@@ -18,6 +18,57 @@ they are routed is global; it is not repeated here.
 `ai/orbit-base-image` (GitLab) is part of this project, not a sibling: standing
 authorisation to raise issues and make changes there (owner, 2026-08-30).
 
+## Where the work lives
+
+Orbit moved to the owner's own GitLab on 2026-09-04 (#801). **`ai/orbit` on
+`gitlab.tomlawson.io`, project id 49, is the source of truth**: issues,
+merge requests and the CI that merges wait on. GitHub is a push mirror
+(GitLab Settings → Repository → Mirroring, owner-managed) kept for CodeQL,
+secret scanning and a second CI opinion; a red GitHub run never blocks a
+GitLab merge. GHCR stays where operators pull from: `publish_gitlab` pushes
+the tested image to `registry.tomlawson.io` and records its digest, and
+`.github/workflows/publish-from-gitlab.yml` copies that digest to GHCR when
+the mirror delivers the `preview` push -- nothing built on GitHub reaches a
+registry. Issue and MR numbers are GitLab's and do not match the GitHub ones.
+
+Every `glab` call needs the same three settings, because the default `glab`
+config points at gitlab.com and `GITLAB_TOKEN` in the environment overrides
+the stored credential:
+
+    env -u GITLAB_TOKEN GLAB_CONFIG_DIR=/home/codex/.config/glab-claude \
+      GITLAB_HOST=gitlab.tomlawson.io glab <command>
+
+Codex uses its own `GLAB_CONFIG_DIR`; see the github-credentials skill. Host
+lookups fail now and then, so wrap calls in two or three tries rather than
+treating one failure as an answer. Pushing needs the credential helper
+explicitly, because git does not read `glab`'s config:
+
+    git -c credential.helper= -c 'credential.helper=!glab auth git-credential' \
+      push gitlab <branch>
+
+`glab issue create` has no `-F`: pass a body with `-d "$(cat file)"`. Notes go
+through `glab api -X POST projects/49/issues/<iid>/notes -f body=…`.
+
+Pipelines: an MR pipeline runs the acceptance stage automatically; a branch
+pipeline leaves those jobs manual, so an MR is the only way to see the full
+gate. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts one. Cancelling a
+pipeline and playing a manual job are both refused by the safety hook, as are
+protected-branch and CI-variable changes: hand the owner the exact steps.
+`dev`, `preview` and `main` all take push "No one", merge "Maintainers".
+
+Two runners serve this project, both on the host `gitlab-runners` (8 cores,
+19 GB): the shared group runner, and a privileged project runner tagged
+`orbit-build` that everything needing a Docker daemon reaches through
+`.privileged_runner`. That runner is still owned by the old staging project;
+#811 re-registers it under `ai/orbit` and deletes the staging project. Its
+`/builds` persists between jobs, so a job that must start clean says so
+(#813, and the data-root wipe in `.docker_in_job`).
+
+Renovate replaces Dependabot on this host: `renovate.json` at the repo root,
+the `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
+Mondays 05:00 London, ref `dev`, variable `RENOVATE=true`). It runs nowhere
+else and covers GitHub Actions too; `.github/dependabot.yml` is gone.
+
 ## Delivery workflow
 
 - Start from an issue with a user outcome, acceptance criteria, non-goals,
@@ -53,6 +104,11 @@ Check the list before building a test rig or handing a check to the owner.
 - `scripts/test-install-acceptance.sh` — real fresh install to a healthy
   `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
   fixture, so no provider credentials are needed
+- `scripts/test-install-bootstrap.sh` — the documented operator path: fetches
+  `install.sh` over the network from a branch, pipes it to bash, and proves the
+  channel tag resolved to the digest the registry serves right now. Real
+  network and registry; only OIDC discovery is redirected, to the `tests/oidc`
+  sidecar. Non-interactive path only; `--red` proves the digest assertion fires
 - `scripts/test-backup-restore.sh` — backup and restore acceptance drill
 - `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
   stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
@@ -63,12 +119,20 @@ Check the list before building a test rig or handing a check to the owner.
 - `scripts/install-test-browser.sh` — one-time headless browser download
 - `scripts/preview-lane-preflight.sh` — preview-lane preflight checks
 - `scripts/validate-compose-config.sh` — Compose configuration validation
+- `scripts/ci/*.sh` — the container validation sequence, one script per
+  workflow step, so GitHub Actions and the GitLab pipeline run the same checks
+  rather than two paraphrases of them (#801). Inputs are environment
+  variables; `$GITHUB_OUTPUT` and `$GITHUB_ENV` are written only when set
 - `scripts/acceptance-mailbox.mjs` — mailbox acceptance record for a digest
+- `scripts/sidecar-pins.mjs` — sidecar pin freshness: `check` reports drift
+  between compose and policy, a moved tag, and stale packages inside a current
+  pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync`
+  re-pins both places after a Renovate bump
 
 ## Traps when running things locally
 
-Seven known ways to lose an afternoon, or worse. The first two have open
-issues; until those land, this is the procedure.
+Ten known ways to lose an afternoon, or worse. The first two have open issues;
+until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
 0004 while the journal has 28 entries, so `drizzle-kit generate` diffs against
@@ -115,13 +179,38 @@ container reading a spent copy and made repair diagnose its own successful
 rotation as failed. Postgres itself never notices, because it reads that file
 once at initdb and authenticates from its own catalogue afterwards. See #629.
 
-**Add `ci: acceptance` to a pull request touching schema, migrations or server
-code.** Without it the integration and compose jobs skip and the pull request
+**Add `ci: acceptance` to a merge request touching schema, migrations or server
+code.** Without it the integration and compose jobs skip and the merge request
 still reports green.
 
 **`scripts/test-backup-restore.sh` seeds its own state with SQL and nothing
 else drives it.** A dropped column passes every unit and integration check and
 fails only the compose smoke test — grep it before changing a schema.
+
+**An install run from inside a worktree rewires the main checkout.** pnpm
+treats the main checkout as a workspace member to link, so its `node_modules`
+fills with symlinks into `.claude/worktrees/<name>/`, and the `orbit` workspace
+link disappears. Nothing dangles while that worktree exists, so the checkout
+looks healthy until someone removes it. Never run `pnpm install` with a
+worktree as the working directory. To check:
+`find node_modules web/node_modules -type l -lname '*worktrees*'` must be
+empty. Repair is `CI=true pnpm install` from the main checkout root, which
+breaks every other session's builds while it runs — agree a window first. See
+#784.
+
+**A red compose smoke job can be hiding the next failure.** Its steps run in
+one job and it stops at the first, so fixing that step reveals what was behind
+it rather than turning the job green — the favicon 404 hid nine e2e failures
+all of 2026-09-03. Read the whole job before reporting what a branch needs.
+
+**Never hand-write a control-character range in a regular expression.** The
+escapes are what break. Lose them and the intended "control characters or
+backslash" collapses into a range running from space to backslash, matching
+most ordinary characters — so a path sanitiser rejects every real path, or the
+reverse, and no test notices unless it covers the boundary. Scan the string
+explicitly instead, as `isApplicationRelative` in
+`web/src/routes/login/+page.svelte` does, and give it cases for the empty
+string, a protocol-relative `//` and a backslash.
 
 ## The demo stack is disposable
 
@@ -131,24 +220,32 @@ demo image or its database alive: if it will not start, rebuild it from current
 `dev` and current versions of everything it depends on, rather than repairing
 it.
 
+## An issue naming `src/app/` may describe a deleted surface
+
+The v19 rebuild (#411) replaces `src/app/` with `web/` and carries nothing
+over, so check the files an issue names against `web/` before picking it up.
+Where they have no equivalent there, close it as superseded by #411 rather
+than fix a surface that will not ship (#566, #300, 2026-09-01).
+
 ## Sources of truth
 
 - `docs/v1-charter.md`: supported product and release contract.
 - `docs/architecture.md` and `docs/adr/`: current architecture and durable
   decisions.
 - `docs/implementation-plan.md`: the phased roadmap.
-- The [Orbit Roadmap project board](https://github.com/users/tomlawesome/projects/4)
-  is the live delivery-status surface: per-issue Status, Slice, Priority, Risk
-  and Delivery lane. GitHub milestones are capability slices (M0 onwards), each
-  a coherent outcome with a definition of done, mirrored by the board's Slice
-  field. A version release moment gets its own milestone holding only its
-  promote-to-main issue, and an issue with no milestone is not scheduled (owner
-  decision, 2026-08-23, recorded on issue #502). Every open issue reaches the
-  board: the project's auto-add workflow places new ones, so the board is
-  complete and can be read as authoritative rather than as a subset someone
-  curated. Set at least Status when picking work up; closed items are removed
-  rather than left to accumulate. It showed only half the open issues until
-  2026-08-31 (#689), so treat any board reading from before then with suspicion.
+- Issues, milestones and labels live on GitLab (`ai/orbit`, project 49), and
+  that issue list is the delivery-status surface (owner, 2026-09-04). The
+  [GitHub roadmap board](https://github.com/users/tomlawesome/projects/4) is
+  retired: it and the GitHub issues are frozen at the 2026-09-04 import, so a
+  status read from either is stale. Milestones are capability slices (M0
+  onwards), each a coherent outcome with a definition of done; a version
+  release moment gets its own milestone holding only its promote-to-main
+  issue, and an empty version milestone is a deliberate placeholder for the
+  next release rather than clutter (owner, 2026-08-23 and 2026-09-01). Every
+  issue carries a milestone. The board's per-issue Status, Priority and Risk
+  fields have no GitLab equivalent and nothing replaces them (owner,
+  2026-09-04, #814): the milestone says what is scheduled and open/closed
+  says what is done.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not

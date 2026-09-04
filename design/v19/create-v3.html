@@ -651,8 +651,22 @@ function setSwatch(name, btn){
    same galaxy positions home.html flies between). The angle decides the
    height it rides at and the side its label reads to; it is never rolled.
    The roll only decides HOW FAR AWAY it floats, how small it reads, and
-   when it next comes past. */
-let seed = (Math.floor(Math.random() * 2147483646) + 1);
+   when it next comes past.
+
+   BUILD NOTE: under ORBIT_FIXTURES the seed MUST be fixed (derive it from
+   the fixture workspace id, not from time or Math.random), so the fidelity
+   gate compares one deterministic sky against this mockup's — the relay's
+   own law (design/v19/relay-satellites.html). seedFromWorkspace below is a
+   copy of $lib/sky.js's function of the same name; the opening seed is what
+   the app derives under ORBIT_FIXTURES from the fixture primary household's
+   own id (web/src/lib/data/fixtures/workspace.js, activeHouseholdId). The
+   re-roll button still rolls fresh via Math.random(). */
+function seedFromWorkspace(id){
+  let h = 2166136261;
+  for (let i = 0; i < String(id).length; i++) { h ^= String(id).charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (Math.abs(h | 0) % 2147483646) + 1;
+}
+let seed = seedFromWorkspace("hh-lawson-1");
 function mkRng(s){ let x = s % 2147483647; if (x <= 0) x += 2147483646;
                    return () => (x = (x * 48271) % 2147483647) / 2147483647; }
 /* the stream for one chunk of one layer: a pure function of the load's seed
@@ -978,7 +992,12 @@ document.querySelectorAll(".accept").forEach(btn => btn.addEventListener("click"
   document.getElementById(btn.dataset.accept).classList.remove("sugg");
 }));
 
-drawSky();
+/* Built once the faces are in, as satellites.js boots: a face only starts
+   loading once something laid out has asked for it, so the layout is forced
+   first; `fonts.ready` then settles once those loads land, and at once when
+   nothing is loading (design/v19/relay-satellites.html's own boot). */
+void document.documentElement.getBoundingClientRect();
+document.fonts.ready.then(drawSky);
 setState("empty");
 </script>
 </body></html>

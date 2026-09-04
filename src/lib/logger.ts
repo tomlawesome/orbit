@@ -150,6 +150,8 @@ export const configurationSettings = [
   "authentication",
   "database",
   "documents",
+  /* The fixture harness, refused in a production build (#773). */
+  "fixtures",
   "logging",
   "mail",
   "imap",
@@ -197,6 +199,54 @@ export const operationalEvents = {
 export type OperationalEventName = keyof typeof operationalEvents;
 export type OperationalComponent = typeof operationalEvents[OperationalEventName];
 
+declare const operationalDetailBrand: unique symbol;
+
+/**
+ * The one pass-through field the closed schema allows (#718): a short,
+ * bounded description of what happened, for cases the enums cannot express
+ * ("applied 17 of 18 does not match 0018_x").
+ *
+ * It is a branded string with exactly one constructor, the `operationalDetail`
+ * tagged template below, so a plain string never typechecks as a detail. The
+ * words therefore always come from a source literal - a reviewable act -
+ * while interpolated values are restricted to numbers and bounded tokens.
+ * That is what keeps the log free of SQL, credentials and provider text
+ * without relying on every future caller remembering the rule.
+ */
+export type OperationalDetail = string & { readonly [operationalDetailBrand]: true };
+
+/** Migration tags, setting names, counts: identifiers, never values. */
+const detailTokenPattern = /^[0-9A-Za-z_.-]{1,64}$/u;
+const detailMaxLength = 256;
+const detailRedaction = "[unavailable]";
+
+/** One line, printable characters only: a log record is not a place a caller
+ *  gets to forge extra records from, so control and formatting characters go. */
+function boundedDetailText(text: string): string {
+  return text.replace(/[\p{Cc}\p{Cf}]/gu, " ").replace(/\s+/gu, " ").trim().slice(0, detailMaxLength);
+}
+
+function renderDetailValue(value: unknown): string {
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : detailRedaction;
+  if (typeof value === "string" && detailTokenPattern.test(value)) return value;
+  return detailRedaction;
+}
+
+/**
+ * The only way to build an `OperationalDetail`:
+ * `` operationalDetail`applied ${applied} of ${expected} from ${tag}` ``.
+ * Anything interpolated that is not a finite number or a bounded token is
+ * rendered `[unavailable]` rather than dropped, so the operator can see that
+ * something was withheld instead of reading a sentence with a hole in it.
+ */
+export function operationalDetail(literals: TemplateStringsArray, ...values: unknown[]): OperationalDetail {
+  const text = literals.reduce(
+    (accumulator, literal, index) => accumulator + literal + (index < values.length ? renderDetailValue(values[index]) : ""),
+    "",
+  );
+  return boundedDetailText(text) as OperationalDetail;
+}
+
 export type OperationalEvent = {
   event: OperationalEventName;
   state: OperationalState;
@@ -207,7 +257,25 @@ export type OperationalEvent = {
   setting?: ConfigurationSetting;
   problemCode?: ConfigurationProblemCode;
   fallback?: ConfigurationFallback;
+  detail?: OperationalDetail;
 };
+
+/* The runtime half of the closed schema. Written as a full record of the
+   event type so that adding a field to `OperationalEvent` without deciding
+   what happens to it here is a compilation error, not a silent drop (#718). */
+const operationalEventKeys: Record<keyof Required<OperationalEvent>, true> = {
+  event: true,
+  state: true,
+  reason: true,
+  action: true,
+  impact: true,
+  durationMs: true,
+  setting: true,
+  problemCode: true,
+  fallback: true,
+  detail: true,
+};
+const knownEventKeys = new Set<string>(Object.keys(operationalEventKeys));
 
 export type OperationalRecord = {
   timestamp: string;
@@ -222,6 +290,7 @@ export type OperationalRecord = {
   setting: ConfigurationSetting | null;
   problem_code: ConfigurationProblemCode | null;
   fallback: ConfigurationFallback | null;
+  detail: string | null;
 };
 
 const levelRank: Record<LogLevel, number> = { error: 0, warn: 1, info: 2, debug: 3 };
@@ -268,7 +337,23 @@ function boundedDuration(durationMs: number | undefined): number | null {
   return Math.min(Math.floor(durationMs), 86_400_000);
 }
 
+/**
+ * A field that is not in the schema used to be dropped between the call site
+ * and the output, so a green test could sit on top of a log line that never
+ * carried it (#718). Outside production that is now a crash: the type system
+ * already refuses it, so reaching here means something bypassed the types and
+ * the next person deserves to find out at their desk rather than in an
+ * incident. Production keeps serving - `normalizeEvent` rebuilds the record
+ * from the allowlist below, so the unknown key is stripped either way.
+ */
+function rejectUnknownKeys(event: OperationalEvent): void {
+  const unknown = Object.keys(event).filter((key) => !knownEventKeys.has(key));
+  if (unknown.length === 0 || process.env.NODE_ENV === "production") return;
+  throw new Error(`operational log event carries fields outside its schema: ${boundedDetailText(unknown.join(", "))}`);
+}
+
 function normalizeEvent(event: OperationalEvent): OperationalEvent {
+  rejectUnknownKeys(event);
   const safeEvent = event.event in operationalEvents ? event.event : "application.error";
   const safeState = operationalStates.includes(event.state) ? event.state : "degraded";
   const safeReason = event.reason && operationalReasons.includes(event.reason) ? event.reason : undefined;
@@ -277,6 +362,11 @@ function normalizeEvent(event: OperationalEvent): OperationalEvent {
   const safeSetting = event.setting && configurationSettings.includes(event.setting) ? event.setting : undefined;
   const safeProblemCode = event.problemCode && configurationProblemCodes.includes(event.problemCode) ? event.problemCode : undefined;
   const safeFallback = event.fallback && configurationFallbacks.includes(event.fallback) ? event.fallback : undefined;
+  /* Re-bounded here as well as in the tagged template: the brand is a
+     compile-time guarantee, and a record must stay one printable line even
+     when a caller has cast its way past the types. */
+  const detailText = typeof event.detail === "string" ? boundedDetailText(event.detail) : "";
+  const safeDetail = detailText.length > 0 ? (detailText as OperationalDetail) : undefined;
   return {
     event: safeEvent,
     state: safeState,
@@ -287,6 +377,7 @@ function normalizeEvent(event: OperationalEvent): OperationalEvent {
     ...(safeSetting ? { setting: safeSetting } : {}),
     ...(safeProblemCode ? { problemCode: safeProblemCode } : {}),
     ...(safeFallback ? { fallback: safeFallback } : {}),
+    ...(safeDetail ? { detail: safeDetail } : {}),
   };
 }
 
@@ -305,6 +396,7 @@ function createRecord(level: LogLevel, event: OperationalEvent, timestamp = new 
     setting: normalized.setting ?? null,
     problem_code: normalized.problemCode ?? null,
     fallback: normalized.fallback ?? null,
+    detail: normalized.detail ?? null,
   };
 }
 
@@ -325,6 +417,9 @@ function renderText(record: OperationalRecord, color = shouldUseColor()): string
     `setting=${record.setting ?? "-"}`,
     `problem_code=${record.problem_code ?? "-"}`,
     `fallback=${record.fallback ?? "-"}`,
+    /* Last, and the only quoted column: it is the one field that may contain
+       spaces, so quoting keeps the stable columns ahead of it parseable. */
+    `detail=${record.detail === null ? "-" : JSON.stringify(record.detail)}`,
   ].join(" ");
 }
 
@@ -378,9 +473,18 @@ function emit(level: LogLevel, event: OperationalEvent): void {
   else console.log(rendered);
 }
 
+/**
+ * An object literal's excess-property check does not survive a spread, so
+ * `{ ...verdict, detail: x }` used to compile and then lose `detail` at
+ * runtime (#718). Requiring every key outside the schema to be `never` closes
+ * that: the extra key is part of the inferred type however it got there, and
+ * nothing is assignable to `never`.
+ */
+type ExactOperationalEvent<T extends OperationalEvent> = T & Record<Exclude<keyof T, keyof OperationalEvent>, never>;
+
 export const log = {
-  error: (event: OperationalEvent) => emit("error", event),
-  warn: (event: OperationalEvent) => emit("warn", event),
-  info: (event: OperationalEvent) => emit("info", event),
-  debug: (event: OperationalEvent) => emit("debug", event),
+  error: <T extends OperationalEvent>(event: ExactOperationalEvent<T>) => emit("error", event),
+  warn: <T extends OperationalEvent>(event: ExactOperationalEvent<T>) => emit("warn", event),
+  info: <T extends OperationalEvent>(event: ExactOperationalEvent<T>) => emit("info", event),
+  debug: <T extends OperationalEvent>(event: ExactOperationalEvent<T>) => emit("debug", event),
 };

@@ -22,16 +22,34 @@
    * Markup only: +page.svelte mounts whichever dialect the viewport selected,
    * so the hidden one never binds listeners.
    */
+  /** @type {{ view?: import('$lib/data/workspace.js').HomeView | null }} */
   let { view = null } = $props();
 
+  /**
+   * The dial body shape `dialBodiesOf` (chart.js) actually returns —
+   * `closest` is set afterwards on at most one entry, so it stays optional.
+   * @typedef {{
+   *   id: string, title: string, days: number, dueDate?: string | null,
+   *   placement: { angle: number, radius: number, x: number, y: number },
+   *   size: number, paint: string, kind: string, suggestion: boolean,
+   *   costMinor: number | null, costIsEstimate: boolean, currency: string,
+   *   documentCount: number, trail: boolean, overdue: boolean, closest?: boolean,
+   * }} DialBody
+   */
+
+  /** @type {DialBody[]} */
   const bodies = $derived(
-    view ? dialBodiesOf(view.household, { suggestions: view.suggestions, today: view.today }) : [],
+    view
+      ? dialBodiesOf(view.household, { suggestions: /** @type {any} */ (view.suggestions), today: view.today })
+      : [],
   );
   const pocketBodies = $derived(
     bodies.filter((b) => b.suggestion || b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade")),
   );
   const groups = $derived(
-    view ? manifestGroupsOf(view.household, { suggestions: view.suggestions, today: view.today }) : null,
+    view
+      ? manifestGroupsOf(view.household, { suggestions: /** @type {any} */ (view.suggestions), today: view.today })
+      : null,
   );
   const others = $derived(
     view
@@ -65,12 +83,18 @@
       label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12],
     })),
   );
+  /** @type {Record<string, string>} */
   const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok" };
-  const tlabel = (b) => (b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+  /** @type {(b: { days: number | null }) => string} */
+  const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+  /** @type {(iso: string) => string} */
   const short = (iso) =>
     new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  /** @type {(b: DialBody) => string} */
   const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
+  /** @type {(b: DialBody) => number} */
   const bodyR = (b) => (b.overdue ? 8 : b.closest ? 7 : 7.5);
+  /** @type {(b: DialBody) => string} */
   const sheetMeta = (b) =>
     [
       tlabel(b),
@@ -80,8 +104,21 @@
     ].filter(Boolean).join(" · ");
   /* #466: the relay's signals — days until an unreviewed arrival burns up,
      elapsed time in the pocket's short register. `now` is pinned by the seam. */
-  const burnsIn = (s) => (s.expiresAt ? daysUntil(s.expiresAt.slice(0, 10), view.today) : null);
-  const agoShort = (iso) => ago(iso, view.now ?? new Date().toISOString());
+  /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => number | null} */
+  const burnsIn = (s) =>
+    s.expiresAt
+      ? daysUntil(s.expiresAt.slice(0, 10), /** @type {import('$lib/data/workspace.js').HomeView} */ (view).today)
+      : null;
+  /** @type {(iso: string | null | undefined) => string} */
+  const agoShort = (iso) =>
+    iso
+      ? ago(iso, /** @type {import('$lib/data/workspace.js').HomeView} */ (view).now ?? new Date().toISOString())
+      : "";
+  /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => string} */
+  const suggMeta = (s) =>
+    `caught by your relay ${short(
+      (s.receivedAt ?? /** @type {import('$lib/data/workspace.js').HomeView} */ (view).today).slice(0, 10),
+    )} · burns up in ${burnsIn(s)}d`;
 </script>
 
 <div class="pocket">
@@ -221,7 +258,7 @@
           `from ${s.sourceDocument}`,
           burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : null,
         ].filter(Boolean).join(" · ")}</span></div>
-        <div class="mt" style="color:var(--accent)">{s.costMinor ? money(s.costMinor, s.currency, true) : ""}<small>{s.renewsOn ? `renews ${short(s.renewsOn)}` : ""}</small></div>
+        <div class="mt" style="color:var(--accent-text)">{s.costMinor ? money(s.costMinor, s.currency, true) : ""}<small>{s.renewsOn ? `renews ${short(s.renewsOn)}` : ""}</small></div>
       </div>
     {/each}
     {#each view.mailReading as r (r.id)}
@@ -257,7 +294,7 @@
   <!-- The suggestion sheet's copy, rendered by Svelte and cloned into the
        sheet by the behaviour — no markup is ever built from strings. -->
   <template data-sugg-template={s.id} data-title={s.title}
-            data-meta={`caught by your relay ${short((s.receivedAt ?? view.today).slice(0, 10))} · burns up in ${burnsIn(s)}d`}>
+            data-meta={suggMeta(s)}>
     {#if s.provider}<div class="kv"><span>provider</span><b>{s.provider}</b></div>{/if}
     {#if s.renewsOn}<div class="kv"><span>renews</span><b>{short(s.renewsOn)} {s.renewsOn.slice(0, 4)}</b></div>{/if}
     {#if s.costMinor}<div class="kv"><span>cost</span><b>{money(s.costMinor, s.currency, true)}</b></div>{/if}

@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import { householdRegister } from "./support/households";
 
 /**
  * #410/§15: THE ARRIVAL. The newcomer's journey and the create-system card,
@@ -42,6 +43,13 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 const HOUSEHOLD = `Harbour Approach ${Date.now()}`;
 const OWN_SYSTEM = `Newcomer's Own ${Date.now()}`;
 
+/* #730: both systems this journey makes are removed once the file is done —
+   not sooner, because the second test needs the first one's name to still be
+   taken. The sweep runs from the administrator's own session: a hard delete is
+   an instance-admin power, and neither the member nor the newcomer has it. */
+const households = householdRegister();
+let seeded = false;
+
 /** The way every other spec signs in: straight at the engine's login route. */
 async function signInAs(page: Page, account: string, returnTo = "/") {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
@@ -67,8 +75,8 @@ async function signInThroughTheDoor(page: Page, account: string) {
 async function establishInstanceAdmin(browser: Browser) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
-  await signInAs(page, "Orbit Administrator");
-  await page.waitForURL(/\/(home)?$/);
+  await signInAs(page, "Orbit Administrator", "/home");
+  await expect(page).toHaveURL(/\/home$/);
   await context.close();
 }
 
@@ -133,6 +141,23 @@ async function pendingRequests(page: Page) {
 
 test.describe.configure({ mode: "serial" });
 
+test.afterAll(async ({ browser }) => {
+  if (!seeded) return;
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  try {
+    /* #665: ask for /home and assert we are ON it. `/\/(home)?$/` matches "/"
+       as well, so it resolves while the app is still navigating -- the race
+       this spec was fixed for. The sweep talks to the API, not the page, but
+       the loose wait is not to be reintroduced anywhere in this file. */
+    await signInAs(page, "Orbit Administrator", "/home");
+    await expect(page).toHaveURL(/\/home$/);
+    await households.sweep(page);
+  } finally {
+    await context.close();
+  }
+});
+
 test("the newcomer's arrival: the climb, the labelled sky, the real count, the question", async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
@@ -144,9 +169,11 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
      owns the default sections and the owner membership. */
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
-  await signInAs(ownerPage, "Orbit Member");
-  await ownerPage.waitForURL(/\/(home)?$/);
+  await signInAs(ownerPage, "Orbit Member", "/home");
+  await expect(ownerPage).toHaveURL(/\/home$/);
   const created = await createSystem(ownerPage, HOUSEHOLD);
+  households.track(created);
+  seeded = true;
   expect(created.canManage).toBe(true);
   expect(created.onboardingComplete).toBe(true);
   expect(created.sections.map((section) => section.name))
@@ -175,16 +202,21 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
 
   /* THE COUNT — a moment on the settled sky, boxless, and REAL: the number is
      read off the households that exist, never written.
-     Measured against the sky this page drew rather than against a second read
-     of the instance: specs run in parallel, and a system created by another one
-     between the two reads would make a true count look wrong. */
+     It is the real list that is counted, not the sky: the sky draws at most
+     twelve (#670), and on a shared instance (#730) more exist than it can
+     draw, so the sky is a lower bound and `visibleHouseholds` is the number.
+     Specs run in parallel locally, and a system created by another one between
+     this read and the page's own would make a true count look wrong; CI runs
+     one worker, so there the two reads cannot disagree. */
   const workspace = await workspaceOf(page);
   expect(workspace.households).toEqual([]);
-  expect(workspace.visibleHouseholds.length).toBeGreaterThan(0);
+  const discovered = workspace.visibleHouseholds.length;
+  expect(discovered).toBeGreaterThan(0);
   const drawn = await page.locator(".minisys").count();
   expect(drawn).toBeGreaterThan(0);
+  expect(drawn).toBeLessThanOrEqual(discovered);
   await expect(page.locator("body")).toHaveClass(/counting/, { timeout: 30_000 });
-  await expect(page.locator(".nf .disc .big")).toHaveText(String(drawn));
+  await expect(page.locator(".nf .disc .big")).toHaveText(String(discovered));
   await expect(page.locator(".nf .disc p")).toContainText("discovered in this universe");
 
   /* AND THEN THE QUESTION, in the space the count left. */
@@ -271,6 +303,10 @@ test("naming your own system: the sealed refusal, then the create, then the laun
   });
   expect(workspace.households[0].sections.map((section) => section.name))
     .toEqual(["Home", "Vehicles", "Devices", "Services"]);
+  /* the reader's own system, made by the card rather than by this file, joins
+     the sweep now that the server has named it (#730) */
+  households.track(workspace.households[0]);
+  seeded = true;
 
   /* And from now on the door hands them on, because home is theirs. */
   await page.goto("/");

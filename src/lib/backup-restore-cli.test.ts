@@ -374,7 +374,13 @@ describe("runRestore (restore.sh's main flow :897-933, including check_capacity 
   });
 });
 
-describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", () => {
+// Real bundles, real crypto: each test here builds an encrypted recovery
+// bundle and then imports it, and on a busy runner that does not fit the
+// 5 s default -- these are the tests that cost GitLab pipelines 176, 190 and
+// 212 a rerun apiece, and #698 raised their budgets once already for the same
+// reason on GitHub. 20 s still fails a hung test, which is what the timeout
+// is for; it just stops measuring how loaded the box was.
+describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", { timeout: 20_000 }, () => {
   it("produces a recovery bundle whose wrapped KEK decrypts back to the original document KEK", () => {
     const documentsRoot = join(sandbox, "docs");
     const sourceBackupDirectory = join(sandbox, "source-backups");
@@ -493,7 +499,7 @@ describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", 
   });
 });
 
-describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, live-KEK-swap-with-rollback)", () => {
+describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, live-KEK-swap-with-rollback)", { timeout: 20_000 }, () => {
   function buildRecoveryBundle(storageKey: string, contentLength: number, documentKekHex: string, passphrase: string): { recoveryBundlePath: string; sourceDocumentsRoot: string } {
     const sourceDocumentsRoot = join(sandbox, `import-source-${storageKey}`);
     const sourceBundlePath = buildBundle(sourceDocumentsRoot, storageKey, contentLength, documentKekHex, join(sandbox, `import-source-backups-${storageKey}`));

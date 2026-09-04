@@ -61,7 +61,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.5.4-debian@sha256:3a4dbfa34240e28151ad449e0bc53face0df7c58597b95e98048308ae4cad446
+    image: clamav/clamav:1.5.4-debian@sha256:6c92171e6ab52529cd44452f6443dd05b2fc4d580c190ffc70f45f955cb9f4b9
     restart: unless-stopped
     networks:
       # clamd shares only the hostile-document channel with Orbit. A separate
@@ -91,12 +91,12 @@ services:
     restart: unless-stopped
     user: "35002:35002"
     read_only: true
-    environment:
-      TIKA_CONFIG: /etc/orbit/tika-config.json
     # Tika 4 takes JSON, not the XML of Tika 3. The exclusion in that file is
     # the only thing holding the Tesseract OCR parser out of the parser set,
     # and it only binds in the array form under a registered component name:
     # the object form parses, loads nothing and reports no error (#687).
+    # This argument is the only thing that selects the config file: the server
+    # reads no environment variable for it, so change the path here (#692).
     command: ["-c", "/etc/orbit/tika-config.json"]
     configs:
       - source: orbit-tika-config

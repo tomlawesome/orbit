@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import { runBackup, runExportRecoveryBundle } from "./backup-restore-cli";
 import { type BackupDockerAdapter, createTar } from "./recovery-bundle";
 import { type CorrespondenceReports, type RestoreDockerAdapter } from "./restore-engine";
@@ -27,6 +28,11 @@ import { type CorrespondenceReports, type RestoreDockerAdapter } from "./restore
 // exactly like slice 1), and import-recovery-bundle.sh's own archive/
 // checksum/manifest preflight, which — like slice 1's own whole-script
 // spawns — runs entirely before the script's first `docker compose` call.
+
+// This file spawns real tar, node and bash (import-recovery-bundle.sh); a
+// spawn that takes 0.7s quiet took 4.3s on a starved core (#698). Budget
+// and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const nodeCryptoScript = join(repoRoot, "scripts", "recovery-crypto.mjs");
@@ -117,13 +123,14 @@ describe("recovery-crypto.mjs cross-implementation parity against runExportRecov
     const recoveryBundlePath = buildRecoveryBundleViaOrchestration(passphrase);
 
     const extractDir = newSandbox("orbit-slice4-parity-extract-");
-    const listing = spawnSync("tar", ["-xf", recoveryBundlePath, "-C", extractDir], { encoding: "utf8" });
+    const listing = failOnProcessDeadline(spawnSync("tar", ["-xf", recoveryBundlePath, "-C", extractDir], { encoding: "utf8", ...processGuard() }), { label: "tar -xf" });
     expect(listing.status).toBe(0);
 
-    const decrypted = spawnSync("node", [nodeCryptoScript, "decrypt", join(extractDir, "document-kek.enc")], {
+    const decrypted = failOnProcessDeadline(spawnSync("node", [nodeCryptoScript, "decrypt", join(extractDir, "document-kek.enc")], {
       input: Buffer.from(passphrase),
       encoding: "buffer",
-    });
+      ...processGuard(),
+    }), { label: "recovery-crypto.mjs decrypt" });
     expect(decrypted.status).toBe(0);
     expect(decrypted.stdout.toString("ascii")).toBe(LIVE_KEK);
   });
@@ -132,12 +139,13 @@ describe("recovery-crypto.mjs cross-implementation parity against runExportRecov
     const passphrase = "correct horse battery staple";
     const recoveryBundlePath = buildRecoveryBundleViaOrchestration(passphrase);
     const extractDir = newSandbox("orbit-slice4-parity-extract-wrong-");
-    spawnSync("tar", ["-xf", recoveryBundlePath, "-C", extractDir]);
+    failOnProcessDeadline(spawnSync("tar", ["-xf", recoveryBundlePath, "-C", extractDir], { ...processGuard() }), { label: "tar -xf" });
 
-    const decrypted = spawnSync("node", [nodeCryptoScript, "decrypt", join(extractDir, "document-kek.enc")], {
+    const decrypted = failOnProcessDeadline(spawnSync("node", [nodeCryptoScript, "decrypt", join(extractDir, "document-kek.enc")], {
       input: Buffer.from("a-completely-different-passphrase-value"),
       encoding: "utf8",
-    });
+      ...processGuard(),
+    }), { label: "recovery-crypto.mjs decrypt" });
     expect(decrypted.status).not.toBe(0);
   });
 });

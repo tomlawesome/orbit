@@ -6,23 +6,24 @@ import { AuthError } from "@/lib/auth/errors";
 import { getAuthConfig } from "@/lib/env";
 import { createSession } from "@/lib/auth/session";
 import { provisionIdentity } from "@/lib/auth/provision";
-import { PATCH as updateMembers } from "@/app/api/households/[householdId]/members/route";
-import { DELETE as removeMember } from "@/app/api/households/[householdId]/members/route";
-import { PATCH as updateUser } from "@/app/api/admin/users/route";
 import { setInstanceAdministrator, setInstanceUserDisabled } from "@/server/admin-repository";
 import { transferHouseholdOwnership } from "@/server/workspace-repository";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
-  requestForSession,
 } from "./support/fixtures";
+import { callRouteForSession, loadRoute } from "./support/request-event";
+
+const { PATCH: updateMembers, DELETE: removeMember } = await loadRoute("households/[householdId]/members");
+const { PATCH: updateUser } = await loadRoute("admin/users");
+const { GET: readWorkspace } = await loadRoute("workspace");
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
 });
 
-function householdContext(householdId: string) {
-  return { params: Promise.resolve({ householdId }) };
+function householdParams(householdId: string) {
+  return { householdId };
 }
 
 function deferred<T>() {
@@ -75,39 +76,42 @@ describe("account disable, session and ownership invariants", () => {
     const secondSession = await fixture.session("member");
     const beforeAudit = (await auditRows(fixture.users.member.id, "account_disabled")).length;
 
-    const disabled = await updateUser(requestForSession(admin, "http://127.0.0.1:3000/api/admin/users", {
+    const disabled = await callRouteForSession(updateUser, admin, {
+      url: "http://127.0.0.1:3000/api/admin/users",
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId: fixture.users.member.id, disabled: true }),
-    }));
+    });
     expect(disabled.status).toBe(200);
     expect((await getDb().select({ disabledAt: users.disabledAt }).from(users).where(eq(users.id, fixture.users.member.id)))[0]?.disabledAt).not.toBeNull();
     expect((await getDb().select({ id: sessions.id }).from(sessions).where(eq(sessions.userId, fixture.users.member.id)))).toHaveLength(0);
     expect((await auditRows(fixture.users.member.id, "account_disabled"))).toHaveLength(beforeAudit + 1);
 
-    await expectApiError(await (await import("@/app/api/workspace/route")).GET(requestForSession(firstSession, "http://127.0.0.1:3000/api/workspace")), 401, "session_required");
-    await expectApiError(await (await import("@/app/api/workspace/route")).GET(requestForSession(secondSession, "http://127.0.0.1:3000/api/workspace")), 401, "session_required");
+    await expectApiError(await callRouteForSession(readWorkspace, firstSession, { url: "http://127.0.0.1:3000/api/workspace" }), 401, "session_required");
+    await expectApiError(await callRouteForSession(readWorkspace, secondSession, { url: "http://127.0.0.1:3000/api/workspace" }), 401, "session_required");
 
-    const repeatedDisable = await updateUser(requestForSession(admin, "http://127.0.0.1:3000/api/admin/users", {
+    const repeatedDisable = await callRouteForSession(updateUser, admin, {
+      url: "http://127.0.0.1:3000/api/admin/users",
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId: fixture.users.member.id, disabled: true }),
-    }));
+    });
     expect(repeatedDisable.status).toBe(200);
     expect((await auditRows(fixture.users.member.id, "account_disabled"))).toHaveLength(beforeAudit + 1);
 
-    const enabled = await updateUser(requestForSession(admin, "http://127.0.0.1:3000/api/admin/users", {
+    const enabled = await callRouteForSession(updateUser, admin, {
+      url: "http://127.0.0.1:3000/api/admin/users",
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId: fixture.users.member.id, disabled: false }),
-    }));
+    });
     expect(enabled.status).toBe(200);
     expect((await getDb().select({ disabledAt: users.disabledAt }).from(users).where(eq(users.id, fixture.users.member.id)))[0]?.disabledAt).toBeNull();
     expect((await auditRows(fixture.users.member.id, "account_enabled"))).toHaveLength(1);
 
     const freshSession = await fixture.session("member");
-    expect((await (await import("@/app/api/workspace/route")).GET(requestForSession(freshSession, "http://127.0.0.1:3000/api/workspace"))).status).toBe(200);
-    await expectApiError(await (await import("@/app/api/workspace/route")).GET(requestForSession(firstSession, "http://127.0.0.1:3000/api/workspace")), 401, "session_required");
+    expect((await callRouteForSession(readWorkspace, freshSession, { url: "http://127.0.0.1:3000/api/workspace" })).status).toBe(200);
+    await expectApiError(await callRouteForSession(readWorkspace, firstSession, { url: "http://127.0.0.1:3000/api/workspace" }), 401, "session_required");
   });
 
   it("rejects disabled OIDC provisioning and session creation without profile mutation", async () => {
@@ -115,11 +119,12 @@ describe("account disable, session and ownership invariants", () => {
     const admin = await fixture.session("admin");
     const [identity] = await getDb().select().from(externalIdentities).where(eq(externalIdentities.userId, fixture.users.member.id));
 
-    await updateUser(requestForSession(admin, "http://127.0.0.1:3000/api/admin/users", {
+    await callRouteForSession(updateUser, admin, {
+      url: "http://127.0.0.1:3000/api/admin/users",
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId: fixture.users.member.id, disabled: true }),
-    }));
+    });
     const [beforeUser] = await getDb().select({ email: users.email, displayName: users.displayName, avatarUrl: users.avatarUrl, emailVerified: users.emailVerified, updatedAt: users.updatedAt })
       .from(users).where(eq(users.id, fixture.users.member.id));
     const beforeIdentity = identity?.lastLoginAt?.getTime();
@@ -152,18 +157,21 @@ describe("account disable, session and ownership invariants", () => {
     const beforeAudit = (await auditRows(fixture.household.id)).length;
     const ownerAudit = (await auditRows(fixture.users.owner.id)).length;
 
-    const disableOwner = await updateUser(requestForSession(admin, "http://127.0.0.1:3000/api/admin/users", {
+    const disableOwner = await callRouteForSession(updateUser, admin, {
+      url: "http://127.0.0.1:3000/api/admin/users",
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId: fixture.users.owner.id, disabled: true }),
-    }));
+    });
     const ownerError = await expectApiError(disableOwner, 409, "owner_protected");
     expect(ownerError.message).toContain("Transfer ownership");
 
-    const removeOwner = await removeMember(requestForSession(owner, "http://127.0.0.1:3000/api/households/members", {
+    const removeOwner = await callRouteForSession(removeMember, owner, {
+      url: "http://127.0.0.1:3000/api/households/members",
       method: "DELETE",
       body: JSON.stringify({ userId: fixture.users.owner.id }),
-    }), householdContext(fixture.household.id));
+      params: householdParams(fixture.household.id),
+    });
     await expectApiError(removeOwner, 409, "owner_protected");
     expect((await getDb().select({ disabledAt: users.disabledAt }).from(users).where(eq(users.id, fixture.users.owner.id)))[0]?.disabledAt).toBeNull();
     expect((await ownerRows(fixture.household.id))).toEqual([{ userId: fixture.users.owner.id, disabledAt: null }]);
@@ -172,15 +180,18 @@ describe("account disable, session and ownership invariants", () => {
     expect((await auditRows(fixture.household.id))).toHaveLength(beforeAudit);
     expect((await auditRows(fixture.users.owner.id))).toHaveLength(ownerAudit);
 
-    await updateUser(requestForSession(admin, "http://127.0.0.1:3000/api/admin/users", {
+    await callRouteForSession(updateUser, admin, {
+      url: "http://127.0.0.1:3000/api/admin/users",
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId: fixture.users.member.id, disabled: true }),
-    }));
-    const transfer = await updateMembers(requestForSession(admin, "http://127.0.0.1:3000/api/households/members", {
+    });
+    const transfer = await callRouteForSession(updateMembers, admin, {
+      url: "http://127.0.0.1:3000/api/households/members",
       method: "PATCH",
       body: JSON.stringify({ userId: fixture.users.member.id }),
-    }), householdContext(fixture.household.id));
+      params: householdParams(fixture.household.id),
+    });
     await expectApiError(transfer, 409, "account_disabled");
     expect((await ownerRows(fixture.household.id))).toEqual([{ userId: fixture.users.owner.id, disabledAt: null }]);
     expect((await auditRows(fixture.household.id, "ownership_transferred"))).toHaveLength(0);

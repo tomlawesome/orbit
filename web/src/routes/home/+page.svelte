@@ -37,7 +37,23 @@
    */
   const DESK = "(min-width: 901px)";
 
+  /** @typedef {import('$lib/data/workspace.js').HomeView} HomeView */
+  /** @type {HomeView | null} */
   let view = $state(null);
+  /* Some of the $derived expressions below build a value from `view` inside a
+     single ternary, and svelte-check's control-flow narrowing does not carry
+     the `view ? ... : ...` guard through into the branch in that position —
+     the branch still type-checks as if `view` were null. This cast is the
+     type-only way to tell it what the guard already guarantees at runtime;
+     it does nothing at runtime beyond returning its argument. */
+  /** @type {(v: HomeView | null) => HomeView} */
+  const asView = (v) => /** @type {HomeView} */ (v);
+  /* Directive expressions (class:x={...}) do not carry an inline `@type`
+     cast comment through to the type checker the way a plain {...}
+     interpolation does, so spots that need an escape hatch there call this
+     instead. */
+  /** @type {(v: any) => any} */
+  const asAny = (v) => v;
 
   /*
    * Coming BACK to home is not arriving at it (owner, 2026-08-15: leaving an
@@ -100,6 +116,7 @@
   /* POL-1's own fanfare would fight the landing for the dial: on a launch the
      flight owns the arrival, and this is its opening beat, not a second one. */
   let arrive = $state(!launching);
+  /** @type {number | null} the scroll position a drawer asked us to put back */
   let restoreScroll = null;
   afterNavigate((navigation) => {
     if (launching) return;
@@ -113,9 +130,11 @@
    * backwards, the name is written on the void with "signing out" under it,
    * and the mark sets down on the dusk's own lockup.
    */
+  /** @type {import('$lib/flight/Flight.svelte').default | null} */
   let flight = $state(null);
   let leaving = $state(fixtureFlight === "down");
   let armedOut = $state(false);
+  /** @type {string | null} */
   let signOutProblem = $state(null);
 
   async function tapSignOut() {
@@ -135,7 +154,7 @@
       redirectTo = await signOut();
     } catch (error) {
       armedOut = false;
-      signOutProblem = error?.message ?? "still signed in — try again";
+      signOutProblem = /** @type {any} */ (error)?.message ?? "still signed in — try again";
       return;
     }
     providerLogout = redirectTo;
@@ -146,6 +165,7 @@
   /* The provider's own end-session URL, kept for the way back: following it
      now would yank the reader off the ratified goodbye, so "sign back in"
      carries it instead, and the identity provider asks its question again. */
+  /** @type {string | null} */
   let providerLogout = $state(null);
   const backIn = $derived(providerLogout ?? "/");
 
@@ -167,27 +187,32 @@
   /* Mail-in review on the row (#434): first tap arms, second fires. One
      operation id per receipt across every retry — approval is idempotent by
      construction, so a double-tap can never create two items. */
+  /** @type {{ id: string | null, act: "approve" | "dismiss" | null }} */
   let armed = $state({ id: null, act: null });
+  /** @type {string | null} */
   let busyReceipt = $state(null);
+  /** @type {string | null} */
   let mailProblem = $state(null);
 
   /* §11 (#453): the ask prompt — the label is the whole surface, the
      question is the whole dialogue. Idempotent server-side. */
+  /** @type {{ id: string, name: string } | null} */
   let askTarget = $state(null);
   let askBusy = $state(false);
+  /** @type {string | null} */
   let askProblem = $state(null);
   let resync = () => {};
   async function ask() {
     askBusy = true;
     askProblem = null;
     try {
-      await requestToJoin(askTarget.id);
+      await requestToJoin(/** @type {{ id: string, name: string }} */ (askTarget).id);
       askTarget = null;
       view = await readHome();
       await tick();
       resync();
     } catch (error) {
-      askProblem = error?.message ?? String(error);
+      askProblem = /** @type {any} */ (error)?.message ?? String(error);
     } finally {
       askBusy = false;
     }
@@ -221,17 +246,22 @@
    * expanded row survives scrolling and closes only on Back, Escape, a click
    * outside it, or a second click on its own row. Noted for ratification.
    */
+  /** @type {(id: string) => string} */
   const addressOf = (id) => `/home?item=${encodeURIComponent(id)}`;
-  const expanded = $derived(page.state.orbitItem ?? null);
+  const expanded = $derived(/** @type {any} */ (page.state).orbitItem ?? null);
   /* True only while the open row owns a history entry we pushed ourselves —
      the difference between closing by going back and closing by rewriting the
      address of a deep link. */
   let pushedEntry = false;
+  /** @type {import('$lib/data/workspace.js').ItemView | null} */
   let detail = $state(null);
   let detailBusy = $state(false);
+  /** @type {string | null} */
   let detailProblem = $state(null);
   let copied = $state(false);
+  /** @type {string | null} */
   let detailFor = null;
+  /** @type {string | null} */
   let revealTarget = null;
 
   $effect(() => {
@@ -265,13 +295,17 @@
         document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
       })
       .catch((error) => {
-        if (detailFor === id) detailProblem = error?.message ?? String(error);
+        if (detailFor === id) detailProblem = /** @type {any} */ (error)?.message ?? String(error);
       })
       .finally(() => {
         if (detailFor === id) detailBusy = false;
       });
   });
 
+  /**
+   * @param {MouseEvent} event
+   * @param {string} id
+   */
   function onRowClick(event, id) {
     /* A modified or middle click still means "somewhere else, please" — the
        href is a real address and the browser may have it. */
@@ -307,9 +341,11 @@
     }
   }
 
+  /** @param {KeyboardEvent} event */
   function onWindowKeydown(event) {
     if (event.key === "Escape" && expanded) collapseRow();
   }
+  /** @param {MouseEvent} event */
   function onWindowClick(event) {
     if (!expanded) return;
     const target = event.target instanceof Element ? event.target : null;
@@ -324,17 +360,22 @@
      you had clicked, so Forward and Back agree with each other. */
   async function openFromAddress() {
     const id = page.url.searchParams.get("item");
-    if (!id || page.state.orbitItem === id) return;
+    if (!id || /** @type {any} */ (page.state).orbitItem === id) return;
     revealTarget = id;
     replaceState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
     await tick();
     document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
   }
 
+  /** @type {(one: any) => string} */
   const detailDue = (one) =>
     one.dueDate ? `${tminus(one.dueDate, one.today)} · ${longDate(one.dueDate)}` : "unscheduled";
 
   const operationIds = new SvelteMap();
+  /**
+   * @param {any} suggestion
+   * @param {"approve" | "dismiss"} act
+   */
   async function tapReceipt(suggestion, act) {
     mailProblem = null;
     if (!suggestion.receiptId) return; // a #454 fixture suggestion has no mail behind it yet
@@ -346,7 +387,7 @@
     try {
       if (act === "approve") {
         if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
-        const result = await approveReceipt(suggestion, view.primary, operationIds.get(suggestion.receiptId));
+        const result = await approveReceipt(suggestion, asView(view).primary, operationIds.get(suggestion.receiptId));
         if (result.outcome === "partial_success") {
           /* The item exists but its documents didn't make it: the SAME
              operation id retries the SAME body — never a second item. */
@@ -360,7 +401,7 @@
       armed = { id: null, act: null };
       view = await readHome();
     } catch (error) {
-      mailProblem = error?.message ?? String(error);
+      mailProblem = /** @type {any} */ (error)?.message ?? String(error);
     } finally {
       busyReceipt = null;
     }
@@ -368,36 +409,41 @@
 
   /* Everything below the chrome is the view-model (#451): the same transform
      the unit tests pin renders the dial, the manifest and the palette. */
+  /** @type {any[]} */
   const bodies = $derived(
-    view ? dialBodiesOf(view.household, { suggestions: view.suggestions, today: view.today }) : [],
+    view ? dialBodiesOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : [],
   );
+  /** @type {any} */
   const groups = $derived(
-    view ? manifestGroupsOf(view.household, { suggestions: view.suggestions, today: view.today }) : null,
+    view ? manifestGroupsOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : null,
   );
   /* §14 (#469): the manifest rendered as the corridor — this household's
      full scrollback, suggestions merged in date order. */
   const corridor = $derived(
-    view?.household
-      ? corridorOf(
-          { households: [view.household], activeHouseholdId: view.primary },
-          view.today,
-          { suggestions: view.suggestions },
-        )
-      : null,
+    (() => {
+      const current = view ? asView(view) : null;
+      return current?.household
+        ? corridorOf(
+            { households: [current.household], activeHouseholdId: current.primary },
+            current.today,
+            { suggestions: /** @type {any} */ (current.suggestions) },
+          )
+        : null;
+    })(),
   );
   const todayLine = $derived(
     view
-      ? new Date(view.today + "T00:00:00Z")
+      ? new Date(asView(view).today + "T00:00:00Z")
           .toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", timeZone: "UTC" })
           .replace(",", "").toUpperCase()
       : "",
   );
   /* the inbox orb's truth: arrivals awaiting the two-tap */
-  const mailWaiting = $derived(view?.suggestions?.length ?? 0);
+  const mailWaiting = $derived(view ? (asView(view).suggestions?.length ?? 0) : 0);
   const initials = $derived(
-    (view?.user?.displayName ?? "")
+    (view ? (asView(view).user?.displayName ?? "") : "")
       .split(/\s+/)
-      .map((word) => word[0] ?? "")
+      .map((/** @type {string} */ word) => word[0] ?? "")
       .join("")
       .slice(0, 2)
       .toUpperCase(),
@@ -418,19 +464,26 @@
     })),
   );
 
+  /** @type {(b: any) => string} */
   const tlabel = (b) => (b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+  /** @type {(iso: string) => string} */
   const short = (iso) =>
     new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  /** @type {(months: number) => string} */
   const period = (months) => (months === 12 ? "1 year" : months === 6 ? "6 months" : `${months} months`);
+  /** @type {Record<string, string>} */
   const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok" };
+  /** @type {Record<string, string>} */
   const T_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok" };
 
+  /** @type {(deg: number, radius: number) => [number, number]} */
   const point = (deg, radius) => [
     Math.round((190 + Math.cos((deg * Math.PI) / 180) * radius) * 10) / 10,
     Math.round((190 + Math.sin((deg * Math.PI) / 180) * radius) * 10) / 10,
   ];
   /* A trail rides just behind the body on its own orbit (suggestions: just
      ahead) — the arc the design drew for everything close to the sun. */
+  /** @type {(b: any) => string} */
   const trailPath = (b) => {
     const angle = b.days - 90;
     const [from, to] = b.suggestion ? [angle + 3, angle + 7] : [angle - 7, angle - 3];
@@ -438,6 +491,7 @@
     const [x2, y2] = point(to, b.placement.radius);
     return `M ${x1} ${y1} A ${b.placement.radius} ${b.placement.radius} 0 0 1 ${x2} ${y2}`;
   };
+  /** @type {(b: any) => string} */
   const trailStroke = (b) =>
     b.suggestion ? "var(--upcoming)" : b.overdue ? "var(--overdue)" : "var(--warm)";
   const trailed = $derived(
@@ -453,12 +507,14 @@
   );
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
+  /** @type {(b: any) => string} */
   const crescent = (b) =>
     `M ${b.placement.x} ${b.placement.y - b.size} A ${b.size} ${b.size} 0 0 1 ${b.placement.x} ${b.placement.y + b.size} Z`;
 
 
   onMount(() => {
     const query = window.matchMedia(DESK);
+    /** @type {(() => void) | null} */
     let teardown = null;
     let disposed = false;
     const sync = () => {
@@ -472,9 +528,9 @@
           /* The pocket's labelled sky is a list; asking rides data attributes
              because the hidden dialect must never bind listeners. */
           const controller = new AbortController();
-          for (const row of document.querySelectorAll("[data-ask]")) {
+          for (const row of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-ask]"))) {
             row.addEventListener("click", () => {
-              if (row.dataset.askRequested !== "true") askTarget = { id: row.dataset.ask, name: row.dataset.askName };
+              if (row.dataset.askRequested !== "true") askTarget = { id: /** @type {string} */ (row.dataset.ask), name: /** @type {string} */ (row.dataset.askName) };
             }, { signal: controller.signal });
           }
           teardown = () => controller.abort();
@@ -487,16 +543,16 @@
            switch travels with the mount — alive per load in the product, pinned
            to the workspace under ORBIT_FIXTURES, which is what lets the gate
            photograph the same sky twice. */
-        ? mountHome({ galaxy: view.galaxy, primary: view.primary,
-                      fixtures: Boolean(data?.fixtures), workspace: view.primary ?? "" })
+        ? mountHome({ galaxy: asView(view).galaxy, primary: asView(view).primary,
+                      fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "" })
         : mountPocket({
             /* #466: the sheet's two-tap lands on the same idempotent approve
                protocol the desk rows use — one operation id per receipt. */
-            approve: (id) => {
+            approve: (/** @type {string} */ id) => {
               const suggestion = view?.suggestions.find((one) => one.receiptId === id);
               if (suggestion) { armed = { id: suggestion.id, act: "approve" }; tapReceipt(suggestion, "approve"); }
             },
-            dismiss: (id) => {
+            dismiss: (/** @type {string} */ id) => {
               const suggestion = view?.suggestions.find((one) => one.receiptId === id);
               if (suggestion) { armed = { id: suggestion.id, act: "dismiss" }; tapReceipt(suggestion, "dismiss"); }
             },
@@ -721,7 +777,7 @@
 <button class="orb" aria-expanded="false" aria-controls="account" title="Menu">{initials}</button>
 <div class="account" id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
-    >{view ? `${view.household?.name ?? ""} · ${view.galaxy[view.primary]?.role ?? "member"}` : ""}</span></div>
+    >{view ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}` : ""}</span></div>
   <nav>
     <a href={resolve("/inbox")}>Inbox</a>
     <a href={resolve("/settings")}>Settings</a>
@@ -1053,7 +1109,7 @@
       <div class="splash-search" style="position:relative">
         <input id="explore" placeholder="explore your world" aria-label="Search items and documents">
         <div class="palette" data-polish="POL-9" id="palette">
-          {#each (groups?.attention ?? []).filter((r) => r.days >= 0).slice(0, 2) as row (row.id)}
+          {#each (groups?.attention ?? []).filter((/** @type {any} */ r) => r.days >= 0).slice(0, 2) as row (row.id)}
             <div><b>{row.title}</b> <small>· {tlabel(row)}</small></div>
           {/each}
           {#if groups?.closest}<div class="act">→ complete "{groups.closest.title}"</div>{/if}
@@ -1069,9 +1125,15 @@
          furthest away, suggestions riding the same line in date order. -->
     <div class="manifest" id="manifest-top">
     {#if corridor && !view?.emptySky}
+      <!-- #624/#782: `row` is left untyped on purpose. A `{#snippet}`
+           parameter is one of the three spots where svelte-check accepts an
+           inline `@type` cast comment but the production rolldown build does
+           not, so annotating it here would pass this check and break the
+           real build. The two implicit-any errors this leaves are the
+           ledger's remaining count for this file. -->
       {#snippet corridorRow(row)}
         {#if row.suggestion}
-          {@const s = view.suggestions.find((one) => one.id === row.id)}
+          {@const s = asView(view).suggestions.find((one) => one.id === row.id)}
           <div class="item suggest" id={row.id}>
             <span class="planet sug" aria-hidden="true"><i></i></span>
             <div class="body"><b>{row.title}</b><span>{[
@@ -1125,6 +1187,7 @@
       <!-- #424: everything Orbit holds about the item, in the row. The field
            set and its order are the item view's, so the two surfaces say the
            same thing in the same words (web/src/routes/item/[id]). -->
+      <!-- #624/#782: same reason as corridorRow above — `row` stays untyped. -->
       {#snippet itemview(row)}
         <div class="itemview" id="{row.id}-view" role="region" aria-label="{row.title} — full detail">
           {#if detailProblem}
@@ -1133,7 +1196,7 @@
             <div class="ivnote">{detailBusy ? "reading…" : ""}</div>
           {:else}
             <div class="kv"><span>due</span>
-              <b class:over={detail.band === "overdue" || row.band === "overdue"}>{detailDue(detail)}</b></div>
+              <b class:over={asAny(detail).band === "overdue" || row.band === "overdue"}>{detailDue(detail)}</b></div>
             {#if detail.snoozedUntil}
               <div class="kv"><span>snoozed until</span><b>{longDate(detail.snoozedUntil)}</b></div>
             {/if}
@@ -1150,7 +1213,7 @@
               <div class="kv"><span>orbital period</span><b>{every(detail.recurrenceMonths)}</b></div>
             {/if}
             <div class="kv"><span>cost</span>
-              <b>{money(detail.costMinor, detail.currency, detail.costIsEstimate)}</b></div>
+              <b>{money(detail.costMinor, detail.currency ?? "GBP", /** @type {any} */ (detail).costIsEstimate)}</b></div>
             {#if detail.provider}
               <div class="kv"><span>provider</span><b>{detail.provider}</b></div>
             {/if}

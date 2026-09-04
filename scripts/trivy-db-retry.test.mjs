@@ -3,11 +3,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Tests here run scripts/trivy-db-retry.sh under bash; a spawn that takes
+// tens of milliseconds quiet takes seconds on a starved core (#698). Budget
+// and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const script = new URL("./trivy-db-retry.sh", import.meta.url).pathname;
 const workflow = readFileSync(
   new URL("../.github/workflows/publish-container.yml", import.meta.url),
+  "utf8",
+).replaceAll("\r\n", "\n");
+// #801 moved the exact-image scan out of the workflow and into
+// scripts/ci/scan-image.sh, so two of the four DB-downloading sites now live
+// there. The rule is about every scan site, wherever it is written, so both
+// files are read and the assertions below run over the pair.
+const imageScan = readFileSync(
+  new URL("./ci/scan-image.sh", import.meta.url),
   "utf8",
 ).replaceAll("\r\n", "\n");
 
@@ -46,10 +61,11 @@ function makeStub({ failures, exitCode, message }) {
 }
 
 function run(stub) {
-  return spawnSync("bash", [script, "bash", stub], {
+  return failOnProcessDeadline(spawnSync("bash", [script, "bash", stub], {
     encoding: "utf8",
     env: { ...process.env, TRIVY_DB_RETRY_BACKOFF_SECONDS: "0" },
-  });
+    ...processGuard(),
+  }), { label: "run" });
 }
 
 describe("trivy-db-retry.sh", () => {
@@ -116,8 +132,8 @@ describe("trivy-db-retry.sh", () => {
   });
 });
 
-describe("publish-container.yml Trivy wiring", () => {
-  const lines = workflow.split("\n");
+describe("Trivy wiring in publish-container.yml and scripts/ci", () => {
+  const lines = [...workflow.split("\n"), ...imageScan.split("\n")];
 
   it("routes every DB-downloading Trivy invocation through the retry wrapper", () => {
     const scanSites = lines

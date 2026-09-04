@@ -1,16 +1,14 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { POST as inspectRoute } from "@/app/api/households/[householdId]/item-document-inspection/route";
 import { getDb } from "@/db";
 import { auditLog, documents, items } from "@/db/schema";
-import { cleanupIntegrationEnvironment, requestForSession, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { callRouteForSession, loadRoute } from "./support/request-event";
 import { readFileSync } from "node:fs";
 
-const qpdfObjectStreamPdf = readFileSync(new URL("../support/fixtures/qpdf-object-stream.pdf", import.meta.url));
+const { POST: inspectRoute } = await loadRoute("households/[householdId]/item-document-inspection");
 
-function context(householdId: string) {
-  return { params: Promise.resolve({ householdId }) };
-}
+const qpdfObjectStreamPdf = readFileSync(new URL("../support/fixtures/qpdf-object-stream.pdf", import.meta.url));
 
 // This file never cleans up its own fixtures per-test (#593); this backstop
 // deletes them, and everything cascaded from them, at file end.
@@ -27,7 +25,8 @@ describe("document-assisted item inspection boundary", () => {
     const beforeAudits = await getDb().select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.householdId, fixture.household.id), eq(auditLog.entityType, "item")));
     const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/item-document-inspection`;
 
-    const response = await inspectRoute(requestForSession(member, url, {
+    const response = await callRouteForSession(inspectRoute, member, {
+      url,
       method: "POST",
       headers: {
         "x-orbit-filename": encodeURIComponent("safe-policy.pdf"),
@@ -35,7 +34,8 @@ describe("document-assisted item inspection boundary", () => {
         "content-type": "application/pdf",
       },
       body: new Uint8Array(qpdfObjectStreamPdf),
-    }), context(fixture.household.id));
+      params: { householdId: fixture.household.id },
+    });
 
     expect(response.status).toBe(200);
     const payload = await response.json() as {
@@ -64,7 +64,8 @@ describe("document-assisted item inspection boundary", () => {
     const bytes = Buffer.from("%PDF-1.7\ntruncated");
     const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/item-document-inspection`;
 
-    const response = await inspectRoute(requestForSession(member, url, {
+    const response = await callRouteForSession(inspectRoute, member, {
+      url,
       method: "POST",
       headers: {
         "x-orbit-filename": encodeURIComponent("unsupported.pdf"),
@@ -72,7 +73,8 @@ describe("document-assisted item inspection boundary", () => {
         "content-type": "application/pdf",
       },
       body: bytes,
-    }), context(fixture.household.id));
+      params: { householdId: fixture.household.id },
+    });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
@@ -91,14 +93,16 @@ describe("document-assisted item inspection boundary", () => {
     const fixture = await createIntegrationFixture("document-assisted-outsider");
     const outsider = await fixture.session("outsider");
     const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/item-document-inspection`;
-    const response = await inspectRoute(requestForSession(outsider, url, {
+    const response = await callRouteForSession(inspectRoute, outsider, {
+      url,
       method: "POST",
       headers: {
         "x-orbit-filename": encodeURIComponent("private-policy.pdf"),
         "x-orbit-declared-bytes": String(qpdfObjectStreamPdf.length),
       },
       body: new Uint8Array(qpdfObjectStreamPdf),
-    }), context(fixture.household.id));
+      params: { householdId: fixture.household.id },
+    });
 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: { code: "household_not_found", message: "That household is not available" } });

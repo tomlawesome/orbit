@@ -3,7 +3,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import pixelmatch from "pixelmatch";
+// @ts-expect-error -- pngjs ships no declaration file and none is vendored for this project;
+// there is no `@type`/`@typedef` spelling that fixes a missing module declaration.
 import { PNG } from "pngjs";
+
+/** @typedef {{ width: number, height: number, data: Buffer }} PngImage */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const baselines = resolve(here, "baselines");
@@ -44,6 +48,56 @@ const MOCKUPS = process.env.FIDELITY_MOCKUPS ?? "http://127.0.0.1:5174";
 const PIXEL_THRESHOLD = 0.1;
 const MAX_DIFF_RATIO = 0.001;
 
+/**
+ * Walks the tour to stop 3 and settles there (#752).
+ *
+ * Runs in the page, polled by waitForFunction, so it has to be safe to
+ * evaluate over and over: it presses *Next* at most once per stop — the card
+ * publishes which stop it is on, and the marker below only lets a given
+ * number be pressed once — so the walk cannot be run past the stop being
+ * photographed. Settled means the galaxy has been placed, the card says stop
+ * 3, the emphasis has actually been applied to something — `.lit` is the
+ * mark the whole screen exists to guard, in both modes — and the fade that
+ * carries it (tour.css, .45s on opacity and filter) has finished everywhere:
+ * photographed mid-fade, the same stop measures differently on every run.
+ */
+function tourAtStopThree() {
+  if (document.querySelectorAll(".minisys").length === 0) return false;
+  const card = document.querySelector(".tourcard");
+  if (!card) return false;
+  const at = Number(card.getAttribute("data-tour-stop") ?? 0);
+  if (at === 0) return false;
+  if (at < 3) {
+    if (card.getAttribute("data-pressed") !== String(at)) {
+      card.setAttribute("data-pressed", String(at));
+      document.getElementById("tour-next")?.click();
+    }
+    return false;
+  }
+  if (at !== 3 || document.querySelectorAll("[data-tour-dim].lit").length === 0) return false;
+  return [...document.querySelectorAll("[data-tour-dim]")].every(
+    (el) => !el.getAnimations().some((a) => a instanceof CSSTransition),
+  );
+}
+
+/**
+ * @typedef {{
+ *   name: string,
+ *   path: string,
+ *   stage?: "porting" | "owned",
+ *   mockup?: string,
+ *   settle: () => boolean,
+ *   mockupOnly?: string[],
+ *   signedOut?: boolean,
+ *   reducedMotion?: "reduce" | null,
+ *   mockupTrim?: (html: string) => string,
+ *   viewport?: { width: number, height: number },
+ *   pack?: string,
+ *   tourDue?: boolean,
+ * }} Screen
+ */
+
+/** @type {Screen[]} */
 const SCREENS = [
   {
     name: "login",
@@ -80,8 +134,8 @@ const SCREENS = [
      * card: `lit` is first light, in both.
      */
     settle: () => {
-      if (typeof window.toLogin === "function" && document.body.classList.contains("showform")) {
-        window.toLogin();
+      if (typeof (/** @type {any} */ (window)).toLogin === "function" && document.body.classList.contains("showform")) {
+        (/** @type {any} */ (window)).toLogin();
       }
       return document.body.classList.contains("lit")
         && !document.body.classList.contains("showform");
@@ -121,8 +175,8 @@ const SCREENS = [
      * every frame of the journey and still arrive here.
      */
     settle: () => {
-      if (typeof window.toDusk === "function" && !document.body.classList.contains("showdusk")) {
-        window.toDusk();
+      if (typeof (/** @type {any} */ (window)).toDusk === "function" && !document.body.classList.contains("showdusk")) {
+        (/** @type {any} */ (window)).toDusk();
       }
       return document.body.classList.contains("showdusk")
         && document.body.classList.contains("farewell");
@@ -191,8 +245,8 @@ const SCREENS = [
      * longer grounded — the climb has started, caught, and set back down.
      */
     settle: () => {
-      if (typeof window.showError === "function" && !document.body.classList.contains("rejected")) {
-        window.showError();
+      if (typeof (/** @type {any} */ (window)).showError === "function" && !document.body.classList.contains("rejected")) {
+        (/** @type {any} */ (window)).showError();
       }
       return document.body.classList.contains("lit")
         && document.body.classList.contains("rejected")
@@ -239,11 +293,27 @@ const SCREENS = [
   },
   {
     name: "maintenance",
+    /* The fixture window has three entries, so this is the state WITH the
+       arrow — the drawer closed, as it first renders. The one-entry state,
+       which is what almost every real window looks like, is the same screen
+       with `?entries=one` and is asserted in tests/e2e/maintenance.spec.ts
+       rather than photographed: it is the three-entry frame minus the arrow. */
     path: "/maintenance",
     stage: "porting",
     mockup: "/design/family/maintenance.html",
     settle: () => document.querySelectorAll("#farstars circle").length > 0,
     /* The mockup annotates its own demo loop for the reviewer; the product does not. */
+    mockupOnly: [".foot"],
+  },
+  {
+    name: "maintenance-mobile",
+    /* The same screen in the pocket (#526): the notice column has to clear
+       the ring and the drawer has to stop at the screen's edge on a phone. */
+    path: "/maintenance",
+    stage: "porting",
+    mockup: "/design/family/maintenance.html",
+    viewport: { width: 400, height: 850 },
+    settle: () => document.querySelectorAll("#farstars circle").length > 0,
     mockupOnly: [".foot"],
   },
   {
@@ -258,7 +328,13 @@ const SCREENS = [
        behind it at a 400×850 viewBox, so that is the sheet of glass to
        compare, not a desk viewport with a narrow column down the middle. */
     viewport: { width: 400, height: 850 },
-    settle: () => Boolean(document.querySelector(".mdial svg")),
+    /* The dial is static chrome and exists before the workspace fetch
+       resolves, so waiting on it alone photographed an empty pocket --
+       no households, no rows, no bodies on the dial. `.msys` is drawn
+       from the data, so it is the dialect's own `.minisys`: the same
+       "the galaxy has been placed" condition home settles on. */
+    settle: () => Boolean(document.querySelector(".mdial svg"))
+      && document.querySelectorAll(".msys").length > 0,
   },
   {
     name: "admin",
@@ -273,21 +349,68 @@ const SCREENS = [
     name: "relay",
     path: "/settings/mail",
     stage: "porting",
-    mockup: "/design/family/settings-mail.html",
-    settle: () => Boolean(document.querySelector(".relay-card")),
-    /* The mockup names its own motif for the reviewer; the product does not. */
-    mockupOnly: [".foot"],
+    /*
+     * The living backdrop (#475, §14), ratified 2026-09-02, replaces the
+     * family sheet's still starfield. The sheet is pinned to the same seed
+     * the app derives under fixtures and runs the same generator (sky.js's
+     * streamFactory, copied verbatim into the sheet), which is the only
+     * reason a living sky can be compared to a mockup at all — home's law.
+     */
+    mockup: "/design/v19/relay-satellites.html",
+    /*
+     * At rest, for the belt's reason: the sky streams and the craft drift on
+     * a requestAnimationFrame clock that `animations: "disabled"` cannot
+     * reach. The design's own reduced-motion state holds the clock at zero
+     * on both sides, and both are photographed in it.
+     */
+    reducedMotion: "reduce",
+    /*
+     * The sheet keeps 102px under its stage for the demos rail it carries
+     * along the bottom; the product has no rail, so the room is scaffolding
+     * too. Cut at load, the belt's way, so the card is centred in the same
+     * height on both sides. If the sheet ever drops the reservation the
+     * replacement matches nothing and the comparison is unchanged.
+     */
+    mockupTrim: (/** @type {string} */ html) => html.replace("min-height:calc(100vh - 102px)", "min-height:100vh"),
+    /* Settled once the card is up and the fleet has been sown — the craft
+       arrive client-side, off the seed. */
+    settle: () =>
+      Boolean(document.querySelector(".relay-card"))
+      && document.querySelectorAll(".craft").length > 0,
+    /* The sheet's own scaffolding: the demos rail (re-roll, freeze, packs)
+       and the footer naming the proposal. */
+    mockupOnly: [".demos", ".foot"],
   },
   {
     name: "create",
     path: "/create",
     stage: "porting",
-    mockup: "/design/family/create.html",
-    /* No dawn and no generated artwork — the starfield is drawn in the markup,
-       so the screen is settled as soon as the card has laid out. */
-    settle: () => Boolean(document.getElementById("card")),
-    /* The mockup states its own thesis to the reviewer; the product does not. */
-    mockupOnly: [".foot"],
+    /*
+     * The living backdrop (#474/#475/#476, §14), ratified 2026-09-02, replaces
+     * the family sheet's still starfield: the instance's own households now
+     * float in the distance, drawn by the same streamed generator (sky.js's
+     * streamFactory, copied verbatim into the sheet) that the relay uses. The
+     * sheet is pinned to the same seed the app derives under fixtures, which
+     * is the only reason a living sky can be compared to a mockup at all.
+     */
+    mockup: "/design/v19/create-v3.html",
+    /*
+     * At rest, for the belt's reason: the sky streams on a
+     * requestAnimationFrame clock that `animations: "disabled"` cannot reach.
+     * The design's own reduced-motion state holds the clock at zero on both
+     * sides, and both are photographed in it.
+     */
+    reducedMotion: "reduce",
+    /* Settled once the card is up and the households have been sown. */
+    settle: () =>
+      Boolean(document.getElementById("card"))
+      && document.querySelectorAll(".chartback .csys").length > 0,
+    /* The sheet's own scaffolding: the demos rail (re-roll, state switcher),
+       the footer naming the proposal, and the account chrome (back link,
+       menu orb) that every standalone mockup carries to stand on its own but
+       that this route does not render — leaving the form is cancel or
+       submit, not a back link, and the account menu lives elsewhere. */
+    mockupOnly: [".demos", "footer", ".back", ".orb"],
   },
   {
     /*
@@ -341,7 +464,7 @@ const SCREENS = [
      * sheet ever stops carrying them it removes nothing and the comparison is
      * unchanged.
      */
-    mockupTrim: (html) => html.replace(/[ \t]*\{ id:"[^"]+",[^{}]*fill:1,[^{}]*\},\r?\n/g, ""),
+    mockupTrim: (/** @type {string} */ html) => html.replace(/[ \t]*\{ id:"[^"]+",[^{}]*fill:1,[^{}]*\},\r?\n/g, ""),
     /* Settled once the band has its seats and the apex has its card — every
        one of which arrives client-side, off the workspace seam. */
     settle: () =>
@@ -355,10 +478,32 @@ const SCREENS = [
     name: "administration",
     path: "/administration",
     stage: "porting",
-    mockup: "/design/v19/administration.html",
-    /* Settled once mission control has people and systems — client-side data. */
-    settle: () => Boolean(document.querySelector(".person")) && Boolean(document.querySelector(".system svg")),
-    mockupOnly: ["footer"],
+    /*
+     * The living station backdrop (#472/#475, §14), ratified 2026-09-02,
+     * replaces the family sheet's still starfield: the ISS — this instance's
+     * own platform — drawn in the family's chart pen, streamed past on the
+     * same non-looping generator (sky.js's streamFactory, copied verbatim
+     * into the sheet) the relay and create use. The sheet is pinned to the
+     * same seed the app derives under fixtures, which is the only reason a
+     * living sky can be compared to a mockup at all.
+     */
+    mockup: "/design/v19/administration-iss.html",
+    /*
+     * At rest, for the belt's reason: the sky streams and the station drifts
+     * on a requestAnimationFrame clock that `animations: "disabled"` cannot
+     * reach. The design's own reduced-motion state holds the clock at zero
+     * on both sides, and both are photographed in it.
+     */
+    reducedMotion: "reduce",
+    /* Settled once mission control has people and systems (client-side data)
+       and the station has flown a pass into the window. */
+    settle: () =>
+      Boolean(document.querySelector(".person"))
+      && Boolean(document.querySelector(".system svg"))
+      && Boolean(document.querySelector(".station .att")),
+    /* The sheet's own scaffolding: the demos rail (re-roll, freeze, the seed
+       tag it carries) and the footer naming the proposal. */
+    mockupOnly: [".demos", "footer"],
   },
   {
     name: "settings",
@@ -408,6 +553,50 @@ const SCREENS = [
      */
     mockupOnly: [".demos", "footer"],
   },
+  /*
+   * THE FIRST-RUN WALK, ONE SCREEN PER EMPHASIS MODE (#752, acceptance
+   * criterion 4). Both photograph the SAME stop — stop 3, the dial, which is
+   * the one every pack has to carry — and differ only in the pack in force:
+   *
+   *   tour-dim      star-chart, where everything but the dial drops to the
+   *                 pack's faint tier;
+   *   tour-forward  dawn, where nothing dims and the dial is pushed forward
+   *                 by colour instead (owner, 2026-09-03).
+   *
+   * OWNED, not porting, and the reason is not a shortcut: design/v19/tour.html
+   * is a reduced stage — a dial, a one-row manifest and three lane cards drawn
+   * to show the TREATMENT — not a second drawing of home. Photographing the
+   * real /home under the tour against that sheet would measure the difference
+   * between two screens, not drift in the walk. What these two guard is the
+   * emphasis itself, on the real screen, in both modes.
+   *
+   * Both are photographed in the design's reduced-motion state, for the
+   * belt's reason (above): home's sky drifts and its rotor turns on clocks
+   * the walk cannot pin, and the walk itself takes seconds to reach stop 3,
+   * so two captures of the same stop otherwise land on different frames of
+   * the drift — measured at 0.8%, eight times the budget. In that state the
+   * sky holds still, the rotor stands, and the emphasis is applied without
+   * its fade, which is exactly the design's own reduced-motion rule
+   * (tour.css: `transition: none`).
+   */
+  {
+    name: "tour-dim",
+    path: "/home",
+    stage: "owned",
+    pack: "starchart",
+    tourDue: true,
+    reducedMotion: "reduce",
+    settle: tourAtStopThree,
+  },
+  {
+    name: "tour-forward",
+    path: "/home",
+    stage: "owned",
+    pack: "dawn",
+    tourDue: true,
+    reducedMotion: "reduce",
+    settle: tourAtStopThree,
+  },
 ];
 
 /**
@@ -436,7 +625,11 @@ const LOCAL_FONT_CSS = [500, 600]
   ])
   .join("\n");
 
-/** Blanks the given rectangles in an image, in place. */
+/**
+ * Blanks the given rectangles in an image, in place.
+ * @param {PngImage} png
+ * @param {{ x: number, y: number, width: number, height: number }[]} rects
+ */
 function maskRegions(png, rects) {
   for (const r of rects) {
     const x0 = Math.max(0, Math.floor(r.x));
@@ -453,11 +646,61 @@ function maskRegions(png, rects) {
   }
 }
 
+/**
+ * @param {import("@playwright/test").Page} page
+ * @param {string} url
+ * @param {(() => boolean) | undefined} settle
+ * @param {string[]} [mockupOnly]
+ * @param {{ width: number, height: number } | null} [viewport]
+ * @param {boolean} [signedOut]
+ * @param {{
+ *   reducedMotion?: "reduce" | null,
+ *   trim?: ((html: string) => string) | null,
+ *   pack?: string,
+ *   tourDue?: boolean,
+ * }} [options]
+ */
 async function capture(
   page, url, settle, mockupOnly = [], viewport = null, signedOut = false,
-  { reducedMotion = null, trim = null } = {},
+  { reducedMotion = null, trim = null, pack = "starchart", tourDue = false } = {},
 ) {
-  await page.route("https://fonts.googleapis.com/**", (route) =>
+  /*
+   * WHICH SKY. Star chart unless a screen names another, because that is the
+   * pack THE MOCKUPS ARE DRAWN IN — the porting comparison is app against
+   * mockup, so both sides have to be the same sky or the diff is just the
+   * theme. This used to ride on whatever pack the app shipped on, which tied
+   * the gate to a product default: when the default moved to After Dark
+   * (2026-09-03) six screens failed without a pixel of the front end having
+   * changed. The packs genuinely do not share a sky, so that comparison was
+   * never meaningful.
+   *
+   * Said through the app's own pre-paint mechanism — the `orbit-theme`
+   * key app.html reads before the first frame — so the pack is in force in
+   * the first painted pixel rather than swapped in after the screen has laid
+   * itself out in a different one.
+   */
+  if (pack) {
+    await page.addInitScript((/** @type {string} */ chosen) => {
+      try { localStorage.setItem("orbit-theme", chosen); } catch { /* storage refused: the default pack stands */ }
+    }, pack);
+  }
+
+  /*
+   * WHETHER THE WALK IS DUE. The fixture route answers "already taken", so
+   * the tour never opens over the other screens; the two that ARE the tour
+   * say otherwise here, the way the goodbye says it is signed out.
+   */
+  if (tourDue) {
+    await page.route("**/api/settings/tour", (/** @type {import("@playwright/test").Route} */ route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: '{"tour":{"tourSeenAt":null}}',
+      }),
+    );
+  }
+
+  await page.route("https://fonts.googleapis.com/**", (/** @type {import("@playwright/test").Route} */ route) =>
     route.fulfill({ contentType: "text/css", body: LOCAL_FONT_CSS }),
   );
 
@@ -479,7 +722,7 @@ async function capture(
    * blanked. Only ever applied to the mockup's own document.
    */
   if (trim) {
-    await page.route(url, async (route) => {
+    await page.route(url, async (/** @type {import("@playwright/test").Route} */ route) => {
       const response = await route.fetch();
       await route.fulfill({
         contentType: "text/html; charset=utf-8",
@@ -498,7 +741,7 @@ async function capture(
    * reader, stated, so the gate photographs the screen instead of the redirect.
    */
   if (signedOut) {
-    await page.route("**/api/auth/session", (route) =>
+    await page.route("**/api/auth/session", (/** @type {import("@playwright/test").Route} */ route) =>
       route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"unauthenticated"}' }),
     );
   }
@@ -531,14 +774,14 @@ async function capture(
    */
   await page.waitForFunction(() =>
     [...document.querySelectorAll(".grain[data-rasterised], .world[data-rasterised]")].every(
-      (el) => el.dataset.rasterised === "ready",
+      (el) => (/** @type {HTMLElement} */ (el)).dataset.rasterised === "ready",
     ),
   );
 
   /* Where the mockup carries scaffolding the product does not, find it by
      selector so the excluded area tracks the design rather than a magic box. */
-  const rects = await page.evaluate((selectors) =>
-    selectors.flatMap((sel) =>
+  const rects = await page.evaluate((/** @type {string[]} */ selectors) =>
+    selectors.flatMap((/** @type {string} */ sel) =>
       [...document.querySelectorAll(sel)].map((el) => {
         const r = el.getBoundingClientRect();
         return { x: r.x, y: r.y, width: r.width, height: r.height };
@@ -572,7 +815,13 @@ async function capture(
   return { png, rects };
 }
 
-/** @param {string | null} [expectedFile] the on-disk PNG `expected` was read from, when it has one */
+/**
+ * @param {PngImage} expected
+ * @param {PngImage} actual
+ * @param {string} name
+ * @param {string} label
+ * @param {string | null} [expectedFile] the on-disk PNG `expected` was read from, when it has one
+ */
 function compare(expected, actual, name, label, expectedFile = null) {
   expect(
     { width: actual.width, height: actual.height },
@@ -628,11 +877,15 @@ function compare(expected, actual, name, label, expectedFile = null) {
  */
 const appShots = new Map();
 
+/**
+ * @param {import("@playwright/test").Page} page
+ * @param {Screen} screen
+ */
 async function captureAppOnce(page, screen) {
   if (!appShots.has(screen.name)) {
     const { png } = await capture(
       page, APP + screen.path, screen.settle, [], screen.viewport ?? null, screen.signedOut,
-      { reducedMotion: screen.reducedMotion });
+      { reducedMotion: screen.reducedMotion, pack: screen.pack, tourDue: screen.tourDue });
     appShots.set(screen.name, { width: png.width, height: png.height, data: png.data });
   }
   const shot = appShots.get(screen.name);
