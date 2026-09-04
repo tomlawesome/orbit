@@ -25,9 +25,16 @@ cd "${repo_root}"
 : "${TESTED_IMAGE_ID:?the tested image identity is required}"
 
 docker push "${IMAGE_TAG}"
+# The first Digest: line, taken without exiting awk early. `exit` on the match
+# left `imagetools inspect` writing the whole Manifests: block that follows into
+# a closed pipe, and under `pipefail` its SIGPIPE (141) becomes the pipeline's
+# status and aborts the assignment -- the same race that broke
+# check-base-image-current.sh on GitLab pipeline 169. Reading to EOF and
+# printing at the end costs a few unread lines and cannot lose that race.
 published_digest="$(
   docker buildx imagetools inspect "${IMAGE_TAG}" |
-    awk '$1 == "Digest:" && $2 ~ /^sha256:[0-9a-f]{64}$/ { print $2; exit }'
+    awk '$1 == "Digest:" && $2 ~ /^sha256:[0-9a-f]{64}$/ && !found { digest = $2; found = 1 }
+         END { if (found) print digest }'
 )"
 [[ "${published_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
   printf 'Registry did not return a valid immutable image digest.\n' >&2
