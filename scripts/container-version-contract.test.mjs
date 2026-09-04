@@ -25,7 +25,7 @@ const entrypoint = readFileSync(
   "utf8",
 ).replaceAll("\r\n", "\n");
 const healthRoute = readFileSync(
-  new URL("../src/app/api/health/route.ts", import.meta.url),
+  new URL("../web/src/routes/api/health/+server.js", import.meta.url),
   "utf8",
 );
 const bash =
@@ -120,7 +120,7 @@ describe("immutable container version identity", () => {
   it("prints the exact banner and immutable identity once for default server startup", () => {
     const fixture = versionFixture();
     try {
-      const result = spawnSync(bash, [fixture.script, "node", "server.js"], {
+      const result = spawnSync(bash, [fixture.script, "node", "web/index.js"], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -139,12 +139,12 @@ describe("immutable container version identity", () => {
     }
   });
 
-  // #450: the image CMD is the composite entry, not Next's generated
-  // server.js; the banner gate must recognise it or startup goes silent.
-  it("prints the banner for the composite entry CMD", () => {
+  // #735: any other command is a one-off (the engine CLI, a shell), and
+  // stamping the banner on those would corrupt machine-readable output.
+  it("stays quiet for a command that is not the server", () => {
     const fixture = versionFixture();
     try {
-      const result = spawnSync(bash, [fixture.script, "node", "scripts/container-server.mjs"], {
+      const result = spawnSync(bash, [fixture.script, "node", "cli/orbit.js"], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -153,9 +153,7 @@ describe("immutable container version identity", () => {
           ORBIT_CHANNEL: "latest",
         },
       });
-      expect(result.stdout).toBe(
-        `${banner}Orbit v1.2.3 | channel=preview | revision=${"a".repeat(40)}\n`,
-      );
+      expect(result.stdout).toBe("");
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }

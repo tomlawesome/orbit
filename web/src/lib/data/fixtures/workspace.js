@@ -91,6 +91,10 @@ const LAWSON_ITEMS = [
 /** Distant constellations, named: the id scheme and the due dates are
  * load-bearing (home's constellation dots hash the ids and band the dates),
  * so #461 gave these items their words without moving either. */
+/**
+ * @param {string} prefix
+ * @param {[string, string, string, number, Record<string, unknown>?][]} specs
+ */
 function distantItems(prefix, specs) {
   return specs.map(([title, sectionId, dueDate, costMinor, extra], index) => ({
     id: `${prefix}-${index}`, title, sectionId,
@@ -179,6 +183,7 @@ export const WORKSPACE_FIXTURE = {
  * (src/server/document-repository.ts). Sizes and dates are chosen so the
  * client-side meta formatting reproduces the design's strings exactly
  * ("added 12 Jun · 240 KB").
+ * @type {Record<string, (import('../workspace.js').DocumentSummary & { recoveryExpiresAt?: ?string, recoveryStatus?: ?string })[]>}
  */
 export const DOCUMENTS_FIXTURE = {
   "i-mot": [

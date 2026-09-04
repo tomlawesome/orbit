@@ -3,9 +3,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, dueEvents, items, notificationStates, reminderRules } from "@/db/schema";
-import { GET as readWorkspace } from "@/app/api/workspace/route";
-import { POST as applyWorkspaceCommand } from "@/app/api/workspace/commands/route";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, requestForSession } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { callRouteForSession, loadRoute } from "./support/request-event";
+
+const { GET: readWorkspace } = await loadRoute("workspace");
+const { POST: applyWorkspaceCommand } = await loadRoute("workspace/commands");
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -89,7 +91,7 @@ async function upsertScheduledItem(
   fixture: Awaited<ReturnType<typeof createIntegrationFixture>>,
   session: Awaited<ReturnType<Awaited<ReturnType<typeof createIntegrationFixture>>["session"]>>,
 ) {
-  const response = await applyWorkspaceCommand(requestForSession(session, commandUrl, {
+  const response = await callRouteForSession(applyWorkspaceCommand, session, { url: commandUrl,
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -98,7 +100,7 @@ async function upsertScheduledItem(
       item: scheduledItem(fixture, 2),
       activity: activity(fixture.item.id, "created", { nextDate: "2026-12-20" }),
     }),
-  }));
+  });
   expect(response.status).toBe(200);
   return response;
 }
@@ -119,14 +121,14 @@ describe("conflict-safe item lifecycle", () => {
 
     const updated = { ...scheduledItem(fixture, 3), title: "Updated boiler cover", dueDate: "2027-01-20", reminderDays: [14, 3] };
     const updateActivity = activity(fixture.item.id, "updated", { previousDate: "2026-12-20", nextDate: "2027-01-20" });
-    const updateResponse = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const updateResponse = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "item.upsert", householdId: fixture.household.id, item: updated, activity: updateActivity }),
-    }));
+    });
     expect(updateResponse.status).toBe(200);
 
-    const reload = await readWorkspace(requestForSession(owner, workspaceUrl));
+    const reload = await callRouteForSession(readWorkspace, owner, { url: workspaceUrl });
     expect(reload.status).toBe(200);
     const workspace = await json(reload);
     const household = (workspace.workspace as { households: Array<{ items: Array<Record<string, unknown>>; activities: Array<Record<string, unknown>> }> }).households[0];
@@ -168,7 +170,7 @@ describe("conflict-safe item lifecycle", () => {
       changes: { activity: impostorActivity },
     });
 
-    const reload = await readWorkspace(requestForSession(owner, workspaceUrl));
+    const reload = await callRouteForSession(readWorkspace, owner, { url: workspaceUrl });
     expect(reload.status).toBe(200);
     const workspace = await json(reload);
     const household = (workspace.workspace as { households: Array<{ activities: Array<Record<string, unknown>> }> }).households[0];
@@ -181,22 +183,22 @@ describe("conflict-safe item lifecycle", () => {
     const notificationIds = Array.from({ length: 12 }, (_, index) => `${fixture.item.id}:2026-12-${String(index + 1).padStart(2, "0")}:due-today`);
     const duplicatedIds = [...notificationIds, ...notificationIds];
 
-    const readAll = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const readAll = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "notification.read-all", householdId: fixture.household.id, notificationIds: duplicatedIds }),
-    }));
+    });
     expect(readAll.status).toBe(200);
 
     const dismissedId = `${fixture.item.id}:2026-12-31:overdue`;
-    const dismiss = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const dismiss = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "notification.dismiss", householdId: fixture.household.id, notificationId: dismissedId }),
-    }));
+    });
     expect(dismiss.status).toBe(200);
 
-    const reload = await readWorkspace(requestForSession(owner, workspaceUrl));
+    const reload = await callRouteForSession(readWorkspace, owner, { url: workspaceUrl });
     const workspace = await json(reload);
     const household = (workspace.workspace as { households: Array<{ readNotificationIds: string[]; dismissedNotificationIds: string[] }> }).households[0];
     expect(new Set(household.readNotificationIds)).toEqual(new Set(notificationIds));
@@ -204,13 +206,13 @@ describe("conflict-safe item lifecycle", () => {
     expect(household.dismissedNotificationIds).toEqual([dismissedId]);
 
     // Re-running the same batch is an idempotent upsert, not a duplicate insert.
-    const rerun = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const rerun = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "notification.read-all", householdId: fixture.household.id, notificationIds }),
-    }));
+    });
     expect(rerun.status).toBe(200);
-    const rereload = await json(await readWorkspace(requestForSession(owner, workspaceUrl)));
+    const rereload = await json(await callRouteForSession(readWorkspace, owner, { url: workspaceUrl }));
     const rehousehold = (rereload.workspace as { households: Array<{ readNotificationIds: string[] }> }).households[0];
     expect(rehousehold.readNotificationIds).toHaveLength(notificationIds.length);
   });
@@ -236,7 +238,7 @@ describe("conflict-safe item lifecycle", () => {
       readAt: new Date(),
     })));
 
-    const reload = await readWorkspace(requestForSession(owner, workspaceUrl));
+    const reload = await callRouteForSession(readWorkspace, owner, { url: workspaceUrl });
     expect(reload.status).toBe(200);
     const workspace = await json(reload);
     const household = (workspace.workspace as { households: Array<{ items: unknown[]; readNotificationIds: string[] }> }).households[0];
@@ -257,17 +259,17 @@ describe("conflict-safe item lifecycle", () => {
       dueDate: "2027-01-10",
       activity: activity(fixture.item.id, "rescheduled", { previousDate: "2026-12-20", nextDate: "2027-01-10" }),
     } as const;
-    const response = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const response = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command),
-    }));
+    });
     expect(response.status).toBe(200);
     const after = await itemSnapshot(fixture);
     expect(after.item?.version).toBe((before.item?.version ?? 0) + 1);
     expect(after.auditCount).toBe(before.auditCount + 1);
 
-    const replay = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const replay = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command),
-    }));
+    });
     await expectError(replay, 409, "version_conflict");
     expect(await itemSnapshot(fixture)).toEqual(after);
   });
@@ -287,11 +289,11 @@ describe("conflict-safe item lifecycle", () => {
     ] as const;
 
     for (const command of commands) {
-      const response = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+      const response = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...command, householdId: fixture.household.id, itemId: fixture.item.id, expectedVersion: stale }),
-      }));
+      });
       await expectError(response, 409, "version_conflict");
       expect(await itemSnapshot(fixture)).toEqual(before);
     }
@@ -303,14 +305,14 @@ describe("conflict-safe item lifecycle", () => {
     await upsertScheduledItem(fixture, owner);
     const base = { type: "item.archive", householdId: fixture.household.id, itemId: fixture.item.id, activity: activity(fixture.item.id, "archived") };
 
-    const missing = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const missing = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(base),
-    }));
+    });
     await expectError(missing, 422, "validation_failed");
 
-    const malformed = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const malformed = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...base, expectedVersion: 0 }),
-    }));
+    });
     await expectError(malformed, 422, "validation_failed");
   });
 
@@ -328,13 +330,13 @@ describe("conflict-safe item lifecycle", () => {
       activity: activity(fixture.item.id, "renewal_completed", { effectiveDate: "2026-12-20", nextDate: "2027-12-20" }),
     } as const;
 
-    const first = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const first = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
-    }));
+    });
     expect(first.status).toBe(200);
-    const replay = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const replay = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
-    }));
+    });
     expect(replay.status).toBe(200);
 
     const concurrentFixture = await createIntegrationFixture("item-completion-concurrent-replay");
@@ -348,8 +350,8 @@ describe("conflict-safe item lifecycle", () => {
     };
     expect(concurrent.activity.id).not.toBe(completion.activity.id);
     const responses = await Promise.all([
-      applyWorkspaceCommand(requestForSession(concurrentOwner, commandUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(concurrent) })),
-      applyWorkspaceCommand(requestForSession(concurrentOwner, commandUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(concurrent) })),
+      callRouteForSession(applyWorkspaceCommand, concurrentOwner, { url: commandUrl, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(concurrent) }),
+      callRouteForSession(applyWorkspaceCommand, concurrentOwner, { url: commandUrl, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(concurrent) }),
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 200]);
 
@@ -376,14 +378,14 @@ describe("conflict-safe item lifecycle", () => {
       nextDate: "2027-12-20",
       activity: activity(fixture.item.id, "renewal_completed", { nextDate: "2027-12-20" }),
     } as const;
-    const completed = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const completed = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
-    }));
+    });
     expect(completed.status).toBe(200);
 
     const otherItemId = randomUUID();
     const otherActivity = activity(otherItemId, "created");
-    const otherUpsert = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const otherUpsert = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -392,7 +394,7 @@ describe("conflict-safe item lifecycle", () => {
         item: { ...scheduledItem(fixture, 1), id: otherItemId, title: "Second scheduled item", version: 1 },
         activity: otherActivity,
       }),
-    }));
+    });
     expect(otherUpsert.status).toBe(200);
     const before = await getDb().select().from(items).where(eq(items.id, otherItemId));
     const beforeEvents = await getDb().select().from(dueEvents).where(eq(dueEvents.itemId, otherItemId));
@@ -401,11 +403,11 @@ describe("conflict-safe item lifecycle", () => {
       eq(auditLog.entityId, otherItemId),
     ));
 
-    const reused = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const reused = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...completion, itemId: otherItemId, expectedVersion: 1, activity: { ...completion.activity, itemId: otherItemId } }),
-    }));
+    });
     await expectError(reused, 409, "version_conflict");
     expect(await getDb().select().from(items).where(eq(items.id, otherItemId))).toEqual(before);
     expect(await getDb().select().from(dueEvents).where(eq(dueEvents.itemId, otherItemId))).toEqual(beforeEvents);
@@ -428,9 +430,9 @@ describe("conflict-safe item lifecycle", () => {
       nextDate: "2027-12-20",
       activity: activity(firstFixture.item.id, "renewal_completed", { nextDate: "2027-12-20" }),
     } as const;
-    const firstResponse = await applyWorkspaceCommand(requestForSession(firstOwner, commandUrl, {
+    const firstResponse = await callRouteForSession(applyWorkspaceCommand, firstOwner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
-    }));
+    });
     expect(firstResponse.status).toBe(200);
 
     const secondFixture = await createIntegrationFixture("item-completion-cross-household-second");
@@ -446,9 +448,9 @@ describe("conflict-safe item lifecycle", () => {
       activity: { ...completion.activity, itemId: secondFixture.item.id },
     };
 
-    const secondResponse = await applyWorkspaceCommand(requestForSession(secondOwner, commandUrl, {
+    const secondResponse = await callRouteForSession(applyWorkspaceCommand, secondOwner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(reused),
-    }));
+    });
     await expectError(secondResponse, 409, "version_conflict");
     expect(await itemSnapshot(secondFixture)).toEqual(before);
     expect(await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id))).toEqual(beforeAudit);
@@ -481,9 +483,9 @@ describe("conflict-safe item lifecycle", () => {
     const before = await itemSnapshot(fixture);
     const beforeAudit = await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id));
 
-    const response = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const response = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
-    }));
+    });
     await expectError(response, 409, "version_conflict");
     expect(await itemSnapshot(fixture)).toEqual(before);
     expect(await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id))).toEqual(beforeAudit);
@@ -530,14 +532,14 @@ describe("conflict-safe item lifecycle", () => {
 
     try {
       await dueEventHeld.promise;
-      const completionRequest = applyWorkspaceCommand(requestForSession(completionOwner, commandUrl, {
+      const completionRequest = callRouteForSession(applyWorkspaceCommand, completionOwner, { url: commandUrl,
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
-      }));
+      });
       await waitForCompletionAdvisory(completion.activity.id);
 
-      const competingResponse = await applyWorkspaceCommand(requestForSession(competingOwner, commandUrl, {
+      const competingResponse = await callRouteForSession(applyWorkspaceCommand, competingOwner, { url: commandUrl,
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(competing),
-      }));
+      });
       expect(competingResponse.status).toBe(200);
       releaseDueEvent.resolve();
 
@@ -565,9 +567,9 @@ describe("conflict-safe item lifecycle", () => {
     await upsertScheduledItem(fixture, owner);
     const common = { type: "item.complete", householdId: fixture.household.id, itemId: fixture.item.id, expectedVersion: 2, completedDate: "2026-12-20", nextDate: "2027-12-20" } as const;
     const completions = ["renewal_completed", "renewal_completed"].map((kind) => ({ ...common, activity: activity(fixture.item.id, kind as "renewal_completed", { nextDate: "2027-12-20" }) }));
-    const responses = await Promise.all(completions.map((command) => applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+    const responses = await Promise.all(completions.map((command) => callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command),
-    }))));
+    })));
     expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
     const snapshot = await itemSnapshot(fixture);
     expect(snapshot.item?.version).toBe(3);
@@ -582,11 +584,11 @@ describe("conflict-safe item lifecycle", () => {
     const outsider = await fixture.session("outsider");
     await upsertScheduledItem(fixture, owner);
     const before = await itemSnapshot(fixture);
-    const response = await applyWorkspaceCommand(requestForSession(outsider, commandUrl, {
+    const response = await callRouteForSession(applyWorkspaceCommand, outsider, { url: commandUrl,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "item.archive", householdId: fixture.household.id, itemId: fixture.item.id, expectedVersion: 2, activity: activity(fixture.item.id, "archived") }),
-    }));
+    });
     await expectError(response, 404, "household_not_found");
     expect(await itemSnapshot(fixture)).toEqual(before);
   });

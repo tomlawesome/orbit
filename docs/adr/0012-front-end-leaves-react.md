@@ -102,10 +102,27 @@ stay green throughout.
 >
 > Orbit has shipped to nobody, so there is no installed base whose calls must
 > keep working, and "expensive to reconstruct" was pricing a risk that does not
-> exist — git holds the deleted routes if one is ever wanted again. The cut
-> therefore builds the route families `web/` actually calls (nineteen, measured
-> 2026-09-03) and deletes the rest with Next, rather than porting all
-> forty-four. See #735.
+> exist — git holds the deleted routes if one is ever wanted again. See #735.
+>
+> **Clarified 2026-09-03 (owner), correcting this amendment's own wording.** An
+> earlier draft of the paragraph above said the cut "builds the route families
+> `web/` actually calls (nineteen, measured 2026-09-03) and deletes the rest".
+> That was a misreading, and it would have deleted delivered capability.
+>
+> The test is what the new front end **needs**, not what it happens to call
+> today. A back end that works and whose screen is simply not drawn yet is
+> needed: #410 defers sixteen such surfaces to M9 precisely because they are
+> wanted and undrawn, not because they are unwanted. Owner: "Backend features
+> that just aren't implemented are needed. The point was not to do anything
+> related to Next/react."
+>
+> So the cut ports every route family that serves a delivered capability, and
+> deletes only what is specific to Next or React — the pages, the components,
+> the dispatcher, the Next-era service worker. `/api/documents/[documentId]/preview`
+> is the case that exposed the misreading: the item screen carries a comment
+> saying the endpoint exists and the screen deliberately does not call it yet,
+> which under the "actually calls" test would have deleted a feature the UI is
+> written around.
 >
 > The rest of this decision stands: SvelteKit, mechanical fidelity, and the old
 > front end not being an input to any decision.

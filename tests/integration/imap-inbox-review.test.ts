@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { GET as getReceipt } from "@/app/api/imap-inbox/[receiptId]/route";
-import { GET as getInbox } from "@/app/api/imap-inbox/route";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, items } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -9,8 +7,12 @@ import { assignImapReceiptHousehold, discardImapReviewItem, getImapReview, listI
 import { scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { requestHouseholdDeletion } from "@/server/household-lifecycle";
-import { cleanupIntegrationEnvironment, requestForSession, requestWithoutSession, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+
+const { GET: getReceipt } = await loadRoute("imap-inbox/[receiptId]");
+const { GET: getInbox } = await loadRoute("imap-inbox");
 
 // The first two cases below never call fixture.cleanup() (#593); this
 // backstop, matching the rest of the suite, deletes whatever they left
@@ -49,20 +51,20 @@ describe("authenticated mailbox review read boundary", () => {
       wrapIv: "wrap-iv", wrapAuthTag: "wrap-tag", keyId: "key", status: "stored",
     });
     const url = "http://127.0.0.1:3000/api/imap-inbox";
-    expect((await getInbox(requestWithoutSession(url))).status).toBe(401);
-    const memberInbox = await getInbox(requestForSession(member, url));
+    expect((await callRoute(getInbox, { url })).status).toBe(401);
+    const memberInbox = await callRouteForSession(getInbox, member, { url });
     expect((await memberInbox.json()).receipts).toHaveLength(1);
-    const peerInbox = await getInbox(requestForSession(await fixture.session("owner"), url));
+    const peerInbox = await callRouteForSession(getInbox, await fixture.session("owner"), { url });
     expect((await peerInbox.json()).receipts).toHaveLength(0);
-    const adminInbox = await getInbox(requestForSession(await fixture.session("admin"), url));
+    const adminInbox = await callRouteForSession(getInbox, await fixture.session("admin"), { url });
     expect((await adminInbox.json()).receipts).toHaveLength(0);
     const disabled = await fixture.session("disabled");
     await fixture.disableUser("disabled");
-    expect((await getInbox(requestForSession(disabled, url))).status).toBe(401);
-    const hidden = await getReceipt(
-      requestForSession(outsider, `${url}/${receipt.id}?householdId=${fixture.household.id}`),
-      { params: Promise.resolve({ receiptId: receipt.id }) },
-    );
+    expect((await callRouteForSession(getInbox, disabled, { url })).status).toBe(401);
+    const hidden = await callRouteForSession(getReceipt, outsider, {
+      url: `${url}/${receipt.id}?householdId=${fixture.household.id}`,
+      params: { receiptId: receipt.id },
+    });
     expect(hidden.status).toBe(404);
     await fixture.cleanup();
   });
@@ -98,10 +100,10 @@ describe("authenticated mailbox review read boundary", () => {
         createdAt: new Date("2030-01-01T00:00:01.000Z"),
       },
     ]);
-    const response = await getReceipt(
-      requestForSession(member, `http://127.0.0.1:3000/api/imap-inbox/${receipt.id}?householdId=${fixture.household.id}`),
-      { params: Promise.resolve({ receiptId: receipt.id }) },
-    );
+    const response = await callRouteForSession(getReceipt, member, {
+      url: `http://127.0.0.1:3000/api/imap-inbox/${receipt.id}?householdId=${fixture.household.id}`,
+      params: { receiptId: receipt.id },
+    });
     expect(response.status).toBe(200);
     const payload = await response.json() as Record<string, unknown>;
     expect(payload).toMatchObject({ receipt: { id: receipt.id }, sections: expect.any(Array), candidates: expect.any(Array) });

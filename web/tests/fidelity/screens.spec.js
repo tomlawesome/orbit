@@ -3,7 +3,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import pixelmatch from "pixelmatch";
+// @ts-expect-error -- pngjs ships no declaration file and none is vendored for this project;
+// there is no `@type`/`@typedef` spelling that fixes a missing module declaration.
 import { PNG } from "pngjs";
+
+/** @typedef {{ width: number, height: number, data: Buffer }} PngImage */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const baselines = resolve(here, "baselines");
@@ -76,6 +80,24 @@ function tourAtStopThree() {
   );
 }
 
+/**
+ * @typedef {{
+ *   name: string,
+ *   path: string,
+ *   stage?: "porting" | "owned",
+ *   mockup?: string,
+ *   settle: () => boolean,
+ *   mockupOnly?: string[],
+ *   signedOut?: boolean,
+ *   reducedMotion?: "reduce" | null,
+ *   mockupTrim?: (html: string) => string,
+ *   viewport?: { width: number, height: number },
+ *   pack?: string,
+ *   tourDue?: boolean,
+ * }} Screen
+ */
+
+/** @type {Screen[]} */
 const SCREENS = [
   {
     name: "login",
@@ -112,8 +134,8 @@ const SCREENS = [
      * card: `lit` is first light, in both.
      */
     settle: () => {
-      if (typeof window.toLogin === "function" && document.body.classList.contains("showform")) {
-        window.toLogin();
+      if (typeof (/** @type {any} */ (window)).toLogin === "function" && document.body.classList.contains("showform")) {
+        (/** @type {any} */ (window)).toLogin();
       }
       return document.body.classList.contains("lit")
         && !document.body.classList.contains("showform");
@@ -153,8 +175,8 @@ const SCREENS = [
      * every frame of the journey and still arrive here.
      */
     settle: () => {
-      if (typeof window.toDusk === "function" && !document.body.classList.contains("showdusk")) {
-        window.toDusk();
+      if (typeof (/** @type {any} */ (window)).toDusk === "function" && !document.body.classList.contains("showdusk")) {
+        (/** @type {any} */ (window)).toDusk();
       }
       return document.body.classList.contains("showdusk")
         && document.body.classList.contains("farewell");
@@ -223,8 +245,8 @@ const SCREENS = [
      * longer grounded — the climb has started, caught, and set back down.
      */
     settle: () => {
-      if (typeof window.showError === "function" && !document.body.classList.contains("rejected")) {
-        window.showError();
+      if (typeof (/** @type {any} */ (window)).showError === "function" && !document.body.classList.contains("rejected")) {
+        (/** @type {any} */ (window)).showError();
       }
       return document.body.classList.contains("lit")
         && document.body.classList.contains("rejected")
@@ -426,7 +448,7 @@ const SCREENS = [
      * sheet ever stops carrying them it removes nothing and the comparison is
      * unchanged.
      */
-    mockupTrim: (html) => html.replace(/[ \t]*\{ id:"[^"]+",[^{}]*fill:1,[^{}]*\},\r?\n/g, ""),
+    mockupTrim: (/** @type {string} */ html) => html.replace(/[ \t]*\{ id:"[^"]+",[^{}]*fill:1,[^{}]*\},\r?\n/g, ""),
     /* Settled once the band has its seats and the apex has its card — every
        one of which arrives client-side, off the workspace seam. */
     settle: () =>
@@ -587,7 +609,11 @@ const LOCAL_FONT_CSS = [500, 600]
   ])
   .join("\n");
 
-/** Blanks the given rectangles in an image, in place. */
+/**
+ * Blanks the given rectangles in an image, in place.
+ * @param {PngImage} png
+ * @param {{ x: number, y: number, width: number, height: number }[]} rects
+ */
 function maskRegions(png, rects) {
   for (const r of rects) {
     const x0 = Math.max(0, Math.floor(r.x));
@@ -604,6 +630,20 @@ function maskRegions(png, rects) {
   }
 }
 
+/**
+ * @param {import("@playwright/test").Page} page
+ * @param {string} url
+ * @param {(() => boolean) | undefined} settle
+ * @param {string[]} [mockupOnly]
+ * @param {{ width: number, height: number } | null} [viewport]
+ * @param {boolean} [signedOut]
+ * @param {{
+ *   reducedMotion?: "reduce" | null,
+ *   trim?: ((html: string) => string) | null,
+ *   pack?: string,
+ *   tourDue?: boolean,
+ * }} [options]
+ */
 async function capture(
   page, url, settle, mockupOnly = [], viewport = null, signedOut = false,
   { reducedMotion = null, trim = null, pack = "starchart", tourDue = false } = {},
@@ -644,7 +684,7 @@ async function capture(
     );
   }
 
-  await page.route("https://fonts.googleapis.com/**", (route) =>
+  await page.route("https://fonts.googleapis.com/**", (/** @type {import("@playwright/test").Route} */ route) =>
     route.fulfill({ contentType: "text/css", body: LOCAL_FONT_CSS }),
   );
 
@@ -666,7 +706,7 @@ async function capture(
    * blanked. Only ever applied to the mockup's own document.
    */
   if (trim) {
-    await page.route(url, async (route) => {
+    await page.route(url, async (/** @type {import("@playwright/test").Route} */ route) => {
       const response = await route.fetch();
       await route.fulfill({
         contentType: "text/html; charset=utf-8",
@@ -685,7 +725,7 @@ async function capture(
    * reader, stated, so the gate photographs the screen instead of the redirect.
    */
   if (signedOut) {
-    await page.route("**/api/auth/session", (route) =>
+    await page.route("**/api/auth/session", (/** @type {import("@playwright/test").Route} */ route) =>
       route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"unauthenticated"}' }),
     );
   }
@@ -718,14 +758,14 @@ async function capture(
    */
   await page.waitForFunction(() =>
     [...document.querySelectorAll(".grain[data-rasterised], .world[data-rasterised]")].every(
-      (el) => el.dataset.rasterised === "ready",
+      (el) => (/** @type {HTMLElement} */ (el)).dataset.rasterised === "ready",
     ),
   );
 
   /* Where the mockup carries scaffolding the product does not, find it by
      selector so the excluded area tracks the design rather than a magic box. */
-  const rects = await page.evaluate((selectors) =>
-    selectors.flatMap((sel) =>
+  const rects = await page.evaluate((/** @type {string[]} */ selectors) =>
+    selectors.flatMap((/** @type {string} */ sel) =>
       [...document.querySelectorAll(sel)].map((el) => {
         const r = el.getBoundingClientRect();
         return { x: r.x, y: r.y, width: r.width, height: r.height };
@@ -759,7 +799,13 @@ async function capture(
   return { png, rects };
 }
 
-/** @param {string | null} [expectedFile] the on-disk PNG `expected` was read from, when it has one */
+/**
+ * @param {PngImage} expected
+ * @param {PngImage} actual
+ * @param {string} name
+ * @param {string} label
+ * @param {string | null} [expectedFile] the on-disk PNG `expected` was read from, when it has one
+ */
 function compare(expected, actual, name, label, expectedFile = null) {
   expect(
     { width: actual.width, height: actual.height },
@@ -815,6 +861,10 @@ function compare(expected, actual, name, label, expectedFile = null) {
  */
 const appShots = new Map();
 
+/**
+ * @param {import("@playwright/test").Page} page
+ * @param {Screen} screen
+ */
 async function captureAppOnce(page, screen) {
   if (!appShots.has(screen.name)) {
     const { png } = await capture(
