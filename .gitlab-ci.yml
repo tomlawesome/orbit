@@ -971,6 +971,7 @@ acceptance:
         ORBIT_REPOSITORY="$IMAGE_NAME" \
         ORBIT_CHANNEL="$(orbit_output channel)" \
         GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
+        ORBIT_ASSETS_FROM_TREE="$CI_PROJECT_DIR" \
           bash "$CI_PROJECT_DIR/scripts/ci/run-installer.sh"
       )
     - |
