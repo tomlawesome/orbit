@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, processWatchdog } from "../../scripts/process-budget.mjs";
 
 // Process-level interruption characterization for issue #296 slice 3: a
 // SIGKILL cannot be trapped by Node any more than by Bash, so this proves
@@ -25,6 +27,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // (ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE): the rehearsal process signals
 // *itself* once the target step has genuinely completed — deterministic,
 // no race window between "the step ran" and "the kill lands".
+
+// This file spawns the real CLI and lets it self-SIGKILL mid-run; a spawn
+// that takes 0.7s quiet took 4.3s on a starved core (#698). Budget and
+// reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cliEntry = fileURLToPath(new URL("../cli/orbit.ts", import.meta.url));
@@ -66,14 +73,22 @@ function runRehearsal(scenario: Record<string, unknown>): Promise<RunResult> {
     const child = spawn("node", [tsxCli, cliEntry, "__restore-engine-rehearse", scenarioPath], { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    const watchdog = processWatchdog({ label: "runRehearsal", kill: () => child.kill("SIGKILL") });
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
+      watchdog.touch();
     });
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
+      watchdog.touch();
     });
     child.on("error", reject);
     child.on("close", (code, signal) => {
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
+        return;
+      }
       // A self-delivered SIGKILL is reported as signal="SIGKILL" (code=null)
       // by Node directly, or as the POSIX 128+SIGKILL exit code 137 when an
       // intervening layer (a container/sandbox init) converts the signal
@@ -152,7 +167,7 @@ describe.each([
     expect(existsSync(objectPath(scenario.liveDocumentsRoot as string, UPDATED))).toBe(false);
     expect(() => readFileSync(journalPath)).toThrow();
     expect(existsSync(restoreRoot) ? readdirSync(restoreRoot).filter((name) => name.startsWith("checkpoint-")) : []).toHaveLength(0);
-  }, 20_000);
+  });
 });
 
 describe("SIGKILL before any checkpoint exists", () => {

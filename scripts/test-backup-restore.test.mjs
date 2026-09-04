@@ -4,7 +4,15 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
+
+// Tests here run functions extracted from scripts/test-backup-restore.sh
+// under bash, some against a real in-process HTTP server; a spawn that
+// takes tens of milliseconds quiet takes seconds on a starved core (#698).
+// Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 // Regression coverage for issue #684: scripts/test-backup-restore.sh's health
 // probe used to hardcode `http://127.0.0.1:3000/api/health`, so the backup and
@@ -96,7 +104,7 @@ function harnessPrelude(environmentFile) {
 
 function runHealthProbeUrl(environmentFile) {
   const harness = [...harnessPrelude(environmentFile), healthProbeUrlSource, "health_probe_url"].join("\n");
-  return spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+  return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runHealthProbeUrl" });
 }
 
 // Async, non-blocking bash runner — required (not spawnSync) whenever the bash
@@ -104,24 +112,30 @@ function runHealthProbeUrl(environmentFile) {
 // this process's event loop for its whole duration, so an in-process
 // http.Server could never service the child's request until the child had
 // already given up and spawnSync returned.
-function runBashAsync(script, timeoutMs) {
+function runBashAsync(script) {
   return new Promise((resolve, reject) => {
     const child = spawn("bash", ["-c", script]);
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    const watchdog = processWatchdog({ label: "runBashAsync", kill: () => child.kill("SIGKILL") });
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
+      watchdog.touch();
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
+      watchdog.touch();
     });
     child.on("error", (error) => {
-      clearTimeout(timer);
+      watchdog.stop();
       reject(error);
     });
     child.on("close", (status, signal) => {
-      clearTimeout(timer);
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
+        return;
+      }
       resolve({ status, signal, stdout, stderr });
     });
   });
@@ -223,9 +237,9 @@ describe("scripts/test-backup-restore.sh health_check (issue #684)", () => {
       healthCheckSource,
       "health_check",
     ].join("\n");
-    const result = await runBashAsync(harness, 10_000);
+    const result = await runBashAsync(harness);
     expect(result.status).toBe(0);
-  }, 15_000);
+  });
 
   it("is not satisfied by a service on a port other than the one .env-orbit configures, so the drill's negative assertions stay honest", async () => {
     // The #684 scenario in miniature: a health endpoint is live on one port,
@@ -248,9 +262,9 @@ describe("scripts/test-backup-restore.sh health_check (issue #684)", () => {
       healthCheckSource,
       "health_check",
     ].join("\n");
-    const result = await runBashAsync(harness, 10_000);
+    const result = await runBashAsync(harness);
     expect(result.status).not.toBe(0);
-  }, 15_000);
+  });
 });
 
 describe("scripts/test-backup-restore.sh wait_for_health (issue #684)", () => {
@@ -268,8 +282,8 @@ describe("scripts/test-backup-restore.sh wait_for_health (issue #684)", () => {
       waitForHealthSource,
       "wait_for_health",
     ].join("\n");
-    const result = await runBashAsync(harness, 20_000);
+    const result = await runBashAsync(harness);
     expect(result.stderr).not.toContain("did not become healthy");
     expect(result.status).toBe(0);
-  }, 25_000);
+  });
 });

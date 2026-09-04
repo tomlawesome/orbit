@@ -2,9 +2,15 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, cpSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { isV19Path } from "./v19-dispatch.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// The container-server startup test below spawns the real entry point; a
+// spawn that takes tens of milliseconds quiet takes seconds on a starved
+// core (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 // #450: the composite container entry serves the Next.js app and the v19
 // front end from ONE process on ONE socket, dispatching on path — one origin,
@@ -89,11 +95,11 @@ describe("container-server startup", () => {
   it("exits nonzero with a clear error when the Next build is absent", () => {
     cpSync(join(process.cwd(), "scripts/container-server.mjs"), join(scratch, "scripts/container-server.mjs"));
     cpSync(join(process.cwd(), "scripts/v19-dispatch.mjs"), join(scratch, "scripts/v19-dispatch.mjs"));
-    const result = spawnSync(process.execPath, [join(scratch, "scripts/container-server.mjs")], {
+    const result = failOnProcessDeadline(spawnSync(process.execPath, [join(scratch, "scripts/container-server.mjs")], {
       cwd: scratch,
       encoding: "utf8",
-      timeout: 20_000,
-    });
+      ...processGuard(),
+    }), { label: "container-server startup" });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("required-server-files.json");
   });

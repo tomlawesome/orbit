@@ -12,9 +12,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { PTY_ASYNC_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, ptyDeadlineError } from "./pty-deadline.mjs";
+import { PTY_TEST_TIMEOUT_MS, ptyWatchdog } from "./pty-deadline.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Tests here run scripts/installer-simulation.sh under bash, some through a
+// pty; a spawn that takes tens of milliseconds quiet takes seconds on a
+// starved core (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const simulationScript = fileURLToPath(new URL("./installer-simulation.sh", import.meta.url));
 const uiScript = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
@@ -46,11 +52,12 @@ function fakeBinDir() {
 }
 
 function runPlain(args, cwd, envOverrides = {}) {
-  return spawnSync("bash", [simulationScript, ...args], {
+  return failOnProcessDeadline(spawnSync("bash", [simulationScript, ...args], {
     cwd,
     encoding: "utf8",
     env: { PATH: `${fakeBinDir()}:${process.env.PATH}`, TERM: "xterm", ...envOverrides },
-  });
+    ...processGuard(),
+  }), { label: "runPlain" });
 }
 
 /*
@@ -88,20 +95,19 @@ function runPty(cwd, input, args = []) {
     );
 
     let stdout = "";
-    let timedOut = false;
     child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    const watchdog = ptyWatchdog({ label: "runPty", kill: () => child.kill("SIGKILL") });
+    child.stdout.on("data", (chunk) => { stdout += chunk; watchdog.touch(); });
     child.on("error", reject);
 
     // Written once, then left open: never child.stdin.end().
     child.stdin.on("error", () => { /* child exited first; nothing to write to */ });
     child.stdin.write(input);
 
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        reject(ptyDeadlineError({ label: "runPty", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout }));
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout }));
         return;
       }
       resolve({ status, stdout });
@@ -124,10 +130,11 @@ describe("scripts/installer-simulation.sh", () => {
     copyFileSync(simulationScript, localScript);
     chmodSync(localScript, 0o755);
 
-    const result = spawnSync("bash", [localScript, "--plain"], {
+    const result = failOnProcessDeadline(spawnSync("bash", [localScript, "--plain"], {
       encoding: "utf8",
       env: { PATH: `${fakeBinDir()}:${process.env.PATH}`, TERM: "xterm" },
-    });
+      ...processGuard(),
+    }), { label: "refuses a missing sibling installer-ui.sh" });
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("missing or unsafe");
@@ -140,10 +147,11 @@ describe("scripts/installer-simulation.sh", () => {
     chmodSync(localScript, 0o755);
     symlinkSync(uiScript, join(dir, "installer-ui.sh"));
 
-    const result = spawnSync("bash", [localScript, "--plain"], {
+    const result = failOnProcessDeadline(spawnSync("bash", [localScript, "--plain"], {
       encoding: "utf8",
       env: { PATH: `${fakeBinDir()}:${process.env.PATH}`, TERM: "xterm" },
-    });
+      ...processGuard(),
+    }), { label: "refuses a symlinked sibling installer-ui.sh" });
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("missing or unsafe");
@@ -156,10 +164,11 @@ describe("scripts/installer-simulation.sh", () => {
     chmodSync(localScript, 0o755);
     mkdirSync(join(dir, "installer-ui.sh"));
 
-    const result = spawnSync("bash", [localScript, "--plain"], {
+    const result = failOnProcessDeadline(spawnSync("bash", [localScript, "--plain"], {
       encoding: "utf8",
       env: { PATH: `${fakeBinDir()}:${process.env.PATH}`, TERM: "xterm" },
-    });
+      ...processGuard(),
+    }), { label: "refuses a non-regular sibling installer-ui.sh" });
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("missing or unsafe");

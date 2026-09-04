@@ -14,7 +14,14 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
+
+// Tests here run scripts/repair.sh under bash, some asynchronously; a spawn
+// that takes tens of milliseconds quiet takes seconds on a starved core
+// (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 // This suite runs repair.sh from copied fixtures in temporary directories:
 // like configure.sh, repair.sh forces its own cwd to its containing
@@ -692,12 +699,13 @@ function writeFileBackedOidcSecretEnv(targetDir) {
 
 function runRepair(targetDir, args, dockerOptions = {}, { input, env } = {}) {
   const binDir = makeFakeBin(dockerOptions);
-  return spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
+  return failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
     cwd: targetDir,
     encoding: "utf8",
     input,
     env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir(), ...env },
-  });
+    ...processGuard(),
+  }), { label: "runRepair" });
 }
 
 // Async counterpart to runRepair, for tests that need to interact with a
@@ -712,14 +720,28 @@ function spawnRepair(targetDir, args, dockerOptions = {}, { env } = {}) {
   });
   let stdout = "";
   let stderr = "";
+  // A test may kill this child itself (e.g. SIGTERM, to exercise signal
+  // handling); that only clears the deliberate-kill path below, since it
+  // never calls this watchdog's own fire(). The watchdog still stands guard
+  // against silence or a genuine hang (#698).
+  const watchdog = processWatchdog({ label: "spawnRepair", kill: () => child.kill("SIGKILL") });
   child.stdout.on("data", (chunk) => {
     stdout += chunk;
+    watchdog.touch();
   });
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
+    watchdog.touch();
   });
-  const exited = new Promise((resolve) => {
-    child.on("close", (status, signal) => resolve({ status, signal, stdoutText: () => stdout, stderrText: () => stderr }));
+  const exited = new Promise((resolve, reject) => {
+    child.on("close", (status, signal) => {
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
+        return;
+      }
+      resolve({ status, signal, stdoutText: () => stdout, stderrText: () => stderr });
+    });
   });
   return { child, exited, stdoutSoFar: () => stdout, stderrSoFar: () => stderr };
 }

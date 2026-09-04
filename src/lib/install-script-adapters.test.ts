@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 import {
   createInstallConfigurationScriptAdapter,
   createInstallGuidedConfigurationAdapter,
@@ -23,6 +24,11 @@ import { prepareConfiguration, stageGuidedInstallConfiguration } from "./guided-
 // slice's own shipped adapters — not a local, unshipped reference adapter —
 // actually drive configuration-migration.ts's/guided-configuration.ts's pure
 // orchestration functions to a real, correct result.
+
+// This file spawns the real configuration.sh/configure.sh under bash and
+// builds/runs a real docker image; a spawn that takes 0.7s quiet took 4.3s
+// on a starved core (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const sandboxes: string[] = [];

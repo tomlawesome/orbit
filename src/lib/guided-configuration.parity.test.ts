@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "../../scripts/process-budget.mjs";
 import {
   missingConfigurationFields,
   missingGuidedFields,
@@ -39,6 +40,11 @@ import {
 //    exported grammar parser actually drives the live script to a
 //    completed guided configuration — not just a stub.
 
+// This file spawns real awk and the real configure.sh under bash; a spawn
+// that takes 0.7s quiet took 4.3s on a starved core (#698). Budget and
+// reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
+
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const installScriptPath = join(repoRoot, "scripts", "install.sh");
 
@@ -47,7 +53,7 @@ function extractFunction(name: string): string {
     $0 ~ "^${name}\\\\(\\\\) \\\\{" { found = 1 }
     found { print; if ($0 == "}") { found = 0; exit } }
   `;
-  const result = spawnSync("awk", [script, installScriptPath], { encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("awk", [script, installScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractFunction" });
   if (result.status !== 0 || !result.stdout.trim()) {
     throw new Error(`Could not extract ${name}() from install.sh; it may have been renamed.`);
   }
@@ -94,10 +100,11 @@ function runDriver(mode: "required" | "guided" | "configuration", readiness: str
 function runDriver(mode: "guidance", missing: string): { stdout: string; stderr: string };
 function runDriver(mode: string, input: string): { stdout: string; stderr: string } {
   const args = mode === "guidance" ? [driverPath, mode, input] : [driverPath, mode];
-  const result = spawnSync("bash", args, {
+  const result = failOnProcessDeadline(spawnSync("bash", args, {
     encoding: "utf8",
     input: mode === "guidance" ? undefined : input,
-  });
+    ...processGuard(),
+  }), { label: "runDriver" });
   return { stdout: result.stdout, stderr: result.stderr };
 }
 
@@ -170,10 +177,12 @@ function runMachinePromptSession(
     const events: MachinePromptLine[] = [];
     let stdout = "";
     let stderr = "";
+    const watchdog = processWatchdog({ label: "runMachinePromptSession", kill: () => child.kill("SIGKILL") });
 
     const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
     rl.on("line", (line) => {
       stdout += `${line}\n`;
+      watchdog.touch();
       const parsed = parseMachinePromptLine(line);
       if (!parsed) return;
       events.push(parsed);
@@ -186,9 +195,15 @@ function runMachinePromptSession(
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString("utf8");
+      watchdog.touch();
     });
     child.on("error", reject);
     child.on("close", (exitCode) => {
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
+        return;
+      }
       resolve({ ok: exitCode === 0, events, stdout, stderr });
     });
   });

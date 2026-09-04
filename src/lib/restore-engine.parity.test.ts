@@ -3,8 +3,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import { sha256File } from "./recovery-bundle";
 import { CORRESPONDENCE_QUERIES, RESTORE_CAPACITY_HEADROOM_KIB, SCAN_RECOVERY_LEASES_SQL, checkRestoreCapacity } from "./restore-engine";
 
@@ -22,12 +23,17 @@ import { CORRESPONDENCE_QUERIES, RESTORE_CAPACITY_HEADROOM_KIB, SCAN_RECOVERY_LE
 // or restructured in restore.sh, extraction fails loudly rather than
 // silently comparing against stale text.
 
+// This file spawns real awk and bash (extracted restore.sh functions run
+// under a driver script); a spawn that takes 0.7s quiet took 4.3s on a
+// starved core (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
+
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const restoreScriptPath = join(repoRoot, "scripts", "restore.sh");
 
 /** Finds the first line in restore.sh containing `anchor` (plain substring, via awk's index() — no regex-escaping needed). */
 function extractLineContaining(anchor: string): string {
-  const result = spawnSync("awk", ["-v", `anchor=${anchor}`, "index($0, anchor) { print; exit }", restoreScriptPath], { encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("awk", ["-v", `anchor=${anchor}`, "index($0, anchor) { print; exit }", restoreScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractLineContaining" });
   if (result.status !== 0 || !result.stdout.trim()) {
     throw new Error(`Could not find a restore.sh line containing "${anchor}"; it may have been rewritten.`);
   }
@@ -52,7 +58,7 @@ function extractSingleQuotedSqlLiteral(anchor: string): string {
 
 function extractFunction(name: string): string {
   const script = `$0 ~ "^${name}\\\\(\\\\) \\\\{" { found = 1 } found { print; if ($0 == "}") { found = 0; exit } }`;
-  const result = spawnSync("awk", [script, restoreScriptPath], { encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("awk", [script, restoreScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractFunction" });
   if (result.status !== 0 || !result.stdout.trim()) {
     throw new Error(`Could not extract ${name}() from restore.sh; it may have been renamed.`);
   }
@@ -122,7 +128,7 @@ describe("checkpoint_sha256 parity (extracted and executed as a real Bash subpro
     const driverPath = join(driverDir, "driver.sh");
     writeFileSync(driverPath, ["#!/usr/bin/env bash", "set -Eeuo pipefail", extracted, 'checkpoint_sha256 "$1"', ""].join("\n"), { mode: 0o755 });
 
-    const result = spawnSync("bash", [driverPath, targetFile], { encoding: "utf8" });
+    const result = failOnProcessDeadline(spawnSync("bash", [driverPath, targetFile], { encoding: "utf8", ...processGuard() }), { label: "checkpoint_sha256 driver" });
 
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe(sha256File(targetFile));
@@ -135,7 +141,7 @@ describe("checkpoint_sha256 parity (extracted and executed as a real Bash subpro
     const driverPath = join(driverDir, "driver.sh");
     writeFileSync(driverPath, ["#!/usr/bin/env bash", "set -Eeuo pipefail", extracted, 'checkpoint_sha256 "$1"', ""].join("\n"), { mode: 0o755 });
 
-    const result = spawnSync("bash", [driverPath, join(driverDir, "does-not-exist")], { encoding: "utf8" });
+    const result = failOnProcessDeadline(spawnSync("bash", [driverPath, join(driverDir, "does-not-exist")], { encoding: "utf8", ...processGuard() }), { label: "checkpoint_sha256 driver" });
 
     expect(result.status).not.toBe(0);
   });
@@ -237,10 +243,11 @@ describe("check_capacity parity (extracted and executed as a real Bash subproces
       { mode: 0o755 },
     );
 
-    const result = spawnSync("bash", [driverPath], {
+    const result = failOnProcessDeadline(spawnSync("bash", [driverPath], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
-    });
+      ...processGuard(),
+    }), { label: "check_capacity driver" });
     return { status: result.status, stderr: result.stderr };
   }
 
