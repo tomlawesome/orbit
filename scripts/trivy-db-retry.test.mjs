@@ -3,7 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Tests here run scripts/trivy-db-retry.sh under bash; a spawn that takes
+// tens of milliseconds quiet takes seconds on a starved core (#698). Budget
+// and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const script = new URL("./trivy-db-retry.sh", import.meta.url).pathname;
 const workflow = readFileSync(
@@ -46,10 +53,11 @@ function makeStub({ failures, exitCode, message }) {
 }
 
 function run(stub) {
-  return spawnSync("bash", [script, "bash", stub], {
+  return failOnProcessDeadline(spawnSync("bash", [script, "bash", stub], {
     encoding: "utf8",
     env: { ...process.env, TRIVY_DB_RETRY_BACKOFF_SECONDS: "0" },
-  });
+    ...processGuard(),
+  }), { label: "run" });
 }
 
 describe("trivy-db-retry.sh", () => {

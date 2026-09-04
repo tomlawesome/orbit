@@ -3,7 +3,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 
 // Bundle-build smoke test for the engine-delivery slice (issue #295): proves
 // scripts/bundle-orbit-cli.mjs (the exact step the Dockerfile's cli-builder
@@ -13,19 +15,20 @@ import { afterAll, describe, expect, it } from "vitest";
 // under the in-container fail-closed guard documented in docs/
 // engine-events.md, "In-container engine invocation (v0)".
 
+// Every spawnSync call here runs the built CLI or a real tool under it; a
+// spawn that takes tens of milliseconds quiet takes seconds on a starved
+// core (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
+
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoDir = join(scriptsDir, "..");
 const bundlePath = join(repoDir, "dist", "cli", "orbit.js");
 
 // Every spawnSync call in this file gets an explicit, closed/piped stdio
-// config (never "inherit") and a hard timeout+killSignal: a wedged child (or
-// one whose piped stdio never sees EOF) fails this test loudly within
-// seconds instead of hanging the whole CI job until its own outer timeout.
-// SIGKILL (not the default SIGTERM) since none of these children install
-// their own signal handlers and this is a test, not a production shutdown
-// path.
-const SPAWN_TIMEOUT_MS = 30_000;
-const SPAWN_OPTS = { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout: SPAWN_TIMEOUT_MS, killSignal: "SIGKILL" };
+// config (never "inherit"), so a wedged child (or one whose piped stdio
+// never sees EOF) fails this test loudly rather than hanging. processGuard()
+// (scripts/process-budget.mjs) supplies the actual deadline and kill signal.
+const SPAWN_OPTS = { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", ...processGuard() };
 
 const scratchDirs = [];
 afterAll(() => {
@@ -79,7 +82,7 @@ function makeBoobyTrappedDockerBinDir(callLogPath) {
 }
 
 function resolveTool(tool) {
-  return spawnSync("which", [tool], SPAWN_OPTS).stdout.trim();
+  return failOnProcessDeadline(spawnSync("which", [tool], SPAWN_OPTS), { label: "resolveTool" }).stdout.trim();
 }
 
 // PATH with no docker at all (see scripts/engine-check.test.mjs's own
@@ -97,7 +100,7 @@ function makeDockerlessBinDir() {
 
 describe("scripts/bundle-orbit-cli.mjs", () => {
   it("runs the real bundling step and produces a single, working dist/cli/orbit.js", () => {
-    const result = spawnSync("node", [join(scriptsDir, "bundle-orbit-cli.mjs")], { cwd: repoDir, ...SPAWN_OPTS });
+    const result = failOnProcessDeadline(spawnSync("node", [join(scriptsDir, "bundle-orbit-cli.mjs")], { cwd: repoDir, ...SPAWN_OPTS }), { label: "runs the real bundling step" });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("wrote");
     const bundleSource = readFileSync(bundlePath, "utf8");
@@ -119,7 +122,7 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
   });
 
   it("`node <bundle>` with no arguments refuses with a usage message (nonzero exit)", () => {
-    const result = spawnSync("node", [bundlePath], SPAWN_OPTS);
+    const result = failOnProcessDeadline(spawnSync("node", [bundlePath], SPAWN_OPTS), { label: "bundle with no arguments" });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("orbit:");
     expect(result.stderr).toContain("supported commands");
@@ -128,10 +131,10 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
   it("`node <bundle> check --dir <fixture>` works with no docker binary on PATH at all", () => {
     const fixture = makeReadyFixture();
     const dockerlessBinDir = makeDockerlessBinDir();
-    const result = spawnSync("node", [bundlePath, "check", "--dir", fixture], {
+    const result = failOnProcessDeadline(spawnSync("node", [bundlePath, "check", "--dir", fixture], {
       ...SPAWN_OPTS,
       env: { PATH: dockerlessBinDir },
-    });
+    }), { label: "check with no docker binary on PATH" });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("ready APP_URL");
     expect(result.stdout).toContain("ready OIDC_CLIENT_SECRET");
@@ -144,10 +147,10 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
     const nodeDir = dirname(resolveTool("node"));
 
-    const result = spawnSync("node", [bundlePath, "check", "--dir", fixture], {
+    const result = failOnProcessDeadline(spawnSync("node", [bundlePath, "check", "--dir", fixture], {
       ...SPAWN_OPTS,
       env: { PATH: `${trapBinDir}:${nodeDir}` },
-    });
+    }), { label: "check never attempts to spawn docker" });
 
     expect(result.status).toBe(0);
     expect(readFileSync(callLogPath, "utf8")).toBe("");
@@ -160,10 +163,10 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
     const nodeDir = dirname(resolveTool("node"));
 
-    const result = spawnSync("node", [bundlePath, "install", "--dir", targetDir], {
+    const result = failOnProcessDeadline(spawnSync("node", [bundlePath, "install", "--dir", targetDir], {
       ...SPAWN_OPTS,
       env: { PATH: `${trapBinDir}:${nodeDir}`, ORBIT_ENGINE_CONTEXT: "container" },
-    });
+    }), { label: "docker-needing command refuses before spawning docker" });
 
     expect(result.status).toBe(9);
     expect(result.stderr).toContain("reason=docker-command-forbidden-in-container");
@@ -177,10 +180,10 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     const dockerNeedingCommands = ["install", "update", "backup", "restore", "export-recovery-bundle", "import-recovery-bundle"];
 
     for (const command of dockerNeedingCommands) {
-      const result = spawnSync("node", [bundlePath, command, "--dir", targetDir], {
+      const result = failOnProcessDeadline(spawnSync("node", [bundlePath, command, "--dir", targetDir], {
         ...SPAWN_OPTS,
         env: { PATH: dockerlessBinDir, ORBIT_ENGINE_CONTEXT: "container" },
-      });
+      }), { label: `fail-closed guard command=${command}` });
       expect(result.status, `command=${command}`).toBe(9);
       expect(result.stderr, `command=${command}`).toContain(`reason=docker-command-forbidden-in-container`);
       expect(result.stderr, `command=${command}`).toContain(`command=${command}`);
@@ -197,10 +200,10 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     // resolvable too, on top of `docker` itself.
     const bashDir = dirname(resolveTool("bash"));
 
-    const result = spawnSync("node", [bundlePath, "install", "--dir", targetDir], {
+    const result = failOnProcessDeadline(spawnSync("node", [bundlePath, "install", "--dir", targetDir], {
       ...SPAWN_OPTS,
       env: { PATH: `${trapBinDir}:${nodeDir}:${bashDir}` },
-    });
+    }), { label: "guard inert outside container mode" });
 
     // No ORBIT_ENGINE_CONTEXT set: the guard never fires, so install
     // proceeds to its own (pre-existing) docker-availability check, which

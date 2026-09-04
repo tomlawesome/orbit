@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import {
   ComposeProjectNameRefusal,
   TargetValidationRefusal,
@@ -22,6 +23,11 @@ import {
 // and this test fails loudly rather than silently comparing against stale
 // text — see docs/adr-notes/295-install-port-plan.md's Flags section.
 
+// This file spawns real awk and bash (a generated driver script); a spawn
+// that takes 0.7s quiet took 4.3s on a starved core (#698). Budget and
+// reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
+
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const installScriptPath = join(repoRoot, "scripts", "install.sh");
 
@@ -30,7 +36,7 @@ function extractFunction(name: string): string {
     $0 ~ "^${name}\\\\(\\\\) \\\\{" { found = 1 }
     found { print; if ($0 == "}") { found = 0; exit } }
   `;
-  const result = spawnSync("awk", [script, installScriptPath], { encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("awk", [script, installScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractFunction" });
   if (result.status !== 0 || !result.stdout.trim()) {
     throw new Error(`Could not extract ${name}() from install.sh; it may have been renamed.`);
   }
@@ -103,7 +109,7 @@ interface DriverResult {
 }
 
 function runDriver(mode: string, targetDir: string, ...args: string[]): DriverResult {
-  const result = spawnSync("bash", [driverPath, mode, targetDir, ...args], { encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("bash", [driverPath, mode, targetDir, ...args], { encoding: "utf8", ...processGuard() }), { label: "runDriver" });
   return { status: result.status ?? -1, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
 }
 
