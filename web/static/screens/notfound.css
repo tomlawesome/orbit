@@ -1,39 +1,29 @@
 
 body{background:#04070f}
 /* the sky falls in (#790, see +error.svelte): three <img> copies of one band
-   of stars, each shrinking toward the hole and handing over to the next. Each
-   copy is a 2200-unit square centred on the hole — the same 1600×1000 slice
-   mapping the well uses, taken from the host's own size (cq units), so the
-   bitmap's centre sits exactly on the horizon. The scale steps are one
+   of stars, each spiralling in toward the hole and handing over to the next.
+   Each copy is a 2200-unit square centred on the hole — the same 1600×1000
+   slice mapping the well uses, taken from the host's own size (cq units), so
+   the bitmap's centre sits exactly on the horizon. The scale steps are one
    geometric series (2 → .25, halving every quarter), so a star's speed is
    proportional to its distance from the hole and the field looks the same at
-   any moment; the copy fades only at the ends, arriving beyond the frame and
-   gone as it meets the horizon. With animation off the copies sit at their
-   spread scales, so the still is still a full sky. Each copy's third-of-a-turn
-   is the `rotate` property, set inline, so the keyframes stay pure scale. */
+   any moment; the turn is steady, with the disc; the copy fades only at the
+   ends, arriving beyond the frame and gone as it meets the horizon. With
+   animation off the copies sit at their spread scales, so the still is still
+   a full sky. Each copy's third-of-a-turn is the `rotate` property, set
+   inline, so the keyframes stay one spiral. A copy stays hidden until build()
+   gives it its bitmap: some browsers paint an empty, sized <img> as a blank
+   box, which showed as a white diamond for a second on load. */
 .infall{position:fixed;inset:0;overflow:hidden;pointer-events:none;container-type:size}
 .fall{--k:max(.0625cqw,.1cqh);--band:calc(2200 * var(--k));
       position:absolute;width:var(--band);height:var(--band);
       left:calc(50% - var(--band) / 2);top:calc(50% - 50 * var(--k) - var(--band) / 2);
       transform:scale(var(--s0));
-      animation:infall calc(var(--T) * var(--pace,1)) linear infinite;
-      animation-delay:calc(var(--i) * var(--T) * var(--pace,1) / -3)}
+      animation:infall var(--T) linear infinite;animation-delay:calc(var(--i) * var(--T) / -3)}
+.fall:not([src]){visibility:hidden}
 .fall-far{--T:160s}
 .fall-near{--T:80s}
 @keyframes infall{
-  0%{transform:scale(2);opacity:0}
-  6%{opacity:1}
-  12.5%{transform:scale(1.542)}
-  25%{transform:scale(1.189)}
-  37.5%{transform:scale(.917)}
-  50%{transform:scale(.707)}
-  62.5%{transform:scale(.545)}
-  75%{transform:scale(.42)}
-  84%{opacity:1}
-  87.5%{transform:scale(.324)}
-  100%{transform:scale(.25);opacity:0}}
-[data-sky="spiral"] .fall{animation-name:infall-spiral}
-@keyframes infall-spiral{
   0%{transform:rotate(0deg) scale(2);opacity:0}
   6%{opacity:1}
   12.5%{transform:rotate(-6.25deg) scale(1.542)}
@@ -45,11 +35,6 @@ body{background:#04070f}
   84%{opacity:1}
   87.5%{transform:rotate(-43.75deg) scale(.324)}
   100%{transform:rotate(-50deg) scale(.25);opacity:0}}
-/* the drift the infall replaces, kept for the review switch's `near` and `drift` */
-.sky-far{animation:driftf calc(370s * var(--pace,1)) linear infinite}
-.sky-near{animation:driftn calc(180s * var(--pace,1)) linear infinite}
-.tw{animation:twinkle 5s ease-in-out infinite alternate}
-@keyframes twinkle{from{opacity:.2}to{opacity:.8}}
 
 /* the well never sits still */
 .disc-precess{transform-origin:800px 450px;animation:precess 56s ease-in-out infinite alternate}

@@ -26,20 +26,6 @@
    */
   const isNotFound = $derived(page.status === 404);
 
-  /** #790 review switch — see the sky markup below. */
-  const SKIES = /** @type {const} */ (["drawn", "spiral", "near", "drift", "none"]);
-  const sky = $derived(
-    /** @type {(typeof SKIES)[number]} */ (
-      SKIES.find((s) => s === page.url.searchParams.get("sky")) ?? "drawn"
-    ),
-  );
-  const farFalls = $derived(sky === "drawn" || sky === "spiral");
-  const nearFalls = $derived(farFalls || sky === "near");
-  /** Whether any layer still drifts in the sky <svg>; `none` is a bare well, for bisecting. */
-  const drifts = $derived(sky === "near" || sky === "drift");
-  /** #790 review switch too: `?pace=slow|brisk` doubles or halves every sky cycle. */
-  const pace = $derived({ slow: 2, brisk: 0.5 }[page.url.searchParams.get("pace") ?? ""] ?? 1);
-
   /**
    * #764 step 2 — the same rasterise-once mechanism as Grain/Dawn/Dusk
    * (#499/#501, $lib/raster.js), applied to the one part of this screen's
@@ -218,10 +204,9 @@
 
   onMount(() => {
     if (!isNotFound) return;
-    /* Populates #lensarcs (among other things) synchronously, before the
-       first build() below ever reads it; hands back the falling bands for
-       build() to rasterise. */
-    const bands = mountGravityWell({ farFalls, nearFalls });
+    /* Populates #lensarcs synchronously, before the first build() below
+       ever reads it; hands back the star bands for build() to rasterise. */
+    const bands = mountGravityWell();
 
     let cancelled = false;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -274,8 +259,8 @@
           rasteriseFrom(`notfound-photon|${w}|${h}`, srcPhoton, F_B6 + F_B1, w, h),
           rasteriseFrom(`notfound-smear-near|${w}|${h}`, srcSmearNear, F_B6 + G_DOPPLER_SOFT, w, h),
           rasteriseFrom(`notfound-smear-tidal|${w}|${h}`, srcSmearTidal, F_B3 + G_STREAMG, w, h),
-          bands.farBand ? rasteriseSvg(`notfound-far-band|${side}`, bandDoc(bands.farBand, side), side, side) : "",
-          bands.nearBand ? rasteriseSvg(`notfound-near-band|${side}`, bandDoc(bands.nearBand, side), side, side) : "",
+          rasteriseSvg(`notfound-far-band|${side}`, bandDoc(bands.farBand, side), side, side),
+          rasteriseSvg(`notfound-near-band|${side}`, bandDoc(bands.nearBand, side), side, side),
         ]);
       if (cancelled) return;
 
@@ -336,55 +321,30 @@
 
 {#if isNotFound}
 <!--
-  The sky falls in (#790). Each star layer is drawn once (gravity-well.js) as
-  one band of stars that starts beyond the frame, rasterised once in build()
-  above, and shown as three <img> copies of that bitmap, each turned a third
-  of a turn so they never look like copies. They shrink toward the hole a
-  third of a cycle apart and hand over to each other (notfound.css, .fall), so
-  the field never empties, nothing spawns in view, and the horizon's own black
-  disc swallows what is left.
+  The sky falls in (#790, owner's pick: the spiral). Each star layer is drawn
+  once (gravity-well.js) as one band of stars that starts beyond the frame,
+  rasterised once in build() above, and shown as three <img> copies of that
+  bitmap, each turned a third of a turn so they never look like copies. They
+  spiral in toward the hole a third of a cycle apart and hand over to each
+  other (notfound.css, .fall), so the field never empties, nothing spawns in
+  view, and the horizon's own black disc swallows what is left.
 
   Bitmaps in <img>, not groups in the sky <svg>, because of what the first cut
   did to a laptop: Safari gives a scaled SVG group a bitmap the size of its
   whole extent and redraws it as the scale changes, and six bands at twice the
   frame is gigabytes. An <img> is composited straight from its decoded pixels,
   whatever transform it wears. Nothing here is filtered, so #764's rule holds:
-  nothing filtered gains motion.
-
-  `sky` is the review switch for the #790 dialogue (drawn | spiral | near |
-  drift | none), read from the URL; it goes once a direction is ratified.
+  nothing filtered gains motion. A copy stays hidden until its bitmap lands
+  (notfound.css): some browsers paint an empty, sized <img> as a blank box.
 -->
-{#if farFalls || nearFalls}
-<div class="infall" data-sky={sky} style="--pace:{pace}" aria-hidden="true" bind:this={infall}>
-  {#if farFalls}
-    <img class="fall fall-far" style="--i:0;--s0:2;rotate:0deg" decoding="sync" alt="" />
-    <img class="fall fall-far" style="--i:1;--s0:1;rotate:120deg" decoding="sync" alt="" />
-    <img class="fall fall-far" style="--i:2;--s0:.5;rotate:240deg" decoding="sync" alt="" />
-  {/if}
-  {#if nearFalls}
-    <img class="fall fall-near" style="--i:0;--s0:2;rotate:0deg" decoding="sync" alt="" />
-    <img class="fall fall-near" style="--i:1;--s0:1;rotate:120deg" decoding="sync" alt="" />
-    <img class="fall fall-near" style="--i:2;--s0:.5;rotate:240deg" decoding="sync" alt="" />
-  {/if}
+<div class="infall" aria-hidden="true" bind:this={infall}>
+  <img class="fall fall-far" style="--i:0;--s0:2;rotate:0deg" decoding="sync" alt="" />
+  <img class="fall fall-far" style="--i:1;--s0:1;rotate:120deg" decoding="sync" alt="" />
+  <img class="fall fall-far" style="--i:2;--s0:.5;rotate:240deg" decoding="sync" alt="" />
+  <img class="fall fall-near" style="--i:0;--s0:2;rotate:0deg" decoding="sync" alt="" />
+  <img class="fall fall-near" style="--i:1;--s0:1;rotate:120deg" decoding="sync" alt="" />
+  <img class="fall fall-near" style="--i:2;--s0:.5;rotate:240deg" decoding="sync" alt="" />
 </div>
-{/if}
-{#if drifts}
-<!-- the drift the infall replaces, kept for the review switch's `near` and `drift` -->
-<div class="sky" style="--pace:{pace}"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-  <defs>
-    <radialGradient id="stargl" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#e8edff" stop-opacity=".45"/>
-      <stop offset="100%" stop-color="#e8edff" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  {#if !farFalls}
-    <g class="sky-far" fill="#dbe2f5"><g id="farstars"></g><use href="#farstars" x="1600"/></g>
-  {/if}
-  {#if !nearFalls}
-    <g class="sky-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
-  {/if}
-</svg></div>
-{/if}
 
 <div class="world" style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
   <defs>
