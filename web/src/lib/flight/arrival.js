@@ -27,6 +27,7 @@
 
 export const LAUNCH_KEY = "orbit-launch";
 
+/** @param {Storage | null | undefined} [given] */
 function store(given) {
   if (given) return given;
   try {
@@ -37,7 +38,10 @@ function store(given) {
   }
 }
 
-/** Written the moment the reader presses the gate and Orbit leaves for the IdP. */
+/**
+ * Written the moment the reader presses the gate and Orbit leaves for the IdP.
+ * @param {Storage | null} [storage]
+ */
 export function markLaunch(storage) {
   const s = store(storage);
   if (!s) return false;
@@ -49,7 +53,10 @@ export function markLaunch(storage) {
   }
 }
 
-/** True exactly once per departure: reads the marker and takes it away. */
+/**
+ * True exactly once per departure: reads the marker and takes it away.
+ * @param {Storage | null} [storage]
+ */
 export function consumeLaunch(storage) {
   const s = store(storage);
   if (!s) return false;
@@ -62,7 +69,10 @@ export function consumeLaunch(storage) {
   }
 }
 
-/** Landing back on the sign-in means the journey did not happen. */
+/**
+ * Landing back on the sign-in means the journey did not happen.
+ * @param {Storage | null} [storage]
+ */
 export function clearLaunch(storage) {
   const s = store(storage);
   if (!s) return;

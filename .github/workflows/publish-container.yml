@@ -172,7 +172,18 @@ jobs:
             github.event_name == 'push' &&
             needs.changes.outputs.build == 'true'
           }}
-        run: pnpm build
+        run: pnpm --filter orbit-web build
+
+      # The render proof, run here as well as inside the image (#735). The
+      # container build is the authoritative gate, but it is minutes away;
+      # this fails in seconds when a packaging change breaks previews.
+      - name: Prove document previews can still be rendered
+        if: >-
+          ${{
+            github.event_name == 'push' &&
+            needs.changes.outputs.build == 'true'
+          }}
+        run: pnpm test:web-pdfjs
 
       - name: Upload diagnostic coverage
         if: success()

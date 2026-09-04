@@ -13,6 +13,14 @@ import { seededRng } from "$lib/sky.js";
 
 const rnd = seededRng(17170812);
 
+/**
+ * @param {number} n
+ * @param {number} rMin
+ * @param {number} rSpan
+ * @param {number} oMin
+ * @param {number} oSpan
+ * @param {boolean} twinkle
+ */
 function tile(n, rMin, rSpan, oMin, oSpan, twinkle) {
   const out = [];
   for (let i = 0; i < n; i++) {
@@ -21,6 +29,7 @@ function tile(n, rMin, rSpan, oMin, oSpan, twinkle) {
       cy: (rnd() * 1000).toFixed(1),
       r: (rMin + rnd() * rSpan).toFixed(2),
       opacity: (oMin + rnd() * oSpan).toFixed(2),
+      /** @type {string | null} */
       delay: null,
     };
     if (twinkle && i % 6 === 0) star.delay = (rnd() * 5.6).toFixed(1);

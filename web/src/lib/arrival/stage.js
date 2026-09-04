@@ -12,6 +12,20 @@
  * and this is the switch. See Arrival.svelte for the surfaces themselves.
  */
 
+/**
+ * @typedef {object} VisibleHousehold
+ * @property {string} id
+ * @property {string} name
+ * @property {boolean} [requested]
+ * @property {Array<[number, number, number, string]>} [planets]
+ */
+
+/**
+ * @typedef {object} Workspace
+ * @property {object[]} [households]
+ * @property {VisibleHousehold[]} [visibleHouseholds]
+ */
+
 /** The reader is signed out, or we have not asked yet: the door is the door. */
 export const DOOR = "door";
 /** Asked, not answered. The dawn is up and the login chrome is held back, so
@@ -34,6 +48,7 @@ export const ONWARD = "onward";
  * instance. An instance administrator is never a newcomer, because the server
  * hands them every household as a member would see it, so they leave here
  * through ONWARD as soon as one system exists.
+ * @param {Workspace | null} [workspace]
  */
 export function arrivalStageOf(workspace) {
   if (!workspace) return ASKING;
@@ -48,6 +63,7 @@ export function arrivalStageOf(workspace) {
  * real"), and it is the newcomer's, not the first admin's: "a first admin
  * always signs in to zero households, so counting them here was counting
  * nothing."
+ * @param {VisibleHousehold[]} [visibleHouseholds]
  */
 export function discoveredCountOf(visibleHouseholds) {
   const count = (visibleHouseholds ?? []).length;
@@ -70,13 +86,16 @@ export function discoveredCountOf(visibleHouseholds) {
  *
  * Case- and space-insensitive, because "lawson home" and "Lawson  Home" are
  * the same answer to the reader and the refusal has to read as one.
+ * @param {string} name
+ * @param {VisibleHousehold[]} [visibleHouseholds]
  */
 export function collidingHouseholdOf(name, visibleHouseholds) {
   const wanted = normaliseName(name);
   if (!wanted) return null;
-  return (visibleHouseholds ?? []).find((household) => normaliseName(household.name) === wanted) ?? null;
+  return (visibleHouseholds ?? []).find((/** @type {VisibleHousehold} */ household) => normaliseName(household.name) === wanted) ?? null;
 }
 
+/** @param {string} [name] */
 function normaliseName(name) {
   return String(name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -112,13 +131,20 @@ export const NAME_LIMIT = 60;
  * first option stands. A reader whose zone is not on this short list changes
  * it on the household screen afterwards, which is where the sheet says every
  * one of these answers moves to.
+ * @param {string | null} [detected]
  */
 export function preferredTimeZone(detected) {
-  return TIME_ZONES.some((zone) => zone.value === detected) ? detected : TIME_ZONES[0].value;
+  /* Whenever the `some` matches, `detected` is one of TIME_ZONES' own string
+     values -- not null or undefined -- but `.some` is opaque to the type
+     checker, so the branch needs a cast rather than a narrowed type. */
+  return TIME_ZONES.some((zone) => zone.value === detected)
+    ? /** @type {string} */ (detected)
+    : TIME_ZONES[0].value;
 }
 
+/** @param {string | null} [detected] */
 export function preferredCurrency(detected) {
-  return CURRENCIES.includes(detected) ? detected : CURRENCIES[0];
+  return detected != null && CURRENCIES.includes(detected) ? detected : CURRENCIES[0];
 }
 
 /**
@@ -133,6 +159,8 @@ export function preferredCurrency(detected) {
  * THREE FIELDS AND NOTHING ELSE: no sections. The server applies the default
  * set (`cloneSections()`), so there is one place that decides what a new
  * system starts with, exactly as the sealed sheet requires.
+ * @param {{ name?: string, timezone?: string, currency?: string }} answers
+ * @param {{ uuid: () => string }} [ids]
  */
 export function createSystemCommand({ name, timezone, currency }, ids = { uuid: () => crypto.randomUUID() }) {
   return {
@@ -150,6 +178,7 @@ export function createSystemCommand({ name, timezone, currency }, ids = { uuid: 
 /**
  * What the button says. The sheet writes the system's name into it as it is
  * typed — "create Lawson Home →" — and falls back to the unnamed word.
+ * @param {string} [name]
  */
 export function createButtonLabel(name) {
   const trimmed = String(name ?? "").trim();
@@ -180,9 +209,11 @@ export function sectionNoteTitle(sections = DEFAULT_SECTIONS) {
  * order (the sheet: "the card's list is the same households, in the same
  * order, as words"). The sky is placed by id — `placeGalaxy` sorts them — so
  * the card sorts by id too and the two agree row for constellation.
+ * @param {Record<string, { name: string, requested?: boolean }>} [galaxy]
  */
 export function belongRowsOf(galaxy) {
-  return Object.keys(galaxy ?? {})
+  const systems = galaxy ?? {};
+  return Object.keys(systems)
     .sort()
-    .map((id) => ({ id, name: galaxy[id].name, requested: Boolean(galaxy[id].requested) }));
+    .map((id) => ({ id, name: systems[id].name, requested: Boolean(systems[id].requested) }));
 }

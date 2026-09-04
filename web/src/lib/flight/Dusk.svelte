@@ -41,8 +41,16 @@
    * full reasoning; it applies here unchanged.
    */
   let { children = undefined } = $props();
+  /** @type {HTMLDivElement} */
   let world;
-  let imgGlow, imgBelt, imgAfterglow, imgRim;
+  /** @type {SVGImageElement} */
+  let imgGlow;
+  /** @type {SVGImageElement} */
+  let imgBelt;
+  /** @type {SVGImageElement} */
+  let imgAfterglow;
+  /** @type {SVGImageElement} */
+  let imgRim;
 
   const F_DB6 =
     '<filter id="d-b6" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1680" height="1080"><feGaussianBlur stdDeviation="6"/></filter>';
@@ -85,6 +93,12 @@
     },
   };
 
+  /**
+   * @param {string} defs
+   * @param {string} body
+   * @param {number} w
+   * @param {number} h
+   */
   function frame(defs, body, w, h) {
     return (
       `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 1600 1000">` +
@@ -94,6 +108,7 @@
 
   onMount(() => {
     let cancelled = false;
+    /** @type {ReturnType<typeof setTimeout>} */
     let timer;
 
     async function build() {
@@ -115,7 +130,7 @@
       if (cancelled) return;
 
       const targets = { glow: imgGlow, belt: imgBelt, afterglow: imgAfterglow, rim: imgRim };
-      for (const [name, url] of built) targets[name]?.setAttribute("href", url);
+      for (const [name, url] of built) targets[/** @type {keyof typeof targets} */ (name)]?.setAttribute("href", url);
       world.dataset.rasterised = "ready";
     }
 
