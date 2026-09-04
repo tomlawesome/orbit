@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { mountGravityWell, paintSky, renewCopy } from "./gravity-well.js";
+  import { createSky, paintSky, renewCopy } from "./gravity-well.js";
   import { rasteriseSvg } from "$lib/raster.js";
 
   /**
@@ -193,19 +193,30 @@
   /** #790: the falling star bands' host, see the markup. @type {HTMLDivElement | null} */
   let infall;
 
+  /**
+   * #790: the sky, seeded here — on the server too — so the HTML arrives
+   * with the stars already in it (the `.first` <svg> in the markup) and the
+   * canvases, painted at mount from the very same seed, take over without
+   * moving a star. Copies 1 and 2 are the ones a fresh cycle shows; copy 0
+   * opens at opacity 0 and fades in from beyond the frame.
+   */
+  const sky = createSky();
+  const FIRST = /** @type {const} */ ([[1, 1], [2, 0.5]]);
+  let first = $state(true);
+
   onMount(() => {
     if (!isNotFound) return;
     /* Populates #lensarcs synchronously, before the first build() below
-       ever reads it; hands back the star bands as a seeded stream. */
-    const bands = mountGravityWell();
+       ever reads it. */
+    sky.mountArcs();
 
-    /* #790: the sky, painted now — synchronously, before the first frame,
-       so the stars are there from the start rather than arriving after the
-       well's rasters — at the density the screen shows it (2200 units at
-       this scale, capped at 2k a side: six canvases at 16 MB each, and a
-       sub-pixel star does not get crisper for being sampled finer). Each
-       copy takes fresh stars every time it wraps unseen, so no pattern ever
-       comes round again (gravity-well.js, renewCopy). */
+    /* The canvases, painted now — synchronously, before this task ends, so
+       the still sky above is swapped for the moving one within a frame — at
+       the density the screen shows it (2200 units at this scale, capped at
+       2k a side: six canvases at 16 MB each, and a sub-pixel star does not
+       get crisper for being sampled finer). Each copy takes fresh stars
+       every time it wraps unseen, so no pattern ever comes round again
+       (gravity-well.js, renewCopy). */
     let side = 0;
     function paint() {
       if (!infall) return;
@@ -213,13 +224,14 @@
       if (!rect.width || !rect.height) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       side = Math.min(2048, Math.max(1, Math.round(2200 * Math.max(rect.width / 1600, rect.height / 1000) * dpr)));
-      paintSky(infall, bands, side);
+      paintSky(infall, sky, side);
     }
     /** @param {AnimationEvent} e */
     function onWrap(e) {
-      if (e.animationName === "infall" && e.target instanceof HTMLCanvasElement) renewCopy(e.target, bands, side);
+      if (e.animationName === "infall" && e.target instanceof HTMLCanvasElement) renewCopy(e.target, sky, side);
     }
     paint();
+    first = false;
     infall?.addEventListener("animationiteration", onWrap);
 
     let cancelled = false;
@@ -327,14 +339,41 @@
   whatever transform it wears — and unlike a rasterised <img> it costs no PNG
   encode and decode, which took whole seconds of blank sky. Nothing here is
   filtered, so #764's rule holds: nothing filtered gains motion.
+
+  A canvas is blank until the script runs, and that is a few hundred
+  milliseconds of empty sky before the stars pop in. So the server draws the
+  same stars first, as one still <svg> in the HTML (static groups only —
+  nothing scaled by CSS, which is the Safari trap above): on screen with the
+  first paint, and replaced within a frame of the canvases being painted, by
+  the same stars in the same places.
 -->
 <div class="infall" aria-hidden="true" bind:this={infall}>
-  <canvas class="fall fall-far" style="--i:0;--s0:2;rotate:0deg"></canvas>
-  <canvas class="fall fall-far" style="--i:1;--s0:1;rotate:120deg"></canvas>
-  <canvas class="fall fall-far" style="--i:2;--s0:.5;rotate:240deg"></canvas>
-  <canvas class="fall fall-near" style="--i:0;--s0:2;rotate:0deg"></canvas>
-  <canvas class="fall fall-near" style="--i:1;--s0:1;rotate:120deg"></canvas>
-  <canvas class="fall fall-near" style="--i:2;--s0:.5;rotate:240deg"></canvas>
+  {#if first}
+  <svg class="first" viewBox="-1100 -1100 2200 2200">
+    <defs>
+      <radialGradient id="stargl" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#e8edff" stop-opacity=".45"/>
+        <stop offset="100%" stop-color="#e8edff" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    {#each FIRST as [i, s]}
+      <g transform="scale({s})" fill="#dbe2f5">
+        {#each sky.first.far[i] as st}<circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)} opacity={st.o.toFixed(2)}/>{/each}
+      </g>
+    {/each}
+    {#each FIRST as [i, s]}
+      <g transform="scale({s})" fill="#e8edff">
+        {#each sky.first.near[i] as st}<circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={(st.r * 3.6).toFixed(1)} fill="url(#stargl)"/><circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)} opacity={st.o.toFixed(2)}/>{/each}
+      </g>
+    {/each}
+  </svg>
+  {/if}
+  <canvas class="fall fall-far" style="--i:0;--s0:2"></canvas>
+  <canvas class="fall fall-far" style="--i:1;--s0:1"></canvas>
+  <canvas class="fall fall-far" style="--i:2;--s0:.5"></canvas>
+  <canvas class="fall fall-near" style="--i:0;--s0:2"></canvas>
+  <canvas class="fall fall-near" style="--i:1;--s0:1"></canvas>
+  <canvas class="fall fall-near" style="--i:2;--s0:.5"></canvas>
 </div>
 
 <div class="world" style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">

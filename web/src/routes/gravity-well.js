@@ -25,14 +25,24 @@
  */
 
 /** @typedef {{ x: number, y: number, r: number, o: number }} Star — hole-relative units. */
-/** @typedef {{ far: () => Star[], near: () => Star[] }} Bands — each call is the next band from the seeded stream. */
+/**
+ * @typedef {object} Sky
+ * @prop {{ far: Star[][], near: Star[][] }} first — the three bands each layer
+ *   opens with, in copy order; the server renders them as the sky the HTML
+ *   arrives with (+error.svelte), and the canvases then take the very same
+ *   bands, so the handover moves nothing.
+ * @prop {() => Star[]} far — the next far band from the seeded stream.
+ * @prop {() => Star[]} near — likewise, near.
+ * @prop {() => void} mountArcs — draws the lensed arcs into #lensarcs. Client only.
+ */
 
 /**
- * @returns {Bands} the star bands. The first three of each layer are drawn
- *   before the lensed arcs, so the arcs (and the fidelity baseline) stay put
- *   however many bands are drawn later.
+ * Seeds the sky. No DOM: safe on the server. The first three bands of each
+ * layer are drawn before the lensed arcs, so the arcs (and the fidelity
+ * baseline) stay put however many bands are drawn later.
+ * @returns {Sky}
  */
-export function mountGravityWell() {
+export function createSky() {
   const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(4040404);
   const NS = "http://www.w3.org/2000/svg";
 
@@ -72,29 +82,31 @@ export function mountGravityWell() {
   };
   const queued = { far: [farBand(), farBand(), farBand()], near: [nearBand(), nearBand(), nearBand()] };
 
-  // lensed starlight: tangential smears ringing the hole
-  const arcs = document.getElementById("lensarcs");
-  for (let i = 0; arcs && i < 46; i++) {
-    const rad = 138 + rng() * 150;
-    const a0 = rng() * Math.PI * 2;
-    const sweep = (0.25 + rng() * 0.7) * (60 / rad);
-    const a1 = a0 + sweep;
-    const x0 = 800 + rad * Math.cos(a0), y0 = 450 + rad * Math.sin(a0);
-    const x1 = 800 + rad * Math.cos(a1), y1 = 450 + rad * Math.sin(a1);
-    const p = document.createElementNS(NS, "path");
-    p.setAttribute("d", `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad.toFixed(1)} ${rad.toFixed(1)} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`);
-    p.setAttribute("stroke", "#cdd6ee");
-    p.setAttribute("stroke-width", (0.7 + rng() * 0.9).toFixed(2));
-    p.setAttribute("stroke-linecap", "round");
-    // tighter to the hole = brighter, more smeared
-    p.setAttribute("opacity", (0.24 * (170 / rad) ** 1.6).toFixed(2));
-    if (rng() < 0.35) p.setAttribute("filter", "url(#b1)");
-    arcs.appendChild(p);
-  }
-
   return {
+    first: { far: [...queued.far], near: [...queued.near] },
     far: () => queued.far.shift() ?? farBand(),
     near: () => queued.near.shift() ?? nearBand(),
+    mountArcs() {
+      // lensed starlight: tangential smears ringing the hole
+      const arcs = document.getElementById("lensarcs");
+      for (let i = 0; arcs && i < 46; i++) {
+        const rad = 138 + rng() * 150;
+        const a0 = rng() * Math.PI * 2;
+        const sweep = (0.25 + rng() * 0.7) * (60 / rad);
+        const a1 = a0 + sweep;
+        const x0 = 800 + rad * Math.cos(a0), y0 = 450 + rad * Math.sin(a0);
+        const x1 = 800 + rad * Math.cos(a1), y1 = 450 + rad * Math.sin(a1);
+        const p = document.createElementNS(NS, "path");
+        p.setAttribute("d", `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad.toFixed(1)} ${rad.toFixed(1)} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`);
+        p.setAttribute("stroke", "#cdd6ee");
+        p.setAttribute("stroke-width", (0.7 + rng() * 0.9).toFixed(2));
+        p.setAttribute("stroke-linecap", "round");
+        // tighter to the hole = brighter, more smeared
+        p.setAttribute("opacity", (0.24 * (170 / rad) ** 1.6).toFixed(2));
+        if (rng() < 0.35) p.setAttribute("filter", "url(#b1)");
+        arcs.appendChild(p);
+      }
+    },
   };
 }
 
@@ -105,7 +117,7 @@ const showing = new WeakMap();
  * Paints every .fall canvas in `host` at `side` pixels a side for the band's
  * 2200 units, so the canvas's centre is the hole. A canvas keeps the stars
  * it has; one without any yet takes the next band. Synchronous.
- * @param {HTMLElement} host @param {Bands} bands @param {number} side
+ * @param {HTMLElement} host @param {Sky} bands @param {number} side
  */
 export function paintSky(host, bands, side) {
   for (const c of host.querySelectorAll("canvas.fall")) paintCopy(/** @type {HTMLCanvasElement} */ (c), bands, side);
@@ -115,14 +127,14 @@ export function paintSky(host, bands, side) {
  * Fresh stars for one copy, for the instant it wraps unseen (opacity 0 at
  * the 0% keyframe): no star pattern ever comes round again, so the field
  * reads as continuous rather than as a loop.
- * @param {HTMLCanvasElement} canvas @param {Bands} bands @param {number} side
+ * @param {HTMLCanvasElement} canvas @param {Sky} bands @param {number} side
  */
 export function renewCopy(canvas, bands, side) {
   showing.delete(canvas);
   paintCopy(canvas, bands, side);
 }
 
-/** @param {HTMLCanvasElement} c @param {Bands} bands @param {number} side */
+/** @param {HTMLCanvasElement} c @param {Sky} bands @param {number} side */
 function paintCopy(c, bands, side) {
   const near = c.classList.contains("fall-near");
   let stars = showing.get(c);

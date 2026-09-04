@@ -10,13 +10,13 @@ body{background:#04070f}
    any moment; the turn is steady, with the disc; the copy fades only at the
    ends, arriving beyond the frame and gone as it meets the horizon. With
    animation off the copies sit at their spread scales, so the still is still
-   a full sky. Each copy's third-of-a-turn is the `rotate` property, set
-   inline, so the keyframes stay one spiral. */
+   a full sky. `.first` is the same sky as the HTML arrives with, still, in
+   the same box (see +error.svelte). */
 .infall{position:fixed;inset:0;overflow:hidden;pointer-events:none;container-type:size}
-.fall{--k:max(.0625cqw,.1cqh);--band:calc(2200 * var(--k));
+.fall,.first{--k:max(.0625cqw,.1cqh);--band:calc(2200 * var(--k));
       position:absolute;width:var(--band);height:var(--band);
-      left:calc(50% - var(--band) / 2);top:calc(50% - 50 * var(--k) - var(--band) / 2);
-      transform:scale(var(--s0));
+      left:calc(50% - var(--band) / 2);top:calc(50% - 50 * var(--k) - var(--band) / 2)}
+.fall{transform:scale(var(--s0));
       animation:infall var(--T) linear infinite;animation-delay:calc(var(--i) * var(--T) / -3)}
 .fall-far{--T:160s}
 .fall-near{--T:80s}
