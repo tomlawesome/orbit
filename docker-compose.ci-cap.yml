@@ -1,0 +1,16 @@
+# The standard CI resource profile for the two services no Orbit stack can run
+# without (#801 step 1). Overlaid last in the pipeline's acceptance stack so a
+# self-hosted runner shared with other work cannot be starved by a stack under
+# test.
+#
+# One CPU and 1 GB between them. Measured peak of both together while the
+# acceptance suite runs is about 260 MB, so these are headroom, not a squeeze:
+# a container that dies here is reporting a real regression in what Orbit
+# needs to start, not a limit tuned too close.
+services:
+  orbit-app:
+    cpus: "0.6"
+    mem_limit: 640m
+  orbit-db:
+    cpus: "0.4"
+    mem_limit: 384m
