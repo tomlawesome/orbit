@@ -46,3 +46,44 @@ updates:
     groups:
       docker-minor-patch:
         update-types: [minor, patch]
+
+  # docker-compose: the sidecars an operator actually runs -- Postgres,
+  # ClamAV, Tika and Ollama. Until this entry existed nothing watched them:
+  # the `docker` entry above reaches the root Dockerfile only, and Dependabot
+  # has never once opened a container pull request here (#771).
+  #
+  # Manual step, deliberately: Dependabot updates the pin in the file but
+  # cannot read `.github/supply-chain-policy.json`, which is a bespoke schema
+  # it does not parse. Its pull request therefore lands with the two places a
+  # pin lives disagreeing, and the drift axis of
+  # `node scripts/sidecar-pins.mjs check --offline` goes red on it in CI. The
+  # fix is one command: run `node scripts/sidecar-pins.mjs sync`, review the
+  # diff and push it to the Dependabot branch.
+  - package-ecosystem: docker-compose
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:15"
+      timezone: Europe/London
+    open-pull-requests-limit: 3
+    groups:
+      docker-compose-minor-patch:
+        update-types: [minor, patch]
+
+  # docker: the disposable OIDC sidecar used by the local end-to-end stack,
+  # which pins node:24-alpine in its own Dockerfile. Same manual step as
+  # above: `sidecar-pins.mjs sync` after the bump.
+  - package-ecosystem: docker
+    directory: /tests/oidc
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:15"
+      timezone: Europe/London
+    open-pull-requests-limit: 3
+    groups:
+      oidc-sidecar-minor-patch:
+        update-types: [minor, patch]
