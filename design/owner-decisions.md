@@ -478,7 +478,12 @@ The full open-questions list, walked in order and ruled:
 
 - **The living backdrops are ratified for build**: relay-satellites v2,
   administration-iss, and create-v3's loudened backdrop — all approved as
-  drawn (admin's bolder atlas rendering included).
+  drawn. *Amended 2026-09-02, superseding "admin's bolder atlas rendering
+  included":* the admin backdrop is damped on the pale packs after all, by
+  create-v3's own `--chart-alpha` (`.82` on atlas and dawn, `1` on the dark
+  packs). Drifting labels that transiently brush each other — a filler name
+  passing a household label — are accepted as living behaviour; no collision
+  avoidance is to be added without a fresh ruling. Both on #475.
 - **Settings gets no verdict yet — three concepts instead**: the
   observatory-slit proposal is set aside; the owner likes all three of the
   new directions in text — *inside the observatory* (sky only through the
@@ -625,6 +630,11 @@ The full open-questions list, walked in order and ruled:
   a no (file stays as the record). EVA is the settings concept — and
   (owner, later): EVA SHIPS AS IT IS for now; the "needs work" second
   pass is deferred to some future time, not a v1.3 gate.
+- **EVA is dropped; settings stays as it is** (owner, 2026-09-03, on
+  the EVA hull built into the app, #472): "super cheesey. It was ok
+  when it was only line drawn." The hull, panels and tether do not
+  ship; settings keeps its cards over the sky (`settings.html`). The
+  concept sheets stay as the record; no replacement is commissioned.
 - **Household backdrop: inside this system** (owner): the berth is a
   no (record kept); H2 — the household's own constellation at room
   scale, fully data-true — is the household screen's backdrop.

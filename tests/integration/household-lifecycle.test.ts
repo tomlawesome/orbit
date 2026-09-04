@@ -16,8 +16,6 @@ import {
   sections,
   users,
 } from "@/db/schema";
-import { POST as lifecycle } from "@/app/api/households/[householdId]/lifecycle/route";
-import { GET as workspace } from "@/app/api/workspace/route";
 import { hardDeleteHousehold, purgeExpiredHouseholds, requestHouseholdDeletion, restoreHousehold } from "@/server/household-lifecycle";
 import { addHouseholdMember, transferHouseholdOwnership } from "@/server/workspace-repository";
 import { LocalDocumentStorage } from "@/server/documents/storage";
@@ -29,20 +27,20 @@ import { createPortableArchive, reconcilePortableArchiveStorage } from "@/server
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { requireHouseholdAccess } from "@/server/workspace-access";
 import {
-  GET as listDocuments,
-  POST as uploadDocument,
-} from "@/app/api/households/[householdId]/items/[itemId]/documents/route";
-import { DELETE as deleteDocument } from "@/app/api/documents/[documentId]/route";
-import { GET as downloadDocument } from "@/app/api/documents/[documentId]/download/route";
-import { POST as createDocumentDraft } from "@/app/api/documents/[documentId]/draft/route";
-import { POST as approveDocumentDraft } from "@/app/api/document-drafts/[draftId]/approve/route";
-import { POST as createArchive } from "@/app/api/households/[householdId]/portable-archives/route";
-import { GET as downloadArchive } from "@/app/api/portable-archives/[archiveId]/download/route";
-import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
-  requestForSession,
 } from "./support/fixtures";
+import { callRouteForSession, loadRoute } from "./support/request-event";
+
+const { POST: lifecycle } = await loadRoute("households/[householdId]/lifecycle");
+const { GET: workspace } = await loadRoute("workspace");
+const { GET: listDocuments, POST: uploadDocument } = await loadRoute("households/[householdId]/items/[itemId]/documents");
+const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
+const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
+const { POST: createDocumentDraft } = await loadRoute("documents/[documentId]/draft");
+const { POST: approveDocumentDraft } = await loadRoute("document-drafts/[draftId]/approve");
+const { POST: createArchive } = await loadRoute("households/[householdId]/portable-archives");
+const { GET: downloadArchive } = await loadRoute("portable-archives/[archiveId]/download");
 
 vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
@@ -54,27 +52,27 @@ afterAll(async () => {
 });
 
 function lifecycleContext(householdId: string) {
-  return { params: Promise.resolve({ householdId }) };
+  return { householdId };
 }
 
 function itemDocumentsContext(householdId: string, itemId: string) {
-  return { params: Promise.resolve({ householdId, itemId }) };
+  return { householdId, itemId };
 }
 
 function documentContext(documentId: string) {
-  return { params: Promise.resolve({ documentId }) };
+  return { documentId };
 }
 
 function archiveContext(archiveId: string) {
-  return { params: Promise.resolve({ archiveId }) };
+  return { archiveId };
 }
 
 function draftContext(draftId: string) {
-  return { params: Promise.resolve({ draftId }) };
+  return { draftId };
 }
 
 function householdContext(householdId: string) {
-  return { params: Promise.resolve({ householdId }) };
+  return { householdId };
 }
 
 function deferred<T>() {
@@ -147,7 +145,8 @@ async function expectApiError(response: Response, status: number, code: string) 
 async function uploadSyntheticDocument(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>) {
   const session = await fixture.session("member");
   const contents = syntheticPdf();
-  const response = await uploadDocument(requestForSession(session, `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`, {
+  const response = await callRouteForSession(uploadDocument, session, {
+    url: `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`,
     method: "POST",
     headers: {
       "content-length": String(contents.length),
@@ -155,7 +154,8 @@ async function uploadSyntheticDocument(fixture: Awaited<ReturnType<typeof create
       "x-orbit-filename": encodeURIComponent("lifecycle-document.pdf"),
     },
     body: contents as unknown as BodyInit,
-  }), itemDocumentsContext(fixture.household.id, fixture.item.id));
+    params: itemDocumentsContext(fixture.household.id, fixture.item.id),
+  });
   expect(response.status).toBe(201);
   return { session, documentId: (await response.json() as { document: { id: string } }).document.id };
 }
@@ -181,7 +181,8 @@ async function uploadStagedDocument(fixture: Awaited<ReturnType<typeof createInt
   vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
   const session = await fixture.session("member");
   const contents = syntheticPdf();
-  const response = await uploadDocument(requestForSession(session, `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`, {
+  const response = await callRouteForSession(uploadDocument, session, {
+    url: `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`,
     method: "POST",
     headers: {
       "content-length": String(contents.length),
@@ -189,7 +190,8 @@ async function uploadStagedDocument(fixture: Awaited<ReturnType<typeof createInt
       "x-orbit-filename": encodeURIComponent("staged-document.pdf"),
     },
     body: contents as unknown as BodyInit,
-  }), itemDocumentsContext(fixture.household.id, fixture.item.id));
+    params: itemDocumentsContext(fixture.household.id, fixture.item.id),
+  });
   expect(response.status).toBe(202);
   const payload = await response.json() as { document: { id: string; lifecycle: string } };
   expect(payload.document.lifecycle).toBe("scanning");
@@ -208,18 +210,22 @@ describe("transactional household lifecycle", () => {
     await expect(requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, ""))
       .rejects.toMatchObject({ code: "household_confirmation_failed" });
 
-    const memberDenied = await lifecycle(requestForSession(member, "http://127.0.0.1:3000/api/households/lifecycle", {
+    const memberDenied = await callRouteForSession(lifecycle, member, {
+      url: "http://127.0.0.1:3000/api/households/lifecycle",
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "delete", confirmation: fixture.household.name }),
-    }), lifecycleContext(fixture.household.id));
+      params: lifecycleContext(fixture.household.id),
+    });
     await expectApiError(memberDenied, 404, "household_not_found");
 
-    const outsiderDenied = await lifecycle(requestForSession(outsider, "http://127.0.0.1:3000/api/households/lifecycle", {
+    const outsiderDenied = await callRouteForSession(lifecycle, outsider, {
+      url: "http://127.0.0.1:3000/api/households/lifecycle",
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "delete", confirmation: fixture.household.name }),
-    }), lifecycleContext(fixture.household.id));
+      params: lifecycleContext(fixture.household.id),
+    });
     await expectApiError(outsiderDenied, 404, "household_not_found");
 
     await fixture.disableUser("owner");
@@ -255,7 +261,7 @@ describe("transactional household lifecycle", () => {
     expect([first, second].filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect([first, second].filter((result) => result.status === "rejected" && result.reason?.code === "household_deletion_pending")).toHaveLength(1);
 
-    const memberWorkspace = await workspace(requestForSession(member, "http://127.0.0.1:3000/api/workspace"));
+    const memberWorkspace = await callRouteForSession(workspace, member, { url: "http://127.0.0.1:3000/api/workspace" });
     expect(memberWorkspace.status).toBe(200);
     expect((await memberWorkspace.json()).workspace.households).toEqual([]);
     await expect(requireHouseholdAccess(fixture.users.owner.id, fixture.household.id))
@@ -263,60 +269,60 @@ describe("transactional household lifecycle", () => {
     await expect(requireHouseholdAccess(fixture.users.outsider.id, fixture.household.id))
       .rejects.toMatchObject({ code: "household_not_found", status: 404 });
 
-    const hiddenDocuments = await listDocuments(
-      requestForSession(member, "http://127.0.0.1:3000/api/households/documents"),
-      itemDocumentsContext(fixture.household.id, fixture.item.id),
-    );
+    const hiddenDocuments = await callRouteForSession(listDocuments, member, {
+      url: "http://127.0.0.1:3000/api/households/documents",
+      params: itemDocumentsContext(fixture.household.id, fixture.item.id),
+    });
     await expectApiError(hiddenDocuments, 404, "item_not_found");
 
-    const hiddenDocument = await downloadDocument(
-      requestForSession(member, "http://127.0.0.1:3000/api/documents/download"),
-      documentContext(documentId),
-    );
+    const hiddenDocument = await callRouteForSession(downloadDocument, member, {
+      url: "http://127.0.0.1:3000/api/documents/download",
+      params: documentContext(documentId),
+    });
     await expectApiError(hiddenDocument, 404, "document_not_found");
 
-    const hiddenArchive = await downloadArchive(
-      requestForSession(owner, "http://127.0.0.1:3000/api/portable-archives/download"),
-      archiveContext(archive.id),
-    );
+    const hiddenArchive = await callRouteForSession(downloadArchive, owner, {
+      url: "http://127.0.0.1:3000/api/portable-archives/download",
+      params: archiveContext(archive.id),
+    });
     await expectApiError(hiddenArchive, 404, "archive_not_found");
 
-    const deniedArchiveCreation = await createArchive(
-      requestForSession(owner, "http://127.0.0.1:3000/api/households/portable-archives", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ passphrase: "integration-passphrase", includeDocuments: false }),
-      }),
-      householdContext(fixture.household.id),
-    );
+    const deniedArchiveCreation = await callRouteForSession(createArchive, owner, {
+      url: "http://127.0.0.1:3000/api/households/portable-archives",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ passphrase: "integration-passphrase", includeDocuments: false }),
+      params: householdContext(fixture.household.id),
+    });
     await expectApiError(deniedArchiveCreation, 404, "household_not_found");
 
-    const deniedDocumentDeletion = await deleteDocument(
-      requestForSession(member, "http://127.0.0.1:3000/api/documents/delete", { method: "DELETE" }),
-      documentContext(documentId),
-    );
+    const deniedDocumentDeletion = await callRouteForSession(deleteDocument, member, {
+      url: "http://127.0.0.1:3000/api/documents/delete",
+      method: "DELETE",
+      params: documentContext(documentId),
+    });
     await expectApiError(deniedDocumentDeletion, 404, "document_not_found");
 
-    const hiddenDraft = await createDocumentDraft(
-      requestForSession(member, "http://127.0.0.1:3000/api/documents/draft", { method: "POST" }),
-      documentContext(documentId),
-    );
+    const hiddenDraft = await callRouteForSession(createDocumentDraft, member, {
+      url: "http://127.0.0.1:3000/api/documents/draft",
+      method: "POST",
+      params: documentContext(documentId),
+    });
     await expectApiError(hiddenDraft, 404, "document_not_found");
 
-    const deniedDraftApproval = await approveDocumentDraft(
-      requestForSession(member, "http://127.0.0.1:3000/api/document-drafts/approve", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sectionId: fixture.section.id,
-          title: "Should not be created",
-          provider: null,
-          reference: null,
-          mode: "create",
-        }),
+    const deniedDraftApproval = await callRouteForSession(approveDocumentDraft, member, {
+      url: "http://127.0.0.1:3000/api/document-drafts/approve",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sectionId: fixture.section.id,
+        title: "Should not be created",
+        provider: null,
+        reference: null,
+        mode: "create",
       }),
-      draftContext(draft.id),
-    );
+      params: draftContext(draft.id),
+    });
     await expectApiError(deniedDraftApproval, 404, "document_not_found");
     expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId)))
       .toEqual([{ lifecycle: "available" }]);
@@ -327,22 +333,22 @@ describe("transactional household lifecycle", () => {
       .rejects.toMatchObject({ code: "household_deletion_pending" });
 
     await restoreHousehold(fixture.users.owner.id, fixture.household.id, owner.sessionId);
-    const restoredDocuments = await listDocuments(
-      requestForSession(member, "http://127.0.0.1:3000/api/households/documents"),
-      itemDocumentsContext(fixture.household.id, fixture.item.id),
-    );
+    const restoredDocuments = await callRouteForSession(listDocuments, member, {
+      url: "http://127.0.0.1:3000/api/households/documents",
+      params: itemDocumentsContext(fixture.household.id, fixture.item.id),
+    });
     expect(restoredDocuments.status).toBe(200);
     expect((await restoredDocuments.json()).documents).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: documentId, displayName: "lifecycle-document.pdf" }),
     ]));
-    expect((await downloadDocument(
-      requestForSession(member, "http://127.0.0.1:3000/api/documents/download"),
-      documentContext(documentId),
-    )).status).toBe(200);
-    expect((await downloadArchive(
-      requestForSession(owner, "http://127.0.0.1:3000/api/portable-archives/download"),
-      archiveContext(archive.id),
-    )).status).toBe(200);
+    expect((await callRouteForSession(downloadDocument, member, {
+      url: "http://127.0.0.1:3000/api/documents/download",
+      params: documentContext(documentId),
+    })).status).toBe(200);
+    expect((await callRouteForSession(downloadArchive, owner, {
+      url: "http://127.0.0.1:3000/api/portable-archives/download",
+      params: archiveContext(archive.id),
+    })).status).toBe(200);
 
     await expect(restoreHousehold(fixture.users.owner.id, fixture.household.id, owner.sessionId))
       .rejects.toMatchObject({ code: "household_not_recoverable" });
@@ -462,11 +468,13 @@ describe("transactional household lifecycle", () => {
       .from(auditLog).where(and(eq(auditLog.entityId, fixture.household.id), eq(auditLog.action, "household_hard_deleted")));
     expect(audits).toEqual([{ householdId: null, entityId: fixture.household.id, action: "household_hard_deleted" }]);
 
-    const repeated = await lifecycle(requestForSession(admin, "http://127.0.0.1:3000/api/households/lifecycle", {
+    const repeated = await callRouteForSession(lifecycle, admin, {
+      url: "http://127.0.0.1:3000/api/households/lifecycle",
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "hard_delete", confirmation: fixture.household.name }),
-    }), lifecycleContext(fixture.household.id));
+      params: lifecycleContext(fixture.household.id),
+    });
     await expectApiError(repeated, 404, "household_not_found");
     expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.entityId, fixture.household.id), eq(auditLog.action, "household_hard_deleted")))).toHaveLength(1);
   });
@@ -537,9 +545,10 @@ describe("transactional household lifecycle", () => {
     }
 
     expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.id, documentId))).toHaveLength(0);
-    const download = await (await import("@/app/api/documents/[documentId]/download/route")).GET(
-      requestForSession(session, `http://127.0.0.1:3000/api/documents/${documentId}/download`), documentContext(documentId),
-    );
+    const download = await callRouteForSession(downloadDocument, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/download`,
+      params: documentContext(documentId),
+    });
     await expectApiError(download, 404, "document_not_found");
     expect(await documentStorage.ciphertextExists(documentRecord.storageKey)).toBe(true);
     expect((await archiveStorage.list()).map((entry) => entry.storageKey)).toContain(archiveRecord.storageKey);
@@ -595,10 +604,10 @@ describe("transactional household lifecycle", () => {
       .toHaveLength(0);
     expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.id, documentId)))
       .toHaveLength(0);
-    const download = await downloadDocument(
-      requestForSession(session, `http://127.0.0.1:3000/api/documents/${documentId}/download`),
-      documentContext(documentId),
-    );
+    const download = await callRouteForSession(downloadDocument, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/download`,
+      params: documentContext(documentId),
+    });
     await expectApiError(download, 404, "document_not_found");
     expect(await documentStorage.ciphertextExists(documentRecord.storageKey)).toBe(true);
     expect((await archiveStorage.list()).map((entry) => entry.storageKey)).toContain(archiveRecord.storageKey);

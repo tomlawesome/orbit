@@ -161,6 +161,18 @@ export function effectiveReminderOffsets(
     .map((daysBefore) => ({ daysBefore, emailEnabled: true, pushEnabled: true }));
 }
 
+/**
+ * The first-run tour's own record (#751, slice 1 of #477): whether the walk
+ * has been taken. `null` means never seen (or seen again after "Take the
+ * walk again"); any other value must be a real ISO timestamp — a client
+ * cannot write a boolean, a number, or a string that only looks like a date.
+ */
+export const tourPreferenceSchema = z.object({
+  tourSeenAt: z.union([z.iso.datetime(), z.null()]),
+});
+
+export type TourPreference = z.infer<typeof tourPreferenceSchema>;
+
 export const sectionPreferenceSchema = z.array(z.object({
   id: z.string().min(1).max(80),
   name: z.string().max(30),

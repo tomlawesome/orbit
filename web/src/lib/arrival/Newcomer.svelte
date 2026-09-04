@@ -26,6 +26,14 @@
    * reduced motion and can be pinned to one millisecond for a screenshot. This
    * component draws; it never decides when.
    */
+  /**
+   * @type {{
+   *   galaxy?: Record<string, import('$lib/data/chart.js').GalaxyEntry>,
+   *   visibleHouseholds?: Array<{ id: string, name: string, requested?: boolean }>,
+   *   onask?: (row: { id: string, name: string, requested?: boolean }) => void,
+   *   oncreate?: import('svelte/elements').MouseEventHandler<HTMLButtonElement>,
+   * }}
+   */
   let {
     /* the labelled sky, from $lib/data/chart.js's labelledSkyOf */
     galaxy = {},
@@ -35,14 +43,33 @@
     oncreate = () => {},
   } = $props();
 
-  let hero;
-  const rows = $derived(belongRowsOf(galaxy));
+  /** @type {HTMLDivElement | null} */
+  let hero = null;
+  /*
+   * The join list is fed from `visibleHouseholds`, NOT from `galaxy` (#670,
+   * owner decision 2026-09-01).
+   *
+   * `labelledSkyOf` now draws at most twelve constellations, because past
+   * that the sky cannot separate them far enough for a click to be sure which
+   * one it hit. That cap is right for the SKY and would be a bug in the LIST:
+   * a thirteenth household drawn nowhere would also be listed nowhere, and a
+   * household you cannot name is a household you cannot ask to join — it
+   * would simply drop out of the instance for every newcomer. So the sky is
+   * capped and the list is not. `visibleHouseholds` already carries the id,
+   * name and requested flag `belongRowsOf` reads, and it keeps the same
+   * id-sorted order, so the rows below are unchanged for every instance small
+   * enough for the cap not to bite.
+   */
+  const rows = $derived(
+    belongRowsOf(Object.fromEntries((visibleHouseholds ?? []).map((household) => [household.id, household]))),
+  );
   const discovered = $derived(discoveredCountOf(visibleHouseholds));
 
   /* The household cards on the sky, as plain descriptors — the layout maths
      is unchanged, it just lands in state instead of DOM nodes so the markup
      below can draw it declaratively (#620: imperative appendChild here
      tripped svelte/no-dom-manipulating). */
+  /** @type {ReturnType<typeof computeCards>} */
   let cards = $state([]);
 
   /**
@@ -60,12 +87,18 @@
   function computeCards() {
     if (!hero) return [];
     const w = hero.clientWidth, h = hero.clientHeight;
-    const panel = hero.parentElement?.querySelector(".belong");
+    const panel = /** @type {HTMLElement | null | undefined} */ (hero.parentElement?.querySelector(".belong"));
     const keepOut = Math.max(200, (panel ? panel.offsetWidth : 430) / 2 + 118);
     const sky = Math.max(640, w - 220);
     const placed = [];
-    for (const { id, household, ox, oy, dim } of placeGalaxy({ galaxy, camera: null, width: sky, height: h, keepOut })) {
+    /* A household the floor pass could not fit anywhere that keeps the 80px
+       floor is marked `undrawn` (#670, owner ruling 2026-09-02) and skipped
+       — the join list below stays complete regardless, since it is fed
+       `visibleHouseholds`, not this sky. */
+    for (const { id, household, ox, oy, dim, undrawn } of placeGalaxy({ galaxy, camera: null, width: sky, height: h, keepOut })) {
+      if (undrawn) continue;
       const away = ox > 0;
+      /** @param {number} x */
       const mx = (x) => (away ? 210 - x : x);
       const ringX = mx(118);
       const label = household.name.toUpperCase();

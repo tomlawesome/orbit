@@ -11,7 +11,7 @@
 # `apk upgrade` this replaces is no longer needed here. #649 also stops
 # applying: that upgrade froze behind the layer cache, and there is no upgrade
 # layer left to freeze.
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:a5113d43233a4ce6d05fe0abfc4043fc5920062ebde3c2cad396efd57e5e1866 AS base
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:237aac3c9561c2e1f9febe7acd7c0f6051e13571b6c6cc1e318278df07b9bcb8 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -29,35 +29,47 @@ COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 COPY web/package.json ./web/package.json
 RUN pnpm install --frozen-lockfile
 
-FROM base AS builder
-COPY --from=deps /opt/orbit/node_modules ./node_modules
-COPY . .
-RUN pnpm build
-
-# Bundles the orbit engine CLI (src/cli/orbit.ts) into a single, dependency-
-# free CommonJS file (issue #295 engine-delivery slice, owner decision
-# 2026-08-13: the engine ships INSIDE the app image, invoked by host scripts
-# as a disposable `docker compose run --rm --no-deps` one-off — never handed
-# the Docker socket, never requiring Node on the host). Built in its own
-# stage off `deps` (not `builder`) since it needs neither the Next.js build
-# nor its output — esbuild does not type-check, and `npx tsc --noEmit`
-# already gates this file in CI. See scripts/bundle-orbit-cli.mjs for the
-# deterministic flag set and docs/engine-events.md, "In-container engine
-# invocation", for the resulting artifact's invocation contract.
-# Builds the v19 front end (web/, SvelteKit + adapter-node) into its
-# self-contained server output (#449). Its own stage off `deps`, like
-# cli-builder: it needs neither the Next.js build nor its output. The
-# adapter externalises whatever web/package.json lists under `dependencies`,
-# which is why web/ keeps everything in devDependencies — the output below
-# must import only node: builtins, because the runner copies it WITHOUT any
-# node_modules. Nothing serves this output until the composite entry lands
-# (#411 step 2); in this image it is carried, inert.
+# Builds the v19 front end (web/, SvelteKit + adapter-node) into its server
+# output (#449). Since the cut (#735) there is no other application build:
+# this output IS the server, and it serves the API routes too. Vite bundles
+# the engine's TypeScript into it — the engine is a linked library, not a
+# separate process (the architecture ruling on #735) — so no `tsc` emit
+# exists or is wanted.
 FROM base AS web-builder
 COPY --from=deps /opt/orbit/node_modules ./node_modules
 COPY --from=deps /opt/orbit/web/node_modules ./web/node_modules
 COPY . .
 RUN pnpm --filter orbit-web build
 
+# The front end's production node_modules, pruned by pnpm to what actually
+# runs (#735). The engine's own code is bundled by the stage above, but its
+# nine runtime dependencies stay external and must be present on disk:
+# `pdfjs-dist` resolves its worker and cmap assets by path, `@napi-rs/canvas`
+# is native, and the rest are listed in web/package.json `dependencies`
+# precisely so the adapter externalises them.
+#
+# The deploy goes through scripts/web-deploy.sh rather than being spelled out
+# here, so the image and anyone reproducing its packaging locally run the same
+# command — including the `--legacy` flag pnpm 11 requires. That script also
+# repairs the workspace state pnpm damages on the way past, which matters in a
+# checkout and is merely harmless in a build stage. `deploy` writes the
+# package's own sources into the target too; only node_modules is copied on.
+FROM base AS web-deps
+COPY --from=deps /opt/orbit/node_modules ./node_modules
+COPY --from=deps /opt/orbit/web/node_modules ./web/node_modules
+COPY . .
+RUN sh scripts/web-deploy.sh /opt/deploy-web
+
+# Bundles the orbit engine CLI (src/cli/orbit.ts) into a single, dependency-
+# free CommonJS file (issue #295 engine-delivery slice, owner decision
+# 2026-08-13: the engine ships INSIDE the app image, invoked by host scripts
+# as a disposable `docker compose run --rm --no-deps` one-off — never handed
+# the Docker socket, never requiring Node on the host). Built in its own
+# stage off `deps` since it needs neither the front-end build nor its output
+# — esbuild does not type-check, and `npx tsc --noEmit` already gates this
+# file in CI. See scripts/bundle-orbit-cli.mjs for the deterministic flag set
+# and docs/engine-events.md, "In-container engine invocation", for the
+# resulting artifact's invocation contract.
 FROM base AS cli-builder
 COPY --from=deps /opt/orbit/node_modules ./node_modules
 COPY . .
@@ -65,7 +77,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:a5113d43233a4ce6d05fe0abfc4043fc5920062ebde3c2cad396efd57e5e1866 AS runner
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:237aac3c9561c2e1f9febe7acd7c0f6051e13571b6c6cc1e318278df07b9bcb8 AS runner
 
 ARG ORBIT_VERSION
 ARG ORBIT_REVISION
@@ -90,7 +102,10 @@ RUN . /opt/orbit/scripts/release-metadata-patterns.sh \
   && printf '%s\n' "${ORBIT_CHANNEL}" | grep -Eq "$ORBIT_CHANNEL_PATTERN"
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV HOSTNAME=0.0.0.0
+# adapter-node's own variables (#735). It reads HOST, not Next's HOSTNAME;
+# both default to these values, and they are set explicitly so the listening
+# address is visible in `docker inspect` rather than only in the adapter.
+ENV HOST=0.0.0.0
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
 # Baked into the image config itself, so it is present in every container
@@ -125,28 +140,35 @@ RUN apk add --no-cache su-exec \
   && mkdir -p /var/lib/orbit/documents \
   && chown orbit:orbit /var/lib/orbit /var/lib/orbit/documents \
   && chmod 0750 /var/lib/orbit /var/lib/orbit/documents
-COPY --from=builder --chown=orbit:orbit /opt/orbit/public ./public
-COPY --from=builder --chown=orbit:orbit /opt/orbit/.next/standalone ./
-COPY --from=builder --chown=orbit:orbit /opt/orbit/.next/static ./.next/static
-COPY --from=builder --chown=orbit:orbit /opt/orbit/drizzle ./drizzle
+COPY --chown=orbit:orbit drizzle ./drizzle
 # The v19 front end's server output (#449): index.js + handler.js + client/.
-# Self-contained (node: builtins only — asserted by the closure evidence's
-# bare-import scan), so no web node_modules is copied. Inert until #411's
-# composite entry dispatches to it.
+# Since the cut (#735) this is the whole application server — it answers the
+# API routes as well as drawing the screens — so it is started directly (see
+# CMD) rather than dispatched to by a custom server.
 COPY --from=web-builder --chown=orbit:orbit /opt/orbit/web/build ./web
-# The output is ESM but sits under the Next standalone's package.json, which
-# has no "type" field — without this marker Node reparses every file with a
-# MODULE_TYPELESS_PACKAGE_JSON warning. Root-owned data file, like VERSION.
+# The nine engine runtime dependencies, pruned to production. Node resolves
+# them by walking up from the importing file, so they must sit here, beside
+# the output that imports them, and nowhere else.
+COPY --from=web-deps --chown=orbit:orbit /opt/deploy-web/node_modules ./web/node_modules
+# The output is ESM and /opt/orbit has no package.json at all, so without this
+# marker Node reparses every file with a MODULE_TYPELESS_PACKAGE_JSON warning.
+# It stops at ./web deliberately: the CLI below is CommonJS and relies on
+# /opt/orbit staying typeless. Root-owned data file, like VERSION.
 RUN printf '{"type":"module"}\n' > ./web/package.json \
   && chown root:root ./web/package.json \
   && chmod 0444 ./web/package.json
-COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
-COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
-COPY --from=builder --chown=root:root /opt/orbit/scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
-# The composite entry (#450): both applications in one process on one origin.
-# Root-owned data files like the entrypoint; invoked as `node scripts/...`.
-COPY --from=builder --chown=root:root /opt/orbit/scripts/container-server.mjs ./scripts/container-server.mjs
-COPY --from=builder --chown=root:root /opt/orbit/scripts/v19-dispatch.mjs ./scripts/v19-dispatch.mjs
+# Proves page-one previews can actually be rendered by what this image ships,
+# against the finished layout rather than a build stage's copy of it (#476,
+# #493, #735). It draws a real page with the native canvas that is here now;
+# parsing a PDF is not rendering one, and #493 shipped a container that could
+# do the first and not the second. The script is removed again immediately:
+# it is a build-time gate, not runtime surface.
+COPY scripts/web-pdfjs-runtime-check.mjs ./scripts/web-pdfjs-runtime-check.mjs
+RUN ORBIT_WEB_BUILD_ROOT=/opt/orbit/web node scripts/web-pdfjs-runtime-check.mjs \
+  && rm -f /opt/orbit/scripts/web-pdfjs-runtime-check.mjs
+COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
+COPY --chown=orbit:orbit scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
+COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
 # The bundled engine CLI (single file, no node_modules dependency at
 # runtime — see scripts/bundle-orbit-cli.mjs). Root-owned and read-only,
 # like container-entrypoint.sh above and VERSION/REVISION/CHANNEL below;
@@ -175,4 +197,4 @@ USER root
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=10 CMD su-exec orbit:orbit node -e "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch((error) => { console.error(error); process.exit(1); })"
 ENTRYPOINT ["/opt/orbit/scripts/container-entrypoint.sh"]
-CMD ["node", "scripts/container-server.mjs"]
+CMD ["node", "web/index.js"]

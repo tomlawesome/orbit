@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import { householdRegister } from "./support/households";
 
 /**
  * #453: membership and the empty sky (§11). A newcomer with no household
@@ -18,6 +19,12 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 
 const HOUSEHOLD = `Harbour House ${Date.now()}`;
 
+/* #730: the member's system is removed when the file is done, from the
+   administrator's own session — a hard delete is an instance-admin power, and
+   the owner here is an ordinary member. */
+const households = householdRegister();
+let seeded = false;
+
 async function signInAs(page: Page, account: string) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
@@ -35,8 +42,9 @@ async function establishInstanceAdmin(browser: Browser) {
 }
 
 async function createHousehold(page: Page, name: string) {
-  await page.evaluate(async (householdName) => {
+  const created = await page.evaluate(async (householdName) => {
     const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const householdId = crypto.randomUUID();
     const response = await fetch("/api/workspace/commands", {
       method: "POST",
       credentials: "same-origin",
@@ -44,7 +52,7 @@ async function createHousehold(page: Page, name: string) {
       body: JSON.stringify({
         type: "household.create",
         household: {
-          id: crypto.randomUUID(), name: householdName, timezone: "Europe/London", currency: "GBP",
+          id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
           memberCount: 1, canManage: true, onboardingComplete: true,
           sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
           items: [],
@@ -52,7 +60,10 @@ async function createHousehold(page: Page, name: string) {
       }),
     });
     if (!response.ok) throw new Error(`household.create failed: ${response.status}`);
+    return { id: householdId, name: householdName };
   }, name);
+  households.track(created);
+  seeded = true;
 }
 
 /* The owner's decision, as household management will make it (§15-2g): the
@@ -82,6 +93,18 @@ async function approveJoinRequest(page: Page, householdName: string, applicant: 
 }
 
 test.describe.configure({ mode: "serial" });
+
+test.afterAll(async ({ browser }) => {
+  if (!seeded) return;
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  try {
+    await signInAs(page, "Orbit Administrator");
+    await households.sweep(page);
+  } finally {
+    await context.close();
+  }
+});
 
 test("a newcomer sees the labelled sky, asks, is approved, and enters the system", async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");

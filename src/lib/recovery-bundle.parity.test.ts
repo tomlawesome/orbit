@@ -3,8 +3,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import {
   BACKUP_BUNDLE_MEMBERS,
   RECOVERY_BUNDLE_MEMBERS,
@@ -81,22 +82,16 @@ function newSandbox(prefix: string): string {
 const KEK_A = "a".repeat(64);
 const KEK_B = "b".repeat(64);
 
-/* Every case here measures a real subprocess — node, openssl, bash — and the
-   first backup.sh run additionally pays for `docker compose version` inside
-   require_tools. That is milliseconds on an idle machine and seconds on a
-   loaded runner, so the default 5s budget was the tightest in a file whose
-   siblings already allow 20-60s: #513 caught it expiring with no assertion
-   failure at all. These cases assert behaviour, never speed.
-
-   The spawn bound is the separate, stricter one: a hung Docker call must fail
-   the case that provoked it rather than stall the worker until the suite's
-   own timeout. */
-const CASE_TIMEOUT_MS = 30_000;
-const SPAWN_TIMEOUT_MS = 20_000;
+// Every case here spawns a real subprocess — node, openssl, bash — and the
+// first backup.sh run additionally pays for `docker compose version` inside
+// require_tools; a spawn that takes 0.7s quiet took 4.3s on a starved core
+// (#698, and the same shape #513 caught here first). Budget and reasoning:
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 // --- (1) recovery-crypto.mjs subprocess parity -----------------------------
 
-describe("recovery-crypto.mjs subprocess parity", { timeout: CASE_TIMEOUT_MS }, () => {
+describe("recovery-crypto.mjs subprocess parity", () => {
   it("hmac: matches computeBundleHmac byte-for-byte for the same key and content", () => {
     const sandbox = newSandbox("orbit-recovery-parity-hmac-");
     const keyFile = join(sandbox, "document-kek");
@@ -104,11 +99,11 @@ describe("recovery-crypto.mjs subprocess parity", { timeout: CASE_TIMEOUT_MS }, 
     const content = Buffer.from("manifest-and-checksums-fixture-content");
 
     // recovery-crypto.mjs's hmac op reads the content to sign from stdin.
-    const result = spawnSync("node", [nodeCryptoScript, "hmac", keyFile], {
+    const result = failOnProcessDeadline(spawnSync("node", [nodeCryptoScript, "hmac", keyFile], {
       input: content,
       encoding: "buffer",
-      timeout: SPAWN_TIMEOUT_MS,
-    });
+      ...processGuard(),
+    }), { label: "recovery-crypto.mjs hmac" });
     expect(result.status).toBe(0);
     expect(result.stdout.toString("utf8")).toBe(computeBundleHmac(KEK_A, content));
   });
@@ -117,7 +112,7 @@ describe("recovery-crypto.mjs subprocess parity", { timeout: CASE_TIMEOUT_MS }, 
     const sandbox = newSandbox("orbit-recovery-parity-fingerprint-");
     const keyFile = join(sandbox, "document-kek");
     writeFileSync(keyFile, `${KEK_A}\n`);
-    const result = spawnSync("node", [nodeCryptoScript, "fingerprint", keyFile], { encoding: "utf8", timeout: SPAWN_TIMEOUT_MS });
+    const result = failOnProcessDeadline(spawnSync("node", [nodeCryptoScript, "fingerprint", keyFile], { encoding: "utf8", ...processGuard() }), { label: "recovery-crypto.mjs fingerprint" });
     expect(result.status).toBe(0);
     expect(result.stdout).toBe(documentKekFingerprint(KEK_A));
   });
@@ -130,11 +125,11 @@ describe("recovery-crypto.mjs subprocess parity", { timeout: CASE_TIMEOUT_MS }, 
     const sandbox = newSandbox("orbit-recovery-parity-decrypt-");
     const envelopePath = join(sandbox, "document-kek.enc");
     writeFileSync(envelopePath, envelope);
-    const decrypted = spawnSync("node", [nodeCryptoScript, "decrypt", envelopePath], {
+    const decrypted = failOnProcessDeadline(spawnSync("node", [nodeCryptoScript, "decrypt", envelopePath], {
       input: Buffer.from(passphrase),
       encoding: "buffer",
-      timeout: SPAWN_TIMEOUT_MS,
-    });
+      ...processGuard(),
+    }), { label: "recovery-crypto.mjs decrypt" });
     expect(decrypted.status).toBe(0);
     expect(decrypted.stdout.toString("ascii")).toBe(KEK_A);
   });
@@ -144,11 +139,11 @@ describe("recovery-crypto.mjs subprocess parity", { timeout: CASE_TIMEOUT_MS }, 
     const sandbox = newSandbox("orbit-recovery-parity-encrypt-");
     const keyFile = join(sandbox, "document-kek");
     writeFileSync(keyFile, `${KEK_A}\n`);
-    const encrypted = spawnSync("node", [nodeCryptoScript, "encrypt", keyFile], {
+    const encrypted = failOnProcessDeadline(spawnSync("node", [nodeCryptoScript, "encrypt", keyFile], {
       input: Buffer.from(passphrase),
       encoding: "buffer",
-      timeout: SPAWN_TIMEOUT_MS,
-    });
+      ...processGuard(),
+    }), { label: "recovery-crypto.mjs encrypt" });
     expect(encrypted.status).toBe(0);
     const recovered = decryptDocumentKek(encrypted.stdout, passphrase);
     expect(recovered.toString("ascii")).toBe(KEK_A);
@@ -160,11 +155,11 @@ describe("recovery-crypto.mjs subprocess parity", { timeout: CASE_TIMEOUT_MS }, 
     const sandbox = newSandbox("orbit-recovery-parity-wrong-pass-");
     const envelopePath = join(sandbox, "document-kek.enc");
     writeFileSync(envelopePath, envelope);
-    const bashResult = spawnSync("node", [nodeCryptoScript, "decrypt", envelopePath], {
+    const bashResult = failOnProcessDeadline(spawnSync("node", [nodeCryptoScript, "decrypt", envelopePath], {
       input: Buffer.from("a-completely-wrong-passphrase-value"),
       encoding: "utf8",
-      timeout: SPAWN_TIMEOUT_MS,
-    });
+      ...processGuard(),
+    }), { label: "recovery-crypto.mjs decrypt" });
     expect(bashResult.status).not.toBe(0);
     expect(bashResult.stderr).toContain("passphrase verification failed");
     expect(() => decryptDocumentKek(envelope, "a-completely-wrong-passphrase-value")).toThrow();
@@ -175,7 +170,7 @@ describe("recovery-crypto.mjs subprocess parity", { timeout: CASE_TIMEOUT_MS }, 
 
 function opensslEncrypt(plaintextPath: string, keyFilePath: string, outputPath: string): { status: number; stderr: string } {
   // backup.sh:156-157's exact argument list.
-  const result = spawnSync(
+  const result = failOnProcessDeadline(spawnSync(
     "openssl",
     [
       "enc",
@@ -193,14 +188,14 @@ function opensslEncrypt(plaintextPath: string, keyFilePath: string, outputPath: 
       "-out",
       outputPath,
     ],
-    { encoding: "utf8", timeout: SPAWN_TIMEOUT_MS },
-  );
+    { encoding: "utf8", ...processGuard() },
+  ), { label: "opensslEncrypt" });
   return { status: result.status ?? -1, stderr: result.stderr ?? "" };
 }
 
 function opensslDecrypt(encryptedPath: string, keyFilePath: string, outputPath: string): { status: number; stderr: string } {
   // backup.sh:128-130's exact argument list.
-  const result = spawnSync(
+  const result = failOnProcessDeadline(spawnSync(
     "openssl",
     [
       "enc",
@@ -218,12 +213,12 @@ function opensslDecrypt(encryptedPath: string, keyFilePath: string, outputPath: 
       "-out",
       outputPath,
     ],
-    { encoding: "utf8", timeout: SPAWN_TIMEOUT_MS },
-  );
+    { encoding: "utf8", ...processGuard() },
+  ), { label: "opensslDecrypt" });
   return { status: result.status ?? -1, stderr: result.stderr ?? "" };
 }
 
-describe("AES-256-CBC document-archive crypto parity (openssl enc -pbkdf2, no Docker)", { timeout: CASE_TIMEOUT_MS }, () => {
+describe("AES-256-CBC document-archive crypto parity (openssl enc -pbkdf2, no Docker)", () => {
   it("TS-encrypt then openssl-decrypt: a plaintext round-trips through both implementations", () => {
     const sandbox = newSandbox("orbit-document-archive-parity-encrypt-");
     const keyFilePath = join(sandbox, "document-kek");
@@ -296,11 +291,11 @@ function newImportSandbox(): { sandbox: string; env: NodeJS.ProcessEnv } {
 }
 
 function runImportScript(bundlePath: string, env: NodeJS.ProcessEnv): { stdout: string; stderr: string; status: number } {
-  const result = spawnSync("bash", [importScript, bundlePath], { env, encoding: "utf8", input: "", timeout: SPAWN_TIMEOUT_MS });
+  const result = failOnProcessDeadline(spawnSync("bash", [importScript, bundlePath], { env, encoding: "utf8", input: "", ...processGuard() }), { label: "runImportScript" });
   return { stdout: result.stdout, stderr: result.stderr, status: result.status ?? -1 };
 }
 
-describe("import-recovery-bundle.sh whole-script preflight parity (no Docker daemon reachable)", { timeout: CASE_TIMEOUT_MS }, () => {
+describe("import-recovery-bundle.sh whole-script preflight parity (no Docker daemon reachable)", () => {
   it("malformed archive: bash and TS agree it is rejected as an invalid archive", () => {
     const { sandbox, env } = newImportSandbox();
     const bundlePath = join(sandbox, "malformed.tar");
@@ -377,11 +372,11 @@ function newBackupSandbox(): { sandbox: string; env: NodeJS.ProcessEnv } {
 }
 
 function runBackupVerify(bundlePath: string, env: NodeJS.ProcessEnv): { stdout: string; stderr: string; status: number } {
-  const result = spawnSync("bash", [backupScript, "--verify", bundlePath], { env, encoding: "utf8", timeout: SPAWN_TIMEOUT_MS });
+  const result = failOnProcessDeadline(spawnSync("bash", [backupScript, "--verify", bundlePath], { env, encoding: "utf8", ...processGuard() }), { label: "runBackupVerify" });
   return { stdout: result.stdout, stderr: result.stderr, status: result.status ?? -1 };
 }
 
-describe("backup.sh --verify whole-script layout/format-version parity (no Docker daemon reachable)", { timeout: CASE_TIMEOUT_MS }, () => {
+describe("backup.sh --verify whole-script layout/format-version parity (no Docker daemon reachable)", () => {
   it("malformed archive: rejected as invalid before any Docker call", () => {
     const { sandbox, env } = newBackupSandbox();
     const bundlePath = join(sandbox, "malformed.tar");

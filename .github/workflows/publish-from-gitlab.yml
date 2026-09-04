@@ -1,0 +1,190 @@
+name: Publish the GitLab-tested image to GHCR
+
+# GitLab (gitlab.tomlawson.io, ai/orbit) is where Orbit is tested and merged;
+# this repository is a push mirror of it (#801 step 5). When a merge to
+# `preview` or a hotfix branch arrives here, the GitLab pipeline for the same
+# commit has built the image, run the whole gate against it and pushed it to
+# registry.tomlawson.io, recording the digest it tested. This workflow copies
+# that exact digest to GHCR, where operators pull from, and attests it. It never
+# builds: a rebuild here would be a different image from the one that was
+# tested.
+#
+# The mirror push lands within minutes of the merge while the GitLab pipeline
+# takes the best part of an hour, so the first step waits for it. If GitLab's
+# pipeline fails, this fails too and publishes nothing; run it again from the
+# Actions tab once GitLab is green.
+#
+# The channel tag is `preview` for hotfix branches as well, as the GitHub build
+# always did (see publish-container.yml's metadata step): verify_preview and
+# promote-container.yml resolve `:preview` for both.
+#
+# Secrets: GITLAB_READ_TOKEN_NAME and GITLAB_READ_TOKEN, a project access token
+# on ai/orbit with the Reporter role and the read_api and read_registry scopes,
+# which is enough to list pipelines, download job artifacts and pull the image.
+# Nothing here can write to GitLab.
+
+on:
+  push:
+    branches:
+      - preview
+      - "hotfix/**"
+  workflow_dispatch: {}
+
+concurrency:
+  group: publish-from-gitlab-${{ github.ref }}
+  # Never cancel: every merge deserves its own published digest. A slower run
+  # for an older commit still publishes its sha- tag; it only moves the channel
+  # tag if that commit is still the head of the branch (checked below).
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  GITLAB_API_URL: https://gitlab.tomlawson.io/api/v4
+  GITLAB_PROJECT_ID: "49"
+  GITLAB_REGISTRY: registry.tomlawson.io
+
+jobs:
+  publish:
+    name: Copy tested digest to GHCR
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Wait for GitLab and fetch its tested-image evidence
+        id: evidence
+        env:
+          GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
+          ORBIT_COMMIT: ${{ github.sha }}
+          ORBIT_REF: ${{ github.ref_name }}
+        run: bash scripts/ci/gitlab-await-tested-image.sh
+
+      - name: Set up crane
+        uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
+
+      - name: Log in to both registries
+        env:
+          GITLAB_READ_TOKEN_NAME: ${{ secrets.GITLAB_READ_TOKEN_NAME }}
+          GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "${GITLAB_READ_TOKEN}" | crane auth login "${GITLAB_REGISTRY}" --username "${GITLAB_READ_TOKEN_NAME}" --password-stdin
+          printf '%s' "${GITHUB_TOKEN}" | crane auth login "${REGISTRY}" --username "${GITHUB_ACTOR}" --password-stdin
+
+      # Only the newest commit on the branch may own the channel tag. This run
+      # could be for an older commit if two merges landed within an hour.
+      - name: Decide which tags this commit may take
+        id: tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/branches/${GITHUB_REF_NAME}" --jq '.commit.sha')"
+          tags="sha-${GITHUB_SHA}"
+          if [[ "${head}" == "${GITHUB_SHA}" ]]; then
+            tags="${tags} preview"
+          else
+            printf '%s is no longer the head of %s (now %s); publishing only the sha- tag.\n' "${GITHUB_SHA}" "${GITHUB_REF_NAME}" "${head}"
+          fi
+          printf 'list=%s\n' "${tags}" >> "${GITHUB_OUTPUT}"
+
+      - name: Copy the exact tested digest
+        id: publish
+        env:
+          SOURCE: ${{ steps.evidence.outputs.source_reference }}
+          DIGEST: ${{ steps.evidence.outputs.digest }}
+          TAGS: ${{ steps.tags.outputs.list }}
+        run: |
+          image="${REGISTRY}/${IMAGE_NAME,,}"
+          # The source must still resolve to the digest the evidence names.
+          [[ "$(crane digest "${SOURCE}")" == "${DIGEST}" ]] || {
+            printf 'The GitLab registry no longer serves %s.\n' "${SOURCE}" >&2
+            exit 1
+          }
+          for tag in ${TAGS}; do
+            crane copy "${SOURCE}" "${image}:${tag}"
+            published="$(crane digest "${image}:${tag}")"
+            [[ "${published}" == "${DIGEST}" ]] || {
+              printf '%s:%s resolved to %s after the copy, expected %s.\n' "${image}" "${tag}" "${published}" "${DIGEST}" >&2
+              exit 1
+            }
+          done
+          printf 'image=%s\n' "${image}" >> "${GITHUB_OUTPUT}"
+
+      - name: Attest published image provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.evidence.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest published image SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.evidence.outputs.digest }}
+          sbom-path: ${{ steps.evidence.outputs.sbom }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Verify published image attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_DIGEST: ${{ steps.evidence.outputs.digest }}
+        run: |
+          image_reference="oci://${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
+          gh attestation verify "${image_reference}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --format json \
+            > .orbit-supply-chain/provenance-verification.json
+          gh attestation verify "${image_reference}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --format json \
+            > .orbit-supply-chain/sbom-verification.json
+
+      - name: Upload publication evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: orbit-published-from-gitlab
+          path: |
+            .orbit-supply-chain/gitlab-tested-image.json
+            .orbit-supply-chain/image.spdx.json
+            .orbit-supply-chain/provenance-verification.json
+            .orbit-supply-chain/sbom-verification.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Record published image
+        env:
+          IMAGE: ${{ steps.publish.outputs.image }}
+          TAGS: ${{ steps.tags.outputs.list }}
+          IMAGE_DIGEST: ${{ steps.evidence.outputs.digest }}
+          SOURCE: ${{ steps.evidence.outputs.source_reference }}
+          PIPELINE_URL: ${{ steps.evidence.outputs.pipeline_url }}
+        run: |
+          {
+            printf '## Orbit preview image, published from GitLab\n\n'
+            printf -- '- Image: `%s`\n' "${IMAGE}"
+            printf -- '- Tags: `%s`\n' "${TAGS}"
+            printf -- '- Digest: `%s`\n' "${IMAGE_DIGEST}"
+            printf -- '- Copied from: `%s`\n' "${SOURCE}"
+            printf -- '- Tested by: %s\n' "${PIPELINE_URL}"
+            printf -- '- Source revision: `%s`\n' "${GITHUB_SHA}"
+            printf -- '- Source branch: `%s`\n' "${GITHUB_REF_NAME}"
+            printf '\nNo container was built here. Deploy this immutable digest for engineering or release acceptance; it is not stable until protected promotion succeeds.\n'
+          } >> "${GITHUB_STEP_SUMMARY}"

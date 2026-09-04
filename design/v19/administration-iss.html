@@ -74,6 +74,11 @@
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+    --chart-alpha:1;
+    /* #491: the text-grade companions administration.html carries — brought
+       up from the app's current chrome (#475 chrome reconciliation), never
+       the reverse. Carried from web/src/lib/packs.css. */
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=afterdark]{
     --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -84,6 +89,8 @@
     --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --chart-alpha:1;
+    --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=atlas]{
     --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
@@ -94,6 +101,9 @@
     --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    /* dark ink on pale paper already carries; the ISS lands softer here (#475) */
+    --chart-alpha:.82;
+    --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
   }
   [data-theme=dawn]{
     --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
@@ -104,6 +114,8 @@
     --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --chart-alpha:.82;
+    --ink-quiet:#404c64; --accent-text:#134a72; --ok-text:#0d4e30;
   }
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
@@ -114,6 +126,8 @@
     --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
     --star-far:#9fd6e6; --star-near:#ffffff;
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --chart-alpha:1;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
   }
 
   *{box-sizing:border-box;margin:0}
@@ -130,7 +144,7 @@
   .layer{position:fixed;inset:0;pointer-events:none}
   .layer svg{position:absolute;inset:0;width:100%;height:100%}
   .sky{z-index:0;opacity:var(--stars);transition:opacity .4s}
-  .chartback{z-index:0;opacity:.95}
+  .chartback{z-index:0;opacity:calc(var(--chart-alpha,1) * .95)}
   /* the station reads boldest out at the edges and steps back under the
      column of panels, so it is never competing with a word */
   .station{z-index:1;opacity:1;
@@ -142,9 +156,13 @@
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
   [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
 
+  /* THE WAY BACK, KNOCKED OUT (#491) — brought up from administration.html's
+     current chrome (#475 reconciliation): --ink-quiet ink and a --bg halo so
+     the label reads sitting directly on the starfield with nothing behind it. */
   .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
-        letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
-  .back:hover{color:var(--accent)}
+        letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
+        text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .back:hover{color:var(--accent-text)}
   .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
        border-radius:50%;border:1px solid var(--line);background:var(--panel);
        backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
@@ -164,7 +182,7 @@
   .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
                  padding:6px 8px;border-radius:8px}
   .account nav a:hover{color:var(--ink);background:var(--panel)}
-  .account nav a[aria-current]{color:var(--accent)}
+  .account nav a[aria-current]{color:var(--accent-text)}
   .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
   .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
@@ -187,7 +205,7 @@
   .card .cardhead button,.card .cardhead a{margin-left:auto;font:11px var(--mono);
         color:var(--ink-mid);background:none;border:1px solid var(--line);
         border-radius:9px;padding:6px 12px;cursor:pointer;text-decoration:none}
-  .card .cardhead :is(button,a):hover{border-color:var(--accent);color:var(--accent)}
+  .card .cardhead :is(button,a):hover{border-color:var(--accent);color:var(--accent-text)}
 
   .person{display:flex;align-items:center;gap:12px;padding:9px 2px;
           border-bottom:1px solid var(--line-soft)}
@@ -201,10 +219,10 @@
                     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
         border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid);flex:none}
-  .role.admin{color:var(--accent);border-color:var(--accent)}
+  .role.admin{color:var(--accent-text);border-color:var(--accent)}
   .person .place{font:10.5px var(--mono);color:var(--ink-faint);background:none;
                  border:0;cursor:pointer;padding:4px;flex:none}
-  .person .place:hover{color:var(--accent)}
+  .person .place:hover{color:var(--accent-text)}
 
   .system{display:flex;align-items:center;gap:14px;padding:10px 2px;
           border-bottom:1px solid var(--line-soft)}
@@ -213,29 +231,33 @@
   .system .who{flex:1;min-width:0}
   .system .who b{display:block;font-size:13.5px;font-weight:530}
   .system .who span{font:10.5px var(--mono);color:var(--ink-faint)}
-  .joinbadge{font:10px var(--mono);letter-spacing:.08em;color:var(--warm);
-             border:1px dashed var(--warm);border-radius:99px;padding:3px 10px;flex:none}
-
-  .joinreq{display:flex;align-items:center;gap:12px;border:1px dashed var(--line);
-           border-radius:12px;padding:11px 14px;margin-top:12px}
-  .joinreq .avatar{width:28px;height:28px;border-radius:50%;flex:none;
-                   border:1px solid var(--line);display:grid;place-items:center;
-                   font:10px var(--mono);color:var(--ink-mid)}
-  .joinreq p{flex:1;font-size:13px;color:var(--ink-mid)}
-  .joinreq p b{color:var(--ink);font-weight:530}
-  .joinreq button{font-size:12px;font-family:var(--ui);border-radius:9px;padding:6px 13px;cursor:pointer;
-                  border:1px solid var(--line);background:none;color:var(--ink-mid)}
-  .joinreq button.yes{border-color:var(--ok);color:var(--ok)}
+  /* §15-2g removed the joinbadge and the dashed join-request row from this
+     panel (chrome reconciliation, #475): admin surfaces carry no join-request
+     data any more, so neither does this sheet — brought up from
+     administration.html/administration.css, never the reverse. */
 
   .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
       font:11.5px var(--mono);color:var(--ink-mid);padding:8px 2px;
       border-bottom:1px solid var(--line-soft)}
   .kv:last-child{border:0}
   .kv b{color:var(--ink);font-weight:500}
-  .kv .on{color:var(--ok)}
+  .kv .on{color:var(--ok-text)}
   .kv button{font:11px var(--mono);color:var(--ink-mid);background:none;
              border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
-  .kv button:hover{border-color:var(--accent);color:var(--accent)}
+  .kv button:hover{border-color:var(--accent);color:var(--accent-text)}
+
+  /* §15: the machinery corner — the relay's instance levers are no longer a
+     panel of their own; they are MAIL MACHINERY, joined to operations in one
+     panel, split by a hairline (chrome reconciliation, #475: brought up from
+     administration.html, which predates this sheet's own last edit). */
+  .card.wide{grid-column:1 / -1}
+  .card.machinery{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
+  .card.machinery .half:last-child{padding-left:26px;border-left:1px solid var(--line-soft)}
+  @media (max-width:880px){
+    .card.machinery{grid-template-columns:1fr;gap:0}
+    .card.machinery .half:last-child{padding-left:0;padding-top:22px;margin-top:22px;
+                                     border-left:0;border-top:1px solid var(--line-soft)}
+  }
 
   .svc{display:flex;align-items:center;gap:9px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
   .svc i{width:7px;height:7px;border-radius:50%;flex:none}
@@ -455,7 +477,10 @@
     <span>THEME</span>
     <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
     <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
-    <button style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+    <!-- clouds replaces atlas in the v1.3.0 roster (chrome reconciliation,
+         #475): atlas predates that change and is off the records shelf, per
+         administration.html's current chrome. -->
+    <button style="background:#eef2f9" title="clouds" aria-pressed="false" onclick="setSwatch('clouds',this)"></button>
     <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
     <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
   </div>
@@ -496,7 +521,7 @@
         <button class="place">place in a system&hellip;</button>
       </div>
       <div class="person">
-        <span class="avatar">GL</span>
+        <span class="avatar">G</span>
         <div class="who"><b>Gran</b><span>gran@lawson.example &middot; in 1 system</span></div>
         <span class="role">user</span>
         <button class="place">place in a system&hellip;</button>
@@ -524,7 +549,6 @@
           <circle cx="16" cy="12.7" r="1.6" style="fill:var(--ok)" opacity=".8"/>
         </svg>
         <div class="who"><b>Seaside Cottage</b><span>3 members &middot; owner Emma Lawson &middot; 3 items</span></div>
-        <span class="joinbadge">1 wants in</span>
       </div>
       <div class="system">
         <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
@@ -553,31 +577,29 @@
         </svg>
         <div class="who"><b>Gran&rsquo;s Flat</b><span>2 members &middot; owner Emma Lawson &middot; 2 items</span></div>
       </div>
+    </div>
 
-      <div class="joinreq">
-        <span class="avatar">RL</span>
-        <p><b>Rob Lawson</b> asks to join <b>Seaside Cottage</b> &middot; 2d ago</p>
-        <button class="yes">approve</button>
-        <button>decline</button>
+    <!-- §15: mail machinery sits WITH operations — one panel, two halves
+         (chrome reconciliation, #475: brought up from administration.html,
+         which merged these after this sheet was last drawn). -->
+    <div class="card wide machinery">
+      <div class="half">
+        <div class="cardhead"><h3>Mail machinery</h3></div>
+        <div class="kv"><span>collection domain</span><b>in.lawson-home.orbit</b></div>
+        <div class="kv"><span>ingest</span><b class="on">enabled &middot; polling every 30s</b></div>
+        <div class="kv"><span>address generation</span><span><b>1</b> &middot; current</span><button>rotate every address</button></div>
+        <div class="kv"><span>unreviewed arrivals</span><b>burn up after 45 days</b></div>
+        <div class="kv"><span>outbound reminders</span><b class="on">configured</b></div>
       </div>
-    </div>
 
-    <div class="card">
-      <div class="cardhead"><h3>The relay &middot; instance</h3></div>
-      <div class="kv"><span>collection domain</span><b>in.lawson-home.orbit</b></div>
-      <div class="kv"><span>ingest</span><b class="on">enabled &middot; polling every 30s</b></div>
-      <div class="kv"><span>address generation</span><span><b>1</b> &middot; current</span><button>rotate every address</button></div>
-      <div class="kv"><span>unreviewed arrivals</span><b>burn up after 45 days</b></div>
-      <div class="kv"><span>outbound reminders</span><b class="on">configured</b></div>
-    </div>
-
-    <div class="card">
-      <div class="cardhead"><h3>Operations</h3><a href="../family/admin.html">open operations &rarr;</a></div>
-      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy &middot; 40s ago</small></div>
-      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy &middot; 40s ago</small></div>
-      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-clamav</b><small>healthy &middot; scanning required</small></div>
-      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-tika</b><small>running</small></div>
-      <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running &middot; 12s ago</small></div>
+      <div class="half">
+        <div class="cardhead"><h3>Operations</h3><a href="../family/admin.html">open operations &rarr;</a></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy &middot; 40s ago</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy &middot; 40s ago</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-clamav</b><small>healthy &middot; scanning required</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-tika</b><small>running</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running &middot; 12s ago</small></div>
+      </div>
     </div>
 
   </div>
@@ -615,24 +637,38 @@ const VIEW = 1600;                       /* the viewBox is always 1600 wide, and
                                             xMidYMid slice never shows more */
 
 /* ---------- one seed, an endless stream (#475) ----------------------------
-   mkRng is the same Lehmer generator every other mockup uses. The trick that
-   makes a NON-LOOPING sky possible is chunkSeed: the contents of world chunk
-   n on a given layer are a pure function of (seed, layer, n), so a chunk can
-   be built the instant it is about to enter on the right and thrown away for
-   good when it leaves on the left — no tile, no <use> repeat, nothing that
-   ever comes back around. Rewind is impossible on purpose: the sky ahead of
-   you has simply not been rolled yet.
+   The trick that makes a NON-LOOPING sky possible: the contents of world
+   chunk n on a given layer are a pure function of (seed, layer, n), so a
+   chunk can be built the instant it is about to enter on the right and
+   thrown away for good when it leaves on the left — no tile, no <use>
+   repeat, nothing that ever comes back around. Rewind is impossible on
+   purpose: the sky ahead of you has simply not been rolled yet.
 
-   BUILD NOTE (fidelity gate): under ORBIT_FIXTURES both the seed and the
-   drift clock must be pinned — seed from the fixture workspace id, clock to a
-   fixed T — so the gate renders exactly one deterministic frame of this sky. */
-function mkRng(s){ let x = Math.abs(Math.floor(s)) % 2147483647; if (x <= 0) x += 2147483646;
-                   return () => (x = (x * 48271) % 2147483647) / 2147483647; }
-function chunkSeed(sd, tag, i){
-  let h = (sd ^ Math.imul(tag, 0x85ebca6b)) >>> 0;
-  h = Math.imul(h ^ (i + 0x9e3779b9), 0xc2b2ae35) >>> 0;
-  h = (h ^ (h >>> 15)) >>> 0;
-  return h % 2147483647;
+   THE GENERATOR IS THE APP'S, AND THE SHEET IS PINNED (the home.html law:
+   "same code, one constant"). makeRng and chunkRng below are copies of
+   seededRng and streamFactory in web/src/lib/sky.js — the one generator every
+   seeded surface in Orbit draws from — and the opening seed is what the app
+   derives under ORBIT_FIXTURES from the fixture primary household's own id
+   (seedFromWorkspace, web/src/lib/data/fixtures/workspace.js). So the sky
+   this sheet opens on is, chunk for chunk, the sky the fidelity gate
+   photographs on /administration; the re-roll button still rolls fresh via
+   Math.random(). Change the hash here and the gate fails for a reason that
+   is not drift. */
+const makeRng = (seed) => { let s = seed % 2147483647; if (s <= 0) s += 2147483646; return () => (s = (s * 48271) % 2147483647) / 2147483647; };
+function seedFromWorkspace(id){
+  let h = 2166136261;
+  for (let i = 0; i < String(id).length; i++) { h ^= String(id).charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (Math.abs(h | 0) % 2147483646) + 1;
+}
+/* hash(seed, lane, chunk) — the address of one patch of sky in the stream,
+   exactly as sky.js's streamFactory addresses it, three draws burnt and all.
+   `lane` is the LAYER'S INDEX in the `layers` array below (0–3), and 4 is the
+   fifth lane startClock() rolls its own opening placement from. */
+function chunkRng(lane, n){
+  const h = (seed ^ Math.imul(n + 1, 2654435761) ^ Math.imul(lane + 1, 40503)) | 0;
+  const r = makeRng((Math.abs(h) % 2147483646) + 1);
+  r(); r(); r();
+  return r;
 }
 
 /* ---------- the drift rates are the parallax ------------------------------
@@ -695,7 +731,7 @@ function Layer(host, speed, chunkW, margin, tag, build){
         if (i < a || i > b){ this.live.get(i).remove(); this.live.delete(i); }
       for (let i = a; i <= b; i++) if (!this.live.has(i)){
         const g = el("g", { transform:`translate(${(i * this.chunkW).toFixed(1)},0)` });
-        this.build(g, mkRng(chunkSeed(seed, this.tag, i)), i, T);
+        this.build(g, chunkRng(this.tag, i), i, T);
         this.host.appendChild(g); this.live.set(i, g);
       }
       this.host.setAttribute("transform", `translate(${(-off).toFixed(1)},0)`);
@@ -829,7 +865,10 @@ function buildStation(g, rng, i, T){
   const l1 = el("text", { x:-250, y:378, "font-size":11, "letter-spacing":".18em" });
   l1.textContent = "THE PLATFORM · IN.LAWSON-HOME.ORBIT";
   const l2 = el("text", { x:-250, y:395, "font-size":9.5, "letter-spacing":".14em", opacity:".88" });
-  l2.textContent = "5 SYSTEMS ABOARD · 5 CREW · 1 JOIN REQUEST HELD";
+  /* §15-2g reconciliation (#475): join requests are a household-management
+     fact now, never an admin one, so the caption carries only what this
+     screen still knows for certain — systems aboard and crew. */
+  l2.textContent = "5 SYSTEMS ABOARD · 5 CREW";
   const l3 = el("text", { x:-250, y:412, "font-size":9.5, "letter-spacing":".14em", opacity:".88" });
   l3.textContent = `PASS ${pass} · ATTITUDE ${rot >= 0 ? "+" : "−"}` +
                    `${Math.abs(rot).toFixed(1)}° · RESUPPLY ` +
@@ -842,15 +881,25 @@ function buildStation(g, rng, i, T){
 }
 
 /* ---------- assembly ------------------------------------------------------ */
-let seed = Math.floor(Math.random() * 2147483646) + 1;
+/* BUILD NOTE: under ORBIT_FIXTURES the seed MUST be fixed (derive it from the
+   fixture workspace id, not from time or Math.random), so the fidelity gate
+   compares one deterministic sky against this mockup's — the relay's own law
+   (design/v19/relay-satellites.html). The opening seed is what the app
+   derives under ORBIT_FIXTURES from the fixture primary household's own id
+   (web/src/lib/data/fixtures/workspace.js, activeHouseholdId). The re-roll
+   button still rolls fresh via Math.random(). */
+let seed = seedFromWorkspace("hh-lawson-1");
 let T0 = 0, T = 0, frozen = false, raf = null;
 const still = window.matchMedia("(prefers-reduced-motion: reduce)");
 
+/* Layer tags are now the layer's own index in this array (0–3) — chunkRng's
+   `lane` argument, exactly as sky.js's streamFactory addresses a lane. The
+   opening-placement roll in startClock() below is a fifth lane, 4. */
 const layers = [
-  Layer(document.getElementById("farL"),     FAR_V,     400,  120, 0x101, buildFar),
-  Layer(document.getElementById("conL"),     FAR_V,     520,  460, 0x202, buildMarks),
-  Layer(document.getElementById("nearL"),    NEAR_V,    400,  120, 0x303, buildNear),
-  Layer(document.getElementById("stationL"), STATION_V, SLOT, 660, 0x404, buildStation),
+  Layer(document.getElementById("farL"),     FAR_V,     400,  120, 0, buildFar),
+  Layer(document.getElementById("conL"),     FAR_V,     520,  460, 1, buildMarks),
+  Layer(document.getElementById("nearL"),    NEAR_V,    400,  120, 2, buildNear),
+  Layer(document.getElementById("stationL"), STATION_V, SLOT, 660, 3, buildStation),
 ];
 
 /* Start the clock so the first frame — the one the owner actually judges — is
@@ -859,7 +908,7 @@ const layers = [
    of the clear margins and its arrays sweep across behind the panels. Which
    margin, and how far out, is part of the roll. */
 function startClock(){
-  const r = mkRng(chunkSeed(seed, 0xF00D, 7));
+  const r = chunkRng(4, 7);
   const side = r() < 0.5 ? -1 : 1;
   const target = 800 + side * (330 + r() * 250);
   const slot = 40;                                  /* an arbitrary positive pass */
@@ -916,7 +965,13 @@ still.addEventListener("change", () => { frozen = still.matches;
 
 document.getElementById("seedout").textContent = String(seed);
 if (still.matches) document.getElementById("freezebtn").setAttribute("aria-pressed", "true");
-startClock();
-run();
+/* Built once the faces are in, as the other two ported sheets are
+   (design/v19/relay-satellites.html, design/v19/create-v3.html): the truss
+   segment identities and the caption both carry the mono face, and a face
+   only starts loading once something laid out has asked for it, so the
+   layout is forced first; `fonts.ready` then settles once those loads land,
+   and at once when nothing is loading. */
+void document.documentElement.getBoundingClientRect();
+document.fonts.ready.then(() => { startClock(); run(); });
 </script>
 </body></html>

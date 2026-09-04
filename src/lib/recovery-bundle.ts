@@ -560,11 +560,28 @@ export function encryptDocumentArchiveToFile(plaintextPath: string, documentKekH
 /**
  * decrypt (backup.sh:128-130 / restore.sh:145-147): rejects an envelope
  * that is too short or missing the `Salted__` header before any
- * cryptographic operation, and reports any decryption failure (wrong key,
- * truncated/tampered ciphertext — AES-CBC has no built-in authentication,
- * so this surfaces as a PKCS#7 padding error) with the same generic
- * refusal the Bash scripts give, never a raw OpenSSL diagnostic
- * (guarantees #19-20).
+ * cryptographic operation, and reports a decryption failure (wrong key,
+ * truncated/tampered ciphertext) with the same generic refusal the Bash
+ * scripts give, never a raw OpenSSL diagnostic (guarantees #19-20).
+ *
+ * What this cannot promise (#659): AES-256-CBC carries no authentication
+ * tag — deliberately, because the envelope must stay byte-compatible with
+ * `openssl enc -pbkdf2` as backup.sh writes it — so a wrong key is only
+ * *noticed* when PKCS#7 unpadding fails on the final block. Roughly 1 wrong
+ * key in 256 decrypts to garbage whose last byte is a plausible pad, and
+ * that garbage is returned rather than refused. The contract is therefore:
+ * a wrong key never yields the original plaintext, and is usually — not
+ * always — refused.
+ *
+ * Detecting a wrong document KEK is not this function's job, and does not
+ * depend on the coin flip. validateBackupManifestAndAuth refuses `wrong-key`
+ * on the manifest's `document_kek_sha256` fingerprint before decryption is
+ * ever attempted, and verifyBundleHmac authenticates manifest + checksums
+ * under the same KEK. Behind both, validateBackupBundleContents hands
+ * whatever comes out of here to validateDocumentArchiveEntries, which
+ * refuses garbage because it is not a tar. Closing the gap at this layer —
+ * authenticating the payload envelope itself — is a bundle-format decision,
+ * not a fix here.
  */
 export function decryptDocumentArchive(envelope: Buffer, documentKekHex: string): Buffer {
   const headerBytes = DOCUMENT_ARCHIVE_MAGIC.length + DOCUMENT_ARCHIVE_SALT_BYTES;
