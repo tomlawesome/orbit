@@ -105,7 +105,6 @@ variables:
   TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
   # The digest scripts/test-integration.mjs pins for its disposable database.
   POSTGRES_IMAGE: postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
-  PNPM_VERSION: "11.9.0"
   ORBIT_CI_IMAGE: orbit-ci:$CI_COMMIT_SHA
   # `.drop_to_node` gives the checkout to uid 1000 so pnpm can write in it, and
   # /builds survives from one job to the next on these runners. The next job to
@@ -145,7 +144,7 @@ variables:
 
 .pnpm_setup: &pnpm_setup |
   corepack enable
-  corepack prepare "pnpm@${PNPM_VERSION}" --activate
+  corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
   pnpm config set store-dir .pnpm-store
 
 # Which events reach the expensive lanes. `ORBIT_SYSTEM` arrives as a dotenv
@@ -616,7 +615,7 @@ fidelity:
       # The image ships its own Node and the browser build that matches it, so
       # neither is installed here: replacing either would defeat the pin. Only
       # pnpm is missing, and corepack is not the route in this image.
-      npm install --global "pnpm@${PNPM_VERSION}"
+      npm install --global "$(node -p "require('./package.json').packageManager")"
       pnpm install --frozen-lockfile
       # web/tsconfig.json extends ./.svelte-kit/tsconfig.json, which
       # `svelte-kit sync` generates and which is gitignored. Playwright reads
@@ -876,7 +875,7 @@ smoke:
       allow_failure: true
   script:
     - *docker_in_job
-    - npm install --global "pnpm@${PNPM_VERSION}"
+    - npm install --global "$(node -p "require('./package.json').packageManager")"
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
