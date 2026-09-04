@@ -2,7 +2,14 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Tests here run scripts/web-deploy.sh under sh; a spawn that takes tens of
+// milliseconds quiet takes seconds on a starved core (#698). Budget and
+// reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 /**
  * #735: `pnpm deploy` produces the image's pruned production node_modules, and
@@ -52,10 +59,11 @@ describe("scripts/web-deploy.sh", () => {
 
   function runDeploy({ exitCode = 0 } = {}) {
     stubPnpm(stubDir, { exitCode });
-    return spawnSync("sh", [join(repoRoot, "scripts", "web-deploy.sh"), join(stubDir, "target")], {
+    return failOnProcessDeadline(spawnSync("sh", [join(repoRoot, "scripts", "web-deploy.sh"), join(stubDir, "target")], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${stubDir}:${process.env.PATH}` },
-    });
+      ...processGuard(),
+    }), { label: "runDeploy" });
   }
 
   it("leaves the workspace's pnpm state exactly as it found it", () => {
@@ -73,7 +81,10 @@ describe("scripts/web-deploy.sh", () => {
   });
 
   it("refuses without a target directory rather than guessing one", () => {
-    const result = spawnSync("sh", [join(repoRoot, "scripts", "web-deploy.sh")], { encoding: "utf8" });
+    const result = failOnProcessDeadline(
+      spawnSync("sh", [join(repoRoot, "scripts", "web-deploy.sh")], { encoding: "utf8", ...processGuard() }),
+      { label: "web-deploy.sh without a target" },
+    );
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("usage:");
   });

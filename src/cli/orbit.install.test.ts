@@ -3,7 +3,9 @@ import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 
 // CLI wiring coverage for `orbit install`/`orbit update` (issue #295 slice
 // 5). This suite does not re-prove install-orchestrator.ts's own
@@ -21,10 +23,14 @@ import { afterEach, describe, expect, it } from "vitest";
 // left open (spawnSync's default `stdio` already closes/pipes it), matching
 // this port's "no spawn without a bound" discipline.
 
+// Every test here spawns the real CLI; a spawn that takes 0.7s quiet took
+// 4.3s on a starved core (#698). The budget and the reasoning live in
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
+
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cliEntry = fileURLToPath(new URL("./orbit.ts", import.meta.url));
 const tsx = join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
-const SPAWN_TIMEOUT_MS = 20_000;
 
 const sandboxes: string[] = [];
 afterEach(() => {
@@ -38,11 +44,11 @@ function newSandbox(prefix: string): string {
 }
 
 function runCli(args: string[], env: NodeJS.ProcessEnv = process.env): { stdout: string; stderr: string; status: number } {
-  const result = spawnSync("node", [tsx, cliEntry, ...args], {
+  const result = failOnProcessDeadline(spawnSync("node", [tsx, cliEntry, ...args], {
     encoding: "utf8",
-    timeout: SPAWN_TIMEOUT_MS,
     env,
-  });
+    ...processGuard(),
+  }), { label: "runCli" });
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status ?? -1 };
 }
 
