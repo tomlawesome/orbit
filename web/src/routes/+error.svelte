@@ -252,9 +252,18 @@
   const sky = createSky();
   const FIRST = /** @type {const} */ ([[1, 1], [2, 0.5]]);
   /* False until every copy is painted: the still sky shows, the canvases
-     are hidden and not yet animating (notfound.css). Flipping it swaps the
-     two in one step, so the handover moves nothing. */
+     are hidden and not yet animating (notfound.css). Flipping it starts
+     the fall and cross-fades the still sky out under it; `still` keeps the
+     still sky in the DOM until that fade has finished (owner, 2026-09-04:
+     parts arriving one after another read as a delay, so every arrival on
+     this page is a fade, never a pop — see notfound.css, "the arrival"). */
   let live = $state(false);
+  let still = $state(true);
+  /* False until every well raster has landed: the disc's lensing layers
+     wait hidden (never painting their live filters), then fade in as one
+     — the same rule, for the well. */
+  let lit = $state(false);
+  const FADE_MS = 700;
 
   onMount(() => {
     if (!isNotFound) return;
@@ -289,6 +298,7 @@
         if (cancelled) return;
       }
       live = true;
+      setTimeout(() => { if (!cancelled) still = false; }, FADE_MS);
     }
     /** @param {AnimationEvent} e */
     function onWrap(e) {
@@ -339,8 +349,10 @@
       /* One raster per frame, not all six in one task (#798): each is
          rendered, encoded and landed on its own, with a frame's rest before
          the next, so the page keeps painting through the build instead of
-         hanging until the last one is done. Landing each as it arrives
-         also retires its live filter that much sooner. */
+         hanging until the last one is done. Nothing shows until all six
+         have landed (`lit`): each layer's `.arrive` wrapper stays hidden,
+         so no live filter ever paints, and the disc lights up in one
+         fade rather than layer by layer. */
       const jobs = /** @type {const} */ ([
         [imgStatic, null, `notfound-static${k}`, STATIC_BODY, F_B6, CROP_TEXT],
         [imgLensarcs, srcLensarcs, `notfound-lensarcs${k}`, srcLensarcs.outerHTML, F_B1, CROP_MID],
@@ -357,6 +369,7 @@
         if (stale()) return;
       }
       world.dataset.rasterised = "ready";
+      lit = true;
     }
 
     function onResize() {
@@ -412,10 +425,11 @@
   same stars first, as one still <svg> in the HTML (static groups only —
   nothing scaled by CSS, which is the Safari trap above): on screen with the
   first paint, and replaced once all six canvases are painted — hidden and
-  unmoving until then (notfound.css) — by the same stars in the same places.
+  unmoving until then (notfound.css) — by the same stars in the same places,
+  which start to fall as the still sky fades out beneath them.
 -->
 <div class="infall" class:live aria-hidden="true" bind:this={infall}>
-  {#if !live}
+  {#if still}
   <svg class="first" viewBox="-1100 -1100 2200 2200">
     <defs>
       <radialGradient id="stargl" cx="50%" cy="50%" r="50%">
@@ -423,27 +437,36 @@
         <stop offset="100%" stop-color="#e8edff" stop-opacity="0"/>
       </radialGradient>
     </defs>
-    {#each FIRST as [i, s]}
+    {#each FIRST as [i, s] (i)}
       <g transform="scale({s})" fill="#dbe2f5">
-        {#each sky.first.far[i] as st}<circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)} opacity={st.o.toFixed(2)}/>{/each}
+        {#each sky.first.far[i] as st, j (j)}<circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)} opacity={st.o.toFixed(2)}/>{/each}
       </g>
     {/each}
-    {#each FIRST as [i, s]}
+    {#each FIRST as [i, s] (i)}
       <g transform="scale({s})" fill="#e8edff">
-        {#each sky.first.near[i] as st}<circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={(st.r * 3.6).toFixed(1)} fill="url(#stargl)"/><circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)} opacity={st.o.toFixed(2)}/>{/each}
+        {#each sky.first.near[i] as st, j (j)}<circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={(st.r * 3.6).toFixed(1)} fill="url(#stargl)"/><circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)} opacity={st.o.toFixed(2)}/>{/each}
       </g>
     {/each}
   </svg>
   {/if}
-  <canvas class="fall fall-far" style="--i:0;--s0:2"></canvas>
-  <canvas class="fall fall-far" style="--i:1;--s0:1"></canvas>
-  <canvas class="fall fall-far" style="--i:2;--s0:.5"></canvas>
-  <canvas class="fall fall-near" style="--i:0;--s0:2"></canvas>
-  <canvas class="fall fall-near" style="--i:1;--s0:1"></canvas>
-  <canvas class="fall fall-near" style="--i:2;--s0:.5"></canvas>
+  <div class="falling">
+    <canvas class="fall fall-far" style="--i:0;--s0:2"></canvas>
+    <canvas class="fall fall-far" style="--i:1;--s0:1"></canvas>
+    <canvas class="fall fall-far" style="--i:2;--s0:.5"></canvas>
+    <canvas class="fall fall-near" style="--i:0;--s0:2"></canvas>
+    <canvas class="fall fall-near" style="--i:1;--s0:1"></canvas>
+    <canvas class="fall fall-near" style="--i:2;--s0:.5"></canvas>
+  </div>
 </div>
 
-<div class="world" style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
+<!-- The well. What the HTML shows at once is the filter-free part of it —
+     the glow, the horizon, the haze, the 4s — and every `.arrive` group
+     (each a rasterised layer with its live source) stays hidden until all
+     six rasters have landed, then fades in as one (notfound.css, `lit`).
+     Without script nothing would ever land, so the noscript rule shows the
+     live sources as they were. -->
+<noscript><style>.world .arrive{visibility:visible;opacity:1}</style></noscript>
+<div class="world" class:lit style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
   <defs>
     <!-- doppler: the approaching side of the disc burns white, the receding side dims -->
     <linearGradient id="doppler" x1="0" y1="0" x2="1" y2="0">
@@ -503,20 +526,24 @@
          nothing here duplicates its seeded generator — but once its raster
          (below) is ready it is hidden (display:none), not removed, so
          `#lensarcs path` still finds what was drawn. -->
-    <g id="lensarcs" class="lensed" fill="none" bind:this={srcLensarcs}></g>
-    <image bind:this={imgLensarcs} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="lensed"/>
+    <g class="arrive">
+      <g id="lensarcs" class="lensed" fill="none" bind:this={srcLensarcs}></g>
+      <image bind:this={imgLensarcs} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="lensed"/>
+    </g>
 
     <!-- the far side of the disc, lensed into an arch OVER the hole (and a
          fainter one under). #764 step 4: rasterised once, same reasoning. -->
-    <g class="lensed" bind:this={srcLensedArch}>
-      <path d="M 649 460 A 152 152 0 1 1 951 460" fill="none" stroke="url(#doppler)"
-            stroke-width="17" stroke-linecap="round" filter="url(#b3)" opacity=".9"/>
-      <path d="M 655 452 A 150 150 0 1 1 945 452" fill="none" stroke="#fff3d6"
-            stroke-width="4" stroke-linecap="round" filter="url(#b1)" opacity=".75"/>
-      <path d="M 668 508 A 140 140 0 0 0 932 508" fill="none" stroke="url(#doppler)"
-            stroke-width="9" stroke-linecap="round" filter="url(#b3)" opacity=".5"/>
+    <g class="arrive">
+      <g class="lensed" bind:this={srcLensedArch}>
+        <path d="M 649 460 A 152 152 0 1 1 951 460" fill="none" stroke="url(#doppler)"
+              stroke-width="17" stroke-linecap="round" filter="url(#b3)" opacity=".9"/>
+        <path d="M 655 452 A 150 150 0 1 1 945 452" fill="none" stroke="#fff3d6"
+              stroke-width="4" stroke-linecap="round" filter="url(#b1)" opacity=".75"/>
+        <path d="M 668 508 A 140 140 0 0 0 932 508" fill="none" stroke="url(#doppler)"
+              stroke-width="9" stroke-linecap="round" filter="url(#b3)" opacity=".5"/>
+      </g>
+      <image bind:this={imgLensedArch} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="lensed"/>
     </g>
-    <image bind:this={imgLensedArch} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="lensed"/>
 
     <!-- disc haze behind everything: static, unanimated, out of this step's
          scope (#764 step 2 already left it live). -->
@@ -529,11 +556,13 @@
          #764 step 4: merged into ONE raster, since they already shared a
          timing and a place in paint order (Dawn's "scatter" group merges
          its five static rings the same way). -->
-    <g bind:this={srcPhoton}>
-      <circle class="photon" cx="800" cy="450" r="119" fill="none" stroke="#ff9a4a" stroke-width="7" opacity=".4" filter="url(#b6)"/>
-      <circle class="photon" cx="800" cy="450" r="118" fill="none" stroke="#ffce8a" stroke-width="2.6" filter="url(#b1)"/>
+    <g class="arrive">
+      <g bind:this={srcPhoton}>
+        <circle class="photon" cx="800" cy="450" r="119" fill="none" stroke="#ff9a4a" stroke-width="7" opacity=".4" filter="url(#b6)"/>
+        <circle class="photon" cx="800" cy="450" r="118" fill="none" stroke="#ffce8a" stroke-width="2.6" filter="url(#b1)"/>
+      </g>
+      <image bind:this={imgPhoton} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="photon"/>
     </g>
-    <image bind:this={imgPhoton} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="photon"/>
     <!-- photon-hot: no filter — stays live, same reason as disc-glow. -->
     <circle class="photon-hot" cx="800" cy="450" r="117" fill="none" stroke="#fffaf0" stroke-width="1.1"/>
 
@@ -541,11 +570,13 @@
          step 4: rasterised once — kept as its OWN raster, not merged with
          the tidal-stream `.smear` below, since the two sit in different,
          non-adjacent places in paint order. -->
-    <g class="smear" bind:this={srcSmearNear}>
-      <path d="M 452 452 A 348 62 0 0 0 1148 452" fill="none" stroke="url(#doppler-soft)"
-            stroke-width="34" filter="url(#b6)"/>
+    <g class="arrive">
+      <g class="smear" bind:this={srcSmearNear}>
+        <path d="M 452 452 A 348 62 0 0 0 1148 452" fill="none" stroke="url(#doppler-soft)"
+              stroke-width="34" filter="url(#b6)"/>
+      </g>
+      <image bind:this={imgSmearNear} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="smear"/>
     </g>
-    <image bind:this={imgSmearNear} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="smear"/>
     <path d="M 452 452 A 348 62 0 0 0 1148 452" fill="none" stroke="url(#doppler)"
           stroke-width="13" filter="url(#hotrough)"/>
     <path d="M 470 458 A 346 58 0 0 0 1130 458" fill="none" stroke="#fff3d6"
@@ -563,7 +594,7 @@
        see the script block) in place of the live text it replaces. Same
        position in paint order: after the outer 4, before the inner 4's own
        crisp glyph. -->
-  <image bind:this={imgStatic} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+  <g class="arrive"><image bind:this={imgStatic} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/></g>
 
   <!-- the inner 4: mid-spaghettification, shearing toward the horizon -->
   <g>
@@ -576,11 +607,13 @@
     <!-- the tidal stream: its substance drawn off into the photon ring.
          #764 step 4: rasterised once, kept as its own raster (see the
          near-side disc above for why it isn't merged with that one). -->
-    <g bind:this={srcSmearTidal}>
-      <path class="smear" d="M 1030 448 C 985 442, 950 442, 916 446 L 916 470 C 950 468, 985 470, 1030 480 Z"
-            fill="url(#streamg)" filter="url(#b3)"/>
+    <g class="arrive">
+      <g bind:this={srcSmearTidal}>
+        <path class="smear" d="M 1030 448 C 985 442, 950 442, 916 446 L 916 470 C 950 468, 985 470, 1030 480 Z"
+              fill="url(#streamg)" filter="url(#b3)"/>
+      </g>
+      <image bind:this={imgSmearTidal} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="smear"/>
     </g>
-    <image bind:this={imgSmearTidal} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="smear"/>
     <path d="M 1026 456 C 978 450, 946 452, 918 456" fill="none" stroke="#ffe9bd"
           stroke-width="1.4" opacity=".55" filter="url(#b1)"/>
   </g>

@@ -128,13 +128,19 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
   /* And the copies arrive hidden and still: `live` is only set once all
      six are painted (#798), so the HTML must not carry it. */
   expect(html, "the copies must not be live before they are painted").not.toMatch(/class="infall live"/);
+  /* Nor the well lit: its lensing layers wait hidden until every raster has
+     landed, so the first paint never runs a live filter. */
+  expect(html, "the well must not be lit before its rasters land").not.toMatch(/class="world lit"/);
 
   await page.goto(`${APP}/some-missing-path`, { waitUntil: "load" });
-  /* The sky is painted synchronously at mount, before the well's rasters
-     even start; "ready" is simply the surest sign mount has run. Asked for
-     as a real match, not every-of-nothing, because before hydration there
-     is no .world[data-rasterised] at all. */
+  /* The sky is painted before the well's rasters even start; "ready" is
+     the surest sign the build has run. Asked for as a real match, not
+     every-of-nothing, because before hydration there is no
+     .world[data-rasterised] at all. The still sky leaves once its
+     cross-fade under the copies has finished, so wait for that event
+     rather than assume the order. */
   await page.waitForFunction(() => document.querySelector('.world[data-rasterised="ready"]') !== null);
+  await page.waitForFunction(() => document.querySelector(".infall .first") === null);
 
   const sample = () =>
     page.evaluate(() => {
@@ -157,6 +163,7 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
            is gone, so nothing static is left under the moving copies. */
         still: document.querySelectorAll(".infall .first").length,
         live: document.querySelector(".infall.live") !== null,
+        lit: document.querySelector(".world.lit") !== null,
         /* Anything in the star layers that is, or sits under, a filter. */
         skyFiltered: document.querySelectorAll(".infall filter, .infall [filter], .sky filter, .sky [filter]").length,
         /* Every painted, animated element on the screen that also carries a
@@ -176,6 +183,7 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
   expect(before.painted, "every falling copy should be a painted canvas").toBe(6);
   expect(before.still, "the still sky should be gone once the canvases are painted").toBe(0);
   expect(before.live, "the copies should be live once the still sky is gone").toBe(true);
+  expect(before.lit, "the well should be lit once its rasters have landed").toBe(true);
   for (const g of before.falls) expect(g.animationName, "a star group lost its infall").toMatch(/^infall/);
   expect(before.skyFiltered, "the sky must stay unfiltered").toBe(0);
   expect(before.animatedFiltered, "an animated element carries a live filter").toEqual([]);
