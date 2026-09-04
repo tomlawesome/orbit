@@ -15,6 +15,7 @@ export function mountSunsetSky() {
 
   (function(){
     var NS='http://www.w3.org/2000/svg';
+    /** @param {number} seed @returns {() => number} */
     function rng(seed){
       var s=seed>>>0;
       return function(){
@@ -22,6 +23,18 @@ export function mountSunsetSky() {
         return s/4294967296;
       };
     }
+    /**
+     * @param {Element} container
+     * @param {string} cls
+     * @param {number} count
+     * @param {number} rMin
+     * @param {number} rMax
+     * @param {number} opMin
+     * @param {number} opMax
+     * @param {string} fill
+     * @param {number} twChance
+     * @param {number} seed
+     */
     function makeLayer(container,cls,count,rMin,rMax,opMin,opMax,fill,twChance,seed){
       var rand=rng(seed);
       var wrap=document.createElementNS(NS,'g');
@@ -41,7 +54,9 @@ export function mountSunsetSky() {
           c.setAttribute('opacity',op.toFixed(2));
           if(rand()<twChance){
             c.setAttribute('class','tw');
-            c.style.animationDelay=(rand()*6).toFixed(1)+'s';
+            // SVG elements support inline style same as HTML; createElementNS's
+            // generic overload just doesn't narrow past Element.
+            /** @type {SVGElement} */ (c).style.animationDelay=(rand()*6).toFixed(1)+'s';
           }
           g.appendChild(c);
         }
@@ -49,7 +64,8 @@ export function mountSunsetSky() {
       }
       container.appendChild(wrap);
     }
-    var field=document.getElementById('starfield');
+    // Present in the static markup this mounts into, so it always resolves.
+    var field=/** @type {Element} */ (document.getElementById('starfield'));
     makeLayer(field,'far',120,0.4,0.9,0.1,0.36,'#e9edf8',0.14,7791);
     makeLayer(field,'near',46,0.8,1.7,0.35,0.72,'#f4f0ff',0.25,3057);
   })();

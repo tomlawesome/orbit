@@ -22,28 +22,38 @@
    * belt's page never loads a stylesheet that fights it. The page imports this
    * component lazily for the same reason.
    */
+  /** @type {{ item: import('$lib/data/workspace.js').ItemView }} */
   let { item } = $props();
 
   let busy = $state(false);
+  /** @type {string | null} */
   let problem = $state(null);
 
+  /** @param {string} text */
   const minorOf = (text) => {
     const value = Number.parseFloat(String(text).replace(",", "."));
     return Number.isFinite(value) ? Math.round(value * 100) : undefined;
   };
 
+  /* A suggestion always carries a (possibly empty) proposal from the parser
+     -- see ItemView's own doc comment -- so this narrows what's already
+     guaranteed rather than changing behaviour. */
+  const proposal = /** @type {NonNullable<typeof item.proposal>} */ (item.proposal);
+
   /* Initialised synchronously: the first render must already know its
      values — an effect lands after render. */
   let sform = $state({
-    title: item.proposal.title ?? "Forwarded email",
-    provider: item.proposal.provider ?? "",
-    reference: item.proposal.reference ?? "",
-    cost: item.proposal.costMinor != null ? (item.proposal.costMinor / 100).toFixed(2) : "",
-    dueDate: item.proposal.dueDate ?? "",
-    recurrenceMonths: item.proposal.recurrenceMonths ?? "",
+    title: proposal.title ?? "Forwarded email",
+    provider: proposal.provider ?? "",
+    reference: proposal.reference ?? "",
+    cost: proposal.costMinor != null ? (proposal.costMinor / 100).toFixed(2) : "",
+    dueDate: proposal.dueDate ?? "",
+    recurrenceMonths: proposal.recurrenceMonths ?? "",
   });
   let acceptArmedDismiss = $state(false);
+  /** @type {string | null} */
   let acceptOpId = null;
+  /** @param {string} field */
   const marked = (field) => Boolean(item?.fieldEvidence?.[field]);
 
   async function accept() {
@@ -51,23 +61,27 @@
     problem = null;
     try {
       acceptOpId ??= crypto.randomUUID();
+      /** @type {import('$lib/data/workspace.js').ItemProposal} */
       const amended = { title: sform.title.trim() || "Forwarded email", currency: item.currency };
-      if (item.proposal.subtype) amended.subtype = item.proposal.subtype;
+      if (proposal.subtype) amended.subtype = proposal.subtype;
       if (sform.provider.trim()) amended.provider = sform.provider.trim();
       if (sform.reference.trim()) amended.reference = sform.reference.trim();
       const cost = minorOf(sform.cost);
       if (cost !== undefined) amended.costMinor = cost;
       if (sform.dueDate) {
         amended.dueDate = sform.dueDate;
-        if (item.proposal.scheduleKind) {
-          amended.scheduleKind = item.proposal.scheduleKind;
+        if (proposal.scheduleKind) {
+          amended.scheduleKind = proposal.scheduleKind;
           const months = Number(sform.recurrenceMonths);
           if (months) amended.recurrenceMonths = months;
         }
       }
       const workspace = await readWorkspace();
       const fallback = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-      const result = await approveReceipt(item, fallback, acceptOpId, amended);
+      /* This card only mounts for a suggestion (#458's fork), so item always
+         carries the ReceiptSuggestion fields ItemView makes optional. */
+      const suggestion = /** @type {import('$lib/data/workspace.js').ReceiptSuggestion} */ (item);
+      const result = await approveReceipt(suggestion, fallback, acceptOpId, amended);
       if (result.outcome === "partial_success") {
         problem = "The item is recorded, but its documents need another try — accept again to finish.";
         return;
@@ -76,7 +90,7 @@
       /* Accepted: it is an item now, so it has a seat in the belt. */
       await goto(result.itemId ? resolve("/item/[id]", { id: result.itemId }) : resolve("/home"));
     } catch (error) {
-      problem = error?.message ?? String(error);
+      problem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
     } finally {
       busy = false;
     }
@@ -90,10 +104,11 @@
     busy = true;
     problem = null;
     try {
-      await dismissReceipt(item.receiptId);
+      /* Same suggestion-only invariant as accept(): receiptId is always set. */
+      await dismissReceipt(/** @type {string} */ (item.receiptId));
       await goto(resolve("/home"));
     } catch (error) {
-      problem = error?.message ?? String(error);
+      problem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
       acceptArmedDismiss = false;
     } finally {
       busy = false;
@@ -101,8 +116,9 @@
   }
 
   /* POL-11: every page's sky drifts. Decorative and aria-hidden. */
+  /** @type {HTMLDivElement | undefined} */
   let sky;
-  onMount(() => mountItemSky(sky));
+  onMount(() => mountItemSky(/** @type {Element} */ (sky)));
 </script>
 
 <svelte:head>
@@ -138,7 +154,7 @@
       <div class="field mono" class:sugg={marked("costMinor")}>
         <label for="s-cost">cost</label>
         <input id="s-cost" inputmode="decimal" bind:value={sform.cost} placeholder="optional"></div>
-      {#if item.attachmentCount > 0}
+      {#if (item.attachmentCount ?? 0) > 0}
         <div class="note">◆ {item.sourceDocument} will be attached on acceptance</div>
       {/if}
       <div class="save-row">

@@ -75,6 +75,11 @@
      page never loads item.css — see Suggestion.svelte. */
   const suggestionView =
     data.kind === "suggestion" ? import("./Suggestion.svelte").then((m) => m.default) : null;
+  /* readBelt only ever sets `item` alongside kind: "suggestion" (workspace.js);
+     the union isn't discriminated at the type level because its `kind` values
+     come back as plain `string`, so this only asserts what data.kind === "suggestion"
+     already guarantees at runtime. */
+  const suggestionItem = /** @type {import('$lib/data/workspace.js').ItemView} */ (data.item);
 
   /** @type {HTMLDivElement | null} */
   let root = $state(null);
@@ -136,7 +141,11 @@
     const rows = beltManifestOf({
       household: data.household,
       documentsByItem: data.documentsByItem,
-      today: data.today,
+      /* Same cast as suggestionItem above and for the same reason: data.kind
+         comes back as plain `string`, so the data.kind === "belt" guard this
+         effect already made does not narrow `today` into existence at the
+         type level even though it always does at runtime. */
+      today: /** @type {string} */ (data.today),
       keepId: data.selectedId,
     });
     const focus = centredId ?? data.selectedId;
@@ -378,7 +387,7 @@
 
 {#if data.kind === "suggestion"}
   {#await suggestionView then Suggestion}
-    <Suggestion item={data.item} />
+    <Suggestion item={suggestionItem} />
   {/await}
 {:else}
 <div class="belt-page" bind:this={root}>
@@ -445,7 +454,12 @@
               {#if cardBody.doc.clean}<b class="clean">scanned clean</b>
               {:else}<b>{cardBody.doc.scan ?? "not scanned"}</b>{/if}</div>
             <div class="getrow">
-              <a class="btn-primary" href={resolve(cardBody.doc.href)} download>download the original</a>
+              <!-- doc.href is a download endpoint, not a page route -- outside
+                   resolve()'s typed route union, but still the right runtime
+                   value. The cast picks one no-params route literal so
+                   resolve()'s generic can be satisfied at all; it has no
+                   effect on the string actually passed through. -->
+              <a class="btn-primary" href={resolve(/** @type {"/home"} */ (cardBody.doc.href))} download>download the original</a>
             </div>
           </div>
         </div>
