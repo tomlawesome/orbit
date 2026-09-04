@@ -325,7 +325,7 @@
     r: Math.max(1.2, r * 0.6),
     tone: TONE[tone] ?? "--ok",
   });
-  const ringDots = $derived(constellationPlanetsOf(v.items ?? [], v.today).map(ringDot));
+  const ringDots = $derived(v.today ? constellationPlanetsOf(v.items ?? [], v.today).map(ringDot) : []);
 
   /* ══════════════════════════════════════════════════════════════════════════
      H2 — INSIDE THIS SYSTEM (§15). The backdrop, and nothing but the backdrop:

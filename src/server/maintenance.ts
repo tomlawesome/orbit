@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
-import type { NextRequest } from "next/server";
+import type { CookieReader } from "@/lib/http";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, instanceMaintenance, maintenanceUpdates, maintenanceWindows, users } from "@/db/schema";
@@ -330,12 +330,12 @@ export async function readEffectiveMaintenance(): Promise<EffectiveMaintenance> 
  * the route module that calls this — never to the URL — which is what leaves
  * prefix and normalisation tricks with no place to work.
  */
-export async function assertOutsideMaintenance(request: NextRequest): Promise<void> {
+export async function assertOutsideMaintenance(cookies: CookieReader): Promise<void> {
   const { effectivelyActive, expectedEndAt } = await readEffectiveMaintenance();
   if (!effectivelyActive) return;
   // readSession answers null for a disabled user, so a surviving session with
   // the administrator flag is exactly "an active instance administrator".
-  const session = await readSession(request, getAuthConfig());
+  const session = await readSession(cookies, getAuthConfig());
   if (session?.user.isInstanceAdmin) return;
   throw new MaintenanceActiveError(expectedEndAt);
 }

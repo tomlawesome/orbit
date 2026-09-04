@@ -21,6 +21,15 @@
    * flows down the page; overdue sits in the red zone above today; months are
    * rules, not a scale. Every dot is the item's own dial body.
    */
+  /* #624/#782: left without JSDoc type annotations, deliberately. Every
+     JSDoc "@type"-style cast tried anywhere in this file — before a $state()
+     call, inside a $derived(...) block, on an arrow-function param, doubled
+     up on a getElementById(...) call — parses fine for svelte-check but
+     makes the production rolldown build fail to parse this file (a parse
+     error right at the cast). This reproduces well beyond the three
+     documented #782 placements and looks specific to this file; flagging for
+     the rolldown fix rather than guessing around it here. Plain (non-JSDoc)
+     comments are unaffected, confirmed by testing. */
   let view = $state(null);
   let filter = $state(null); // household id, or null = all systems
 

@@ -1,5 +1,5 @@
 import { and, eq, gt, sql } from "drizzle-orm";
-import type { NextRequest, NextResponse } from "next/server";
+import type { CookieReader, CookieSink } from "@/lib/http";
 import { getDb } from "@/db";
 import { auditLog, sessions, userPreferences, users } from "@/db/schema";
 import type { AuthConfig } from "@/lib/env";
@@ -84,8 +84,8 @@ export async function revokeUserSessions(userId: string): Promise<number> {
   });
 }
 
-export async function readSession(request: NextRequest, config: AuthConfig): Promise<AuthenticatedSession | null> {
-  const token = request.cookies.get(sessionCookieName(config))?.value;
+export async function readSession(cookies: CookieReader, config: AuthConfig): Promise<AuthenticatedSession | null> {
+  const token = cookies.get(sessionCookieName(config));
   if (!token) return null;
   const tokenHash = hashSessionToken(token);
   const [record] = await getDb()
@@ -141,13 +141,13 @@ export async function readSession(request: NextRequest, config: AuthConfig): Pro
   };
 }
 
-export async function requireSession(request: NextRequest, config: AuthConfig): Promise<AuthenticatedSession> {
-  const session = await readSession(request, config);
+export async function requireSession(cookies: CookieReader, config: AuthConfig): Promise<AuthenticatedSession> {
+  const session = await readSession(cookies, config);
   if (!session) throw new AuthError("session_required", "A valid session is required", 401);
   return session;
 }
 
-export async function rotateSession(session: AuthenticatedSession, response: NextResponse, config: AuthConfig): Promise<void> {
+export async function rotateSession(session: AuthenticatedSession, cookies: CookieSink, config: AuthConfig): Promise<void> {
   const nextToken = randomUrlSafe(32);
   const nextExpiry = new Date(Date.now() + config.sessionTtlSeconds * 1000);
   const [rotated] = await getDb()
@@ -160,12 +160,12 @@ export async function rotateSession(session: AuthenticatedSession, response: Nex
     .where(and(eq(sessions.id, session.id), eq(sessions.tokenHash, hashSessionToken(session.token))))
     .returning({ id: sessions.id });
   if (!rotated) throw new AuthError("session_required", "The session was replaced by another request", 401);
-  setSessionCookie(response, nextToken, config);
+  setSessionCookie(cookies, nextToken, config);
 }
 
-export function assertSameOrigin(request: NextRequest, config: AuthConfig): void {
-  const origin = request.headers.get("origin");
-  const fetchSite = request.headers.get("sec-fetch-site");
+export function assertSameOrigin(headers: Headers, config: AuthConfig): void {
+  const origin = headers.get("origin");
+  const fetchSite = headers.get("sec-fetch-site");
   let requestOrigin: string | undefined;
   try {
     requestOrigin = origin ? new URL(origin).origin : undefined;
@@ -177,9 +177,9 @@ export function assertSameOrigin(request: NextRequest, config: AuthConfig): void
   }
 }
 
-export function assertCsrf(request: NextRequest, session: AuthenticatedSession, config: AuthConfig): void {
-  assertSameOrigin(request, config);
-  const supplied = request.headers.get("x-csrf-token");
+export function assertCsrf(headers: Headers, session: AuthenticatedSession, config: AuthConfig): void {
+  assertSameOrigin(headers, config);
+  const supplied = headers.get("x-csrf-token");
   const expected = createCsrfToken(session.token, config.sessionSecret);
   if (!supplied || !constantTimeEqual(supplied, expected)) {
     throw new AuthError("csrf_failed", "The CSRF token is missing or invalid", 403);
@@ -190,7 +190,7 @@ export function csrfTokenForSession(session: AuthenticatedSession, config: AuthC
   return createCsrfToken(session.token, config.sessionSecret);
 }
 
-export async function invalidateSession(request: NextRequest, response: NextResponse, config: AuthConfig): Promise<void> {
-  await deleteSessionToken(request.cookies.get(sessionCookieName(config))?.value);
-  clearSessionCookie(response, config);
+export async function invalidateSession(cookies: CookieSink, config: AuthConfig): Promise<void> {
+  await deleteSessionToken(cookies.get(sessionCookieName(config)));
+  clearSessionCookie(cookies, config);
 }
