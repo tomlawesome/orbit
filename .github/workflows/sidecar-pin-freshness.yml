@@ -1,0 +1,123 @@
+name: Sidecar pin freshness
+
+# Asks, once a week and without anybody remembering to, whether the pinned
+# sidecar images are still the images upstream is shipping (#771). Before this,
+# nothing did: `Base image freshness` covers only the Orbit base image, and
+# Dependabot cannot read `.github/supply-chain-policy.json` at all. The gap did
+# not announce itself; it accumulated into the 81 findings on #740.
+#
+# Two things about the schedule that are easy to get wrong:
+#
+#  (a) GitHub runs a scheduled workflow from the repository's DEFAULT branch,
+#      which here is `main`. `main` stays at v1.2.0 until #547 promotes v1.3,
+#      so this file does not exist there yet and the schedule will not fire
+#      until it does. `workflow_dispatch` is unavailable for the same reason.
+#      Until then the cadence is manual, and `docs/supply-chain.md` says so.
+#  (b) When it does start firing, the checkout below must ask for `dev`
+#      explicitly. The pins on `main` are the v1.2.0 pins; the ones that matter
+#      are the current ones.
+#
+# No registry credentials, no `contents: write`, no pull request. A pull
+# request opened with the workflow token gets no CI runs, so it could never
+# satisfy the required checks and could never merge — the artefact a human can
+# actually act on is an issue. Version bumps and moved digests arrive instead
+# as Dependabot pull requests, which do get CI.
+
+on:
+  schedule:
+    # Monday 05:30. Cron is UTC, so this is 05:30 or 06:30 UK depending on the
+    # season — early either way, and ahead of Dependabot's 06:00 window.
+    - cron: "30 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sidecar_pins:
+    name: Sidecar pin freshness
+    runs-on: ubuntu-latest
+    # The package axis pulls every pinned image, and ollama and tika are large.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Only so the last step can file or update one issue. Nothing here can
+      # push, publish, or mint a token.
+      issues: write
+
+    steps:
+      - name: Check out the current pins from dev
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          persist-credentials: false
+
+      # Proves the check can fail before believing it when it passes. It
+      # mutates one pin in memory into a digest that is valid but wrong, and
+      # insists the check reports it as moved.
+      - name: Prove the check fires on a deliberately stale pin
+        run: node scripts/sidecar-pins.mjs check --red
+
+      - name: Check every pinned sidecar
+        id: check
+        run: |
+          set +e
+          node scripts/sidecar-pins.mjs check \
+            --packages \
+            --report "${RUNNER_TEMP}/sidecar-pins.md"
+          check_status=$?
+          set -e
+          echo "exit-code=${check_status}" >> "${GITHUB_OUTPUT}"
+          if [ "${check_status}" -eq 0 ]; then
+            echo "status=current" >> "${GITHUB_OUTPUT}"
+          elif [ "${check_status}" -eq 1 ]; then
+            echo "status=behind" >> "${GITHUB_OUTPUT}"
+          else
+            # Exit 2 means the check could not see — an unreachable registry,
+            # or an image with no package manager. Not a pass, but not
+            # something to file an issue about either: there is no finding.
+            echo "status=blind" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: File or update the issue naming what is behind
+        if: ${{ always() && steps.check.outputs.status == 'behind' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title='Sidecar pins are behind'
+          body_file="${RUNNER_TEMP}/sidecar-pins-issue.md"
+          {
+            printf 'Reported by the weekly `Sidecar pin freshness` workflow on %s.\n' "$(date -u +%Y-%m-%d)"
+            printf 'Run: %s\n\n' "${RUN_URL}"
+            cat "${RUNNER_TEMP}/sidecar-pins.md"
+          } > "${body_file}"
+
+          existing="$(gh issue list \
+            --search 'in:title "Sidecar pins are behind"' \
+            --state open \
+            --json number \
+            --limit 5 \
+            --jq '.[0].number // empty')"
+
+          if [ -n "${existing}" ]; then
+            gh issue edit "${existing}" --body-file "${body_file}"
+            echo "updated issue #${existing}"
+          else
+            gh issue create \
+              --title "${title}" \
+              --body-file "${body_file}" \
+              --label security \
+              --label dependencies \
+              --milestone 'M5 — Supply chain and CI baseline'
+          fi
+
+      # The run itself must be red when a pin is behind, so the schedule's
+      # history reads as a record rather than as a row of green ticks with the
+      # news buried in an issue.
+      - name: Fail the run when a pin is behind or could not be checked
+        if: ${{ always() && steps.check.outputs.exit-code != '0' }}
+        run: |
+          printf 'sidecar pins: the check exited %s.\n' "${{ steps.check.outputs.exit-code }}" >&2
+          exit 1
