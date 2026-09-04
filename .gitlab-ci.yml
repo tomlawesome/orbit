@@ -88,6 +88,20 @@ variables:
   POSTGRES_IMAGE: postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
   PNPM_VERSION: "11.9.0"
   ORBIT_CI_IMAGE: orbit-ci:$CI_COMMIT_SHA
+  # `.drop_to_node` gives the checkout to uid 1000 so pnpm can write in it, and
+  # /builds survives from one job to the next on these runners. The next job to
+  # run git as root in that same directory -- build_image's `git fetch --tags`
+  # -- then dies on "detected dubious ownership in repository at
+  # /builds/ai/orbit" (pipeline 195 on `dev`; the same job passed on 197,
+  # because whether it bites depends on which job had the slot before, so it
+  # fails intermittently and never for a reason in the diff). Git reads this
+  # trio as if it were `git config safe.directory $CI_PROJECT_DIR`, which
+  # covers every job without a shared before_script for the node jobs to
+  # override. The directory belongs to the runner and holds only this
+  # checkout, so trusting it asserts nothing about anyone else's repository.
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: safe.directory
+  GIT_CONFIG_VALUE_0: $CI_PROJECT_DIR
 
 # --- Reusable pieces ---------------------------------------------------------
 
