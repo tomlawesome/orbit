@@ -3,7 +3,14 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Every spawnSync call here runs configure.sh (or a coreutil) under bash; a
+// spawn that takes tens of milliseconds quiet takes seconds on a starved
+// core (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 // scripts/engine-check.sh is the first delegation point for issue #295's
 // engine-delivery architecture; this suite proves scripts/configure.sh's own
@@ -24,8 +31,7 @@ const configureScriptSource = readFileSync(join(scriptsDir, "configure.sh"), "ut
 const installerUiSource = readFileSync(join(scriptsDir, "installer-ui.sh"), "utf8");
 const environmentExampleSource = readFileSync(join(repoDir, ".env-orbit.example"), "utf8");
 
-const SPAWN_TIMEOUT_MS = 30_000;
-const SPAWN_OPTS = { encoding: "utf8", timeout: SPAWN_TIMEOUT_MS, killSignal: "SIGKILL" };
+const SPAWN_OPTS = { encoding: "utf8", ...processGuard() };
 
 const scratchDirs = [];
 
@@ -97,12 +103,12 @@ function makeFakeDockerBin({ imageInspectExitCode = 0, runExitCode = 0, argvLogP
 
 function runConfigure(targetDir, args, { pathPrefix, env = {}, input } = {}) {
   const pathValue = pathPrefix ? `${pathPrefix}:${process.env.PATH}` : process.env.PATH;
-  return spawnSync("bash", [join(targetDir, "scripts", "configure.sh"), ...args], {
+  return failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "configure.sh"), ...args], {
     cwd: targetDir,
     ...SPAWN_OPTS,
     input,
     env: { PATH: pathValue, HOME: process.env.HOME ?? tmpdir(), ...env },
-  });
+  }), { label: "runConfigure" });
 }
 
 function readArgv(argvLogPath) {
@@ -121,7 +127,7 @@ describe("default mode (ORBIT_CONFIGURE_ENGINE unset): never touches docker", ()
     for (const systemDir of ["/usr/bin", "/bin"]) {
       let entries = [];
       try {
-        entries = spawnSync("ls", [systemDir], SPAWN_OPTS).stdout.split("\n").filter(Boolean);
+        entries = failOnProcessDeadline(spawnSync("ls", [systemDir], SPAWN_OPTS), { label: "ls systemDir" }).stdout.split("\n").filter(Boolean);
       } catch {
         continue;
       }

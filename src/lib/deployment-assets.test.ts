@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import {
   DEPLOYMENT_ASSETS,
   DEPLOYMENT_SCRIPTS,
@@ -20,6 +21,11 @@ import {
 // hand-copied) instead of a function, the same "fails loudly if renamed"
 // discipline every parity test in this port uses.
 
+// This file spawns real awk to extract install.sh source; a spawn that
+// takes 0.7s quiet took 4.3s on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
+
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const installScriptPath = join(repoRoot, "scripts", "install.sh");
 
@@ -28,7 +34,7 @@ function extractArrayLiteral(name: string): string[] {
     $0 ~ "readonly ${name}=\\\\(" { found = 1; next }
     found { if ($0 == ")") { found = 0; exit } print }
   `;
-  const result = spawnSync("awk", [script, installScriptPath], { encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("awk", [script, installScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractArrayLiteral" });
   if (result.status !== 0 || !result.stdout.trim()) {
     throw new Error(`Could not extract ${name} array literal from install.sh; it may have been renamed.`);
   }
