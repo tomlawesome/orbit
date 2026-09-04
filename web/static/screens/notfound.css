@@ -1,6 +1,6 @@
 
 body{background:#04070f}
-/* the sky falls in (#790, see +error.svelte): three <img> copies of one band
+/* the sky falls in (#790, see +error.svelte): three <canvas> copies of a band
    of stars, each spiralling in toward the hole and handing over to the next.
    Each copy is a 2200-unit square centred on the hole — the same 1600×1000
    slice mapping the well uses, taken from the host's own size (cq units), so
@@ -11,16 +11,13 @@ body{background:#04070f}
    ends, arriving beyond the frame and gone as it meets the horizon. With
    animation off the copies sit at their spread scales, so the still is still
    a full sky. Each copy's third-of-a-turn is the `rotate` property, set
-   inline, so the keyframes stay one spiral. A copy stays hidden until build()
-   gives it its bitmap: some browsers paint an empty, sized <img> as a blank
-   box, which showed as a white diamond for a second on load. */
+   inline, so the keyframes stay one spiral. */
 .infall{position:fixed;inset:0;overflow:hidden;pointer-events:none;container-type:size}
 .fall{--k:max(.0625cqw,.1cqh);--band:calc(2200 * var(--k));
       position:absolute;width:var(--band);height:var(--band);
       left:calc(50% - var(--band) / 2);top:calc(50% - 50 * var(--k) - var(--band) / 2);
       transform:scale(var(--s0));
       animation:infall var(--T) linear infinite;animation-delay:calc(var(--i) * var(--T) / -3)}
-.fall:not([src]){visibility:hidden}
 .fall-far{--T:160s}
 .fall-near{--T:80s}
 @keyframes infall{
