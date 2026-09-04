@@ -30,6 +30,13 @@
 
 const AVATARS = null;
 
+/**
+ * Typed as the route's own projection (HouseholdMember in
+ * src/server/workspace-repository.ts) rather than workspace.js's `Member`,
+ * which has no `avatarUrl` and requires a `role` candidates never carry.
+ * @typedef {{ id: string, displayName: string, avatarUrl: ?string }} FixtureCandidate
+ * @type {Record<string, { members: (FixtureCandidate & { role: string })[], candidates: FixtureCandidate[] }>}
+ */
 export const MEMBERS_FIXTURE = {
   /* Lawson Home — Tom owns it, and the mockup's owner state is drawn from
      exactly these four. */

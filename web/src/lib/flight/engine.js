@@ -354,8 +354,8 @@ export function createFlight(canvas, options = {}) {
   /** @param {number} r */
   function propScale(r) { return (r / (H * 1.05)); }
 
-  /** @param {HydratedProp} g @param {number} [t] */
-  function penConstellation(g, t) {
+  /** @param {HydratedProp} g @param {number} [_t] */
+  function penConstellation(g, _t) {
     const pts = /** @type {number[][]} */ (g.pts);
     ctx.lineWidth = g.hair; ctx.strokeStyle = PACK.pen; ctx.globalAlpha = g.al * 0.95;
     ctx.beginPath();
@@ -374,8 +374,8 @@ export function createFlight(canvas, options = {}) {
       ctx.beginPath(); ctx.arc(p[0], p[1], p[2], 0, 6.284); ctx.fill();
     }
   }
-  /** @param {HydratedProp} g @param {number} [t] */
-  function penSystem(g, t) {
+  /** @param {HydratedProp} g @param {number} [_t] */
+  function penSystem(g, _t) {
     /* another household's gravity well, seen in passing — home's minisys */
     ctx.lineWidth = g.hair; ctx.globalAlpha = g.al;
     ctx.strokeStyle = PACK.pen;
@@ -398,8 +398,8 @@ export function createFlight(canvas, options = {}) {
     ctx.fillStyle = PACK.pen; ctx.globalAlpha = g.al * 0.7;
     ctx.fillRect(116, -1.5, 34, 3);
   }
-  /** @param {HydratedProp} g @param {number} [t] */
-  function penGraticule(g, t) {
+  /** @param {HydratedProp} g @param {number} [_t] */
+  function penGraticule(g, _t) {
     /* the fine graticule linework of the identity, seen edge-on */
     ctx.lineWidth = g.hair; ctx.strokeStyle = PACK.penLo; ctx.globalAlpha = g.al * 0.95;
     for (const r of [230, 300, 372]) {
@@ -456,8 +456,8 @@ export function createFlight(canvas, options = {}) {
     ctx.beginPath(); ctx.arc(20, 0, 3.6, 0, 6.284); ctx.fill();
     ctx.globalAlpha = g.al;
   }
-  /** @param {HydratedProp} g @param {number} [t] */
-  function penComet(g, t) {
+  /** @param {HydratedProp} g @param {number} [_t] */
+  function penComet(g, _t) {
     const grd = ctx.createLinearGradient(0, 0, -260, 0);
     grd.addColorStop(0, "rgba(216,180,90,.85)");
     grd.addColorStop(1, "rgba(216,180,90,0)");

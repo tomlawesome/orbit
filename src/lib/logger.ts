@@ -150,6 +150,8 @@ export const configurationSettings = [
   "authentication",
   "database",
   "documents",
+  /* The fixture harness, refused in a production build (#773). */
+  "fixtures",
   "logging",
   "mail",
   "imap",
