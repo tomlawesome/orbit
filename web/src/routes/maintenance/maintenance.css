@@ -63,10 +63,48 @@ body{background:#060a18}
   74%{opacity:.3}
   79%,100%{opacity:0}
 }
-.msg{position:fixed;left:0;right:0;bottom:20vh;text-align:center;z-index:3;
-     font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
+/* The notice column sits beneath the ring — its lower edge is at 62.6% of
+   the height at the design's aspect ratio — and runs to the bottom, so the
+   drawer has somewhere to open into. Everything in it is centred and narrow:
+   an announcement, not a document. */
+.notice{position:fixed;left:0;right:0;top:65vh;bottom:0;z-index:3;
+        display:flex;flex-direction:column;align-items:center;gap:12px;
+        padding:0 24px calc(16px + env(safe-area-inset-bottom));text-align:center}
+.notice p{margin:0}
+.msg{margin:0;font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
      text-transform:uppercase}
+.latest{display:flex;flex-direction:column;gap:6px;max-width:44ch}
+.when{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-faint);
+      text-transform:uppercase}
+.body{font:400 15px/1.5 var(--ui);color:var(--ink)}
+.back{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
+      text-transform:uppercase}
+.back time{color:var(--accent)}
+
+/* The arrow. A native disclosure so the keyboard and the screen reader get it
+   for free; the marker is replaced with the chevron, which turns when open. */
+.earlier{display:flex;flex-direction:column;align-items:center;
+         flex:1 1 auto;min-height:0;max-width:44ch;width:100%;
+         overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--ink-faint) transparent}
+.earlier summary{list-style:none;cursor:pointer;color:var(--ink-faint);
+                 padding:6px 12px;border-radius:999px;display:inline-flex;
+                 position:sticky;top:0;transition:color .18s ease}
+.earlier[open]{mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent)}
+.earlier summary::-webkit-details-marker{display:none}
+.earlier summary:hover{color:var(--ink)}
+.earlier summary:focus-visible{outline:1.5px solid var(--accent);outline-offset:2px;
+                               color:var(--ink)}
+.earlier summary svg{transition:transform .22s ease}
+.earlier[open] summary svg{transform:rotate(180deg)}
+/* The drawer takes whatever height is left beneath it and scrolls inside
+   that — the scroll is on the <details> itself, because a <details> does not
+   lay its content out as a flex item, and the arrow stays put on top. */
+.log{list-style:none;margin:6px 0 0;padding:0 12px;width:100%}
+.log li{display:flex;flex-direction:column;gap:4px;padding:10px 0;
+        border-top:1px solid rgba(233,237,248,.08)}
+.log .body{font-size:13px;color:var(--ink-mid)}
 @media (prefers-reduced-motion: reduce){
   .flare,.wash,.ringflare,.flarewave{opacity:0!important}
   .progress{stroke-dasharray:64 36}
+  .earlier summary,.earlier summary svg{transition:none}
 }

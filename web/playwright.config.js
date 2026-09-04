@@ -21,6 +21,10 @@ export default defineConfig({
     deviceScaleFactor: 1,
     /* Motion is the design's, not the machine's — see capture() in screens.spec.js. */
     reducedMotion: "no-preference",
+    /* The maintenance screen shows wall-clock times in the viewer's zone. The
+       mockup is static and says what it says; the gate views in UTC so the
+       same fixture photographs the same on this machine and in CI. */
+    timezoneId: "UTC",
   },
   /*
    * The two ports the gate stands up. Overridable, and defaulted to what they

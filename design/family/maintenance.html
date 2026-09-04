@@ -68,13 +68,51 @@ body{background:#060a18}
   74%{opacity:.3}
   79%,100%{opacity:0}
 }
-.msg{position:fixed;left:0;right:0;bottom:20vh;text-align:center;z-index:3;
-     font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
+/* The notice column sits beneath the ring — its lower edge is at 62.6% of
+   the height at the design's aspect ratio — and runs to the bottom, so the
+   drawer has somewhere to open into. Everything in it is centred and narrow:
+   an announcement, not a document. */
+.notice{position:fixed;left:0;right:0;top:65vh;bottom:0;z-index:3;
+        display:flex;flex-direction:column;align-items:center;gap:12px;
+        padding:0 24px calc(16px + env(safe-area-inset-bottom));text-align:center}
+.notice p{margin:0}
+.msg{margin:0;font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
      text-transform:uppercase}
+.latest{display:flex;flex-direction:column;gap:6px;max-width:44ch}
+.when{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-faint);
+      text-transform:uppercase}
+.body{font:400 15px/1.5 var(--ui);color:var(--ink)}
+.back{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
+      text-transform:uppercase}
+.back time{color:var(--accent)}
+
+/* The arrow. A native disclosure so the keyboard and the screen reader get it
+   for free; the marker is replaced with the chevron, which turns when open. */
+.earlier{display:flex;flex-direction:column;align-items:center;
+         flex:1 1 auto;min-height:0;max-width:44ch;width:100%;
+         overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--ink-faint) transparent}
+.earlier summary{list-style:none;cursor:pointer;color:var(--ink-faint);
+                 padding:6px 12px;border-radius:999px;display:inline-flex;
+                 position:sticky;top:0;transition:color .18s ease}
+.earlier[open]{mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent)}
+.earlier summary::-webkit-details-marker{display:none}
+.earlier summary:hover{color:var(--ink)}
+.earlier summary:focus-visible{outline:1.5px solid var(--accent);outline-offset:2px;
+                               color:var(--ink)}
+.earlier summary svg{transition:transform .22s ease}
+.earlier[open] summary svg{transform:rotate(180deg)}
+/* The drawer takes whatever height is left beneath it and scrolls inside
+   that — the scroll is on the <details> itself, because a <details> does not
+   lay its content out as a flex item, and the arrow stays put on top. */
+.log{list-style:none;margin:6px 0 0;padding:0 12px;width:100%}
+.log li{display:flex;flex-direction:column;gap:4px;padding:10px 0;
+        border-top:1px solid rgba(233,237,248,.08)}
+.log .body{font-size:13px;color:var(--ink-mid)}
 .grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
 @media (prefers-reduced-motion: reduce){
   .flare,.wash,.ringflare,.flarewave{opacity:0!important}
   .progress{stroke-dasharray:64 36}
+  .earlier summary,.earlier summary svg{transition:none}
 }
 </style></head><body>
 
@@ -270,7 +308,31 @@ body{background:#060a18}
   <rect class="wash" x="0" y="0" width="1600" height="1000" fill="url(#washg)"/>
 </svg></div>
 
-<div class="msg">maintenance — back soon</div>
+<main class="notice">
+  <h1 class="msg">maintenance — back soon</h1>
+  <article class="latest">
+    <p class="when"><time datetime="2026-09-04T21:48:00.000Z">21:48 · 4 Sep</time></p>
+    <p class="body">Verifying the copied documents before we reopen.</p>
+  </article>
+  <p class="back">back by <time datetime="2026-09-04T22:30:00.000Z">22:30</time></p>
+  <details class="earlier">
+    <summary aria-label="Earlier updates">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </summary>
+    <ol class="log">
+      <li>
+        <p class="when"><time datetime="2026-09-04T21:25:00.000Z">21:25 · 4 Sep</time></p>
+        <p class="body">The copy is about halfway. Still on track for the time below.</p>
+      </li>
+      <li>
+        <p class="when"><time datetime="2026-09-04T21:00:00.000Z">21:00 · 4 Sep</time> · started</p>
+        <p class="body">We are moving Orbit to new storage. Documents and mail are paused while everything copies across.</p>
+      </li>
+    </ol>
+  </details>
+</main>
 
 <svg class="grain" width="100%" height="100%"><filter id="gr">
   <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
