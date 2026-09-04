@@ -111,25 +111,33 @@ test("notfound keeps its six animations live after rasterising the filtered grou
 /*
  * #790: the starfield falls into the hole. Its saving grace under #764's
  * measured lesson — animated elements under a live filter are what costs
- * frames — is that the stars are plain fills in the unfiltered sky <svg>,
- * moved only by a transform on their group. This holds both halves: the
- * infall is actually running, and nothing that animates has a filter.
+ * frames — is that each star band is one unfiltered bitmap, shown as <img>
+ * copies moved only by their own transform (a scaled SVG group is what hung
+ * the owner's laptop; +error.svelte has why). This holds all three halves:
+ * the copies really are bitmaps, the infall is actually running, and nothing
+ * that animates has a filter.
  */
 test("notfound's starfield falls in, and nothing that moves is filtered", async ({ page }) => {
   await page.goto(`${APP}/some-missing-path`, { waitUntil: "load" });
-  await page.waitForFunction(() => document.querySelectorAll("#farstars circle").length > 0);
+  /* The band bitmaps land in the same build() as the well's rasters, so
+     "ready" covers them; asked for as a real match, not every-of-nothing,
+     because before hydration there is no .world[data-rasterised] at all. */
+  await page.waitForFunction(() => document.querySelector('.world[data-rasterised="ready"]') !== null);
 
   const sample = () =>
     page.evaluate(() => {
-      const falls = [...document.querySelectorAll(".sky .fall")];
+      const falls = [...document.querySelectorAll(".infall .fall")];
       return {
-        stars: document.querySelectorAll("#farstars circle, #nearstars circle").length,
+        /* Every copy is a decoded bitmap with pixels in it. */
+        bitmaps: falls.filter(
+          (el) => el instanceof HTMLImageElement && el.currentSrc.startsWith("data:image/png") && el.naturalWidth > 0,
+        ).length,
         falls: falls.map((g) => ({
           animationName: getComputedStyle(g).animationName,
           transform: getComputedStyle(g).transform,
         })),
-        /* Anything in the sky that is, or sits under, a filter. */
-        skyFiltered: document.querySelectorAll(".sky filter, .sky [filter]").length,
+        /* Anything in the star layers that is, or sits under, a filter. */
+        skyFiltered: document.querySelectorAll(".infall filter, .infall [filter], .sky filter, .sky [filter]").length,
         /* Every painted, animated element on the screen that also carries a
            filter, by attribute or by computed style. Painted, because #764
            keeps its rasterised sources in the DOM under display:none — they
@@ -143,8 +151,8 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
     });
 
   const before = await sample();
-  expect(before.stars, "the sky should hold generated stars").toBeGreaterThan(0);
-  expect(before.falls.length, "expected the falling star groups").toBe(6);
+  expect(before.falls.length, "expected the falling star copies").toBe(6);
+  expect(before.bitmaps, "every falling copy should be a decoded bitmap").toBe(6);
   for (const g of before.falls) expect(g.animationName, "a star group lost its infall").toMatch(/^infall/);
   expect(before.skyFiltered, "the sky must stay unfiltered").toBe(0);
   expect(before.animatedFiltered, "an animated element carries a live filter").toEqual([]);
