@@ -794,7 +794,11 @@ smoke:
     - npm install --global "pnpm@${PNPM_VERSION}"
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
-    - bash scripts/ci/create-test-configuration.sh
+    # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
+    # digest or an orbit-local tag. The workflow never hits this because its
+    # image step exports ORBIT_IMAGE after this one; here it is a job
+    # variable, so hide it for the one command that must not see it.
+    - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
     # The workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
     - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
@@ -889,7 +893,11 @@ acceptance:
     - docker load --input image.tar
     # The compose validations read .env-orbit, so the same configuration step
     # the workflow runs once for the whole anchor runs once here too.
-    - bash scripts/ci/create-test-configuration.sh
+    # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
+    # digest or an orbit-local tag. The workflow never hits this because its
+    # image step exports ORBIT_IMAGE after this one; here it is a job
+    # variable, so hide it for the one command that must not see it.
+    - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
     - bash scripts/ci/validate-deployment-assets.sh
     - |
       set -eu
