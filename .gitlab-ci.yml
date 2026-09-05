@@ -189,7 +189,9 @@ variables:
   }
 
 .node:
-  image: $NODE_IMAGE
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
   variables:
     COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
   cache:
@@ -417,7 +419,7 @@ classify:
   artifacts:
     reports:
       dotenv: classify.env
-    expire_in: 14 days
+    expire_in: 1 week
 
 # --- fast --------------------------------------------------------------------
 
@@ -514,6 +516,7 @@ supply_chain_source:
   image:
     name: $TRIVY_IMAGE
     entrypoint: [""]
+    pull_policy: if-not-present
   timeout: 10m
   rules:
     - *not_scheduled
@@ -599,6 +602,7 @@ sidecar_images:
   image:
     name: $TRIVY_IMAGE
     entrypoint: [""]
+    pull_policy: if-not-present
   timeout: 15m
   rules:
     - *not_scheduled
@@ -656,7 +660,9 @@ sidecar_images:
 # moves web/ pays for this; one that does not never sees it.
 fidelity:
   stage: acceptance
-  image: $PLAYWRIGHT_IMAGE
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
   timeout: 20m
   rules:
     - *not_scheduled
@@ -714,6 +720,7 @@ integration:
   services:
     - name: $POSTGRES_IMAGE
       alias: postgres
+      pull_policy: if-not-present
   variables:
     POSTGRES_DB: orbit_integration
     POSTGRES_USER: orbit_test
@@ -860,7 +867,9 @@ supply_chain_image:
   extends: .privileged_runner
   # For its Node, which the policy script needs, and its Ubuntu Noble base,
   # which .docker_in_job's package list requires. Its browsers go unused.
-  image: $PLAYWRIGHT_IMAGE
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
   timeout: 20m
   needs:
     - job: classify
@@ -921,7 +930,9 @@ supply_chain_image:
 smoke:
   stage: acceptance
   extends: .privileged_runner
-  image: $PLAYWRIGHT_IMAGE
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
   timeout: 30m
   needs:
     - job: classify
@@ -1003,7 +1014,9 @@ acceptance:
   extends: .privileged_runner
   # For its Ubuntu Noble base, which packages the Compose v2 plugin that every
   # script below needs, and its Node, which the processor corpus runs under.
-  image: $PLAYWRIGHT_IMAGE
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
   timeout: 45m
   needs:
     - job: classify
@@ -1152,7 +1165,9 @@ repair_journeys:
   # needs `docker compose`, and Ubuntu Noble packages the v2 plugin
   # (docker-compose-v2) where Debian Bookworm, which $NODE_IMAGE is built on,
   # still ships only the retired v1.
-  image: $PLAYWRIGHT_IMAGE
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
   timeout: 30m
   needs:
     - job: classify
@@ -1379,7 +1394,9 @@ renovate:
   # the tools a run needs as it goes (binarySource=install), which is where the
   # pnpm that rewrites pnpm-lock.yaml comes from. `-full` preinstalls them and
   # costs several gigabytes of pull on a shared runner every week.
-  image: renovate/renovate:44.62.2@sha256:757c6c3b8b63dc5b2600855f277aaababf56344c507cc9636a3b3aece5752645
+  image:
+    name: renovate/renovate:44.62.2@sha256:757c6c3b8b63dc5b2600855f277aaababf56344c507cc9636a3b3aece5752645
+    pull_policy: if-not-present
   timeout: 1h
   # A weekly maintenance run has nothing that could supersede it, and being
   # cancelled part-way leaves half-written branches behind.
@@ -1456,7 +1473,9 @@ sidecar_pin_freshness:
   # shape as `fast`: the node image keeps the script's runtime, the dind
   # service supplies the daemon, .docker_cli the client.
   extends: .dind_service
-  image: $NODE_IMAGE
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
   # The package axis pulls every pinned image, and ollama and tika are large
   # (same budget as the GitHub job's timeout-minutes: 30).
   timeout: 30m
