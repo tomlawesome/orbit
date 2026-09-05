@@ -15,7 +15,10 @@
   /** @type {{ row: import('$lib/data/chart.js').CorridorRow }} */
   let { row } = $props();
 
-  const tlabel = row.days < 0 ? `T+${-row.days}d` : `T−${row.days}d`;
+  /* $derived, not const: a prop read at the top level of a component's
+     script is captured once, so a row reused for a different entry would
+     keep the first entry's label and meta. */
+  const tlabel = $derived(row.days < 0 ? `T+${-row.days}d` : `T−${row.days}d`);
   /* Due next never passes corridorOf() any suggestions (that's home's job),
      so a due-next row's own dueDate/household are never actually null --
      but the shared CorridorRow type allows for the suggestion shape too, so
@@ -25,11 +28,11 @@
     iso
       ? new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" })
       : "";
-  const meta = [
-    row.section,
-    row.provider,
-    row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
-  ].filter(Boolean);
+  const meta = $derived(
+    [row.section, row.provider, row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null].filter(
+      Boolean,
+    ),
+  );
 </script>
 
 <a class="item" href={resolve("/item/[id]", { id: row.id })}>
