@@ -30,8 +30,8 @@
 # group runner is not privileged, which is what failed pipeline 163.
 # `orbit-build` is the project's own docker-executor runner, registered with
 # `privileged = true` for exactly this. Jobs that need no daemon deliberately
-# stay untagged and keep running on the shared runner, so the one privileged
-# runner is not the queue for the whole pipeline.
+# stay on the shared runner's `big` or `light` lane (#830), so the one
+# privileged runner is not the queue for the whole pipeline.
 
 stages:
   - classify
@@ -1346,9 +1346,10 @@ promote_stable:
 # schedule, one place to look when an expected merge request does not appear.
 # What it watches, how it groups and why is in renovate.json at the repo root.
 #
-# Light lane (#830). Nothing in this job talks to a Docker daemon, so it
-# never needs to queue behind `orbit-build`; it does not build or test
-# either, which is what the light lane is for.
+# Big lane (#830). Nothing in this job talks to a Docker daemon, so it never
+# queues behind `orbit-build`. It stays off the light lane because an npm
+# lockfile update runs pnpm over the whole monorepo inside the job, which
+# can pass the light lane's 2 GB. Same choice as mikroview and orbit-launcher.
 #
 # Two CI/CD variables the owner creates under Settings > CI/CD > Variables.
 # Mask both. Leave both unprotected unless the schedule's branch is itself
@@ -1385,7 +1386,6 @@ promote_stable:
 # The instruction goes on the merge request body instead.
 renovate:
   stage: maintenance
-  tags: [light]
   # Pinned by digest, the way every other image here is. The digest is the
   # docker-content-digest header from a manifest HEAD against
   # registry-1.docker.io, not a tag listing.
@@ -1464,9 +1464,8 @@ renovate:
 #       report that never fires red teaches nothing when it is finally asked
 #       to.
 #
-# No Docker daemon and no registry credentials: `sidecar-pins.mjs check` only
-# reads manifests over the network, so this stays on the shared untagged
-# runner like `renovate`.
+# Both axes go through Docker (see the job), so this runs on `orbit-build`
+# via `.dind_service`, not on the shared runner.
 #
 # One CI/CD variable the owner creates under Settings > CI/CD > Variables,
 # masked, unprotected unless the schedule's branch is itself protected (same
