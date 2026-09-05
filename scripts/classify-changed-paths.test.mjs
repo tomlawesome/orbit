@@ -6,6 +6,7 @@ import {
   isNonExecutablePath,
   pathRisk,
   requiresExecutableValidation,
+  touchesLicencePolicy,
   touchesWeb,
 } from "./classify-changed-paths.mjs";
 
@@ -27,12 +28,11 @@ describe("changed-path CI risk classification", () => {
   it("keeps deterministic governance and policy controls in the fast lane", () => {
     for (const path of [
       ".github/supply-chain-policy.json",
-      ".github/dependency-review-config.yml",
+      "supply-chain/licence-policy.yml",
       "scripts/supply-chain-policy.mjs",
       "scripts/supply-chain-policy.test.mjs",
       "scripts/stable-promotion-policy.mjs",
       "scripts/stable-promotion-policy.test.mjs",
-      "scripts/dependency-review-workflow.test.mjs",
       "scripts/exact-image-workflow.test.mjs",
       "scripts/esbuild-override-policy.test.mjs",
     ]) {
@@ -117,6 +117,34 @@ describe("changed-path CI risk classification", () => {
     expect(ciRequirements(["docs/architecture.md"]).web).toBe(false);
   });
 
+  /*
+   * The `licence_policy` gate's own trigger (#815): a change that can add or
+   * move a dependency reaches it, one that cannot does not.
+   */
+  it("runs the licence gate for dependency-graph and policy-file changes", () => {
+    expect(touchesLicencePolicy(["pnpm-lock.yaml"])).toBe(true);
+    expect(touchesLicencePolicy(["package.json"])).toBe(true);
+    expect(touchesLicencePolicy(["web/package.json"])).toBe(true);
+    expect(touchesLicencePolicy(["pnpm-workspace.yaml"])).toBe(true);
+    expect(touchesLicencePolicy(["supply-chain/licence-policy.yml"])).toBe(true);
+  });
+
+  it("does not run the licence gate for changes that cannot add or move a dependency", () => {
+    expect(touchesLicencePolicy(["docs/architecture.md"])).toBe(false);
+    expect(touchesLicencePolicy(["src/server/documents/scanner.ts"])).toBe(false);
+  });
+
+  it("fails safe to running the licence gate without a usable comparison", () => {
+    expect(touchesLicencePolicy([])).toBe(true);
+    expect(touchesLicencePolicy(undefined)).toBe(true);
+    expect(touchesLicencePolicy(null)).toBe(true);
+  });
+
+  it("exposes the licence trigger alongside the other lane requirements", () => {
+    expect(ciRequirements(["pnpm-lock.yaml"]).licence).toBe(true);
+    expect(ciRequirements(["docs/architecture.md"]).licence).toBe(false);
+  });
+
   it("puts the v19 front end in the system lane by rule, not by fallback", () => {
     /*
      * These already reached CI_RISK.SYSTEM through the catch-all default for
@@ -157,6 +185,8 @@ describe("changed-path CI risk classification", () => {
       // A lockfile change can move what the v19 build resolves, so the
       // fidelity gate runs even when the lane stays fast.
       web: true,
+      // A lockfile change is exactly what the licence gate exists to catch.
+      licence: true,
     });
   });
 
