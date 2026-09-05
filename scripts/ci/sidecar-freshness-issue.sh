@@ -45,6 +45,13 @@ trap 'rm -f "$header_file" "$body_file"' EXIT
 printf 'PRIVATE-TOKEN: %s\n' "$SIDECAR_ISSUE_TOKEN" > "$header_file"
 api_call() { curl --silent --show-error --fail --location --max-time 60 --header @"$header_file" "$@"; }
 
+# Reads one value out of a JSON response on stdin with node, which every job
+# image here carries; jq is not in $NODE_IMAGE and the unit test's runner image
+# does not have it either. First argument is passed through as argv[1].
+json_field() {
+  node -e 'let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }).on("end", () => { const value = new Function("input", process.argv[2])(input); process.stdout.write(String(value ?? "")); });' -- "$1" "$2"
+}
+
 {
   printf 'Reported by the weekly `sidecar_pin_freshness` GitLab job on %s.\n' "$(date -u +%Y-%m-%d)"
   printf 'Run: %s\n\n' "$CI_PIPELINE_URL"
@@ -61,7 +68,7 @@ existing_iid="$(
     --data-urlencode "labels=${labels}" \
     --data-urlencode "per_page=5" \
     "${api}/issues" |
-    jq -r --arg title "$title" '[.[] | select(.title == $title)] | first | .iid // empty'
+    json_field "$title" 'const hit = JSON.parse(input).find((issue) => issue.title === process.argv[1]); return hit ? hit.iid : "";'
 )"
 
 if [[ -n "$existing_iid" ]]; then
@@ -77,7 +84,7 @@ fi
 # it -- so this warns rather than failing the run.
 milestone_id="$(
   api_call -G --data-urlencode "title=${milestone_title}" "${api}/milestones" |
-    jq -r 'first | .id // empty'
+    json_field '' 'const [first] = JSON.parse(input); return first ? first.id : "";'
 )"
 if [[ -z "$milestone_id" ]]; then
   printf 'sidecar-freshness-issue: no milestone titled "%s"; creating without one.\n' "$milestone_title" >&2
@@ -92,6 +99,6 @@ if [[ -n "$milestone_id" ]]; then
   create_args+=(--data-urlencode "milestone_id=${milestone_id}")
 fi
 
-created_iid="$(api_call "${create_args[@]}" "${api}/issues" | jq -r '.iid // empty')"
+created_iid="$(api_call "${create_args[@]}" "${api}/issues" | json_field '' 'return JSON.parse(input).iid ?? "";')"
 [[ -n "$created_iid" ]] || fail 'issue creation did not return an iid'
 printf 'sidecar-freshness-issue: created issue #%s\n' "$created_iid"
