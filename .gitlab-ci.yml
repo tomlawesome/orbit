@@ -1244,15 +1244,39 @@ launcher_install_compat:
       export ORBIT_CHANNEL=preview
       (cd launcher && go test -tags live -count=1 -v -timeout 30m ./test/live/...)
   after_script:
+    # Never fails the job: this only gathers evidence for the next person to
+    # read, win or lose. The live suite tears its own compose stack down on
+    # the way out (see the comment above `repair_journeys`), so a project may
+    # already be gone by the time this runs — hence both the compose-logs
+    # pass (which needs the project to still exist) and the plain
+    # container-logs pass (which does not).
     - |
+      mkdir -p .orbit-launcher-diagnostics
       if command -v docker > /dev/null 2>&1 && docker info > /dev/null 2>&1; then
-        docker ps -a || true
-        docker volume ls || true
+        docker info > .orbit-launcher-diagnostics/docker-info.txt 2>&1 || true
+        docker ps -a > .orbit-launcher-diagnostics/docker-ps.txt 2>&1 || true
+        docker volume ls > .orbit-launcher-diagnostics/docker-volumes.txt 2>&1 || true
+        for project in $(docker ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sort -u); do
+          [ -n "$project" ] || continue
+          docker compose -p "$project" logs --no-color --timestamps \
+            > ".orbit-launcher-diagnostics/compose-${project}.log" 2>&1 || true
+        done
+        for container in $(docker ps -a --format '{{.Names}}' 2>/dev/null); do
+          docker logs --timestamps "$container" \
+            > ".orbit-launcher-diagnostics/container-${container}.log" 2>&1 || true
+        done
       fi
+      df -h > .orbit-launcher-diagnostics/df-h.txt 2>&1 || true
+      cp /tmp/dockerd.log .orbit-launcher-diagnostics/dockerd.log 2>/dev/null || true
+      # install.sh itself keeps no persistent log of its own under the install
+      # directory -- everything it prints goes to stdout/stderr, which the
+      # live suite already captures as $ORBIT_LAUNCHER_LIVE_RAW_LOG (below).
+      # Nothing further to collect for that half.
   artifacts:
     name: orbit-launcher-compat-live-raw-log
     paths:
       - .orbit-launcher-live-raw.log*
+      - .orbit-launcher-diagnostics/
     expire_in: 7 days
     when: always
 
