@@ -46,12 +46,14 @@ workflow:
     # Tags publish nothing here; the release lane is GitHub's.
     - if: $CI_COMMIT_TAG
       when: never
-    # A scheduled pipeline is the Renovate lane and nothing else (#801 step 6).
-    # `renovate` is the only job that opts in, so a schedule that forgot the
-    # variable would produce a pipeline with no jobs, which GitLab rejects with
-    # a message that names neither the schedule nor the variable. Refusing it
-    # here says why.
+    # A scheduled pipeline is the Renovate lane, the sidecar-pin-freshness
+    # lane, or nothing (#801 step 6, #820). `renovate` and
+    # `sidecar_pin_freshness` are the only jobs that opt in, so a schedule
+    # that forgot its variable would produce a pipeline with no jobs, which
+    # GitLab rejects with a message that names neither the schedule nor the
+    # variable. Refusing it here says why.
     - if: $CI_PIPELINE_SOURCE == "schedule" && $RENOVATE == "true"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -375,7 +377,7 @@ classify:
     - |
       set -eu
       : > classify.env
-      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web; do
+      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_LICENCE:licence; do
         name="${pair%%:*}"
         key="${pair##*:}"
         value="$(sed -n "s/^${key}=//p" classify-output.txt | tail -1)"
@@ -527,6 +529,33 @@ supply_chain_source:
       - .orbit-supply-chain/trivy-version.json
     expire_in: 14 days
     when: always
+
+# The licence half of what GitHub's actions/dependency-review-action used to
+# check. That action ran only on the `pull_request` event and went inert when
+# the mirror flip (#801) left GitHub with no pull requests to compare, so this
+# job takes over instead of leaving the gap -- and it checks the whole
+# installed dependency tree, not a diff, which the action could never do
+# anyway (#815). The vulnerability half it also used to cover needed no
+# replacement: that has been `supply_chain_source` above all along.
+licence_policy:
+  stage: policy
+  extends: .node
+  timeout: 10m
+  rules:
+    - *not_scheduled
+    - when: on_success
+  needs:
+    - job: classify
+      artifacts: true
+  allow_failure: false
+  script:
+    - |
+      if [ "${ORBIT_LICENCE:-true}" != "true" ]; then
+        echo "skipped: no dependency or licence-policy change"
+        exit 0
+      fi
+      pnpm install --frozen-lockfile --ignore-scripts
+      node scripts/ci/licence-policy.mjs
 
 # Scans every image pinned in .github/supply-chain-policy.json, not just the
 # one Orbit builds: an operator's deployment runs the sidecars too (#647).
@@ -1286,3 +1315,75 @@ renovate:
         echo "renovate: dry run (${RENOVATE_DRY_RUN}), nothing will be created"
       fi
       renovate
+
+# Asks, once a week and without anybody remembering to, whether the pinned
+# sidecar images are still the images upstream is shipping (#771). Ported from
+# `.github/workflows/sidecar-pin-freshness.yml` (#820): GitHub issues on the
+# mirror are frozen and being switched off (#801), so the finding now goes to
+# a GitLab issue instead, over the same REST API `renovate` above already
+# authenticates against.
+#
+# Two things about the schedule that are easy to get wrong, carried over from
+# the GitHub version:
+#
+#   (a) GitLab clones whatever ref the schedule names, not necessarily `dev`,
+#       and does not check that out for you. The scheduled pipeline this job
+#       runs in **must** be created against `dev` (Settings > CI/CD >
+#       Schedules, target branch `dev`): the pins that matter are the current
+#       ones, and this job takes no `ref:` of its own to fall back on.
+#   (b) The proof-it-fires step below must stay ahead of the real check: a
+#       report that never fires red teaches nothing when it is finally asked
+#       to.
+#
+# No Docker daemon and no registry credentials: `sidecar-pins.mjs check` only
+# reads manifests over the network, so this stays on the shared untagged
+# runner like `renovate`.
+#
+# One CI/CD variable the owner creates under Settings > CI/CD > Variables,
+# masked, unprotected unless the schedule's branch is itself protected (same
+# reasoning as RENOVATE_TOKEN above):
+#
+#   SIDECAR_ISSUE_TOKEN   A project access token on ai/orbit with the `api`
+#                         scope. Read by scripts/ci/sidecar-freshness-issue.sh,
+#                         which fails clearly if it is unset. Never printed.
+sidecar_pin_freshness:
+  stage: maintenance
+  image: $NODE_IMAGE
+  # The package axis pulls every pinned image, and ollama and tika are large
+  # (same budget as the GitHub job's timeout-minutes: 30).
+  timeout: 30m
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
+  script:
+    - |
+      set -eu
+      # Proves the check can fail before believing it when it passes. It
+      # mutates one pin in memory into a digest that is valid but wrong, and
+      # insists the check reports it as moved.
+      node scripts/sidecar-pins.mjs check --red
+
+      set +e
+      node scripts/sidecar-pins.mjs check \
+        --packages \
+        --report "${CI_PROJECT_DIR}/sidecar-pins-report.md"
+      check_status=$?
+      set -e
+
+      if [ "$check_status" -eq 1 ]; then
+        echo "sidecar pins: behind; filing or updating the GitLab issue"
+        scripts/ci/sidecar-freshness-issue.sh "${CI_PROJECT_DIR}/sidecar-pins-report.md"
+      elif [ "$check_status" -eq 2 ]; then
+        # Exit 2 means the check could not see -- an unreachable registry, or
+        # an image with no package manager. Not a pass, but not something to
+        # file an issue about either: there is no finding.
+        echo "sidecar pins: could not check every image; see the log above"
+      fi
+
+      # The run itself must be red when a pin is behind or could not be
+      # checked, so the schedule's history reads as a record rather than as a
+      # row of green ticks with the news buried in an issue.
+      if [ "$check_status" -ne 0 ]; then
+        echo "sidecar pins: the check exited ${check_status}." >&2
+        exit 1
+      fi
