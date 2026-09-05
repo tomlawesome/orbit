@@ -823,7 +823,12 @@ build_image:
       - image.tar
     reports:
       dotenv: build.env
-    expire_in: 1 day
+    # Only the later stages of this same pipeline `docker load` it, so it need
+    # not outlive them: at ~100 MB a run, a day's worth filled the GitLab host's
+    # disk on 2026-09-05 (#832). Four hours covers a pipeline that queues for a
+    # while behind the two build slots; GitLab keeps each branch's latest
+    # successful pipeline's artifacts regardless of this.
+    expire_in: 4 hours
 
 # The workflow's "Scan exact local image" step: Trivy against the image that
 # was built and tested rather than a rebuild of the same source, an SPDX SBOM
