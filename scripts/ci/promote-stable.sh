@@ -79,9 +79,14 @@ run_node() { "${PROMOTE_NODE:-node}" "$@"; }
 # against (a `docker buildx imagetools inspect ... | awk '...; exit'` that
 # exits before the Manifests: block finishes writing can turn the writer's
 # SIGPIPE into this pipeline's own failure under `set -o pipefail`).
+#
+# `length($2) == 71` rather than `[0-9a-f]{64}`: the node image's mawk
+# (1.3.4-20200120) has no interval expressions, so `{64}` silently matches
+# nothing there and the unit test read every tag as unresolvable (pipeline
+# 317, job 2114). Alpine's awk accepts both; this form works on either.
 resolve_digest() {
   docker buildx imagetools inspect "$1" 2> /dev/null |
-    awk '$1 == "Digest:" && $2 ~ /^sha256:[0-9a-f]{64}$/ && !found { digest = $2; found = 1 }
+    awk '$1 == "Digest:" && length($2) == 71 && $2 ~ /^sha256:[0-9a-f]+$/ && !found { digest = $2; found = 1 }
          END { if (found) print digest }'
 }
 
