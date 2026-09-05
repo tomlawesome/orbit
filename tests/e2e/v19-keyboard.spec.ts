@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 
 /**
@@ -12,14 +12,19 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
  * (tap targets, sheets, swipe) and a keyboard-only pass over it is a
  * different exercise with a different law; out of scope here.
  *
+ * Each test signs in fresh (or, for journeys that start from `/home`, arrives
+ * there by seeding its own household first — see `arriveAtHome` below, same
+ * shape as v19-axe-sweep.spec.ts's `arriveWithHousehold`) and cleans up its
+ * own household in `finally`. #846: an earlier draft of this file shared one
+ * page, one session and one seeded household across all fourteen tests via
+ * `beforeAll`, so the first failure poisoned every test after it. Nothing
+ * here is shared between tests.
+ *
  * THE FIRST-RUN TOUR is not walked here. tests/e2e/v19-tour.spec.ts journey 5
  * ("the walk can be taken from the keyboard, and Escape skips") already
  * proves the tour's own keyboard path end to end. This file only has to
  * survive the tour turning up uninvited on a first landing — see
- * `dismissTourIfShown` below — not re-prove it. (`tourSeenAt` is per-user and
- * this reader is shared with every other spec on the acceptance stack, so
- * whether it shows here depends on run order elsewhere, not on anything this
- * file does.)
+ * `dismissTourIfShown` below — not re-prove it.
  *
  * WHAT "reachable" MEANS. For each screen this file asks the browser, not a
  * static list, what is on screen: every `a[href]`, un-disabled
@@ -52,97 +57,85 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
  * join veil needs, and nothing here opens a document — so this file has no
  * case to test a real modal trap against; that gap is noted, not papered
  * over.
+ *
+ * Known product defect, not fixed here: #847 (/home: Tab reaches the closed
+ * account panel's links and pack buttons; the search input has no focus
+ * ring).
  */
 
-const HOUSEHOLD_NAME = `keyboard-${randomUUID()}`;
 const READER = "Orbit Administrator";
 
-let authState: Awaited<ReturnType<BrowserContext["storageState"]>> | undefined;
-let householdId: string;
-let seededItemId: string;
-let seeded = false;
-
-/* Widened well past Playwright's 30s default: this shared host runs other
-   agents' work concurrently, and a screen's own waits (SETTLE_TIMEOUT below)
-   are already 60s each on a slow day. A test hitting this ceiling still
-   fails — it is not a licence to hang forever — it is only sized so a busy
-   host is not mistaken for a broken build. */
-test.describe.configure({ timeout: 150_000 });
-
-/* Deliberately NOT `test.describe.configure({ mode: "serial" })`: serial mode
-   skips every remaining test in the file the moment one fails, which is
-   exactly wrong here — the whole point is a screen-by-screen report, and a
-   real defect on one screen (there are some; see the run report) must not
-   hide whether the rest of the journey works. A single worker
-   (playwright.config.ts) already keeps these tests running in file order
-   without it. */
-
-let browser: Browser;
-
-test.beforeAll(async ({ browser: b }) => {
-  browser = b;
-});
-
-test.afterAll(async () => {
-  if (!seeded) return;
-  const context = await browser.newContext({ ignoreHTTPSErrors: true, storageState: authState });
-  const page = await context.newPage();
-  try {
-    await cleanupHousehold(page, await sessionHeaders(page), householdId, HOUSEHOLD_NAME);
-  } finally {
-    await context.close();
-  }
-});
-
-/** Every context this file has opened for a test, closed in afterEach —
- *  otherwise leftover home pages' worth of continuous JS-driven
- *  starfield/sky-pack animation loops (not gated by prefers-reduced-motion;
- *  only their CSS keyframe counterparts are) keep running at once. */
-const openContexts: BrowserContext[] = [];
-
-/**
- * A fresh browser context per test, signed in via saved storage state.
- *
- * KNOWN LIMITATION, not resolved: running this file's tests back to back in
- * one `playwright test` invocation, every test AFTER `auditTabOrder`'s own
- * long Tab-walk (~25+ presses, in "home: every control...") fails a fresh
- * `page.goto()` — the navigation starts (one script response arrives) and
- * then nothing further ever loads, no console error, no failed request,
- * for as long as 60s. Isolation tried and confirmed NOT to fix it, in order:
- * a fresh tab in a shared context; closing old tabs after each test; a fresh
- * context per test (this file's current shape); pacing the audit's own Tab
- * presses; widening every wait to 60s; dropping expect.soft for plain
- * expect; and — the most expensive attempt — a wholly separate Chromium
- * PROCESS per test (`chromium.launch()`, not the shared `browser` fixture),
- * which still failed identically. Skipping "home: every control..." alone
- * (`-g` excluding it) lets every other test pass; running each test alone
- * (`-g` matching just it) also passes every one, including that one. So the
- * fault is real and specific to sequencing two-or-more of this file's tests
- * behind that one long walk in a single worker process, not to any given
- * screen, browser object, or the app itself — and it is beyond what this
- * pass could isolate further. Reported as its own finding rather than
- * quietly working around it by shortening the audit that triggers it, since
- * that audit is exactly what #496 asks this file to do.
- */
-async function freshPage(): Promise<Page> {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true, storageState: authState });
-  openContexts.push(context);
-  const p = await context.newPage();
-  await p.emulateMedia({ reducedMotion: "reduce" });
-  await installKeyboardAudit(p);
-  return p;
+async function signIn(page: Page, returnTo: string) {
+  await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
+  await page.getByRole("link", { name: READER }).click();
 }
 
-test.afterEach(async () => {
-  await Promise.all(openContexts.splice(0).map((c) => c.close().catch(() => {})));
-});
+/**
+ * A household of the signed-in reader's own, through the same
+ * `household.create` / `item.upsert` commands v19-entry.spec.ts and
+ * v19-create.spec.ts use — same shape as v19-axe-sweep.spec.ts's
+ * `seedHousehold`. Named distinctively (this file's own prefix plus a random
+ * id) since other specs may run against the same shared stack at the same
+ * time.
+ */
+async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
+  const name = `keyboard-${randomUUID()}`;
+  const householdId = randomUUID();
+  const sectionId = randomUUID();
+  const headers = { ...(await sessionHeaders(page)), "content-type": "application/json" };
 
-/** A fresh tab, already on the settled, signed-in /home. */
-async function atHome(): Promise<Page> {
-  const p = await freshPage();
-  await p.goto("/home");
-  await settled(p);
-  return p;
+  const created = await page.request.post("/api/workspace/commands", {
+    headers,
+    data: {
+      type: "household.create",
+      household: {
+        id: householdId,
+        name,
+        timezone: "Europe/London",
+        currency: "GBP",
+        memberCount: 1,
+        canManage: true,
+        onboardingComplete: true,
+        sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
+        items: [],
+      },
+    },
+  });
+  if (!created.ok()) throw new Error(`#496: could not seed household "${name}" (${created.status()})`);
+
+  let itemId: string | undefined;
+  if (options.withItem) {
+    itemId = randomUUID();
+    const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    const itemCreated = await page.request.post("/api/workspace/commands", {
+      headers,
+      data: {
+        type: "item.upsert",
+        householdId,
+        item: {
+          id: itemId,
+          sectionId,
+          title: "Keyboard-reached boiler service",
+          currency: "GBP",
+          scheduleKind: "service",
+          dueDate,
+          recurrenceMonths: 12,
+          status: "active",
+        },
+        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      },
+    });
+    if (!itemCreated.ok()) {
+      throw new Error(`#496: could not seed item for "${name}" (${itemCreated.status()})`);
+    }
+  }
+
+  return { id: householdId, name, itemId };
+}
+
+/** #730: every household this file makes is removed, even when the test fails. */
+async function cleanup(page: Page, household: { id: string; name: string }) {
+  await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -230,9 +223,9 @@ const AUDIT_SCRIPT = `
 
 async function installKeyboardAudit(p: Page) {
   await p.addInitScript(AUDIT_SCRIPT);
-  /* addInitScript only takes effect from the NEXT navigation; the very first
-     page (still on about:blank at this point) gets nothing to install onto
-     until beforeAll's caller navigates, so nothing further is needed here. */
+  /* addInitScript only takes effect from the NEXT navigation; called before
+     any navigation happens on a fresh test page, so the very first goto
+     already has it installed. */
 }
 
 type Described = { key: string; label: string };
@@ -318,7 +311,7 @@ async function auditTabOrder(p: Page, screen: string, { root = null, exclude = n
        retrying a genuine no-op press costs nothing and does not mask one. */
     for (let retry = 0; retry < 3; retry += 1) {
       await p.keyboard.press("Tab");
-      await p.waitForTimeout(20); // see the note on freshPage(): pacing this loop matters, not just its length
+      await p.waitForTimeout(20); // pacing this loop matters, not just its length
       info = await currentFocus(p);
       if (!info || info.key !== lastKey) break;
       await p.waitForTimeout(50);
@@ -367,7 +360,7 @@ async function dismissTourIfShown(p: Page) {
    wall-clock budget nobody would notice widening is not the bar being
    tested here; `#explore` either attaches or it doesn't, and that is still
    asserted, just given room to be true on a slow host rather than a fast
-   one. `test.setTimeout` below is widened to match. */
+   one. `test.setTimeout` in every test below is widened to match. */
 const SETTLE_TIMEOUT = 60_000;
 
 async function settled(p: Page) {
@@ -384,42 +377,20 @@ async function settled(p: Page) {
   await p.locator("#explore").waitFor({ state: "attached", timeout: SETTLE_TIMEOUT });
 }
 
-async function seedHouseholdWithItem(p: Page): Promise<{ householdId: string; itemId: string }> {
-  return p.evaluate(async (name) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const command = async (payload: unknown) => {
-      const response = await fetch("/api/workspace/commands", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) throw new Error(`command failed: ${response.status} ${await response.text()}`);
-    };
-    const householdId = crypto.randomUUID();
-    const sectionId = crypto.randomUUID();
-    await command({
-      type: "household.create",
-      household: {
-        id: householdId, name, timezone: "Europe/London", currency: "GBP",
-        memberCount: 1, canManage: true, onboardingComplete: true,
-        sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
-        items: [],
-      },
-    });
-    const itemId = crypto.randomUUID();
-    const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
-    await command({
-      type: "item.upsert",
-      householdId,
-      item: {
-        id: itemId, sectionId, title: "Keyboard-reached boiler service",
-        currency: "GBP", scheduleKind: "service", dueDate, recurrenceMonths: 12, status: "active",
-      },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
-    });
-    return { householdId, itemId };
-  }, HOUSEHOLD_NAME);
+/**
+ * Signs in, seeds a household of the reader's own, installs the keyboard
+ * audit and lands settled on `/home`. Same shape as
+ * v19-axe-sweep.spec.ts's `arriveWithHousehold`. Callers clean up the
+ * returned household in `finally`.
+ */
+async function arriveAtHome(page: Page, options: { withItem?: boolean } = {}) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installKeyboardAudit(page);
+  await signIn(page, "/home");
+  const household = await seedHousehold(page, options);
+  await page.goto("/home");
+  await settled(page);
+  return household;
 }
 
 /**
@@ -455,127 +426,20 @@ async function auditLightDismiss(p: Page, screen: string, toggle: string, panel:
   await expect.soft(p.locator(toggle).first(), `${screen}: Escape did not return focus to ${toggle}`).toBeFocused();
 }
 
-/* ────────────────────────────────────────────────────────────────────────
- * The journeys.
- * ──────────────────────────────────────────────────────────────────────── */
-
-test("arrive: the sign-in door opens by Tab and Enter alone", async () => {
-  const page = await freshPage();
-  /* Signed out, asking for /home is redirected to Orbit's own /login — the
-     door every screen sends a signed-out reader through (v19-entry.spec.ts). */
-  await page.goto("/home");
-  await expect(page).toHaveURL(/\/login\?returnTo=%2Fhome$/);
-
-  await tabTo(page, { selector: "#gate" }, { screen: "sign-in" });
-  const gate = await currentFocus(page);
-  expect(gate?.focusVisible, "sign-in: the Sign in button has no visible focus indicator").toBe(true);
-  await page.keyboard.press("Enter");
-
-  /* SignIn.svelte's press() hands off to /api/auth/login after its own
-     flight beat, which redirects on to the OIDC provider. Wait for the /login
-     screen itself to be left rather than guessing the provider's URL shape. */
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 10_000 });
-
-  /* The provider lists identities as links (tests/e2e/v19-entry.spec.ts);
-     Tab to the one this suite signs in as and press Enter rather than
-     clicking it. */
-  await tabTo(page, { tag: "A", textIncludes: READER }, { screen: "identity provider" });
-  await page.keyboard.press("Enter");
-
-  await expect(page).toHaveURL(/\/home$/, { timeout: 15_000 });
-  await settled(page);
-
-  /* Seeded once here and reused (via the module-level ids below) by every
-     later journey, each of which opens its own fresh, independently
-     signed-in context rather than continuing this one — see freshPage(). */
-  const seed = await seedHouseholdWithItem(page);
-  householdId = seed.householdId;
-  seededItemId = seed.itemId;
-  seeded = true;
-
-  /* Captured AFTER sign-in so every later freshPage() starts already
-     authenticated, without repeating the OIDC round trip per test. */
-  authState = await page.context().storageState();
-});
-
-test("home: every control is reachable, focus is visible, and Tab is not trapped", async () => {
-  const page = await atHome();
-  await auditTabOrder(page, "home");
-});
-
-test("home: the account panel and the three drawers are light-dismiss by keyboard", async () => {
-  const page = await atHome();
-  await auditLightDismiss(page, "home", "button.orb", "#account");
-  await auditLightDismiss(page, "home", "#nstar", "#createdrawer");
-  await auditLightDismiss(page, "home", "#edge-health", "#statusdrawer");
-  await auditLightDismiss(page, "home", "#keydrawer .handle", "#keydrawer");
-});
-
-test("home: a dial planet link is reachable and activates by keyboard", async () => {
-  const page = await atHome();
-  /* The seeded item's body on the dial is a real <a href="#<id>">; Enter
-     follows it like any link, landing on (and focusing) the matching
-     corridor row (#424: the row is the item, sharing that id). Attribute
-     selectors throughout: a UUID id is a perfectly legal HTML id but not
-     always a legal bare CSS identifier (one starting with a digit isn't),
-     so it is never interpolated as `#${id}`. */
-  await tabTo(page, { selector: `a.body-link[href="#${seededItemId}"]` }, { screen: "home dial" });
-  const body = await currentFocus(page);
-  expect(body?.focusVisible, "home: the dial body-link has no visible focus indicator").toBe(true);
-  await page.keyboard.press("Enter");
-  await expect(page.locator(`a.item[id="${seededItemId}"]`)).toBeFocused();
-});
-
 /** #424: the manifest row expands in place on Enter (it is not a plain
  *  navigation — onRowClick calls preventDefault), and its "manage this item"
  *  link is the real way onto /item/[id] by keyboard. Shared by the two item
  *  tests below so each gets this same real path on its own fresh page. */
-async function openItemPageFromHome(page: Page) {
+async function openItemPageFromHome(page: Page, itemId: string) {
   await page.goto("/home");
   await settled(page);
-  await tabTo(page, { selector: `a.item[id="${seededItemId}"]` }, { screen: "home corridor row" });
+  await tabTo(page, { selector: `a.item[id="${itemId}"]` }, { screen: "home corridor row" });
   await page.keyboard.press("Enter");
-  await expect(page.locator(`a.item[id="${seededItemId}"]`)).toHaveClass(/open/);
+  await expect(page.locator(`a.item[id="${itemId}"]`)).toHaveClass(/open/);
   await tabTo(page, { selector: ".ivfull" }, { screen: "home expanded row" });
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/item\//);
 }
-
-test("item page: reached from home's manifest by keyboard, is fully reachable", async () => {
-  const page = await freshPage();
-  await openItemPageFromHome(page);
-  await auditTabOrder(page, "item page");
-});
-
-test("item page: actions and the back link work by keyboard", async () => {
-  /* A fresh tab, not a continuation of the audit above — see freshPage()'s
-     note on why a long Tab-walk leaves a tab unresponsive to further
-     keyboard input afterwards. */
-  const page = await freshPage();
-  await openItemPageFromHome(page);
-
-  /* Reschedule: open the panel, change the date, save, and the panel closes
-     without a `.problem` alert. */
-  await tabTo(page, { tag: "BUTTON", textIncludes: "reschedule" }, { screen: "item page actions" });
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".panel")).toBeVisible();
-  await tabTo(page, { selector: "#a-due" }, { screen: "item page reschedule panel" });
-  const dueField = await currentFocus(page);
-  expect(dueField?.focusVisible, "item page: the reschedule date field has no visible focus indicator").toBe(true);
-  const newDue = new Date(Date.now() + 40 * 86400000).toISOString().slice(0, 10);
-  const [y, m, d] = newDue.split("-");
-  await page.keyboard.type(`${m}${d}${y}`); // en-US date-input segment order: MM DD YYYY
-  await tabTo(page, { selector: ".panel .btn-primary" }, { screen: "item page reschedule panel" });
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".panel")).toBeHidden();
-  await expect(page.locator(".problem")).toBeHidden();
-
-  await tabTo(page, { selector: "a.back" }, { screen: "item page" });
-  const back = await currentFocus(page);
-  expect(back?.focusVisible, "item page: the back link has no visible focus indicator").toBe(true);
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/home/);
-});
 
 /** Tabs through the whole create form in DOM order, filling the fields a
  *  reader actually would (name, type, key date, a closing note) and leaving
@@ -618,27 +482,6 @@ async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.type("added by the keyboard-only pass");
 }
 
-test("create: the whole form is reachable in order", async () => {
-  const page = await freshPage();
-  await fillCreateForm(page, "Keyboard-only proving ground (audit)");
-  await auditTabOrder(page, "create form");
-});
-
-test("create: fillable and submittable by keyboard alone", async () => {
-  /* A fresh tab, not a continuation of the audit above (see freshPage()). */
-  const page = await freshPage();
-  const name = "Keyboard-only proving ground";
-  await fillCreateForm(page, name);
-
-  await tabTo(page, { selector: ".btn-primary" }, { screen: "create form" });
-  const submit = await currentFocus(page);
-  expect(submit?.focusVisible, "create: the submit button has no visible focus indicator").toBe(true);
-  await page.keyboard.press("Enter");
-
-  await expect(page).toHaveURL(/\/home$/, { timeout: 10_000 });
-  await expect(page.locator(".item", { hasText: name })).toBeVisible();
-});
-
 /** Reaches household management the way the sun's own door works (§15,
  *  owner ruling 2026-08-17): Tab to the sun on the dial, Enter. Shared by
  *  both household tests so each drives it on its own fresh page. */
@@ -652,27 +495,6 @@ async function openHouseholdFromHome(page: Page) {
   await expect(page).toHaveURL(/\/household\//);
 }
 
-test("household page: reached from home's sun by keyboard, and is fully reachable", async () => {
-  const page = await freshPage();
-  await openHouseholdFromHome(page);
-  /* Scoped away from `.cand`: "Add someone" lists every account on this
-     shared acceptance instance not yet in the household, which grows over
-     the stack's lifetime as unrelated specs create accounts — genuinely
-     unbounded and not part of what this test is proving. Everything else on
-     the screen is still audited in full. */
-  await auditTabOrder(page, "household page", { exclude: ".cand" });
-});
-
-test("household page: the back link works by keyboard", async () => {
-  const page = await freshPage();
-  await openHouseholdFromHome(page);
-  await tabTo(page, { selector: "a.back" }, { screen: "household page" });
-  const back = await currentFocus(page);
-  expect(back?.focusVisible, "household page: the back link has no visible focus indicator").toBe(true);
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/home/);
-});
-
 /** Reaches /settings the way a reader would: home's account panel, its
  *  Settings link. Shared so both settings tests below drive it fresh. */
 async function openSettingsFromHome(page: Page) {
@@ -685,63 +507,258 @@ async function openSettingsFromHome(page: Page) {
   await expect(page).toHaveURL(/\/settings$/);
 }
 
-test("settings: reached via the account panel, and fully reachable", async () => {
-  const page = await freshPage();
-  await openSettingsFromHome(page);
-  await auditTabOrder(page, "settings");
-});
+/* ────────────────────────────────────────────────────────────────────────
+ * The journeys. One `test(...)` per screen state; each signs in and seeds
+ * its own household (where one is needed), and cleans it up in `finally`.
+ * ──────────────────────────────────────────────────────────────────────── */
 
-test("settings: the account panel is light-dismiss by keyboard", async () => {
-  const page = await freshPage();
-  await openSettingsFromHome(page);
-  /* Chrome.svelte's account panel is shared by settings, household and
-     inbox, and is the same "light dismiss" control home's own account panel
-     is — the same promise is checked here rather than assumed to carry
-     over, since Chrome.svelte is a different implementation of it. */
-  await auditLightDismiss(page, "settings", "button.orb", "#account");
-});
+test("arrive: the sign-in door opens by Tab and Enter alone", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installKeyboardAudit(page);
 
-test("inbox: reachable via the account panel, and keyboard-navigable", async () => {
-  const page = await atHome();
-  await tabTo(page, { selector: "button.orb" }, { screen: "home" });
+  /* Signed out, asking for /home is redirected to Orbit's own /login — the
+     door every screen sends a signed-out reader through (v19-entry.spec.ts). */
+  await page.goto("/home");
+  await expect(page).toHaveURL(/\/login\?returnTo=%2Fhome$/);
+
+  await tabTo(page, { selector: "#gate" }, { screen: "sign-in" });
+  const gate = await currentFocus(page);
+  expect(gate?.focusVisible, "sign-in: the Sign in button has no visible focus indicator").toBe(true);
   await page.keyboard.press("Enter");
-  await tabTo(page, { tag: "A", textIncludes: "Inbox" }, { screen: "home account panel" });
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/inbox$/);
 
-  await auditTabOrder(page, "inbox");
-});
+  /* SignIn.svelte's press() hands off to /api/auth/login after its own
+     flight beat, which redirects on to the OIDC provider. Wait for the /login
+     screen itself to be left rather than guessing the provider's URL shape. */
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 10_000 });
 
-test("sign out: the two-tap control ends the session by keyboard alone", async () => {
-  const page = await atHome();
-
-  await tabTo(page, { selector: "button.orb" }, { screen: "home" });
-  await page.keyboard.press("Enter");
-  await tabTo(page, { selector: ".signout" }, { screen: "home account panel" });
-  const signOut = await currentFocus(page);
-  expect(signOut?.focusVisible, "home: the sign-out control has no visible focus indicator").toBe(true);
-  await page.keyboard.press("Enter"); // arms
-  await expect(page.locator(".signout")).toHaveText(/tap again/);
-  await page.keyboard.press("Enter"); // fires — revokes the session, then plays the descent
-
-  await expect(page).toHaveURL(/\/logout$/, { timeout: 15_000 });
-  const session = await page.evaluate(async () => {
-    const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
-    return (await response.json()) as { authenticated?: boolean };
-  });
-  expect(session.authenticated, "sign out: the session is still authenticated after the two-tap control fired").toBeFalsy();
-
-  /* Cleanup needs a live session again — sign back in the same keyboard way
-     the arrival journey proved, so afterAll's hard delete has one. Every
-     freshPage() context (this one included) started from a COPY of the
-     same `authState` cookie, so revoking it above just revoked that shared
-     token for everyone still holding a copy — including afterAll's own,
-     taken from `arrive`. Re-capturing it here after signing back in is what
-     keeps afterAll's cleanup request from presenting a token this test
-     itself just revoked. */
-  await page.goto("/api/auth/login?returnTo=/home");
+  /* The provider lists identities as links (tests/e2e/v19-entry.spec.ts);
+     Tab to the one this suite signs in as and press Enter rather than
+     clicking it. */
   await tabTo(page, { tag: "A", textIncludes: READER }, { screen: "identity provider" });
   await page.keyboard.press("Enter");
+
   await expect(page).toHaveURL(/\/home$/, { timeout: 15_000 });
-  authState = await page.context().storageState();
+  await settled(page);
+});
+
+test("home: every control is reachable, focus is visible, and Tab is not trapped", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page, { withItem: true });
+  try {
+    await auditTabOrder(page, "home");
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("home: the account panel and the three drawers are light-dismiss by keyboard", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page);
+  try {
+    await auditLightDismiss(page, "home", "button.orb", "#account");
+    await auditLightDismiss(page, "home", "#nstar", "#createdrawer");
+    await auditLightDismiss(page, "home", "#edge-health", "#statusdrawer");
+    await auditLightDismiss(page, "home", "#keydrawer .handle", "#keydrawer");
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("home: a dial planet link is reachable and activates by keyboard", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page, { withItem: true });
+  try {
+    /* The seeded item's body on the dial is a real <a href="#<id>">; Enter
+       follows it like any link, landing on (and focusing) the matching
+       corridor row (#424: the row is the item, sharing that id). Attribute
+       selectors throughout: a UUID id is a perfectly legal HTML id but not
+       always a legal bare CSS identifier (one starting with a digit isn't),
+       so it is never interpolated as `#${id}`. */
+    await tabTo(page, { selector: `a.body-link[href="#${household.itemId}"]` }, { screen: "home dial" });
+    const body = await currentFocus(page);
+    expect(body?.focusVisible, "home: the dial body-link has no visible focus indicator").toBe(true);
+    await page.keyboard.press("Enter");
+    await expect(page.locator(`a.item[id="${household.itemId}"]`)).toBeFocused();
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("item page: reached from home's manifest by keyboard, is fully reachable", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page, { withItem: true });
+  try {
+    await openItemPageFromHome(page, household.itemId as string);
+    await auditTabOrder(page, "item page");
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("item page: actions and the back link work by keyboard", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page, { withItem: true });
+  try {
+    await openItemPageFromHome(page, household.itemId as string);
+
+    /* Reschedule: open the panel, change the date, save, and the panel closes
+       without a `.problem` alert. */
+    await tabTo(page, { tag: "BUTTON", textIncludes: "reschedule" }, { screen: "item page actions" });
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".panel")).toBeVisible();
+    await tabTo(page, { selector: "#a-due" }, { screen: "item page reschedule panel" });
+    const dueField = await currentFocus(page);
+    expect(dueField?.focusVisible, "item page: the reschedule date field has no visible focus indicator").toBe(true);
+    const newDue = new Date(Date.now() + 40 * 86400000).toISOString().slice(0, 10);
+    const [y, m, d] = newDue.split("-");
+    await page.keyboard.type(`${m}${d}${y}`); // en-US date-input segment order: MM DD YYYY
+    await tabTo(page, { selector: ".panel .btn-primary" }, { screen: "item page reschedule panel" });
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".panel")).toBeHidden();
+    await expect(page.locator(".problem")).toBeHidden();
+
+    await tabTo(page, { selector: "a.back" }, { screen: "item page" });
+    const back = await currentFocus(page);
+    expect(back?.focusVisible, "item page: the back link has no visible focus indicator").toBe(true);
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/home/);
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("create: the whole form is reachable in order", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page);
+  try {
+    await fillCreateForm(page, "Keyboard-only proving ground (audit)");
+    await auditTabOrder(page, "create form");
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("create: fillable and submittable by keyboard alone", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page);
+  try {
+    const name = "Keyboard-only proving ground";
+    await fillCreateForm(page, name);
+
+    await tabTo(page, { selector: ".btn-primary" }, { screen: "create form" });
+    const submit = await currentFocus(page);
+    expect(submit?.focusVisible, "create: the submit button has no visible focus indicator").toBe(true);
+    await page.keyboard.press("Enter");
+
+    await expect(page).toHaveURL(/\/home$/, { timeout: 10_000 });
+    await expect(page.locator(".item", { hasText: name })).toBeVisible();
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("household page: reached from home's sun by keyboard, and is fully reachable", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page);
+  try {
+    await openHouseholdFromHome(page);
+    /* Scoped away from `.cand`: "Add someone" lists every account on this
+       shared acceptance instance not yet in the household, which grows over
+       the stack's lifetime as unrelated specs create accounts — genuinely
+       unbounded and not part of what this test is proving. Everything else on
+       the screen is still audited in full. */
+    await auditTabOrder(page, "household page", { exclude: ".cand" });
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("household page: the back link works by keyboard", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page);
+  try {
+    await openHouseholdFromHome(page);
+    await tabTo(page, { selector: "a.back" }, { screen: "household page" });
+    const back = await currentFocus(page);
+    expect(back?.focusVisible, "household page: the back link has no visible focus indicator").toBe(true);
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/home/);
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("settings: reached via the account panel, and fully reachable", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page);
+  try {
+    await openSettingsFromHome(page);
+    await auditTabOrder(page, "settings");
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("settings: the account panel is light-dismiss by keyboard", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page);
+  try {
+    await openSettingsFromHome(page);
+    /* Chrome.svelte's account panel is shared by settings, household and
+       inbox, and is the same "light dismiss" control home's own account panel
+       is — the same promise is checked here rather than assumed to carry
+       over, since Chrome.svelte is a different implementation of it. */
+    await auditLightDismiss(page, "settings", "button.orb", "#account");
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("inbox: reachable via the account panel, and keyboard-navigable", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page);
+  try {
+    await tabTo(page, { selector: "button.orb" }, { screen: "home" });
+    await page.keyboard.press("Enter");
+    await tabTo(page, { tag: "A", textIncludes: "Inbox" }, { screen: "home account panel" });
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/inbox$/);
+
+    await auditTabOrder(page, "inbox");
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("sign out: the two-tap control ends the session by keyboard alone", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHome(page);
+  try {
+    await tabTo(page, { selector: "button.orb" }, { screen: "home" });
+    await page.keyboard.press("Enter");
+    await tabTo(page, { selector: ".signout" }, { screen: "home account panel" });
+    const signOut = await currentFocus(page);
+    expect(signOut?.focusVisible, "home: the sign-out control has no visible focus indicator").toBe(true);
+    await page.keyboard.press("Enter"); // arms
+    await expect(page.locator(".signout")).toHaveText(/tap again/);
+    await page.keyboard.press("Enter"); // fires — revokes the session, then plays the descent
+
+    await expect(page).toHaveURL(/\/logout$/, { timeout: 15_000 });
+    const session = await page.evaluate(async () => {
+      const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+      return (await response.json()) as { authenticated?: boolean };
+    });
+    expect(session.authenticated, "sign out: the session is still authenticated after the two-tap control fired").toBeFalsy();
+
+    /* Cleanup needs a live session again — sign back in the same keyboard way
+       the arrival journey proved, so this test's own household can still be
+       removed once it revoked the session that was carrying it. */
+    await page.goto("/api/auth/login?returnTo=/home");
+    await tabTo(page, { tag: "A", textIncludes: READER }, { screen: "identity provider" });
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/home$/, { timeout: 15_000 });
+  } finally {
+    await cleanup(page, household);
+  }
 });
