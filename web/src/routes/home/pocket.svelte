@@ -231,7 +231,8 @@
       {/each}
     </svg>
   </div>
-  <div class="skies">
+  <!-- #845: the strip scrolls sideways, so it must be reachable to scroll by keyboard. -->
+  <div class="skies" tabindex="0" role="region" aria-label="Other skies">
     {#each others as hh (hh.id)}
       <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx={hh.dx} cy={hh.dy} r="2" style="fill:var({hh.tone === "--warm" ? "--warm" : hh.tone === "--upcoming" ? "--upcoming" : "--ok"})" opacity=".6"/></svg>{hh.name}</div>
     {/each}

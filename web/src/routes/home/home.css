@@ -593,7 +593,9 @@
   @keyframes settle{from{opacity:0}to{opacity:1}}
 
   @media (prefers-reduced-motion: reduce){
-    .sky .far,.sky .near,.nstar .glint,.rotor{animation:none!important}
+    /* #841: the health dot's breathe and the waiting inbox orb's were the
+       two continuous animations this block missed. */
+    .sky .far,.sky .near,.nstar .glint,.rotor,.handle i,.inbox-orb.waiting svg{animation:none!important}
   }
 
 /* ---- #453: the labelled sky's quiet centre and the one question -------- */
