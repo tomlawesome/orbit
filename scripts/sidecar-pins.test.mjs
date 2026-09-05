@@ -720,3 +720,16 @@ describe("sidecar pins: sync", () => {
     expect(output.join("")).toContain("tests/oidc/Dockerfile");
   });
 });
+
+describe("sidecar pins: the CI job has the tools the check shells out to", () => {
+  it("installs the buildx plugin alongside the Docker client", () => {
+    // Axis 1 resolves a tag with `docker buildx imagetools inspect --format`.
+    // Without docker-buildx-plugin that fails as "unknown flag: --format",
+    // and the self-test reports 'unreachable' (pipeline 321, #820).
+    const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
+    const anchor = gitlabCi.slice(gitlabCi.indexOf("\n.docker_cli:"), gitlabCi.indexOf("\n.drop_to_node"));
+
+    expect(anchor).toMatch(/apt-get install [^\n]* docker-buildx-plugin/u);
+    expect(anchor).toContain("docker buildx version");
+  });
+});
