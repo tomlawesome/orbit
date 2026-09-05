@@ -1,37 +1,38 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — gravity well</title>
+<title>Orbit — gravity well · drawn in</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="family.css">
+<link rel="stylesheet" href="../family/family.css">
 <style>
 body{background:#04070f}
-/* the sky falls in (#790, ported from +error.svelte/notfound.css): three
-   <canvas> copies of a band of stars, each spiralling in toward the hole and
-   handing over to the next. Frozen state only — the gate screenshots with
-   animations disabled, so this mockup goes straight to the settled/live
-   picture rather than reproducing the still-SVG handover the product opens
-   with. */
-.infall{position:fixed;inset:0;overflow:hidden;pointer-events:none;container-type:size}
-.fall{--k:max(.0625cqw,.1cqh);--band:calc(2200 * var(--k));
-      position:absolute;width:var(--band);height:var(--band);
-      left:calc(50% - var(--band) / 2);top:calc(50% - 50 * var(--k) - var(--band) / 2);
-      transform:scale(var(--s0));
-      animation:infall var(--T) linear infinite;animation-delay:calc(var(--i) * var(--T) / -3)}
+/* the sky falls in (#790): three copies of one band of stars, each shrinking
+   toward the hole and handing over to the next. Every star is drawn once, in
+   a band that starts beyond the frame, so the field never empties and nothing
+   spawns in view; the horizon's own black disc swallows what is left. Only the
+   two groups move, exactly as the drift did, and nothing here is filtered. */
+.fall{transform-origin:800px 450px;transform:scale(var(--s0));
+      animation:infall calc(var(--T) * var(--pace,1)) linear infinite;
+      animation-delay:calc(var(--i) * var(--T) * var(--pace,1) / -3)}
 .fall-far{--T:160s}
 .fall-near{--T:80s}
-.infall:not(.live) .fall{visibility:hidden;animation:none}
 @keyframes infall{
-  0%{transform:rotate(0deg) scale(2);opacity:0}
+  0%{transform:scale(2);opacity:0}
   6%{opacity:1}
-  12.5%{transform:rotate(-6.25deg) scale(1.542)}
-  25%{transform:rotate(-12.5deg) scale(1.189)}
-  37.5%{transform:rotate(-18.75deg) scale(.917)}
-  50%{transform:rotate(-25deg) scale(.707)}
-  62.5%{transform:rotate(-31.25deg) scale(.545)}
-  75%{transform:rotate(-37.5deg) scale(.42)}
+  12.5%{transform:scale(1.542)}
+  25%{transform:scale(1.189)}
+  37.5%{transform:scale(.917)}
+  50%{transform:scale(.707)}
+  62.5%{transform:scale(.545)}
+  75%{transform:scale(.42)}
   84%{opacity:1}
-  87.5%{transform:rotate(-43.75deg) scale(.324)}
-  100%{transform:rotate(-50deg) scale(.25);opacity:0}}
+  87.5%{transform:scale(.324)}
+  100%{transform:scale(.25);opacity:0}}
+.pace{position:fixed;bottom:34px;left:0;right:0;text-align:center;z-index:2;
+      font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.1em}
+.pace a{color:var(--accent);text-decoration:none;margin:0 .4em}
+.pace a[aria-current]{text-decoration:underline}
+.tw{animation:twinkle 5s ease-in-out infinite alternate}
+@keyframes twinkle{from{opacity:.2}to{opacity:.8}}
 
 /* the well never sits still */
 .disc-precess{transform-origin:800px 450px;animation:precess 56s ease-in-out infinite alternate}
@@ -56,14 +57,22 @@ body{background:#04070f}
 .grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
 </style></head><body>
 
-<div class="infall live" aria-hidden="true">
-  <canvas class="fall fall-far" style="--i:0;--s0:2"></canvas>
-  <canvas class="fall fall-far" style="--i:1;--s0:1"></canvas>
-  <canvas class="fall fall-far" style="--i:2;--s0:.5"></canvas>
-  <canvas class="fall fall-near" style="--i:0;--s0:2"></canvas>
-  <canvas class="fall fall-near" style="--i:1;--s0:1"></canvas>
-  <canvas class="fall fall-near" style="--i:2;--s0:.5"></canvas>
-</div>
+<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <radialGradient id="stargl" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e8edff" stop-opacity=".45"/>
+      <stop offset="100%" stop-color="#e8edff" stop-opacity="0"/>
+    </radialGradient>
+    <g id="farstars" fill="#dbe2f5"></g>
+    <g id="nearstars"></g>
+  </defs>
+  <g class="fall fall-far" style="--i:0;--s0:2"><use href="#farstars"/></g>
+  <g class="fall fall-far" style="--i:1;--s0:1"><use href="#farstars" transform="rotate(120 800 450)"/></g>
+  <g class="fall fall-far" style="--i:2;--s0:0.5"><use href="#farstars" transform="rotate(240 800 450)"/></g>
+  <g class="fall fall-near" style="--i:0;--s0:2"><use href="#nearstars"/></g>
+  <g class="fall fall-near" style="--i:1;--s0:1"><use href="#nearstars" transform="rotate(120 800 450)"/></g>
+  <g class="fall fall-near" style="--i:2;--s0:0.5"><use href="#nearstars" transform="rotate(240 800 450)"/></g>
+</svg></div>
 
 <div style="position:fixed;inset:0;z-index:1"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
   <defs>
@@ -203,131 +212,71 @@ body{background:#04070f}
 </filter><rect width="100%" height="100%" filter="url(#gr)"/></svg>
 
 <div class="vignette" style="background:radial-gradient(ellipse at 50% 45%,transparent 42%,rgba(0,0,0,.5) 100%)"></div>
-<div class="foot">the black hole is the 0 &middot; the near 4 is further gone &middot; nothing escapes, except you &mdash; home is a click away</div>
+<div class="pace" aria-label="pace">pace:
+  <a href="?pace=slow">slow</a><a href="?pace=steady">steady</a><a href="?pace=brisk">brisk</a></div>
+<div class="foot">A: the whole sky is drawn in, straight and steady &middot; the black hole is the 0 &middot; the near 4 is further gone &middot; nothing escapes, except you &mdash; home is a click away</div>
 
 <script>
-/* #790: the falling sky, inlined verbatim from web/src/routes/gravity-well.js
-   (same seed, same maths) so this mockup's sky is pixel-identical to the
-   product's. No module system here, so createSky/paintCopy/renewCopy are
-   copied in rather than imported — keep them in sync by hand if
-   gravity-well.js changes. */
-function createSky() {
-  const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(4040404);
-  const NS = "http://www.w3.org/2000/svg";
-
-  const band = (n, place) => {
-    let made = 0;
-    while (made < n) {
-      const r = 450 * Math.exp(rng() * Math.log(1100 / 450));
-      const w = r < 560 ? (r - 450) / 110 : r > 900 ? (1100 - r) / 200 : 1;
-      if (rng() > w) continue;
-      const a = rng() * Math.PI * 2;
-      place(r * Math.cos(a), r * Math.sin(a));
-      made++;
-    }
-  };
-  const farBand = () => {
-    const stars = [];
-    band(150, (x, y) => {
-      stars.push({ x, y, r: 0.35 + rng() * 0.65, o: 0.1 + rng() * 0.28 });
-      if (rng() < 0.14) rng();
-    });
-    return stars;
-  };
-  const nearBand = () => {
-    const stars = [];
-    band(36, (x, y) => {
-      const r = 0.9 + rng() * 0.9;
-      stars.push({ x, y, r, o: 0.4 + rng() * 0.4 });
-      if (rng() < 0.28) rng();
-    });
-    return stars;
-  };
-  const queued = { far: [farBand(), farBand(), farBand()], near: [nearBand(), nearBand(), nearBand()] };
-
-  return {
-    first: { far: [...queued.far], near: [...queued.near] },
-    far: () => queued.far.shift() ?? farBand(),
-    near: () => queued.near.shift() ?? nearBand(),
-    mountArcs() {
-      // lensed starlight: tangential smears ringing the hole
-      const arcs = document.getElementById("lensarcs");
-      for (let i = 0; arcs && i < 46; i++) {
-        const rad = 138 + rng() * 150;
-        const a0 = rng() * Math.PI * 2;
-        const sweep = (0.25 + rng() * 0.7) * (60 / rad);
-        const a1 = a0 + sweep;
-        const x0 = 800 + rad * Math.cos(a0), y0 = 450 + rad * Math.sin(a0);
-        const x1 = 800 + rad * Math.cos(a1), y1 = 450 + rad * Math.sin(a1);
-        const p = document.createElementNS(NS, "path");
-        p.setAttribute("d", `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad.toFixed(1)} ${rad.toFixed(1)} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`);
-        p.setAttribute("stroke", "#cdd6ee");
-        p.setAttribute("stroke-width", (0.7 + rng() * 0.9).toFixed(2));
-        p.setAttribute("stroke-linecap", "round");
-        // tighter to the hole = brighter, more smeared
-        p.setAttribute("opacity", (0.24 * (170 / rad) ** 1.6).toFixed(2));
-        if (rng() < 0.35) p.setAttribute("filter", "url(#b1)");
-        arcs.appendChild(p);
-      }
-    },
-  };
-}
-
-const showing = new WeakMap();
-
-function renewCopy(canvas, bands, side) {
-  showing.delete(canvas);
-  paintCopy(canvas, bands, side);
-}
-
-function paintCopy(c, bands, side) {
-  const near = c.classList.contains("fall-near");
-  let stars = showing.get(c);
-  if (!stars) showing.set(c, (stars = near ? bands.near() : bands.far()));
-  c.width = side;
-  c.height = side;
-  const ctx = c.getContext("2d");
-  ctx.setTransform(side / 2200, 0, 0, side / 2200, side / 2, side / 2);
-  for (const s of stars) {
-    if (near) {
-      const glow = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r * 3.6);
-      glow.addColorStop(0, "rgba(232,237,255,.45)");
-      glow.addColorStop(1, "rgba(232,237,255,0)");
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r * 3.6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = s.o;
-    ctx.fillStyle = near ? "#e8edff" : "#dbe2f5";
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-    ctx.fill();
+const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(4040404);
+const NS = "http://www.w3.org/2000/svg";
+const far = document.getElementById("farstars"), near = document.getElementById("nearstars");
+const hole = (x, y) => Math.hypot(x - 800, y - 450);
+// one band of stars around the hole, 450-1100 out with soft edges, thinning as
+// 1/r^2 so that a shrinking copy meets the next at the same density it left
+const band = (n, place) => {
+  let made = 0;
+  while (made < n) {
+    const r = 450 * Math.exp(rng() * Math.log(1100 / 450));
+    const w = r < 560 ? (r - 450) / 110 : r > 900 ? (1100 - r) / 200 : 1;
+    if (rng() > w) continue;
+    const a = rng() * Math.PI * 2;
+    place(800 + r * Math.cos(a), 450 + r * Math.sin(a));
+    made++;
   }
-}
-
-/* This mockup skips the still-SVG handover +error.svelte opens with (the
-   fidelity gate screenshots after settle, when the product is already past
-   it) and goes straight to the live, painted sky. */
-const sky = createSky();
-sky.mountArcs();
-
-const infall = document.querySelector(".infall");
-let side = 0;
-function paint() {
-  const rect = infall.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  side = Math.min(2048, Math.max(1, Math.round(2200 * Math.max(rect.width / 1600, rect.height / 1000) * dpr)));
-  const copies = [...infall.querySelectorAll("canvas.fall")];
-  copies.sort((a, b) => Number(a.style.getPropertyValue("--i") === "0") - Number(b.style.getPropertyValue("--i") === "0"));
-  for (const c of copies) paintCopy(c, sky, side);
-}
-paint();
-window.addEventListener("resize", paint);
-infall.addEventListener("animationiteration", (e) => {
-  if (e.animationName === "infall" && e.target instanceof HTMLCanvasElement) renewCopy(e.target, sky, side);
+};
+band(150, (x, y) => {
+  const c = document.createElementNS(NS, "circle");
+  c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", y.toFixed(1));
+  c.setAttribute("r", (0.35 + rng() * 0.65).toFixed(2));
+  c.setAttribute("opacity", (0.1 + rng() * 0.28).toFixed(2));
+  if (rng() < 0.14) { c.setAttribute("class", "tw"); c.style.animationDelay = (rng() * 6).toFixed(1) + "s"; }
+  far.appendChild(c);
 });
+band(36, (x, y) => {
+  const r = 0.9 + rng() * 0.9;
+  const g = document.createElementNS(NS, "circle");
+  g.setAttribute("cx", x.toFixed(1)); g.setAttribute("cy", y.toFixed(1));
+  g.setAttribute("r", (r * 3.6).toFixed(1)); g.setAttribute("fill", "url(#stargl)");
+  near.appendChild(g);
+  const c = document.createElementNS(NS, "circle");
+  c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", y.toFixed(1));
+  c.setAttribute("r", r.toFixed(2)); c.setAttribute("fill", "#e8edff");
+  c.setAttribute("opacity", (0.4 + rng() * 0.4).toFixed(2));
+  if (rng() < 0.28) { c.setAttribute("class", "tw"); c.style.animationDelay = (rng() * 6).toFixed(1) + "s"; }
+  near.appendChild(c);
+});
+// lensed starlight: tangential smears ringing the hole
+const arcs = document.getElementById("lensarcs");
+for (let i = 0; i < 46; i++) {
+  const rad = 138 + rng() * 150;
+  const a0 = rng() * Math.PI * 2;
+  const sweep = (0.25 + rng() * 0.7) * (60 / rad);
+  const a1 = a0 + sweep;
+  const x0 = 800 + rad * Math.cos(a0), y0 = 450 + rad * Math.sin(a0);
+  const x1 = 800 + rad * Math.cos(a1), y1 = 450 + rad * Math.sin(a1);
+  const p = document.createElementNS(NS, "path");
+  p.setAttribute("d", `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad.toFixed(1)} ${rad.toFixed(1)} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`);
+  p.setAttribute("stroke", "#cdd6ee");
+  p.setAttribute("stroke-width", (0.7 + rng() * 0.9).toFixed(2));
+  p.setAttribute("stroke-linecap", "round");
+  // tighter to the hole = brighter, more smeared
+  p.setAttribute("opacity", (0.24 * (170 / rad) ** 1.6).toFixed(2));
+  if (rng() < 0.35) p.setAttribute("filter", "url(#b1)");
+  arcs.appendChild(p);
+}
+// ?pace=slow|steady|brisk — a review aid only, not part of the design
+const pace = { slow: 2, steady: 1, brisk: .5 }[new URLSearchParams(location.search).get("pace")] ?? 1;
+document.documentElement.style.setProperty("--pace", pace);
+document.querySelector(`.pace a[href="?pace=${pace === 2 ? "slow" : pace === .5 ? "brisk" : "steady"}"]`)?.setAttribute("aria-current", "true");
 </script>
 </body></html>
