@@ -1,7 +1,7 @@
 # Orbit preview lane and stable promotion
 
 Orbit treats a container digest -- not a mutable tag -- as the identity of an
-artifact. `preview` and `stable` help people find an image, but deployments,
+artifact. `preview` and `latest` help people find an image, but deployments,
 acceptance records and promotion use the immutable digest.
 
 GitLab (`gitlab.tomlawson.io`, `ai/orbit`) is where Orbit is built, tested and
@@ -28,18 +28,27 @@ checks that `main` and `preview` are the exact same commit.
 Each `preview` build embeds one calculated semantic version, read by
 `scripts/calculate-version.mjs` from the highest existing stable `vMAJOR.MINOR.PATCH`
 Git tag: an ordinary `preview` train increments minor and resets patch, and a
-`hotfix/*` train increments patch. This is informational only -- it is not
-what stable promotion reads. When you run the promotion job below, type the
-version the preview image already calculated (visible in its
-`org.opencontainers.image.version` label or its `--version` output) unless the
-owner has decided otherwise.
+`hotfix/*` train increments patch. The version is never typed in by an
+operator, at preview time or at promotion time: stable promotion reads it
+back out of the accepted image itself and re-runs the same calculation to
+confirm the two agree.
 
 ## Stable promotion (on GitLab)
 
 Promotion is a manual GitLab CI job, `promote_stable` in `.gitlab-ci.yml`. It
 only appears, as a manual step, on a pipeline running on `main`, or on a
-pipeline you start yourself against any ref by giving it a `VERSION` variable.
-Nothing runs it automatically: a release version is a human decision.
+pipeline you start yourself against any ref by giving it a `PREVIEW_DIGEST`
+variable. Nothing runs it automatically: accepting a release is a human
+decision.
+
+The only input is `PREVIEW_DIGEST`, the accepted preview image's digest
+(`sha256:<64 hex>`). Find it either:
+
+- in the `publish_gitlab` job's log for the pipeline that tested the commit
+  being promoted (it prints the digest it pushed, and records the same value
+  in the `gitlab-tested-image.json` artifact); or
+- by resolving GHCR's `:preview` tag directly:
+  `docker buildx imagetools inspect ghcr.io/tomlawesome/orbit:preview`.
 
 To run it:
 
@@ -47,23 +56,36 @@ To run it:
 2. Merge the `preview` -> `main` merge request once acceptance is done.
 3. Open `https://gitlab.tomlawson.io/ai/orbit/-/pipelines/new`, choose the
    `main` branch (or the ref you are promoting), add a pipeline variable named
-   `VERSION` set to the version, e.g. `1.4.0` or `v1.4.0`, and start the
+   `PREVIEW_DIGEST` set to the digest, e.g. `sha256:abcd...`, and start the
    pipeline.
 4. Find the `promote_stable` job in the pipeline and click Run.
 
-The job (`scripts/ci/promote-stable.sh`) then, in order:
+The job (`scripts/ci/promote-stable.sh`) then, in order, exactly as the
+retired `promote-container.yml` GitHub workflow did:
 
-1. Normalises `VERSION` to `vMAJOR.MINOR.PATCH` and refuses anything else.
-2. Refuses if the GitLab tag `vX.Y.Z` already exists -- a version does not
+1. Validates `PREVIEW_DIGEST` is `sha256:<64 hex>`.
+2. Confirms `main` and `preview` point at the exact same commit.
+3. Resolves GHCR's `:preview` tag and `:sha-<main HEAD>` tag and confirms both
+   still equal `PREVIEW_DIGEST` -- refusing if `preview` has moved on, or the
+   digest never reached main's own commit.
+4. Reads the image's `org.opencontainers.image.version`/`.revision` and
+   `io.github.tomlawesome.orbit.release-stage`/`.source-branch` labels and its
+   embedded `/opt/orbit/VERSION`, `/opt/orbit/REVISION`, `/opt/orbit/CHANNEL`
+   files and `--version` output, and refuses if any of them disagree.
+5. Recalculates the expected version with `scripts/calculate-version.mjs` for
+   the image's channel (`hotfix` if its source branch is `hotfix/*`,
+   otherwise `preview`) and refuses if it disagrees with the image's own
+   version label.
+6. Refuses if the GitLab tag `vX.Y.Z` already exists -- a version does not
    ship twice.
-3. Confirms `main` and `preview` point at the exact same commit.
-4. Resolves the GHCR `:preview` digest and confirms it still matches
-   `:sha-<commit>` for the commit being promoted -- refusing if `preview` has
-   moved on since this commit's pipeline tested it.
-5. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already exists in GHCR.
-6. Tags that exact digest `vX.Y.Z` and `stable` in GHCR, by digest, without
-   rebuilding anything.
-7. Creates the annotated tag `vX.Y.Z` on the GitLab commit through the API.
+7. Runs `scripts/stable-promotion-policy.mjs`, which refuses unless the
+   image's revision is an ancestor of both `main` and its source branch and
+   the tree at that revision exactly matches `main`'s tree.
+8. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR.
+9. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
+   rebuilding anything (`latest`, not `stable`: `install.sh` defaults
+   `ORBIT_CHANNEL` to `latest`).
+10. Creates the annotated tag `vX.Y.Z` on the GitLab commit through the API.
 
 GitLab's push mirror carries the new tag to GitHub within minutes.
 `.github/workflows/release-on-tag.yml` there watches for `v*` tags and runs
@@ -85,8 +107,8 @@ protected (the job only ever runs on a protected ref):
   cannot.
 
 Neither token is ever a command-line argument or printed: the GHCR token is
-piped to `crane auth login` on stdin, and the GitLab token travels to `curl`
-as a header file. Rotate either by replacing the CI/CD variable; nothing else
+piped to `docker login` on stdin, and the GitLab token travels to `curl` as a
+header file. Rotate either by replacing the CI/CD variable; nothing else
 needs to change.
 
 ## Supported install targets
@@ -96,7 +118,7 @@ releases are not supported install targets
 ([ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md)). Pinning
 a version tag requires the image's own embedded version to name that release,
 so a moved tag cannot pass an image off as a version it is not. Moving tags
-such as `preview` make no version claim and are unaffected; `stable` always
+such as `preview` make no version claim and are unaffected; `latest` always
 points at the newest promoted release.
 
 Tags can move; digests cannot. Compose does not default to any discovery tag.
