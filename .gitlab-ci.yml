@@ -408,7 +408,7 @@ classify:
     - |
       set -eu
       : > classify.env
-      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_LICENCE:licence; do
+      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_LICENCE:licence ORBIT_LAUNCHER_COMPAT:launcher_compat; do
         name="${pair%%:*}"
         key="${pair##*:}"
         value="$(sed -n "s/^${key}=//p" classify-output.txt | tail -1)"
@@ -1189,6 +1189,199 @@ repair_journeys:
     - bash scripts/test-repair-journeys.sh
   after_script:
     - *docker_in_job_teardown
+
+# Ports .github/workflows/launcher-install-compat.yml (#819), retired because
+# GitHub receives no merge requests since the mirror flip (#801) and so never
+# ran the check that watches this repository's *production API*: orbit-launcher
+# fetches scripts/install.sh live from `main` at runtime rather than vendoring
+# a copy, so this job installs Orbit through a real orbit-launcher build,
+# against this commit's own install.sh, before that pairing is ever untested in
+# the wild. See #596, orbit-launcher#119, the owner ruling in #606 and the
+# follow-up in #736 for what a green run here does and does not prove; the same
+# scope note lives in docs/quality-strategy.md's "Launcher install
+# compatibility" section.
+#
+# The in-job daemon (.docker_in_job), not the dind service: like `smoke` and
+# `repair_journeys`, orbit-launcher drives Docker to stand up a real
+# deployment and then talks to it on a published loopback port, and a dind
+# service would put that port in the service container's own network
+# namespace where nothing here could reach it. Ubuntu Noble base for the same
+# reason those two jobs use it: docker-compose-v2 has no Debian Bookworm
+# package, and $NODE_IMAGE is Bookworm.
+#
+# Scope is the workflow's, narrowed the GitLab way: `classify` already treats
+# both scripts/install.sh (explicitly) and .gitlab-ci.yml (via its unmatched-
+# path catch-all) as system risk, but that bucket is far wider than what this
+# job actually watches itself for, so it gets its own classifier output
+# (ORBIT_LAUNCHER_COMPAT, scripts/classify-changed-paths.mjs) rather than
+# reusing ORBIT_SYSTEM. A merge request targeting `main` is always checked --
+# that is the preview -> main promotion this job exists to gate -- exactly as
+# the workflow always ran on a pull request into `main`.
+launcher_install_compat:
+  stage: acceptance
+  extends: .privileged_runner
+  image: $PLAYWRIGHT_IMAGE
+  # The live suite's own -timeout is 30m; the job must outlive it so a slow
+  # run fails with the suite's report rather than GitLab's.
+  timeout: 35m
+  needs:
+    - job: classify
+      artifacts: true
+  variables:
+    # Overridable the same way the workflow's workflow_dispatch input was;
+    # dev is orbit-launcher's own default branch.
+    LAUNCHER_REF: dev
+  rules:
+    - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: manual
+      allow_failure: true
+  allow_failure: false
+  script:
+    - |
+      set -eu
+      if [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ]; then
+        echo "Merge request into main — this is the promotion gate."
+      elif [ "${ORBIT_LAUNCHER_COMPAT:-true}" != "true" ]; then
+        echo "skipped: neither scripts/install.sh nor this job's own definition (.gitlab-ci.yml) changed"
+        exit 0
+      fi
+    - *docker_in_job
+    # git and curl for the launcher checkout and the Go download below; not
+    # added to .docker_in_job itself, which every Docker-using job shares and
+    # none of the others need either.
+    - apt-get install -y -qq --no-install-recommends git
+    - |
+      set -eu
+      git clone --quiet https://github.com/tomlawesome/orbit-launcher.git launcher
+      git -C launcher checkout --quiet "$LAUNCHER_REF"
+    # go-version-file equivalent: read the toolchain orbit-launcher's own
+    # go.mod asks for rather than pinning a copy of it here, so a launcher
+    # bump cannot drift silently out of step with what this job builds with.
+    - |
+      set -eu
+      go_version="$(sed -n 's/^toolchain go//p' launcher/go.mod | head -1)"
+      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' launcher/go.mod | head -1)"
+      [ -n "$go_version" ] || { echo "launcher/go.mod names no go version"; exit 1; }
+      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+      tar -C /usr/local -xzf /tmp/go.tar.gz
+    - export PATH="/usr/local/go/bin:$PATH"
+    - go version
+    - mkdir -p "$CI_PROJECT_DIR/.orbit-launcher-bin"
+    - (cd launcher && go build -o "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher" ./cmd/orbit-launcher)
+    # The candidate installer is this commit's own scripts/install.sh. The
+    # GitHub workflow pointed the launcher at raw.githubusercontent.com; this
+    # project is private and an MR commit is never mirrored, so the checkout
+    # itself is served instead (see below).
+    - |
+      set -eu
+      export ORBIT_LAUNCHER_LIVE_BINARY="$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
+      export ORBIT_LAUNCHER_LIVE_RAW_LOG="$CI_PROJECT_DIR/.orbit-launcher-live-raw.log"
+      # The candidate installer is this commit's own scripts/install.sh, served
+      # from the checkout on loopback. Fetching it from the repository-files API
+      # would need a job token in the URL, and the launcher's raw pty log --
+      # kept as an artifact below -- may echo the URL it was given.
+      node -e '
+        const http = require("node:http"), fs = require("node:fs");
+        const script = fs.readFileSync(process.argv[1]);
+        http.createServer((req, res) => {
+          if (req.url !== "/install.sh") { res.writeHead(404); return res.end(); }
+          res.writeHead(200, { "content-type": "text/x-shellscript" }); res.end(script);
+        }).listen(0, "127.0.0.1", function () { fs.writeFileSync(process.argv[2], String(this.address().port)); });
+      ' "$CI_PROJECT_DIR/scripts/install.sh" "$CI_PROJECT_DIR/.installer-port" &
+      for _ in $(seq 1 50); do [ -s "$CI_PROJECT_DIR/.installer-port" ] && break; sleep 0.1; done
+      [ -s "$CI_PROJECT_DIR/.installer-port" ] || { echo "installer server did not start"; exit 1; }
+      export ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="http://127.0.0.1:$(cat "$CI_PROJECT_DIR/.installer-port")/install.sh"
+      curl -fsS "$ORBIT_LAUNCHER_INSTALL_SCRIPT_URL" | cmp - "$CI_PROJECT_DIR/scripts/install.sh"
+      # install.sh and the image it verifies are one generation; see the
+      # workflow's own comment on ORBIT_CHANNEL for why this must be the
+      # pre-release channel rather than the promoted `latest` image.
+      export ORBIT_CHANNEL=preview
+      # The live suite tears its own compose stack down on its way out (see
+      # the after_script comment below), so after_script never sees a running
+      # Postgres or any other container the suite started -- the only window
+      # to capture their logs is while go test is still running. Poll in the
+      # background and stop the poller once go test exits, without letting
+      # the poller's own exit status stand in for the suite's.
+      mkdir -p "$CI_PROJECT_DIR/.orbit-launcher-diagnostics"
+      (
+        while :; do
+          stamp="$(date -u +%H%M%S)"
+          docker ps -a --format '{{.Names}} {{.Status}} {{.Image}}' > "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/ps.txt" 2>&1 || :
+          { printf '%s ' "$stamp"; tr '\n' '|' < "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/ps.txt" 2>/dev/null; printf '\n'; } >> "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/ps-history.txt" 2>&1 || :
+          for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null); do
+            docker logs --timestamps "$c" > "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/container-$c.log" 2>&1 || :
+            docker inspect --format '{{json .State}}' "$c" > "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/state-$c.json" 2>&1 || :
+          done
+          # How long a probe takes here. install.sh bounds each
+          # `docker compose exec` health probe at 5 s, and every run so far
+          # waited in 8 s steps -- that bound plus its 2 s poll -- against a
+          # Postgres whose own log and Docker health said it was ready. Time
+          # the two halves separately: the daemon round trip, and the compose
+          # CLI's own start-up.
+          if docker inspect orbit-postgres > /dev/null 2>&1; then
+            started="$(date +%s.%N)"; docker exec orbit-postgres pg_isready > /dev/null 2>&1; probe_status=$?
+            printf '%s docker-exec-pg_isready status=%s seconds=%s\n' "$stamp" "$probe_status" \
+              "$(awk -v a="$started" -v b="$(date +%s.%N)" 'BEGIN { printf "%.2f", b - a }')" \
+              >> "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/probe-timing.txt" 2>&1 || :
+            started="$(date +%s.%N)"; docker compose ls > /dev/null 2>&1; probe_status=$?
+            printf '%s docker-compose-ls status=%s seconds=%s\n' "$stamp" "$probe_status" \
+              "$(awk -v a="$started" -v b="$(date +%s.%N)" 'BEGIN { printf "%.2f", b - a }')" \
+              >> "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/probe-timing.txt" 2>&1 || :
+          fi
+          sleep 15
+        done
+      ) &
+      collector=$!
+      status=0
+      (cd launcher && go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
+      kill "$collector" 2>/dev/null || :
+      wait "$collector" 2>/dev/null || :
+      exit "$status"
+  after_script:
+    # Never fails the job: this only gathers evidence for the next person to
+    # read, win or lose. The live suite tears its own compose stack down on
+    # the way out (see the comment above `repair_journeys`), so a project may
+    # already be gone by the time this runs — hence both the compose-logs
+    # pass (which needs the project to still exist) and the plain
+    # container-logs pass (which does not).
+    - |
+      mkdir -p .orbit-launcher-diagnostics
+      if command -v docker > /dev/null 2>&1; then
+        # Always captured, unlike the old /dev/null guard: a daemon that is
+        # gone by the time after_script runs is itself the finding, and a
+        # guard that only tests exit status silently produced none of the
+        # df-h.txt/dockerd.log pair this after_script used to be limited to.
+        docker info > .orbit-launcher-diagnostics/docker-info.txt 2>&1 || echo "docker info failed with $?" >> .orbit-launcher-diagnostics/docker-info.txt
+        if docker info > /dev/null 2>&1; then
+          docker ps -a > .orbit-launcher-diagnostics/docker-ps.txt 2>&1 || :
+          docker volume ls > .orbit-launcher-diagnostics/docker-volumes.txt 2>&1 || :
+          for project in $(docker ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sort -u); do
+            [ -n "$project" ] || continue
+            docker compose -p "$project" logs --no-color --timestamps \
+              > ".orbit-launcher-diagnostics/compose-${project}.log" 2>&1 || :
+          done
+          for container in $(docker ps -a --format '{{.Names}}' 2>/dev/null); do
+            docker logs --timestamps "$container" \
+              > ".orbit-launcher-diagnostics/container-${container}.log" 2>&1 || :
+          done
+        fi
+      fi
+      df -h > .orbit-launcher-diagnostics/df-h.txt 2>&1 || :
+      cp /tmp/dockerd.log .orbit-launcher-diagnostics/dockerd.log 2>/dev/null || :
+      # install.sh itself keeps no persistent log of its own under the install
+      # directory -- everything it prints goes to stdout/stderr, which the
+      # live suite already captures as $ORBIT_LAUNCHER_LIVE_RAW_LOG (below).
+      # Nothing further to collect for that half.
+    - *docker_in_job_teardown
+  artifacts:
+    name: orbit-launcher-compat-live-raw-log
+    paths:
+      - .orbit-launcher-live-raw.log*
+      - .orbit-launcher-diagnostics/
+    expire_in: 7 days
+    when: always
 
 # --- publish -----------------------------------------------------------------
 

@@ -6,6 +6,7 @@ import {
   isNonExecutablePath,
   pathRisk,
   requiresExecutableValidation,
+  touchesLauncherInstallCompat,
   touchesLicencePolicy,
   touchesWeb,
 } from "./classify-changed-paths.mjs";
@@ -187,7 +188,20 @@ describe("changed-path CI risk classification", () => {
       web: true,
       // A lockfile change is exactly what the licence gate exists to catch.
       licence: true,
+      launcherCompat: false,
     });
+  });
+
+  it("narrows launcher_install_compat to the installer contract and its own job definition (#819)", () => {
+    expect(touchesLauncherInstallCompat(["scripts/install.sh"])).toBe(true);
+    expect(touchesLauncherInstallCompat([".gitlab-ci.yml"])).toBe(true);
+    expect(touchesLauncherInstallCompat(["docs/architecture.md", "scripts/install.sh"])).toBe(true);
+    expect(touchesLauncherInstallCompat(["scripts/configure.sh"])).toBe(false);
+    expect(touchesLauncherInstallCompat(["README.md"])).toBe(false);
+    expect(touchesLauncherInstallCompat([])).toBe(true);
+    expect(touchesLauncherInstallCompat(undefined)).toBe(true);
+    expect(ciRequirements(["scripts/install.sh"]).launcherCompat).toBe(true);
+    expect(ciRequirements(["README.md"]).launcherCompat).toBe(false);
   });
 
   it("builds executable and dependency-snapshot changes but not inert fast changes", () => {
