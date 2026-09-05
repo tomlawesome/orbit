@@ -733,3 +733,44 @@ describe("sidecar pins: the CI job has the tools the check shells out to", () =>
     expect(anchor).toContain("docker buildx version");
   });
 });
+
+describe("sidecar pins: every pinned .gitlab-ci.yml image is a tracked location (#807)", () => {
+  // A pin the policy does not know about is a pin `check --offline` never
+  // looks at: drift between .gitlab-ci.yml and the policy would go silent.
+  // This reads the real files rather than a fixture, because the point is
+  // whether the two are in step right now, not whether the mechanism works
+  // on made-up input.
+  it("lists .gitlab-ci.yml in the locations of every policy entry it pins", () => {
+    const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
+    const realPolicy = JSON.parse(
+      readFileSync(new URL("../.github/supply-chain-policy.json", import.meta.url), "utf8"),
+    );
+
+    const pinnedImages = [...gitlabCi.matchAll(/^\s*[A-Z0-9_]+_IMAGE:\s*(\S+@sha256:[0-9a-f]{64})\s*$/gmu)].map(
+      (match) => match[1],
+    );
+    // A fixture-free assertion that the extraction itself still works: if
+    // .gitlab-ci.yml stops pinning anything by digest, the test below would
+    // pass vacuously and prove nothing.
+    expect(pinnedImages.length).toBeGreaterThan(0);
+
+    const matchedEntries = new Set();
+    for (const pinned of pinnedImages) {
+      const tag = pinned.slice(0, pinned.indexOf("@"));
+      const entry = realPolicy.containerImages.find((candidate) => candidate.tag === tag);
+      if (entry) matchedEntries.add(entry.name);
+    }
+    // Guard the guard: at least one pinned image (postgres) must actually
+    // match a policy entry, or the loop below checks nothing.
+    expect(matchedEntries.size).toBeGreaterThan(0);
+
+    for (const pinned of pinnedImages) {
+      const tag = pinned.slice(0, pinned.indexOf("@"));
+      const entry = realPolicy.containerImages.find((candidate) => candidate.tag === tag);
+      if (!entry) continue; // not every .gitlab-ci.yml pin is policy-tracked (e.g. the scanner image)
+      expect(entry.locations, `${entry.name} (${tag}) should list .gitlab-ci.yml`).toContain(
+        ".gitlab-ci.yml",
+      );
+    }
+  });
+});
