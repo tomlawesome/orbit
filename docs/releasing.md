@@ -15,7 +15,16 @@ receives what GitLab already decided (#821).
 - Ordinary issue branches start from and target `dev`.
 - Merge `dev` into `preview` to start or update an ordinary release train.
 - The `preview` push runs the full CI gate and publishes the tested image to
-  GHCR as `:preview` and `:sha-<commit>`.
+  GHCR as `:preview` and `:sha-<commit>`. On GitHub's mirror, the
+  `publish-from-gitlab` workflow copies the digest GitLab already built and
+  tested; it never rebuilds. It does this by polling the GitLab pipeline for
+  the pushed commit (`scripts/ci/gitlab-await-tested-image.sh`) and copying
+  the digest only once that pipeline succeeds. If a GitLab job flakes and is
+  retried, the same pipeline turning `success` within the wait window
+  (`ORBIT_WAIT_MINUTES`, default 120 minutes) is picked up automatically on
+  the next poll -- no one needs to re-run anything. Only once that window
+  passes with the pipeline still failed does the GitHub run need re-running by
+  hand, with `gh run rerun <run-id> --failed`.
 - After digest-based acceptance, merge `preview` into `main`.
 - A `hotfix/*` branch starts from `main`, publishes and accepts a patch
   preview, merges to `main`, and is then reconciled into `dev` and `preview`.
