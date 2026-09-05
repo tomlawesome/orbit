@@ -165,27 +165,27 @@ terminal check results; workflow-level path filters are not used.
 
 ### Launcher install compatibility
 
-`Launcher install compatibility` (`.github/workflows/launcher-install-compat.yml`)
-installs Orbit through a real orbit-launcher build against the pull request's
-own `scripts/install.sh`. Green means only that: the pull request's
-`install.sh` still honours its contract with orbit-launcher (`--plain`,
+`launcher_install_compat` (`.gitlab-ci.yml`) installs Orbit through a real
+orbit-launcher build against the merge request's own `scripts/install.sh`.
+Green means only that: the merge request's `install.sh` still honours its
+contract with orbit-launcher (`--plain`,
 `--install|--update|--repair`). It does not mean the launcher can drive the
 rest of a deployment, because `install.sh` fetches its helpers —
 `configure.sh`, `installer-ui.sh` and the rest of `deployment_assets` — from
 the resolved image's own source revision, not from the commit under test
-(`scripts/install.sh:1320`, `:1348`, `:1447`), so a pull request changing a
+(`scripts/install.sh:1320`, `:1348`, `:1447`), so a merge request changing a
 helper is invisible to this gate. Their line grammars are enforced instead per
-pull request, against `docs/engine-events.md`, by `scripts/engine-events.test.mjs`
+merge request, against `docs/engine-events.md`, by `scripts/engine-events.test.mjs`
 (the `phase=...` event stream) and `scripts/configure.test.mjs` (`configure.sh
 --check`'s readiness lines). Full pairing of changed helpers with a real image
 is proven only at the `preview` → `main` gate. Ruling: #606; follow-up
 (pairing changed helpers against the acceptance rig's candidate image):
 #736.
 
-Pull requests run static and unit checks without a production application or
+Merge requests run static and unit checks without a production application or
 container build. Every accepted push to protected `preview` or `hotfix/**`
 runs the complete exact-image system and publication path, so integration and
-release evidence is never inferred from a cheaper pull-request lane. Until a
+release evidence is never inferred from a cheaper merge-request lane. Until a
 forge-native combined-state queue is available, only one release train is
 admitted to protected CI at a time while
 independent implementation and local validation continue concurrently.
