@@ -90,6 +90,23 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# `--project` is variadic in the pinned Playwright, so `--project NAME SPEC`
+# reads SPEC as a second project name instead of a file filter (#731). Using
+# `--project=NAME` instead keeps the value tied to the flag regardless of
+# argument order or which flags are present, and does not depend on
+# Playwright's variadic parsing staying as it is today.
+playwright_args=()
+[[ -z "$playwright_project" ]] || playwright_args+=("--project=${playwright_project}")
+[[ -z "$spec" ]] || playwright_args+=("$spec")
+
+# Assembled before any Docker or network work runs, so
+# scripts/test-e2e-local.test.mjs can prove the argument list is correct
+# without bringing up the stack.
+if [[ -n "${TEST_E2E_LOCAL_DRY_RUN:-}" ]]; then
+  printf '%s\n' "${playwright_args[@]}"
+  exit 0
+fi
+
 orbit_image=""
 
 log() { printf 'test-e2e-local: %s\n' "$*" >&2; }
@@ -244,10 +261,7 @@ configured_app_url="$(compose config --format json | jq -r '.services["orbit-app
 log "APP_URL agrees with the published port"
 
 # --- Run the Playwright suite -------------------------------------------------
-
-playwright_args=()
-[[ -z "$playwright_project" ]] || playwright_args+=(--project "$playwright_project")
-[[ -z "$spec" ]] || playwright_args+=("$spec")
+# playwright_args was assembled right after argument parsing, above.
 
 log "installing Playwright's Chromium build"
 # scripts/install-test-browser.sh (README "Local development"): a plain
