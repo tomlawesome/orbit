@@ -417,6 +417,7 @@ classify:
   artifacts:
     reports:
       dotenv: classify.env
+    expire_in: 14 days
 
 # --- fast --------------------------------------------------------------------
 
