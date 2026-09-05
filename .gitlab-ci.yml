@@ -377,7 +377,7 @@ classify:
     - |
       set -eu
       : > classify.env
-      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_LICENCE:licence; do
+      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_LICENCE:licence ORBIT_LAUNCHER_COMPAT:launcher_compat; do
         name="${pair%%:*}"
         key="${pair##*:}"
         value="$(sed -n "s/^${key}=//p" classify-output.txt | tail -1)"
@@ -1133,6 +1133,112 @@ repair_journeys:
     - docker load --input image.tar
     - docker tag "$ORBIT_CI_IMAGE" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
     - bash scripts/test-repair-journeys.sh
+
+# Ports .github/workflows/launcher-install-compat.yml (#819), retired because
+# GitHub receives no merge requests since the mirror flip (#801) and so never
+# ran the check that watches this repository's *production API*: orbit-launcher
+# fetches scripts/install.sh live from `main` at runtime rather than vendoring
+# a copy, so this job installs Orbit through a real orbit-launcher build,
+# against this commit's own install.sh, before that pairing is ever untested in
+# the wild. See #596, orbit-launcher#119, the owner ruling in #606 and the
+# follow-up in #736 for what a green run here does and does not prove; the same
+# scope note lives in docs/quality-strategy.md's "Launcher install
+# compatibility" section.
+#
+# The in-job daemon (.docker_in_job), not the dind service: like `smoke` and
+# `repair_journeys`, orbit-launcher drives Docker to stand up a real
+# deployment and then talks to it on a published loopback port, and a dind
+# service would put that port in the service container's own network
+# namespace where nothing here could reach it. Ubuntu Noble base for the same
+# reason those two jobs use it: docker-compose-v2 has no Debian Bookworm
+# package, and $NODE_IMAGE is Bookworm.
+#
+# Scope is the workflow's, narrowed the GitLab way: `classify` already treats
+# both scripts/install.sh (explicitly) and .gitlab-ci.yml (via its unmatched-
+# path catch-all) as system risk, but that bucket is far wider than what this
+# job actually watches itself for, so it gets its own classifier output
+# (ORBIT_LAUNCHER_COMPAT, scripts/classify-changed-paths.mjs) rather than
+# reusing ORBIT_SYSTEM. A merge request targeting `main` is always checked --
+# that is the preview -> main promotion this job exists to gate -- exactly as
+# the workflow always ran on a pull request into `main`.
+launcher_install_compat:
+  stage: acceptance
+  extends: .privileged_runner
+  image: $PLAYWRIGHT_IMAGE
+  timeout: 20m
+  needs:
+    - job: classify
+      artifacts: true
+  variables:
+    # Overridable the same way the workflow's workflow_dispatch input was;
+    # dev is orbit-launcher's own default branch.
+    LAUNCHER_REF: dev
+  rules:
+    - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: manual
+      allow_failure: true
+  allow_failure: false
+  script:
+    - |
+      set -eu
+      if [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ]; then
+        echo "Merge request into main — this is the promotion gate."
+      elif [ "${ORBIT_LAUNCHER_COMPAT:-true}" != "true" ]; then
+        echo "skipped: neither scripts/install.sh nor this job's own definition (.gitlab-ci.yml) changed"
+        exit 0
+      fi
+    - *docker_in_job
+    # git and curl for the launcher checkout and the Go download below; not
+    # added to .docker_in_job itself, which every Docker-using job shares and
+    # none of the others need either.
+    - apt-get install -y -qq --no-install-recommends git
+    - |
+      set -eu
+      git clone --quiet https://github.com/tomlawesome/orbit-launcher.git launcher
+      git -C launcher checkout --quiet "$LAUNCHER_REF"
+    # go-version-file equivalent: read the toolchain orbit-launcher's own
+    # go.mod asks for rather than pinning a copy of it here, so a launcher
+    # bump cannot drift silently out of step with what this job builds with.
+    - |
+      set -eu
+      go_version="$(sed -n 's/^toolchain go//p' launcher/go.mod | head -1)"
+      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' launcher/go.mod | head -1)"
+      [ -n "$go_version" ] || { echo "launcher/go.mod names no go version"; exit 1; }
+      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+      tar -C /usr/local -xzf /tmp/go.tar.gz
+    - export PATH="/usr/local/go/bin:$PATH"
+    - go version
+    - mkdir -p "$CI_PROJECT_DIR/.orbit-launcher-bin"
+    - (cd launcher && go build -o "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher" ./cmd/orbit-launcher)
+    # The candidate installer, by exact commit, through GitLab's own
+    # repository-files API rather than raw.githubusercontent.com: this
+    # project is private and this commit has not been mirrored to GitHub, so
+    # the workflow's public raw URL has no equivalent here that would serve
+    # it. CI_JOB_TOKEN authenticates the read within this same pipeline.
+    - |
+      set -eu
+      export ORBIT_LAUNCHER_LIVE_BINARY="$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
+      export ORBIT_LAUNCHER_LIVE_RAW_LOG="$CI_PROJECT_DIR/.orbit-launcher-live-raw.log"
+      export ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="${CI_SERVER_URL}/api/v4/projects/${CI_PROJECT_ID}/repository/files/scripts%2Finstall.sh/raw?ref=${CI_COMMIT_SHA}&job_token=${CI_JOB_TOKEN}"
+      # install.sh and the image it verifies are one generation; see the
+      # workflow's own comment on ORBIT_CHANNEL for why this must be the
+      # pre-release channel rather than the promoted `latest` image.
+      export ORBIT_CHANNEL=preview
+      (cd launcher && go test -tags live -count=1 -v -timeout 30m ./test/live/...)
+  after_script:
+    - |
+      if command -v docker > /dev/null 2>&1 && docker info > /dev/null 2>&1; then
+        docker ps -a || true
+        docker volume ls || true
+      fi
+  artifacts:
+    name: orbit-launcher-compat-live-raw-log
+    paths:
+      - .orbit-launcher-live-raw.log*
+    expire_in: 7 days
+    when: always
 
 # --- publish -----------------------------------------------------------------
 

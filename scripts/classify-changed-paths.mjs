@@ -46,6 +46,15 @@ const licencePolicyPaths = new Set([
   "supply-chain/licence-policy.yml",
 ]);
 
+// The two paths the retired `.github/workflows/launcher-install-compat.yml`
+// watched to decide whether an ordinary pull request needed the check at
+// all: the installer's own contract with orbit-launcher, and the gate's own
+// definition. `.gitlab-ci.yml` is that definition's new home on GitLab (see
+// the `launcher_install_compat` job, #819) — it also already falls into the
+// default system lane below through the unmatched-path catch-all, so this
+// list exists to narrow *this one job's* reach, not to change classifyCiRisk.
+const launcherCompatPatterns = [/^scripts\/install\.sh$/u, /^\.gitlab-ci\.yml$/u];
+
 const fastPatterns = [
   /^docs\//u,
   /^\.github\/ISSUE_TEMPLATE\//u,
@@ -146,6 +155,15 @@ export function touchesLicencePolicy(changedPaths) {
   return changedPaths.some((path) => licencePolicyPaths.has(normalizePath(path)));
 }
 
+/**
+ * True when a change can move whether `launcher_install_compat` has anything
+ * new to prove. Fails safe: no usable list of changed paths means run it.
+ */
+export function touchesLauncherInstallCompat(changedPaths) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return true;
+  return changedPaths.some((path) => matchesAny(normalizePath(path), launcherCompatPatterns));
+}
+
 export function ciRequirements(changedPaths, options = {}) {
   const risk = classifyCiRisk(changedPaths, options);
   const dependencySnapshotChanged = Array.isArray(changedPaths)
@@ -157,6 +175,7 @@ export function ciRequirements(changedPaths, options = {}) {
     system: risk === CI_RISK.SYSTEM,
     web: touchesWeb(changedPaths),
     licence: touchesLicencePolicy(changedPaths),
+    launcherCompat: touchesLauncherInstallCompat(changedPaths),
   };
 }
 
@@ -281,8 +300,9 @@ function main() {
   const system = risk === CI_RISK.SYSTEM || requirements.system;
   const web = requirements.web;
   const licence = requirements.licence;
+  const launcherCompat = requirements.launcherCompat;
   console.log(
-    `CI risk classification: risk=${risk} build=${build} integration=${integration} system=${system} web=${web} licence=${licence} (${reason}).`,
+    `CI risk classification: risk=${risk} build=${build} integration=${integration} system=${system} web=${web} licence=${licence} launcher_compat=${launcherCompat} (${reason}).`,
   );
   if (graphChanged !== undefined) {
     console.log(`Production dependency graph changed: ${graphChanged}.`);
@@ -295,6 +315,7 @@ function main() {
     appendFileSync(process.env.GITHUB_OUTPUT, `system=${system}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `web=${web}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `licence=${licence}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `launcher_compat=${launcherCompat}\n`);
   }
 }
 
