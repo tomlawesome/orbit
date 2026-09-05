@@ -32,12 +32,26 @@ const dependencySnapshotPaths = new Set(["pnpm-lock.yaml", "pnpm-workspace.yaml"
 // layer moves without charging every system-risk change for it.
 const webPatterns = [/^web\//u, /^pnpm-lock\.yaml$/u, /^pnpm-workspace\.yaml$/u];
 
+// What the `licence_policy` job (#815) reaches for: a change to any of these
+// can add or move a dependency, so the installed-tree licence walk needs to
+// run. Narrower than a full dependency-snapshot change on purpose -- unlike
+// `pathRisk`'s dependencySnapshotPaths, this does not fall back to a
+// production-graph comparison, because the licence walk covers the whole
+// installed tree regardless of whether production dependencies moved.
+const licencePolicyPaths = new Set([
+  "pnpm-lock.yaml",
+  "package.json",
+  "web/package.json",
+  "pnpm-workspace.yaml",
+  "supply-chain/licence-policy.yml",
+]);
+
 const fastPatterns = [
   /^docs\//u,
   /^\.github\/ISSUE_TEMPLATE\//u,
   /^\.github\/pull_request_template\.md$/u,
   /^\.github\/supply-chain-policy\.json$/u,
-  /^\.github\/dependency-review-config\.yml$/u,
+  /^supply-chain\/licence-policy\.yml$/u,
   /^[^/]+\.md$/u,
   /^\.gitignore$/u,
   /^LICENSE$/u,
@@ -122,6 +136,16 @@ export function touchesWeb(changedPaths) {
   return changedPaths.some((path) => matchesAny(normalizePath(path), webPatterns));
 }
 
+/**
+ * True when a change can move what the `licence_policy` gate checks. Fails
+ * safe the same way `touchesWeb` does: no usable list of changed paths means
+ * run it.
+ */
+export function touchesLicencePolicy(changedPaths) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return true;
+  return changedPaths.some((path) => licencePolicyPaths.has(normalizePath(path)));
+}
+
 export function ciRequirements(changedPaths, options = {}) {
   const risk = classifyCiRisk(changedPaths, options);
   const dependencySnapshotChanged = Array.isArray(changedPaths)
@@ -132,6 +156,7 @@ export function ciRequirements(changedPaths, options = {}) {
     integration: risk === CI_RISK.INTEGRATION || risk === CI_RISK.SYSTEM,
     system: risk === CI_RISK.SYSTEM,
     web: touchesWeb(changedPaths),
+    licence: touchesLicencePolicy(changedPaths),
   };
 }
 
@@ -255,8 +280,9 @@ function main() {
   const integration = risk === CI_RISK.SYSTEM || requirements.integration;
   const system = risk === CI_RISK.SYSTEM || requirements.system;
   const web = requirements.web;
+  const licence = requirements.licence;
   console.log(
-    `CI risk classification: risk=${risk} build=${build} integration=${integration} system=${system} web=${web} (${reason}).`,
+    `CI risk classification: risk=${risk} build=${build} integration=${integration} system=${system} web=${web} licence=${licence} (${reason}).`,
   );
   if (graphChanged !== undefined) {
     console.log(`Production dependency graph changed: ${graphChanged}.`);
@@ -268,6 +294,7 @@ function main() {
     appendFileSync(process.env.GITHUB_OUTPUT, `integration=${integration}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `system=${system}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `web=${web}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `licence=${licence}\n`);
   }
 }
 
