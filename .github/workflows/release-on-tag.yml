@@ -1,0 +1,33 @@
+name: Release the mirrored stable tag
+
+# The release decision itself is made on GitLab (#821): the manual
+# `promote_stable` job there validates the version, checks the tested
+# preview digest and creates the annotated `vX.Y.Z` tag. GitLab's push
+# mirror carries that tag here within minutes, and this workflow's only job
+# is to turn it into a GitHub Release so the public Releases page keeps
+# working. GitHub does no judging of its own -- it never refuses a tag or
+# recomputes anything.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub release from mirrored tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the release if it does not already exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
+            printf 'Release %s already exists; nothing to do.\n' "${TAG}"
+            exit 0
+          fi
+          gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes

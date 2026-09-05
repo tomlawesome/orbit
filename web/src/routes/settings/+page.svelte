@@ -3,6 +3,7 @@
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { clearTourSeen, readSettingsScreen, signOutEverywhere, writeReminders } from "$lib/data/workspace.js";
+  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
   import { relaunchTour } from "$lib/tour/relaunch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
@@ -112,6 +113,70 @@
   }
 
   /**
+   * Browser alerts (#763). The same reminder arriving on a phone that is not
+   * currently looking at Orbit, which is where a person is when a reminder
+   * matters.
+   *
+   * PER DEVICE, and the label says so. A push subscription and a notification
+   * permission both belong to one browser profile, so there is no account-wide
+   * state to show here: a second device reads off until it is switched on
+   * there. The alternative — one shared-looking switch — would show `on` to a
+   * device that receives nothing.
+   *
+   * `alerts.js` holds the sequence; this screen holds only the three things a
+   * reader sees. `supported` false hides the control rather than drawing a
+   * toggle that cannot move, and the account-wide `pushNotifications`
+   * preference is deliberately not drawn: it defaults on, the worker honours
+   * it, and two switches for one idea is worse than one.
+   */
+  let alertsAvailable = $state(false);
+  let browserAlerts = $state(false);
+  /** @type {?string} */
+  let alertsProblem = $state(null);
+  let alertsBusy = $state(false);
+
+  onMount(async () => {
+    alertsAvailable = alertsSupported();
+    /* The row is drawn either way, and the switch is simply held when the
+       browser cannot do push. Drawing a different row instead would make this
+       screen's shape depend on a browser capability, which the pixel gate
+       compares against one ratified mockup — and would give the reader a
+       missing control rather than a held one. */
+    if (!alertsAvailable) alertsProblem = "this browser can't show alerts";
+    else browserAlerts = Boolean(await currentSubscription());
+  });
+
+  async function toggleBrowserAlerts() {
+    if (alertsBusy) return;
+    /* Not optimistic, unlike the email toggle above: turning these on opens a
+       browser permission prompt the reader has to answer, so the switch must
+       not claim to be on while that prompt is still on screen. */
+    alertsBusy = true;
+    alertsProblem = null;
+    try {
+      if (browserAlerts) {
+        await disableAlerts();
+        browserAlerts = false;
+      } else {
+        await enableAlerts();
+        browserAlerts = true;
+      }
+    } catch (error) {
+      browserAlerts = Boolean(await currentSubscription());
+      /* alerts.js throws AlertsError, which carries the reason as a code so
+         this screen never has to match on a message. */
+      const reason = /** @type {{ code?: string }} */ (error)?.code;
+      alertsProblem = reason === "permission_denied"
+        ? "your browser is refusing alerts. allow notifications for Orbit, then try again"
+        : reason === "unconfigured"
+          ? "not switched on — this Orbit has no push keys yet, which is your administrator's to set"
+          : "not switched on — Orbit could not reach your alert settings";
+    } finally {
+      alertsBusy = false;
+    }
+  }
+
+  /**
    * "Sign out of every device" — armed by a first tap, done by a second, the
    * family protocol the inbox and the item view already use for anything
    * that cannot be undone. This one ends the caller's own session too, so on
@@ -205,10 +270,12 @@
     <div class="card">
       <h3>Reminders</h3>
       <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
+      <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
       <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
       <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
       <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
       {#if reminderProblem}<div class="note">{reminderProblem}</div>{/if}
+      {#if alertsProblem}<div class="note">{alertsProblem}</div>{/if}
     </div>
 
     <div class="card">
