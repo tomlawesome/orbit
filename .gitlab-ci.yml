@@ -311,10 +311,14 @@ variables:
   printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian %s stable\n' \
     "$VERSION_CODENAME" > /etc/apt/sources.list.d/docker.list
   apt-get update -qq
-  apt-get install -y -qq --no-install-recommends docker-ce-cli docker-compose-plugin
-  # Proves the plugin is installed without contacting a daemon, which is the
-  # exact check scripts/backup.sh makes before it does anything else.
+  # buildx too: sidecar_pin_freshness resolves tags with `docker buildx
+  # imagetools inspect --format`, which without the plugin fails as
+  # "unknown flag: --format" (pipeline 321, #820).
+  apt-get install -y -qq --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin
+  # Proves both plugins are installed without contacting a daemon; the compose
+  # line is the exact check scripts/backup.sh makes before it does anything else.
   docker compose version
+  docker buildx version
   for _ in $(seq 1 60); do
     docker info > /dev/null 2>&1 && break
     sleep 1
