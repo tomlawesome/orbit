@@ -7,9 +7,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { PTY_DEADLINE_MS, PTY_ASYNC_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, failOnPtyDeadline, ptyDeadlineError } from "./pty-deadline.mjs";
+import { PTY_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, failOnPtyDeadline, ptyWatchdog } from "./pty-deadline.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Tests here run installer-ui.sh under bash, most through a pty; a spawn
+// that takes tens of milliseconds quiet takes seconds on a starved core
+// (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
 
@@ -49,7 +55,7 @@ const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
  */
 
 function runHelper(modeArgs = [], env = {}) {
-  return spawnSync(
+  return failOnProcessDeadline(spawnSync(
     "bash",
     [
       "-c",
@@ -61,8 +67,37 @@ function runHelper(modeArgs = [], env = {}) {
     {
       encoding: "utf8",
       env: { ...process.env, TERM: "xterm", ...env },
+      ...processGuard(),
     },
-  );
+  ), { label: "runHelper" });
+}
+
+/*
+ * runHelper's pty twin: the same one-shot emit, with stdout on a real terminal
+ * so the colour and simulation decisions are made the way an operator's
+ * terminal makes them.
+ *
+ * `bash -c` inside the command, rather than letting `script` run the body
+ * itself. script(1) runs its -c argument with $SHELL and falls back to /bin/sh
+ * when that is unset, and this body is bash -- `source`, and a bash helper on
+ * the other end of it. On a GitHub runner $SHELL is /bin/bash and the fallback
+ * never fired; in a container job it is unset, /bin/sh is dash, and every
+ * command in the body failed "not found" for an exit status of 127 (GitLab
+ * pipeline 169, job 727). The pty is script's, not the shell's, so naming the
+ * shell costs nothing and settles what runs the body -- which is why runPty
+ * below has always spelled bash out.
+ */
+function runTtyEmit({ initArgs = "", env, label }) {
+  return failOnProcessDeadline(spawnSync(
+    "script",
+    [
+      "-qec",
+      `bash -c 'source "$1"; installer_ui_init ${initArgs}; `
+        + `installer_ui_emit bootstrap installer starting initial begin 3' _ '${helper}'`,
+      "/dev/null",
+    ],
+    { encoding: "utf8", env, ...processGuard() },
+  ), { label });
 }
 
 /*
@@ -94,8 +129,10 @@ function runPtyInterrupted(body, marker, env = {}) {
     let signalled = false;
     let innerPid = null;
     child.stdout.setEncoding("utf8");
+    const watchdog = ptyWatchdog({ label: "runPtyInterrupted", kill: () => child.kill("SIGKILL") });
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
+      watchdog.touch();
       const pid = stdout.match(/PID=(\d+)/u);
       if (pid) innerPid = Number(pid[1]);
       // Only once the marker is on screen is the trap known to be installed.
@@ -105,12 +142,10 @@ function runPtyInterrupted(body, marker, env = {}) {
       }
     });
     child.on("error", reject);
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        reject(ptyDeadlineError({ label: "runPtyInterrupted", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout }));
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout }));
         return;
       }
       resolve({ status, stdout, signalled });
@@ -137,8 +172,10 @@ function runPtyStorm(body, marker, signals) {
     let remaining = signals;
     let innerPid = null;
     child.stdout.setEncoding("utf8");
+    const watchdog = ptyWatchdog({ label: "runPtyStorm", kill: () => child.kill("SIGKILL") });
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
+      watchdog.touch();
       const pid = stdout.match(/PID=(\d+)/u);
       if (pid) innerPid = Number(pid[1]);
       if (!stormed && innerPid && stdout.includes(marker)) {
@@ -153,12 +190,10 @@ function runPtyStorm(body, marker, signals) {
     });
     child.on("error", reject);
     child.stdin.on("error", () => {});
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        reject(ptyDeadlineError({ label: "runPtyStorm", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout }));
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout }));
         return;
       }
       resolve({ status, stdout, stormed });
@@ -197,18 +232,17 @@ function runPtyOpenStdin(body, input, env = {}) {
       { env: { ...process.env, TERM: "xterm", ...env } },
     );
     let stdout = "";
-    let timedOut = false;
     child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    const watchdog = ptyWatchdog({ label: "runPtyOpenStdin", kill: () => child.kill("SIGKILL") });
+    child.stdout.on("data", (chunk) => { stdout += chunk; watchdog.touch(); });
     child.on("error", reject);
     // Written once, then left open: never child.stdin.end().
     child.stdin.on("error", () => { /* child exited first; nothing to write to */ });
     child.stdin.write(input);
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        reject(ptyDeadlineError({ label: "runPtyOpenStdin", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout }));
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout }));
         return;
       }
       resolve({ status, stdout });
@@ -242,19 +276,18 @@ function runPtyTimed(body, input, env = {}) {
     let stderr = "";
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const watchdog = ptyWatchdog({ label: "runPtyTimed", kill: () => child.kill("SIGKILL") });
+    child.stdout.on("data", (chunk) => { stdout += chunk; watchdog.touch(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk; watchdog.touch(); });
     child.on("error", reject);
-    let timedOut = false;
-    const timeout = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     setTimeout(() => {
       child.stdin.write(input);
       child.stdin.end();
     }, 200);
     child.on("close", (status, signal) => {
-      clearTimeout(timeout);
-      if (timedOut) {
-        reject(ptyDeadlineError({ label: "runPtyTimed", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout, stderr }));
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
         return;
       }
       resolve({ status, signal, stdout, stderr });
@@ -275,7 +308,7 @@ describe("installer semantic UI", () => {
   });
 
   it("rejects arbitrary field content instead of echoing untrusted values", () => {
-    const result = spawnSync(
+    const result = failOnProcessDeadline(spawnSync(
       "bash",
       [
         "-c",
@@ -283,8 +316,8 @@ describe("installer semantic UI", () => {
         "installer-ui-test",
         helper,
       ],
-      { encoding: "utf8" },
-    );
+      { encoding: "utf8", ...processGuard() },
+    ), { label: "rejects arbitrary field content" });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("reason=unknown");
@@ -307,7 +340,7 @@ describe("installer semantic UI", () => {
     const target = mkdtempSync(join(tmpdir(), "orbit-installer-ui-"));
     const output = join(target, "output");
     try {
-      const result = spawnSync(
+      const result = failOnProcessDeadline(spawnSync(
         "bash",
         [
           "-c",
@@ -316,8 +349,8 @@ describe("installer semantic UI", () => {
           helper,
           output,
         ],
-        { encoding: "utf8", env: { ...process.env, TERM: "xterm" } },
-      );
+        { encoding: "utf8", env: { ...process.env, TERM: "xterm" }, ...processGuard() },
+      ), { label: "does not emit ANSI when output is redirected" });
 
       expect(result.status).toBe(0);
       expect(readFileSync(output, "utf8")).not.toMatch(/\x1b\[/u);
@@ -329,15 +362,7 @@ describe("installer semantic UI", () => {
   it("uses ANSI only for an actual TTY when color is allowed", () => {
     const colorEnv = { ...process.env, TERM: "xterm" };
     delete colorEnv.NO_COLOR;
-    const result = spawnSync(
-      "script",
-      [
-        "-qec",
-        `source '${helper}'; installer_ui_init; installer_ui_emit bootstrap installer starting initial begin 3`,
-        "/dev/null",
-      ],
-      { encoding: "utf8", env: colorEnv },
-    );
+    const result = runTtyEmit({ env: colorEnv, label: "uses ANSI only for an actual TTY" });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/\x1b\[/u);
@@ -352,15 +377,7 @@ describe("installer semantic UI", () => {
   ])("refuses forced TTY color when %s disables it", (_label, overrides) => {
     const env = { ...process.env, ...overrides };
     if (!("NO_COLOR" in overrides)) delete env.NO_COLOR;
-    const result = spawnSync(
-      "script",
-      [
-        "-qec",
-        `source '${helper}'; installer_ui_init --tty; installer_ui_emit bootstrap installer starting initial begin 3`,
-        "/dev/null",
-      ],
-      { encoding: "utf8", env },
-    );
+    const result = runTtyEmit({ initArgs: "--tty", env, label: "refuses forced TTY color" });
 
     expect(result.status).toBe(0);
     expect(result.stdout).not.toMatch(/\x1b\[/u);
@@ -638,24 +655,8 @@ describe("installer semantic UI", () => {
   it("labels TTY output as simulation without affecting ordinary output", () => {
     const colorEnv = { ...process.env, TERM: "xterm" };
     delete colorEnv.NO_COLOR;
-    const simulated = spawnSync(
-      "script",
-      [
-        "-qec",
-        `source '${helper}'; installer_ui_init --simulation; installer_ui_emit bootstrap installer starting initial begin 3`,
-        "/dev/null",
-      ],
-      { encoding: "utf8", env: colorEnv },
-    );
-    const ordinary = spawnSync(
-      "script",
-      [
-        "-qec",
-        `source '${helper}'; installer_ui_init; installer_ui_emit bootstrap installer starting initial begin 3`,
-        "/dev/null",
-      ],
-      { encoding: "utf8", env: colorEnv },
-    );
+    const simulated = runTtyEmit({ initArgs: "--simulation", env: colorEnv, label: "simulated" });
+    const ordinary = runTtyEmit({ env: colorEnv, label: "ordinary" });
 
     expect(simulated.status).toBe(0);
     expect(simulated.stdout).toContain("[SIMULATION]");

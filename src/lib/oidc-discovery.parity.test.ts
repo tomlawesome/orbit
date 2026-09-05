@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import { OIDC_DISCOVERY_MAX_BYTES, buildDiscoveryUrl, validateDiscoveryDocument, verifyOidcDiscovery } from "./oidc-discovery";
 
 // Parity between scripts/install.sh's OIDC discovery handling and this
@@ -31,6 +32,11 @@ import { OIDC_DISCOVERY_MAX_BYTES, buildDiscoveryUrl, validateDiscoveryDocument,
 // per the slice plan's established convention (docs/adr-notes/
 // 295-install-port-plan.md).
 
+// This file spawns real awk, node and bash (a generated install.sh driver);
+// a spawn that takes 0.7s quiet took 4.3s on a starved core (#698). Budget
+// and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
+
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const installScriptPath = join(repoRoot, "scripts", "install.sh");
 
@@ -39,7 +45,7 @@ function extractFunction(name: string): string {
     $0 ~ "^${name}\\\\(\\\\) \\\\{" { found = 1 }
     found { print; if ($0 == "}") { found = 0; exit } }
   `;
-  const result = spawnSync("awk", [script, installScriptPath], { encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("awk", [script, installScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractFunction" });
   if (result.status !== 0 || !result.stdout.trim()) {
     throw new Error(`Could not extract ${name}() from install.sh; it may have been renamed.`);
   }
@@ -57,7 +63,7 @@ function extractReadonlyBlock(name: string, endLineExact?: string): string {
       found { print; if ($0 == "${endLineExact}") { found = 0; exit } }
     `
     : `$0 ~ "^readonly ${name}=" { print; exit }`;
-  const result = spawnSync("awk", [script, installScriptPath], { encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("awk", [script, installScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractReadonlyBlock" });
   if (result.status !== 0 || !result.stdout.trim()) {
     throw new Error(`Could not extract readonly ${name} from install.sh; it may have been renamed or reshaped.`);
   }
@@ -76,10 +82,11 @@ function extractParserSource(): string {
 }
 
 function runExtractedParser(stdin: string): number {
-  const result = spawnSync("node", ["--input-type=commonjs", "-e", extractParserSource()], {
+  const result = failOnProcessDeadline(spawnSync("node", ["--input-type=commonjs", "-e", extractParserSource()], {
     input: stdin,
     encoding: "utf8",
-  });
+    ...processGuard(),
+  }), { label: "runExtractedParser" });
   return result.status ?? -1;
 }
 
@@ -257,10 +264,11 @@ function runDriver(
     STUB_CURL_SCENARIO: curlScenarioPath,
     STUB_DOCKER_EXIT_CODE: String(dockerExitCode),
   };
-  const result = spawnSync("bash", [driverPath, environmentFile, stagingDir, "stub-image"], {
+  const result = failOnProcessDeadline(spawnSync("bash", [driverPath, environmentFile, stagingDir, "stub-image"], {
     encoding: "utf8",
     env,
-  });
+    ...processGuard(),
+  }), { label: "runDriver" });
   return { status: result.status ?? -1, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
 }
 

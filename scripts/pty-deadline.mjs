@@ -1,3 +1,5 @@
+import { deadlineError, processWatchdog } from "./process-budget.mjs";
+
 /*
  * What a pty test says when its child runs out of time (#595).
  *
@@ -51,28 +53,26 @@ export const PTY_ASYNC_DEADLINE_MS = 60_000;
  */
 export const PTY_TEST_TIMEOUT_MS = PTY_ASYNC_DEADLINE_MS + 15_000;
 
-const CAPTURED_OUTPUT_LIMIT = 1_500;
-
-function tail(text, limit = CAPTURED_OUTPUT_LIMIT) {
-  const value = typeof text === "string" ? text : "";
-  return value.length > limit ? `...${value.slice(-limit)}` : value;
-}
+/*
+ * How long a spawn-based driver's child may go without printing anything.
+ *
+ * The 60s ceiling above cannot tell a stuck child from a slow one: both reach
+ * it. A child that has stopped printing has stopped working -- it is waiting
+ * for a key that is not coming (#611's shape) or has hung -- and the longest
+ * deliberate silence in the scripts these drivers run is the 0.2s key read in
+ * installer-ui.sh; every wait loop prints an event per poll. A child that is
+ * merely slow keeps printing and reaches the ceiling instead. 20s is a hundred
+ * times the longest deliberate silence and a third of the ceiling, so a stall
+ * is named as a stall, 40s sooner (#698).
+ */
+export const PTY_IDLE_DEADLINE_MS = 20_000;
 
 /*
  * The error every pty deadline fails with, whoever noticed it: spawnSync via
- * failOnPtyDeadline below, or a spawn-based driver's own timer.
+ * failOnPtyDeadline below, or a spawn-based driver's watchdog.
  */
-export function ptyDeadlineError({ label, deadlineMs, stdout = "", stderr = "" }) {
-  const captured = [
-    tail(stdout) && `--- stdout before the kill ---\n${tail(stdout)}`,
-    tail(stderr, 500) && `--- stderr before the kill ---\n${tail(stderr, 500)}`,
-  ].filter(Boolean).join("\n");
-
-  return new Error(
-    `${label}: the pty child was killed after its ${deadlineMs}ms deadline without exiting, `
-    + "so there is no exit code to assert. This is a hang or a slow runner, not a wrong exit status.\n"
-    + (captured || "(nothing was captured before the kill)"),
-  );
+export function ptyDeadlineError({ label, deadlineMs, reason, stdout = "", stderr = "" }) {
+  return deadlineError({ label, deadlineMs, reason, subject: "pty child", stdout, stderr });
 }
 
 /*
@@ -86,4 +86,17 @@ export function ptyDeadlineError({ label, deadlineMs, stdout = "", stderr = "" }
 export function failOnPtyDeadline(result, { label, deadlineMs }) {
   if (result?.error?.code !== "ETIMEDOUT") return result;
   throw ptyDeadlineError({ label, deadlineMs, stdout: result.stdout, stderr: result.stderr });
+}
+
+/*
+ * The two deadlines of a spawn-based driver -- idle and ceiling -- with the
+ * pty defaults. Usage and behaviour: processWatchdog in process-budget.mjs.
+ */
+export function ptyWatchdog({
+  label,
+  kill,
+  idleMs = PTY_IDLE_DEADLINE_MS,
+  ceilingMs = PTY_ASYNC_DEADLINE_MS,
+}) {
+  return processWatchdog({ label, kill, idleMs, ceilingMs, subject: "pty child" });
 }

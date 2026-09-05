@@ -12,8 +12,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import {
   CANONICAL_OIDC_SECRET_FILE_PATH,
   evaluateReadiness,
@@ -25,6 +26,11 @@ import {
 // contract's readiness report must equal the real `configure.sh --check`
 // output line for line. This is the drift alarm for the Phase 2 engine port
 // (ADR-0011): a semantic change on either side fails here first.
+
+// This file spawns the real configure.sh under bash and the real CLI; a
+// spawn that takes 0.7s quiet took 4.3s on a starved core (#698). Budget
+// and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const sandboxes: string[] = [];
@@ -61,10 +67,11 @@ function runCheck(fixture: Fixture): { lines: string[]; status: number } {
   writeFileSync(join(sandbox, ".env-orbit"), `${body}\n`);
   chmodSync(join(sandbox, ".env-orbit"), 0o600);
 
-  const result = spawnSync("bash", ["scripts/configure.sh", "--check"], {
+  const result = failOnProcessDeadline(spawnSync("bash", ["scripts/configure.sh", "--check"], {
     cwd: sandbox,
     encoding: "utf8",
-  });
+    ...processGuard(),
+  }), { label: "runCheck" });
   return {
     lines: result.stdout.split("\n").filter(Boolean),
     status: result.status ?? -1,
@@ -172,9 +179,10 @@ function runCli(): { lines: string[]; status: number } {
   const sandbox = sandboxes[sandboxes.length - 1];
   const cli = fileURLToPath(new URL("../cli/orbit.ts", import.meta.url));
   const tsx = join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
-  const result = spawnSync("node", [tsx, cli, "check", "--dir", sandbox], {
+  const result = failOnProcessDeadline(spawnSync("node", [tsx, cli, "check", "--dir", sandbox], {
     encoding: "utf8",
-  });
+    ...processGuard(),
+  }), { label: "runCli" });
   return {
     lines: result.stdout.split("\n").filter(Boolean),
     status: result.status ?? -1,

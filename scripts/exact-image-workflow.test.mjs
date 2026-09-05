@@ -15,6 +15,21 @@ const dockerfile = readFileSync(
   "utf8",
 ).replaceAll("\r\n", "\n");
 
+/*
+ * #801 moved the &container_validation_steps shell out of the workflow and
+ * into scripts/ci/, so the GitLab pipeline can run the same checks instead of
+ * a paraphrase of them. The split of responsibility the cases below follow:
+ * the workflow still owns the step list, their order, their `if:` conditions
+ * and the inputs handed to each script, and is still asserted for those; the
+ * evidence a step used to inline is now asserted in the script it calls.
+ */
+function ciScript(name) {
+  return readFileSync(
+    new URL(`./ci/${name}`, import.meta.url),
+    "utf8",
+  ).replaceAll("\r\n", "\n");
+}
+
 function jobBlock(job, nextJob) {
   const start = workflow.indexOf(`  ${job}:\n`);
   const end = workflow.indexOf(`  ${nextJob}:\n`, start);
@@ -43,10 +58,18 @@ function jobBlock(job, nextJob) {
  * six; `Protect preview` requires the first four. The list is the union,
  * because the property being defended is that a name some rule depends on
  * keeps reporting -- which rule it is does not change what a rename breaks.
+ *
+ * "Dependency change and licence policy" (dependency-review.yml) is removed
+ * from this list as of #815: that workflow ran on the `pull_request` event,
+ * GitHub has taken no pull requests since the mirror flip (#801), and the
+ * licence check it used to run is now `licence_policy` on GitLab instead. An
+ * agent cannot edit a ruleset (see above), so if either "Protect dev" or
+ * "Protect preview" still names this check as required, that is a manual
+ * follow-up for the owner: remove it from both, or every future pull request
+ * on GitHub waits forever for a check that will never report again.
  */
 const REQUIRED_CHECK_NAMES = [
   "Static and unit checks",
-  "Dependency change and licence policy",
   "CodeQL (actions)",
   "CodeQL (javascript-typescript)",
   // Added to `Protect dev` and `Protect preview` by the owner, 2026-08-25,
@@ -60,8 +83,8 @@ const REQUIRED_CHECK_NAMES = [
 
 describe("exact-image publication workflow", () => {
   /*
-   * Resolved across every workflow, not just this one: two of the four
-   * required checks are reported by codeql.yml and dependency-review.yml. The
+   * Resolved across every workflow, not just this one: two of the required
+   * checks are reported by codeql.yml, not publish-container.yml. The
    * CodeQL names are composed from a matrix, so the literal string appears
    * nowhere -- checking only for it would have made this list unsatisfiable,
    * which is how the first version of it came to be wrong.
@@ -123,6 +146,13 @@ describe("exact-image publication workflow", () => {
     // publish_preview already runs this exact step sequence once on push;
     // smoke itself must never also fire on a push event.
     expect(smoke).not.toContain("'push'");
+    // Since the mirror flip (#801 step 5) GitHub sees pushes, not pull
+    // requests: the mirror delivers dev, preview and main.
+    const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
+    const pushBranches = trigger.slice(trigger.indexOf("  push:\n"), trigger.indexOf("  workflow_dispatch:"));
+    for (const branch of ["dev", "preview", "main", '"hotfix/**"']) {
+      expect(pushBranches).toContain(`      - ${branch}\n`);
+    }
   });
 
   it("selects fail-safe risk lanes while keeping required checks reportable", () => {
@@ -157,7 +187,7 @@ describe("exact-image publication workflow", () => {
     expect(workflow).not.toContain("paths-ignore:");
   });
 
-  it("keeps every integration-branch push on the complete publication path", () => {
+  it("keeps every integration-branch push on the complete validation path", () => {
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(preview).toContain("github.event_name == 'push'");
@@ -198,18 +228,44 @@ describe("exact-image publication workflow", () => {
     expect(smoke).toContain("PUBLICATION_CHANNEL: ci");
   });
 
-  it("publishes previews only from the protected preview or bounded hotfix lanes", () => {
+  it("validates the preview and hotfix pushes but publishes nothing (#801 step 5)", () => {
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(preview).toContain("github.event_name == 'push'");
     expect(preview).toContain("github.ref == 'refs/heads/preview'");
     expect(preview).toContain("startsWith(github.ref, 'refs/heads/hotfix/')");
-    expect(preview).toContain("packages: write");
-    expect(preview).toContain("PUBLICATION_CHANNEL: preview");
+    // GitLab publishes; publish-from-gitlab.yml copies its digest to GHCR. A
+    // second publisher here would race it for the `preview` tag with a
+    // different image, so this job has no registry access and no channel
+    // other than `ci`.
+    expect(preview).not.toContain("packages: write");
+    expect(preview).toContain("PUBLICATION_CHANNEL: ci");
+    expect(workflow).not.toContain("PUBLICATION_CHANNEL: preview");
+    expect(preview).not.toContain("docker/login-action");
+    expect(workflow).not.toContain("scripts/ci/publish-image.sh");
+    expect(workflow).not.toContain("actions/attest@");
     expect(preview).toContain("steps: *container_validation_steps");
     expect(workflow).not.toContain("  development:\n");
     expect(workflow).not.toContain("  preview:\n");
     expect(workflow).not.toContain("PUBLICATION_CHANNEL: development");
+  });
+
+  it("takes the pnpm version from package.json alone, on both hosts", () => {
+    // Renovate bumps package.json's packageManager (234eb98 took it to
+    // 11.11.0) and nothing else: a second copy of the version in either
+    // pipeline drifts, and pnpm/action-setup then refuses to start
+    // (GitHub run 33924807335). package.json is the one place it lives.
+    const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+
+    expect(packageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/u);
+    for (const pipeline of [workflow, gitlabCi]) {
+      expect(pipeline).not.toMatch(/pnpm@\d/u);
+      expect(pipeline).not.toMatch(/version: *["']?\d+\.\d+\.\d+/u);
+      expect(pipeline).not.toContain("PNPM_VERSION");
+    }
+    expect(workflow).toContain("require('./package.json').packageManager");
+    expect(gitlabCi).toContain("require('./package.json').packageManager");
   });
 
   it("publishes only the preview discovery tag while retaining digest identity", () => {
@@ -242,7 +298,7 @@ describe("exact-image publication workflow", () => {
     expect(preflightStep).toContain("--channel");
   });
 
-  it("builds once, validates the loaded image, then pushes without rebuilding", () => {
+  it("builds once and validates the loaded image, then tears down without touching a registry", () => {
     /*
      * The invariant is that the PUBLICATION path builds once and pushes the
      * image it validated — not that the workflow contains exactly one build
@@ -266,22 +322,26 @@ describe("exact-image publication workflow", () => {
     expect(workflow).toContain("org.opencontainers.image.version=${{ steps.version.outputs.version }}");
     expect(workflow).toContain("ORBIT_VERSION=${{ steps.version.outputs.version }}");
     expect(workflow).toContain("ORBIT_CHANNEL=${{ env.PUBLICATION_CHANNEL }}");
-    expect(workflow).toContain('/opt/orbit/CHANNEL');
-    expect(workflow).toContain('[[ "${embedded_channel}" == "${release_stage}" ]]');
-    expect(workflow).toContain('docker run --rm "${image_tag}" --version');
-    expect(workflow).toContain("docker compose --env-file .env-orbit logs --no-color orbit-app");
-    expect(workflow).toContain(
+    const identity = ciScript("verify-image-identity.sh");
+    expect(identity).toContain('/opt/orbit/CHANNEL');
+    expect(identity).toContain('[[ "${embedded_channel}" == "${release_stage}" ]]');
+    expect(identity).toContain('docker run --rm "${image_tag}" --version');
+    expect(identity).toContain("ORBIT_IMAGE=");
+
+    const banner = ciScript("verify-startup-banner.sh");
+    expect(banner).toContain("docker compose --env-file .env-orbit logs --no-color orbit-app");
+    expect(banner).toContain(
       'Orbit ${version} | channel=${release_stage} | revision=${revision}',
     );
-    expect(workflow).toContain("grep --fixed-strings --line-regexp --count");
-    expect(workflow).toContain("ORBIT_IMAGE=");
-    expect(workflow).toContain("--no-build");
-    expect(workflow).not.toContain("include_arm64");
-    expect(workflow).not.toContain("bash scripts/build-container.sh");
-    expect(workflow).toContain(
+    expect(banner).toContain("grep --fixed-strings --line-regexp --count");
+
+    expect(ciScript("start-acceptance-stack.sh")).toContain("--no-build");
+    expect(ciScript("publish-image.sh")).toContain(
       "Published image identity %s does not match tested identity %s.",
     );
-    expect(workflow).toContain("scripts/supply-chain-policy.mjs image");
+    expect(ciScript("scan-image.sh")).toContain("scripts/supply-chain-policy.mjs image");
+    expect(workflow).not.toContain("include_arm64");
+    expect(workflow).not.toContain("bash scripts/build-container.sh");
     expect(workflow).toContain("image.spdx.json");
     expect(workflow).toContain("image-vulnerabilities.json");
 
@@ -289,20 +349,18 @@ describe("exact-image publication workflow", () => {
     const scan = workflow.indexOf("- name: Scan exact local image");
     const start = workflow.indexOf("- name: Start application and database");
     const stop = workflow.indexOf("- name: Stop smoke-test services");
-    const login = workflow.indexOf("- name: Log in to GitHub Container Registry");
-    const push = workflow.indexOf("- name: Push exact tested image");
-    const attest = workflow.indexOf("- name: Attest published image provenance");
-    const verify = workflow.indexOf("- name: Verify published image attestations");
+    const cleanUp = workflow.indexOf("- name: Clean up installer validation resources");
 
     expect(build).toBeGreaterThanOrEqual(0);
     expect(scan).toBeGreaterThan(build);
     expect(start).toBeGreaterThan(scan);
     expect(stop).toBeGreaterThan(start);
-    expect(login).toBeGreaterThan(stop);
-    expect(push).toBeGreaterThan(login);
-    expect(attest).toBeGreaterThan(push);
-    expect(verify).toBeGreaterThan(attest);
-    expect(workflow.slice(push, attest)).not.toContain("docker/build-push-action");
+    expect(cleanUp).toBeGreaterThan(stop);
+    // The installer clean-up is the last step of the anchor: the GHCR login,
+    // push and attestation steps that used to follow it moved to
+    // publish-from-gitlab.yml with the mirror flip (#801 step 5).
+    const anchorTail = workflow.slice(cleanUp, workflow.indexOf("  repair_journeys:\n"));
+    expect(anchorTail.match(/- name:/gu)).toHaveLength(1);
   });
 
   it("keeps failure diagnostics available before an exact image is configured", () => {
@@ -315,9 +373,15 @@ describe("exact-image publication workflow", () => {
       workflow.indexOf("- name: Start disposable installer registry"),
     );
 
+    // The steps still run in that order and still call their own script; the
+    // fallback that lets Compose parse before an image is recorded is in the
+    // scripts they call.
+    expect(diagnostics).toContain("bash scripts/ci/show-stack-diagnostics.sh");
+    expect(cleanup).toContain("bash scripts/ci/stop-acceptance-stack.sh");
+
     const fallback = 'export ORBIT_IMAGE="${ORBIT_IMAGE:-orbit-local:000000000000}"';
-    expect(diagnostics).toContain(fallback);
-    expect(cleanup).toContain(fallback);
+    expect(ciScript("show-stack-diagnostics.sh")).toContain(fallback);
+    expect(ciScript("stop-acceptance-stack.sh")).toContain(fallback);
   });
 
   it("supplies the calculated identity to source-build overlay validation", () => {
@@ -339,25 +403,26 @@ describe("exact-image publication workflow", () => {
 
   it("requires the database-backed ready contract before smoke acceptance continues", () => {
     expect(workflow).toContain("- name: Verify health endpoint");
-    expect(workflow).toContain('.status == "ready" and .service == "orbit"');
+    const health = ciScript("verify-health-endpoint.sh");
+    expect(health).toContain('.status == "ready" and .service == "orbit"');
+    expect(health).not.toContain('.status == "ok" and .service == "orbit"');
     expect(workflow).not.toContain('.status == "ok" and .service == "orbit"');
   });
 
-  it("attests and verifies the resolved registry digest with least privilege", () => {
+  it("mints no attestation and holds no registry or OIDC permission anywhere", () => {
+    // Attestation moved to publish-from-gitlab.yml with the digest it covers
+    // (#801 step 5); scripts/publish-from-gitlab-workflow.test.mjs asserts it
+    // there. Here the only remaining attestation reader is verify_preview.
     const smoke = jobBlock("smoke", "publish_preview");
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(smoke).not.toContain("id-token: write");
     expect(smoke).not.toContain("attestations: write");
-    expect(preview).toContain("id-token: write");
-    expect(preview).toContain("attestations: write");
-    expect(workflow).toContain(
-      "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
-    );
-    expect(workflow).toContain("subject-digest: ${{ steps.publish.outputs.digest }}");
-    expect(workflow).toContain("sbom-path: .orbit-supply-chain/image.spdx.json");
-    expect(workflow).toContain("gh attestation verify");
-    expect(workflow).toContain("oci://${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}");
+    expect(preview).not.toContain("id-token: write");
+    expect(preview).not.toContain("attestations: write");
+    expect(workflow).not.toContain("id-token: write");
+    expect(workflow).not.toContain("attestations: write");
+    expect(workflow).not.toContain("packages: write");
   });
 
   it("pins scanner execution and retains only bounded supply-chain evidence", () => {
@@ -401,27 +466,42 @@ describe("exact-image publication workflow", () => {
   });
 
   it("validates both supported mail secret overlays", () => {
-    expect(workflow).toContain(
+    const configuration = ciScript("create-test-configuration.sh");
+    expect(configuration).toContain(
       "openssl rand -hex 32 > .orbit-secrets/smtp-password",
     );
-    expect(workflow).toContain(
+    expect(configuration).toContain(
       "SMTP_HOST=smtp.example.invalid",
     );
-    expect(workflow).toContain(
+    expect(configuration).toContain(
       "IMAP_HOST=imap.example.invalid",
     );
-    expect(workflow).toContain(
+    expect(configuration).toContain(
       "IMAP_ENABLED=false",
     );
-    expect(workflow).toContain(
+
+    const composeValidation = ciScript("validate-compose.sh");
+    expect(composeValidation).toContain(
       "-f docker-compose.yml -f docker-compose.mail.yml config --quiet",
     );
-    expect(workflow).toContain(
+    expect(composeValidation).toContain(
       "-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.mail-alias-rotation.yml config --quiet",
     );
-    expect(workflow).toContain(
-      "-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml up --detach --no-build --wait",
+
+    /*
+     * The acceptance stack runs the mail overlay too. Its file set became an
+     * input with #801, so the GitLab lane can append its own cap overlay --
+     * which means the guarantee now lives in the default that set falls back
+     * to, and in the fact that the stack is still brought up without a
+     * rebuild. The workflow passes no COMPOSE_FILES, so it gets the default.
+     */
+    const stack = ciScript("start-acceptance-stack.sh");
+    expect(stack).toContain(
+      "-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml",
     );
+    expect(stack).toContain("COMPOSE_FILES:-${default_compose_files}");
+    expect(stack).toContain("up --detach --no-build --wait");
+    expect(workflow).not.toContain("COMPOSE_FILES");
   });
 
   it("does not describe any preview as a release candidate", () => {
@@ -452,7 +532,7 @@ describe("exact-image publication workflow", () => {
     expect(login).toBeGreaterThan(cleanup);
 
     // Registry pinning and configuration.
-    const registryStep = workflow.slice(registryStart, targetPrepare);
+    const registryStep = ciScript("start-installer-registry.sh");
     expect(registryStep).toContain(
       "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373",
     );
@@ -465,8 +545,12 @@ describe("exact-image publication workflow", () => {
     expect(registryStep).toContain('registry_id="$(');
     expect(registryStep).toContain('[[ "${registry_id}" =~ ^[0-9a-f]{64}$ ]]');
 
-    const prepareStep = workflow.slice(targetPrepare, installerRun);
-    expect(prepareStep).toContain('mktemp -d "${RUNNER_TEMP}/orbit-installer-target.XXXXXX"');
+    const prepareStep = ciScript("prepare-installer-target.sh");
+    // The target still lives under the runner's temporary directory; the
+    // script reads RUNNER_TEMP into a local so it can also run where that
+    // variable does not exist.
+    expect(prepareStep).toContain('runner_temp="${RUNNER_TEMP:-');
+    expect(prepareStep).toContain('mktemp -d "${runner_temp}/orbit-installer-target.XXXXXX"');
     expect(prepareStep).toContain('[[ "${#entries[@]}" -eq 0 ]]');
     expect(prepareStep).toContain("orbit-installer-git-guard.XXXXXX");
     expect(prepareStep).toContain("git-was-invoked");
@@ -476,8 +560,13 @@ describe("exact-image publication workflow", () => {
 
     // Empty non-TTY input must fail closed without starting Compose, mutate no
     // Git state, and leave the target empty for the documented bootstrap path.
-    const refusalStep = workflow.slice(refusal, provision);
-    expect(refusalStep).toContain('refusal_output="${RUNNER_TEMP}/orbit-installer-refusal-');
+    const refusalStep = ciScript("verify-installer-refusal.sh");
+    // Both installer steps run from the target directory, so a relative
+    // script path resolves against the wrong tree (PR #805, first run).
+    expect(workflow).toContain('run: bash "$GITHUB_WORKSPACE/scripts/ci/verify-installer-refusal.sh"');
+    expect(workflow).toContain('run: bash "$GITHUB_WORKSPACE/scripts/ci/run-installer.sh"');
+    expect(refusalStep).toContain('runner_temp="${RUNNER_TEMP:-');
+    expect(refusalStep).toContain('refusal_output="${runner_temp}/orbit-installer-refusal-');
     expect(refusalStep).toContain("exec < /dev/null");
     expect(refusalStep).toContain("[[ ! -t 0 ]]");
     expect(refusalStep).toContain("installer_status=$?");
@@ -494,8 +583,11 @@ describe("exact-image publication workflow", () => {
 
     // The unattended bootstrap uses only the documented example plus fixed
     // non-secret inputs and an owner-only generated secret file.
-    const provisionStep = workflow.slice(provision, installerRun);
-    expect(provisionStep).toContain('cp -- "${GITHUB_WORKSPACE}/.env-orbit.example" "${env_file}"');
+    const provisionStep = ciScript("provision-installer-target.sh");
+    // Still the checkout's own example file; the script reads GITHUB_WORKSPACE
+    // into a local, falling back to its own repository root.
+    expect(provisionStep).toContain('workspace="${GITHUB_WORKSPACE:-');
+    expect(provisionStep).toContain('cp -- "${workspace}/.env-orbit.example" "${env_file}"');
     expect(provisionStep).toContain("ORBIT_CONFIG_SCHEMA_VERSION=1");
     expect(provisionStep).toContain("APP_URL=https://orbit.install-test.invalid");
     expect(provisionStep).toContain("OIDC_ISSUER=https://accounts.google.com");
@@ -514,22 +606,32 @@ describe("exact-image publication workflow", () => {
 
     // Successful installer input validation: stdin from /dev/null, TTY
     // assertion, and the same Git guard used by the refusal path.
-    const installerStep = workflow.slice(installerRun, installerVerify);
-    expect(installerStep).toContain("ORBIT_REGISTRY: 127.0.0.1:5000");
-    expect(installerStep).toContain("ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}");
+    // The registry the installer resolves through is still handed to it by
+    // the workflow step; the input validation is in the script it runs.
+    const installerStepInputs = workflow.slice(installerRun, installerVerify);
+    expect(installerStepInputs).toContain("ORBIT_REGISTRY: 127.0.0.1:5000");
+    expect(installerStepInputs).toContain("ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}");
+
+    const installerStep = ciScript("run-installer.sh");
     expect(installerStep).toContain("exec < /dev/null");
     expect(installerStep).toContain("[[ ! -t 0 ]]");
     expect(installerStep).toContain("PATH=\"${GIT_GUARD_DIR}:${PATH}\"");
-    expect(installerStep).toContain('bash "${GITHUB_WORKSPACE}/scripts/install.sh"');
+    expect(installerStep).toContain('workspace="${GITHUB_WORKSPACE:-');
+    expect(installerStep).toContain('bash "${workspace}/scripts/install.sh"');
 
     // Image digest requirements.
     expect(installerVerify).toBeGreaterThanOrEqual(0);
-    const verifyStep = workflow.slice(installerVerify, cleanup);
+    const verifyStep = ciScript("verify-installed-image.sh");
     expect(verifyStep).toContain("ORBIT_IMAGE=127.0.0.1:5000/${IMAGE_NAME}@sha256:");
     expect(verifyStep).toContain("[[ \"${digest}\" =~ ^[0-9a-f]{64}$ ]]");
     expect(verifyStep).toContain('[[ "${resolved_id}" == "${TESTED_IMAGE_ID}" ]]');
     expect(verifyStep).toContain('[[ "${running_id}" == "${TESTED_IMAGE_ID}" ]]');
-    expect(verifyStep).toContain('[[ "${revision_label}" == "${GITHUB_SHA}" ]]');
+    // Still the workflow's own revision: the script takes it as an input so
+    // another CI system can supply its own, and the workflow passes github.sha.
+    expect(verifyStep).toContain('[[ "${revision_label}" == "${ORBIT_REVISION}" ]]');
+    expect(workflow.slice(installerVerify, cleanup)).toContain(
+      "ORBIT_REVISION: ${{ github.sha }}",
+    );
     expect(verifyStep).toContain("org.opencontainers.image.revision");
 
     // Fetched assets validation: docker-compose.yml and scripts/configure.sh match.
@@ -549,9 +651,13 @@ describe("exact-image publication workflow", () => {
     expect(verifyStep).toContain(".status == \"ready\"");
     expect(verifyStep).toContain(".service == \"orbit\"");
 
-    const cleanupSection = workflow.slice(cleanup, login);
-    expect(cleanupSection).toContain("if: always()");
-    expect(cleanupSection).toContain("${RUNNER_TEMP}");
+    // The step still runs unconditionally; the guarded removals are in the
+    // script it calls.
+    expect(workflow.slice(cleanup, login)).toContain("if: always()");
+
+    const cleanupSection = ciScript("clean-up-installer.sh");
+    expect(cleanupSection).toContain('runner_temp="${RUNNER_TEMP:-');
+    expect(cleanupSection).toContain('"${runner_temp}"/orbit-installer-target.');
     expect(cleanupSection).toContain("! -L");
     expect(cleanupSection).toContain("down --volumes --remove-orphans");
     expect(cleanupSection).toContain('docker rm --force "${REGISTRY_ID}"');

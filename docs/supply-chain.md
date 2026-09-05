@@ -7,12 +7,18 @@ that policy and converts scanner output into bounded review evidence.
 
 ## Trusted workflow
 
-Every pull request and trusted preview run performs these steps:
+Every merge request on GitLab and every push to `preview` performs these
+steps. GitLab (`.gitlab-ci.yml`) is the gate since #801; GitHub runs the same
+checks on its mirror as a second opinion that blocks nothing.
 
-1. A separate read-only dependency-review job compares pull-request dependency
-   changes with the base revision. Newly introduced high or critical
-   vulnerabilities in runtime, development or unknown scopes block the pull
-   request. Newly introduced dependencies must use an approved SPDX licence.
+1. A separate read-only `licence_policy` job walks the whole installed
+   dependency tree -- not a pull-request diff -- and checks every package's
+   declared licence against `supply-chain/licence-policy.yml`. This replaces
+   GitHub's `actions/dependency-review-action`, which ran only on the
+   `pull_request` event and stopped running when the mirror flip (#801) left
+   GitHub with no pull requests to compare (#815). The vulnerability half of
+   what that action covered is unaffected: it was already the
+   `supply_chain_source` job below.
 2. A read-only job scans the checked-out repository for dependency
    vulnerabilities and secret patterns. Checkout credentials are not
    persisted. The raw secret-scan report is never uploaded and is deleted
@@ -25,14 +31,20 @@ Every pull request and trusted preview run performs these steps:
 5. The repository policy verifies that the vulnerability report and SBOM name
    the same image that enters Compose, recovery, privacy, browser and
    accessibility tests.
-6. Pull requests stop with read-only evidence. A trusted `dev` or
-   versioned-release push may log in to GHCR only after every preceding gate
+6. Merge requests stop with read-only evidence. Only a push to `preview` or a
+   hotfix branch reaches a registry, and only after every preceding gate
    passes.
-7. CI pushes that exact tested image without rebuilding, resolves the registry
-   digest, pulls it back and verifies its configuration identity.
-8. GitHub mints short-lived OIDC provenance and SBOM attestations for the
-   resolved digest. CI immediately verifies both attestations before recording
-   a deployable preview.
+7. GitLab's `publish_gitlab` job pushes that exact tested image to
+   `registry.tomlawson.io` without rebuilding, resolves the registry digest,
+   pulls it back, verifies its configuration identity and records the digest
+   as `gitlab-tested-image.json`.
+8. When the mirror delivers the same commit to GitHub,
+   `publish-from-gitlab.yml` waits for that pipeline, checks the record names
+   this commit, copies the digest to GHCR with `crane copy` and refuses if the
+   copy resolves to anything else. Nothing built on GitHub reaches GHCR.
+9. GitHub mints short-lived OIDC provenance and SBOM attestations for the
+   copied digest, using the SBOM GitLab produced, and verifies both before
+   recording a deployable preview.
 
 The source, exact-image and attestation-verification artifacts are retained for
 14 days. They contain public package and image metadata, bounded finding
@@ -45,16 +57,21 @@ High and critical dependency or image vulnerabilities block publication.
 Every repository secret finding blocks regardless of its scanner severity.
 Lower-severity vulnerabilities remain visible in the retained evidence.
 
-Dependency changes are governed separately from the full source and image
-scans. `.github/dependency-review-config.yml` allows only the listed
-SPDX-compatible permissive or file-level reciprocal licences and blocks newly
-introduced high or critical vulnerabilities in every dependency scope.
-Dependencies that declare a licence outside the allow-list block
-automatically. Missing or ambiguous licence metadata is surfaced by the action
-and remains a manual review and release blocker until it is resolved. There
-are no advisory or package licence exemptions in the policy. Any future
-exemption must be narrow, justified, owned, time-bounded and linked to a
-tracking issue.
+Dependency licences are governed separately from the full source and image
+scans. `supply-chain/licence-policy.yml` allows only the listed
+SPDX-compatible permissive or file-level reciprocal licences, and
+`scripts/ci/licence-policy.mjs` (the `licence_policy` job) checks every
+shipped package's declared licence against it, not just newly introduced ones.
+The gate covers only what reaches the runtime image -- the Dockerfile's
+`web-deps` production dependencies and the `@fontsource*` typefaces inlined
+into the client bundle -- not build or test tooling (owner decision,
+2026-09-05): a GPL build tool does not affect the licence of what it
+produces. A licence outside the allow-list blocks automatically. Missing or
+ambiguous licence metadata blocks the same way: there is no manual-review
+pass-through. There are no advisory or package licence exemptions for shipped
+dependencies. Any exemption must be narrow, justified, owned, time-bounded and
+linked to a tracking issue. Vulnerabilities are unaffected by this job; they
+remain governed by `supply_chain_source` below.
 
 A vulnerability exception is valid only when it identifies the finding,
 package and scope, names an owner, gives a rationale, links a tracking issue
@@ -63,7 +80,24 @@ validator fails closed on stale or malformed exceptions. Exceptions do not
 change scanner output; they make a narrow, reviewable publication decision for
 a known vulnerability.
 
-### Sharp/libvips v1 licence decision
+The `exceptions[]` list currently holds the pinned sidecar findings that had
+no upstream fix to pin to on 2026-09-04 (#740): OpenSSL 3.5.7 in the Node and
+Postgres images until those tags are rebuilt, and Go standard-library findings
+compiled into `gosu`, Tika's `pebble` and the Ollama binary. Each entry names
+the installed version it was seen in, so a rebuilt image that is still
+vulnerable is blocked afresh, and every entry expires on the same date. #794
+tracks retiring them; when they expire the scan goes red until they are
+removed or renewed with a reason recorded there.
+
+### Sharp/libvips v1 licence decision (historical; exception removed)
+
+The exception this section describes was removed from
+`supply-chain/licence-policy.yml` on 2026-09-05, alongside the scope change
+above: `sharp` and every `@img/sharp-*` platform package it names are absent
+from the installed tree entirely (no `sharp` resolves anywhere in
+`pnpm-lock.yaml`, shipped or not), so the exception matched nothing and the
+2026-10-31 review it was pending is moot. The record below is kept for
+history; nothing here is still in force.
 
 The v1 release comparison against the older `main` branch reports the
 platform packages introduced by the `sharp` 0.35.0 update because their
@@ -74,7 +108,7 @@ Reverting is not an acceptable resolution: GitHub advisory
 vulnerabilities in `sharp` versions before 0.35.0 and identifies 0.35.0 as
 patched.
 
-The exception in `.github/dependency-review-config.yml` therefore excludes
+The exception in `supply-chain/licence-policy.yml` therefore excludes
 only the exact `@img` platform-package PURLs for `sharp` 0.35.0 and libvips
 1.3.0 from the licence check. It does not add LGPL to the repository-wide
 allow-list and does not carry forward to a later package version. Issue
@@ -162,10 +196,10 @@ Use a focused pull request for image updates:
 1. Read the upstream release notes and image-source change history. Confirm
    maintenance status, provenance and licence evidence before accepting a new
    tag or a moved tag.
-2. Dependabot opens the bump. It rewrites the pin in the file and stops there:
-   the policy is a bespoke JSON file it cannot read, so its pull request
+2. Renovate opens the bump. It rewrites the pin in the file and stops there:
+   the policy is a bespoke JSON file it cannot read, so its merge request
    arrives with the two places disagreeing.
-3. CI goes red on that pull request, at the step
+3. CI goes red on that merge request, at the step
    `Refuse a pin that drifted between compose and policy`. That is the drift
    check (`node scripts/sidecar-pins.mjs check --offline`) doing its job, not a
    broken build.
@@ -173,7 +207,7 @@ Use a focused pull request for image updates:
    as the truth, re-resolves the tag's index digest from the registry, and
    writes the reference, the index digest and today's date into the policy —
    then rewrites any other file that pins the same image. Review the diff and
-   push it to the Dependabot branch. Do not update an untracked reference or
+   push it to the Renovate branch. Do not update an untracked reference or
    add a temporary mutable fallback.
 5. Run `node scripts/supply-chain-policy.mjs validate`, the focused policy
    tests (`pnpm vitest run scripts/sidecar-pins.test.mjs`), static/unit checks
@@ -194,11 +228,13 @@ it are not. So an image can be exactly what its tag points at today and still
 be missing a fix its own distribution published weeks ago — which is how the
 findings on #740 accumulated.
 
-`Sidecar pin freshness` (`.github/workflows/sidecar-pin-freshness.yml`) runs
-weekly and asks all three questions: do the file and the policy agree, has the
-tag moved, and does the pinned image itself have package upgrades waiting. When
-anything is behind it files, or updates, one open issue titled
-`Sidecar pins are behind` holding the full report, and the run goes red.
+The `sidecar_pin_freshness` job in `.gitlab-ci.yml` runs weekly and asks all
+three questions: do the file and the policy agree, has the tag moved, and does
+the pinned image itself have package upgrades waiting. When anything is behind
+it files, or updates, one open issue titled `Sidecar pins are behind` holding
+the full report, and the run goes red. It was ported from GitHub Actions
+(#820) once GitHub issues on the mirror were switched off (#801); the report
+and the issue title are unchanged, only where the issue lives.
 
 A moved tag is fixed by re-pinning, and `sidecar-pins.mjs sync` does it. Stale
 packages inside a current pin have no such remedy: there is nothing newer to
@@ -207,11 +243,13 @@ entry in the policy's `exceptions[]` with an owner, a rationale, a tracking
 issue and an expiry date.
 
 **The weekly schedule is not running yet, and this is the manual step it
-replaces.** GitHub runs a scheduled workflow from the repository's default
-branch, `main`, and `main` stays at v1.2.0 until #547 promotes v1.3. Until that
-promotion the workflow file does not exist there, so neither the schedule nor
-`Run workflow` will start it. Until then the cadence is a person: **weekly,
-whoever is working on Orbit**, run
+replaces.** The job only runs in a scheduled pipeline that sets the
+`SIDECAR_FRESHNESS` variable, and it files or updates the issue with a project
+access token in the `SIDECAR_ISSUE_TOKEN` CI/CD variable -- both are settings
+only the owner can create (GitLab Settings > CI/CD, and Settings > CI/CD >
+Schedules with the schedule's target branch set to `dev`; see the job's own
+comment in `.gitlab-ci.yml` for why `dev`). Until both exist the cadence is a
+person: **weekly, whoever is working on Orbit**, run
 
 ```bash
 node scripts/sidecar-pins.mjs check --packages
@@ -236,10 +274,10 @@ digest; it does not build or transform the image. Orbit maintainers own both
 tool updates and the policy review date. Licences, upstream release pages,
 versions and immutable identities are recorded beside that ownership.
 
-GitHub's `actions/dependency-review-action` is also pinned to the reviewed
-commit recorded in the policy. It runs only on the `pull_request` event with
-read-only contents access, does not persist checkout credentials and does not
-receive permission to comment, publish packages or mint OIDC tokens.
+The licence check runs as `scripts/ci/licence-policy.mjs`, the `licence_policy`
+job (#815). It has no third-party action to pin: it reads
+`supply-chain/licence-policy.yml` and each installed package's own
+`package.json`, both already inside the checkout.
 
 The vulnerability database is intentionally refreshed by the pinned scanner
 at run time because vulnerability knowledge changes. Scanner version metadata

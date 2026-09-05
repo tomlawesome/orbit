@@ -14,9 +14,15 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { PTY_DEADLINE_MS, failOnPtyDeadline } from "./pty-deadline.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Every test here spawns configure.sh under bash, some three times over; a
+// spawn that takes tens of milliseconds quiet takes seconds on a starved
+// core (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 // This suite runs configure.sh from copied fixtures in temporary directories:
 // the script always cds to its own containing checkout, so it must never be
@@ -99,7 +105,7 @@ function makeFixture(envOrbitContent) {
 
 function runConfigure(targetDir, args = [], envOverrides = {}, input = undefined) {
   const binDir = makeFakeBin();
-  return spawnSync("bash", [join(targetDir, "scripts", "configure.sh"), ...args], {
+  return failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "configure.sh"), ...args], {
     cwd: targetDir,
     encoding: "utf8",
     input,
@@ -109,7 +115,8 @@ function runConfigure(targetDir, args = [], envOverrides = {}, input = undefined
       ORBIT_IMAGE: "orbit-local:abcdef123456",
       ...envOverrides,
     },
-  });
+    ...processGuard(),
+  }), { label: "runConfigure" });
 }
 
 function runConfigureWithControllingTerminal(targetDir, args = [], envOverrides = {}, input = "") {
@@ -135,7 +142,7 @@ function runConfigureWithPipeEOF(targetDir, args = [], envOverrides = {}, input 
   const binDir = makeFakeBin();
   const inputPath = join(targetDir, ".configure-stdin-fixture");
   writeFileSync(inputPath, input);
-  const result = spawnSync(
+  const result = failOnProcessDeadline(spawnSync(
     "bash",
     [
       "-c",
@@ -154,8 +161,9 @@ function runConfigureWithPipeEOF(targetDir, args = [], envOverrides = {}, input 
         ORBIT_IMAGE: "orbit-local:abcdef123456",
         ...envOverrides,
       },
+      ...processGuard(),
     },
-  );
+  ), { label: "runConfigureWithPipeEOF" });
   unlinkSync(inputPath);
   return result;
 }
