@@ -80,7 +80,17 @@ export async function verifyMigrationIntegrity(client: SqlClient, folder: string
       }
       return;
     }
-    throw new MigrationIntegrityError("migration_integrity");
+    // Anything else here -- a wrong password, a refused connection, a
+    // timeout -- is not a proven fact about the schema, so it must not be
+    // relabelled as one. Rethrow the original error unwrapped: boot.ts's own
+    // catch (src/server/boot.ts) only assigns the precise "database_mismatch"
+    // wording to an actual MigrationIntegrityError, and falls back to the
+    // generic "migration_integrity" reason for anything else. Wrapping a
+    // connection/auth failure in MigrationIntegrityError here defeated that
+    // distinction and is what made repair_journeys' credential-drift check
+    // intermittently see "database-schema-mismatch" instead of
+    // "database-credential-mismatch" (#822).
+    throw error;
   }
   const floorIndex = expected.findIndex((migration) => migration.tag === SUPPORTED_FLOOR_TAG);
   if (applied.length === 0 && await hasExistingProductTables(client)) {

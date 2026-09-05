@@ -223,6 +223,21 @@ demo image or its database alive: if it will not start, rebuild it from current
 `dev` and current versions of everything it depends on, rather than repairing
 it.
 
+## Anything the owner must look at is hosted, never a file path
+
+The owner cannot open files on this VM. A mockup is served from an
+`nginx:alpine` container with a published port (the standing pattern —
+`docker run -d --name orbit-<issue>-review -p <port>:80 -v <dir>:/usr/share/nginx/html:ro nginx:alpine`),
+and a built screen is the demo stack (`bash scripts/build-container.sh`, then
+`docker compose -p orbit-demo --env-file .env-orbit -f docker-compose.yml
+-f docker-compose.mail.yml -f docker-compose.acceptance.yml
+-f docker-compose.demo.yml up -d` with `DEMO_HOST`, `ORBIT_IMAGE`,
+`ORBIT_BIND_ADDRESS=127.0.0.1`, `ORBIT_PORT=3001` set). Hand over clickable
+`https://<DEMO_HOST>:3443/<route>` links plus the one-time self-signed cert
+warning on `:3443` and `:4443`. A screenshot or fidelity baseline is
+supporting evidence, not the review: sign-off is on the running code
+(owner, 2026-09-05, #474).
+
 ## An issue naming `src/app/` may describe a deleted surface
 
 The v19 rebuild (#411) replaces `src/app/` with `web/` and carries nothing
