@@ -150,6 +150,11 @@ export async function registerNode(): Promise<void> {
           setting: issue.field,
           problemCode: issue.code,
           fallback: issue.code === "configuration_optional" ? "feature_disabled" : "startup_blocked",
+          /* The specific rule that failed and its remedy (#717), added
+             alongside the coded fields above rather than replacing them —
+             `reason`/`setting`/`problemCode` keep the exact shape anything
+             already greps for (repair.sh's own trap, #447). */
+          ...(issue.detail ? { detail: issue.detail } : {}),
         });
       }
     } else {

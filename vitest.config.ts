@@ -5,6 +5,13 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // The package-name form web/src files import the engine through
+      // ("orbit/server/boot" etc, matching the root package.json `exports`
+      // map). It only ever resolves once a real `pnpm install` links the
+      // workspace self-reference; a worktree deliberately has none (#784),
+      // so a web/ subject that imports the engine this way needs it aliased
+      // here too, the same reason $lib and $env/dynamic/private are (#717).
+      orbit: fileURLToPath(new URL("./src", import.meta.url)),
       // SvelteKit's own alias, so the v19 unit tests in tests/unit can import
       // a web/ module that imports a sibling through $lib (#410). web/ test
       // FILES stay excluded below; only their subjects are reachable.
@@ -14,6 +21,11 @@ export default defineConfig({
       // stub exposes the same live process environment the real one does.
       "$env/dynamic/private": fileURLToPath(
         new URL("./tests/support/env-dynamic-private.ts", import.meta.url),
+      ),
+      // hooks.server.js's `init` reads this to skip booting while the
+      // adapter prerenders (#717); outside SvelteKit it is just a constant.
+      "$app/environment": fileURLToPath(
+        new URL("./tests/support/app-environment.ts", import.meta.url),
       ),
     },
   },
