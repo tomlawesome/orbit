@@ -52,12 +52,18 @@ describe("launcher install compatibility gate", () => {
     expect(job).toMatch(/LAUNCHER_REF:\s*dev/u);
   });
 
-  it("points the launcher at this commit's own install.sh", () => {
+  it("points the launcher at this commit's own install.sh, served without a token", () => {
     const job = launcherCompatJob();
 
-    expect(job).toContain("ORBIT_LAUNCHER_INSTALL_SCRIPT_URL=");
-    expect(job).toContain("scripts%2Finstall.sh");
-    expect(job).toContain("ref=${CI_COMMIT_SHA}");
+    // The checkout's file over loopback: no repository-files URL, because
+    // that would carry a job token the launcher's raw log could echo.
+    expect(job).toContain('ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="http://127.0.0.1:');
+    expect(job).toContain('"$CI_PROJECT_DIR/scripts/install.sh"');
+    expect(job).not.toContain("job_token");
+    expect(job).not.toContain("CI_JOB_TOKEN");
+    // The job must outlive the suite's own 30-minute limit.
+    expect(job).toMatch(/timeout: 35m/u);
+    expect(job).toContain("-timeout 30m");
   });
 
   it("always runs on a merge request into main, the promotion gate", () => {
