@@ -16,7 +16,8 @@ name: Publish the GitLab-tested image to GHCR
 #
 # The channel tag is `preview` for hotfix branches as well, as the GitHub build
 # always did (see publish-container.yml's metadata step): verify_preview and
-# promote-container.yml resolve `:preview` for both.
+# GitLab's `promote_stable` job (scripts/ci/promote-stable.sh, #821) resolve
+# `:preview` for both.
 #
 # Secrets: GITLAB_READ_TOKEN_NAME and GITLAB_READ_TOKEN, a project access token
 # on ai/orbit with the Reporter role and the read_api and read_registry scopes,
