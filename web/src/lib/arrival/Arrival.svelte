@@ -372,7 +372,7 @@
 
   const title = $derived(
     stage === CREATE ? "Orbit — name your first system"
-      : stage === NEWCOMER ? "Orbit — where do you belong?"
+      : stage === NEWCOMER ? "Orbit — arrival"
       : "Orbit — sign in");
 </script>
 
