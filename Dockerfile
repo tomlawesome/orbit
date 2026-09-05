@@ -125,7 +125,14 @@ LABEL io.github.tomlawesome.orbit.release-stage="${ORBIT_CHANNEL}"
 WORKDIR /opt/orbit
 # Seed the mount point with the runtime user's ownership so a new named volume
 # is writable when Docker copies the image directory into it on first use.
-RUN apk add --no-cache su-exec \
+# apk_retry: a transient DNS/CDN blip against the Alpine mirror must not abort
+# the whole build (#734; same shape as orbit-base-image's #9/!7) -- three
+# attempts, sleeping 5s then 10s, failing loudly if every attempt fails. Never
+# --force-missing-repositories: building against a stale index is worse than
+# the failure this fixes. Only the apk fetch is wrapped; the rm/user/mkdir
+# chain below is local and cannot fail transiently.
+RUN apk_retry() { "$@" || { sleep 5; "$@"; } || { sleep 10; "$@"; }; } \
+  && apk_retry apk add --no-cache su-exec \
   && rm -rf /usr/local/lib/node_modules /opt/yarn-v* \
   && rm -f \
     /usr/local/bin/corepack \
