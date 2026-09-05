@@ -7,8 +7,10 @@ import { describe, expect, it } from "vitest";
 import {
   checkInstalledTree,
   discoverInstalledPackages,
+  fontsourceShippedIdentities,
   isLicenceAllowed,
   loadPolicy,
+  parsePnpmListProdJson,
   parsePurlException,
 } from "./ci/licence-policy.mjs";
 
@@ -226,5 +228,81 @@ describe("checkInstalledTree", () => {
     expect(result.offending).toEqual([
       { name: "and-pkg", version: "1.0.0", licence: "MIT AND GPL-3.0-only" },
     ]);
+  });
+
+  it("with shippedIdentities, ignores a disallowed package outside the shipped set", () => {
+    const root = scratchDir();
+    writePackage(root, "node_modules/gpl-build-tool", { name: "gpl-build-tool", version: "1.0.0", license: "GPL-3.0-only" });
+    writePackage(root, "node_modules/mit-pkg", { name: "mit-pkg", version: "1.0.0", license: "MIT" });
+    const policyPath = writePolicy(scratchDir(), { allowLicenses: ["MIT"] });
+    const result = checkInstalledTree({
+      root,
+      policyPath,
+      shippedIdentities: new Set(["mit-pkg@1.0.0"]),
+    });
+    expect(result.checked).toBe(1);
+    expect(result.offending).toEqual([]);
+  });
+
+  it("with shippedIdentities, still fails a disallowed package inside the shipped set", () => {
+    const root = scratchDir();
+    writePackage(root, "node_modules/gpl-pkg", { name: "gpl-pkg", version: "2.0.0", license: "GPL-3.0-only" });
+    const policyPath = writePolicy(scratchDir(), { allowLicenses: ["MIT"] });
+    const result = checkInstalledTree({
+      root,
+      policyPath,
+      shippedIdentities: new Set(["gpl-pkg@2.0.0"]),
+    });
+    expect(result.checked).toBe(1);
+    expect(result.offending).toEqual([
+      { name: "gpl-pkg", version: "2.0.0", licence: "GPL-3.0-only" },
+    ]);
+  });
+});
+
+describe("parsePnpmListProdJson", () => {
+  it("collects name@version identities across every workspace project, nested dependencies included", () => {
+    const json = JSON.stringify([
+      {
+        name: "orbit",
+        dependencies: {
+          zod: { from: "zod", version: "4.4.3", resolved: "https://example/zod" },
+          jose: {
+            from: "jose",
+            version: "6.2.4",
+            dependencies: {
+              "nested-dep": { from: "nested-dep", version: "1.0.0" },
+            },
+          },
+        },
+      },
+      {
+        name: "orbit-web",
+        dependencies: {
+          zod: { from: "zod", version: "4.4.3" },
+        },
+      },
+    ]);
+    const identities = parsePnpmListProdJson(json);
+    expect(identities).toEqual(new Set(["zod@4.4.3", "jose@6.2.4", "nested-dep@1.0.0"]));
+  });
+
+  it("returns an empty set for a project with no production dependencies", () => {
+    expect(parsePnpmListProdJson(JSON.stringify([{ name: "orbit" }]))).toEqual(new Set());
+  });
+});
+
+describe("fontsourceShippedIdentities", () => {
+  it("keeps only the @fontsource-prefixed entries, by their declared exact version", () => {
+    const identities = fontsourceShippedIdentities({
+      "@fontsource/space-grotesk": "5.3.0",
+      "@fontsource-variable/inter": "5.3.0",
+      vite: "8.2.1",
+    });
+    expect(identities).toEqual(new Set(["@fontsource/space-grotesk@5.3.0", "@fontsource-variable/inter@5.3.0"]));
+  });
+
+  it("returns an empty set when there are no devDependencies", () => {
+    expect(fontsourceShippedIdentities(undefined)).toEqual(new Set());
   });
 });
