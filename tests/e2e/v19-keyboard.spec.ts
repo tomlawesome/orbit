@@ -153,10 +153,14 @@ const AUDIT_SCRIPT = `
   var SELECTOR = ${JSON.stringify(INTERACTIVE_SELECTOR)};
 
   function isReallyVisible(el) {
+    /* visibility is read on the element alone: it inherits, but a child may
+       opt back in (a drawer's handle stays visible while its drawer is
+       hidden), so an ancestor's "hidden" says nothing on its own. */
+    if (getComputedStyle(el).visibility === "hidden") return false;
     var node = el;
     while (node) {
       var cs = getComputedStyle(node);
-      if (cs.display === "none" || cs.visibility === "hidden" || parseFloat(cs.opacity) === 0) return false;
+      if (cs.display === "none" || parseFloat(cs.opacity) === 0) return false;
       if (node !== el && cs.overflow !== "visible") {
         var arect = node.getBoundingClientRect();
         if (arect.width === 0 || arect.height === 0) return false;
@@ -309,7 +313,10 @@ async function auditTabOrder(p: Page, screen: string, { root = null, exclude = n
        element again). That is automation flake, not a trap — a real trap
        keeps returning to the same one or two elements even after a beat, so
        retrying a genuine no-op press costs nothing and does not mask one. */
-    for (let retry = 0; retry < 3; retry += 1) {
+    /* Six, not three: Chromium's native <input type="date"> is one control
+       with four internal Tab stops (day, month, year, picker), and the
+       audit must walk through it rather than call it a trap. */
+    for (let retry = 0; retry < 6; retry += 1) {
       await p.keyboard.press("Tab");
       await p.waitForTimeout(20); // pacing this loop matters, not just its length
       info = await currentFocus(p);
@@ -479,7 +486,13 @@ async function fillCreateForm(page: Page, name: string) {
   await page.locator("#f-date").fill(dueDate);
   await expect(page.locator("#f-date")).toHaveValue(dueDate);
 
-  await page.keyboard.press("Tab"); // f-recur select — left at its default (yearly)
+  /* A filled date input keeps focus for several more Tabs (its day, month,
+     year and picker stops); leave it the way a keyboard user does, by
+     pressing Tab until focus lands on the next control. */
+  for (let i = 0; i < 6 && (await page.evaluate(() => document.activeElement?.id)) === "f-date"; i += 1) {
+    await page.keyboard.press("Tab");
+  }
+  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the recurrence select after the date").toBe("f-recur");
   await page.keyboard.press("Tab"); // f-cost — left blank, optional
   await page.keyboard.press("Tab"); // f-reminder select — left at its default
   await page.keyboard.press("Tab"); // f-assign select — left at its default (household)
@@ -746,6 +759,9 @@ test("inbox: reachable via the account panel, and keyboard-navigable", async ({ 
     await tabTo(page, { tag: "A", textIncludes: "Inbox" }, { screen: "home account panel" });
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/inbox$/);
+    /* The inbox draws its queue or its empty-state relay bar only once the
+       view has loaded; audit the loaded screen, not the shell. */
+    await expect(page.locator(".inbox-page .lanes, .inbox-page .quietnote").first()).toBeVisible({ timeout: 30_000 });
 
     await auditTabOrder(page, "inbox");
   } finally {
