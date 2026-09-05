@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { mountGravityWell } from "./gravity-well.js";
+  import { createSky, paintCopy, renewCopy } from "./gravity-well.js";
   import { rasteriseSvg } from "$lib/raster.js";
 
   /**
@@ -50,10 +50,10 @@
    * does not, because blur is exactly what hides sub-pixel edge noise).
    * Rasterising only the blur keeps both crisp glyphs byte-identical to
    * before and still removes the one actual live filter from the paint
-   * tree. The raster is built at the full 1600×1000 frame, the same
-   * technique Dawn/Dusk use for a single shape, with the glyph's own
-   * transform baked into the SVG string so the <image> can sit at 0,0
-   * without a second transform.
+   * tree. The raster is built in frame coordinates (cropped to CROP_TEXT
+   * below, #798), the same technique Dawn/Dusk use for a single shape, with
+   * the glyph's own transform baked into the SVG string so the <image>
+   * needs no transform of its own.
    */
   const F_B6 =
     '<filter id="b6" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>';
@@ -62,14 +62,6 @@
     '<text x="0" y="52" text-anchor="middle" font-family="\'Space Grotesk\',sans-serif" ' +
     'font-weight="600" font-size="168" fill="#e8dcbc" opacity=".3" filter="url(#b6)" ' +
     'transform="scale(1.35,1)">4</text></g>';
-
-  /** @param {number} w @param {number} h */
-  function staticFrame(w, h) {
-    return (
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 1600 1000">` +
-      `<defs>${F_B6}</defs>${STATIC_BODY}</svg>`
-    );
-  }
 
   /**
    * #764 step 4 — measurement (the webkit-frames.mjs sampler, tests/perf/)
@@ -150,20 +142,88 @@
     "</linearGradient>";
 
   /**
+   * #798: each raster covers only the part of the frame its filter can
+   * touch, not the whole 1600×1000. A filter paints nothing outside its
+   * region, so a raster cropped to that region is the same pixels with the
+   * rest of the frame — most of it — simply not rendered, not encoded and
+   * not decoded. Rendering all six at full frame was the bulk of the first
+   * load's hang, before any star fell.
+   *
+   * Boxes are in viewBox units, [x, y, width, height], each drawn around
+   * what its layer actually draws plus the blur's whole tail (four standard
+   * deviations, beyond which a Gaussian contributes nothing a pixel can
+   * hold), never merely around the filter's region: a blur costs by the
+   * pixels it covers, and the first cut, six boxes at b1/b3's shared
+   * 1000×640 region, spent most of the build blurring empty sky (owner,
+   * 2026-09-04: the halo was the one thing still arriving late).
+   *
+   * ARCS: gravity-well.js rings the hole at radii 138–288 from (800,450);
+   * b1's tail is 4. ARCH: three arcs of radius ≤152 about (800,443) and
+   * (800,461), stroke ≤17 with round caps, b3's tail 12. PHOTON: a circle
+   * of radius 119, stroke 7, b6's tail 24. NEAR: the near-side disc's
+   * path spans x452–1148 and dips 62 below y452, stroke 34, b6. TIDAL: the
+   * stream's path lies in x916–1030, y442–480, b3. TEXT: the afterimage
+   * "4" sits around 1092,460 at 168px scaled 1.35×1.24 wide, b6's region
+   * relative to that bbox; the box leaves well over 100 units beyond it.
+   */
+  const CROP_ARCS = /** @type {const} */ ([500, 150, 600, 600]);
+  const CROP_ARCH = /** @type {const} */ ([620, 260, 360, 370]);
+  const CROP_PHOTON = /** @type {const} */ ([640, 290, 320, 320]);
+  const CROP_NEAR = /** @type {const} */ ([400, 400, 800, 170]);
+  const CROP_TIDAL = /** @type {const} */ ([880, 410, 180, 100]);
+  const CROP_TEXT = /** @type {const} */ ([780, 180, 640, 560]);
+
+  /**
+   * Snaps a crop box to the device-pixel grid at this scale, so the raster's
+   * first pixel lands exactly on a frame pixel: the same grid the full-frame
+   * raster used, just starting later. Returns the box in both units.
+   * @param {readonly [number, number, number, number]} crop @param {number} scale
+   */
+  function frameOf(crop, scale) {
+    const [x, y, w, h] = crop;
+    const px = Math.floor(x * scale), py = Math.floor(y * scale);
+    const pw = Math.ceil((x + w) * scale) - px, ph = Math.ceil((y + h) * scale) - py;
+    return { pw, ph, x: px / scale, y: py / scale, w: pw / scale, h: ph / scale };
+  }
+
+  /**
    * Captures a live source element's CURRENT markup (verbatim, via
    * outerHTML — so the source's own tag, attributes and children all come
-   * along, exactly as rendered) into a standalone, self-contained SVG at
-   * the frame size, and hands back its raster. Called before the source is
-   * hidden — never after, or the capture would carry `display:none` into
-   * the document being rasterised and decode to nothing.
-   * @param {string} key @param {SVGElement} sourceEl @param {string} defs @param {number} w @param {number} h
+   * along, exactly as rendered) into a standalone, self-contained SVG
+   * showing just its crop box, and hands back its raster together with the
+   * box the <image> must occupy. Called before the source is hidden — never
+   * after, or the capture would carry `display:none` into the document
+   * being rasterised and decode to nothing.
+   * @param {string} key @param {string} body @param {string} defs
+   * @param {readonly [number, number, number, number]} crop @param {number} scale
    */
-  function rasteriseFrom(key, sourceEl, defs, w, h) {
+  async function rasteriseCrop(key, body, defs, crop, scale) {
+    const f = frameOf(crop, scale);
     const svg =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 1600 1000">` +
-      `<defs>${defs}</defs>${sourceEl.outerHTML}</svg>`;
-    return rasteriseSvg(key, svg, w, h);
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${f.pw}" height="${f.ph}" viewBox="${f.x} ${f.y} ${f.w} ${f.h}">` +
+      `<defs>${defs}</defs>${body}</svg>`;
+    return { url: await rasteriseSvg(key, svg, f.pw, f.ph), f };
   }
+
+  /**
+   * Lands a finished raster: the <image> takes the crop box and the URL,
+   * and its live source is hidden — never removed, so `#lensarcs path` (the
+   * gate's settle condition, and this file's own animation test) keeps
+   * finding what gravity-well.js drew.
+   * @param {SVGImageElement | null} img @param {SVGElement | null} src
+   * @param {{ url: string, f: ReturnType<typeof frameOf> }} r
+   */
+  function land(img, src, { url, f }) {
+    img?.setAttribute("x", String(f.x));
+    img?.setAttribute("y", String(f.y));
+    img?.setAttribute("width", String(f.w));
+    img?.setAttribute("height", String(f.h));
+    img?.setAttribute("href", url);
+    if (src) src.style.display = "none";
+  }
+
+  /** A frame's rest between rasters, so each one is its own short task. */
+  const breathe = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
   /** @type {HTMLDivElement | null} */
   let world;
@@ -190,17 +250,97 @@
   /** @type {SVGImageElement | null} */
   let imgSmearTidal;
 
+  /** #790: the falling star bands' host, see the markup. @type {HTMLDivElement | null} */
+  let infall;
+
+  /**
+   * #790: the sky, seeded here — on the server too — so the HTML arrives
+   * with the stars already in it (the `.first` <svg> in the markup) and the
+   * canvases, painted at mount from the very same seed, take over without
+   * moving a star. Copies 1 and 2 are the ones a fresh cycle shows; copy 0
+   * opens at opacity 0 and fades in from beyond the frame.
+   */
+  const sky = createSky();
+  const FIRST = /** @type {const} */ ([[1, 1], [2, 0.5]]);
+  /* False until every copy is painted: the still sky shows, the canvases
+     are hidden and not yet animating (notfound.css). Flipping it starts
+     the fall and cross-fades the still sky out under it; `still` keeps the
+     still sky in the DOM until that fade has finished (owner, 2026-09-04:
+     parts arriving one after another read as a delay, so every arrival on
+     this page is a fade, never a pop — see notfound.css, "the arrival"). */
+  let live = $state(false);
+  let still = $state(true);
+  /* False until every well raster has landed: the disc's lensing layers
+     wait hidden (never painting their live filters), then fade in as one
+     — the same rule, for the well. */
+  let lit = $state(false);
+  const FADE_MS = 700;
+
   onMount(() => {
     if (!isNotFound) return;
-    /* Populates #lensarcs (among other things) synchronously, before the
-       first build() below ever reads it. */
-    mountGravityWell();
+    /* Populates #lensarcs synchronously, before the first build() below
+       ever reads it. */
+    sky.mountArcs();
 
     let cancelled = false;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
     let timer;
 
+    /* The canvases, painted one per task behind the still sky (#798: six at
+       once was the first thing a visitor waited on) at the density the
+       screen shows it (2200 units at this scale, capped at 2k a side: six
+       canvases at 16 MB each, and a sub-pixel star does not get crisper for
+       being sampled finer). Copies 1 and 2 — the ones the still sky shows —
+       go first; copy 0 opens at opacity 0 and has seconds before it is seen.
+       Each copy takes fresh stars every time it wraps unseen, so no pattern
+       ever comes round again (gravity-well.js, renewCopy). */
+    let side = 0;
+    /* `.world[data-rasterised]` is the fidelity gate's (and
+       notfound-motion.spec.js's) one wait for this whole page, and it must
+       mean "the frame a visitor would see": the well built AND the sky
+       painted. The two run in sequence at mount and side by side after a
+       resize, so each clears its own flag as it starts and the attribute
+       reads "ready" only once both are set. */
+    let painted = false;
+    let built = false;
+    function settle() {
+      if (world) world.dataset.rasterised = painted && built ? "ready" : "pending";
+    }
+    async function paint() {
+      painted = false;
+      settle();
+      if (!infall) return;
+      const rect = infall.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      side = Math.min(2048, Math.max(1, Math.round(2200 * Math.max(rect.width / 1600, rect.height / 1000) * dpr)));
+      const copies = /** @type {HTMLCanvasElement[]} */ ([...infall.querySelectorAll("canvas.fall")]);
+      copies.sort((a, b) => Number(a.style.getPropertyValue("--i") === "0") - Number(b.style.getPropertyValue("--i") === "0"));
+      for (const c of copies) {
+        paintCopy(c, sky, side);
+        await breathe();
+        if (cancelled) return;
+      }
+      live = true;
+      setTimeout(() => { if (!cancelled) still = false; }, FADE_MS);
+      painted = true;
+      settle();
+    }
+    /** @param {AnimationEvent} e */
+    function onWrap(e) {
+      if (e.animationName === "infall" && e.target instanceof HTMLCanvasElement) renewCopy(e.target, sky, side);
+    }
+    infall?.addEventListener("animationiteration", onWrap);
+    /* A resize during the six-frame build starts a new one; the older
+       build must then stop landing rasters at the old scale between the
+       new one's. Each build takes a number and yields when it is stale. */
+    let generation = 0;
+
     async function build() {
+      const mine = ++generation;
+      built = false;
+      settle();
+      const stale = () => cancelled || mine !== generation;
       if (!world || !srcLensarcs || !srcLensedArch || !srcPhoton || !srcSmearNear || !srcSmearTidal) return;
       const rect = world.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
@@ -212,18 +352,13 @@
          rather than race it, the same wait the fidelity gate itself takes
          before screenshotting this page (screens.spec.js). */
       await document.fonts.ready;
-      if (cancelled) return;
+      if (stale()) return;
       /* Capped at 2, as Grain/Dawn/Dusk cap it: retina stays crisp without a
          3x+ display doubling the raster for no visible gain. */
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const scale = Math.max(rect.width / 1600, rect.height / 1000) * dpr;
-      const w = Math.max(1, Math.round(1600 * scale));
-      const h = Math.max(1, Math.round(1000 * scale));
+      const k = `|${Math.round(1600 * scale)}|${Math.round(1000 * scale)}`;
 
-      /* Marks this surface for the fidelity gate (screens.spec.js), which
-         waits for `.world[data-rasterised]` before screenshotting so the
-         async decode below can never race a capture. */
-      world.dataset.rasterised = "pending";
       /* Un-hide every source before capturing. On the first build this is a
          no-op (nothing has been hidden yet); on a resize-triggered rebuild
          each source is already display:none from the previous pass, and
@@ -234,44 +369,53 @@
       srcPhoton.style.display = "";
       srcSmearNear.style.display = "";
       srcSmearTidal.style.display = "";
-      const [urlText, urlLensarcs, urlLensedArch, urlPhoton, urlSmearNear, urlSmearTidal] = await Promise.all([
-        rasteriseSvg(`notfound-static|${w}|${h}`, staticFrame(w, h), w, h),
-        rasteriseFrom(`notfound-lensarcs|${w}|${h}`, srcLensarcs, F_B1, w, h),
-        rasteriseFrom(`notfound-lensed-arch|${w}|${h}`, srcLensedArch, F_B1 + F_B3 + G_DOPPLER, w, h),
-        rasteriseFrom(`notfound-photon|${w}|${h}`, srcPhoton, F_B6 + F_B1, w, h),
-        rasteriseFrom(`notfound-smear-near|${w}|${h}`, srcSmearNear, F_B6 + G_DOPPLER_SOFT, w, h),
-        rasteriseFrom(`notfound-smear-tidal|${w}|${h}`, srcSmearTidal, F_B3 + G_STREAMG, w, h),
-      ]);
-      if (cancelled) return;
 
-      imgStatic?.setAttribute("href", urlText);
-      imgLensarcs?.setAttribute("href", urlLensarcs);
-      imgLensedArch?.setAttribute("href", urlLensedArch);
-      imgPhoton?.setAttribute("href", urlPhoton);
-      imgSmearNear?.setAttribute("href", urlSmearNear);
-      imgSmearTidal?.setAttribute("href", urlSmearTidal);
-      /* The sources are never removed — only hidden — so `#lensarcs path`
-         (the gate's settle condition, and this file's own animation test)
-         keeps finding what gravity-well.js drew. */
-      srcLensarcs.style.display = "none";
-      srcLensedArch.style.display = "none";
-      srcPhoton.style.display = "none";
-      srcSmearNear.style.display = "none";
-      srcSmearTidal.style.display = "none";
-      world.dataset.rasterised = "ready";
+      /* One raster per frame, not all six in one task (#798): each is
+         rendered, encoded and landed on its own, with a frame's rest before
+         the next, so the page keeps painting through the build instead of
+         hanging until the last one is done. Nothing shows until all six
+         have landed (`lit`): each layer's `.arrive` wrapper stays hidden,
+         so no live filter ever paints, and the disc lights up in one
+         fade rather than layer by layer. */
+      const jobs = /** @type {const} */ ([
+        [imgStatic, null, `notfound-static${k}`, STATIC_BODY, F_B6, CROP_TEXT],
+        [imgLensarcs, srcLensarcs, `notfound-lensarcs${k}`, srcLensarcs.outerHTML, F_B1, CROP_ARCS],
+        [imgLensedArch, srcLensedArch, `notfound-lensed-arch${k}`, srcLensedArch.outerHTML, F_B1 + F_B3 + G_DOPPLER, CROP_ARCH],
+        [imgPhoton, srcPhoton, `notfound-photon${k}`, srcPhoton.outerHTML, F_B6 + F_B1, CROP_PHOTON],
+        [imgSmearNear, srcSmearNear, `notfound-smear-near${k}`, srcSmearNear.outerHTML, F_B6 + G_DOPPLER_SOFT, CROP_NEAR],
+        [imgSmearTidal, srcSmearTidal, `notfound-smear-tidal${k}`, srcSmearTidal.outerHTML, F_B3 + G_STREAMG, CROP_TIDAL],
+      ]);
+      for (const [img, src, key, body, defs, crop] of jobs) {
+        const r = await rasteriseCrop(key, body, defs, crop, scale);
+        if (stale()) return;
+        land(img, src, r);
+        await breathe();
+        if (stale()) return;
+      }
+      built = true;
+      settle();
+      lit = true;
     }
 
     function onResize() {
       clearTimeout(timer);
-      timer = setTimeout(build, 120);
+      timer = setTimeout(() => { paint(); build(); }, 120);
     }
 
-    build();
+    /* The well first, then the sky: the still stars are already on screen
+       and lose nothing by falling a little later, while the halo is the one
+       thing the first frame is missing (owner, 2026-09-04). build() marks
+       the well pending before its first await, so the mark is in the DOM
+       by the time mount returns: the fidelity gate (and
+       notfound-motion.spec.js) waits on `.world[data-rasterised]`, and an
+       element it cannot see yet is one it will not wait for. */
+    build().then(paint);
     window.addEventListener("resize", onResize);
     return () => {
       cancelled = true;
       clearTimeout(timer);
       window.removeEventListener("resize", onResize);
+      infall?.removeEventListener("animationiteration", onWrap);
     };
   });
 </script>
@@ -283,18 +427,71 @@
 </svelte:head>
 
 {#if isNotFound}
-<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-  <defs>
-    <radialGradient id="stargl" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#e8edff" stop-opacity=".45"/>
-      <stop offset="100%" stop-color="#e8edff" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <g class="sky-far" fill="#dbe2f5"><g id="farstars"></g><use href="#farstars" x="1600"/></g>
-  <g class="sky-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
-</svg></div>
+<!--
+  The sky falls in (#790, owner's pick: the spiral). Each star layer is one
+  band of stars that starts beyond the frame, painted onto three <canvas>
+  copies (gravity-well.js, paintCopy), each turned a third of a turn and each
+  with its own stars. They spiral in toward the hole a third of a cycle apart
+  and hand over to each other (notfound.css, .fall), so the field never
+  empties, nothing spawns in view, and the horizon's own black disc swallows
+  what is left; a copy takes fresh stars each time it wraps, unseen, so it
+  never reads as a loop.
 
-<div class="world" style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
+  Canvases, not groups in the sky <svg>, because of what the first cut did to
+  a laptop: Safari gives a scaled SVG group a bitmap the size of its whole
+  extent and redraws it as the scale changes, and six bands at twice the
+  frame is gigabytes. A canvas is composited straight from its own pixels,
+  whatever transform it wears — and unlike a rasterised <img> it costs no PNG
+  encode and decode, which took whole seconds of blank sky. Nothing here is
+  filtered, so #764's rule holds: nothing filtered gains motion.
+
+  A canvas is blank until the script runs, and that is a few hundred
+  milliseconds of empty sky before the stars pop in. So the server draws the
+  same stars first, as one still <svg> in the HTML (static groups only —
+  nothing scaled by CSS, which is the Safari trap above): on screen with the
+  first paint, and replaced once all six canvases are painted — hidden and
+  unmoving until then (notfound.css) — by the same stars in the same places,
+  which start to fall as the still sky fades out beneath them.
+-->
+<div class="infall" class:live aria-hidden="true" bind:this={infall}>
+  {#if still}
+  <svg class="first" viewBox="-1100 -1100 2200 2200">
+    <defs>
+      <radialGradient id="stargl" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#e8edff" stop-opacity=".45"/>
+        <stop offset="100%" stop-color="#e8edff" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    {#each FIRST as [i, s] (i)}
+      <g transform="scale({s})" fill="#dbe2f5">
+        {#each sky.first.far[i] as st, j (j)}<circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)} opacity={st.o.toFixed(2)}/>{/each}
+      </g>
+    {/each}
+    {#each FIRST as [i, s] (i)}
+      <g transform="scale({s})" fill="#e8edff">
+        {#each sky.first.near[i] as st, j (j)}<circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={(st.r * 3.6).toFixed(1)} fill="url(#stargl)"/><circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)} opacity={st.o.toFixed(2)}/>{/each}
+      </g>
+    {/each}
+  </svg>
+  {/if}
+  <div class="falling">
+    <canvas class="fall fall-far" style="--i:0;--s0:2"></canvas>
+    <canvas class="fall fall-far" style="--i:1;--s0:1"></canvas>
+    <canvas class="fall fall-far" style="--i:2;--s0:.5"></canvas>
+    <canvas class="fall fall-near" style="--i:0;--s0:2"></canvas>
+    <canvas class="fall fall-near" style="--i:1;--s0:1"></canvas>
+    <canvas class="fall fall-near" style="--i:2;--s0:.5"></canvas>
+  </div>
+</div>
+
+<!-- The well. What the HTML shows at once is the filter-free part of it —
+     the glow, the horizon, the haze, the 4s — and every `.arrive` group
+     (each a rasterised layer with its live source) stays hidden until all
+     six rasters have landed, then fades in as one (notfound.css, `lit`).
+     Without script nothing would ever land, so the noscript rule shows the
+     live sources as they were. -->
+<noscript><style>.world .arrive{visibility:visible;opacity:1}</style></noscript>
+<div class="world" class:lit style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
   <defs>
     <!-- doppler: the approaching side of the disc burns white, the receding side dims -->
     <linearGradient id="doppler" x1="0" y1="0" x2="1" y2="0">
@@ -354,20 +551,24 @@
          nothing here duplicates its seeded generator — but once its raster
          (below) is ready it is hidden (display:none), not removed, so
          `#lensarcs path` still finds what was drawn. -->
-    <g id="lensarcs" class="lensed" fill="none" bind:this={srcLensarcs}></g>
-    <image bind:this={imgLensarcs} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="lensed"/>
+    <g class="arrive">
+      <g id="lensarcs" class="lensed" fill="none" bind:this={srcLensarcs}></g>
+      <image bind:this={imgLensarcs} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="lensed"/>
+    </g>
 
     <!-- the far side of the disc, lensed into an arch OVER the hole (and a
          fainter one under). #764 step 4: rasterised once, same reasoning. -->
-    <g class="lensed" bind:this={srcLensedArch}>
-      <path d="M 649 460 A 152 152 0 1 1 951 460" fill="none" stroke="url(#doppler)"
-            stroke-width="17" stroke-linecap="round" filter="url(#b3)" opacity=".9"/>
-      <path d="M 655 452 A 150 150 0 1 1 945 452" fill="none" stroke="#fff3d6"
-            stroke-width="4" stroke-linecap="round" filter="url(#b1)" opacity=".75"/>
-      <path d="M 668 508 A 140 140 0 0 0 932 508" fill="none" stroke="url(#doppler)"
-            stroke-width="9" stroke-linecap="round" filter="url(#b3)" opacity=".5"/>
+    <g class="arrive">
+      <g class="lensed" bind:this={srcLensedArch}>
+        <path d="M 649 460 A 152 152 0 1 1 951 460" fill="none" stroke="url(#doppler)"
+              stroke-width="17" stroke-linecap="round" filter="url(#b3)" opacity=".9"/>
+        <path d="M 655 452 A 150 150 0 1 1 945 452" fill="none" stroke="#fff3d6"
+              stroke-width="4" stroke-linecap="round" filter="url(#b1)" opacity=".75"/>
+        <path d="M 668 508 A 140 140 0 0 0 932 508" fill="none" stroke="url(#doppler)"
+              stroke-width="9" stroke-linecap="round" filter="url(#b3)" opacity=".5"/>
+      </g>
+      <image bind:this={imgLensedArch} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="lensed"/>
     </g>
-    <image bind:this={imgLensedArch} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="lensed"/>
 
     <!-- disc haze behind everything: static, unanimated, out of this step's
          scope (#764 step 2 already left it live). -->
@@ -380,11 +581,13 @@
          #764 step 4: merged into ONE raster, since they already shared a
          timing and a place in paint order (Dawn's "scatter" group merges
          its five static rings the same way). -->
-    <g bind:this={srcPhoton}>
-      <circle class="photon" cx="800" cy="450" r="119" fill="none" stroke="#ff9a4a" stroke-width="7" opacity=".4" filter="url(#b6)"/>
-      <circle class="photon" cx="800" cy="450" r="118" fill="none" stroke="#ffce8a" stroke-width="2.6" filter="url(#b1)"/>
+    <g class="arrive">
+      <g bind:this={srcPhoton}>
+        <circle class="photon" cx="800" cy="450" r="119" fill="none" stroke="#ff9a4a" stroke-width="7" opacity=".4" filter="url(#b6)"/>
+        <circle class="photon" cx="800" cy="450" r="118" fill="none" stroke="#ffce8a" stroke-width="2.6" filter="url(#b1)"/>
+      </g>
+      <image bind:this={imgPhoton} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="photon"/>
     </g>
-    <image bind:this={imgPhoton} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="photon"/>
     <!-- photon-hot: no filter — stays live, same reason as disc-glow. -->
     <circle class="photon-hot" cx="800" cy="450" r="117" fill="none" stroke="#fffaf0" stroke-width="1.1"/>
 
@@ -392,11 +595,13 @@
          step 4: rasterised once — kept as its OWN raster, not merged with
          the tidal-stream `.smear` below, since the two sit in different,
          non-adjacent places in paint order. -->
-    <g class="smear" bind:this={srcSmearNear}>
-      <path d="M 452 452 A 348 62 0 0 0 1148 452" fill="none" stroke="url(#doppler-soft)"
-            stroke-width="34" filter="url(#b6)"/>
+    <g class="arrive">
+      <g class="smear" bind:this={srcSmearNear}>
+        <path d="M 452 452 A 348 62 0 0 0 1148 452" fill="none" stroke="url(#doppler-soft)"
+              stroke-width="34" filter="url(#b6)"/>
+      </g>
+      <image bind:this={imgSmearNear} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="smear"/>
     </g>
-    <image bind:this={imgSmearNear} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="smear"/>
     <path d="M 452 452 A 348 62 0 0 0 1148 452" fill="none" stroke="url(#doppler)"
           stroke-width="13" filter="url(#hotrough)"/>
     <path d="M 470 458 A 346 58 0 0 0 1130 458" fill="none" stroke="#fff3d6"
@@ -414,7 +619,7 @@
        see the script block) in place of the live text it replaces. Same
        position in paint order: after the outer 4, before the inner 4's own
        crisp glyph. -->
-  <image bind:this={imgStatic} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+  <g class="arrive"><image bind:this={imgStatic} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/></g>
 
   <!-- the inner 4: mid-spaghettification, shearing toward the horizon -->
   <g>
@@ -427,11 +632,13 @@
     <!-- the tidal stream: its substance drawn off into the photon ring.
          #764 step 4: rasterised once, kept as its own raster (see the
          near-side disc above for why it isn't merged with that one). -->
-    <g bind:this={srcSmearTidal}>
-      <path class="smear" d="M 1030 448 C 985 442, 950 442, 916 446 L 916 470 C 950 468, 985 470, 1030 480 Z"
-            fill="url(#streamg)" filter="url(#b3)"/>
+    <g class="arrive">
+      <g bind:this={srcSmearTidal}>
+        <path class="smear" d="M 1030 448 C 985 442, 950 442, 916 446 L 916 470 C 950 468, 985 470, 1030 480 Z"
+              fill="url(#streamg)" filter="url(#b3)"/>
+      </g>
+      <image bind:this={imgSmearTidal} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="smear"/>
     </g>
-    <image bind:this={imgSmearTidal} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" class="smear"/>
     <path d="M 1026 456 C 978 450, 946 452, 918 456" fill="none" stroke="#ffe9bd"
           stroke-width="1.4" opacity=".55" filter="url(#b1)"/>
   </g>
