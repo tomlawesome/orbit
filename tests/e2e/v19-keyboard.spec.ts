@@ -65,6 +65,12 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
 
 const READER = "Orbit Administrator";
 
+/* The pocket layouts are different screens with their own chrome; their walk
+   is #849. This file covers the desktop screens. */
+test.beforeEach(({ isMobile }) => {
+  test.skip(isMobile, "desktop screens only; the pocket walk is #849");
+});
+
 async function signIn(page: Page, returnTo: string) {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: READER }).click();
