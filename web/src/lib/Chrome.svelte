@@ -57,8 +57,20 @@
     const close = (/** @type {Event} */ event) => {
       if (!(event.target instanceof Element) || !event.target.closest(".account,.orb")) open = false;
     };
+    /** @param {KeyboardEvent} event */
+    const onKeydown = (event) => {
+      if (event.key !== "Escape" || !open) return;
+      const account = document.getElementById("account");
+      const hadFocus = account?.contains(document.activeElement);
+      open = false;
+      if (hadFocus) /** @type {HTMLElement | null} */ (document.querySelector(".orb"))?.focus();
+    };
     addEventListener("click", close);
-    return () => removeEventListener("click", close);
+    addEventListener("keydown", onKeydown);
+    return () => {
+      removeEventListener("click", close);
+      removeEventListener("keydown", onKeydown);
+    };
   });
 
   /** @param {string} name */
@@ -172,8 +184,15 @@
            background:var(--panel-raised);backdrop-filter:blur(14px);
            border:1px solid var(--line);border-radius:16px;padding:18px 20px;
            opacity:0;transform:translateY(-6px);pointer-events:none;
-           transition:opacity .25s,transform .25s}
-  .account.open{opacity:1;transform:none;pointer-events:auto}
+           /* #847: closed, this must leave the tab order entirely — opacity
+              and pointer-events alone still let Tab land on the links and
+              swatch buttons inside. visibility is delayed to match the close
+              animation's own .25s so it still plays; opening clears the delay
+              so the panel is reachable the instant it appears. */
+           visibility:hidden;
+           transition:opacity .25s,transform .25s,visibility 0s .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto;
+                visibility:visible;transition-delay:0s}
   .account .who b{display:block;font-size:14px;font-weight:560}
   .account .who span{font-size:12px;color:var(--ink-mid)}
   .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
