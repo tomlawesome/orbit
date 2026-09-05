@@ -1028,7 +1028,8 @@
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
-        "scripts/test-integration.mjs"
+        "scripts/test-integration.mjs",
+        ".gitlab-ci.yml"
       ],
       "source": "https://github.com/docker-library/postgres",
       "registry": "https://hub.docker.com/_/postgres",

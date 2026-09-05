@@ -93,3 +93,39 @@ describe("a push starts a pipeline on the long-lived branches only (#829)", () =
     expect(catchAll).toBeGreaterThan(rules.indexOf(pushGuard));
   });
 });
+
+// #834 (part 1): an artifacts block with no expire_in keeps its files forever,
+// which is exactly the kind of unbounded growth #823 was about. This only
+// pins the expiry; the pull_policy and registry-retention parts of #834 are
+// separate and need the owner first.
+function artifactsSection(block) {
+  const start = block.indexOf("\n  artifacts:\n");
+  if (start < 0) {
+    return null;
+  }
+  const rest = block.slice(start + "\n  artifacts:\n".length);
+  // Same rule as afterScriptEntries: the section ends at the next key
+  // indented two spaces, or at the end of the block.
+  const end = rest.search(/^ {2}[a-z_]+:/mu);
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
+describe("every artifacts block has an expire_in (#834)", () => {
+  const jobsWithArtifacts = [...jobBlocks()].filter(
+    ([, block]) => artifactsSection(block) !== null,
+  );
+
+  it("found at least one job with an artifacts block", () => {
+    // Guards the guard: if nobody pins artifacts any more this test would
+    // otherwise pass vacuously.
+    expect(jobsWithArtifacts.length).toBeGreaterThan(0);
+  });
+
+  it.each(jobsWithArtifacts.map(([name, block]) => [name, block]))(
+    "%s sets expire_in on its artifacts",
+    (_name, block) => {
+      const section = artifactsSection(block);
+      expect(section).toMatch(/^ {4}expire_in: /mu);
+    },
+  );
+});

@@ -89,15 +89,26 @@ describe("supply-chain policy", () => {
       "tests/oidc/Dockerfile",
       "docker-compose.yml",
       "scripts/test-integration.mjs",
+      ".gitlab-ci.yml",
     ];
     const discovered = new Map();
     for (const file of files) {
       const content = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
       for (const line of content.split(/\r?\n/u)) {
         const from = line.match(/^FROM\s+(\S+)/u)?.[1];
-        const compose = line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1];
+        const compose =
+          file === "docker-compose.yml"
+            ? line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1]
+            : undefined;
         const integration = line.match(/^\s+"(postgres:[^"]+)",?$/u)?.[1];
-        const reference = from ?? compose ?? integration;
+        // The pipeline pins the same PostgreSQL sidecar for its integration
+        // job; other `*_IMAGE:` pins here (node, playwright) are unrelated
+        // images with no policy entry, so this only picks out postgres.
+        const pipelinePostgres =
+          file === ".gitlab-ci.yml"
+            ? line.match(/^\s*POSTGRES_IMAGE:\s+(postgres:\S+)\s*$/u)?.[1]
+            : undefined;
+        const reference = from ?? compose ?? integration ?? pipelinePostgres;
         if (!reference || reference === "base") continue;
         if (reference.startsWith("${ORBIT_IMAGE:")) {
           expect(reference).toBe(
