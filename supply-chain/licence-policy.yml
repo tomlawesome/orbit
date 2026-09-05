@@ -1,10 +1,10 @@
-fail-on-severity: high
-fail-on-scopes: runtime, development, unknown
-license-check: true
-vulnerability-check: true
-warn-only: false
-show-openssf-scorecard: false
-show-patched-versions: true
+# Licence allow-list for every package in the installed dependency tree.
+# Read by scripts/ci/licence-policy.mjs, run as the `licence_policy` job in
+# .gitlab-ci.yml. GitHub's actions/dependency-review-action read this file
+# under its former name and path (.github/dependency-review-config.yml) and
+# only ever compared a pull-request diff; it stopped running when GitHub
+# became a push-mirror with no pull requests (#801), so the licence check
+# moved here and now walks the whole installed tree instead (#815).
 allow-licenses:
   - 0BSD
   - Apache-2.0

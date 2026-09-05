@@ -375,7 +375,7 @@ classify:
     - |
       set -eu
       : > classify.env
-      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web; do
+      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_LICENCE:licence; do
         name="${pair%%:*}"
         key="${pair##*:}"
         value="$(sed -n "s/^${key}=//p" classify-output.txt | tail -1)"
@@ -527,6 +527,33 @@ supply_chain_source:
       - .orbit-supply-chain/trivy-version.json
     expire_in: 14 days
     when: always
+
+# The licence half of what GitHub's actions/dependency-review-action used to
+# check. That action ran only on the `pull_request` event and went inert when
+# the mirror flip (#801) left GitHub with no pull requests to compare, so this
+# job takes over instead of leaving the gap -- and it checks the whole
+# installed dependency tree, not a diff, which the action could never do
+# anyway (#815). The vulnerability half it also used to cover needed no
+# replacement: that has been `supply_chain_source` above all along.
+licence_policy:
+  stage: policy
+  extends: .node
+  timeout: 10m
+  rules:
+    - *not_scheduled
+    - when: on_success
+  needs:
+    - job: classify
+      artifacts: true
+  allow_failure: false
+  script:
+    - |
+      if [ "${ORBIT_LICENCE:-true}" != "true" ]; then
+        echo "skipped: no dependency or licence-policy change"
+        exit 0
+      fi
+      pnpm install --frozen-lockfile --ignore-scripts
+      node scripts/ci/licence-policy.mjs
 
 # Scans every image pinned in .github/supply-chain-policy.json, not just the
 # one Orbit builds: an operator's deployment runs the sidecars too (#647).
