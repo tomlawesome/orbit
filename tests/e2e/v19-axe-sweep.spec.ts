@@ -33,8 +33,20 @@ async function signIn(page: Page, returnTo: string) {
   await page.getByRole("link", { name: READER }).click();
 }
 
+/**
+ * The station backdrop's layers (`$lib/backdrops/station.js`) are pure
+ * decoration and already `aria-hidden`: constellation names, "0 ITEMS"
+ * satellite captions, bearing marks. axe still measures their contrast, and
+ * WCAG 1.4.3 exempts decorative text, so they are excluded here rather than
+ * lifted -- the chart pen is faint on purpose.
+ */
+const DECORATIVE_BACKDROP = '.layer[aria-hidden="true"]';
+
 async function axeCheck(page: Page) {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .exclude(DECORATIVE_BACKDROP)
+    .analyze();
   expect(results.violations).toEqual([]);
 }
 
