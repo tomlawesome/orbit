@@ -229,7 +229,11 @@ assert_green() {
   grep '^phase=' "$workdir/install.log" |
     grep -vE '^phase=[a-z-]+ component=[a-z-]+ state=[a-z-]+ reason=[a-z-]+ action=[a-z-]+ elapsed=[0-9]+s( simulation=true)?$' &&
     fail "event line outside the documented engine-events format"
-  grep '^phase=' "$workdir/install.log" | grep -q '=unknown' &&
+  # One grep, not a `| grep -q` pipe: the unknown-fallback line, if any, could
+  # sit early in a long log, and under set -e pipefail a first grep killed by
+  # SIGPIPE once the second exited would turn 141 into the pipeline's status,
+  # skipping this `&&` and passing a run that should fail (issue #809).
+  grep -qE '^phase=.*=unknown' "$workdir/install.log" &&
     fail "green run emitted the unknown-vocabulary fallback"
 
   # catalogue Part 1 / configuration.sh #2: the deployment config is a
@@ -245,11 +249,22 @@ assert_green() {
   # catalogue Part 1 / install.sh #6: generated secrets stay owner-only.
   [[ "$(stat -c %a "$target/.orbit-secrets")" == 700 ]] ||
     fail ".orbit-secrets is not mode 700"
-  find "$target/.orbit-secrets" -type f ! -perm 600 | grep -q . &&
+  # Capture first, test second: `find | grep -q .` races find's continued
+  # traversal against grep's exit on the first match (issue #809). `-quit`
+  # bounds find to at most one line, so there is nothing left to write once
+  # it has printed that line -- the same guard scripts/test-backup-restore.sh
+  # already uses at its own find-for-existence check.
+  local bad_secret
+  bad_secret="$(find "$target/.orbit-secrets" -type f ! -perm 600 -print -quit)"
+  [[ -z "$bad_secret" ]] ||
     fail "a generated secret file is not mode 600"
 
-  /usr/bin/curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health" |
-    grep -q '"status":"ready"' || fail "/api/health did not report ready"
+  # Capture first, test second (issue #809): curl can still be streaming the
+  # rest of the response when grep -q matches early and exits, which would
+  # SIGPIPE curl and turn a healthy body into a 141 instead of a verdict.
+  local health_body
+  health_body="$(/usr/bin/curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health")" || true
+  [[ "$health_body" == *'"status":"ready"'* ]] || fail "/api/health did not report ready"
   note "green: fresh install healthy with $events documented events"
 }
 
@@ -276,8 +291,12 @@ positive_scenario() {
   docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
     fail "push to the local registry failed"
+  # grep -m1, not `| head -1` (issue #809): docker inspect's one line can hold
+  # more than one digest, and head -1 exiting after the first would SIGPIPE
+  # grep while it still had output queued, turning a captured digest into a
+  # 141. -m1 makes grep itself the one process that stops once it has enough.
   digest="$(docker inspect --format '{{index .RepoDigests}}' "127.0.0.1:$registry_port/$repository:latest" |
-    grep -oE 'sha256:[0-9a-f]{64}' | head -1)"
+    grep -m1 -oE 'sha256:[0-9a-f]{64}')"
   [[ -n "$digest" ]] || fail "could not capture the pushed digest"
 
   write_shim "$revision"
@@ -350,11 +369,20 @@ positive_scenario() {
     # the assets phase would have exited on its own with a status of its own.
     [[ "$install_status" == 137 ]] ||
       fail "interruption: installer was not killed mid-assets-phase (status $install_status)"
-    find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -type d | grep -q . ||
+    # `-print -quit`, not a bare `| grep -q .` (issue #809): bounding find to
+    # one line of output means it never has a second line queued when grep
+    # exits, so it cannot take SIGPIPE and turn a real answer into a 141 --
+    # the same reasoning as the existing find check in
+    # scripts/test-backup-restore.sh.
+    local staging_dir
+    staging_dir="$(find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -type d -print -quit)"
+    [[ -n "$staging_dir" ]] ||
       fail "interruption: no staging directory, so the assets phase was never entered"
     cmp -s "$workdir/env-before-interrupt" "$target/.env-orbit" ||
       fail "interruption during assets phase mutated .env-orbit"
-    find "$target" -maxdepth 1 -name '.orbit-install-staging*' -type d ! -perm 700 | grep -q . &&
+    local lax_staging_dir
+    lax_staging_dir="$(find "$target" -maxdepth 1 -name '.orbit-install-staging*' -type d ! -perm 700 -print -quit)"
+    [[ -z "$lax_staging_dir" ]] ||
       fail "interruption left staging evidence that is not owner-only"
     note "lifecycle: hard interruption left the target byte-identical (install.sh #31)"
     # Recovery is the operator's documented step: staging evidence is kept
