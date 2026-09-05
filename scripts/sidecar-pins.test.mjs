@@ -533,6 +533,27 @@ describe("sidecar pins: --red self-proof", () => {
     expect(status).toBe(1);
     expect(output.join("")).toContain("did not fire");
   });
+
+  it("names the cause when the registry could not be asked at all", async () => {
+    const { repoDir, policyPath } = alignedRepo();
+    const output = [];
+    // Pipeline 278: the job had no Docker client, every lookup threw, and the
+    // failure line said only 'unreachable'. The error message must be on it.
+    const status = await runSidecarPins(["check", "--policy", policyPath, "--red"], {
+      repoDir,
+      today: TODAY,
+      resolveTag: async () => {
+        throw new Error("docker could not be run: spawnSync docker ENOENT");
+      },
+      write: (line) => output.push(line),
+      writeError: (line) => output.push(line),
+    });
+
+    expect(status).toBe(1);
+    const text = output.join("");
+    expect(text).toContain("'unreachable'");
+    expect(text).toContain("spawnSync docker ENOENT");
+  });
 });
 
 describe("sidecar pins: the check command", () => {
