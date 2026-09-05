@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
 const mocks = vi.hoisted(() => ({
@@ -130,6 +130,20 @@ describe("boot module boundary", () => {
 });
 
 describe("strict startup ordering", () => {
+  /* registerNode() lazily imports the real logger, auth observability and
+     maintenance worker — the modules this file does not mock — so the first
+     test paid for transforming that graph inside its own 5 s budget: 1.1 s
+     here, over 5 s when the runner shares its lane (#839). Warm the transform
+     cache once, outside any test's clock; vi.resetModules() only drops the
+     evaluated instances, which cost ~20 ms to rebuild. */
+  beforeAll(async () => {
+    await Promise.all([
+      import("./boot"),
+      import("@/lib/logger"),
+      import("@/lib/auth/observability"),
+      import("@/server/maintenance-worker"),
+    ]);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
