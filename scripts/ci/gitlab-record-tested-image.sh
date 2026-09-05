@@ -26,13 +26,16 @@ image_digest="${2:-}"
 [[ -n "$image_reference" ]] || fail 'an image reference is required as the first argument'
 [[ -n "$image_digest" ]] || fail 'an image digest is required as the second argument'
 
-# Deliberately narrow: a registry reference and a manifest digest, nothing that
-# needs JSON escaping. Anything else is a bug in the caller, not a value to
-# quote around.
-[[ "$image_reference" =~ ^[A-Za-z0-9._:/-]+$ ]] ||
-  fail "image reference is not a plain registry reference: ${image_reference}"
+# Deliberately narrow: the reference is "<registry>/<path>@<digest>" -- the
+# same shape gitlab-await-tested-image.sh insists on before copying -- and the
+# digest it carries is the one passed alongside it. Nothing that needs JSON
+# escaping. Anything else is a bug in the caller, not a value to quote around.
 [[ "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
   fail "image digest is not an immutable manifest digest: ${image_digest}"
+[[ "$image_reference" =~ ^[A-Za-z0-9._-]+(:[0-9]+)?(/[A-Za-z0-9._-]+)+@sha256:[0-9a-f]{64}$ ]] ||
+  fail "image reference is not a plain registry reference pinned to a digest: ${image_reference}"
+[[ "$image_reference" == *"@${image_digest}" ]] ||
+  fail "image reference ${image_reference} does not name digest ${image_digest}"
 
 commit="${CI_COMMIT_SHA:-}"
 ref="${CI_COMMIT_REF_NAME:-}"
