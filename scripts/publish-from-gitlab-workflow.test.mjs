@@ -1,4 +1,7 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -136,5 +139,53 @@ describe("gitlab-await-tested-image.sh", () => {
     expect(awaitScript).toContain('[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]');
     expect(awaitScript).toContain('[[ "$source_reference" == "${GITLAB_REGISTRY}/"*"@${digest}" ]]');
     expect(awaitScript).toContain("7 * 24 * 3600");
+  });
+});
+
+describe("gitlab-record-tested-image.sh", () => {
+  // The job hands the script exactly what the reader later demands:
+  // "<registry>/<path>@<digest>". Job 1504 (pipeline 247) pushed the image and
+  // then failed here, because the reference check had no room for the "@"
+  // (#818).
+  const digest = `sha256:${"ab".repeat(32)}`;
+  const reference = `registry.example/ai/orbit@${digest}`;
+  const env = {
+    ...process.env,
+    CI_COMMIT_SHA: "0123456789abcdef0123456789abcdef01234567",
+    CI_COMMIT_REF_NAME: "preview",
+    CI_PIPELINE_ID: "247",
+    CI_PIPELINE_URL: "https://gitlab.example/ai/orbit/-/pipelines/247",
+  };
+  // The script writes under its own repository root, so each run gets a
+  // throwaway copy of that layout rather than writing into this checkout.
+  const run = (...args) => {
+    const root = mkdtempSync(join(tmpdir(), "orbit-record-"));
+    mkdirSync(join(root, "scripts", "ci"), { recursive: true });
+    const script = join(root, "scripts", "ci", "gitlab-record-tested-image.sh");
+    copyFileSync(new URL("./ci/gitlab-record-tested-image.sh", import.meta.url), script);
+    const result = spawnSync("bash", [script, ...args], { cwd: root, env, encoding: "utf8" });
+    return { ...result, output: join(root, ".orbit-supply-chain", "gitlab-tested-image.json") };
+  };
+
+  it("records the digest reference the publish job passes", () => {
+    const result = run(reference, digest);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    const written = JSON.parse(readFileSync(result.output, "utf8"));
+    expect(written.imageReference).toBe(reference);
+    expect(written.imageDigest).toBe(digest);
+  });
+
+  it("refuses a reference that names another digest, a tag, or nothing immutable", () => {
+    for (const bad of [
+      `registry.example/ai/orbit@sha256:${"cd".repeat(32)}`,
+      "registry.example/ai/orbit:preview",
+      "registry.example/ai/orbit",
+      `registry.example/ai/orbit@${digest} --oops`,
+    ]) {
+      const result = run(bad, digest);
+      expect(result.status, bad).toBe(1);
+      expect(result.stderr, bad).toContain("image reference");
+    }
   });
 });
