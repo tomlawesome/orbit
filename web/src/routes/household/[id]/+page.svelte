@@ -586,7 +586,7 @@
   </span>
 {/snippet}
 
-<div class="household-page" class:member={!v.canManage} bind:this={stage}>
+<div class="household-page" class:member={!v.canManage} bind:this={stage} role="main">
 <!-- your own system, drawn from the inside (§15 H2). Behind the dust, not in
      front of it: your system is the structure you are standing in, and the dust
      of the wider sky streams past nearer to the eye. Nothing in here is
@@ -712,7 +712,7 @@
          UNDERNEATH IT IS STILL ONE COMMAND: the client sends the bundled
          household.update carrying name + time zone + currency together. -->
     <div class="card c-system">
-      <div class="cardhead"><h3>The system</h3></div>
+      <div class="cardhead"><h2>The system</h2></div>
       <div class="field" class:dirty={dirty.name}>
         <div class="lab">
           <label for="hhname">name</label>
@@ -775,7 +775,7 @@
     {#if v.canManage}
       <div class="card c-sections">
         <div class="cardhead">
-          <h3>Sections</h3><span class="count">{shown.length} of {MAX_SECTIONS}</span>
+          <h2>Sections</h2><span class="count">{shown.length} of {MAX_SECTIONS}</span>
         </div>
 
         <div>
@@ -816,7 +816,7 @@
          height, so nothing sits under "the system" but sections ── -->
     <div class="card c-members">
       <div class="cardhead">
-        <h3>Members</h3><span class="count">{v.memberCount} in this system</span>
+        <h2>Members</h2><span class="count">{v.memberCount} in this system</span>
       </div>
 
       <div class="roster">
@@ -853,7 +853,7 @@
              block is dropped — an instance admin who needs to answer one
              opens the household from the dial and answers it here. -->
         <div class="block">
-          <h4>Waiting to come in</h4>
+          <h3>Waiting to come in</h3>
           {#each v.joinRequests as request (request.id)}
             <div class="joinreq">
               <span class="avatar" aria-hidden="true">{request.initials}</span>
@@ -874,7 +874,7 @@
         </div>
 
         <div class="block">
-          <h4>Add someone who already has an account</h4>
+          <h3>Add someone who already has an account</h3>
           {#each v.candidates as candidate (candidate.id)}
             <div class="cand">
               <span class="avatar" aria-hidden="true">{candidate.initials}</span><b>{candidate.name}</b>
@@ -894,7 +894,7 @@
 
         <!-- the handover: two deliberate steps, and the second asks twice -->
         <div class="handover" class:open={handoverOpen}>
-          <h4>Hand this system over</h4>
+          <h3>Hand this system over</h3>
           <div class="step">
             <span class="n">STEP ONE — WHO TAKES IT</span>
             {#each v.roster.filter((person) => person.role !== "owner") as person (person.id)}
@@ -951,7 +951,7 @@
             <path d="M9 2.2 16.4 15H1.6L9 2.2Z"/>
             <path d="M9 6.6v4.1"/><path d="M9 12.8v.05"/>
           </svg>
-          <h3>The danger line</h3>
+          <h2>The danger line</h2>
           <span class="spacer"></span>
           {#if !confirming}
             <button class="dangerbtn" onclick={openConfirm}>request deletion →</button>
@@ -1002,7 +1002,7 @@
          reads two tidy columns too, with no lone card across the foot -->
     {#if !v.canManage}
       <div class="card c-leaving">
-        <div class="cardhead"><h3>Leaving</h3></div>
+        <div class="cardhead"><h2>Leaving</h2></div>
         <p style="font-size:13.5px;color:var(--ink-mid)">
           You can leave {v.name} whenever you like. Nothing you added goes with you —
           the entries belong to the system, not to you. It returns to your sky as a label,

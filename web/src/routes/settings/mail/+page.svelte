@@ -54,9 +54,9 @@
 <div class="satellites" bind:this={backdropRoot} aria-hidden="true"></div>
 <!-- §14 (#471): clicking off the card returns to wherever the reader came
      from — the inbox, settings, or home as the deep-link fallback. -->
-<div class="stage" onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
+<div class="stage" role="main" onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
   <div class="dish" id="relaydish"><span></span><span></span><span></span><i></i></div>
-  <h2 style="text-align:center">Your relay</h2>
+  <h1 style="text-align:center">Your relay</h1>
   <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
   <div class="alias">{relay.address}</div>
   <div class="kv"><span>status</span><b>{relay.status}</b></div>
@@ -66,7 +66,7 @@
   {#if failures.length}
     <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
     <div class="failures">
-      <h4>arrived, but could not be read</h4>
+      <h2>arrived, but could not be read</h2>
       {#each failures as failure (failure.id)}
         <div class="kv"><span>{shortDate(failure.receivedAt)}</span><span>{failure.message}</span></div>
       {/each}

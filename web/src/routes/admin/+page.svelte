@@ -25,7 +25,7 @@
   <title>Orbit — observatory</title>
 </svelte:head>
 
-<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+<div class="sky" aria-hidden="true"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
 <g fill="var(--star-far, #e9edf8)"><circle cx="19.6" cy="112.4" r="0.6" opacity="0.2"/>
       <circle cx="221.9" cy="112.4" r="0.52" opacity="0.21"/>
       <circle cx="235.8" cy="740.7" r="0.73" opacity="0.1"/>
@@ -111,11 +111,13 @@
     <a href="#">Deliveries</a><a href="#">Document jobs</a><a href="#">Mailboxes</a>
   </nav>
   <main class="pane glass">
-    <h3>Operational state</h3>
+    <!-- #843: sr-only -- the OBSERVATORY badge above carries the visible title. -->
+    <h1 class="sr-only">Orbit — observatory</h1>
+    <h2>Operational state</h2>
     {#each operations.state as line (line.name)}
       <div class="row"><i style="background:var(--{line.tone})"></i><b>{line.name}</b><small>{line.detail}</small></div>
     {/each}
-    <h3 style="margin-top:22px">Recent deliveries</h3>
+    <h2 style="margin-top:22px">Recent deliveries</h2>
     {#each operations.deliveries as line, index (index)}
       <div class="row"><i style="background:var(--{line.tone})"></i><b>{line.name}</b><small>{line.detail}</small></div>
     {/each}

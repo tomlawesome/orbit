@@ -171,7 +171,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
   .household-page .c-members .note.foot{margin-top:13px;padding-top:0}
 }
 .household-page .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:15px}
-.household-page .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+.household-page .card h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
 .household-page .cardhead .count{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.06em}
 
 /* the create screen's field vocabulary, unchanged */
@@ -280,7 +280,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    the same panel, each under its own small rule, instead of drawers you had
    to open. Registered accounts only — the route has no email invite (#481). */
 .household-page .block{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)}
-.household-page .block h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+.household-page .block h3{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
           color:var(--ink-faint);margin-bottom:9px}
 .household-page .cand{display:flex;align-items:center;gap:12px;padding:6px 2px;
       border-bottom:1px solid var(--line-soft)}
@@ -291,7 +291,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .handover{display:none;margin-top:14px;border:1px solid var(--accent);border-radius:13px;
           background:var(--panel-raised);padding:16px 18px}
 .household-page .handover.open{display:block}
-.household-page .handover h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+.household-page .handover h3{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
              color:var(--accent-text);margin-bottom:12px}
 .household-page .step{margin-bottom:13px}
 .household-page .step>.n{display:block;font:10px var(--mono);letter-spacing:.14em;color:var(--ink-faint);
@@ -334,7 +334,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .dangercard>*{position:relative;z-index:1}
 
 .household-page .dangerhead{display:flex;align-items:center;gap:11px;margin-bottom:11px}
-.household-page .dangercard h3{color:var(--overdue-text);letter-spacing:.2em;font-weight:600}
+.household-page .dangercard h2{color:var(--overdue-text);letter-spacing:.2em;font-weight:600}
 .household-page .dangerhead svg{flex:none;fill:none;stroke:var(--overdue);stroke-width:1.5;
                 stroke-linecap:round;stroke-linejoin:round}
 .household-page .dangerhead .spacer{margin-left:auto}

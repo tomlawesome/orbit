@@ -76,7 +76,7 @@
 <Chrome user={view.value?.user} current="due-next"
         role={view.value ? `${need().household?.name ?? ""} · ${need().household?.canManage ? "owner" : "member"}` : ""} />
 
-<div class="page">
+<div class="page" role="main">
   <header class="screen">
     <h1>Due next</h1>
     <div class="sub">{corridor

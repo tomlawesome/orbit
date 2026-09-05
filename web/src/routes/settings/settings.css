@@ -29,7 +29,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 
 .helm-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
       border-radius:16px;padding:20px 22px;margin-top:22px}
-.helm-page .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+.helm-page .card h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
          color:var(--ink-faint);margin-bottom:14px}
 .helm-page .idrow{display:flex;align-items:center;gap:16px}
 .helm-page .idrow .avatar{width:46px;height:46px;border-radius:50%;flex:none;

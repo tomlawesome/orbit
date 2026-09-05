@@ -136,7 +136,7 @@
 <Chrome user={view?.user} current="inbox"
         role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
 
-<div class="page">
+<div class="page" role="main">
   <header class="screen">
     <h1>Inbox</h1>
     <div class="sub">what your relay has caught · nothing enters your orbit without your say-so</div>
@@ -147,7 +147,7 @@
     <div class="lanes">
     <div class="lane filed">
       <div class="group">
-        <h3>Filed{view.filed.length ? ` · ${view.filed.length}` : ""}</h3>
+        <h2>Filed{view.filed.length ? ` · ${view.filed.length}` : ""}</h2>
         {#each view.filed as entry (entry.itemId)}
           <a class="item" href={resolve("/item/[id]", { id: entry.itemId })}>
             <span class="dot" style="background:var({TONES[entry.band]})" aria-hidden="true"></span>
@@ -166,7 +166,7 @@
     <div class="lane">
     {#if view.review.length}
       <div class="group">
-        <h3>For your review · {view.review.length}</h3>
+        <h2>For your review · {view.review.length}</h2>
         {#each view.review as receipt (receipt.id)}
           <div class="receipt">
             <div class="head">
@@ -210,7 +210,7 @@
     <div class="lane">
     {#if view.reading.length}
       <div class="group">
-        <h3>Still reading</h3>
+        <h2>Still reading</h2>
         {#each view.reading as receipt (receipt.id)}
           <div class="reading">
             <i aria-hidden="true"></i>
@@ -225,7 +225,7 @@
 
     {#if view.failed.length}
       <div class="group">
-        <h3>Failed to process</h3>
+        <h2>Failed to process</h2>
         {#each view.failed as failure (failure.id)}
           <div class="failed">
             <i aria-hidden="true"></i>

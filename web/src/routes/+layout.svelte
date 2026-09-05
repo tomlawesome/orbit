@@ -24,6 +24,7 @@
      reads them. */
   import "$lib/packs.css";
   import "$lib/atmosphere.css";
+  import "../app.css";
 
   import "@fontsource/space-grotesk/500.css";
   import "@fontsource/space-grotesk/600.css";
