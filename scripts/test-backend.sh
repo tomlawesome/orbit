@@ -11,6 +11,8 @@ cd "$repo_dir"
 # the root tsconfig sets allowJs false and web/src holds no TypeScript -- so
 # before this, a .svelte file that did not compile first failed at the container
 # build on the preview push, long after it merged green. The build is ~10s.
+# check-v19-types.mjs is a plain svelte-check gate (#624): zero errors, no
+# per-file tolerance left anywhere.
 if command -v pnpm >/dev/null 2>&1; then
   pnpm typecheck
   pnpm lint
