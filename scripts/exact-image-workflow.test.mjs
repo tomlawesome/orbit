@@ -58,10 +58,18 @@ function jobBlock(job, nextJob) {
  * six; `Protect preview` requires the first four. The list is the union,
  * because the property being defended is that a name some rule depends on
  * keeps reporting -- which rule it is does not change what a rename breaks.
+ *
+ * "Dependency change and licence policy" (dependency-review.yml) is removed
+ * from this list as of #815: that workflow ran on the `pull_request` event,
+ * GitHub has taken no pull requests since the mirror flip (#801), and the
+ * licence check it used to run is now `licence_policy` on GitLab instead. An
+ * agent cannot edit a ruleset (see above), so if either "Protect dev" or
+ * "Protect preview" still names this check as required, that is a manual
+ * follow-up for the owner: remove it from both, or every future pull request
+ * on GitHub waits forever for a check that will never report again.
  */
 const REQUIRED_CHECK_NAMES = [
   "Static and unit checks",
-  "Dependency change and licence policy",
   "CodeQL (actions)",
   "CodeQL (javascript-typescript)",
   // Added to `Protect dev` and `Protect preview` by the owner, 2026-08-25,
@@ -75,8 +83,8 @@ const REQUIRED_CHECK_NAMES = [
 
 describe("exact-image publication workflow", () => {
   /*
-   * Resolved across every workflow, not just this one: two of the four
-   * required checks are reported by codeql.yml and dependency-review.yml. The
+   * Resolved across every workflow, not just this one: two of the required
+   * checks are reported by codeql.yml, not publish-container.yml. The
    * CodeQL names are composed from a matrix, so the literal string appears
    * nowhere -- checking only for it would have made this list unsatisfiable,
    * which is how the first version of it came to be wrong.
