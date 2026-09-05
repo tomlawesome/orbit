@@ -111,7 +111,21 @@ This is a holding position for the duration of the v19 rebuild, not a standard.
 **M2 does not close while the ledger has entries in it** (#624): the rebuild is
 what makes the tolerance removable, so each screen it rewrites should land
 clean and drop its entry in the same pull request. When the ledger is empty the
-gate becomes a plain zero-error check and both files go.
+gate becomes a plain zero-error check and the ledger machinery goes with it.
+
+`due-next/+page.svelte` reached zero this way (#624): its reactive `view`
+state and its lookup objects moved into small companion modules
+(`due-next-view.svelte.js`, `bands.js`) so their `$state` and `Record<string,
+string>` types could be declared as JSDoc comments, and its `{#snippet}` row
+became a real child component (`EntryRow.svelte`) so its prop could carry a
+type too — none of those positions are available inline in a route's own
+`<script>` without hitting a production-build parse failure (#782). One entry
+remains: `home/+page.svelte`'s two `{#snippet}` row parameters hit the same
+#782 limitation, and extracting them the same way would mean threading a large
+number of the screen's own reactive state and handlers into new child
+components, which is a larger, riskier change than a ledger clean-up warrants
+on its own. It stays until #782 is fixed upstream or that extraction is done
+as its own reviewed piece of work.
 
 The same job compiles `web/` (`pnpm --filter orbit-web build`, about ten
 seconds). Before that, a `.svelte` file that did not compile could merge green
