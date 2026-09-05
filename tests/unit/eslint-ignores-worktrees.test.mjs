@@ -1,5 +1,5 @@
 import { ESLint } from "eslint";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 /**
  * #769: `pnpm lint` walked into `.claude/worktrees/` and linted a second
@@ -15,6 +15,14 @@ import { describe, expect, it } from "vitest";
  */
 describe("the ESLint config ignores sibling worktrees", () => {
   const eslint = new ESLint();
+
+  // `new ESLint()` is cheap; the first `isPathIgnored` call is what loads
+  // eslint.config.js and every plugin it imports. On a runner sharing its CPU
+  // with the rest of the pipeline that outran vitest's 5 s default (#817), so
+  // the one-off load gets its own budget here and the cases stay fast.
+  beforeAll(async () => {
+    await eslint.isPathIgnored("src/lib/install-orchestrator.ts");
+  }, 30_000);
 
   it("ignores any worktree under .claude/worktrees, whatever it is called", async () => {
     for (const path of [
