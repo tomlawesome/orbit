@@ -145,8 +145,14 @@ async function cleanup(page: Page, household: { id: string; name: string }) {
  * so on a fresh instance every `/home` state here would fail in settleHome
  * (caught the first time the file ran against a stack no other spec had
  * seeded). Callers clean up in `finally`.
+ *
+ * Sign-in, seeding, the settle and an axe pass over a chart-heavy dial
+ * outrun the 30s default (three of the four states timed out on a fresh
+ * stack), so every state that arrives this way gets the same room the
+ * chart-key state already had.
  */
 async function arriveWithHousehold(page: Page) {
+  test.setTimeout(60_000);
   await signIn(page, "/home");
   const household = await seedHousehold(page);
   await page.goto("/home");
