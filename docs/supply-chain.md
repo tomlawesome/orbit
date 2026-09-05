@@ -11,12 +11,14 @@ Every merge request on GitLab and every push to `preview` performs these
 steps. GitLab (`.gitlab-ci.yml`) is the gate since #801; GitHub runs the same
 checks on its mirror as a second opinion that blocks nothing.
 
-1. A separate read-only dependency-review job compares pull-request dependency
-   changes with the base revision. Newly introduced high or critical
-   vulnerabilities in runtime, development or unknown scopes block the pull
-   request. Newly introduced dependencies must use an approved SPDX licence.
-   (GitHub only; it runs on the `pull_request` event and has no GitLab
-   equivalent yet.)
+1. A separate read-only `licence_policy` job walks the whole installed
+   dependency tree -- not a pull-request diff -- and checks every package's
+   declared licence against `supply-chain/licence-policy.yml`. This replaces
+   GitHub's `actions/dependency-review-action`, which ran only on the
+   `pull_request` event and stopped running when the mirror flip (#801) left
+   GitHub with no pull requests to compare (#815). The vulnerability half of
+   what that action covered is unaffected: it was already the
+   `supply_chain_source` job below.
 2. A read-only job scans the checked-out repository for dependency
    vulnerabilities and secret patterns. Checkout credentials are not
    persisted. The raw secret-scan report is never uploaded and is deleted
@@ -55,16 +57,18 @@ High and critical dependency or image vulnerabilities block publication.
 Every repository secret finding blocks regardless of its scanner severity.
 Lower-severity vulnerabilities remain visible in the retained evidence.
 
-Dependency changes are governed separately from the full source and image
-scans. `.github/dependency-review-config.yml` allows only the listed
-SPDX-compatible permissive or file-level reciprocal licences and blocks newly
-introduced high or critical vulnerabilities in every dependency scope.
-Dependencies that declare a licence outside the allow-list block
-automatically. Missing or ambiguous licence metadata is surfaced by the action
-and remains a manual review and release blocker until it is resolved. There
-are no advisory or package licence exemptions for source dependencies. Any
-exemption must be narrow, justified, owned, time-bounded and linked to a
-tracking issue.
+Dependency licences are governed separately from the full source and image
+scans. `supply-chain/licence-policy.yml` allows only the listed
+SPDX-compatible permissive or file-level reciprocal licences, and
+`scripts/ci/licence-policy.mjs` (the `licence_policy` job) checks every
+package's declared licence against it across the whole installed tree, not
+just newly introduced ones. A licence outside the allow-list blocks
+automatically. Missing or ambiguous licence metadata blocks the same way:
+there is no manual-review pass-through. There are no advisory or package
+licence exemptions for source dependencies. Any exemption must be narrow,
+justified, owned, time-bounded and linked to a tracking issue. Vulnerabilities
+are unaffected by this job; they remain governed by `supply_chain_source`
+below.
 
 A vulnerability exception is valid only when it identifies the finding,
 package and scope, names an owner, gives a rationale, links a tracking issue
@@ -93,7 +97,7 @@ Reverting is not an acceptable resolution: GitHub advisory
 vulnerabilities in `sharp` versions before 0.35.0 and identifies 0.35.0 as
 patched.
 
-The exception in `.github/dependency-review-config.yml` therefore excludes
+The exception in `supply-chain/licence-policy.yml` therefore excludes
 only the exact `@img` platform-package PURLs for `sharp` 0.35.0 and libvips
 1.3.0 from the licence check. It does not add LGPL to the repository-wide
 allow-list and does not carry forward to a later package version. Issue
@@ -259,10 +263,10 @@ digest; it does not build or transform the image. Orbit maintainers own both
 tool updates and the policy review date. Licences, upstream release pages,
 versions and immutable identities are recorded beside that ownership.
 
-GitHub's `actions/dependency-review-action` is also pinned to the reviewed
-commit recorded in the policy. It runs only on the `pull_request` event with
-read-only contents access, does not persist checkout credentials and does not
-receive permission to comment, publish packages or mint OIDC tokens.
+The licence check runs as `scripts/ci/licence-policy.mjs`, the `licence_policy`
+job (#815). It has no third-party action to pin: it reads
+`supply-chain/licence-policy.yml` and each installed package's own
+`package.json`, both already inside the checkout.
 
 The vulnerability database is intentionally refreshed by the pinned scanner
 at run time because vulnerability knowledge changes. Scanner version metadata
