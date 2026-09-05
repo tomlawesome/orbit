@@ -34,18 +34,6 @@ function policy(overrides = {}) {
         reviewBy: "2026-10-30",
       },
     ],
-    dependencyReviewActions: [
-      {
-        name: "actions/dependency-review-action",
-        version: "v5.0.0",
-        commit: "d".repeat(40),
-        license: "MIT",
-        source:
-          "https://github.com/actions/dependency-review-action/releases/tag/v5.0.0",
-        updateOwner: "Orbit maintainers",
-        reviewBy: "2026-10-30",
-      },
-    ],
     thresholds: {
       sourceVulnerabilities: ["HIGH", "CRITICAL"],
       sourceSecrets: ["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
@@ -191,7 +179,6 @@ describe("supply-chain policy", () => {
   it("accepts a pinned reviewed scanner and live bounded exceptions", () => {
     expect(validateSupplyChainPolicy(policy(), "2026-07-30")).toMatchObject({
       scannerVersion: "0.72.0",
-      dependencyReviewActionCount: 1,
       exceptionCount: 0,
       pinnedImageCount: 1,
       mutableReferenceCount: 0,
@@ -202,18 +189,6 @@ describe("supply-chain policy", () => {
     [{ scanner: { ...policy().scanner, image: "aquasec/trivy:latest" } }, /digest/u],
     [{ scanner: { ...policy().scanner, reviewBy: "2026-07-29" } }, /review/u],
     [{ scanner: { ...policy().scanner, reviewBy: "2026-02-30" } }, /ISO date/u],
-    [
-      {
-        dependencyReviewActions: [
-          {
-            ...policy().dependencyReviewActions[0],
-            commit: "v5",
-          },
-        ],
-      },
-      /full commit/u,
-    ],
-    [{ dependencyReviewActions: [] }, /dependency action/u],
     [
       {
         containerImages: [
