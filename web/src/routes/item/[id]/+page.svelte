@@ -390,7 +390,9 @@
     <Suggestion item={suggestionItem} />
   {/await}
 {:else}
-<div class="belt-page" bind:this={root}>
+<div class="belt-page" bind:this={root} role="main">
+  <!-- #843: sr-only -- the visible title is the centred card's own h2. -->
+  <h1 class="sr-only">Item</h1>
   <div class="sky" aria-hidden="true" bind:this={sky}></div>
   <div class="vignette" aria-hidden="true"></div>
 
@@ -431,7 +433,7 @@
           in the order it comes due — sooner to the left, later to the right — and the one
           you are looking at rides at the apex as this card. add the first and the band has
           something to carry.</div>
-        <h4>start</h4>
+        <h3>start</h3>
         <div class="acts" role="group" aria-label="Actions">
           <button style="--act:var(--accent)" onclick={() => goto(resolve("/create"))}>add an item</button>
           <button style="--act:var(--upcoming)" onclick={() => goto(resolve("/inbox"))}>mail something in</button>
@@ -445,7 +447,7 @@
         <div class="docview">
           <div class="plate" aria-hidden="true">{cardBody.doc.plate}</div>
           <div class="docbody">
-            <h3>{cardBody.doc.name}</h3>
+            <h2>{cardBody.doc.name}</h2>
             <div class="sub">document · attached to {row.title}</div>
             <div class="kv"><span>added</span><b>{cardBody.doc.added}</b></div>
             <div class="kv"><span>size</span><b>{cardBody.doc.size}</b></div>
@@ -505,7 +507,7 @@
           <div class="kv"><span>reminders</span><b>{remindOf(row.remind)}</b></div>
         {/if}
 
-        <h4>actions</h4>
+        <h3>actions</h3>
         <div class="acts" role="group" aria-label="Item actions">
           {#if row.status === "active"}
             <button style="--act:var(--ok)" aria-pressed={panel === "complete"}
@@ -634,7 +636,7 @@
         {/if}
 
         {#if row.notes}
-          <h4>notes</h4>
+          <h3>notes</h3>
           <p>{row.notes}</p>
         {/if}
 

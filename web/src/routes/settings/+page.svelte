@@ -232,7 +232,7 @@
 <Chrome user={view?.user} current="settings"
         role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
 
-<div class="page">
+<div class="page" role="main">
   <header class="screen">
     <h1>Settings</h1>
     <div class="sub">your controls, and only yours · the instance’s levers live on administration</div>
@@ -241,7 +241,7 @@
   {#if view}
     <div class="cards">
     <div class="card wide">
-      <h3>You</h3>
+      <h2>You</h2>
       <div class="idrow">
         <span class="avatar" aria-hidden="true">{initials}</span>
         <div class="who"><b>{view.user?.displayName ?? ""}</b><span>{view.user?.email ?? ""} · signed in via your identity provider</span></div>
@@ -250,7 +250,7 @@
     </div>
 
     <div class="card wide">
-      <h3>Your sky</h3>
+      <h2>Your sky</h2>
       <div class="packs" role="group" aria-label="Theme pack">
         {#each PACKS as [name, title, line, ground, [sun, warm, ok, upcoming]] (name)}
           <button class="pack" aria-pressed={active === name} onclick={() => pickPack(name)}>
@@ -268,7 +268,7 @@
     </div>
 
     <div class="card">
-      <h3>Reminders</h3>
+      <h2>Reminders</h2>
       <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
       <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
       <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
@@ -279,7 +279,7 @@
     </div>
 
     <div class="card">
-      <h3>Your relay</h3>
+      <h2>Your relay</h2>
       <div class="kv"><span>address</span><b style="color:var(--accent-text)">{view.relay.address}</b></div>
       <div class="kv"><span>status</span><b class="on">{view.relay.status}</b></div>
       <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{view.waiting} arrival{view.waiting === 1 ? "" : "s"} — open your inbox →</a></div>
@@ -287,7 +287,7 @@
     </div>
 
     <div class="card">
-      <h3>Your systems</h3>
+      <h2>Your systems</h2>
       <!-- §15-2k: this card is the door to household management. Each row is
            the way into one system — /household/{id}, the owner's screen or the
            member's depending on who is reading it. A link, not a button with a
