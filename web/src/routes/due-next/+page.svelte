@@ -6,13 +6,12 @@
    * to the belt (#458).
    */
   import { onMount } from "svelte";
-  import { resolve } from "$app/paths";
-  import { readDueNext } from "$lib/data/workspace.js";
   import { corridorOf } from "$lib/data/chart.js";
-  import { money } from "$lib/format.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { createDueNextViewState } from "./due-next-view.svelte.js";
+  import EntryRow from "./EntryRow.svelte";
   import "./due-next.css";
 
   /**
@@ -22,24 +21,26 @@
    * flows down the page; overdue sits in the red zone above today; months are
    * rules, not a scale. Every dot is the item's own dial body.
    */
-  /* #624/#782: left without JSDoc type annotations, deliberately. Every
-     JSDoc "@type"-style cast tried anywhere in this file — before a $state()
-     call, inside a $derived(...) block, on an arrow-function param, doubled
-     up on a getElementById(...) call — parses fine for svelte-check but
-     makes the production rolldown build fail to parse this file (a parse
-     error right at the cast). This reproduces well beyond the three
-     documented #782 placements and looks specific to this file; flagging for
-     the rolldown fix rather than guessing around it here. Plain (non-JSDoc)
-     comments are unaffected, confirmed by testing. */
-  let view = $state(null);
-  let filter = $state(null); // household id, or null = all systems
+  const view = createDueNextViewState();
+  /* The template only reaches `view.value` from inside a truthy guard, but
+     that guard doesn't reach into these standalone functions' closures, so
+     this asserts what the call sites already guarantee (same idiom as the
+     inbox and settings screens' own `need()`). */
+  /** @returns {NonNullable<typeof view.value>} */
+  function need() {
+    const current = view.value;
+    if (current === null) throw new Error("need() called before the corridor loaded");
+    return current;
+  }
 
   const filtered = $derived(
-    view && filter
-      ? { ...view.workspace, households: view.workspace.households.filter((h) => h.id === filter) }
-      : view?.workspace,
+    view.value && view.filter
+      ? { ...need().workspace, households: need().workspace.households.filter((h) => h.id === view.filter) }
+      : view.value
+        ? need().workspace
+        : undefined,
   );
-  const corridor = $derived(view ? corridorOf(filtered, view.today) : null);
+  const corridor = $derived(view.value ? corridorOf(filtered, need().today) : null);
   /* #763: same truth as home's own badge — this browser's chart, not the
      server. */
   const overdueCount = $derived(corridor?.overdue?.length ?? 0);
@@ -47,19 +48,9 @@
     showUrgentCount(overdueCount);
   });
 
-  const tlabel = (row) => (row.days < 0 ? `T+${-row.days}d` : `T−${row.days}d`);
-  const short = (iso) =>
-    new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
-  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok" };
-  const T_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok" };
-  const meta = (row) => [
-    row.section,
-    row.provider,
-    row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
-  ].filter(Boolean);
   const todayLine = $derived(
-    view
-      ? new Date(view.today + "T00:00:00Z")
+    view.value
+      ? new Date(need().today + "T00:00:00Z")
           .toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", timeZone: "UTC" })
           .replace(",", "").toUpperCase()
       : "",
@@ -67,7 +58,7 @@
 
   onMount(async () => {
     fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
-    view = await readDueNext();
+    await view.load();
   });
 </script>
 
@@ -82,8 +73,8 @@
 </div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={view?.user} current="due-next"
-        role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
+<Chrome user={view.value?.user} current="due-next"
+        role={view.value ? `${need().household?.name ?? ""} · ${need().household?.canManage ? "owner" : "member"}` : ""} />
 
 <div class="page">
   <header class="screen">
@@ -93,12 +84,12 @@
       : "everything approaching, in order"}</div>
   </header>
 
-  {#if view}
+  {#if view.value}
     <div class="filters" role="group" aria-label="Filter by system">
-      <button class="chip" aria-pressed={filter === null} onclick={() => (filter = null)}>all systems</button>
-      {#each view.workspace.households as household (household.id)}
-        <button class="chip" aria-pressed={filter === household.id}
-                onclick={() => (filter = filter === household.id ? null : household.id)}>{household.name}</button>
+      <button class="chip" aria-pressed={view.filter === null} onclick={() => (view.filter = null)}>all systems</button>
+      {#each need().workspace.households as household (household.id)}
+        <button class="chip" aria-pressed={view.filter === household.id}
+                onclick={() => (view.filter = view.filter === household.id ? null : household.id)}>{household.name}</button>
       {/each}
     </div>
   {/if}
@@ -108,7 +99,7 @@
       {#if corridor.overdue.length}
         <div class="redzone">
           {#each corridor.overdue as row (row.id)}
-            {@render entry(row)}
+            <EntryRow {row} />
           {/each}
         </div>
       {/if}
@@ -116,13 +107,13 @@
       <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · {todayLine}</span><div class="rule"></div></div>
 
       {#each corridor.current as row (row.id)}
-        {@render entry(row)}
+        <EntryRow {row} />
       {/each}
 
       {#each corridor.months as month (month.key)}
         <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
         {#each month.rows as row (row.id)}
-          {@render entry(row)}
+          <EntryRow {row} />
         {/each}
       {/each}
     </div>
@@ -135,13 +126,3 @@
   {/if}
 </div>
 </div>
-
-{#snippet entry(row)}
-  <a class="item" href={resolve("/item/[id]", { id: row.id })}>
-    <span class="planet" class:ter={row.kind === "inspection"} class:con={row.kind === "renewal"}
-          style="color:var({BAND_VAR[row.band]})"><i></i></span>
-    <div class="body"><b>{row.title}</b><span><span class="sys" class:away={row.away}
-      >{row.household.toUpperCase()}</span>{meta(row).length ? ` · ${meta(row).join(" · ")}` : ""}</span></div>
-    <div class="t {T_CLASS[row.band]}">{tlabel(row)}<small>{short(row.dueDate)}</small></div>
-  </a>
-{/snippet}
