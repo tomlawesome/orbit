@@ -87,7 +87,7 @@ workflow:
 default:
   interruptible: true
   # Runner lanes (#830). `big` is the 8 CPU / 18 GB runner (two jobs at a
-  # time); `light` is the 2 CPU / 2 GB runner (three at a time). The big
+  # time); `light` is the 4 CPU / 6 GB runner (four jobs at a time). The big
   # runner is moving to reject untagged jobs, so every job needs one of the
   # two -- this covers everything that does not already ask for the
   # dedicated `orbit-build` runner by tag (see .privileged_runner below).
@@ -521,7 +521,7 @@ base_image:
 # policy scripts are Node standard library only, which is why the GitHub job
 # installs no dependencies either.
 #
-# Short scanners run on the light lane (2 CPU / 2 GB, three at a time) so they
+# Short scanners run on the light lane (4 CPU / 6 GB, four at a time) so they
 # stop holding a big-lane slot. If one is ever killed for memory, move it back
 # to big -- owner decision, ai/agent-infra#3 (2026-09-05).
 supply_chain_source:
@@ -612,6 +612,8 @@ licence_policy:
 # pinned sidecar currently has fixable HIGH findings with no clean upstream
 # digest to re-pin to. When the pins scan clean, delete `allow_failure` so a
 # newly published advisory against a pinned digest fails the job.
+#
+# Stays on big: it peaks at ~4.9 GB, close to the 6 GB light cap.
 sidecar_images:
   stage: policy
   image:
@@ -675,6 +677,7 @@ sidecar_images:
 # moves web/ pays for this; one that does not never sees it.
 fidelity:
   stage: acceptance
+  tags: [light]
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -723,6 +726,7 @@ fidelity:
 # databases of its own.
 integration:
   stage: acceptance
+  tags: [light]
   extends: .node
   timeout: 10m
   rules:
@@ -1548,7 +1552,7 @@ promote_stable:
 # Big lane (#830). Nothing in this job talks to a Docker daemon, so it never
 # queues behind `orbit-build`. It stays off the light lane because an npm
 # lockfile update runs pnpm over the whole monorepo inside the job, which
-# can pass the light lane's 2 GB. Same choice as mikroview and orbit-launcher.
+# is unmeasured on the light lane. Same choice as mikroview and orbit-launcher.
 #
 # Two CI/CD variables the owner creates under Settings > CI/CD > Variables.
 # Mask both. Leave both unprotected unless the schedule's branch is itself
