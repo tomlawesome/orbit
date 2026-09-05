@@ -30,8 +30,8 @@
 # group runner is not privileged, which is what failed pipeline 163.
 # `orbit-build` is the project's own docker-executor runner, registered with
 # `privileged = true` for exactly this. Jobs that need no daemon deliberately
-# stay untagged and keep running on the shared runner, so the one privileged
-# runner is not the queue for the whole pipeline.
+# stay on the shared runner's `big` or `light` lane (#830), so the one
+# privileged runner is not the queue for the whole pipeline.
 
 stages:
   - classify
@@ -86,6 +86,12 @@ workflow:
 
 default:
   interruptible: true
+  # Runner lanes (#830). `big` is the 8 CPU / 18 GB runner (two jobs at a
+  # time); `light` is the 2 CPU / 2 GB runner (three at a time). The big
+  # runner is moving to reject untagged jobs, so every job needs one of the
+  # two -- this covers everything that does not already ask for the
+  # dedicated `orbit-build` runner by tag (see .privileged_runner below).
+  tags: [big]
   # Infrastructure only: a job that failed on its own merits is never retried.
   # These three are what this GitLab still accepts without a deprecation
   # warning for the stuck-or-timed-out case; `stuck_or_timeout_failure` and
@@ -376,6 +382,9 @@ variables:
 # artifact every later job reads.
 classify:
   stage: classify
+  # Light lane (#830): a git/node script over history and lockfile
+  # snapshots -- no pnpm install, no build.
+  tags: [light]
   extends: .node
   timeout: 10m
   rules:
@@ -1530,8 +1539,10 @@ promote_stable:
 # schedule, one place to look when an expected merge request does not appear.
 # What it watches, how it groups and why is in renovate.json at the repo root.
 #
-# No `tags:`. Nothing in this job talks to a Docker daemon, so it stays on the
-# shared untagged runner and never queues behind `orbit-build`.
+# Big lane (#830). Nothing in this job talks to a Docker daemon, so it never
+# queues behind `orbit-build`. It stays off the light lane because an npm
+# lockfile update runs pnpm over the whole monorepo inside the job, which
+# can pass the light lane's 2 GB. Same choice as mikroview and orbit-launcher.
 #
 # Two CI/CD variables the owner creates under Settings > CI/CD > Variables.
 # Mask both. Leave both unprotected unless the schedule's branch is itself
@@ -1646,9 +1657,8 @@ renovate:
 #       report that never fires red teaches nothing when it is finally asked
 #       to.
 #
-# No Docker daemon and no registry credentials: `sidecar-pins.mjs check` only
-# reads manifests over the network, so this stays on the shared untagged
-# runner like `renovate`.
+# Both axes go through Docker (see the job), so this runs on `orbit-build`
+# via `.dind_service`, not on the shared runner.
 #
 # One CI/CD variable the owner creates under Settings > CI/CD > Variables,
 # masked, unprotected unless the schedule's branch is itself protected (same
