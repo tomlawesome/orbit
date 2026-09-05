@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 /**
  * #735: the route-set contract for the Next.js -> SvelteKit API port.
  *
- * `src/app/` (the old Next.js routes) is slated for deletion once the port is
- * verified. Nothing enumerates the SvelteKit side against a fixed list, so a
+ * `src/app/` (the old Next.js routes) is gone (merge 2de45bc, ADR-0018).
+ * Nothing else enumerates the SvelteKit side against a fixed list, so a
  * route that gets missed, renamed or left as an empty stub during the port
  * would only surface once its caller broke in production -- and for the
  * routes below, "its caller" is not `web/`, so a scan of what the front end
