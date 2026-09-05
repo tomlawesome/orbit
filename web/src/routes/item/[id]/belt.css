@@ -383,7 +383,7 @@
 .belt-page .panel .field input,.belt-page .panel .field textarea{width:100%;background:var(--panel);
   border:1px solid var(--line);border-radius:9px;color:var(--ink);font-size:13.5px;
   padding:9px 12px;font-family:var(--ui)}
-.belt-page .panel .field input:focus,.belt-page .panel .field textarea:focus{outline:none;border-color:var(--accent)}
+.belt-page .panel .field input:focus,.belt-page .panel .field textarea:focus{border-color:var(--accent)}
 .belt-page .panel .field textarea{resize:vertical;line-height:1.5}
 .belt-page .panel .field.mono input{font-family:var(--mono)}
 .belt-page .panel .row2{display:flex;gap:14px}
