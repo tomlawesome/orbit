@@ -44,13 +44,30 @@ const DOORS = new Set(["/login", "/logout"]);
  * so booting there would either fail the build or, worse, migrate whatever
  * database happened to be configured at build time.
  *
+ * A `registerNode` rejection exits the process (#717): SvelteKit's own
+ * handling of a failed `init` leaves the HTTP server bound and answering
+ * `/` at 200 while every dynamic route 500s, which no orchestrator or
+ * restart policy reacts to.
+ *
  * @type {import("@sveltejs/kit").ServerInit}
  */
 export async function init() {
   if (building) return;
 
   const { registerNode } = await import("orbit/server/boot");
-  await registerNode();
+  try {
+    await registerNode();
+  } catch {
+    /* registerNode has already logged exactly what is wrong and its remedy
+       (#717); this only has to make the process stop. Left running, the
+       Node process kept serving `/` at 200 while every dynamic route
+       answered 500 -- indistinguishable from a slow boot to anything that
+       did not run `docker compose up --wait`, and `restart: unless-stopped`
+       does not act on the healthcheck. Exiting non-zero is what makes the
+       container actually stop, so the orchestrator and repair.sh's own
+       diagnosis (scripts/repair.sh) have something to see. */
+    process.exit(1);
+  }
 }
 
 /**

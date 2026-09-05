@@ -581,6 +581,21 @@ describe("exact-image publication workflow", () => {
     expect(refusalStep).toContain('[[ ! -e "${GIT_MARKER}" ]]');
     expect(refusalStep).toContain('[[ "${#entries[@]}" -eq 0 ]]');
 
+    // #770: a wrong field list and an installer that never reached the field
+    // check used to both report as "did not report the fixed required
+    // fields", with no way to tell which happened. The prefix is checked
+    // separately so the two report differently, and the offending line (or
+    // its absence) is shown rather than just the fixed expectation.
+    expect(refusalStep).toContain("required_fields_prefix=");
+    expect(refusalStep).toContain("without ever reaching the field check");
+    expect(refusalStep).toContain("reported the wrong required fields");
+    expect(refusalStep).toContain("actual_fields_line=");
+    // #770: on any failure, show the installer's exit code and what the
+    // target directory actually held, alongside the output already dumped.
+    expect(refusalStep).toContain("installer exit status: %s");
+    expect(refusalStep).toContain("target directory contents");
+    expect(refusalStep).toMatch(/did not restore the target to empty.*\$\{entries\[\*\]\}/);
+
     // The unattended bootstrap uses only the documented example plus fixed
     // non-secret inputs and an owner-only generated secret file.
     const provisionStep = ciScript("provision-installer-target.sh");
