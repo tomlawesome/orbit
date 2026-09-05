@@ -2,25 +2,30 @@
 # a browser on the owner's LAN (the base acceptance overlay binds it to
 # loopback and names it by container, which only other containers can
 # resolve). Compose with: base + mail + acceptance + THIS, last.
+#
+# DEMO_HOST is the LAN address of the machine running the demo, set in the
+# environment (`DEMO_HOST=192.0.2.10 docker compose …`), never written here:
+# the repository is public and the address is the owner's network.
+#
 # The provider's certificate is self-signed and regenerated per start — the
-# browser will warn once at https://192.168.11.30:4443 and must be told to
+# browser will warn once at https://$DEMO_HOST:4443 and must be told to
 # proceed, after which the login round-trip works from any LAN device.
 #
-# The app itself is served https://192.168.11.30:3443 via the demo-tls proxy
+# The app itself is served https://$DEMO_HOST:3443 via the demo-tls proxy
 # (APP_URL's own law requires HTTPS off loopback). Generate its throwaway
 # cert before first bring-up (never committed):
 #   openssl req -x509 -newkey rsa:2048 -keyout demo-tls/demo.key \
-#     -out demo-tls/demo.crt -days 30 -nodes -subj "/CN=192.168.11.30" \
-#     -addext "subjectAltName=IP:192.168.11.30"
+#     -out demo-tls/demo.crt -days 30 -nodes -subj "/CN=$DEMO_HOST" \
+#     -addext "subjectAltName=IP:$DEMO_HOST"
 services:
   orbit-app:
     environment:
-      APP_URL: https://192.168.11.30:3443
-      OIDC_ISSUER: https://192.168.11.30:4443/
-      OIDC_CALLBACK_URL: https://192.168.11.30:3443/api/auth/callback
+      APP_URL: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:3443
+      OIDC_ISSUER: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:4443/
+      OIDC_CALLBACK_URL: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:3443/api/auth/callback
   orbit-oidc:
     environment:
-      TEST_OIDC_ISSUER: https://192.168.11.30:4443/
+      TEST_OIDC_ISSUER: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:4443/
     ports: !override
       - "0.0.0.0:4443:4443"
   demo-tls:
@@ -30,4 +35,4 @@ services:
       - ./demo-tls/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "0.0.0.0:3443:3443"
-      - "192.168.11.30:3000:3080"
+      - "${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:3000:3080"
