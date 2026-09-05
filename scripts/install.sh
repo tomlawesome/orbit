@@ -1104,8 +1104,13 @@ stage_guided_install_configuration() {
 }
 
 bounded_compose_probe() {
+  # stdin is closed on purpose (#836): `timeout` runs the command in its own
+  # process group, a background one when the installer has a terminal (the
+  # launcher gives it one), and `compose exec` keeps stdin attached even with
+  # -T. Its first read of the terminal would stop it with SIGTTIN, TERM cannot
+  # wake a stopped process, and every probe would fail at the bound.
   timeout --signal=TERM --kill-after=1s 5s \
-    docker compose --project-name "$compose_project_name" --env-file "$environment_file" "$@"
+    docker compose --project-name "$compose_project_name" --env-file "$environment_file" "$@" </dev/null
 }
 
 probe_database_health() {
