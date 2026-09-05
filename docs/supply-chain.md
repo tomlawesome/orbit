@@ -213,11 +213,13 @@ it are not. So an image can be exactly what its tag points at today and still
 be missing a fix its own distribution published weeks ago — which is how the
 findings on #740 accumulated.
 
-`Sidecar pin freshness` (`.github/workflows/sidecar-pin-freshness.yml`) runs
-weekly and asks all three questions: do the file and the policy agree, has the
-tag moved, and does the pinned image itself have package upgrades waiting. When
-anything is behind it files, or updates, one open issue titled
-`Sidecar pins are behind` holding the full report, and the run goes red.
+The `sidecar_pin_freshness` job in `.gitlab-ci.yml` runs weekly and asks all
+three questions: do the file and the policy agree, has the tag moved, and does
+the pinned image itself have package upgrades waiting. When anything is behind
+it files, or updates, one open issue titled `Sidecar pins are behind` holding
+the full report, and the run goes red. It was ported from GitHub Actions
+(#820) once GitHub issues on the mirror were switched off (#801); the report
+and the issue title are unchanged, only where the issue lives.
 
 A moved tag is fixed by re-pinning, and `sidecar-pins.mjs sync` does it. Stale
 packages inside a current pin have no such remedy: there is nothing newer to
@@ -226,11 +228,13 @@ entry in the policy's `exceptions[]` with an owner, a rationale, a tracking
 issue and an expiry date.
 
 **The weekly schedule is not running yet, and this is the manual step it
-replaces.** GitHub runs a scheduled workflow from the repository's default
-branch, `main`, and `main` stays at v1.2.0 until #547 promotes v1.3. Until that
-promotion the workflow file does not exist there, so neither the schedule nor
-`Run workflow` will start it. Until then the cadence is a person: **weekly,
-whoever is working on Orbit**, run
+replaces.** The job only runs in a scheduled pipeline that sets the
+`SIDECAR_FRESHNESS` variable, and it files or updates the issue with a project
+access token in the `SIDECAR_ISSUE_TOKEN` CI/CD variable -- both are settings
+only the owner can create (GitLab Settings > CI/CD, and Settings > CI/CD >
+Schedules with the schedule's target branch set to `dev`; see the job's own
+comment in `.gitlab-ci.yml` for why `dev`). Until both exist the cadence is a
+person: **weekly, whoever is working on Orbit**, run
 
 ```bash
 node scripts/sidecar-pins.mjs check --packages
