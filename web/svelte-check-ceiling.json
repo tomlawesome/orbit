@@ -1,8 +1,7 @@
 {
-  "note": "Per-file svelte-check error allowances for the v19 front end. Counts must match EXACTLY: a file that gets worse fails, and a file that gets better fails too, asking for its number to be lowered. A file with no entry may have no errors, so anything newly written lands clean. Never add an entry and never raise one. See scripts/check-v19-types.mjs.",
+  "note": "The v19 type ledger (#624) is retired: web/ now type-checks clean and scripts/check-v19-types.mjs is a plain zero-error gate with no per-file tolerance. This file is kept empty as the historical record of the ledger; nothing reads it anymore.",
   "issue": "https://gitlab.tomlawson.io/ai/orbit/-/issues/624",
   "recorded": "2026-08-24",
-  "files": {
-    "src/routes/home/+page.svelte": 2
-  }
+  "closed": "2026-09-05",
+  "files": {}
 }

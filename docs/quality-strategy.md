@@ -83,7 +83,7 @@ fail on a global percentage.
 Coverage cannot prove authorization, concurrency, provider behaviour,
 accessibility, or recoverability. Those require the appropriate layer above.
 
-## The v19 type ledger
+## The v19 type check
 
 The SvelteKit front end in `web/` is outside `pnpm typecheck`: the root
 `tsconfig.json` sets `"allowJs": false` and includes only `**/*.ts` and
@@ -91,41 +91,34 @@ The SvelteKit front end in `web/` is outside `pnpm typecheck`: the root
 had no caller in CI until #620, so 1,644 errors accumulated across 52 files --
 overwhelmingly implicit `any` and DOM narrowing rather than defects.
 
-Gating on zero would fail every pull request from day one; leaving it off lets
-the pile grow unseen. So `web/svelte-check-ceiling.json` records what each file
-is allowed today and `scripts/check-v19-types.mjs` enforces it from the fast
-job, on the same ratchet principle as the coverage floors above and with one
-addition:
+Gating on zero would have failed every pull request on day one, so from #620
+until #624 `web/svelte-check-ceiling.json` recorded exactly how many errors
+each file was still allowed, on the same ratchet principle as the coverage
+floors above: a file that got worse failed, a file that got better also
+failed (asking for its number to be lowered), and a file with no entry had to
+be clean already. That was a holding position for the duration of the v19
+rebuild (M2), not a standard, and M2 did not close while the ledger had
+entries in it.
 
-1. A file that gets worse fails.
-2. A file that gets **better** also fails, asking for its number to be lowered.
-   Exact match is what walks the ledger down to nothing rather than leaving
-   slack nobody reclaims. `svelte-check` is deterministic against a frozen
-   lockfile, so this cannot flap.
-3. A file with no entry may have no errors, so everything M2 writes fresh is
-   held at zero automatically.
-4. Entries are never added and never raised. Lowering one and deleting one are
-   the only edits that move this forward.
+**#624 closed that out.** `scripts/check-v19-types.mjs` is now a plain
+zero-error check: it runs `svelte-check` across `web/` and fails on any error,
+anywhere, with no per-file exemption. `web/svelte-check-ceiling.json` is kept
+only as the empty historical record of the ledger; nothing reads it anymore.
 
-This is a holding position for the duration of the v19 rebuild, not a standard.
-**M2 does not close while the ledger has entries in it** (#624): the rebuild is
-what makes the tolerance removable, so each screen it rewrites should land
-clean and drop its entry in the same pull request. When the ledger is empty the
-gate becomes a plain zero-error check and the ledger machinery goes with it.
-
-`due-next/+page.svelte` reached zero this way (#624): its reactive `view`
-state and its lookup objects moved into small companion modules
-(`due-next-view.svelte.js`, `bands.js`) so their `$state` and `Record<string,
-string>` types could be declared as JSDoc comments, and its `{#snippet}` row
-became a real child component (`EntryRow.svelte`) so its prop could carry a
-type too — none of those positions are available inline in a route's own
-`<script>` without hitting a production-build parse failure (#782). One entry
-remains: `home/+page.svelte`'s two `{#snippet}` row parameters hit the same
-#782 limitation, and extracting them the same way would mean threading a large
-number of the screen's own reactive state and handlers into new child
-components, which is a larger, riskier change than a ledger clean-up warrants
-on its own. It stays until #782 is fixed upstream or that extraction is done
-as its own reviewed piece of work.
+`due-next/+page.svelte` and `home/+page.svelte` were the two files still
+carrying tolerated errors, both for the same reason: a `{#snippet}` parameter
+is one of the positions where `svelte-check` accepts an inline `@type` cast
+comment but the production rolldown build does not (#782), so the type
+couldn't be written inline in the route's own `<script>`. Both reached zero by
+turning the snippet into a real child component, whose `$props()`
+destructuring is a plain `<script>` statement and takes the annotation
+without issue: `due-next/EntryRow.svelte`, and `home/CorridorRow.svelte` and
+`home/ItemView.svelte` (home's two snippets closed over a large slice of the
+screen's own reactive state and handlers, so those became typed props and
+callback props instead). Both routes' reactive `view` state and lookup
+objects also moved into small companion modules (`due-next-view.svelte.js`,
+`bands.js`) for the same reason. #782 stays open to carry the upstream
+constraint and the workaround, but no file needs it worked around today.
 
 The same job compiles `web/` (`pnpm --filter orbit-web build`, about ten
 seconds). Before that, a `.svelte` file that did not compile could merge green
