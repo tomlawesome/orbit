@@ -25,6 +25,22 @@ describe("migration integrity", () => {
     await expect(verifyMigrationIntegrity(clientWith(Object.assign(new Error("missing"), { code: "42P01" })), folder)).resolves.toBeUndefined();
   });
 
+  // #822: a connection/authentication failure reaching readAppliedMigrationHashes
+  // (e.g. a drifted database credential) must never be reclassified as a
+  // migration/schema problem -- boot.ts's own mapping (src/server/boot.ts)
+  // relies on receiving the RAW, non-MigrationIntegrityError here so it can
+  // report the generic "migration_integrity" reason instead of the precise
+  // (and here, wrong) "database_mismatch" one. Wrapping it, as the code did,
+  // is exactly what made repair_journeys' credential-drift check intermittently
+  // see "database-schema-mismatch" instead of "database-credential-mismatch".
+  it("propagates a connection or authentication failure unwrapped, rather than mislabeling it a schema mismatch (#822)", async () => {
+    const authFailure = Object.assign(
+      new Error('password authentication failed for user "orbit"'),
+      { code: "28P01" },
+    );
+    await expect(verifyMigrationIntegrity(clientWith(authFailure), folder)).rejects.toBe(authFailure);
+  });
+
   it("rejects missing or empty journals when product tables already exist", async () => {
     const missing = Object.assign(new Error("missing"), { code: "42P01" });
     await expect(verifyMigrationIntegrity(clientWith(missing, true), folder)).rejects.toMatchObject({ code: "database_floor" });
