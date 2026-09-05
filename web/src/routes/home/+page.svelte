@@ -14,11 +14,13 @@
   import { markDoor } from "../household/[id]/door.js";
   import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin, signOut } from "$lib/data/workspace.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { every, longDate, money, tminus } from "$lib/format.js";
+  import { money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
   import { SvelteMap } from "svelte/reactivity";
+  import { tlabel } from "./bands.js";
+  import CorridorRow from "./CorridorRow.svelte";
   import "./home.css";
 
   /**
@@ -49,12 +51,6 @@
      it does nothing at runtime beyond returning its argument. */
   /** @type {(v: HomeView | null) => HomeView} */
   const asView = (v) => /** @type {HomeView} */ (v);
-  /* Directive expressions (class:x={...}) do not carry an inline `@type`
-     cast comment through to the type checker the way a plain {...}
-     interpolation does, so spots that need an escape hatch there call this
-     instead. */
-  /** @type {(v: any) => any} */
-  const asAny = (v) => v;
 
   /*
    * Coming BACK to home is not arriving at it (owner, 2026-08-15: leaving an
@@ -368,10 +364,6 @@
     document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
   }
 
-  /** @type {(one: any) => string} */
-  const detailDue = (one) =>
-    one.dueDate ? `${tminus(one.dueDate, one.today)} · ${longDate(one.dueDate)}` : "unscheduled";
-
   const operationIds = new SvelteMap();
   /**
    * @param {any} suggestion
@@ -441,6 +433,10 @@
   );
   /* the inbox orb's truth: arrivals awaiting the two-tap */
   const mailWaiting = $derived(view ? (asView(view).suggestions?.length ?? 0) : 0);
+  /* CorridorRow's own suggestion lookup (#624/#782): passed down as a prop
+     rather than the whole view, so the row component's type is the slice it
+     actually reads. */
+  const suggestions = $derived(view ? asView(view).suggestions : undefined);
   /* #763: how many are overdue right now — the OS badge and the tab title
      both read this, never the server, so both hold whatever this browser's
      own chart just worked out. */
@@ -471,18 +467,6 @@
       label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k) % 12],
     })),
   );
-
-  /** @type {(b: any) => string} */
-  const tlabel = (b) => (b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
-  /** @type {(iso: string) => string} */
-  const short = (iso) =>
-    new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
-  /** @type {(months: number) => string} */
-  const period = (months) => (months === 12 ? "1 year" : months === 6 ? "6 months" : `${months} months`);
-  /** @type {Record<string, string>} */
-  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok" };
-  /** @type {Record<string, string>} */
-  const T_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok" };
 
   /** @type {(deg: number, radius: number) => [number, number]} */
   const point = (deg, radius) => [
@@ -1133,135 +1117,35 @@
          furthest away, suggestions riding the same line in date order. -->
     <div class="manifest" id="manifest-top">
     {#if corridor && !view?.emptySky}
-      <!-- #624/#782: `row` is left untyped on purpose. A `{#snippet}`
-           parameter is one of the three spots where svelte-check accepts an
-           inline `@type` cast comment but the production rolldown build does
-           not, so annotating it here would pass this check and break the
-           real build. The two implicit-any errors this leaves are the
-           ledger's remaining count for this file. -->
-      {#snippet corridorRow(row)}
-        {#if row.suggestion}
-          {@const s = asView(view).suggestions.find((one) => one.id === row.id)}
-          <div class="item suggest" id={row.id}>
-            <span class="planet sug" aria-hidden="true"><i></i></span>
-            <div class="body"><b>{row.title}</b><span>{[
-              `Found in ${row.sourceDocument}`,
-              row.dueDate ? `renews ${short(row.dueDate)}` : null,
-              row.costMinor ? money(row.costMinor, row.currency, true) : null,
-            ].filter(Boolean).join(" · ")}</span></div>
-            <!-- #434: approval is the boundary between untrusted mail and
-                 the household, so it takes two deliberate taps — the first
-                 arms, the second fires. One operation id per receipt makes
-                 the write idempotent under any retry. -->
-            <div class="actions">
-              <button class="yes" disabled={busyReceipt === row.id}
-                onclick={() => tapReceipt(s, "approve")}>
-                {armed.id === row.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
-              </button>
-              <button disabled={busyReceipt === row.id}
-                onclick={() => tapReceipt(s, "dismiss")}>
-                {armed.id === row.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
-              </button>
-            </div>
-            {#if mailProblem && armed.id === row.id}
-              <div class="mail-problem">{mailProblem}</div>
-            {/if}
-          </div>
-        {:else}
-          <!-- #424: the row is the item. The href is the row's real address —
-               kept so a modified click can still open it in its own tab — and
-               a plain click expands the row here instead of leaving home. -->
-          <a class="item" class:open={expanded === row.id} id={row.id}
-             href={resolve(`/home?item=${encodeURIComponent(row.id)}`)} aria-expanded={expanded === row.id}
-             aria-controls="{row.id}-view" onclick={(event) => onRowClick(event, row.id)}>
-            <span class="planet" class:ter={row.kind === "inspection"} class:con={row.kind === "renewal"}
-                  style="color:var({BAND_VAR[row.band]})" aria-hidden="true"><i></i></span>
-            <div class="body"><b>{row.title}</b><span>{[
-              row.section,
-              row.recurrenceMonths ? `orbital period ${period(row.recurrenceMonths)}` : null,
-              row.provider,
-              row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
-            ].filter(Boolean).join(" · ")}</span></div>
-            {#if row.dueDate}
-              <div class="t {T_CLASS[row.band]}">{tlabel(row)}<small>{short(row.dueDate)}</small></div>
-            {:else}
-              <div class="t ok">—</div>
-            {/if}
-          </a>
-          {#if expanded === row.id}{@render itemview(row)}{/if}
-        {/if}
-      {/snippet}
-
-      <!-- #424: everything Orbit holds about the item, in the row. The field
-           set and its order are the item view's, so the two surfaces say the
-           same thing in the same words (web/src/routes/item/[id]). -->
-      <!-- #624/#782: same reason as corridorRow above — `row` stays untyped. -->
-      {#snippet itemview(row)}
-        <div class="itemview" id="{row.id}-view" role="region" aria-label="{row.title} — full detail">
-          {#if detailProblem}
-            <div class="ivproblem" role="alert">{detailProblem}</div>
-          {:else if !detail}
-            <div class="ivnote">{detailBusy ? "reading…" : ""}</div>
-          {:else}
-            <div class="kv"><span>due</span>
-              <b class:over={asAny(detail).band === "overdue" || row.band === "overdue"}>{detailDue(detail)}</b></div>
-            {#if detail.snoozedUntil}
-              <div class="kv"><span>snoozed until</span><b>{longDate(detail.snoozedUntil)}</b></div>
-            {/if}
-            {#if detail.status !== "active"}
-              <div class="kv"><span>status</span><b>{detail.status}</b></div>
-            {/if}
-            {#if detail.section}
-              <div class="kv"><span>section</span><b>{detail.section}</b></div>
-            {/if}
-            {#if detail.subtype}
-              <div class="kv"><span>type</span><b>{detail.subtype}</b></div>
-            {/if}
-            {#if detail.recurrenceMonths}
-              <div class="kv"><span>orbital period</span><b>{every(detail.recurrenceMonths)}</b></div>
-            {/if}
-            <div class="kv"><span>cost</span>
-              <b>{money(detail.costMinor, detail.currency ?? "GBP", /** @type {any} */ (detail).costIsEstimate)}</b></div>
-            {#if detail.provider}
-              <div class="kv"><span>provider</span><b>{detail.provider}</b></div>
-            {/if}
-            {#if detail.reference}
-              <div class="kv"><span>reference</span><b>{detail.reference}</b></div>
-            {/if}
-            {#if detail.reminderDays?.length}
-              <div class="kv"><span>reminders</span>
-                <b>{detail.reminderDays.map((d) => `${d}d before`).join(" · ")}</b></div>
-            {/if}
-            {#if detail.documents?.length}
-              <h4>documents</h4>
-              {#each detail.documents as document (document.name)}
-                <div class="doc">◆<span>{document.name}<small>{document.meta}</small></span></div>
-              {/each}
-            {/if}
-            {#if detail.notes}
-              <h4>notes</h4>
-              <p>{detail.notes}</p>
-            {/if}
-            <div class="ivfoot">
-              <button class="ivcopy" onclick={copyAddress}>{copied ? "link copied" : "copy link"}</button>
-              <a class="ivfull" href={resolve("/item/[id]", { id: row.id })}>manage this item →</a>
-            </div>
-          {/if}
-        </div>
-      {/snippet}
       <div class="corridor">
         {#if corridor.overdue.length}
           <div class="redzone">
-            {#each corridor.overdue as row (row.id)}{@render corridorRow(row)}{/each}
+            {#each corridor.overdue as row (row.id)}
+              <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+                onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
+                onCopyAddress={copyAddress} />
+            {/each}
           </div>
         {/if}
         <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · {todayLine}</span><div class="rule"></div></div>
-        {#each corridor.current as row (row.id)}{@render corridorRow(row)}{/each}
+        {#each corridor.current as row (row.id)}
+          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+            onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
+            onCopyAddress={copyAddress} />
+        {/each}
         {#each corridor.months as month (month.key)}
           <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
-          {#each month.rows as row (row.id)}{@render corridorRow(row)}{/each}
+          {#each month.rows as row (row.id)}
+            <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+              onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
+              onCopyAddress={copyAddress} />
+          {/each}
         {/each}
-        {#each corridor.undated as row (row.id)}{@render corridorRow(row)}{/each}
+        {#each corridor.undated as row (row.id)}
+          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+            onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
+            onCopyAddress={copyAddress} />
+        {/each}
       </div>
       {#if corridor.total === 0}
         <div class="horizon">— nothing scheduled: your sky is quiet —</div>
