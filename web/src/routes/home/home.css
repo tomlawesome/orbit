@@ -363,8 +363,13 @@
            max-height:76vh;overflow:auto;overscroll-behavior:contain;
            width:300px;background:var(--panel-raised);backdrop-filter:blur(16px);
            border:1px solid var(--line);border-radius:16px;padding:20px 22px;
-           opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
-  .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%)}
+           opacity:0;pointer-events:none;
+           /* #847: closed, the viewer's close button must leave the tab
+              order, on the same delayed-visibility rule as .account above. */
+           visibility:hidden;
+           transition:opacity .25s,transform .25s,visibility 0s .25s}
+  .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%);
+                visibility:visible;transition-delay:0s}
   .drawer{position:fixed;top:0;bottom:0;z-index:10;width:290px;
           background:var(--panel-raised);backdrop-filter:blur(16px);
           padding:26px;
