@@ -250,7 +250,15 @@ refuse_foreign_stack() {
 
 compose() { (cd "$target" && docker compose --env-file .env-orbit "$@"); }
 
-health_check() { curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health" | grep -q '"status":"ready"'; }
+# Capture first, test second (issue #809): `curl | grep -q` can still be
+# streaming the rest of the body when grep matches early and exits, which
+# would SIGPIPE curl and turn a healthy response into a 141 instead of an
+# answer.
+health_check() {
+  local body
+  body="$(curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health")" || true
+  [[ "$body" == *'"status":"ready"'* ]]
+}
 
 wait_for_health() {
   local deadline=$((SECONDS + 90))
