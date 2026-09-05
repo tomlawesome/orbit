@@ -3,7 +3,9 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 
 // Process-level interruption characterization for issue #295 slice 1: a
 // SIGKILL cannot be trapped by Node any more than by Bash, so this proves
@@ -14,6 +16,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // behind is owner-only (mode 0700). Drives the hidden, undocumented
 // `orbit __install-transaction-rehearse` subcommand (src/cli/orbit.ts),
 // wired only to make this characterization possible — not a shipped flow.
+
+// This file spawns the real CLI and then hard-kills it mid-run; a spawn
+// that takes 0.7s quiet took 4.3s on a starved core (#698). Budget and
+// reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cliEntry = fileURLToPath(new URL("../cli/orbit.ts", import.meta.url));
@@ -109,5 +116,5 @@ describe("SIGKILL interruption leaves install.sh-equivalent recovery evidence", 
     // rerunning.
     rmSync(join(targetDir, leftovers[0]), { recursive: true, force: true });
     expect(existsSync(join(targetDir, leftovers[0]))).toBe(false);
-  }, 20_000);
+  });
 });

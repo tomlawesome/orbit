@@ -533,6 +533,27 @@ describe("sidecar pins: --red self-proof", () => {
     expect(status).toBe(1);
     expect(output.join("")).toContain("did not fire");
   });
+
+  it("names the cause when the registry could not be asked at all", async () => {
+    const { repoDir, policyPath } = alignedRepo();
+    const output = [];
+    // Pipeline 278: the job had no Docker client, every lookup threw, and the
+    // failure line said only 'unreachable'. The error message must be on it.
+    const status = await runSidecarPins(["check", "--policy", policyPath, "--red"], {
+      repoDir,
+      today: TODAY,
+      resolveTag: async () => {
+        throw new Error("docker could not be run: spawnSync docker ENOENT");
+      },
+      write: (line) => output.push(line),
+      writeError: (line) => output.push(line),
+    });
+
+    expect(status).toBe(1);
+    const text = output.join("");
+    expect(text).toContain("'unreachable'");
+    expect(text).toContain("spawnSync docker ENOENT");
+  });
 });
 
 describe("sidecar pins: the check command", () => {
@@ -697,5 +718,59 @@ describe("sidecar pins: sync", () => {
 
     expect(status).toBe(1);
     expect(output.join("")).toContain("tests/oidc/Dockerfile");
+  });
+});
+
+describe("sidecar pins: the CI job has the tools the check shells out to", () => {
+  it("installs the buildx plugin alongside the Docker client", () => {
+    // Axis 1 resolves a tag with `docker buildx imagetools inspect --format`.
+    // Without docker-buildx-plugin that fails as "unknown flag: --format",
+    // and the self-test reports 'unreachable' (pipeline 321, #820).
+    const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
+    const anchor = gitlabCi.slice(gitlabCi.indexOf("\n.docker_cli:"), gitlabCi.indexOf("\n.drop_to_node"));
+
+    expect(anchor).toMatch(/apt-get install [^\n]* docker-buildx-plugin/u);
+    expect(anchor).toContain("docker buildx version");
+  });
+});
+
+describe("sidecar pins: every pinned .gitlab-ci.yml image is a tracked location (#807)", () => {
+  // A pin the policy does not know about is a pin `check --offline` never
+  // looks at: drift between .gitlab-ci.yml and the policy would go silent.
+  // This reads the real files rather than a fixture, because the point is
+  // whether the two are in step right now, not whether the mechanism works
+  // on made-up input.
+  it("lists .gitlab-ci.yml in the locations of every policy entry it pins", () => {
+    const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
+    const realPolicy = JSON.parse(
+      readFileSync(new URL("../.github/supply-chain-policy.json", import.meta.url), "utf8"),
+    );
+
+    const pinnedImages = [...gitlabCi.matchAll(/^\s*[A-Z0-9_]+_IMAGE:\s*(\S+@sha256:[0-9a-f]{64})\s*$/gmu)].map(
+      (match) => match[1],
+    );
+    // A fixture-free assertion that the extraction itself still works: if
+    // .gitlab-ci.yml stops pinning anything by digest, the test below would
+    // pass vacuously and prove nothing.
+    expect(pinnedImages.length).toBeGreaterThan(0);
+
+    const matchedEntries = new Set();
+    for (const pinned of pinnedImages) {
+      const tag = pinned.slice(0, pinned.indexOf("@"));
+      const entry = realPolicy.containerImages.find((candidate) => candidate.tag === tag);
+      if (entry) matchedEntries.add(entry.name);
+    }
+    // Guard the guard: at least one pinned image (postgres) must actually
+    // match a policy entry, or the loop below checks nothing.
+    expect(matchedEntries.size).toBeGreaterThan(0);
+
+    for (const pinned of pinnedImages) {
+      const tag = pinned.slice(0, pinned.indexOf("@"));
+      const entry = realPolicy.containerImages.find((candidate) => candidate.tag === tag);
+      if (!entry) continue; // not every .gitlab-ci.yml pin is policy-tracked (e.g. the scanner image)
+      expect(entry.locations, `${entry.name} (${tag}) should list .gitlab-ci.yml`).toContain(
+        ".gitlab-ci.yml",
+      );
+    }
   });
 });

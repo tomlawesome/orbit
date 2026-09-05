@@ -4,7 +4,15 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
+
+// Tests here run functions extracted from scripts/restore.sh under bash,
+// some against a real in-process HTTP server; a spawn that takes tens of
+// milliseconds quiet takes seconds on a starved core (#698). Budget and
+// reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 // Regression coverage for issue #383 finding 3: scripts/restore.sh's health
 // probe used to hardcode `http://127.0.0.1:3000/api/health`, so any
@@ -108,7 +116,7 @@ function runHealthProbeUrl(environmentFile) {
     healthProbeUrlSource,
     "health_probe_url",
   ].join("\n");
-  return spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+  return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runHealthProbeUrl" });
 }
 
 // Async, non-blocking bash runner — required (not spawnSync) whenever the
@@ -117,26 +125,30 @@ function runHealthProbeUrl(environmentFile) {
 // http.Server can never actually service the child's request until the
 // child already gave up, timed out, and spawnSync returned. Using `spawn`
 // keeps the event loop free to drive the server while bash runs.
-function runBashAsync(script, timeoutMs) {
+function runBashAsync(script) {
   return new Promise((resolve, reject) => {
     const child = spawn("bash", ["-c", script]);
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-    }, timeoutMs);
+    const watchdog = processWatchdog({ label: "runBashAsync", kill: () => child.kill("SIGKILL") });
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
+      watchdog.touch();
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
+      watchdog.touch();
     });
     child.on("error", (error) => {
-      clearTimeout(timer);
+      watchdog.stop();
       reject(error);
     });
     child.on("close", (status, signal) => {
-      clearTimeout(timer);
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
+        return;
+      }
       resolve({ status, signal, stdout, stderr });
     });
   });
@@ -221,7 +233,7 @@ describe("scripts/restore.sh wait_for_health (issue #383 finding 3)", () => {
       waitForHealthSource,
       "wait_for_health",
     ].join("\n");
-    const result = await runBashAsync(scopedHarness, 10000);
+    const result = await runBashAsync(scopedHarness);
     expect(result.status).toBe(0);
   });
 
@@ -267,7 +279,7 @@ describe("scripts/restore.sh wait_for_health (issue #383 finding 3)", () => {
       shortenedWaitForHealthSource,
       "wait_for_health",
     ].join("\n");
-    const result = await runBashAsync(scopedHarness, 10000);
+    const result = await runBashAsync(scopedHarness);
     expect(result.status).not.toBe(0);
   });
 });
@@ -326,7 +338,7 @@ function runQueryReport({ mode, variant = "stage", checkName = "crypto" }) {
     `${call} || status=$?`,
     'printf "status=%s check=%s\\n" "$status" "$incomplete_check"',
   ].join("\n");
-  const result = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runQueryReport" });
   return {
     result,
     status: /status=(\d+)/.exec(result.stdout)?.[1],
@@ -408,7 +420,7 @@ describe("scripts/restore.sh report acceptance, against the pre-fix query (issue
       `pre_fix_query_report db 'SELECT 1;' ${JSON.stringify(reportPath)} || status=$?`,
       'printf "status=%s\\n" "$status"',
     ].join("\n");
-    const result = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    const result = failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runPreFix" });
     return { status: /status=(\d+)/.exec(result.stdout)?.[1], report: readFileSync(reportPath, "utf8") };
   }
 
@@ -436,7 +448,7 @@ describe("scripts/restore.sh fail_correspondence (issue #678)", () => {
       `fail_correspondence ${status} preflight ${JSON.stringify(corruptBackupMessage)}`,
       'printf "returned-cleanly\\n"',
     ].join("\n");
-    return spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runFailCorrespondence" });
   }
 
   it("tells the operator which check could not be completed, and does not call their backup corrupt", () => {

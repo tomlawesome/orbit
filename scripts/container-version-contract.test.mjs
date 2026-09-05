@@ -10,7 +10,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Every test here runs scripts/container-entrypoint.sh under bash; a spawn
+// that takes tens of milliseconds quiet takes seconds on a starved core
+// (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8").replaceAll(
   "\r\n",
@@ -100,7 +107,7 @@ describe("immutable container version identity", () => {
 
     const fixture = versionFixture();
     try {
-      const result = spawnSync(bash, [fixture.script, "--version"], {
+      const result = failOnProcessDeadline(spawnSync(bash, [fixture.script, "--version"], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -108,7 +115,8 @@ describe("immutable container version identity", () => {
           ORBIT_REVISION: "f".repeat(40),
           ORBIT_CHANNEL: "latest",
         },
-      });
+        ...processGuard(),
+      }), { label: "--version before root and secret bootstrap checks" });
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("Orbit v1.2.3\n");
       expect(result.stderr).toBe("");
@@ -120,7 +128,7 @@ describe("immutable container version identity", () => {
   it("prints the exact banner and immutable identity once for default server startup", () => {
     const fixture = versionFixture();
     try {
-      const result = spawnSync(bash, [fixture.script, "node", "web/index.js"], {
+      const result = failOnProcessDeadline(spawnSync(bash, [fixture.script, "node", "web/index.js"], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -128,7 +136,8 @@ describe("immutable container version identity", () => {
           ORBIT_REVISION: "f".repeat(40),
           ORBIT_CHANNEL: "latest",
         },
-      });
+        ...processGuard(),
+      }), { label: "banner and immutable identity for default server startup" });
       expect(result.stdout).toBe(
         `${banner}Orbit v1.2.3 | channel=preview | revision=${"a".repeat(40)}\n`,
       );
@@ -144,7 +153,7 @@ describe("immutable container version identity", () => {
   it("stays quiet for a command that is not the server", () => {
     const fixture = versionFixture();
     try {
-      const result = spawnSync(bash, [fixture.script, "node", "cli/orbit.js"], {
+      const result = failOnProcessDeadline(spawnSync(bash, [fixture.script, "node", "cli/orbit.js"], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -152,7 +161,8 @@ describe("immutable container version identity", () => {
           ORBIT_REVISION: "f".repeat(40),
           ORBIT_CHANNEL: "latest",
         },
-      });
+        ...processGuard(),
+      }), { label: "a command that is not the server" });
       expect(result.stdout).toBe("");
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
@@ -162,7 +172,7 @@ describe("immutable container version identity", () => {
   it("exposes the canonical banner as a quiet one-off image command", () => {
     const fixture = versionFixture();
     try {
-      const result = spawnSync(bash, [fixture.script, "--banner"], {
+      const result = failOnProcessDeadline(spawnSync(bash, [fixture.script, "--banner"], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -170,7 +180,8 @@ describe("immutable container version identity", () => {
           ORBIT_REVISION: "f".repeat(40),
           ORBIT_CHANNEL: "latest",
         },
-      });
+        ...processGuard(),
+      }), { label: "canonical banner as a quiet one-off image command" });
       expect(result.status).toBe(0);
       expect(result.stdout).toBe(
         `${banner}Orbit v1.2.3 | channel=preview | revision=${"a".repeat(40)}\n`,
@@ -184,9 +195,10 @@ describe("immutable container version identity", () => {
   it("does not print startup identity or the banner for one-off commands", () => {
     const fixture = versionFixture();
     try {
-      const result = spawnSync(bash, [fixture.script, "sh", "-c", "exit 0"], {
+      const result = failOnProcessDeadline(spawnSync(bash, [fixture.script, "sh", "-c", "exit 0"], {
         encoding: "utf8",
-      });
+        ...processGuard(),
+      }), { label: "no startup identity or banner for one-off commands" });
       expect(result.stdout).toBe("");
       expect(result.stdout).not.toContain("██████╗");
       expect(result.stdout).not.toContain("Orbit v1.2.3");
@@ -198,9 +210,10 @@ describe("immutable container version identity", () => {
   it("fails closed for malformed embedded identity", () => {
     const fixture = versionFixture("next");
     try {
-      const result = spawnSync(bash, [fixture.script, "--version"], {
+      const result = failOnProcessDeadline(spawnSync(bash, [fixture.script, "--version"], {
         encoding: "utf8",
-      });
+        ...processGuard(),
+      }), { label: "fails closed for malformed embedded identity" });
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("embedded version identity is invalid");
       expect(result.stdout).toBe("");
@@ -212,9 +225,10 @@ describe("immutable container version identity", () => {
   it("fails closed for a malformed embedded channel", () => {
     const fixture = versionFixture("v1.2.3", "a".repeat(40), "latest; injected");
     try {
-      const result = spawnSync(bash, [fixture.script, "--version"], {
+      const result = failOnProcessDeadline(spawnSync(bash, [fixture.script, "--version"], {
         encoding: "utf8",
-      });
+        ...processGuard(),
+      }), { label: "fails closed for a malformed embedded channel" });
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("embedded release channel is invalid");
       expect(result.stdout).toBe("");

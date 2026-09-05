@@ -3,8 +3,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import { envOrbitSchema, isValidSessionSecret, secretFileFormatMessage } from "./config-contract";
 import { ensureSecretFile } from "./configure-engine";
 import { getAuthConfig } from "./env";
@@ -19,6 +20,11 @@ import { getAuthConfig } from "./env";
 // Every layer below must now agree with `isValidSessionSecret`, which is the
 // single rule. This is the drift alarm: widening or narrowing any one of them
 // on its own fails here.
+
+// This file spawns the real configure.sh under bash; a spawn that takes
+// 0.7s quiet took 4.3s on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scratchDirs: string[] = [];
@@ -158,7 +164,7 @@ function runBashConfigure(value: string): { status: number | null; stderr: strin
   chmodSync(secretPath, 0o600);
 
   const binDir = makeFakeBin();
-  const result = spawnSync("bash", [join(dir, "scripts", "configure.sh")], {
+  const result = failOnProcessDeadline(spawnSync("bash", [join(dir, "scripts", "configure.sh")], {
     cwd: dir,
     encoding: "utf8",
     env: {
@@ -167,7 +173,8 @@ function runBashConfigure(value: string): { status: number | null; stderr: strin
       HOME: process.env.HOME ?? tmpdir(),
       ORBIT_IMAGE: "orbit-local:abcdef123456",
     },
-  });
+    ...processGuard(),
+  }), { label: "runBashConfigure" });
   return { status: result.status, stderr: result.stderr ?? "" };
 }
 

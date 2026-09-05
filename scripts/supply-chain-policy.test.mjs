@@ -34,18 +34,6 @@ function policy(overrides = {}) {
         reviewBy: "2026-10-30",
       },
     ],
-    dependencyReviewActions: [
-      {
-        name: "actions/dependency-review-action",
-        version: "v5.0.0",
-        commit: "d".repeat(40),
-        license: "MIT",
-        source:
-          "https://github.com/actions/dependency-review-action/releases/tag/v5.0.0",
-        updateOwner: "Orbit maintainers",
-        reviewBy: "2026-10-30",
-      },
-    ],
     thresholds: {
       sourceVulnerabilities: ["HIGH", "CRITICAL"],
       sourceSecrets: ["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
@@ -101,15 +89,26 @@ describe("supply-chain policy", () => {
       "tests/oidc/Dockerfile",
       "docker-compose.yml",
       "scripts/test-integration.mjs",
+      ".gitlab-ci.yml",
     ];
     const discovered = new Map();
     for (const file of files) {
       const content = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
       for (const line of content.split(/\r?\n/u)) {
         const from = line.match(/^FROM\s+(\S+)/u)?.[1];
-        const compose = line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1];
+        const compose =
+          file === "docker-compose.yml"
+            ? line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1]
+            : undefined;
         const integration = line.match(/^\s+"(postgres:[^"]+)",?$/u)?.[1];
-        const reference = from ?? compose ?? integration;
+        // The pipeline pins the same PostgreSQL sidecar for its integration
+        // job; other `*_IMAGE:` pins here (node, playwright) are unrelated
+        // images with no policy entry, so this only picks out postgres.
+        const pipelinePostgres =
+          file === ".gitlab-ci.yml"
+            ? line.match(/^\s*POSTGRES_IMAGE:\s+(postgres:\S+)\s*$/u)?.[1]
+            : undefined;
+        const reference = from ?? compose ?? integration ?? pipelinePostgres;
         if (!reference || reference === "base") continue;
         if (reference.startsWith("${ORBIT_IMAGE:")) {
           expect(reference).toBe(
@@ -191,7 +190,6 @@ describe("supply-chain policy", () => {
   it("accepts a pinned reviewed scanner and live bounded exceptions", () => {
     expect(validateSupplyChainPolicy(policy(), "2026-07-30")).toMatchObject({
       scannerVersion: "0.72.0",
-      dependencyReviewActionCount: 1,
       exceptionCount: 0,
       pinnedImageCount: 1,
       mutableReferenceCount: 0,
@@ -202,18 +200,6 @@ describe("supply-chain policy", () => {
     [{ scanner: { ...policy().scanner, image: "aquasec/trivy:latest" } }, /digest/u],
     [{ scanner: { ...policy().scanner, reviewBy: "2026-07-29" } }, /review/u],
     [{ scanner: { ...policy().scanner, reviewBy: "2026-02-30" } }, /ISO date/u],
-    [
-      {
-        dependencyReviewActions: [
-          {
-            ...policy().dependencyReviewActions[0],
-            commit: "v5",
-          },
-        ],
-      },
-      /full commit/u,
-    ],
-    [{ dependencyReviewActions: [] }, /dependency action/u],
     [
       {
         containerImages: [
@@ -345,6 +331,74 @@ describe("supply-chain policy", () => {
         "2026-07-30",
       ).summary,
     ).toMatchObject({ blocked: 0, excepted: 1 });
+  });
+
+  it("fails closed the day after an exception expires, rather than matching it", () => {
+    // The sidecar exceptions recorded for #740 rely on this: an expiry that
+    // silently stopped matching would leave the finding blocked (acceptable),
+    // but one that kept matching would hide it forever.
+    const report = sourceReport({
+      Vulnerabilities: [
+        {
+          VulnerabilityID: "CVE-2026-0001",
+          PkgName: "example",
+          InstalledVersion: "1.0.0",
+          FixedVersion: "1.0.1",
+          Severity: "HIGH",
+        },
+      ],
+    });
+    const exception = {
+      kind: "vulnerability",
+      scope: "source",
+      id: "CVE-2026-0001",
+      package: "example",
+      owner: "Orbit maintainers",
+      rationale: "A bounded compatibility check is underway.",
+      expiresOn: "2026-08-15",
+      trackingIssue: 81,
+    };
+
+    expect(
+      evaluateSourceEvidence(report, policy({ exceptions: [exception] }), "2026-08-15")
+        .summary,
+    ).toMatchObject({ blocked: 0, excepted: 1 });
+    expect(() =>
+      evaluateSourceEvidence(report, policy({ exceptions: [exception] }), "2026-08-16"),
+    ).toThrow(/expired on 2026-08-15/u);
+  });
+
+  it("does not let an exception for one installed version cover another", () => {
+    // Each #740 entry names the installed version it was seen in, so an
+    // upstream rebuild that ships a different, still-vulnerable version is
+    // blocked afresh instead of inheriting the exception.
+    const report = sourceReport({
+      Vulnerabilities: [
+        {
+          VulnerabilityID: "CVE-2026-0001",
+          PkgName: "example",
+          InstalledVersion: "1.0.0",
+          FixedVersion: "1.0.2",
+          Severity: "HIGH",
+        },
+      ],
+    });
+    const exception = {
+      kind: "vulnerability",
+      scope: "source",
+      id: "CVE-2026-0001",
+      package: "example",
+      installedVersion: "0.9.0",
+      owner: "Orbit maintainers",
+      rationale: "Seen only in 0.9.0.",
+      expiresOn: "2026-08-15",
+      trackingIssue: 81,
+    };
+
+    expect(
+      evaluateSourceEvidence(report, policy({ exceptions: [exception] }), "2026-07-30")
+        .summary,
+    ).toMatchObject({ blocked: 1, excepted: 0 });
   });
 
   it("binds vulnerability and SPDX evidence to the expected tested image", () => {

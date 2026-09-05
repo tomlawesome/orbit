@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/app-error";
 import type { EncryptedPortableArchive } from "@/server/portable-archive";
+import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 import { previewPortableArchive } from "./portable-archive-repository";
+
+// scrypt N=16384 by design; see KDF_TEST_TIMEOUT_MS
+// (scripts/process-budget.mjs) for the cost and the figure it's set from.
+vi.setConfig({ testTimeout: KDF_TEST_TIMEOUT_MS });
 
 const passphrase = "correct-horse-battery-staple";
 
