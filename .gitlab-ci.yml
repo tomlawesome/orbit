@@ -1348,6 +1348,13 @@ renovate:
 #                         which fails clearly if it is unset. Never printed.
 sidecar_pin_freshness:
   stage: maintenance
+  # Both axes go through Docker: the moved-tag check is `docker buildx
+  # imagetools inspect`, and the package axis runs each pinned image. The
+  # first scheduled run (pipeline 278) had neither daemon nor client and every
+  # lookup came back "unreachable", so the self-test rightly failed it. Same
+  # shape as `fast`: the node image keeps the script's runtime, the dind
+  # service supplies the daemon, .docker_cli the client.
+  extends: .dind_service
   image: $NODE_IMAGE
   # The package axis pulls every pinned image, and ollama and tika are large
   # (same budget as the GitHub job's timeout-minutes: 30).
@@ -1356,6 +1363,7 @@ sidecar_pin_freshness:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
   script:
+    - *docker_cli
     - |
       set -eu
       # Proves the check can fail before believing it when it passes. It
