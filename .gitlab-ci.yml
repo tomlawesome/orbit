@@ -65,6 +65,13 @@ workflow:
     # the merge-request pipeline is the one that matters.
     - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
       when: never
+    # That guard cannot see a merge request opened seconds after the push, so
+    # a working branch's first push ran a second full pipeline every time
+    # (#829). Pushes start a pipeline on the long-lived branches only; a
+    # working branch is tested by its merge request, and a pipeline started by
+    # hand (`gl-pipeline-run`, source `api`) still runs on any branch.
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != "dev" && $CI_COMMIT_BRANCH != "preview" && $CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /^hotfix\//
+      when: never
     - if: $CI_COMMIT_BRANCH
 
 # The other half of that rule. Every validation job proves something about a

@@ -57,12 +57,15 @@ protected-branch and CI-variable changes: hand the owner the exact steps.
 `dev`, `preview` and `main` all take push "No one", merge "Maintainers".
 
 Two runners serve this project, both on the host `gitlab-runners` (8 cores,
-19 GB): the shared group runner, and a privileged project runner tagged
-`orbit-build` that everything needing a Docker daemon reaches through
-`.privileged_runner`. That runner is still owned by the old staging project;
-#811 re-registers it under `ai/orbit` and deletes the staging project. Its
-`/builds` persists between jobs, so a job that must start clean says so
-(#813, and the data-root wipe in `.docker_in_job`).
+19 GB): the shared group runner, and runner 8, a privileged project runner
+owned by `ai/orbit` and tagged `orbit-build`, that everything needing a
+Docker daemon reaches through `.privileged_runner` (#811). Its `/builds`
+persists between jobs, so a job that must start clean says so (#813, and the
+data-root wipe in `.docker_in_job`).
+
+A push starts a pipeline only on `dev`, `preview`, `main` and `hotfix/*`; a
+working branch is tested by its merge request, so open the MR straight after
+the first push (#829). `gl-pipeline-run` still starts one on any branch.
 
 Renovate replaces Dependabot on this host: `renovate.json` at the repo root,
 the `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
