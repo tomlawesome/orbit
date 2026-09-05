@@ -64,6 +64,24 @@ trap 'rm -f "$header_file"' EXIT
 printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_READ_TOKEN" > "$header_file"
 api() { curl --silent --show-error --fail --location --max-time 60 --header @"$header_file" "$@"; }
 
+# Reads one value out of the JSON on stdin with node: jq is not on the fast
+# job's image, where this script's tests run, and node is on every image and
+# on GitHub's runners (the same reason sidecar-freshness-issue.sh reads with
+# node). $1 is a JavaScript expression over `input`, the parsed document, and
+# `arg`, the optional $2; a missing value prints nothing, like jq's `// empty`,
+# and a document that is not JSON exits 3.
+json() {
+  node -e '
+    let raw = "";
+    process.stdin.on("data", (chunk) => { raw += chunk; }).on("end", () => {
+      let input;
+      try { input = JSON.parse(raw); } catch { process.exit(3); }
+      const value = new Function("input", "arg", "return (" + process.argv[1] + ");")(input, process.argv[2]);
+      process.stdout.write(value === undefined || value === null ? "" : String(value));
+    });
+  ' -- "$1" "${2:-}"
+}
+
 # GitLab lists pipelines newest first. Only a push pipeline for this exact
 # commit on this exact ref counts: a merge-request pipeline for the same SHA
 # tested a different ref and never ran publish_gitlab.
@@ -72,8 +90,8 @@ deadline=$((SECONDS + wait_minutes * 60))
 pipeline_id=""
 while :; do
   listing="$(api "$pipeline_query")"
-  pipeline_id="$(jq -r '.[0].id // empty' <<< "$listing")"
-  status="$(jq -r '.[0].status // empty' <<< "$listing")"
+  pipeline_id="$(json 'input[0]?.id' <<< "$listing")"
+  status="$(json 'input[0]?.status' <<< "$listing")"
   case "$status" in
     success) break ;;
     canceled|skipped)
@@ -88,14 +106,14 @@ while :; do
   ((SECONDS < deadline)) || fail "gave up after ${wait_minutes} minutes waiting for a successful GitLab pipeline for ${ORBIT_COMMIT} on ${ORBIT_REF}; a failed pipeline can be retried on GitLab, and the GitHub run re-run with \`gh run rerun <id> --failed\`"
   sleep "$poll_seconds"
 done
-pipeline_url="$(jq -r '.[0].web_url' <<< "$listing")"
+pipeline_url="$(json 'input[0].web_url' <<< "$listing")"
 printf 'GitLab pipeline %s succeeded: %s\n' "$pipeline_id" "$pipeline_url"
 
 # The job that wrote each piece of evidence. include_retried is off, so a job
 # retried into success is listed once, by its successful run.
 jobs="$(api "${project}/pipelines/${pipeline_id}/jobs?per_page=100")"
 job_id() {
-  jq -r --arg name "$1" '[.[] | select(.name == $name and .status == "success")] | sort_by(.id) | last | .id // empty' <<< "$jobs"
+  json 'input.filter((job) => job.name === arg && job.status === "success").sort((a, b) => a.id - b.id).at(-1)?.id' "$1" <<< "$jobs"
 }
 publish_job="$(job_id publish_gitlab)"
 sbom_job="$(job_id supply_chain_image)"
@@ -113,11 +131,12 @@ api --output "$sbom" "${project}/jobs/${sbom_job}/artifacts/.orbit-supply-chain/
 # Every field the publisher will act on, checked against what this run knows
 # independently. A record for the right commit but another pipeline means two
 # pipelines ran for one push; refuse rather than pick.
-jq -e 'type == "object"' "$evidence" > /dev/null || fail 'gitlab-tested-image.json is not a JSON object'
-field() { jq -r --arg key "$1" '.[$key] // empty' "$evidence"; }
+[[ "$(json 'typeof input === "object" && input !== null && !Array.isArray(input)' < "$evidence" || :)" == true ]] ||
+  fail 'gitlab-tested-image.json is not a JSON object'
+field() { json 'input[arg]' "$1" < "$evidence"; }
 recorded_commit="$(field commit)"
 recorded_ref="$(field ref)"
-recorded_pipeline="$(jq -r '.pipelineId // empty' "$evidence")"
+recorded_pipeline="$(field pipelineId)"
 digest="$(field imageDigest)"
 source_reference="$(field imageReference)"
 recorded_at="$(field recordedAt)"
@@ -135,7 +154,7 @@ now_epoch="$(date -u +%s)"
 (( now_epoch - recorded_epoch <= 7 * 24 * 3600 )) || fail "evidence recorded at ${recorded_at} is older than seven days"
 (( recorded_epoch <= now_epoch + 300 )) || fail "evidence recorded at ${recorded_at} is in the future"
 
-jq -e '.spdxVersion? // .SPDXID? // empty' "$sbom" > /dev/null || fail 'image.spdx.json is not an SPDX document'
+[[ -n "$(json 'input.spdxVersion ?? input.SPDXID' < "$sbom" || :)" ]] || fail 'image.spdx.json is not an SPDX document'
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
