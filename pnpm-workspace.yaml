@@ -10,7 +10,6 @@ packages:
 
 allowBuilds:
   esbuild: true
-  sharp: true
   unrs-resolver: true
 overrides:
   # Security floor: esbuild >=0.25.0 avoids GHSA-67mh-4wv8-2f99.
@@ -19,6 +18,5 @@ overrides:
   postcss: 8.5.23
   # Security floor: js-yaml 4.3.1 avoids GHSA-5p4m-2wfm-xmqj.
   js-yaml: 4.3.1
-  sharp: 0.35.0
   # Security floor: nanoid 3.3.18 avoids GHSA-2v37-7h3g-55p8 and CVE-2026-67213.
   'postcss@8.5.23>nanoid': 3.3.18
