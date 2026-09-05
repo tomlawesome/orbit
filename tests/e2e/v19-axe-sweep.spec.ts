@@ -139,11 +139,29 @@ async function cleanup(page: Page, household: { id: string; name: string }) {
   await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
 }
 
+/**
+ * Signs in, seeds a household of the reader's own and settles on the dial.
+ * Without a household `/home` is the adrift screen and draws no dial at all,
+ * so on a fresh instance every `/home` state here would fail in settleHome
+ * (caught the first time the file ran against a stack no other spec had
+ * seeded). Callers clean up in `finally`.
+ */
+async function arriveWithHousehold(page: Page) {
+  await signIn(page, "/home");
+  const household = await seedHousehold(page);
+  await page.goto("/home");
+  await settleHome(page);
+  return household;
+}
+
 test.describe("the signed-in v19 sweep", () => {
   test("/home has no automated WCAG A/AA violations", async ({ page }) => {
-    await signIn(page, "/home");
-    await settleHome(page);
-    await axeCheck(page);
+    const household = await arriveWithHousehold(page);
+    try {
+      await axeCheck(page);
+    } finally {
+      await cleanup(page, household);
+    }
   });
 
   // `button.orb`, `#nstar`, `#edge-health` and `#keydrawer` are the DESKTOP
@@ -155,29 +173,38 @@ test.describe("the signed-in v19 sweep", () => {
   // examine on that dialect.
   test("/home account panel open has no automated WCAG A/AA violations", async ({ page, isMobile }) => {
     test.skip(isMobile, "the account panel is desk-only chrome; the pocket dialect has no drawers");
-    await signIn(page, "/home");
-    await settleHome(page);
-    await page.locator("button.orb").click();
-    await expect(page.locator("button.orb")).toHaveAttribute("aria-expanded", "true");
-    await axeCheck(page);
+    const household = await arriveWithHousehold(page);
+    try {
+      await page.locator("button.orb").click();
+      await expect(page.locator("button.orb")).toHaveAttribute("aria-expanded", "true");
+      await axeCheck(page);
+    } finally {
+      await cleanup(page, household);
+    }
   });
 
   test("/home add-to-orbit drawer open has no automated WCAG A/AA violations", async ({ page, isMobile }) => {
     test.skip(isMobile, "the create drawer is desk-only chrome; the pocket dialect has no drawers");
-    await signIn(page, "/home");
-    await settleHome(page);
-    await page.locator("#nstar").click();
-    await expect(page.locator("#nstar")).toHaveAttribute("aria-expanded", "true");
-    await axeCheck(page);
+    const household = await arriveWithHousehold(page);
+    try {
+      await page.locator("#nstar").click();
+      await expect(page.locator("#nstar")).toHaveAttribute("aria-expanded", "true");
+      await axeCheck(page);
+    } finally {
+      await cleanup(page, household);
+    }
   });
 
   test("/home system-status drawer open has no automated WCAG A/AA violations", async ({ page, isMobile }) => {
     test.skip(isMobile, "the status drawer is desk-only chrome; the pocket dialect has no drawers");
-    await signIn(page, "/home");
-    await settleHome(page);
-    await page.locator("#edge-health").click();
-    await expect(page.locator("#edge-health")).toHaveAttribute("aria-expanded", "true");
-    await axeCheck(page);
+    const household = await arriveWithHousehold(page);
+    try {
+      await page.locator("#edge-health").click();
+      await expect(page.locator("#edge-health")).toHaveAttribute("aria-expanded", "true");
+      await axeCheck(page);
+    } finally {
+      await cleanup(page, household);
+    }
   });
 
   // The chart-key drawer only exists once the reader belongs to a household

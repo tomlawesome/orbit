@@ -595,9 +595,10 @@
   @keyframes settle{from{opacity:0}to{opacity:1}}
 
   @media (prefers-reduced-motion: reduce){
-    /* #841: the health dot's breathe and the waiting inbox orb's were the
-       two continuous animations this block missed. */
-    .sky .far,.sky .near,.nstar .glint,.rotor,.handle i,.inbox-orb.waiting svg{animation:none!important}
+    /* #841: the health dot's breathe, the waiting inbox orb's, and the
+       overdue/amber bodies' `.breathe` on the dial were the continuous
+       animations this block missed. */
+    .sky .far,.sky .near,.nstar .glint,.rotor,.handle i,.inbox-orb.waiting svg,.breathe{animation:none!important}
   }
 
 /* ---- #453: the labelled sky's quiet centre and the one question -------- */
