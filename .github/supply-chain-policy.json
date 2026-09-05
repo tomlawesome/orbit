@@ -327,6 +327,83 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-53612",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-53613",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-53614",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-76642",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78408",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78409",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78410",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2025-61726",
       "package": "stdlib",
       "installedVersion": "v1.24.6",
