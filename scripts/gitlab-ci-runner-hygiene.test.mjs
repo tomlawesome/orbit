@@ -66,3 +66,30 @@ describe("in-job Docker daemons clean up after themselves (#823)", () => {
     expect(anchor).toContain('rm -rf "$RUNNER_TEMP" || :');
   });
 });
+
+// #829: a working branch's first push and its merge request, opened seconds
+// later, each ran a full pipeline for the same commit, doubling Orbit's share
+// of the shared runner. Pushes start a pipeline on the long-lived branches
+// only; everything else is tested by its merge request.
+describe("a push starts a pipeline on the long-lived branches only (#829)", () => {
+  const workflow = jobBlocks().get("workflow");
+  const rules = [...workflow.matchAll(/^ {4}- if: (.*)$(?:\n {6}when: (\S+))?/gmu)].map((match) => ({
+    condition: match[1],
+    when: match[2] ?? "always",
+  }));
+  const pushGuard = rules.find(({ condition }) => condition.startsWith('$CI_PIPELINE_SOURCE == "push" &&'));
+
+  it("refuses a push pipeline on any other branch", () => {
+    expect(pushGuard, "the push guard is missing").toBeDefined();
+    expect(pushGuard.when).toBe("never");
+    for (const branch of ["dev", "preview", "main"]) {
+      expect(pushGuard.condition).toContain(`$CI_COMMIT_BRANCH != "${branch}"`);
+    }
+    expect(pushGuard.condition).toContain("$CI_COMMIT_BRANCH !~ /^hotfix\\//");
+  });
+
+  it("keeps the catch-all for pipelines started by hand, after the guard", () => {
+    const catchAll = rules.findIndex(({ condition, when }) => condition === "$CI_COMMIT_BRANCH" && when === "always");
+    expect(catchAll).toBeGreaterThan(rules.indexOf(pushGuard));
+  });
+});
