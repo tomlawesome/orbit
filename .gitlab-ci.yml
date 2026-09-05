@@ -86,6 +86,12 @@ workflow:
 
 default:
   interruptible: true
+  # Runner lanes (#830). `big` is the 8 CPU / 18 GB runner (two jobs at a
+  # time); `light` is the 2 CPU / 2 GB runner (three at a time). The big
+  # runner is moving to reject untagged jobs, so every job needs one of the
+  # two -- this covers everything that does not already ask for the
+  # dedicated `orbit-build` runner by tag (see .privileged_runner below).
+  tags: [big]
   # Infrastructure only: a job that failed on its own merits is never retried.
   # These three are what this GitLab still accepts without a deprecation
   # warning for the stuck-or-timed-out case; `stuck_or_timeout_failure` and
@@ -376,6 +382,9 @@ variables:
 # artifact every later job reads.
 classify:
   stage: classify
+  # Light lane (#830): a git/node script over history and lockfile
+  # snapshots -- no pnpm install, no build.
+  tags: [light]
   extends: .node
   timeout: 10m
   rules:
@@ -1337,8 +1346,9 @@ promote_stable:
 # schedule, one place to look when an expected merge request does not appear.
 # What it watches, how it groups and why is in renovate.json at the repo root.
 #
-# No `tags:`. Nothing in this job talks to a Docker daemon, so it stays on the
-# shared untagged runner and never queues behind `orbit-build`.
+# Light lane (#830). Nothing in this job talks to a Docker daemon, so it
+# never needs to queue behind `orbit-build`; it does not build or test
+# either, which is what the light lane is for.
 #
 # Two CI/CD variables the owner creates under Settings > CI/CD > Variables.
 # Mask both. Leave both unprotected unless the schedule's branch is itself
@@ -1375,6 +1385,7 @@ promote_stable:
 # The instruction goes on the merge request body instead.
 renovate:
   stage: maintenance
+  tags: [light]
   # Pinned by digest, the way every other image here is. The digest is the
   # docker-content-digest header from a manifest HEAD against
   # registry-1.docker.io, not a tag listing.
