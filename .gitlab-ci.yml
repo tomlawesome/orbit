@@ -520,8 +520,13 @@ base_image:
 # not share it. Node comes from the image's own Alpine repository -- the three
 # policy scripts are Node standard library only, which is why the GitHub job
 # installs no dependencies either.
+#
+# Short scanners run on the light lane (2 CPU / 2 GB, three at a time) so they
+# stop holding a big-lane slot. If one is ever killed for memory, move it back
+# to big -- owner decision, ai/agent-infra#3 (2026-09-05).
 supply_chain_source:
   stage: policy
+  tags: [light]
   image:
     name: $TRIVY_IMAGE
     entrypoint: [""]
@@ -581,6 +586,7 @@ supply_chain_source:
 # replacement: that has been `supply_chain_source` above all along.
 licence_policy:
   stage: policy
+  tags: [light]
   extends: .node
   timeout: 10m
   rules:
