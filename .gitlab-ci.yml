@@ -274,6 +274,24 @@ variables:
   done
   docker info > /dev/null 2>&1 || { echo "the in-job Docker daemon did not start"; cat /tmp/dockerd.log; exit 1; }
 
+# The last step of every after_script that started the daemon above. /builds
+# outlives the job, so the daemon's image store -- a whole Orbit stack, 3 to
+# 4 GB -- would otherwise sit in the slot's cache volume until the next such
+# job replaces it, once per slot; on 2026-09-05 the runner host ran out of disk
+# (#823). Stop the daemon before removing its store, or containerd's metadata
+# is left pointing at nothing. Every line tolerates failure: after_script
+# reports its own status, and a cleanup error must not stand in for the job's.
+.docker_in_job_teardown: &docker_in_job_teardown |
+  if [ -f /var/run/docker.pid ]; then
+    kill "$(cat /var/run/docker.pid)" 2>/dev/null || :
+    for _ in $(seq 1 60); do
+      kill -0 "$(cat /var/run/docker.pid 2>/dev/null)" 2>/dev/null || break
+      sleep 1
+    done
+  fi
+  rm -rf "${CI_BUILDS_DIR:-/builds}/.orbit-docker-data" || :
+  if [ -n "${RUNNER_TEMP:-}" ]; then rm -rf "$RUNNER_TEMP" || :; fi
+
 # The client half only, for a job that keeps its own image and takes the daemon
 # from the dind service instead of starting one. Not the `docker.io
 # docker-compose-v2` pair above: those are Ubuntu package names, and $NODE_IMAGE
@@ -856,6 +874,8 @@ supply_chain_image:
       TESTED_IMAGE_TAG="$ORBIT_CI_IMAGE" \
       ORBIT_REVISION="$CI_COMMIT_SHA" \
         bash scripts/ci/scan-image.sh
+  after_script:
+    - *docker_in_job_teardown
   artifacts:
     name: orbit-supply-chain-image
     paths:
@@ -936,6 +956,7 @@ smoke:
         bash scripts/ci/show-stack-diagnostics.sh || true
       fi
       bash scripts/ci/stop-acceptance-stack.sh || true
+    - *docker_in_job_teardown
   artifacts:
     name: orbit-playwright-report
     paths:
@@ -1096,6 +1117,7 @@ acceptance:
       GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
       REFUSAL_OUTPUT="$(orbit_output refusal_output)" \
         bash scripts/ci/clean-up-installer.sh || true
+    - *docker_in_job_teardown
 
 # Live evidence for the repair journeys (#532): a real stack, broken for real,
 # recovered by scripts/repair.sh. Same daemon placement as `smoke`, and for the
@@ -1133,6 +1155,8 @@ repair_journeys:
     - docker load --input image.tar
     - docker tag "$ORBIT_CI_IMAGE" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
     - bash scripts/test-repair-journeys.sh
+  after_script:
+    - *docker_in_job_teardown
 
 # --- publish -----------------------------------------------------------------
 
