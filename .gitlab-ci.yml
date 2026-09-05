@@ -1165,7 +1165,9 @@ launcher_install_compat:
   stage: acceptance
   extends: .privileged_runner
   image: $PLAYWRIGHT_IMAGE
-  timeout: 20m
+  # The live suite's own -timeout is 30m; the job must outlive it so a slow
+  # run fails with the suite's report rather than GitLab's.
+  timeout: 35m
   needs:
     - job: classify
       artifacts: true
@@ -1212,16 +1214,30 @@ launcher_install_compat:
     - go version
     - mkdir -p "$CI_PROJECT_DIR/.orbit-launcher-bin"
     - (cd launcher && go build -o "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher" ./cmd/orbit-launcher)
-    # The candidate installer, by exact commit, through GitLab's own
-    # repository-files API rather than raw.githubusercontent.com: this
-    # project is private and this commit has not been mirrored to GitHub, so
-    # the workflow's public raw URL has no equivalent here that would serve
-    # it. CI_JOB_TOKEN authenticates the read within this same pipeline.
+    # The candidate installer is this commit's own scripts/install.sh. The
+    # GitHub workflow pointed the launcher at raw.githubusercontent.com; this
+    # project is private and an MR commit is never mirrored, so the checkout
+    # itself is served instead (see below).
     - |
       set -eu
       export ORBIT_LAUNCHER_LIVE_BINARY="$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
       export ORBIT_LAUNCHER_LIVE_RAW_LOG="$CI_PROJECT_DIR/.orbit-launcher-live-raw.log"
-      export ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="${CI_SERVER_URL}/api/v4/projects/${CI_PROJECT_ID}/repository/files/scripts%2Finstall.sh/raw?ref=${CI_COMMIT_SHA}&job_token=${CI_JOB_TOKEN}"
+      # The candidate installer is this commit's own scripts/install.sh, served
+      # from the checkout on loopback. Fetching it from the repository-files API
+      # would need a job token in the URL, and the launcher's raw pty log --
+      # kept as an artifact below -- may echo the URL it was given.
+      node -e '
+        const http = require("node:http"), fs = require("node:fs");
+        const script = fs.readFileSync(process.argv[1]);
+        http.createServer((req, res) => {
+          if (req.url !== "/install.sh") { res.writeHead(404); return res.end(); }
+          res.writeHead(200, { "content-type": "text/x-shellscript" }); res.end(script);
+        }).listen(0, "127.0.0.1", function () { fs.writeFileSync(process.argv[2], String(this.address().port)); });
+      ' "$CI_PROJECT_DIR/scripts/install.sh" "$CI_PROJECT_DIR/.installer-port" &
+      for _ in $(seq 1 50); do [ -s "$CI_PROJECT_DIR/.installer-port" ] && break; sleep 0.1; done
+      [ -s "$CI_PROJECT_DIR/.installer-port" ] || { echo "installer server did not start"; exit 1; }
+      export ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="http://127.0.0.1:$(cat "$CI_PROJECT_DIR/.installer-port")/install.sh"
+      curl -fsS "$ORBIT_LAUNCHER_INSTALL_SCRIPT_URL" | cmp - "$CI_PROJECT_DIR/scripts/install.sh"
       # install.sh and the image it verifies are one generation; see the
       # workflow's own comment on ORBIT_CHANNEL for why this must be the
       # pre-release channel rather than the promoted `latest` image.
