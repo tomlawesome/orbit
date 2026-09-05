@@ -9,8 +9,14 @@
 # what this script says (#801 step 5).
 #
 # It refuses, rather than guessing, when:
-#   - no push pipeline exists for the commit and ref within the wait budget;
-#   - the newest such pipeline finished with anything other than success;
+#   - no push pipeline exists for the commit and ref within the wait budget,
+#     or one exists but is still failed when the budget runs out. A failed
+#     pipeline is retried in place on GitLab (same id, new status), so this
+#     script keeps polling a failed pipeline until the deadline instead of
+#     giving up on the first failure, printing a line each poll while it
+#     waits;
+#   - the newest such pipeline is canceled or skipped -- both deliberate, so
+#     it fails immediately rather than waiting out the deadline for them;
 #   - publish_gitlab or supply_chain_image did not succeed in it;
 #   - the evidence names another commit, ref or pipeline, is malformed, points
 #     outside the project's own registry, or is older than seven days.
@@ -22,7 +28,9 @@
 #   GITLAB_REGISTRY     registry host the evidence must point into
 #   ORBIT_COMMIT        the commit being published (GITHUB_SHA)
 #   ORBIT_REF           the branch it was pushed to (GITHUB_REF_NAME)
-#   ORBIT_WAIT_MINUTES  optional; how long to wait for GitLab, default 120
+#   ORBIT_WAIT_MINUTES  optional; how long to wait for GitLab, default 120,
+#                       including waiting out a failed pipeline for a retry
+#   ORBIT_POLL_SECONDS  optional; seconds between polls, default 60
 #   ORBIT_EVIDENCE_DIR  optional; where to write the fetched files,
 #                       default .orbit-supply-chain
 #
@@ -44,6 +52,8 @@ fail() { printf 'gitlab-await-tested-image: %s\n' "$1" >&2; exit 1; }
 
 wait_minutes="${ORBIT_WAIT_MINUTES:-120}"
 [[ "$wait_minutes" =~ ^[0-9]+$ ]] || fail "ORBIT_WAIT_MINUTES is not a whole number: ${wait_minutes}"
+poll_seconds="${ORBIT_POLL_SECONDS:-60}"
+[[ "$poll_seconds" =~ ^[0-9]+$ ]] || fail "ORBIT_POLL_SECONDS is not a whole number: ${poll_seconds}"
 evidence_dir="${ORBIT_EVIDENCE_DIR:-.orbit-supply-chain}"
 project="${GITLAB_API_URL%/}/projects/${GITLAB_PROJECT_ID}"
 
@@ -66,15 +76,17 @@ while :; do
   status="$(jq -r '.[0].status // empty' <<< "$listing")"
   case "$status" in
     success) break ;;
-    failed|canceled|skipped)
+    canceled|skipped)
       fail "GitLab pipeline ${pipeline_id} for ${ORBIT_COMMIT} on ${ORBIT_REF} ended ${status}; nothing to publish" ;;
+    failed)
+      printf 'GitLab pipeline %s is failed; waiting until the deadline for a retry.\n' "$pipeline_id" ;;
     "")
       printf 'No push pipeline for %s on %s yet; waiting.\n' "$ORBIT_COMMIT" "$ORBIT_REF" ;;
     *)
       printf 'GitLab pipeline %s is %s; waiting.\n' "$pipeline_id" "$status" ;;
   esac
-  ((SECONDS < deadline)) || fail "gave up after ${wait_minutes} minutes waiting for a successful GitLab pipeline for ${ORBIT_COMMIT} on ${ORBIT_REF}"
-  sleep 60
+  ((SECONDS < deadline)) || fail "gave up after ${wait_minutes} minutes waiting for a successful GitLab pipeline for ${ORBIT_COMMIT} on ${ORBIT_REF}; a failed pipeline can be retried on GitLab, and the GitHub run re-run with \`gh run rerun <id> --failed\`"
+  sleep "$poll_seconds"
 done
 pipeline_url="$(jq -r '.[0].web_url' <<< "$listing")"
 printf 'GitLab pipeline %s succeeded: %s\n' "$pipeline_id" "$pipeline_url"
