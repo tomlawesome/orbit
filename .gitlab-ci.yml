@@ -1214,29 +1214,31 @@ publish_gitlab:
     expire_in: 90 days
     when: on_success
 
-# Promotes a tested `preview` digest to a stable release (#821). Manual only,
-# and only reachable from a pipeline on `main` or a pipeline you start
-# yourself (`web`/`api`) carrying a `VERSION` variable -- there is no
-# automatic trigger, because a release version is a human decision this
+# Promotes a tested `preview` digest to a stable release (#821), the same
+# thing .github/workflows/promote-container.yml did before GitLab was the
+# source of truth: an operator supplies the accepted PREVIEW_DIGEST (not a
+# typed version -- the version comes from the image itself, verified the same
+# way that workflow always verified it) and this job does the rest. Manual
+# only, and only reachable from a pipeline on `main` or a pipeline you start
+# yourself (`web`/`api`) carrying a `PREVIEW_DIGEST` variable -- there is no
+# automatic trigger, because accepting a release is a human decision this
 # pipeline cannot infer from a push.
 #
 # GHCR stays the public image source; the GitLab registry keeps only
 # `:sha-*`/`:preview` (see publish_gitlab above). So this job never touches
 # registry.tomlawson.io -- it reads and retags ghcr.io/tomlawesome/orbit by
-# digest with `crane`, then creates the matching annotated tag here on
-# GitLab. The push mirror carries that tag to GitHub, where
-# release-on-tag.yml turns it into a GitHub release; nothing on GitHub judges
-# the promotion itself.
+# digest with plain `docker`/`docker buildx imagetools` (GHCR is the only
+# registry involved, so there is nothing crane does here that docker does
+# not), then creates the matching annotated tag here on GitLab. The push
+# mirror carries that tag to GitHub, where release-on-tag.yml turns it into a
+# GitHub release; nothing on GitHub judges the promotion itself.
 #
 # All the logic lives in scripts/ci/promote-stable.sh so it can be unit
-# tested (scripts/promote-stable.test.mjs) against stub crane/curl/git --
-# this job only installs crane and calls it.
-#
-# crane is a single static binary with no package-manager entry, so it is
-# fetched and checksummed by hand, the same way TRIVY_IMAGE and the other
-# pins in this file are: an upstream release moving out from under this job
-# would be an unreviewed change to what publishes a stable release, not a
-# routine build finding.
+# tested (scripts/promote-stable.test.mjs) against stub docker/git/curl --
+# this job only installs what the script needs and calls it. `.dind` for the
+# same reason `build_image` and `publish_gitlab` need it: talking to a Docker
+# daemon (`docker buildx imagetools`, `docker login`) needs one, and its
+# image (docker:29-cli) carries no package manager entries for git or node.
 #
 # Two masked, protected CI/CD variables the owner creates (docs/releasing.md
 # has the exact scopes):
@@ -1246,32 +1248,30 @@ publish_gitlab:
 #                          scope, named `release-tagging`.
 #
 # Neither is ever a command-line argument: promote-stable.sh pipes the GHCR
-# token to `crane auth login` on stdin and sends the GitLab token to curl as
-# a header file. No CI_JOB_TOKEN either -- that token is scoped to this
+# token to `docker login` on stdin and sends the GitLab token to curl as a
+# header file. No CI_JOB_TOKEN either -- that token is scoped to this
 # pipeline and cannot be trusted with a release action the same way a
 # purpose-made, ownable credential can.
 promote_stable:
   stage: publish
-  image: $NODE_IMAGE
+  extends: .dind
   interruptible: false
   variables:
-    CRANE_VERSION: "0.22.1"
-    CRANE_SHA256: "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0"
+    # Stable Git tags are the version calculator's durable baseline, and
+    # merge-base/tree-diff evidence needs main, preview and hotfix/* history
+    # -- the same reason build_image sets this for calculate-version.mjs.
+    GIT_DEPTH: 0
   rules:
     - *not_scheduled
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual
       allow_failure: false
-    - if: ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $VERSION
+    - if: ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $PREVIEW_DIGEST
       when: manual
       allow_failure: false
   script:
-    - |
-      set -eu
-      curl -fsSL -o /tmp/crane.tar.gz \
-        "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
-      printf '%s  /tmp/crane.tar.gz\n' "$CRANE_SHA256" | sha256sum -c -
-      tar -xzf /tmp/crane.tar.gz -C /usr/local/bin crane
+    - *apk_retry
+    - apk_add bash git nodejs curl
     - bash scripts/ci/promote-stable.sh
 
 # --- maintenance -------------------------------------------------------------
