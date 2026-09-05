@@ -521,7 +521,7 @@ base_image:
 # policy scripts are Node standard library only, which is why the GitHub job
 # installs no dependencies either.
 #
-# Short scanners run on the light lane (2 CPU / 2 GB, three at a time) so they
+# Short scanners run on the light lane (4 CPU / 6 GB, four at a time) so they
 # stop holding a big-lane slot. If one is ever killed for memory, move it back
 # to big -- owner decision, ai/agent-infra#3 (2026-09-05).
 supply_chain_source:
@@ -1552,7 +1552,7 @@ promote_stable:
 # Big lane (#830). Nothing in this job talks to a Docker daemon, so it never
 # queues behind `orbit-build`. It stays off the light lane because an npm
 # lockfile update runs pnpm over the whole monorepo inside the job, which
-# can pass the light lane's 2 GB. Same choice as mikroview and orbit-launcher.
+# is unmeasured on the light lane. Same choice as mikroview and orbit-launcher.
 #
 # Two CI/CD variables the owner creates under Settings > CI/CD > Variables.
 # Mask both. Leave both unprotected unless the schedule's branch is itself
