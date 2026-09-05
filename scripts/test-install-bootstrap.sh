@@ -256,7 +256,11 @@ fi
 grep -q '^phase=complete .*state=completed' "$workdir/install.log" ||
   fail "terminal phase=complete event missing from the install log"
 
-pinned="$(grep '^ORBIT_IMAGE=' "$target/.env-orbit" | head -1)"
+# grep -m1 against the file directly, not `| head -1` (issue #809): under
+# set -e pipefail, head -1 exiting after the first match can SIGPIPE grep
+# while it still has lines queued, aborting the script with no message
+# instead of reporting the persisted value.
+pinned="$(grep -m1 '^ORBIT_IMAGE=' "$target/.env-orbit")"
 pinned="${pinned#ORBIT_IMAGE=}"
 [[ -n "$pinned" ]] || fail "no ORBIT_IMAGE was persisted"
 case "$pinned" in
