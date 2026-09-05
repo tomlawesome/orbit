@@ -58,7 +58,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .relaybar a:hover{border-color:var(--accent);color:var(--accent-text)}
 
 .inbox-page .group{margin-top:32px}
-.inbox-page .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+.inbox-page .group h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
           color:var(--ink-faint);margin-bottom:10px;padding-left:4px}
 
 /* a receipt awaiting review: the dashed vocabulary of "not yet in orbit" */

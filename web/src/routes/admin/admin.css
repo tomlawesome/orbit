@@ -25,7 +25,7 @@ body{overflow:auto}
 .obs nav a.on{color:var(--accent-text);background:var(--panel)}
 .obs nav a:hover{color:var(--ink)}
 .pane{padding:22px 24px}
-.pane h3{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+.pane h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
          color:var(--ink-faint);margin-bottom:12px}
 .row{display:flex;align-items:center;gap:10px;font:12.5px var(--mono);color:var(--ink-mid);
      padding:9px 4px;border-bottom:1px solid var(--line-soft)}

@@ -36,7 +36,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .archive-page .facts b{color:var(--ok-text);font-weight:500}
 
 .archive-page .group{margin-top:28px}
-.archive-page .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+.archive-page .group h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
           color:var(--ink-faint);margin-bottom:10px;padding-left:4px}
 .archive-page .doc{display:flex;align-items:center;gap:15px;border-radius:14px;
      padding:13px 18px;margin-bottom:6px;border:1px solid var(--line-soft);

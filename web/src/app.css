@@ -1,0 +1,16 @@
+/*
+ * Global, cross-screen utilities that do not belong to any one design
+ * family's own stylesheet (#843).
+ */
+
+/* Visually hidden but still read by a screen reader: for headings and other
+   structure a screen needs to announce its shape even where the mockups
+   carry the equivalent text as art rather than as an element. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

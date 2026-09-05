@@ -47,7 +47,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
       border-radius:16px;padding:20px 22px}
 .mission-page .card .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
-.mission-page .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+.mission-page .card h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
 .mission-page .card .cardhead button,.mission-page .card .cardhead a{margin-left:auto;font:11px var(--mono);
       color:var(--ink-mid);background:none;border:1px solid var(--line);
       border-radius:9px;padding:6px 12px;cursor:pointer;text-decoration:none}
