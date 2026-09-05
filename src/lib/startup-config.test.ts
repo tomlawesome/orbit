@@ -66,6 +66,26 @@ describe("startup configuration", () => {
     expect(mocks.getDb).not.toHaveBeenCalled();
   });
 
+  it("names the failing rule and its remedy for an invalid session secret, never the secret itself (#717)", () => {
+    const badSecret = "not-a-valid-hex-session-secret";
+    let failure: unknown;
+    try {
+      validateStartupConfiguration({ ...baseEnvironment(), SESSION_SECRET: badSecret });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(StartupConfigurationError);
+    const issue = (failure as StartupConfigurationError).issues.find((entry) => entry.field === "authentication");
+    /*
+     * Grepping the log for the validator's own wording used to return zero
+     * matches (#717) because only the coded `field`/`code` reached it. This
+     * asserts the actual remedy text -- not just that some string exists.
+     */
+    expect(issue?.detail).toContain("64 hexadecimal characters");
+    expect(issue?.detail).toContain("openssl rand -hex 32");
+    expect(issue?.detail).not.toContain(badSecret);
+  });
+
   /*
    * The fixture harness must not be switchable on in a production Orbit
    * (#773). Until the cut it took two mistakes: nothing production ran set
