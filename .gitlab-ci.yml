@@ -1287,6 +1287,22 @@ launcher_install_compat:
             docker logs --timestamps "$c" > "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/container-$c.log" 2>&1 || :
             docker inspect --format '{{json .State}}' "$c" > "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/state-$c.json" 2>&1 || :
           done
+          # How long a probe takes here. install.sh bounds each
+          # `docker compose exec` health probe at 5 s, and every run so far
+          # waited in 8 s steps -- that bound plus its 2 s poll -- against a
+          # Postgres whose own log and Docker health said it was ready. Time
+          # the two halves separately: the daemon round trip, and the compose
+          # CLI's own start-up.
+          if docker inspect orbit-postgres > /dev/null 2>&1; then
+            started="$(date +%s.%N)"; docker exec orbit-postgres pg_isready > /dev/null 2>&1; probe_status=$?
+            printf '%s docker-exec-pg_isready status=%s seconds=%s\n' "$stamp" "$probe_status" \
+              "$(awk -v a="$started" -v b="$(date +%s.%N)" 'BEGIN { printf "%.2f", b - a }')" \
+              >> "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/probe-timing.txt" 2>&1 || :
+            started="$(date +%s.%N)"; docker compose ls > /dev/null 2>&1; probe_status=$?
+            printf '%s docker-compose-ls status=%s seconds=%s\n' "$stamp" "$probe_status" \
+              "$(awk -v a="$started" -v b="$(date +%s.%N)" 'BEGIN { printf "%.2f", b - a }')" \
+              >> "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/probe-timing.txt" 2>&1 || :
+          fi
           sleep 15
         done
       ) &
