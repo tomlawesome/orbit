@@ -274,6 +274,24 @@ variables:
   done
   docker info > /dev/null 2>&1 || { echo "the in-job Docker daemon did not start"; cat /tmp/dockerd.log; exit 1; }
 
+# The last step of every after_script that started the daemon above. /builds
+# outlives the job, so the daemon's image store -- a whole Orbit stack, 3 to
+# 4 GB -- would otherwise sit in the slot's cache volume until the next such
+# job replaces it, once per slot; on 2026-09-05 the runner host ran out of disk
+# (#823). Stop the daemon before removing its store, or containerd's metadata
+# is left pointing at nothing. Every line tolerates failure: after_script
+# reports its own status, and a cleanup error must not stand in for the job's.
+.docker_in_job_teardown: &docker_in_job_teardown |
+  if [ -f /var/run/docker.pid ]; then
+    kill "$(cat /var/run/docker.pid)" 2>/dev/null || :
+    for _ in $(seq 1 60); do
+      kill -0 "$(cat /var/run/docker.pid 2>/dev/null)" 2>/dev/null || break
+      sleep 1
+    done
+  fi
+  rm -rf "${CI_BUILDS_DIR:-/builds}/.orbit-docker-data" || :
+  if [ -n "${RUNNER_TEMP:-}" ]; then rm -rf "$RUNNER_TEMP" || :; fi
+
 # The client half only, for a job that keeps its own image and takes the daemon
 # from the dind service instead of starting one. Not the `docker.io
 # docker-compose-v2` pair above: those are Ubuntu package names, and $NODE_IMAGE
@@ -805,7 +823,12 @@ build_image:
       - image.tar
     reports:
       dotenv: build.env
-    expire_in: 1 day
+    # Only the later stages of this same pipeline `docker load` it, so it need
+    # not outlive them: at ~100 MB a run, a day's worth filled the GitLab host's
+    # disk on 2026-09-05 (#832). Four hours covers a pipeline that queues for a
+    # while behind the two build slots; GitLab keeps each branch's latest
+    # successful pipeline's artifacts regardless of this.
+    expire_in: 4 hours
 
 # The workflow's "Scan exact local image" step: Trivy against the image that
 # was built and tested rather than a rebuild of the same source, an SPDX SBOM
@@ -856,6 +879,8 @@ supply_chain_image:
       TESTED_IMAGE_TAG="$ORBIT_CI_IMAGE" \
       ORBIT_REVISION="$CI_COMMIT_SHA" \
         bash scripts/ci/scan-image.sh
+  after_script:
+    - *docker_in_job_teardown
   artifacts:
     name: orbit-supply-chain-image
     paths:
@@ -936,6 +961,7 @@ smoke:
         bash scripts/ci/show-stack-diagnostics.sh || true
       fi
       bash scripts/ci/stop-acceptance-stack.sh || true
+    - *docker_in_job_teardown
   artifacts:
     name: orbit-playwright-report
     paths:
@@ -1096,6 +1122,7 @@ acceptance:
       GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
       REFUSAL_OUTPUT="$(orbit_output refusal_output)" \
         bash scripts/ci/clean-up-installer.sh || true
+    - *docker_in_job_teardown
 
 # Live evidence for the repair journeys (#532): a real stack, broken for real,
 # recovered by scripts/repair.sh. Same daemon placement as `smoke`, and for the
@@ -1133,6 +1160,8 @@ repair_journeys:
     - docker load --input image.tar
     - docker tag "$ORBIT_CI_IMAGE" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
     - bash scripts/test-repair-journeys.sh
+  after_script:
+    - *docker_in_job_teardown
 
 # Ports .github/workflows/launcher-install-compat.yml (#819), retired because
 # GitHub receives no merge requests since the mirror flip (#801) and so never
@@ -1360,6 +1389,66 @@ publish_gitlab:
     expire_in: 90 days
     when: on_success
 
+# Promotes a tested `preview` digest to a stable release (#821), the same
+# thing .github/workflows/promote-container.yml did before GitLab was the
+# source of truth: an operator supplies the accepted PREVIEW_DIGEST (not a
+# typed version -- the version comes from the image itself, verified the same
+# way that workflow always verified it) and this job does the rest. Manual
+# only, and only reachable from a pipeline on `main` or a pipeline you start
+# yourself (`web`/`api`) carrying a `PREVIEW_DIGEST` variable -- there is no
+# automatic trigger, because accepting a release is a human decision this
+# pipeline cannot infer from a push.
+#
+# GHCR stays the public image source; the GitLab registry keeps only
+# `:sha-*`/`:preview` (see publish_gitlab above). So this job never touches
+# registry.tomlawson.io -- it reads and retags ghcr.io/tomlawesome/orbit by
+# digest with plain `docker`/`docker buildx imagetools` (GHCR is the only
+# registry involved, so there is nothing crane does here that docker does
+# not), then creates the matching annotated tag here on GitLab. The push
+# mirror carries that tag to GitHub, where release-on-tag.yml turns it into a
+# GitHub release; nothing on GitHub judges the promotion itself.
+#
+# All the logic lives in scripts/ci/promote-stable.sh so it can be unit
+# tested (scripts/promote-stable.test.mjs) against stub docker/git/curl --
+# this job only installs what the script needs and calls it. `.dind` for the
+# same reason `build_image` and `publish_gitlab` need it: talking to a Docker
+# daemon (`docker buildx imagetools`, `docker login`) needs one, and its
+# image (docker:29-cli) carries no package manager entries for git or node.
+#
+# Two masked, protected CI/CD variables the owner creates (docs/releasing.md
+# has the exact scopes):
+#
+#   GHCR_PUBLISH_TOKEN     A GHCR token scoped only to write:packages.
+#   GITLAB_RELEASE_TOKEN   A project access token, Maintainer role, `api`
+#                          scope, named `release-tagging`.
+#
+# Neither is ever a command-line argument: promote-stable.sh pipes the GHCR
+# token to `docker login` on stdin and sends the GitLab token to curl as a
+# header file. No CI_JOB_TOKEN either -- that token is scoped to this
+# pipeline and cannot be trusted with a release action the same way a
+# purpose-made, ownable credential can.
+promote_stable:
+  stage: publish
+  extends: .dind
+  interruptible: false
+  variables:
+    # Stable Git tags are the version calculator's durable baseline, and
+    # merge-base/tree-diff evidence needs main, preview and hotfix/* history
+    # -- the same reason build_image sets this for calculate-version.mjs.
+    GIT_DEPTH: 0
+  rules:
+    - *not_scheduled
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+      allow_failure: false
+    - if: ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $PREVIEW_DIGEST
+      when: manual
+      allow_failure: false
+  script:
+    - *apk_retry
+    - apk_add bash git nodejs curl
+    - bash scripts/ci/promote-stable.sh
+
 # --- maintenance -------------------------------------------------------------
 
 # Renovate, taking over from Dependabot for this host (#801 step 6). It runs
@@ -1494,6 +1583,13 @@ renovate:
 #                         which fails clearly if it is unset. Never printed.
 sidecar_pin_freshness:
   stage: maintenance
+  # Both axes go through Docker: the moved-tag check is `docker buildx
+  # imagetools inspect`, and the package axis runs each pinned image. The
+  # first scheduled run (pipeline 278) had neither daemon nor client and every
+  # lookup came back "unreachable", so the self-test rightly failed it. Same
+  # shape as `fast`: the node image keeps the script's runtime, the dind
+  # service supplies the daemon, .docker_cli the client.
+  extends: .dind_service
   image: $NODE_IMAGE
   # The package axis pulls every pinned image, and ollama and tika are large
   # (same budget as the GitHub job's timeout-minutes: 30).
@@ -1502,6 +1598,7 @@ sidecar_pin_freshness:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
   script:
+    - *docker_cli
     - |
       set -eu
       # Proves the check can fail before believing it when it passes. It
