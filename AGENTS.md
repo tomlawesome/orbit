@@ -81,10 +81,10 @@ else and covers GitHub Actions too; `.github/dependabot.yml` is gone.
   lane. Test immutable image digests, verify the exact preview source through
   `main`, and promote only the accepted digest without rebuilding it.
 - Nothing promotes to `main` before v1.3.0; #547 holds that promotion. So
-  `main` stays at v1.2.0 and is expected to be far behind. A Dependabot alert
-  or stale pin on `main` is not work: check `dev` first, and if `dev` is
-  already fixed the alert clears when v1.3.0 ships. Do not propose a promotion
-  as available work.
+  `main` stays at v1.2.0 and is expected to be far behind. A Renovate-flagged
+  stale pin on `main` is not work: check `dev` first, and if `dev` is already
+  fixed it clears when v1.3.0 ships. Do not propose a promotion as available
+  work.
 
 ## Harnesses that already exist
 

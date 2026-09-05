@@ -61,14 +61,17 @@ Dependency licences are governed separately from the full source and image
 scans. `supply-chain/licence-policy.yml` allows only the listed
 SPDX-compatible permissive or file-level reciprocal licences, and
 `scripts/ci/licence-policy.mjs` (the `licence_policy` job) checks every
-package's declared licence against it across the whole installed tree, not
-just newly introduced ones. A licence outside the allow-list blocks
-automatically. Missing or ambiguous licence metadata blocks the same way:
-there is no manual-review pass-through. There are no advisory or package
-licence exemptions for source dependencies. Any exemption must be narrow,
-justified, owned, time-bounded and linked to a tracking issue. Vulnerabilities
-are unaffected by this job; they remain governed by `supply_chain_source`
-below.
+shipped package's declared licence against it, not just newly introduced ones.
+The gate covers only what reaches the runtime image -- the Dockerfile's
+`web-deps` production dependencies and the `@fontsource*` typefaces inlined
+into the client bundle -- not build or test tooling (owner decision,
+2026-09-05): a GPL build tool does not affect the licence of what it
+produces. A licence outside the allow-list blocks automatically. Missing or
+ambiguous licence metadata blocks the same way: there is no manual-review
+pass-through. There are no advisory or package licence exemptions for shipped
+dependencies. Any exemption must be narrow, justified, owned, time-bounded and
+linked to a tracking issue. Vulnerabilities are unaffected by this job; they
+remain governed by `supply_chain_source` below.
 
 A vulnerability exception is valid only when it identifies the finding,
 package and scope, names an owner, gives a rationale, links a tracking issue
@@ -86,7 +89,15 @@ vulnerable is blocked afresh, and every entry expires on the same date. #794
 tracks retiring them; when they expire the scan goes red until they are
 removed or renewed with a reason recorded there.
 
-### Sharp/libvips v1 licence decision
+### Sharp/libvips v1 licence decision (historical; exception removed)
+
+The exception this section describes was removed from
+`supply-chain/licence-policy.yml` on 2026-09-05, alongside the scope change
+above: `sharp` and every `@img/sharp-*` platform package it names are absent
+from the installed tree entirely (no `sharp` resolves anywhere in
+`pnpm-lock.yaml`, shipped or not), so the exception matched nothing and the
+2026-10-31 review it was pending is moot. The record below is kept for
+history; nothing here is still in force.
 
 The v1 release comparison against the older `main` branch reports the
 platform packages introduced by the `sharp` 0.35.0 update because their
