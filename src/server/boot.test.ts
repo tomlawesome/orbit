@@ -135,7 +135,9 @@ describe("strict startup ordering", () => {
      test paid for transforming that graph inside its own 5 s budget: 1.1 s
      here, over 5 s when the runner shares its lane (#839). Warm the transform
      cache once, outside any test's clock; vi.resetModules() only drops the
-     evaluated instances, which cost ~20 ms to rebuild. */
+     evaluated instances, which cost ~20 ms to rebuild. The hook gets its own
+     budget because the transform itself passed 10 s on the runner (pipeline
+     483, job 3880) — a starved lane is slow, not stuck. */
   beforeAll(async () => {
     await Promise.all([
       import("./boot"),
@@ -143,7 +145,7 @@ describe("strict startup ordering", () => {
       import("@/lib/auth/observability"),
       import("@/server/maintenance-worker"),
     ]);
-  });
+  }, 60_000);
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
