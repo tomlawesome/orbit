@@ -636,8 +636,12 @@ async function runRedSelfTest({ policy, repoDir, resolveTag, only, today, write 
     );
     return 0;
   }
+  // The status alone hides the cause -- pipeline 278 read "unreachable" and
+  // nothing about the missing Docker client behind it -- so the axis's own
+  // summary, which carries the error message, goes on the line as well.
+  const detail = axis?.summary ? ` (${axis.summary})` : "";
   write(
-    `sidecar pins: self-test FAILED. The check did not fire on a deliberately stale pin for ${entry.tag}; it reported '${axis?.status ?? "nothing"}'. Do not trust a green run from this check until that is fixed.\n`,
+    `sidecar pins: self-test FAILED. The check did not fire on a deliberately stale pin for ${entry.tag}; it reported '${axis?.status ?? "nothing"}'${detail}. Do not trust a green run from this check until that is fixed.\n`,
   );
   return 1;
 }
