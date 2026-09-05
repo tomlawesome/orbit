@@ -76,6 +76,11 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
           background:var(--ink-faint);transition:left .2s,background .2s}
 .helm-page .toggle[aria-pressed=true]{border-color:var(--ok)}
 .helm-page .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
+/* Browser alerts (#763) are the one switch that cannot answer instantly: the
+   browser's own permission prompt sits in the middle of the sequence. Held
+   here while it does, because a switch that moves before permission is given
+   would be the lie the rest of this file avoids. */
+.helm-page .toggle[disabled]{opacity:.55;cursor:progress}
 
 /* What a control says when it could not do what it looked like it did — the
    inbox's .mail-problem, in the helm's own type. Never on the happy path, so
