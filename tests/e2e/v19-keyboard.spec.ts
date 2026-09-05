@@ -469,9 +469,14 @@ async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.press("Tab"); // f-ref — left blank, optional
   await page.keyboard.press("Tab"); // f-date
   expect(await page.evaluate(() => document.activeElement?.id), "create: expected the key-date field next").toBe("f-date");
+  /* Tab still reaches the field by keyboard alone; setting its value goes
+     through Playwright's supported `fill()` rather than typed digits, since
+     a native `<input type="date">` reads typed digits in whatever segment
+     order the OS/browser locale uses (this Chromium reads DD-MM-YYYY, not
+     the MM-DD-YYYY assumed by an earlier draft), making a typed sequence a
+     locale bug in the test, not a thing this file should assert about. */
   const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-  const [y, m, d] = dueDate.split("-");
-  await page.keyboard.type(`${m}${d}${y}`);
+  await page.locator("#f-date").fill(dueDate);
   await expect(page.locator("#f-date")).toHaveValue(dueDate);
 
   await page.keyboard.press("Tab"); // f-recur select — left at its default (yearly)
@@ -496,7 +501,23 @@ async function openHouseholdFromHome(page: Page) {
 }
 
 /** Reaches /settings the way a reader would: home's account panel, its
- *  Settings link. Shared so both settings tests below drive it fresh. */
+ *  Settings link. Shared so both settings tests below drive it fresh.
+ *
+ * settings/+page.svelte renders its `<h1>` immediately but gates every card
+ * (You, Your sky, Reminders, Your relay, household list, sign out
+ * everywhere) behind `{#if view}`, and `view` is only set once
+ * `onMount`'s own `readSettingsScreen()` fetch resolves — confirmed by
+ * instrumenting a throwaway page: right after the URL becomes `/settings`
+ * only 11 interactive controls exist in the DOM (the heading and chrome);
+ * ~500ms later, once `view` has arrived, that is 34. Waiting only for the
+ * URL (as this helper used to) let `auditTabOrder`'s `collectVisible` snapshot
+ * that empty-ish moment as "expected", so every one of those 23 real,
+ * genuinely-reachable controls came back later as Tab visiting something
+ * "the screen does not show as visible" — not a `collectVisible` bug (rect,
+ * `visibility`, scrolling all check out fine once `view` has loaded; see
+ * the diagnostic in the #846 follow-up), and not a real reachability defect
+ * either. Waiting for `.cards` — the wrapper `{#if view}` itself renders —
+ * closes the race. */
 async function openSettingsFromHome(page: Page) {
   await page.goto("/home");
   await settled(page);
@@ -505,6 +526,7 @@ async function openSettingsFromHome(page: Page) {
   await tabTo(page, { tag: "A", textIncludes: "Settings" }, { screen: "home account panel" });
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -610,9 +632,9 @@ test("item page: actions and the back link work by keyboard", async ({ page }) =
     await tabTo(page, { selector: "#a-due" }, { screen: "item page reschedule panel" });
     const dueField = await currentFocus(page);
     expect(dueField?.focusVisible, "item page: the reschedule date field has no visible focus indicator").toBe(true);
+    // See fillCreateForm's #f-date: `fill()`, not typed digits, sidesteps the locale-dependent segment order.
     const newDue = new Date(Date.now() + 40 * 86400000).toISOString().slice(0, 10);
-    const [y, m, d] = newDue.split("-");
-    await page.keyboard.type(`${m}${d}${y}`); // en-US date-input segment order: MM DD YYYY
+    await page.locator("#a-due").fill(newDue);
     await tabTo(page, { selector: ".panel .btn-primary" }, { screen: "item page reschedule panel" });
     await page.keyboard.press("Enter");
     await expect(page.locator(".panel")).toBeHidden();
