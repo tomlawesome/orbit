@@ -127,15 +127,16 @@ maintained in the
 static linking, the packaged binaries, or their licence metadata requires a
 new review rather than relying on this decision.
 
-The same release comparison could not infer licences for four updated direct
-package declarations. Their installed, versioned package manifests were
-manually checked on 2026-07-31:
+The same release comparison could not infer licences for a set of updated
+direct package declarations. Their installed, versioned package manifests were
+manually checked on 2026-07-31; `next` and `eslint-config-next` have since left
+the dependency tree entirely (neither is in any `package.json` or in
+`pnpm-lock.yaml`) and are dropped from the table below rather than kept as a
+record of a package that is no longer here:
 
 | Package | Version | Declared licence |
 | --- | --- | --- |
 | `drizzle-orm` | 0.45.2 | Apache-2.0 |
-| `eslint-config-next` | 16.2.11 | MIT |
-| `next` | 16.2.11 | MIT |
 | `nodemailer` | 9.0.3 | MIT-0 |
 
 These declarations are already inside the global allow-list and require no
