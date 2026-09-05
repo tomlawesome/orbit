@@ -90,6 +90,24 @@ describe("launcher install compatibility gate", () => {
     expect(job).toContain("allow_failure: false");
   });
 
+  it("collects Docker and installer diagnostics as an artifact regardless of outcome (#819 follow-up)", () => {
+    const job = launcherCompatJob();
+
+    // The live suite tears its own compose stack down on the way out, so the
+    // after_script must gather evidence without depending on the job's own
+    // exit code.
+    expect(job).toContain("mkdir -p .orbit-launcher-diagnostics");
+    expect(job).toContain("docker info > .orbit-launcher-diagnostics/docker-info.txt");
+    expect(job).toContain("docker compose -p \"$project\" logs --no-color --timestamps");
+    expect(job).toContain("docker logs --timestamps \"$container\"");
+    expect(job).toContain("df -h > .orbit-launcher-diagnostics/df-h.txt");
+    expect(job).toContain("cp /tmp/dockerd.log .orbit-launcher-diagnostics/dockerd.log");
+    expect(job).toContain(".orbit-launcher-diagnostics/");
+    // The whole artifacts: block this after_script output belongs to must be
+    // collected win or lose, the same way the raw log already is.
+    expect(job).toMatch(/artifacts:\s*\n\s*name: orbit-launcher-compat-live-raw-log\s*\n\s*paths:\s*\n\s*- \.orbit-launcher-live-raw\.log\*\s*\n\s*- \.orbit-launcher-diagnostics\/\s*\n\s*expire_in: 7 days\s*\n\s*when: always/u);
+  });
+
   it("classifies scripts/install.sh and its own job definition as launcher-compat scope", async () => {
     const { touchesLauncherInstallCompat } = await import("./classify-changed-paths.mjs");
 
