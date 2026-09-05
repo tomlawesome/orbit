@@ -328,6 +328,11 @@
   <div class="card">
     <h3>Reminders</h3>
     <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed="true" aria-label="Email reminders" onclick="flip(this)"><i></i></button></div>
+    <!-- Browser alerts (#763, ratified 2026-09-03): the same reminder arriving
+         on a phone that is not currently looking at Orbit. Per device, and the
+         label says so — a push subscription belongs to one browser profile, so
+         there is no account-wide state this row could honestly show. -->
+    <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed="false" aria-label="Browser alerts on this device" onclick="flip(this)"><i></i></button></div>
     <div class="kv"><span>first warning</span><b>14 days before closest approach</b></div>
     <div class="kv"><span>final warning</span><b>3 days before</b></div>
     <div class="kv"><span>outbound mail</span><span><b class="on">configured</b> · by your administrator</span></div>
