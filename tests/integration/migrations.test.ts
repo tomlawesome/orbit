@@ -272,6 +272,36 @@ describe("PostgreSQL migration evidence", () => {
     expect(BASELINE_MIGRATION_TAG).toBe("0017_imap_recipient_alias_index");
   });
 
+  it("lets only one invitation per household and address stay open, and bounds send_error to its classes (#481)", async () => {
+    const database = await createMigrationTestDatabase("invitations");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+    const insert = (digest: string) => database.client.unsafe(
+      `INSERT INTO "household_invitations" ("household_id", "email", "token_digest", "expires_at")
+       VALUES ($1, $2, $3, now() + interval '14 days')`,
+      [householdId, "invited@example.invalid", digest],
+    );
+
+    await expect(insert("a".repeat(64))).resolves.toBeDefined();
+    /* The partial unique index is the "resend replaces" rule in the database:
+       a second OPEN invitation to the same address cannot exist at all. */
+    await expect(insert("b".repeat(64))).rejects.toThrow(/household_invitation_open_once/u);
+    /* Withdrawn, and the address is free again — the audit row survives. */
+    await database.client.unsafe(`UPDATE "household_invitations" SET "revoked_at" = now()`);
+    await expect(insert("c".repeat(64))).resolves.toBeDefined();
+
+    /* send_error carries a bounded class, never a provider message. */
+    await expect(
+      database.client.unsafe(`UPDATE "household_invitations" SET "send_error" = 'smtp_rejected'`),
+    ).resolves.toBeDefined();
+    await expect(
+      database.client.unsafe(`UPDATE "household_invitations" SET "send_error" = '550 no such user invited@example.invalid'`),
+    ).rejects.toThrow(/household_invitation_send_error_valid/u);
+  });
+
   it("reports an invalid next migration without recording it", async () => {
     const database = await createMigrationTestDatabase("failure");
     databases.push(database);
