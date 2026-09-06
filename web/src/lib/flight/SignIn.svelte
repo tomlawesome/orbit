@@ -129,7 +129,11 @@
     /** @type {ReturnType<typeof setTimeout> | undefined} */
     let pollTimer;
 
-    /** Shows a state other than the door: fixed words, styled to match it. */
+    /**
+     * Shows a state other than the door: fixed words, styled to match it.
+     * @param {Parameters<typeof doorMessageFor>[0]} state
+     * @param {string | null} [contactAddress]
+     */
     function showState(state, contactAddress) {
       const message = doorMessageFor(state, contactAddress);
       statePrimary = message.primary;
