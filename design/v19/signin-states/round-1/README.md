@@ -36,8 +36,10 @@ returns with its ratified 10px rise at dusk-farewell tempo.
 **B — on the horizon** (`b-on-the-horizon.html`). The ring is left as the
 create path already shows it — word alone, no button — and the message is
 written on the planet's edge in the flight's void-inscription voice
-(letterspaced small caps, gold glow, dark seat for legibility over the
-bloom). The condition belongs to the world, not to a missing control.
+(letterspaced small caps, gold glow). Both lines sit in the inscription's
+own shade — a soft pool of the void behind the words, as a cut inscription
+holds its shadow — keeping them AA-legible over the bloom. The condition
+belongs to the world, not to a missing control.
 Waking: the inscription's glow pulses with the sun; ready: the words set
 below the horizon and the pill rises in the ring.
 
@@ -65,7 +67,10 @@ real pressable gate behind identical pixels.
 - Screenshots: every direction × every state (incl. mid-waking and
   post-recovery) × desktop 1440×900 and mobile 390×844 captured and
   reviewed; fixed before this commit: grain tile defaulting to 300×150,
-  B's subline washing into the sun bloom (dark seat + brighter ink), D's
+  B's subline washing into the sun bloom (the first cut — halo shadows +
+  brighter ink — still measured 3.3–3.9:1 at the bloom's peak; now a soft
+  shade pool behind the inscription + #cfd3e4 ink, measured ≥7.4:1 in
+  every B state at 1280×800 and 390×844), D's
   sweep drawing square corners half a pixel off the border, demo-bar
   overflow on mobile.
 - `prefers-reduced-motion`: animations off, staging kept; starting still
