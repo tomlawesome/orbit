@@ -42,6 +42,9 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   imap_notification_kind: ["receipt", "review_ready"],
   item_status: ["active", "expired", "cancelled", "archived"],
   join_request_status: ["pending", "approved", "declined"],
+  mail_in_secret_kind: ["imap_password", "alias_key", "oauth_refresh_token"],
+  mail_in_provider_profile: ["mailcow", "gmail", "outlook", "other"],
+  mail_in_auth_method: ["password", "xoauth2"],
   membership_role: ["owner", "member"],
   theme_mode: ["system", "light", "dark"],
   reviewed_intake_operation_status: ["processing", "pending_attachment", "completed", "recoverable", "failed"],
@@ -82,6 +85,8 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   reviewed_intake_operations: ["id", "actor_user_id", "source", "household_id", "section_id", "action", "target_item_id", "item_id", "request_sha256", "result_id", "expected_document", "attachment_state", "document_id", "status", "failure_code", "completed_at", "created_at", "updated_at"],
   imap_ingestion_staging_objects: ["id", "message_id", "lease_token", "storage_key", "status", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
   imap_notification_deliveries: ["id", "message_id", "user_id", "kind", "status", "attempts", "next_attempt_at", "locked_at", "lease_token", "sent_at", "failure_code", "created_at", "updated_at"],
+  mail_in_secrets: ["id", "kind", "ciphertext", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "created_by_user_id", "created_at", "updated_at"],
+  mail_in_mailbox: ["singleton", "id", "host", "port", "account_user", "mailbox", "tls_server_name", "provider_profile", "auth_method", "trusted_recipient_header", "poll_seconds", "enabled", "verification_state", "verified_at", "password_secret_id", "alias_key_secret_id", "version", "created_at", "updated_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -268,6 +273,11 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   reviewed_intake_operations_household_id_households_id_fk: foreign("reviewed_intake_operations", ["household_id"], "households", ["id"], "cascade"),
   reviewed_intake_operations_target_item_id_items_id_fk: foreign("reviewed_intake_operations", ["target_item_id"], "items", ["id"], "set_null"),
   reviewed_intake_operations_document_id_documents_id_fk: foreign("reviewed_intake_operations", ["document_id"], "documents", ["id"], "set_null"),
+  mail_in_secrets_pkey: primary("mail_in_secrets", ["id"]),
+  mail_in_secrets_created_by_user_id_users_id_fk: foreign("mail_in_secrets", ["created_by_user_id"], "users", ["id"], "set_null"),
+  mail_in_mailbox_pkey: primary("mail_in_mailbox", ["singleton"]),
+  mail_in_mailbox_password_secret_id_mail_in_secrets_id_fk: foreign("mail_in_mailbox", ["password_secret_id"], "mail_in_secrets", ["id"], "set_null"),
+  mail_in_mailbox_alias_key_secret_id_mail_in_secrets_id_fk: foreign("mail_in_mailbox", ["alias_key_secret_id"], "mail_in_secrets", ["id"], "set_null"),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;

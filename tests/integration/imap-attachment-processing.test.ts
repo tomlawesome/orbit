@@ -8,11 +8,15 @@ import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
   cleanupImapStagingAttempt,
   commitStagedAttachment,
-  getImapIngestionConfig,
   imapRecipientAlias,
   runImapIngestionCycle,
   setImapClientFactoryForTests,
 } from "@/server/imap-ingestion";
+// ADR-0017 slice 1 (orbit#742): `getImapIngestionConfig` from
+// `@/server/imap-ingestion` is now database-backed. This fixture only needs
+// a plain ImapIngestionConfig built from env-shaped values, which is exactly
+// what the renamed pure parser still does.
+import { parseImapIngestionConfigFromEnvironment as getImapIngestionConfig } from "@/server/mail-in/core/config";
 import { holdImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";

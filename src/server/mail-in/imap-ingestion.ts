@@ -23,20 +23,22 @@ import {
   type ImapRotationState,
 } from "./core/imap-rotation";
 import {
-  getImapIngestionConfig,
   imapProviderConnectionOptions,
   imapProviderConfigCommitment,
   imapAttachmentRetryDelayMs,
   type ImapIngestionConfig,
 } from "./core/config";
+import { getImapIngestionConfig, MailInCredentialLockedError } from "./mailbox-config";
 
 // Re-exported so `@/server/imap-ingestion` (now a deprecated stub pointing
-// here) keeps every existing import path working churn-free. See
-// src/server/mail-in/core/config.ts for the implementations.
-export { getImapIngestionConfig, imapProviderConnectionOptions, imapProviderConfigCommitment, imapAttachmentRetryDelayMs };
+// here) keeps every existing import path working churn-free.
+// `getImapIngestionConfig` is database-backed as of ADR-0017 slice 1
+// (orbit#742, src/server/mail-in/mailbox-config.ts) — no environment
+// fallback. The others are still the pure helpers in core/config.ts.
+export { getImapIngestionConfig, imapProviderConnectionOptions, imapProviderConfigCommitment, imapAttachmentRetryDelayMs, MailInCredentialLockedError };
 export type { ImapIngestionConfig };
 
-export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_pending" | "available" | "provider_unavailable" | "unsafe_input" | "retrying" | "exhausted" | "retention_backlog";
+export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_pending" | "available" | "provider_unavailable" | "unsafe_input" | "credential_locked" | "retrying" | "exhausted" | "retention_backlog";
 
 /**
  * How long a mail-in receipt (and its held suggestion) waits for review
@@ -86,9 +88,16 @@ export function getImapProviderPreflightState(config?: ImapIngestionConfig, smtp
   };
 }
 
-/** Verifies both independent providers before a worker is allowed to poll. */
+/**
+ * Verifies both independent providers before a worker is allowed to poll.
+ * `config` must already be resolved by the caller (ADR-0017 slice 1):
+ * resolving it is now a database read that can fail closed with
+ * `MailInCredentialLockedError`, which this function has no bounded way to
+ * turn into a preflight status — the caller (the poll loop, or the
+ * administrator operations view) is what reports `credential_locked`.
+ */
 export async function verifyImapIngestionProviders(
-  config = getImapIngestionConfig(),
+  config: ImapIngestionConfig,
   smtp = getNotificationWorkerConfig(),
   dependencies: ImapProviderVerificationDependencies = {},
 ): Promise<ImapProviderPreflightState> {
@@ -131,13 +140,13 @@ export async function verifyImapIngestionProviders(
 }
 
 /** A deterministic opaque forwarding alias; the user ID, key, and generation never appear in the address. */
-export function imapRecipientAlias(userId: string, config = getImapIngestionConfig()): string {
+export function imapRecipientAlias(userId: string, config: ImapIngestionConfig): string {
   if (!config.enabled) throw new Error("IMAP ingestion is not configured");
   return deriveImapRecipientAlias(userId, config.recipientDomain, config.aliasCurrent);
 }
 
 /** Constant-time comparison for the provider-injected delivery recipient value. */
-export function matchesImapRecipientAlias(value: string, userId: string, config = getImapIngestionConfig()): boolean {
+export function matchesImapRecipientAlias(value: string, userId: string, config: ImapIngestionConfig): boolean {
   if (!config.enabled) return false;
   return matchImapRecipientAliasGeneration(value, userId, config.recipientDomain, config.aliasCurrent)
     || Boolean(config.aliasPrevious && matchImapRecipientAliasGeneration(value, userId, config.recipientDomain, config.aliasPrevious));
@@ -824,7 +833,7 @@ async function processImapAttachments(
  * not parse, retain, attach, create, or merge household data; later review
  * work must explicitly choose a household and approve a document draft.
  */
-export async function runImapIngestionCycle(config = getImapIngestionConfig()): Promise<void> {
+export async function runImapIngestionCycle(config: ImapIngestionConfig): Promise<void> {
   if (!config.enabled) return;
   await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
@@ -951,10 +960,16 @@ export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
     try {
       let currentConfig = config;
       try {
-        currentConfig ??= getImapIngestionConfig();
-      } catch {
-        workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
-        log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
+        currentConfig ??= await getImapIngestionConfig();
+      } catch (error) {
+        // The database read and decrypt already logged and audited
+        // mail_in_credential_locked with no secret or stack trace
+        // (src/server/mail-in/mailbox-config.ts); this just records the
+        // worker-visible health class (ADR-0017 decision 1).
+        workerState.__orbitImapWorkerLastErrorCode = error instanceof MailInCredentialLockedError ? "credential_locked" : "unsafe_input";
+        if (!(error instanceof MailInCredentialLockedError)) {
+          log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
+        }
         return;
       }
       let smtp: NotificationWorkerConfig;
@@ -997,7 +1012,7 @@ export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
 }
 
 /** Establishes a bounded TLS-only connection without listing or fetching mail. */
-export async function verifyImapProvider(config = getImapIngestionConfig()): Promise<"ready" | "imap_unconfigured" | "imap_unavailable"> {
+export async function verifyImapProvider(config: ImapIngestionConfig): Promise<"ready" | "imap_unconfigured" | "imap_unavailable"> {
   if (!config.enabled) return "imap_unconfigured";
   const client = createImapClient(config, true);
   try {

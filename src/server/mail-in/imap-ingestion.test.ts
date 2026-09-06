@@ -2,7 +2,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getImapIngestionConfig, imapAttachmentRetryDelayMs, imapProviderConfigCommitment, imapProviderConnectionOptions, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
+import { imapAttachmentRetryDelayMs, imapProviderConfigCommitment, imapProviderConnectionOptions, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
+// ADR-0017 slice 1 (orbit#742): `getImapIngestionConfig` from `./imap-ingestion`
+// is now the database-backed runtime config. These fixtures only need a
+// plain ImapIngestionConfig built from env-shaped values, which is exactly
+// what the renamed pure parser still does.
+import { parseImapIngestionConfigFromEnvironment as getImapIngestionConfig } from "./core/config";
 import { getNotificationWorkerConfig } from "../notification-worker";
 import { deriveImapRecipientAlias } from "./core/imap-recipient";
 
