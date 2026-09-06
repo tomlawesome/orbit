@@ -14,32 +14,51 @@ export type TextSize = (typeof textSizes)[number];
  */
 export type UrgencyPalette = "classic" | "themed";
 
-/** The four v19 theme packs (issue #325), replacing the old five-colourway
- *  x display-mode matrix. Token values for each pack live in
- *  src/app/theme-tokens.css. */
-export const themePacks = ["starchart", "afterdark", "atlas", "dawn"] as const;
+/** The v19 theme packs this schema validates (issue #325), replacing the old
+ *  five-colourway x display-mode matrix. Token values for each pack live in
+ *  web/src/lib/packs.css. Atlas was here until #865 removed it along with
+ *  its tokens; this list is intentionally its own (smaller) thing from the
+ *  full front-end roster in web/src/lib/theme.js — the front end is not yet
+ *  wired to write through this schema (see the INTERIM note in
+ *  web/src/app.html), so widening it to match is separate work. */
+export const themePacks = ["starchart", "afterdark", "dawn"] as const;
 export type ThemePack = (typeof themePacks)[number];
+
+/** After dark is the default everywhere (owner, 2026-09-06, #865): a stored
+ *  preference or session value naming a theme outside `themePacks` — a
+ *  removed pack, atlas being the first, or anything else — resolves here. */
+export const DEFAULT_THEME_PACK: ThemePack = "afterdark";
 
 export const themePackInfo: Record<ThemePack, { name: string; description: string; swatches: readonly [string, string, string] }> = {
   starchart: { name: "Star-chart", description: "Deep indigo sky, warm gold wayfinding", swatches: ["#060b1c", "#d8b45a", "#4ade80"] },
   afterdark: { name: "After Dark", description: "Near-black, cool electric blue", swatches: ["#05070d", "#7dd3fc", "#4ade80"] },
-  atlas: { name: "Atlas", description: "Warm parchment, bronze ink", swatches: ["#efe9db", "#b4842c", "#1e7a45"] },
   dawn: { name: "Dawn", description: "Cool paper white, clear sky blue", swatches: ["#eef1f6", "#1f7ac2", "#178a4c"] },
 };
 
 /**
+ * A theme id stored somewhere this schema does not gate — today, only
+ * `userPreferences.themeId` read back by `readSession` (#865) — made safe to
+ * hand to a client: itself when it is still a valid pack, the default
+ * otherwise. An upgraded instance holding a stale value (atlas, or the
+ * column's own pre-#325 default) is not broken by it.
+ */
+export function themePackOrDefault(id: string | null | undefined): ThemePack {
+  return (themePacks as readonly string[]).includes(id ?? "") ? (id as ThemePack) : DEFAULT_THEME_PACK;
+}
+
+/**
  * Maps a legacy (pre-#325) colourway id + display mode to the nearest of
- * the four v19 theme packs. Documented mapping:
+ * the current v19 theme packs. Documented mapping:
  *  - "after-dark"               -> afterdark  (name match, cool accent, dark)
  *  - "coast"   + light/system   -> dawn        (cool blue accent, light)
  *  - "coast"   + dark           -> afterdark   (cool blue accent, dark)
- *  - "verdant" + light/system   -> atlas       (warm accent, light)
- *  - "verdant" + dark           -> starchart   (warm accent, dark)
- *  - "ember"   + light/system   -> atlas       (warm accent, light)
- *  - "ember"   + dark           -> starchart   (warm accent, dark)
+ *  - "verdant" (either mode)    -> starchart   (warm accent; atlas, the
+ *                                  light-mode nearest match, left the
+ *                                  roster at #865)
+ *  - "ember"   (either mode)    -> starchart   (warm accent, same reason)
  *  - "berry"   + light/system   -> dawn        (cool-leaning accent, light)
  *  - "berry"   + dark           -> afterdark   (cool-leaning accent, dark)
- *  - anything unrecognised      -> starchart   (the new default pack)
+ *  - anything unrecognised      -> afterdark   (the default pack, #865)
  */
 export function legacyToThemePack(colourway: string, mode: string): ThemePack {
   const dark = mode === "dark";
@@ -49,13 +68,13 @@ export function legacyToThemePack(colourway: string, mode: string): ThemePack {
     case "coast":
       return dark ? "afterdark" : "dawn";
     case "verdant":
-      return dark ? "starchart" : "atlas";
+      return "starchart";
     case "ember":
-      return dark ? "starchart" : "atlas";
+      return "starchart";
     case "berry":
       return dark ? "afterdark" : "dawn";
     default:
-      return "starchart";
+      return DEFAULT_THEME_PACK;
   }
 }
 
