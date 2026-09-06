@@ -70,7 +70,18 @@ the first push (#829). `gl-pipeline-run` still starts one on any branch.
 Renovate replaces Dependabot on this host: `renovate.json` at the repo root,
 the `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
 Mondays 05:00 London, ref `dev`, variable `RENOVATE=true`). It runs nowhere
-else and covers GitHub Actions too; `.github/dependabot.yml` is gone.
+else and covers GitHub Actions too; `.github/dependabot.yml` is gone. It
+deliberately excludes the Orbit base image (`renovate.json`'s
+`matchPackageNames` entry says why); `base_image_repin` below owns that one.
+
+The `base_image_repin` job (#708) detects the pinned Orbit base image being
+behind and opens a merge request re-pinning it, sourced from
+`ai/orbit-base-image`'s own `publish` job artifact rather than an
+independently resolved tag. It needs its own schedule (variable
+`BASE_IMAGE_REPIN=true`) and its own token, `BASE_REPIN_TOKEN` -- see the
+job's comment in `.gitlab-ci.yml` for the exact grant. It never rebuilds
+anything, never pushes to `dev`/`preview`/`main`, and never merges; it pushes
+`chore/base-image-repin` and opens or refreshes one merge request from it.
 
 ## Delivery workflow
 
@@ -140,6 +151,11 @@ Check the list before building a test rig or handing a check to the owner.
   between compose and policy, a moved tag, and stale packages inside a current
   pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync`
   re-pins both places after a Renovate bump
+- `scripts/ci/repin-base-image.sh` — base image freshness (#708): compares
+  the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact
+  and, on a mismatch, re-pins every location and opens a merge request;
+  `--red` proves the comparison fires, `--dry-run` stops before any commit,
+  push or merge-request call
 
 ## Traps when running things locally
 
