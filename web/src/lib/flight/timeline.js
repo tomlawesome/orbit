@@ -72,13 +72,17 @@ const tourAt = instrumentAt + ASCENT_BASE.instrument + ASCENT_BASE.tourGap;  /* 
  * where they were:
  *
  *     9400   the labelled sky's chrome arrives
- *     9900   the count fades IN on the settling sky, boxless (0.8s)
- *    11900   it fades OUT again (0.8s) — ~2.8s of screen time in all
- *    12800   and the question arrives in the space it left
+ *     9700   the count fades IN on the settling sky, boxless (0.45s)
+ *    12900   it fades OUT again (0.45s) — ~4.55s of screen time in all
+ *    13800   and the question arrives in the space it left
+ *
+ * RETIMED (#870, owner): the gap before the count starts, the fade itself
+ * (arrival.css's `.nf .disc` transition) and the hold all moved; the fade OUT
+ * before the question stands, unchanged.
  */
 const newDwell = 3000;
-const countGap = 500;
-const countHold = 2000;
+const countGap = 300;
+const countHold = 3200;
 const countFade = 900;
 const newInstrumentAt = ASCENT_BASE.condensed + newDwell;  /*  9400 */
 const countOn = newInstrumentAt + countGap;                /*  9900 */
