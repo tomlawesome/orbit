@@ -198,6 +198,37 @@
          (+page.svelte's `.account`/`#account`), laid out as a bottom sheet
          here — see `.msheet` below and pocket.behaviour.js for the wiring. -->
     <button class="morb" id="morb" aria-expanded="false" aria-controls="maccount" title="Menu">{initials}</button>
+    <!-- #852: the account menu as a bottom sheet — same contents as the desk
+         `.account` (+page.svelte lines ~779-810), same wiring (pocket.behaviour.js
+         imports setSwatch/packOf from ./swatches.js, the same functions
+         home.behaviour.js's swatches use, and drives sign-out the way
+         Chrome.svelte's sub-screen orb does: two taps, the second one revoking
+         the session before it navigates). Only one of `#sheet`/`#maccount` is
+         ever open at a time — pocket.behaviour.js enforces that. It sits here,
+         straight after `#morb`, for the same reason the desk `.account` follows
+         its orb: one Tab from the open toggle must land inside the sheet
+         (tests/e2e/support/keyboard.ts auditLightDismiss). It is position:fixed,
+         so its place in the DOM changes nothing visually. -->
+    <div class="msheet" id="maccount" role="region" aria-label="Account and menu">
+      <div class="grab"></div>
+      <div class="mwho"><b>{view?.user?.displayName ?? ""}</b><span>{roleLine}</span></div>
+      <nav>
+        <a href={resolve("/inbox")}>Inbox</a>
+        <a href={resolve("/settings")}>Settings</a>
+        <a href={resolve("/administration")}>Administration</a>
+      </nav>
+      <div class="mswatches" role="group" aria-label="Theme">
+        <span>THEME</span>
+        <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
+        <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
+        <button style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
+        <button style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
+        <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
+                aria-pressed="false"></button>
+      </div>
+      <button class="msignout" id="msignout">sign out →</button>
+      <div class="msignout-problem" id="msignout-problem" hidden></div>
+    </div>
   </div>
   {#if view?.emptySky}
   <!-- §11 (#453): the pocket's labelled sky is a list — each system a ring
@@ -303,33 +334,6 @@
     <button data-sheet-close>close</button>
   </div>
   <a class="amend" id="sh-amend" href={resolve("/home")} hidden>review &amp; amend →</a>
-</div>
-<!-- #852: the account menu as a bottom sheet — same contents as the desk
-     `.account` (+page.svelte lines ~779-810), same wiring (pocket.behaviour.js
-     imports setSwatch/packOf from ./swatches.js, the same functions
-     home.behaviour.js's swatches use, and drives sign-out the way
-     Chrome.svelte's sub-screen orb does: two taps, the second one revoking
-     the session before it navigates). Only one of `#sheet`/`#maccount` is
-     ever open at a time — pocket.behaviour.js enforces that. -->
-<div class="msheet" id="maccount" role="region" aria-label="Account and menu">
-  <div class="grab"></div>
-  <div class="mwho"><b>{view?.user?.displayName ?? ""}</b><span>{roleLine}</span></div>
-  <nav>
-    <a href={resolve("/inbox")}>Inbox</a>
-    <a href={resolve("/settings")}>Settings</a>
-    <a href={resolve("/administration")}>Administration</a>
-  </nav>
-  <div class="mswatches" role="group" aria-label="Theme">
-    <span>THEME</span>
-    <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
-    <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
-    <button style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
-    <button style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
-    <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
-            aria-pressed="false"></button>
-  </div>
-  <button class="msignout" id="msignout">sign out →</button>
-  <div class="msignout-problem" id="msignout-problem" hidden></div>
 </div>
 {#each view?.suggestions ?? [] as s (s.id)}
   <!-- The suggestion sheet's copy, rendered by Svelte and cloned into the
