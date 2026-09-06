@@ -15,7 +15,13 @@ import { expect, test, type Page } from "@playwright/test";
 async function signIn(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  /* Not a fixed destination: #840 sends a session with no household of its
+     own to the arrival at `/` instead of /home, and this account may have
+     none at this point in the run. The fixture below creates one and the
+     test navigates to /home explicitly afterwards, so only the session
+     needs to be real here. */
+  const session = await page.request.get("/api/auth/session");
+  expect(session.ok()).toBe(true);
 }
 
 async function sessionHeaders(page: Page) {
