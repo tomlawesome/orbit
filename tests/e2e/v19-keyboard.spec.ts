@@ -4,9 +4,7 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
 import {
   auditLightDismiss,
   auditTabOrder,
-  collectVisible,
   currentFocus,
-  dismissTourIfShown,
   fillCreateForm,
   installKeyboardAudit,
   settled,
