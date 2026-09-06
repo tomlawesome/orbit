@@ -39,12 +39,26 @@
      * belongs to nothing yet gets — the same flight to the millisecond, the
      * ratified 3s dwell instead of the trimmed 2s, and the count's own three
      * beats after it. The host draws both; this only says when.
+     *
+     * "invited" (#871) flies the identical newcomer beats — the host's own
+     * INVITED stage feeds `Newcomer.svelte` the same sky and count a plain
+     * newcomer gets — and differs at exactly one beat: see `onbelong` below.
      */
     landing = "home",
     /* the landing: the host reveals its own surface here (bare sky) */
     onland = () => {},
     /* the instrument has arrived and the journey is over */
     onsettled = () => {},
+    /*
+     * WHERE THE CHOOSER WOULD STAND (#871). On landing "newcomer" this beat is
+     * drawn — `belong` arrives as a body class and the host's own markup shows
+     * or hides behind it. On landing "invited" there is no chooser to show at
+     * any frame, drawn or hidden, so the class is never added and this fires
+     * instead: the host's one hook to move on to the household the invitation
+     * named, by the same road landing "home" already takes there (a launch
+     * marker and a navigation) — this component draws no second camera move.
+     */
+    onbelong = () => {},
     /* the descent has finished: the reader is on the dusk */
     onfarewell = () => {},
   } = $props();
@@ -179,11 +193,12 @@
           b.classList.add("instrument");
           onsettled();
           break;
-        /* THE COUNT (the newcomer's landing only): a moment on the settled
-           sky, boxless, and then the question in the space it left. */
+        /* THE COUNT (the newcomer's and the invited reader's landing alike): a
+           moment on the settled sky, boxless, and then the question — or,
+           landing "invited", the move — in the space it left. */
         case "countOn": b.classList.add("counting"); break;
         case "countOff": b.classList.remove("counting"); break;
-        case "belong": b.classList.add("belong"); break;
+        case "belong": if (landing === "invited") onbelong(); else b.classList.add("belong"); break;
       }
     };
   }
@@ -251,7 +266,9 @@
     subtitleText = subtitle;
     const pinned = typeof at === "number";
     if (pinned) body().classList.add("pinned");
-    const newcomer = landing === "newcomer";
+    /* "invited" flies the newcomer's own beats too (see the prop's own note):
+       only landing "home" gets the plain ascent. */
+    const newcomer = landing !== "home";
     if (reduced()) {
       cancelTimeline = runTimeline(
         newcomer ? newcomerAscentBeatsReduced() : ascentBeatsReduced(),

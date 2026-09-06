@@ -122,7 +122,12 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
   const link = await waitForInvitationLink(NEWCOMER_EMAIL, HOUSEHOLD);
   expect(link).toMatch(/\/invite\//u);
 
-  const newcomerContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  // #871: redemption now lands on the arrival at `/` -- the newcomer's own
+  // climb, sky and count -- before moving on to `/home`. Reduced motion
+  // collapses that to a beat rather than a wait, so this journey's own
+  // assertion (a member ends up on their household) stays exactly as fast
+  // and exactly as it read before that changed.
+  const newcomerContext = await browser.newContext({ ignoreHTTPSErrors: true, reducedMotion: "reduce" });
   const newcomerPage = await newcomerContext.newPage();
   try {
     await newcomerPage.goto(link);
@@ -137,6 +142,69 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
     const joined = workspace.households.find((one) => one.id === created.id);
     expect(joined, "the invited household is not in the newcomer's own workspace").toBeTruthy();
     expect(joined?.canManage).toBe(false);
+  } finally {
+    await newcomerContext.close();
+  }
+});
+
+test("an invited reader's arrival never draws the chooser: the sky moves to the household instead (#871)", async ({ page, browser }) => {
+  test.setTimeout(180_000);
+
+  await establishInstanceAdmin(browser);
+
+  await signInAs(page, OWNER_ACCOUNT);
+  const invitedHousehold = `${HOUSEHOLD} (invited landing)`;
+  const created = await createHousehold(page, invitedHousehold);
+  households.track(created);
+  seeded = true;
+
+  const headers = await sessionHeaders(page);
+  const sendResponse = await page.request.post(`/api/households/${created.id}/invitations`, {
+    headers,
+    data: { email: NEWCOMER_EMAIL },
+  });
+  expect(sendResponse.ok(), `invitation send failed: ${sendResponse.status()}`).toBe(true);
+
+  const link = await waitForInvitationLink(NEWCOMER_EMAIL, invitedHousehold);
+  expect(link).toMatch(/\/invite\//u);
+
+  /* Reduced motion, deliberately: `.nf .belong` never renders REGARDLESS of
+     motion (Newcomer.svelte leaves it out of the DOM entirely for INVITED --
+     see its own note), so this is for speed and determinism, not to dodge a
+     race the product itself does not have. */
+  const newcomerContext = await browser.newContext({ ignoreHTTPSErrors: true, reducedMotion: "reduce" });
+  const newcomerPage = await newcomerContext.newPage();
+  try {
+    await newcomerPage.goto(link);
+    await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT }).click();
+
+    // The redemption's own redirect target (#871): the arrival, not /home
+    // directly -- this is the newcomer's landing, playing for a reader whose
+    // household was already decided.
+    await expect(newcomerPage).toHaveURL(/\/$/, { timeout: 30_000 });
+
+    // NO CHOOSER, AT ANY FRAME: not merely hidden -- absent from the DOM for
+    // the entire time this reader is on this surface, which is what "not
+    // rendered then hidden" (#871's own rule) means in a running browser.
+    await expect(newcomerPage.locator(".nf .belong")).toHaveCount(0);
+
+    // THE COUNT STILL SHOWS: this reader's own household is one of the
+    // systems the universe answers with (`listVisibleHouseholds` does not
+    // exclude it), so the boxless count is a real, positive number -- not
+    // asserted exactly, because the shared instance's total household count
+    // is not this file's to pin (other specs make and sweep their own).
+    const countText = await newcomerPage.locator(".nf .disc .big").textContent();
+    expect(Number(countText)).toBeGreaterThan(0);
+
+    // THE MOVE: the sky lands the reader on their own household, by the same
+    // road any arriving member already takes -- no second landing invented.
+    await expect(newcomerPage).toHaveURL(/\/home$/, { timeout: 15_000 });
+    // and the chooser stays gone for good measure: this surface draws none.
+    await expect(newcomerPage.locator(".nf .belong")).toHaveCount(0);
+
+    const workspace = await workspaceOf(newcomerPage);
+    const joined = workspace.households.find((one) => one.id === created.id);
+    expect(joined, "the invited household is not in the invited reader's own workspace").toBeTruthy();
   } finally {
     await newcomerContext.close();
   }
