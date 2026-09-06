@@ -18,7 +18,7 @@
  * written against it. Zero-specificity, so every rule below still wins on the
  * margins it sets deliberately.
  */
-:where(#formlayer, #formlayer *, .nf, .nf *){box-sizing:border-box;margin:0}
+:where(#formlayer, #formlayer *, .nf, .nf *, .bigring, .bigring *){box-sizing:border-box;margin:0}
 
 /* ── THE LOGIN CHROME IS GONE WHILE THE CARD SHOWS ────────────────────────
    §15, fourth pass, owner verbatim: "Login button still there, but we must
