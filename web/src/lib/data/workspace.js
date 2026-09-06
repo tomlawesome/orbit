@@ -1160,7 +1160,12 @@ export async function readRelay() {
  * leaked address needs. The answer is the same shape `readRelay` returns,
  * carrying the NEW address for the member to save.
  *
- * @param {"rotate" | "cut_off"} action
+ * `pause` and `resume` (ADR-0017 slice 5, #746) go through the same endpoint
+ * and the same rule: the session names the member, the body names only what to
+ * do. Paused, mail addressed to them is recorded and held; resuming stages all
+ * of it exactly once.
+ *
+ * @param {"rotate" | "cut_off" | "pause" | "resume"} action
  * @returns {Promise<Relay>}
  */
 export async function rotateRelay(action) {

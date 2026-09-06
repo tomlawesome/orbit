@@ -41,6 +41,10 @@ export function reviewInboxState(status: string, failureCode: string | null | un
     && attachmentTransferFailureCodes.has(failureCode ?? "");
   if (status === "pending_review") return { classification: "ready", canApprove: true, canDiscard: true, message: "Ready for your review." };
   if (status === "processing" || status === "approving") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Orbit is still preparing this private review." };
+  /* ADR-0017 slice 5 (#746): the reader paused their own collection, so this
+     arrived and was deliberately left alone. Saying so is the point — a held
+     message that looked "unavailable" would read as something going wrong. */
+  if (status === "held") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Collection is paused. This will be prepared when you turn it back on." };
   if (canRetryAttachmentTransfer) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents." };
   if (status === "recoverable") return { classification: "retry", canApprove: false, canDiscard: true, message: "Private cleanup is waiting to finish. You can retry discard." };
   if (status === "failed" && failureCode === "legacy_review_item") return { classification: "cleanup", canApprove: false, canDiscard: true, message: "This older review can only finish private cleanup." };

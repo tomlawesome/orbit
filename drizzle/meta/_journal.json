@@ -246,6 +246,13 @@
       "when": 1788134400000,
       "tag": "0035_mail_in_sender_addresses",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1788220800000,
+      "tag": "0036_mail_in_held_receipts",
+      "breakpoints": true
     }
   ]
 }
