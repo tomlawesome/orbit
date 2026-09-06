@@ -169,19 +169,30 @@ while [[ "$TEST_OIDC_PORT" == "$TEST_SMTP_PORT" ]]; do
 done
 export TEST_OIDC_PORT
 
-# The app's own port and the two ports just selected must be free before
+# The invitation journey (#481) reads its own mail back out of GreenMail over
+# IMAPS rather than SMTP-injecting it, so it needs a third host-published
+# port alongside the two above -- same reasoning, same pattern.
+export TEST_IMAPS_PORT="${TEST_IMAPS_PORT:-$(free_port)}"
+while [[ "$TEST_IMAPS_PORT" == "$TEST_SMTP_PORT" || "$TEST_IMAPS_PORT" == "$TEST_OIDC_PORT" ]]; do
+  TEST_IMAPS_PORT="$(free_port)"
+done
+export TEST_IMAPS_PORT
+
+# The app's own port and the three ports just selected must be free before
 # anything starts -- refuse clearly rather than fail deep inside
-# `compose up` or hang waiting for health. TEST_SMTP_PORT/TEST_OIDC_PORT are
-# freshly chosen above, so this is normally a formality; it still guards an
-# explicit caller override and the narrow race between selection and use.
+# `compose up` or hang waiting for health. TEST_SMTP_PORT/TEST_OIDC_PORT/
+# TEST_IMAPS_PORT are freshly chosen above, so this is normally a formality;
+# it still guards an explicit caller override and the narrow race between
+# selection and use.
 for port_check in "${TEST_SMTP_PORT}:GreenMail SMTP (TEST_SMTP_PORT)" \
   "${TEST_OIDC_PORT}:the disposable OIDC provider (TEST_OIDC_PORT)" \
+  "${TEST_IMAPS_PORT}:GreenMail IMAPS (TEST_IMAPS_PORT)" \
   "${app_port}:the Orbit application"; do
   port="${port_check%%:*}"
   label="${port_check#*:}"
   port_free "$port" || fail "port ${port} (${label}) is already in use -- likely a real Orbit deployment on this host. Stop it before running the local acceptance suite."
 done
-log "using TEST_SMTP_PORT=${TEST_SMTP_PORT} TEST_OIDC_PORT=${TEST_OIDC_PORT}"
+log "using TEST_SMTP_PORT=${TEST_SMTP_PORT} TEST_OIDC_PORT=${TEST_OIDC_PORT} TEST_IMAPS_PORT=${TEST_IMAPS_PORT}"
 
 # The renamed containers (docker-compose.local-e2e.yml) must not already
 # exist under a different project; a name collision there would mean this

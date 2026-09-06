@@ -59,9 +59,15 @@ export const TOUR_STOPS = [
     target: ".sun-link, .minisys",
     phone: false,
     example: false,
+    /* Second line rewritten for EVERYONE (#481, ratified Q45). An invitee
+       arrives inside a household without having chosen it, so the tour is
+       where they learn more are possible — but the old line only described
+       the sky, and this one says what to do with it. It is how joining works
+       today (home's ask-to-join veil), it is true for every reader, and it
+       needs no separate invitee script. */
     copy: [
       "That's your sun, at centre — your household, always here.",
-      "The rest of the sky holds systems you don't belong to, dimmed by distance.",
+      "The rest of the sky holds systems you don't belong to — tap one to ask to join.",
     ],
   },
   {
