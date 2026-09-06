@@ -88,4 +88,6 @@ performs the edits and is the record of exactly what changed.
 
 ## Verdicts
 
-Awaiting round 2.
+**Round 2 is dead** (owner, 2026-09-06): *"Round 2, these are even worse to be
+honest."* The verdict came with a design rather than a preference, which round
+3 builds. Superseded by round 3.
