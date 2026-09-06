@@ -595,12 +595,19 @@ export const imapNotificationDeliveries = pgTable("imap_notification_deliveries"
 ]);
 
 /** Generation-aware per-user aliases. Legacy prototype digests are retained
- * only as explicitly inactive rows and are never eligible for lookup. */
+ * only as explicitly inactive rows and are never eligible for lookup.
+ *
+ * Since ADR-0017 slice 3 (orbit#744) `generation` is the owning user's own
+ * counter, not the instance's, and this table is the whole lookup authority:
+ * `alias_key_secret_id` records which `mail_in_secrets` row of kind
+ * `alias_key` derived the digest, so a row still verifies after the
+ * administrator's emergency key rotation replaces the instance key. */
 export const imapRecipientAliases = pgTable("imap_recipient_aliases", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   generation: integer("generation").notNull(),
   aliasSha256: text("alias_sha256").notNull(),
+  aliasKeySecretId: uuid("alias_key_secret_id").references(() => mailInSecrets.id, { onDelete: "set null" }),
   status: imapRecipientAliasStatus("status").notNull().default("active"),
   activeUntil: timestamp("active_until", { withTimezone: true }),
   ...auditColumns,
@@ -611,20 +618,31 @@ export const imapRecipientAliases = pgTable("imap_recipient_aliases", {
   check("imap_recipient_alias_generation_valid", sql`${table.generation} > 0 OR ${table.status} = 'legacy_inactive'`),
 ]);
 
-/** Database-authoritative singleton for monotonic alias rotation handover. */
-export const imapRecipientRotationState = pgTable("imap_recipient_rotation_state", {
-  id: integer("id").primaryKey().default(1),
-  currentGeneration: integer("current_generation").notNull(),
-  currentCommitment: text("current_commitment").notNull(),
+/**
+ * One relay per user (ADR-0017 decision 2, slice 3, orbit#744), replacing the
+ * instance-wide `imap_recipient_rotation_state` singleton it retires.
+ *
+ * Generations are this user's own monotonic counter: exactly one current, at
+ * most one previous with an explicit expiry, never lowered and never reused.
+ * `version` carries the same optimistic-concurrency discipline as
+ * `instance_maintenance`, and every user-initiated transition is an UPDATE
+ * predicated on `user_id = $self AND version = $expected` — the sibling
+ * invariant is that no statement on that path has a wider predicate.
+ */
+export const mailInRelays = pgTable("mail_in_relays", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  currentGeneration: integer("current_generation").notNull().default(1),
   previousGeneration: integer("previous_generation"),
   previousExpiresAt: timestamp("previous_expires_at", { withTimezone: true }),
-  previousCommitment: text("previous_commitment"),
+  /** Set here in slice 3, given its receipt-time behaviour in slice 5 (#746). */
+  ingestPausedAt: timestamp("ingest_paused_at", { withTimezone: true }),
+  rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
   ...auditColumns,
 }, (table) => [
-  check("imap_recipient_rotation_state_singleton", sql`${table.id} = 1`),
-  check("imap_recipient_rotation_state_current_valid", sql`${table.currentGeneration} > 0`),
-  check("imap_recipient_rotation_state_previous_valid", sql`${table.previousGeneration} IS NULL OR (${table.previousGeneration} > 0 AND ${table.previousGeneration} <> ${table.currentGeneration})`),
-  check("imap_recipient_rotation_state_previous_pair", sql`(${table.previousGeneration} IS NULL) = (${table.previousExpiresAt} IS NULL) AND (${table.previousGeneration} IS NULL) = (${table.previousCommitment} IS NULL)`),
+  check("mail_in_relay_current_valid", sql`${table.currentGeneration} > 0`),
+  check("mail_in_relay_previous_valid", sql`${table.previousGeneration} IS NULL OR (${table.previousGeneration} > 0 AND ${table.previousGeneration} < ${table.currentGeneration})`),
+  check("mail_in_relay_previous_pair", sql`(${table.previousGeneration} IS NULL) = (${table.previousExpiresAt} IS NULL)`),
 ]);
 
 /** Durable idempotency/result state for an explicit reviewed approval. This is

@@ -76,8 +76,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   sessions: ["id", "user_id", "token_hash", "active_household_id", "expires_at", "rotated_at", "created_at", "user_agent", "last_seen_at"],
   user_preferences: ["user_id", "theme_mode", "theme_id", "text_size", "urgency_palette", "email_notifications", "push_notifications", "first_warning_days", "final_warning_days", "tour_seen_at", "updated_at"],
   users: ["id", "email", "email_verified", "display_name", "avatar_url", "is_instance_admin", "disabled_at", "created_at", "updated_at"],
-  imap_recipient_aliases: ["id", "user_id", "generation", "alias_sha256", "status", "active_until", "created_at", "updated_at"],
-  imap_recipient_rotation_state: ["id", "current_generation", "current_commitment", "previous_generation", "previous_expires_at", "previous_commitment", "created_at", "updated_at"],
+  imap_recipient_aliases: ["id", "user_id", "generation", "alias_sha256", "alias_key_secret_id", "status", "active_until", "created_at", "updated_at"],
   instance_authority: ["singleton", "primary_user_id", "updated_at"],
   instance_maintenance: ["singleton", "id", "active", "current_window_id", "expected_end_at", "version", "updated_at"],
   maintenance_windows: ["id", "status", "scheduled_start_at", "started_at", "expected_end_at", "ended_at", "cancelled_at", "absorbed_into_id", "created_at", "updated_at"],
@@ -87,6 +86,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   imap_notification_deliveries: ["id", "message_id", "user_id", "kind", "status", "attempts", "next_attempt_at", "locked_at", "lease_token", "sent_at", "failure_code", "created_at", "updated_at"],
   mail_in_secrets: ["id", "kind", "ciphertext", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "created_by_user_id", "created_at", "updated_at"],
   mail_in_mailbox: ["singleton", "id", "host", "port", "account_user", "mailbox", "tls_server_name", "provider_profile", "auth_method", "trusted_recipient_header", "poll_seconds", "enabled", "verification_state", "verified_at", "password_secret_id", "alias_key_secret_id", "version", "created_at", "updated_at"],
+  mail_in_relays: ["user_id", "current_generation", "previous_generation", "previous_expires_at", "ingest_paused_at", "rotated_at", "version", "created_at", "updated_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -236,7 +236,6 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   imap_notification_deliveries_user_id_users_id_fk: foreign("imap_notification_deliveries", ["user_id"], "users", ["id"], "cascade"),
   imap_recipient_aliases_pkey: primary("imap_recipient_aliases", ["id"]),
   imap_recipient_aliases_user_id_users_id_fk: foreign("imap_recipient_aliases", ["user_id"], "users", ["id"], "cascade"),
-  imap_recipient_rotation_state_pkey: primary("imap_recipient_rotation_state", ["id"]),
   imap_attachment_message_hash_unique: unique("imap_ingestion_attachments", ["message_id", "content_sha256"]),
   items_household_id_households_id_fk: foreign("items", ["household_id"], "households", ["id"], "cascade"),
   items_section_id_sections_id_fk: foreign("items", ["section_id"], "sections", ["id"], "restrict"),
@@ -278,6 +277,11 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   mail_in_mailbox_pkey: primary("mail_in_mailbox", ["singleton"]),
   mail_in_mailbox_password_secret_id_mail_in_secrets_id_fk: foreign("mail_in_mailbox", ["password_secret_id"], "mail_in_secrets", ["id"], "set_null"),
   mail_in_mailbox_alias_key_secret_id_mail_in_secrets_id_fk: foreign("mail_in_mailbox", ["alias_key_secret_id"], "mail_in_secrets", ["id"], "set_null"),
+  mail_in_relays_pkey: primary("mail_in_relays", ["user_id"]),
+  mail_in_relays_user_id_users_id_fk: foreign("mail_in_relays", ["user_id"], "users", ["id"], "cascade"),
+  /* Truncated to 63 characters by PostgreSQL's identifier limit, exactly as
+     the migration writes it. */
+  imap_recipient_aliases_alias_key_secret_id_mail_in_secrets_id_f: foreign("imap_recipient_aliases", ["alias_key_secret_id"], "mail_in_secrets", ["id"], "set_null"),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;

@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ImapFlow, type MessageStructureObject } from "imapflow";
-import { and, asc, eq, gt, inArray, isNull, lte, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, imapRecipientRotationState, users } from "@/db/schema";
+import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, users } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
@@ -11,17 +11,17 @@ import { LocalDocumentStorage } from "@/server/documents/storage";
 import { classifyImapBodyStructure, IMAP_ATTACHMENT_LIMITS, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
 import {
   deriveImapRecipientAlias,
-  digestImapAliasConfiguration,
   digestImapRecipientAlias,
   matchImapRecipientAliasGeneration,
   normalizeImapRecipientAlias,
   parseTrustedRecipientHeader,
 } from "./core/imap-recipient";
 import {
-  decideImapRotationState,
-  type ImapRotationConfigState,
-  type ImapRotationState,
-} from "./core/imap-rotation";
+  ensureRelayAliases,
+  ensureRelayRow,
+  expireLapsedRelayAliases,
+  retireAliasesForDisabledUsers,
+} from "./relays";
 import {
   imapProviderConnectionOptions,
   imapProviderConfigCommitment,
@@ -152,17 +152,21 @@ export async function verifyImapIngestionProviders(
   return inFlight;
 }
 
-/** A deterministic opaque forwarding alias; the user ID, key, and generation never appear in the address. */
-export function imapRecipientAlias(userId: string, config: ImapIngestionConfig): string {
+/**
+ * A deterministic opaque forwarding alias; the user ID, key, and generation
+ * never appear in the address. Since ADR-0017 slice 3 the generation is the
+ * user's own, from `mail_in_relays`; the default is the generation a member is
+ * enrolled at, which is what a caller with no row yet should be shown.
+ */
+export function imapRecipientAlias(userId: string, config: ImapIngestionConfig, generation = 1): string {
   if (!config.enabled) throw new Error("IMAP ingestion is not configured");
-  return deriveImapRecipientAlias(userId, config.aliasBase, config.aliasCurrent);
+  return deriveImapRecipientAlias(userId, config.aliasBase, { generation, secret: config.aliasCurrent.secret });
 }
 
 /** Constant-time comparison for the provider-injected delivery recipient value. */
-export function matchesImapRecipientAlias(value: string, userId: string, config: ImapIngestionConfig): boolean {
+export function matchesImapRecipientAlias(value: string, userId: string, config: ImapIngestionConfig, generation = 1): boolean {
   if (!config.enabled) return false;
-  return matchImapRecipientAliasGeneration(value, userId, config.aliasBase, config.aliasCurrent)
-    || Boolean(config.aliasPrevious && matchImapRecipientAliasGeneration(value, userId, config.aliasBase, config.aliasPrevious));
+  return matchImapRecipientAliasGeneration(value, userId, config.aliasBase, { generation, secret: config.aliasCurrent.secret });
 }
 
 /** Reads one provider-injected recipient header without retaining raw mail headers. */
@@ -188,150 +192,52 @@ function trustedRecipientFailure(result: ReturnType<typeof parseTrustedRecipient
   }
 }
 
-type ImapDbExecutor = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update">;
-
-function rotationConfigState(config: ImapIngestionConfig, now: Date): ImapRotationConfigState {
-  const activePrevious = config.aliasPrevious && config.aliasPrevious.expiresAt && config.aliasPrevious.expiresAt.getTime() > now.getTime()
-    ? config.aliasPrevious
-    : undefined;
-  return {
-    currentGeneration: config.aliasCurrent.generation,
-    currentCommitment: digestImapAliasConfiguration(config.aliasBase, config.trustedRecipientHeader, config.aliasCurrent),
-    previousGeneration: activePrevious?.generation,
-    previousExpiresAt: activePrevious?.expiresAt,
-    previousCommitment: activePrevious ? digestImapAliasConfiguration(config.aliasBase, config.trustedRecipientHeader, activePrevious) : undefined,
-  };
-}
-
-function sameRotationState(left: ImapRotationState, right: ImapRotationState): boolean {
-  return left.currentGeneration === right.currentGeneration
-    && left.currentCommitment === right.currentCommitment
-    && left.previousGeneration === right.previousGeneration
-    && left.previousExpiresAt?.getTime() === right.previousExpiresAt?.getTime()
-    && left.previousCommitment === right.previousCommitment;
-}
-
-async function readPersistedImapRotationState(executor: ImapDbExecutor, lock: boolean): Promise<ImapRotationState | null> {
-  const query = executor.select({
-    currentGeneration: imapRecipientRotationState.currentGeneration,
-    currentCommitment: imapRecipientRotationState.currentCommitment,
-    previousGeneration: imapRecipientRotationState.previousGeneration,
-    previousExpiresAt: imapRecipientRotationState.previousExpiresAt,
-    previousCommitment: imapRecipientRotationState.previousCommitment,
-  }).from(imapRecipientRotationState).where(eq(imapRecipientRotationState.id, 1)).limit(1);
-  const rows = lock ? await query.for("update") : await query;
-  const row = rows[0];
-  return row
-    ? {
-      currentGeneration: row.currentGeneration,
-      currentCommitment: row.currentCommitment,
-      previousGeneration: row.previousGeneration,
-      previousExpiresAt: row.previousExpiresAt,
-      previousCommitment: row.previousCommitment,
-    }
-    : null;
-}
-
-/** Locks and advances the database-authoritative singleton before any alias or receipt mutation. */
-async function ensureImapRotationAuthority(executor: ImapDbExecutor, config: ImapIngestionConfig, now: Date): Promise<ImapRotationState> {
-  let persisted = await readPersistedImapRotationState(executor, true);
-  if (!persisted) {
-    const initial = decideImapRotationState(null, rotationConfigState(config, now), now);
-    await executor.insert(imapRecipientRotationState).values({
-      id: 1,
-      currentGeneration: initial.currentGeneration,
-      currentCommitment: initial.currentCommitment,
-      previousGeneration: initial.previousGeneration,
-      previousExpiresAt: initial.previousExpiresAt,
-      previousCommitment: initial.previousCommitment,
-      createdAt: now,
-      updatedAt: now,
-    }).onConflictDoNothing();
-    persisted = await readPersistedImapRotationState(executor, true);
-    if (!persisted) throw new Error("IMAP alias rotation state could not be initialized");
-  }
-
-  const next = decideImapRotationState(persisted, rotationConfigState(config, now), now);
-  if (!sameRotationState(persisted, next)) {
-    await executor.update(imapRecipientRotationState).set({
-      currentGeneration: next.currentGeneration,
-      currentCommitment: next.currentCommitment,
-      previousGeneration: next.previousGeneration,
-      previousExpiresAt: next.previousExpiresAt,
-      previousCommitment: next.previousCommitment,
-      updatedAt: now,
-    }).where(eq(imapRecipientRotationState.id, 1));
-  }
-  return next;
-}
-
-/** Reconciles current and at most one previous aliases from trusted application code. */
+/**
+ * Enrols every user in `mail_in_relays` and keeps their alias rows saying what
+ * their relay row says (ADR-0017 slice 3).
+ *
+ * What used to be here was a reconciliation between two authorities — the
+ * environment's alias generations and a database singleton that policed them.
+ * There is only one authority now, so this shrank to enrolling new users at
+ * generation 1, letting lapsed previous generations expire, and retiring the
+ * rows of users who have been disabled.
+ */
 export async function reconcileImapRecipientAliases(config: ImapIngestionConfig, limit = 1_000, now = new Date()): Promise<void> {
   if (!config.enabled) return;
   if (!Number.isInteger(limit) || limit < 1) throw new Error("IMAP alias reconciliation limit must be positive");
   const database = getDb();
-  await database.transaction(async (transaction) => {
-    await ensureImapRotationAuthority(transaction, config, now);
-  });
   let lastUserId: string | undefined;
   while (true) {
     const candidates = await database.select({ id: users.id, disabledAt: users.disabledAt }).from(users)
       .where(lastUserId ? gt(users.id, lastUserId) : undefined).orderBy(asc(users.id)).limit(limit);
     if (candidates.length === 0) break;
-    await database.transaction(async (transaction) => {
-      const authority = await ensureImapRotationAuthority(transaction, config, now);
-      const activePrevious = authority.previousGeneration && authority.previousExpiresAt && config.aliasPrevious?.generation === authority.previousGeneration
-        ? { ...config.aliasPrevious, expiresAt: authority.previousExpiresAt }
-        : undefined;
-      for (const candidate of candidates) {
-        if (candidate.disabledAt) {
-          await transaction.update(imapRecipientAliases).set({ status: "legacy_inactive", activeUntil: now, updatedAt: now })
-            .where(and(eq(imapRecipientAliases.userId, candidate.id), eq(imapRecipientAliases.status, "active")));
-          continue;
-        }
-
-        const currentDigest = digestImapRecipientAlias(deriveImapRecipientAlias(candidate.id, config.aliasBase, config.aliasCurrent));
-        await transaction.insert(imapRecipientAliases).values({
-          userId: candidate.id,
-          generation: config.aliasCurrent.generation,
-          aliasSha256: currentDigest,
-          status: "active",
-          activeUntil: null,
-          updatedAt: now,
-        }).onConflictDoUpdate({
-          target: [imapRecipientAliases.userId, imapRecipientAliases.generation],
-          set: { aliasSha256: currentDigest, status: "active", activeUntil: null, updatedAt: now },
-        });
-
-        if (activePrevious) {
-          const previousDigest = digestImapRecipientAlias(deriveImapRecipientAlias(candidate.id, config.aliasBase, activePrevious));
-          await transaction.insert(imapRecipientAliases).values({
-            userId: candidate.id,
-            generation: activePrevious.generation,
-            aliasSha256: previousDigest,
-            status: "active",
-            activeUntil: activePrevious.expiresAt,
-            updatedAt: now,
-          }).onConflictDoUpdate({
-            target: [imapRecipientAliases.userId, imapRecipientAliases.generation],
-            set: { aliasSha256: previousDigest, status: "active", activeUntil: activePrevious.expiresAt, updatedAt: now },
-          });
-        }
-
-        const retainedGenerations = [authority.currentGeneration, ...(activePrevious ? [activePrevious.generation] : [])];
-        await transaction.update(imapRecipientAliases).set({ status: "legacy_inactive", activeUntil: now, updatedAt: now })
-          .where(and(
-            eq(imapRecipientAliases.userId, candidate.id),
-            eq(imapRecipientAliases.status, "active"),
-            notInArray(imapRecipientAliases.generation, retainedGenerations),
-          ));
+    for (const candidate of candidates) {
+      /* A disabled account is still seated, so it keeps its place in the
+         counter: re-enabling it must never reissue an address somebody else
+         has been given since. Only its alias ROWS are retired, below. */
+      if (candidate.disabledAt) {
+        await ensureRelayRow(candidate.id);
+        continue;
       }
-    });
+      await ensureRelayAliases(candidate.id, config, now);
+    }
     if (candidates.length < limit) break;
     lastUserId = candidates[candidates.length - 1].id;
   }
+  await retireAliasesForDisabledUsers(now);
+  await expireLapsedRelayAliases(now);
 }
 
+/**
+ * Resolves the provider-injected recipient to the member whose relay it names.
+ *
+ * The instance-generation filter is gone (ADR-0017 slice 3): a row is eligible
+ * on its own terms — `status = 'active'`, and an `active_until` that is either
+ * absent or still in the future — and the HMAC is then verified with the key
+ * the row itself names, that row's generation and that row's user. Two members
+ * sitting at the same generation number is ordinary and means nothing, so the
+ * generation can no longer be part of the WHERE clause.
+ */
 async function userForRecipientAlias(headers: Buffer | undefined, config: ImapIngestionConfig, now = new Date()): Promise<RecipientResolution> {
   const parsedHeader = parseTrustedRecipientHeader(headers, config.trustedRecipientHeader);
   const structuralFailure = trustedRecipientFailure(parsedHeader);
@@ -342,33 +248,30 @@ async function userForRecipientAlias(headers: Buffer | undefined, config: ImapIn
     return { failureCode: domain && domain !== config.recipientDomain ? "recipient_wrong_domain" : "recipient_malformed" };
   }
   const aliasDigest = digestImapRecipientAlias(normalizedRecipient);
-  const authority = await getDb().transaction(async (transaction) => ensureImapRotationAuthority(transaction, config, now));
-  const activePrevious = authority.previousGeneration && authority.previousExpiresAt && config.aliasPrevious?.generation === authority.previousGeneration
-    ? { ...config.aliasPrevious, expiresAt: authority.previousExpiresAt }
-    : undefined;
-  const generations = [authority.currentGeneration, ...(activePrevious ? [activePrevious.generation] : [])];
   const rows = await getDb().select({
     userId: imapRecipientAliases.userId,
     generation: imapRecipientAliases.generation,
+    aliasKeySecretId: imapRecipientAliases.aliasKeySecretId,
     status: imapRecipientAliases.status,
     activeUntil: imapRecipientAliases.activeUntil,
     disabledAt: users.disabledAt,
-  }).from(imapRecipientAliases).innerJoin(users, eq(users.id, imapRecipientAliases.userId)).where(and(
-    eq(imapRecipientAliases.aliasSha256, aliasDigest),
-    inArray(imapRecipientAliases.generation, generations),
-  ));
+  }).from(imapRecipientAliases).innerJoin(users, eq(users.id, imapRecipientAliases.userId))
+    .where(eq(imapRecipientAliases.aliasSha256, aliasDigest));
   const disabled = rows.some((row) => row.disabledAt);
+  const expired = rows.some((row) => row.activeUntil && row.activeUntil.getTime() <= now.getTime());
   const matches = rows.filter((row) => {
     if (row.disabledAt || row.status !== "active" || (row.activeUntil && row.activeUntil.getTime() <= now.getTime())) return false;
-    const key = row.generation === authority.currentGeneration ? config.aliasCurrent : activePrevious;
-    return Boolean(key && matchImapRecipientAliasGeneration(normalizedRecipient, row.userId, config.aliasBase, key, now));
+    // A row derived under a key the administrator has since replaced verifies
+    // against that key for as long as its own expiry runs; a row naming a key
+    // this instance can no longer decrypt verifies against nothing.
+    const secret = (row.aliasKeySecretId ? config.aliasKeys?.[row.aliasKeySecretId] : undefined) ?? config.aliasCurrent.secret;
+    if (!secret) return false;
+    return matchImapRecipientAliasGeneration(normalizedRecipient, row.userId, config.aliasBase, { generation: row.generation, secret }, now);
   });
   if (matches.length > 1) return { failureCode: "recipient_alias_ambiguous", digest: aliasDigest };
   if (matches.length === 1) return { userId: matches[0].userId, generation: matches[0].generation, digest: aliasDigest };
   if (disabled) return { failureCode: "recipient_disabled", digest: aliasDigest };
-  if (activePrevious && rows.some((row) => row.generation === activePrevious.generation && row.activeUntil && row.activeUntil.getTime() <= now.getTime())) {
-    return { failureCode: "recipient_alias_expired", digest: aliasDigest };
-  }
+  if (expired) return { failureCode: "recipient_alias_expired", digest: aliasDigest };
   return { failureCode: "recipient_unverified", digest: aliasDigest };
 }
 
@@ -388,9 +291,8 @@ type ImapReceiptValues = {
   receivedAt: Date;
 };
 
-async function recordImapReceipt(config: ImapIngestionConfig, values: ImapReceiptValues) {
+async function recordImapReceipt(_config: ImapIngestionConfig, values: ImapReceiptValues) {
   return getDb().transaction(async (transaction) => {
-    await ensureImapRotationAuthority(transaction, config, new Date());
     const inserted = await transaction.insert(imapIngestionMessages).values(values).onConflictDoNothing().returning({ id: imapIngestionMessages.id, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status });
     if (inserted.length) return inserted;
     return transaction.select({ id: imapIngestionMessages.id, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status })

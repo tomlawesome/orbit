@@ -19,7 +19,7 @@ import { getDb } from "@/db";
 import { imapIngestionMessages } from "@/db/schema";
 import { getImapIngestionConfig } from "./mailbox-config";
 import type { ImapIngestionConfig } from "./core/config";
-import { deriveImapRecipientAlias } from "./core/imap-recipient";
+import { ensureRelayAliases, readRelayRow, relayAddressFor, rotateRelay, type RelayRotationMode } from "./relays";
 
 /** Mail-in is configured, switched on, and this account has a mailbox. */
 export const RELAY_LISTENING = "connected · listening";
@@ -38,7 +38,11 @@ export type RelayListening =
   | typeof RELAY_NOT_LISTENING
   | typeof RELAY_NO_MAILBOX;
 
-/** The instance-level ingest flag, reported read-only; a per-user pause does not exist yet. */
+/**
+ * The instance-level ingest flag, still reported read-only here. The per-user
+ * pause has its column since ADR-0017 slice 3 and its behaviour in slice 5
+ * (#746), which is where this word starts following the member's own row.
+ */
 export type RelayIngest = "enabled" | "paused";
 
 export interface RelaySettings {
@@ -88,10 +92,46 @@ export async function readRelaySettings(
     .where(eq(imapIngestionMessages.userId, user.id))
     .orderBy(desc(imapIngestionMessages.receivedAt))
     .limit(1);
+  /* Enrolling on read is what makes the address on this screen the same
+     address the receipt path will attribute: the member's row and their
+     `active` alias row both exist before the address is ever shown. */
+  const relay = await ensureRelayAliases(user.id, config);
   return {
-    address: deriveImapRecipientAlias(user.id, config.aliasBase, config.aliasCurrent),
+    address: relayAddressFor(user.id, relay.currentGeneration, config),
     listening: RELAY_LISTENING,
     lastReceived: latest?.receivedAt ? latest.receivedAt.toISOString() : null,
     ingest,
   };
+}
+
+/**
+ * Rotates the signed-in member's own relay address (ADR-0017 decision 2).
+ *
+ * `rotate` keeps the outgoing address working for fourteen days so mail
+ * already in flight still arrives; `cut_off` stops it now, which is the
+ * mitigation for an address that has leaked. Both are the member's own: like
+ * `readRelaySettings` this takes the session's user rather than an id from the
+ * request, so there is nothing to name and no way to rotate anyone else.
+ *
+ * The new address is returned because the member needs to save it, and it is
+ * derived here for that one response — never written, never logged.
+ */
+export async function rotateRelayAddress(
+  user: { id: string; isInstanceAdmin: boolean },
+  mode: RelayRotationMode,
+): Promise<RelaySettings> {
+  const config = await resolvedConfig();
+  if (user.isInstanceAdmin || !config?.enabled) {
+    // An account with no relay has nothing to rotate. Answering with the same
+    // bounded reading as a GET keeps the refusal in this screen's vocabulary
+    // rather than inventing an error the reader cannot act on.
+    return readRelaySettings(user);
+  }
+  await rotateRelay(user.id, mode, config);
+  return readRelaySettings(user);
+}
+
+/** The member's own relay row, or `undefined` before they are enrolled. */
+export async function readOwnRelayRow(user: { id: string }) {
+  return readRelayRow(user.id);
 }

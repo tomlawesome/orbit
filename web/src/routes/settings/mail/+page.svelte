@@ -2,6 +2,7 @@
   import "./relay.css";
   import { onMount } from "svelte";
   import { mountSatellites } from "$lib/backdrops/satellites.js";
+  import { rotateRelay } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
 
   /**
@@ -15,9 +16,11 @@
    * Built from design/family/settings-mail.html and owned here from that point
    * on. The four values read through the seam (readRelay in
    * $lib/data/workspace.js) and are live since #432; the gate still renders the
-   * mockup's own via the ORBIT_FIXTURES stand-in route. "rotate address" and
-   * "pause ingest" are still inert — the machinery exists, the user-facing
-   * commands do not, and #432 put both out of scope.
+   * mockup's own via the ORBIT_FIXTURES stand-in route. "rotate address" is
+   * live since ADR-0017 slice 3 (#744): it asks for a new address, keeping the
+   * old one collecting for fourteen days so mail already on its way still
+   * arrives. "pause ingest" is still inert — its column exists, its behaviour
+   * lands in slice 5 (#746).
    *
    * The living backdrop (#475, §14) is $lib/backdrops/satellites.js, ported
    * from design/v19/relay-satellites.html — this file only mounts it and
@@ -27,7 +30,11 @@
    * otherwise, because backdrops are alive and never the same twice.
    */
   let { data } = $props();
-  const relay = $derived(data.relay);
+  /* The rotated relay replaces the loaded one for the rest of this visit: the
+     member has to be able to read and save the address they just asked for. */
+  let rotated = $state(/** @type {typeof data.relay | null} */ (null));
+  let rotating = $state(false);
+  const relay = $derived(rotated ?? data.relay);
   const failures = $derived(data.failures ?? []);
   /** @type {(value: string | number | Date) => string} */
   const shortDate = (value) =>
@@ -36,6 +43,18 @@
   const dismissRelay = () => {
     if (history.length > 1) history.back();
     else location.href = "/home";
+  };
+
+  /* Nothing here can name another member: the endpoint takes the session's
+     own user and this sends no user, no generation and no address. */
+  const rotate = async () => {
+    if (rotating) return;
+    rotating = true;
+    try {
+      rotated = await rotateRelay("rotate");
+    } finally {
+      rotating = false;
+    }
   };
 
   /** @type {?HTMLDivElement} */
@@ -62,7 +81,7 @@
   <div class="kv"><span>status</span><b>{relay.status}</b></div>
   <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>
   <div class="kv"><span>ingest</span><b>{relay.ingest}</b></div>
-  <div class="btns"><button class="pri">rotate address</button><button>pause ingest</button></div>
+  <div class="btns"><button class="pri" disabled={rotating} onclick={rotate}>rotate address</button><button>pause ingest</button></div>
   {#if failures.length}
     <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
     <div class="failures">

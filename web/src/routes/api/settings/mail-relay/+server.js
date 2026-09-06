@@ -1,12 +1,12 @@
 import { json } from "@sveltejs/kit";
 
-import { readRelaySettings } from "orbit/server/mail-in/relay-settings";
+import { readRelaySettings, rotateRelayAddress } from "orbit/server/mail-in/relay-settings";
 
 import { RELAY_FIXTURE } from "$lib/data/fixtures/relay.js";
-import { read } from "$lib/server/api.js";
+import { read, write } from "$lib/server/api.js";
 
 /**
- * The signed-in user's own relay (#432): their mail-in address, whether Orbit
+ * The signed-in member's own relay (#432): their mail-in address, whether Orbit
  * is listening, when something last arrived, and the instance's ingest flag.
  *
  * A GET, so no CSRF token; the session is the only input, which is what makes
@@ -22,3 +22,34 @@ export const GET = read(
   },
   { fixture: () => json(RELAY_FIXTURE, { headers: { "cache-control": "no-store" } }) },
 );
+
+/**
+ * Rotating the member's own relay address (ADR-0017 decision 2, slice 3,
+ * orbit#744).
+ *
+ * The body carries an action and nothing else. THERE IS NO USER FIELD, and
+ * adding one would break the invariant this endpoint exists to keep: the
+ * session's user is the only user this can ever act on, so a member cannot
+ * rotate, and therefore cannot cut off, anybody else's address. Every extra
+ * field in the body is ignored for the same reason.
+ *
+ * `rotate` keeps the old address working for fourteen days so mail already in
+ * flight still arrives. `cut_off` stops it now, which is what a member reaches
+ * for when the address has leaked.
+ *
+ * The response is the same shape a GET answers with, including the NEW address
+ * — the member has to be able to save it — and the same `no-store`, for the
+ * same reason.
+ */
+export const PUT = write(async (event, session) => {
+  const body = await event.request.json().catch(() => null);
+  const action = body && typeof body === "object" ? body.action : undefined;
+  if (action !== "rotate" && action !== "cut_off") {
+    return json(
+      { error: { code: "relay_action_invalid", message: "The relay action must be rotate or cut_off" } },
+      { status: 400, headers: { "cache-control": "no-store" } },
+    );
+  }
+  const relay = await rotateRelayAddress(session.user, action);
+  return json({ relay }, { headers: { "cache-control": "no-store" } });
+});
