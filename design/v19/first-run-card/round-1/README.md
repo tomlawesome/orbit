@@ -93,4 +93,14 @@ atlas swatch only as history (owner, 2026-09-06).
 
 ## Verdicts
 
-Awaiting round 1.
+**Round 1 is dead** (owner, 2026-09-06): *"No, these are all very poor for 862.
+Generic boxes with clumsy wording that doesn't tie into the login screen in any
+way."*
+
+The diagnosis was exact. This round changed the card's ground and left its form
+and its words alone, which was the wrong variable: fixing the wash-out is not
+the same as reworking the card. The one thing that survives is the argument
+that the card must stop reading the pack for legibility, which round 2 carries
+forward — it drops the panel altogether, so there is nothing left to wash out.
+
+Superseded by round 2.
