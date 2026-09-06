@@ -76,7 +76,7 @@ vi.mock("@/db", async () => {
         };
       },
     }),
-    async transaction(callback: (transaction: typeof fakeDb) => Promise<unknown>) {
+    async transaction(callback: (transaction: unknown) => Promise<unknown>) {
       const snapshot = mocks.row ? { ...mocks.row } : null;
       try {
         return await callback(fakeDb);
