@@ -5,6 +5,7 @@
   import { page } from "$app/state";
   import { readTour, writeTourSeen } from "$lib/data/workspace.js";
   import { createTour } from "./engine.js";
+  import { tourHasSomethingToShow } from "./offer.js";
   import { tourMayBegin } from "./relaunch.js";
   import { TOUR_REGIONS, stopsFor } from "./stops.js";
   import "./tour.css";
@@ -79,6 +80,10 @@
       return;
     }
     if (record.tourSeenAt !== null) return;
+    /* #864: a reader with no household yet gets the labelled sky, not the
+       dial the walk's first three stops all point at — offer nothing rather
+       than a card claiming to explain a screen that isn't there. */
+    if (!tourHasSomethingToShow(document)) return;
     const phone = !matchMedia(DESK).matches;
     tour = createTour({
       doc: document,
