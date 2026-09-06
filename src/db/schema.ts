@@ -219,6 +219,12 @@ export const sessions = pgTable("sessions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   rotatedAt: timestamp("rotated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // #482: bounded per-session facts for "where you're signed in" — a coarse
+  // user-agent string (never shown raw; see lib/auth/device.ts) and when the
+  // session was last validated, so the reader can tell a live device from a
+  // stale one.
+  userAgent: text("user_agent"),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
 });
 
 export const households = pgTable("households", {
