@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { createTour } from "../../web/src/lib/tour/engine.js";
-import { stopsFor } from "../../web/src/lib/tour/stops.js";
+import { tourHasSomethingToShow } from "../../web/src/lib/tour/offer.js";
 
 /*
  * #864: "the tour doesn't move to anything."
@@ -16,18 +15,19 @@ import { stopsFor } from "../../web/src/lib/tour/stops.js";
  * regardless (it sits outside that if/else), empty of its `.corridor`.
  *
  * The tour's very first stop, "chart" (stops.js), targets
- * ".dial .chrome, .sun-link" — both absent on this sky. emphasis.js's own
- * contract for an absent target is deliberate ("a page dimmed to nothing,
- * explaining nothing, is worse than a page left alone") but the walk still
- * puts the card up claiming to be pointing at something, having lit nothing
- * at all — which is exactly what an administrator with no household yet
- * would see as "the tour doesn't move to anything": the first card of the
- * walk, over an untouched screen.
+ * ".dial .chrome, .sun-link" — both absent on this sky. Rather than putting
+ * the card up over a screen where nothing lights (what an administrator with
+ * no household yet would see as "the tour doesn't move to anything"), the
+ * decided fix (#864) is not to offer the walk at all until there is a
+ * household to walk through — matching #484, which seeds demo data on first
+ * run specifically so the tour has something to show.
  *
- * v19-tour-walk.test.mjs never plants this DOM, and the e2e journeys
- * (tests/e2e/v19-tour.spec.ts) always create a household through
- * `household.create` before taking the walk, so no existing coverage takes
- * the walk on a genuinely empty sky.
+ * `tourHasSomethingToShow` (offer.js) is Tour.svelte's own gate, read from
+ * the same `adrift` mark both dialects draw for `view.emptySky` (see
+ * home/+page.svelte and pocket.svelte). This is the seam Tour.svelte's
+ * `begin()` calls before ever constructing the walk, so it is exercised here
+ * from a bare DOM exactly as the four existing tour suites exercise
+ * engine.js.
  */
 
 /** The "adrift" home screen: no household, so no dial at all. */
@@ -36,45 +36,30 @@ const ADRIFT = `
   <div id="manifest-top"></div>
   <button id="nstar"></button>
   <button class="orb"></button>
-  <div class="tourcard" tabindex="-1"><p id="tour-copy-1"></p><p id="tour-copy-2"></p></div>
 `;
 
-function stageAdrift() {
-  document.body.innerHTML = ADRIFT;
-}
-
-let fetched;
-
-beforeEach(() => {
-  fetched = vi.fn();
-  vi.stubGlobal("fetch", fetched);
-});
+/** The ordinary home screen: a household, so the dial is drawn. */
+const SKY = `
+  <svg class="dial"><g class="chrome"></g><a class="sun-link"></a></svg>
+  <div class="minisys"></div>
+  <div class="hero-foot"></div>
+  <div id="manifest-top"><div class="corridor"><div class="today"></div></div></div>
+  <button id="nstar"></button>
+  <button class="orb"></button>
+`;
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
 
-describe("the walk on a household-less (adrift) sky (#864)", () => {
-  it("lights something at stop one instead of pointing at nothing", async () => {
-    stageAdrift();
-    let route = "/home";
-    const tour = createTour({
-      doc: document,
-      stops: stopsFor(),
-      routeOf: () => route,
-      navigate: async (next) => { route = next; },
-      writeSeen: async () => {},
-      onChange: () => {},
-      patience: 20,
-    });
+describe("whether the walk is offered (#864)", () => {
+  it("is not offered on a household-less (adrift) sky", () => {
+    document.body.innerHTML = ADRIFT;
+    expect(tourHasSomethingToShow(document)).toBe(false);
+  });
 
-    await tour.start();
-
-    /* The card is up, claiming to be at stop one of the walk, and it ought
-       to be pointing at something real on the screen behind it — not
-       standing over an untouched page. */
-    expect(document.querySelector(".tourcard")).toBeTruthy();
-    expect(document.querySelectorAll(".lit").length).toBeGreaterThan(0);
+  it("is offered exactly as today on a sky with a household", () => {
+    document.body.innerHTML = SKY;
+    expect(tourHasSomethingToShow(document)).toBe(true);
   });
 });
