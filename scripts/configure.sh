@@ -226,7 +226,7 @@ ensure_environment_file() {
     'Authentication' OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET managed:OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL --section \
     'Generated secrets and keys' SESSION_SECRET_FILE DOCUMENT_KEK_FILE POSTGRES_PASSWORD_FILE VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY_FILE --section \
     'Deployment' managed:COMPOSE_PROJECT_NAME ORBIT_BIND_ADDRESS ORBIT_PORT COMPOSE_PROFILES POSTGRES_DB POSTGRES_USER --section \
-    'Optional services' TIKA_URL OLLAMA_MODEL IMAP_ENABLED --section \
+    'Optional services' TIKA_URL OLLAMA_MODEL --section \
     'Observability' ORBIT_LOG_LEVEL ORBIT_LOG_FORMAT > "$temporary_file" ||
     fail "Could not create a concise Orbit environment file from the supported defaults."
   mv -- "$temporary_file" "$environment_file"
@@ -1056,6 +1056,13 @@ run_check() {
     fi
   }
 
+  # A service configured entirely from the administration screen (its
+  # credential lives in the database, not .env-orbit) is never ready/missing
+  # from environment facts alone, and never fails readiness.
+  report_app_managed() {
+    printf 'app-managed %s\n' "$1"
+  }
+
   local processing_present=0 processing_ready=0
   if profile_enabled processing || is_set TIKA_URL; then processing_present=1; fi
   if profile_enabled processing && is_set TIKA_URL; then processing_ready=1; fi
@@ -1074,23 +1081,6 @@ run_check() {
     && exactly_one_set SMTP_PASSWORD SMTP_PASSWORD_FILE \
     && ! any_set SMTP_URL SMTP_URL_FILE; then
     mail_ready=1
-  fi
-
-  local imap_present=0 imap_ready=0
-  if any_set IMAP_HOST IMAP_USER IMAP_PASSWORD IMAP_PASSWORD_FILE \
-    IMAP_RECIPIENT_DOMAIN IMAP_ALIAS_CURRENT_GENERATION \
-    IMAP_ALIAS_CURRENT_SECRET IMAP_ALIAS_CURRENT_SECRET_FILE \
-    IMAP_TRUSTED_RECIPIENT_HEADER; then
-    imap_present=1
-  fi
-  if [[ "${values[IMAP_ENABLED]:-false}" == true ]]; then imap_present=1; fi
-  if [[ "${values[IMAP_ENABLED]:-false}" == true ]] \
-    && all_set IMAP_HOST IMAP_USER IMAP_RECIPIENT_DOMAIN \
-      IMAP_ALIAS_CURRENT_GENERATION IMAP_TRUSTED_RECIPIENT_HEADER \
-    && exactly_one_set IMAP_PASSWORD IMAP_PASSWORD_FILE \
-    && exactly_one_set IMAP_ALIAS_CURRENT_SECRET IMAP_ALIAS_CURRENT_SECRET_FILE \
-    && [[ "$mail_ready" == 1 ]]; then
-    imap_ready=1
   fi
 
   local push_present=0 push_ready=0
@@ -1151,7 +1141,7 @@ run_check() {
   report_optional processing "$processing_ready" "$processing_present"
   report_optional ai "$ai_ready" "$ai_present"
   report_optional mail "$mail_ready" "$mail_present"
-  report_optional imap "$imap_ready" "$imap_present"
+  report_app_managed imap
   report_optional push "$push_ready" "$push_present"
 
   return "$overall_status"

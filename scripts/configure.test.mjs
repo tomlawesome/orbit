@@ -191,7 +191,7 @@ describe(".env-orbit.example", () => {
       "Installer-managed: image and generated values",
       "Ordinary deployment exposure",
       "Optional: document processing",
-      "Optional: outbound and inbound mail",
+      "Optional: outbound mail",
       "Optional: push notifications",
       "Advanced: limits and tuning",
     ]);
@@ -222,7 +222,6 @@ describe(".env-orbit.example", () => {
       "POSTGRES_USER",
       "TIKA_URL",
       "OLLAMA_MODEL",
-      "IMAP_ENABLED",
     ]);
   });
 
@@ -240,12 +239,8 @@ describe(".env-orbit.example", () => {
     expect(environmentExampleSource).not.toMatch(/^[A-Z_]+=http:\/\//m);
   });
 
-  it("leaves optional IMAP inactive by default", () => {
-    expect(environmentExampleSource).toMatch(/^IMAP_ENABLED=false$/m);
-    expect(environmentExampleSource).not.toMatch(/^IMAP_HOST=/m);
-    expect(environmentExampleSource).not.toMatch(/^IMAP_USER=/m);
-    expect(environmentExampleSource).not.toMatch(/^IMAP_PASSWORD=/m);
-    expect(environmentExampleSource).not.toMatch(/^IMAP_PASSWORD_FILE=/m);
+  it("documents no IMAP_* key: inbound mail is configured on the administration screen (ADR-0017)", () => {
+    expect(environmentExampleSource).not.toMatch(/^#?\s*IMAP_[A-Z_]*=/m);
   });
 
   it("keeps the deprecated SMTP_URL compatibility form out of the active surface", () => {
@@ -524,7 +519,7 @@ describe("configure.sh", () => {
 
     const lines = result.stdout.split("\n").filter(Boolean);
     for (const line of lines) {
-      expect(line).toMatch(/^(ready|missing|optional) [A-Za-z_]+$/);
+      expect(line).toMatch(/^(ready|missing|optional|app-managed) [A-Za-z_]+$/);
     }
     expect(lines).toContain("ready APP_URL");
     expect(lines).toContain("ready ORBIT_IMAGE");
@@ -533,7 +528,7 @@ describe("configure.sh", () => {
     expect(lines).toContain("ready OIDC_CLIENT_SECRET");
     expect(lines).toContain("ready OIDC_CALLBACK_URL");
     expect(lines).toContain("ready mail");
-    expect(lines).toContain("optional imap");
+    expect(lines).toContain("app-managed imap");
     expect(lines).toContain("optional processing");
     expect(lines).toContain("optional ai");
     expect(lines).toContain("optional push");
@@ -555,7 +550,7 @@ describe("configure.sh", () => {
     expect(lines).toContain("optional processing");
     expect(lines).toContain("optional ai");
     expect(lines).toContain("optional mail");
-    expect(lines).toContain("optional imap");
+    expect(lines).toContain("app-managed imap");
     expect(lines).toContain("optional push");
   });
 
@@ -638,7 +633,7 @@ describe("configure.sh", () => {
     expect(lines).toContain("optional processing");
     expect(lines).toContain("optional ai");
     expect(lines).toContain("optional mail");
-    expect(lines).toContain("optional imap");
+    expect(lines).toContain("app-managed imap");
     expect(lines).toContain("optional push");
   });
 
@@ -662,7 +657,7 @@ describe("configure.sh", () => {
     expect(lines).toContain("missing mail");
   });
 
-  it("reports inbound mail ready only when its complete trust boundary and outbound mail are configured", () => {
+  it("reports imap as app-managed regardless of outbound mail configuration", () => {
     const initial = [
       "APP_URL=https://orbit.configure-test.internal",
       "ORBIT_IMAGE=orbit-local:abcdef123456",
@@ -670,17 +665,9 @@ describe("configure.sh", () => {
       "OIDC_CLIENT_ID=test-client-id",
       "OIDC_CLIENT_SECRET=test-client-secret",
       "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
-      "IMAP_ENABLED=true",
       "SMTP_HOST=smtp.example.com",
       "SMTP_USER=orbit@example.com",
       "SMTP_PASSWORD=private-smtp-value",
-      "IMAP_HOST=imap.example.com",
-      "IMAP_USER=orbit@example.com",
-      "IMAP_PASSWORD=private-imap-value",
-      "IMAP_RECIPIENT_DOMAIN=orbit.example.com",
-      "IMAP_ALIAS_CURRENT_GENERATION=1",
-      "IMAP_ALIAS_CURRENT_SECRET=private-alias-value",
-      "IMAP_TRUSTED_RECIPIENT_HEADER=X-Original-To",
       "",
     ].join("\n");
     const targetDir = makeFixture(initial);
@@ -689,7 +676,7 @@ describe("configure.sh", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("ready mail\n");
-    expect(result.stdout).toContain("ready imap\n");
+    expect(result.stdout).toContain("app-managed imap\n");
     expect(result.stdout).not.toContain("private-");
   });
 

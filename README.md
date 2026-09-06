@@ -641,13 +641,6 @@ and add a matching read-only secret mount to the Compose service.
 | `SMTP_USER` / `SMTP_PASSWORD_FILE` | Worker | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
 | `SMTP_URL` | Worker | Deprecated compatibility form; do not set it with the individual SMTP settings. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
 | `SMTP_FROM` | Worker | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
-| `IMAP_HOST` / `IMAP_PORT` | Worker | Dedicated inbound mailbox host and implicit-TLS port. The port is configurable; verified TLS is mandatory. | `imap.example.com` / `993` |
-| `IMAP_USER` / `IMAP_PASSWORD_FILE` | Worker | Dedicated least-privilege mailbox login and mounted password file. | `orbit@example.com` / `/run/orbit-secrets/orbit-imap-password` |
-| `IMAP_ALIAS_CURRENT_GENERATION` | Orbit | Positive current HMAC alias generation. | `2` |
-| `IMAP_ALIAS_CURRENT_SECRET_FILE` | Orbit | Runtime secret file for the current alias key; use a distinct file from the previous key. | `/run/orbit-secrets/orbit-imap-alias-current-secret` |
-| `IMAP_ALIAS_PREVIOUS_GENERATION` | Orbit | Optional previous HMAC alias generation during an explicit bounded rotation. | `1` |
-| `IMAP_ALIAS_PREVIOUS_SECRET_FILE` | Orbit | Runtime secret file for the previous alias key. | `/run/orbit-secrets/orbit-imap-alias-previous-secret` |
-| `IMAP_ALIAS_PREVIOUS_EXPIRES_AT` | Orbit | Explicit UTC expiry for the previous generation; omit all previous-generation settings for emergency invalidation. | `2026-08-15T00:00:00.000Z` |
 | `VAPID_SUBJECT` | Worker | Contact URI included in Web Push VAPID claims. VAPID enables browser/PWA native notifications; it is not Pushover. | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` | Browser and worker | Public VAPID key generated for this deployment. | `<base64url-public-key>` |
 | `VAPID_PRIVATE_KEY` | Worker | Direct private VAPID key. Leave empty when the file form is used. | `<base64url-private-key>` |
@@ -660,21 +653,14 @@ and add a matching read-only secret mount to the Compose service.
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
 | `ORBIT_SECRETS_DIR` | Compose | Host directory containing files mounted as Compose secrets. | `./.orbit-secrets` |
 
-### IMAP alias rotation
+Inbound mail (the mailbox Orbit polls for incoming statements and documents)
+is no longer environment configuration: an instance administrator sets it
+from the administration screen, and Orbit stores the credential encrypted in
+the database (ADR-0017). No `IMAP_*` environment key is accepted any more.
 
-For a key rotation within the same recipient domain, increment the generation,
-deploy the new key as current and the exact old current tuple as previous, and
-set an explicit UTC expiry no more than 90 days away. Replicas with stale or
-mismatched generation, key, domain, or trusted-header configuration fail
-closed. At expiry, current ingestion continues and the previous tuple is
-retired; omit all previous settings for immediate emergency invalidation. A
-recipient-domain change cannot preserve old-domain aliases in v1: use a new
-generation/current-only deployment, which invalidates the old domain at once.
-
-Use `docker-compose.mail.yml` only after the SMTP, IMAP, and current alias
-secret files exist. Add `docker-compose.mail-alias-rotation.yml` only for the
-bounded previous-key transition. The complete operator procedure and
-production-like acceptance boundary are documented in
+Use `docker-compose.mail.yml` once the SMTP password file exists. The
+complete operator procedure and production-like acceptance boundary are
+documented in
 [Orbit administrator operations](docs/administrator-operations.md).
 
 For production, use HTTPS, file-backed secrets, a private PostgreSQL connection,

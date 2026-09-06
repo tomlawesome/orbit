@@ -1,5 +1,3 @@
-import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { createTransport } from "nodemailer";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
@@ -12,11 +10,18 @@ import { settleArrival } from "./support/arrival";
  * through the v19 row. A malformed claim travels the same pipe into its
  * bounded failure state, visible on the relay.
  *
- * The alias derivation mirrors src/server/mail-in/core/imap-recipient.ts
- * exactly, keyed by the DISPOSABLE alias secret this stack runs with.
+ * Since ADR-0017 slice 2 (#743) the mailbox is not container configuration:
+ * an instance administrator sets it through /api/admin/mailbox and Orbit
+ * stores it encrypted, generating the alias key itself. So this spec now
+ * configures the mailbox as the administrator before sending anything, and
+ * asks the app for the member's own relay address rather than deriving it
+ * from a secret it used to be handed. Nothing here knows a mailbox password
+ * beyond the throwaway one it sets, and nothing knows the alias key at all.
  */
-const RECIPIENT_DOMAIN = "in.orbit.test";
-const ALIAS_GENERATION = 1;
+const MAILBOX_ACCOUNT = "orbit-intake@in.orbit.test";
+/* GreenMail runs with -Dgreenmail.auth.disabled, so this is accepted as-is
+   and is not a credential to anything. */
+const MAILBOX_PASSWORD = "greenmail-proving-ground-only";
 // Must match docker-compose.acceptance.yml's GreenMail host-port binding
 // exactly -- both read TEST_SMTP_PORT so the test and the compose
 // host-binding can never diverge. Defaults to 3025 (CI's fixed value).
@@ -30,10 +35,18 @@ const HOUSEHOLD = "Collection Proving Ground";
 const households = householdRegister();
 let seeded = false;
 
-function deriveAlias(userId: string, secret: string): string {
-  const input = `orbit:imap-recipient-alias:v1\0${RECIPIENT_DOMAIN}\0${ALIAS_GENERATION}\0${userId}`;
-  const token = createHmac("sha256", secret).update(input, "utf8").digest("base64url");
-  return `orbit+${token}@${RECIPIENT_DOMAIN}`;
+/**
+ * The member's own relay address, from the app rather than from a secret.
+ *
+ * There is no other way to get it now, and that is the point: the alias key
+ * lives encrypted in the database and no read path returns it, so the only
+ * holder of an address is the member whose address it is.
+ */
+async function relayAddress(page: Page): Promise<string> {
+  const response = await page.request.get("/api/settings/mail-relay");
+  const body = (await response.json()) as { relay?: { address?: string } };
+  if (!body.relay?.address) throw new Error("the member has no relay address");
+  return body.relay.address;
 }
 
 const TINY_PDF = Buffer.from(
@@ -64,7 +77,48 @@ async function establishInstanceAdmin(browser: Browser) {
      not a landing on /home -- see signInAsMember above. */
   const session = await page.request.get("/api/auth/session");
   expect(session.ok()).toBe(true);
+  await settleArrival(page);
+  await configureMailbox(page);
   await context.close();
+}
+
+/**
+ * Points the instance at the GreenMail sidecar through the real
+ * administrator API (#743), which verifies the credential against the
+ * provider before committing it. Idempotent: it reads the current version
+ * first, so re-running the suite against a live stack re-sets the same
+ * mailbox rather than failing on a version conflict.
+ */
+async function configureMailbox(page: Page) {
+  const outcome = await page.evaluate(async ([account, password]) => {
+    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const current = (await (await fetch("/api/admin/mailbox", { credentials: "same-origin" })).json()) as { mailbox?: { version?: number | null } | null };
+    const response = await fetch("/api/admin/mailbox", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+      body: JSON.stringify({
+        action: "set",
+        expectedVersion: current.mailbox?.version ?? null,
+        host: "orbit-greenmail",
+        port: 3993,
+        accountUser: account,
+        mailbox: "INBOX",
+        tlsServerName: "orbit-greenmail",
+        providerProfile: "other",
+        trustedRecipientHeader: "X-Orbit-Delivered-To",
+        /* The floor the settings schema allows; the poll loop follows it, so
+           a receipt appears within seconds rather than a minute. */
+        pollSeconds: 30,
+        password,
+      }),
+    });
+    if (!response.ok) throw new Error(`mailbox set failed: ${response.status}`);
+    return ((await response.json()) as { outcome?: string }).outcome ?? "";
+  }, [MAILBOX_ACCOUNT, MAILBOX_PASSWORD]);
+  /* A refusal here is the provider check doing its job, and every assertion
+     below would fail for a reason that named the wrong thing. */
+  expect(outcome, "the administrator API must verify the GreenMail mailbox before committing it").toBe("verified");
 }
 
 
@@ -99,17 +153,10 @@ async function seedHousehold(page: Page) {
   }
 }
 
-async function sessionUserId(page: Page): Promise<string> {
-  const response = await page.request.get("/api/auth/session");
-  const body = (await response.json()) as { user?: { id?: string } };
-  if (!body.user?.id) throw new Error("no session user");
-  return body.user.id;
-}
-
 async function sendMail(alias: string, subject: string, attachment: { filename: string; content: Buffer; contentType: string } | null) {
   const transport = createTransport({ host: "127.0.0.1", port: SMTP_PORT, secure: false, tls: { rejectUnauthorized: false } });
   await transport.sendMail({
-    envelope: { from: "spoofer@outside.example", to: "orbit-intake@in.orbit.test" },
+    envelope: { from: "spoofer@outside.example", to: MAILBOX_ACCOUNT },
     from: "Spoofed Sender <spoofer@outside.example>",
     to: alias,
     subject,
@@ -160,9 +207,7 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   await establishInstanceAdmin(browser);
   await signInAsMember(page);
   await seedHousehold(page);
-  const userId = await sessionUserId(page);
-  const secret = readFileSync(".orbit-secrets/imap-alias-current-secret", "utf8").trim();
-  const alias = deriveAlias(userId, secret);
+  const alias = await relayAddress(page);
 
   await sendMail(alias, "Boiler cover renewal", {
     filename: "spoofed-policy.pdf",
@@ -220,9 +265,7 @@ test("a message with no readable document lands in a bounded state on the relay"
   test.setTimeout(240_000);
 
   await signInAsMember(page);
-  const userId = await sessionUserId(page);
-  const secret = readFileSync(".orbit-secrets/imap-alias-current-secret", "utf8").trim();
-  const alias = deriveAlias(userId, secret);
+  const alias = await relayAddress(page);
 
   // A hostile claim: says PDF, is not one.
   await sendMail(alias, "Definitely a real invoice", {

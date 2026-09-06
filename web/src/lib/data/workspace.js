@@ -911,15 +911,72 @@ export async function readSettingsScreen() {
 }
 
 /**
+ * The instance's one mailbox, as an administrator sees it (#743).
+ *
+ * `null` means the route could not answer — under fixtures, or for a signed-in
+ * user who is not an instance administrator. The screen falls back to the
+ * mockup's relay rows in that case rather than showing an empty panel.
+ *
+ * Nothing in this object is a secret: the password and the alias key have no
+ * read path at all, and `aliasPattern` is the SHAPE addresses take, never a
+ * member's actual address.
+ *
+ * @typedef {object} MailboxSettings
+ * @property {boolean} configured
+ * @property {boolean} enabled
+ * @property {string} host
+ * @property {number} port
+ * @property {string} accountUser
+ * @property {string} mailbox
+ * @property {string} tlsServerName
+ * @property {string} providerProfile
+ * @property {string} trustedRecipientHeader
+ * @property {number} pollSeconds
+ * @property {string} verificationState
+ * @property {?string} verifiedAt
+ * @property {?string} aliasPattern
+ * @property {?string} credentialSetAt
+ * @property {?string} credentialSetBy
+ * @property {boolean} hasPassword
+ * @property {?number} version
+ * @property {{ status: string, smtp: string, imap: string, checkedAt: ?string, credentialLocked: boolean }} health
+ *
+ * @returns {Promise<?MailboxSettings>}
+ */
+export async function readMailboxSettings() {
+  try {
+    /** @type {{ mailbox?: ?MailboxSettings }} */
+    const body = await json(await fetch("/api/admin/mailbox", { credentials: "same-origin" }));
+    return body.mailbox ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Runs one mailbox action and answers with the settings as they now stand.
+ *
+ * `set` and `rotate` carry the password. It is write-only in both directions:
+ * it goes out once in this body and never comes back in any answer, so a
+ * caller that wants to show "set" shows `hasPassword`, not a value.
+ *
+ * @param {object} command  `{ action, ... }` — see the route's schema
+ * @returns {Promise<{ mailbox: ?MailboxSettings, outcome?: string }>}
+ */
+export async function commandMailbox(command) {
+  return json(await csrfFetch("/api/admin/mailbox", { body: command }));
+}
+
+/**
  * Everything mission control renders (#465): the instance's people (real
- * route), its systems from the workspace (admins see everything, §11), and
- * the parts no route can answer yet — ownership, membership counts, the
- * relay's levers — from the admin fixture until #453/#432 make them real.
- * Live data omits what it cannot know. No join requests: §15-2g moved them
- * to household management, so this screen never asks for them.
+ * route), its systems from the workspace (admins see everything, §11), the
+ * live mailbox settings (#743), and the parts no route can answer yet —
+ * ownership, membership counts — from the admin fixture until #453 makes
+ * them real. Live data omits what it cannot know. No join requests: §15-2g
+ * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users] = await Promise.all([
+  const [workspace, session, users, mailbox] = await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
@@ -928,6 +985,7 @@ export async function readAdminScreen() {
           body.users ?? [],
       )
       .catch(() => []),
+    readMailboxSettings(),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   /* Real owner names where the members route answers (#453); the fixture's
@@ -954,8 +1012,37 @@ export async function readAdminScreen() {
     users,
     households: workspace.households,
     ...adminFixture,
+    /* Live where the route answers, and the mockup's rows where it does not,
+       so the fixture-mode screen the fidelity gate photographs is unchanged
+       (#465, §15) while a real deployment shows its real mailbox. */
+    relay: mailbox ? relayRowsOf(mailbox) : adminFixture.relay,
+    mailbox,
     owners,
   };
+}
+
+/**
+ * The mail-machinery rows, as words rather than fields. Deliberately bounded:
+ * the collection domain is the account's own domain, not any member's
+ * address, and nothing here can carry a credential.
+ *
+ * @param {MailboxSettings} mailbox
+ * @returns {[string, string, string | null][]}
+ */
+function relayRowsOf(mailbox) {
+  const domain = mailbox.accountUser.split("@")[1] ?? "";
+  const pollWords = `polling every ${mailbox.pollSeconds}s`;
+  return [
+    ["collection domain", domain || "not set", null],
+    [
+      "ingest",
+      mailbox.enabled ? `enabled · ${pollWords}` : mailbox.configured ? "disabled" : "not set up",
+      mailbox.enabled ? "on" : null,
+    ],
+    ["mailbox", mailbox.configured ? `${mailbox.accountUser} · ${mailbox.mailbox}` : "no mailbox set", null],
+    ["credential", mailbox.hasPassword ? "stored, encrypted" : "not set", null],
+    ["last check", mailbox.health.status.replaceAll("_", " "), null],
+  ];
 }
 
 /** @param {string} iso */

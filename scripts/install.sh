@@ -1354,7 +1354,6 @@ readonly asset_base="https://raw.githubusercontent.com/${repository}/${revision}
 readonly deployment_assets=(
   "docker-compose.yml"
   "docker-compose.mail.yml"
-  "docker-compose.mail-alias-rotation.yml"
   ".env-orbit.example"
   "config/tika-config.json"
   "scripts/configure.sh"
