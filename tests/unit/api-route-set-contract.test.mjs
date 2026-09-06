@@ -41,6 +41,7 @@ const routesRoot = new URL("../../web/src/routes/api/", import.meta.url).pathnam
 const HANDLER_NAMES = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 const EXPECTED_ROUTES = [
+  "/api/admin/contact",
   "/api/admin/documents/health",
   "/api/admin/mailbox",
   "/api/admin/maintenance",
@@ -52,6 +53,7 @@ const EXPECTED_ROUTES = [
   "/api/admin/operations/smtp-test",
   "/api/admin/primary",
   "/api/admin/users",
+  "/api/auth/availability",
   "/api/auth/callback",
   "/api/auth/login",
   "/api/auth/logout",
@@ -128,7 +130,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 48 route families -- no fewer, no more", () => {
+  it("has exactly the expected 50 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

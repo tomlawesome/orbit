@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { resolve } from "$app/paths";
-  import { addMember, commandMailbox, readAdminScreen } from "$lib/data/workspace.js";
+  import { addMember, commandContact, commandMailbox, readAdminScreen } from "$lib/data/workspace.js";
   import { constellationPlanetsOf, galaxyOf } from "$lib/data/chart.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
@@ -163,6 +163,40 @@
     }
   }
 
+  /* The public contact address (#860): one field an administrator sets,
+     changes or clears, never defaulted from any account's own email. Named
+     plainly on the door's third state (#788) when it cannot open safely — so
+     unlike the mailbox above, there is no "verify" step: it is a published
+     string, not a credential, and Orbit never talks to it. */
+  let editingContact = $state(false);
+  let contactDraft = $state("");
+  /** @type {string | null} */
+  let contactProblem = $state(null);
+  let contactBusy = $state(false);
+
+  function openContactEditor() {
+    contactDraft = need().contact?.address ?? "";
+    contactProblem = null;
+    editingContact = true;
+  }
+
+  /** @param {{ action: "set", address: string } | { action: "clear" }} partial */
+  async function contactAction(partial) {
+    const current = need().contact;
+    if (!current) return;
+    contactBusy = true;
+    contactProblem = null;
+    try {
+      await commandContact({ ...partial, expectedVersion: current.version });
+      view = await readAdminScreen();
+      editingContact = false;
+    } catch (error) {
+      contactProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+    } finally {
+      contactBusy = false;
+    }
+  }
+
   /** @type {Record<string, string>} */
   const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
   /* The sheet's five hand-placed rings (design/v19/administration-iss.html,
@@ -276,6 +310,38 @@
             </div>
           </div>
         {/each}
+      </div>
+
+      <!-- #860: one published address, never a real administrator's own
+           mailbox. Read by the sign-in door's third state (#788) with no
+           session at all, so this card is the only place it is ever set. -->
+      <div class="card">
+        <div class="cardhead"><h2>Public contact</h2>
+          {#if view.contact && !editingContact}
+            <button onclick={openContactEditor}>{view.contact.address ? "change…" : "set…"}</button>
+          {/if}
+        </div>
+        <div class="kv"><span>address</span><b>{view.contact?.address ?? "not set"}</b></div>
+        {#if view.contact}
+          {#if editingContact}
+            <form class="mailboxform" onsubmit={(event) => {
+              event.preventDefault();
+              contactAction({ action: "set", address: contactDraft });
+            }}>
+              <label>address <input type="email" bind:value={contactDraft} placeholder="ops@example.com" required /></label>
+              <p class="mailboxnote">Shown on the sign-in door if it ever cannot open safely — never
+                a real administrator's own mailbox. Anyone can read it, signed in or not.</p>
+              <div class="placerow mailboxrow">
+                <button type="submit" disabled={contactBusy}>save</button>
+                {#if view.contact.address}
+                  <button type="button" disabled={contactBusy} onclick={() => contactAction({ action: "clear" })}>clear</button>
+                {/if}
+                <button type="button" onclick={() => (editingContact = false)}>cancel</button>
+              </div>
+            </form>
+          {/if}
+          {#if contactProblem}<div class="adminproblem">{contactProblem}</div>{/if}
+        {/if}
       </div>
 
       <!-- §15: mail machinery sits WITH operations — one panel, two halves. -->
