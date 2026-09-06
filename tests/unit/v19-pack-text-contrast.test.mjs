@@ -189,20 +189,20 @@ describe("packs.css text-grade companions clear WCAG 2 AA on their pack's ground
  *             use one inline custom property for text, border and fill at
  *             once (+page.svelte, Suggestion.svelte): color:var(--act,...).
  *             The values bound to it for those buttons are --overdue,
- *             --accent and --ok raw (--upcoming and --warm are also bound
- *             there; --warm's case is the row above, --upcoming is #491's
- *             remaining gap, left as found). Raw, all three failed on
+ *             --accent, --ok and --upcoming raw (--warm is also bound there;
+ *             its case is the row above). Raw, all of them failed on
  *             --panel on the daylight packs (2.06-4.30:1) even though their
  *             -text companions already existed from #491 — that ground had
  *             simply never been measured. The buttons now carry a sibling
  *             --act-text custom property (set beside --act wherever it is
- *             --overdue/--accent/--ok/--warm) so the ring and fill keep
+ *             --overdue/--accent/--ok/--warm/--upcoming — the last one #855,
+ *             measured at 2.97-3.54:1 on the same packs) so the ring and fill keep
  *             --act's raw colour and only the letterform reads the graded
  *             one; .acts button/.btn-quiet's `color` now reads
  *             var(--act-text,var(--act,var(--ink-mid))). Measured here as
  *             the -text companion actually used for that value.
  */
-const ACT_BUTTON_VALUES = ["overdue", "accent", "ok"];
+const ACT_BUTTON_VALUES = ["overdue", "accent", "ok", "upcoming"];
 
 /** rgba(...) --panel composited over the pack's own --bg — html body's real
  * painted background per belt.css / item.css. */

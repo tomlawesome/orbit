@@ -436,7 +436,7 @@
         <h3>start</h3>
         <div class="acts" role="group" aria-label="Actions">
           <button style="--act:var(--accent);--act-text:var(--accent-text)" onclick={() => goto(resolve("/create"))}>add an item</button>
-          <button style="--act:var(--upcoming)" onclick={() => goto(resolve("/inbox"))}>mail something in</button>
+          <button style="--act:var(--upcoming);--act-text:var(--upcoming-text)" onclick={() => goto(resolve("/inbox"))}>mail something in</button>
         </div>
         <a class="back" href={resolve("/home")}>← back to your orbit</a>
       </article>
@@ -512,7 +512,7 @@
           {#if row.status === "active"}
             <button style="--act:var(--ok);--act-text:var(--ok-text)" aria-pressed={panel === "complete"}
                     onclick={() => open("complete", record)}>complete</button>
-            <button style="--act:var(--upcoming)" aria-pressed={panel === "reschedule"}
+            <button style="--act:var(--upcoming);--act-text:var(--upcoming-text)" aria-pressed={panel === "reschedule"}
                     onclick={() => open("reschedule", record)}>reschedule</button>
             <button style="--act:var(--warm);--act-text:var(--warm-text)" aria-pressed={panel === "snooze"}
                     onclick={() => open("snooze", record)}>snooze</button>
@@ -560,7 +560,7 @@
         {/if}
 
         {#if panel === "reschedule"}
-          <div class="panel" style="--act:var(--upcoming)">
+          <div class="panel" style="--act:var(--upcoming);--act-text:var(--upcoming-text)">
             <div class="field"><label for="a-due">new due date</label>
               <input id="a-due" type="date" bind:value={form.dueDate}></div>
             <div class="save-row">
