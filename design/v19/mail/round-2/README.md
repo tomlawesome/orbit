@@ -33,3 +33,16 @@ Files: `d-the-sun-in-motion.html`, `e-the-arrival.html`. Renders checked at
 ## Verdicts
 
 _Awaiting the owner (posted on #481, 2026-09-06)._
+
+## Verdicts
+
+Owner, 2026-09-06, on #481:
+
+- D the sun in motion — "No." As a whole; but "the style in [D] is fine
+  tbh, though could be developed further to be more impressive." **Style
+  survives into round 3.**
+- E the arrival — "This is better but it's still a bit meh. and the bright
+  yellow button thats just an outline sucks." And: "The animation is
+  better in [E]. But again, it's just … lacking, it's not exciting,
+  inspiring." **Motion survives into round 3; the outlined button is
+  dead — filled from here on.**
