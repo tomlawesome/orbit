@@ -24,6 +24,7 @@ import {
   type MailInSecretContext,
   type MailInSecretEnvelope,
 } from "./core/secret-crypto";
+import { imapAliasBaseFromAccount } from "./core/imap-recipient";
 import type { ImapIngestionConfig } from "./core/config";
 
 /**
@@ -53,6 +54,7 @@ const NOT_CONFIGURED: ImapIngestionConfig = {
   mailbox: "INBOX",
   tlsServerName: "",
   recipientDomain: "",
+  aliasBase: { localPart: "orbit", domain: "" },
   currentAliasGeneration: 1,
   currentAliasSecret: "",
   aliasCurrent: { generation: 1, secret: "" },
@@ -109,9 +111,42 @@ async function reportCredentialLocked(mailboxId: string, keyId: string): Promise
   });
 }
 
-function recipientDomainOf(accountUser: string): string {
-  const at = accountUser.indexOf("@");
-  return at === -1 ? "" : accountUser.slice(at + 1).toLowerCase();
+/**
+ * Turns one mailbox row into the shape the ingestion worker and the relay
+ * page already read. Exported so the administrator settings module can build
+ * the same configuration for a candidate that has not been committed yet —
+ * rotation and first setup both have to verify against the provider before
+ * anything is written (ADR-0017 decision 1).
+ */
+export function imapConfigFromMailbox(
+  mailbox: {
+    host: string; port: number; accountUser: string; mailbox: string; tlsServerName: string;
+    trustedRecipientHeader: string; pollSeconds: number; enabled: boolean;
+  },
+  password: string,
+  aliasSecret: string,
+): ImapIngestionConfig {
+  const configured = Boolean(mailbox.host && mailbox.accountUser && password);
+  const aliasCurrent = { generation: 1, secret: aliasSecret };
+  const aliasBase = imapAliasBaseFromAccount(mailbox.accountUser);
+  return {
+    configured,
+    enabled: configured && mailbox.enabled,
+    host: mailbox.host,
+    port: mailbox.port,
+    user: mailbox.accountUser,
+    password,
+    mailbox: mailbox.mailbox,
+    tlsServerName: mailbox.tlsServerName,
+    recipientDomain: aliasBase.domain,
+    aliasBase,
+    currentAliasGeneration: aliasCurrent.generation,
+    currentAliasSecret: aliasCurrent.secret,
+    aliasCurrent,
+    aliasSecret: aliasCurrent.secret,
+    trustedRecipientHeader: mailbox.trustedRecipientHeader,
+    pollMilliseconds: mailbox.pollSeconds * 1_000,
+  };
 }
 
 /**
@@ -158,25 +193,7 @@ export async function getImapIngestionConfig(): Promise<ImapIngestionConfig> {
     }
   }
 
-  const configured = Boolean(mailboxRow.host && mailboxRow.accountUser && password);
-  const aliasCurrent = { generation: 1, secret: aliasSecret };
-  return {
-    configured,
-    enabled: configured && mailboxRow.enabled,
-    host: mailboxRow.host,
-    port: mailboxRow.port,
-    user: mailboxRow.accountUser,
-    password,
-    mailbox: mailboxRow.mailbox,
-    tlsServerName: mailboxRow.tlsServerName,
-    recipientDomain: recipientDomainOf(mailboxRow.accountUser),
-    currentAliasGeneration: aliasCurrent.generation,
-    currentAliasSecret: aliasCurrent.secret,
-    aliasCurrent,
-    aliasSecret: aliasCurrent.secret,
-    trustedRecipientHeader: mailboxRow.trustedRecipientHeader,
-    pollMilliseconds: mailboxRow.pollSeconds * 1_000,
-  };
+  return imapConfigFromMailbox(mailboxRow, password, aliasSecret);
 }
 
 /** Test-only reset for the per-process locked-audit dedupe guard. */
