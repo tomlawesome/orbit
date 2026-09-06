@@ -76,7 +76,6 @@ POSTGRES_USER=orbit
 
 TIKA_URL=
 OLLAMA_MODEL=
-IMAP_ENABLED=false
 `;
 
 let deployDir: string;

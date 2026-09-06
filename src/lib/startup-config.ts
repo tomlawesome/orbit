@@ -4,7 +4,6 @@ import { databaseConnectionString } from "@/db";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { getDocumentConfig } from "@/server/documents/config";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
-import { parseImapIngestionConfigFromEnvironment } from "@/server/mail-in/core/config";
 import { setConfigurationProblems } from "@/lib/configuration-problems";
 import {
   logFormats,
@@ -145,17 +144,6 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
     getNotificationWorkerConfig(notificationEnvironment);
   } catch (error) {
     issues.push({ field: "mail", code: "configuration_optional", detail: detailFromCaughtError(error) });
-  }
-  if (environment.IMAP_ENABLED !== "false") {
-    try {
-      // Deprecated-supported shape check only (ADR-0017 decision 6): these
-      // variables no longer feed the running mail-in configuration, which is
-      // database-backed (src/server/mail-in/mailbox-config.ts). This just
-      // fails an operator's leftover environment loudly rather than silently.
-      parseImapIngestionConfigFromEnvironment(environment);
-    } catch (error) {
-      issues.push({ field: "imap", code: "configuration_optional", detail: detailFromCaughtError(error) });
-    }
   }
   if (environment.ORBIT_LOG_LEVEL !== undefined && !(logLevels as readonly string[]).includes(environment.ORBIT_LOG_LEVEL)) {
     issues.push({ field: "logging", code: "configuration_optional" });
