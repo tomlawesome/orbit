@@ -69,6 +69,41 @@ describe("authenticated mailbox review read boundary", () => {
     await fixture.cleanup();
   });
 
+  /*
+   * Regression for the gap that let orbit#858's e2e run hang for two minutes:
+   * mail-in-attribution.test.ts proves an unattributed or held message gets
+   * that status, but nothing tied that status to what the review lane
+   * actually shows. `v19-mail-collection.spec.ts` (#459) found the gap by
+   * polling `/api/imap-inbox` against a message that could only ever reach
+   * "unattributed" — and it never appeared, because `reviewLaneStatuses`
+   * (src/server/mail-in/imap-inbox.ts:34) never included it. This is the
+   * unit of behaviour an e2e timeout is a very expensive way to discover.
+   */
+  it("never lists an unattributed or held message, even though a receipt row exists (ADR-0017 slices 4-5)", async () => {
+    const fixture = await createIntegrationFixture("imap-review-unlisted-statuses");
+    const member = await fixture.session("member");
+    const shared = {
+      mailbox: "private", contentSha256: crypto.randomUUID().replaceAll("-", ""),
+      recipientAliasSha256: "unlisted-alias", userId: member.userId,
+      expiresAt: new Date(Date.now() + 86_400_000),
+    };
+    await getDb().insert(imapIngestionMessages).values([
+      { ...shared, mailboxUidValidity: "unlisted-1", mailboxUid: 201, status: "unattributed", failureCode: "sender_unverified", receiptStatus: "cancelled" },
+      { ...shared, mailboxUidValidity: "unlisted-2", mailboxUid: 202, status: "held", receiptStatus: "cancelled" },
+    ]);
+    const [visible] = await getDb().insert(imapIngestionMessages).values({
+      ...shared, mailboxUidValidity: "unlisted-3", mailboxUid: 203, status: "pending_review",
+      receiptStatus: "processing", householdId: fixture.household.id, proposal: { title: "The one that should show" },
+    }).returning({ id: imapIngestionMessages.id });
+
+    const url = "http://127.0.0.1:3000/api/imap-inbox";
+    const inbox = await callRouteForSession(getInbox, member, { url });
+    const receipts = (await inbox.json()).receipts as Array<{ id: string; message: string; canApprove: boolean }>;
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({ id: visible.id, canApprove: true, message: "Ready for your review." });
+    await fixture.cleanup();
+  });
+
   it("requires a selected household and redacts mail and storage metadata", async () => {
     const fixture = await createIntegrationFixture("imap-review-route-safe");
     const member = await fixture.session("member");
