@@ -140,35 +140,31 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
                right │ members, running the FULL height of that column
                foot  │ the danger line, across both
 
-     NON-OWNER left  │ the system (read-only)  →  leaving
-               right │ members, full height
+     NON-OWNER left  │ the system (read-only)
+               right │ members
 
-   Members is stretched, not floated: its box ends level with sections, so
-   both columns finish on the same rule and the closing line inside it is
-   pinned to its own foot rather than leaving a gap under the roster. */
+   Members is stretched, not floated: its box ends level with sections and
+   the slack shares out between its blocks. Round 2 (#481): the foot notes
+   and the member's Leaving card are gone — a member reads one card per
+   column and the panel takes its own height. */
 .household-page .card.c-system  {grid-column:1;grid-row:1}
 .household-page .card.c-sections{grid-column:1;grid-row:2}
-.household-page .card.c-leaving {grid-column:1;grid-row:2}
 .household-page .card.c-members {grid-column:2;grid-row:1 / span 2;align-self:stretch;
                  display:flex;flex-direction:column}
 .household-page .card.c-danger  {grid-column:1 / -1;grid-row:3}
 /* the panel is taller than its content in a family this size, so the slack
    is SHARED between the blocks instead of collecting in one hole at the
    bottom: three auto margins, three even breaths, rules evenly spaced. */
-.household-page .c-members .block,
-.household-page .c-members .note.foot{margin-top:auto}
-.household-page .c-members .note.foot{padding-top:14px;border-top:1px solid var(--line-soft)}
+.household-page .c-members .block{margin-top:auto}
 /* the member's screen has only three blocks in the whole desk, so the panel
    takes its own height instead of stretching over air */
 .household-page.member .card.c-members{align-self:start}
-.household-page.member .c-members .note.foot{margin-top:14px}
 @media (max-width:880px){
   .household-page .cards{grid-template-columns:1fr}
   .household-page .card.c-system,.household-page .card.c-sections,
-  .household-page .card.c-leaving,.household-page .card.c-members,
+  .household-page .card.c-members,
   .household-page .card.c-danger{grid-column:1;grid-row:auto;align-self:auto}
   .household-page .c-members .block{margin-top:16px}
-  .household-page .c-members .note.foot{margin-top:13px;padding-top:0}
 }
 .household-page .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:15px}
 .household-page .card h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-quiet)}
@@ -201,6 +197,12 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .selwrap::after{content:"";position:absolute;right:13px;top:50%;width:6px;height:6px;
                 border-right:1.4px solid var(--ink-faint);border-bottom:1.4px solid var(--ink-faint);
                 transform:translateY(-72%) rotate(45deg);pointer-events:none}
+/* round 2 (#481): a member's identity card prints values, not greyed
+   controls — the shape says read-only, so no caption has to. */
+.household-page.member .c-system .field input:disabled,
+.household-page.member .c-system .field select:disabled{
+  background:none;border-color:transparent;opacity:1;color:var(--ink);padding:9px 0}
+.household-page.member .c-system .selwrap::after{display:none}
 
 .household-page .savebar{display:flex;align-items:center;gap:14px;margin-top:17px}
 .household-page .btn{font:600 13px var(--display);color:var(--bg);background:var(--accent);border:0;
@@ -216,6 +218,14 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .note b{color:var(--ink-mid);font-weight:400}
 .household-page .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
 .household-page .said.show{display:block}
+/* a line that exists only at the moment it applies (#481 round 2): the screen
+   does not print a rule everybody has to read, it answers the person the rule
+   stops, while it is stopping them. */
+.household-page .moment{margin-top:10px;font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.85}
+.household-page .moment.warn{color:var(--warm)}
+/* and it points at the way out rather than describing it */
+.household-page .ghost.beckon{border-color:var(--accent);color:var(--accent-text);
+       box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 /* What a control says when it could not do what it looked like it did — the
    helm's .note in the warm ink, never on the happy path. */
 .household-page .problem{margin-top:12px;font:11px var(--mono);color:var(--warm);line-height:1.8}
@@ -287,23 +297,33 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .cand:last-of-type{border-bottom:0}
 .household-page .cand b{flex:1;font-size:13px;font-weight:520}
 
-/* INVITATIONS BY EMAIL (#481) — the other way in, for somebody who has no
-   account yet. Drawn as the candidates list is, with one field above it: the
-   two blocks are the same act, and the only difference is whether the person
-   already exists on this instance. The address is the row, because there is no
-   display name to stand in for it — this is the one place on this screen where
-   an email address appears at all. */
-.household-page .invite{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+/* INVITATIONS BY EMAIL (#481) — the other way in, for somebody with no
+   account here yet. An outstanding invitation is NOT a third list of people:
+   it is a seat held open. So the row wears a dashed EMPTY ring where a
+   member's avatar would sit — the same pen the joiners' dashed border uses
+   for "not in yet" — and its name is the address the owner typed, set in mono
+   because it is a string, not a chosen name. That is the deliberate answer to
+   this screen's names-only rule: an ACCOUNT is never shown by its address, and
+   an invitation has nothing else to be shown by. The address exists here only
+   while the person doesn't, and leaves the moment they arrive. Members see
+   what is outstanding (Q44) but the field and the controls are the owner's. */
+.household-page .invite{display:flex;align-items:center;gap:10px;margin-bottom:6px}
 .household-page .invite input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);
        border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
 .household-page .invite input::placeholder{color:var(--ink-quiet)}
 .household-page .invite input:focus{border-color:var(--accent)}
-.household-page .inv{display:flex;align-items:center;gap:12px;padding:6px 2px;
+.household-page .inv{display:flex;align-items:center;gap:12px;padding:8px 2px;
       border-bottom:1px solid var(--line-soft)}
 .household-page .inv:last-of-type{border-bottom:0}
-.household-page .inv b{font-size:13px;font-weight:520;font-family:var(--mono);word-break:break-all}
-.household-page .inv .when{flex:1;font:10.5px var(--mono);letter-spacing:.04em;color:var(--ink-quiet)}
-.household-page .inv.readonly .when{flex:none}
+/* the held seat: an avatar's geometry with nobody in it yet */
+.household-page .seat{width:32px;height:32px;border-radius:50%;flex:none;
+      border:1px dashed var(--line)}
+.household-page .inv .who{flex:1;min-width:0}
+.household-page .inv b{display:block;font-size:13px;font-weight:520;font-family:var(--mono);
+      word-break:break-all}
+.household-page .inv .when{display:block;margin-top:2px;font:10.5px var(--mono);
+      letter-spacing:.04em;color:var(--ink-quiet)}
+.household-page .inv .ghost{padding:5px 11px;flex:none}
 
 /* the handover: two deliberate steps, and the second asks twice */
 .household-page .handover{display:none;margin-top:14px;border:1px solid var(--accent);border-radius:13px;
@@ -333,9 +353,11 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    pen — no gradient, no gloss, no siren stripes. Just red: a red rule around
    it, a flat red wash under it, hazard ticks along the top edge, the heading
    in red, and a red-outlined button that FILLS red the moment it is armed.
-   The copy runs ACROSS the card in two short columns and the button sits UP
-   on the right of the heading line. Type the system's name exactly, then tap
-   twice. */
+
+   Round 2 (#481): at rest the card is the heading and the act, with the
+   button UP on the right of the heading line. What deletion costs is printed
+   only when somebody presses the opener, beside the name they must type. The
+   protocol is untouched: the name exactly, then tap twice. */
 .household-page .card.dangercard{position:relative;overflow:hidden;
                  border:1.5px solid var(--overdue);padding:15px 22px 17px}
 /* the wash — one flat plane of the same red, laid under the panel */
@@ -357,16 +379,11 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
                 stroke-linecap:round;stroke-linejoin:round}
 .household-page .dangerhead .spacer{margin-left:auto}
 
-/* the copy, spread across the width: the act on the left, the small print
-   about who holds the clock on the right */
-.household-page .dangerbody{display:grid;grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:start}
 .household-page .dangercard p{font-size:13px;color:var(--ink-mid);max-width:none;line-height:1.62}
 .household-page .dangercard p b{color:var(--ink);font-weight:560}
 .household-page .dangercard p b.red{color:var(--overdue-text);font-weight:600}
-/* the card's prose is 13px; its mono asides are not — say so, or the prose
-   rule out-specifies .note and .said and swallows them */
-.household-page .dangercard .note{font-size:10.5px;color:var(--ink-quiet);max-width:none;margin-top:0}
-.household-page .dangercard .note b{color:var(--ink-mid);font-weight:400}
+/* the card's prose is 13px; its mono lines are not — say so, or the prose
+   rule out-specifies .said and .problem and swallows them */
 .household-page .dangercard .said{font-size:11px;color:var(--ok-text);max-width:none}
 .household-page .dangercard .problem{font-size:11px;color:var(--warm);max-width:none}
 
@@ -380,17 +397,15 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .dangerbtn:disabled{opacity:.42;cursor:not-allowed;background:none;
                     color:var(--overdue-text);border-color:var(--overdue)}
 
-.household-page .confirm{display:grid;margin-top:13px;padding-top:13px;
-         grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:end;
+.household-page .confirm{display:block;margin-top:13px;padding-top:13px;
          border-top:1px dashed color-mix(in srgb,var(--overdue) 55%,transparent)}
-.household-page .confirm .field{margin-bottom:0;min-width:0}
+.household-page .confirm .stake{margin:0 0 13px;max-width:72ch}
+.household-page .confirm .field{margin-bottom:0;min-width:0;max-width:430px}
 .household-page .confirm .field label{color:var(--overdue-text);opacity:.9}
 .household-page .confirm .field input{font-family:var(--mono);font-size:12.5px;
                       border-color:color-mix(in srgb,var(--overdue) 60%,transparent)}
 .household-page .confirm .field input:focus{border-color:var(--overdue)}
-.household-page .confirm .note{align-self:end;padding-bottom:2px}
 @media (max-width:880px){
-  .household-page .dangerbody,.household-page .confirm{grid-template-columns:1fr;gap:10px}
   .household-page .dangerhead{flex-wrap:wrap}
 }
 

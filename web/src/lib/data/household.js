@@ -12,7 +12,7 @@
  */
 
 import { bandOf, bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
-import { ago, longDate, tminus } from "$lib/format.js";
+import { ago, shortDate, tminus } from "$lib/format.js";
 
 /**
  * Two letters from a chosen display name — never from an email address, which
@@ -161,9 +161,10 @@ export function invitationRowsOf(invitations, now) {
     email: invitation.email,
     sent: invitation.sentAt && now ? ago(invitation.sentAt, now) : null,
     failed: Boolean(invitation.sendError) || !invitation.sentAt,
-    /* A date, not a countdown: fourteen days out, "expires 20 September 2026"
-       is what an owner can act on, and T−14d is not. */
-    expires: longDate(invitation.expiresAt.slice(0, 10)),
+    /* A date, not a countdown: "expires 18 Sep 2026" is what an owner can act
+       on, and T−14d is not. Short-form month, as the ratified mockup draws it
+       — the row's second line is chrome under the address, not a sentence. */
+    expires: shortDate(invitation.expiresAt.slice(0, 10)),
   }));
 }
 

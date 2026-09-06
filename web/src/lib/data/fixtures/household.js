@@ -89,16 +89,32 @@ export const MEMBERS_FIXTURE = {
  * The open invitations `GET /api/households/{householdId}/invitations`
  * answers (#481), in that route's exact shape.
  *
- * Empty everywhere, and that is the fixture's whole content: an address is the
- * one thing this screen shows that a display name is not, so a fixture holding
- * one would put a plausible email address into a photographed screen and into
- * every developer's `vite dev`. The empty state is also the state the ratified
- * mockup draws, so the gate measures the port rather than invented data.
+ * The primary household holds the one seat the ratified mockup draws, address
+ * and dates included, because the round-2 verdict made the held seat part of
+ * the design rather than an empty state with a caption: a fixture without it
+ * would photograph a block the design does not have. The address is the
+ * mockup's own, on the reserved documentation domain — a placeholder, never a
+ * deliverable address — and it is the one address this screen shows anywhere.
+ *
+ * The dates are the strings the mockup prints, read against the fixture clock
+ * (`fixtureToday`, 2026-08-13 noon): sent two days before it, expiring on the
+ * mockup's date. Nothing on the screen claims an interval between them, so
+ * there is nothing for them to contradict.
  *
  * @type {Record<string, { id: string, householdId: string, email: string, createdAt: string, sentAt: string | null, sendError: string | null, expiresAt: string }[]>}
  */
 export const INVITATIONS_FIXTURE = {
-  "hh-lawson-1": [],
+  "hh-lawson-1": [
+    {
+      id: "inv-fixture-1",
+      householdId: "hh-lawson-1",
+      email: "daniel.lawson@example.com",
+      createdAt: "2026-08-11T12:00:00.000Z",
+      sentAt: "2026-08-11T12:00:00.000Z",
+      sendError: null,
+      expiresAt: "2026-09-18T12:00:00.000Z",
+    },
+  ],
   "hh-seaside-4551": [],
   "hh-mumdad-2480": [],
   "hh-narrow-15033": [],

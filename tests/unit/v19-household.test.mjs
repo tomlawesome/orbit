@@ -285,7 +285,7 @@ describe("the open-invitations rows", () => {
       email: "priya@example.com",
       sent: "3h ago",
       failed: false,
-      expires: "27 August 2026",
+      expires: "27 Aug 2026",
     }]);
   });
 
