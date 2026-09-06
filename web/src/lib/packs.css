@@ -95,6 +95,9 @@
      (7.08:1 / 8.23:1 on this pack's ground), so their companions are the
      originals — no pixel moves on the dark packs or retrograde. */
   --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: --warm already clears the law as words here (10.51:1 on --bg,
+     10.12:1 on --panel), so its companion is the original — no pixel move. */
+  --warm-text:var(--warm);
 }
 [data-theme=afterdark]{
   --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -141,6 +144,8 @@
   /* #491 item 3: 7.28:1 / 8.46:1 as words on this ground — the companions are
      the originals, same reason as star-chart above. */
   --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: 10.80:1 / 10.50:1 as words here — the companion is the original. */
+  --warm-text:var(--warm);
   /*
    * THE GALACTIC PLANE — after dark's own sky (§15, "after dark adopts the
    * happy accident"; approved with the bottom glow in the deep). The pack owns
@@ -194,6 +199,11 @@
      degraded-text 5.11:1. */
   --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
   --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+  /* #854: --warm as words is 2.66:1 on --bg, 3.00:1 on --panel — both under
+     the law. Same darken-toward-black recipe as overdue/degraded, taken
+     further: the 70/30 split used there falls just short here, at 4.48:1,
+     so 65/35 clears at 4.90:1 on --bg (5.52:1 on --panel). */
+  --warm-text:color-mix(in srgb, var(--warm) 65%, black 35%);
 }
 /*
  * dawn — AND DAWN IS THE TERMINATOR (owner, §15: "'dawn' the pack means the
@@ -289,6 +299,10 @@
      clear with margin (4.98:1). */
   --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
   --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+  /* #854: --warm as words is 2.64:1 on --bg, 3.08:1 on --panel — both under
+     the law. The same 70/30 darken-toward-black split used above clears
+     4.65:1 on --bg (5.43:1 on --panel). */
+  --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
 }
 /*
  * clouds — THE CLOUD SEA, and one of Orbit's MAIN LIGHTER THEMES (owner, §15:
@@ -341,6 +355,9 @@
      overdue-text 4.84:1, degraded-text 4.98:1. */
   --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
   --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+  /* #854: identical --warm, --bg and --panel to dawn, so the same 70/30
+     recipe lands the same ratios — 4.65:1 on --bg, 5.43:1 on --panel. */
+  --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
 }
 /*
  * retrograde — the fifth pack (owner, 2026-08-14). A planet in retrograde is
@@ -413,5 +430,8 @@
   /* #491 item 3: overdue and degraded clear the law as words too (5.64:1 and
      9.61:1), so their companions are the originals — no pixel moves. */
   --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: --warm clears the law as words too (13.67:1 on --bg, 13.17:1 on
+     --panel), so its companion is the original — no pixel move. */
+  --warm-text:var(--warm);
 }
 
