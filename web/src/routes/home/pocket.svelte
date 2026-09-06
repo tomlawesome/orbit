@@ -215,13 +215,15 @@
         {#if b.suggestion}
           <!-- #466: the relay's catch is ON the dial at its law position —
                the same hollow accent body the desk shows (§12). -->
-          <g data-sheet-sugg={b.id} style="cursor:pointer">
+          <g data-sheet-sugg={b.id} style="cursor:pointer" tabindex="0" role="button"
+             aria-label={`caught receipt: ${b.title}`}>
             <circle cx={b.placement.x} cy={b.placement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
             <circle cx={b.placement.x} cy={b.placement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
           </g>
         {:else}
           <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}"
-                  data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}/>
+                  data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}
+                  tabindex="0" role="button" aria-label={b.title}/>
           {#if b.documentCount > 0 && b.paint === "jade"}
             <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
                      transform="rotate(-24 {b.placement.x} {b.placement.y})"
