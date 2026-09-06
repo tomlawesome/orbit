@@ -220,6 +220,20 @@
       "breakpoints": true
     },
     {
+      "idx": 31,
+      "version": "7",
+      "when": 1787788800000,
+      "tag": "0031_session_facts",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787875200000,
+      "tag": "0032_mail_in_secrets",
+      "breakpoints": true
+    },
+    {
       "idx": 33,
       "version": "7",
       "when": 1787961600000,

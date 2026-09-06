@@ -4,11 +4,18 @@ import {
   randomBytes,
 } from "node:crypto";
 
-const ALGORITHM = "aes-256-gcm";
-const ENVELOPE_VERSION = 1;
-const IV_BYTES = 12;
-const AUTH_TAG_BYTES = 16;
-const KEY_BYTES = 32;
+export const ENVELOPE_ALGORITHM = "aes-256-gcm";
+export const ENVELOPE_VERSION = 1;
+export const ENVELOPE_IV_BYTES = 12;
+export const ENVELOPE_AUTH_TAG_BYTES = 16;
+export const ENVELOPE_KEY_BYTES = 32;
+
+// Retained as unexported aliases so the rest of this file reads exactly as it
+// did before the ADR-0017 generalisation below.
+const ALGORITHM = ENVELOPE_ALGORITHM;
+const IV_BYTES = ENVELOPE_IV_BYTES;
+const AUTH_TAG_BYTES = ENVELOPE_AUTH_TAG_BYTES;
+const KEY_BYTES = ENVELOPE_KEY_BYTES;
 
 export interface DocumentEncryptionContext {
   documentId: string;
@@ -66,6 +73,86 @@ function keyAdditionalData(documentId: string, keyId: string, purpose: DocumentE
   }), "utf8");
 }
 
+/**
+ * Generic envelope key-wrap primitives (ADR-0017 decision 1): the same
+ * AES-256-GCM construction `wrapDocumentKey`/`unwrapDocumentKey` always used,
+ * generalised to take caller-supplied AAD instead of building document AAD
+ * internally. Every purpose-specific caller — documents, and the mail-in
+ * secrets in `src/server/mail-in/core/secret-crypto.ts` — builds its own AAD
+ * and calls these rather than a new cipher construction being added per
+ * purpose.
+ */
+export interface WrappedKey {
+  wrappedDek: string;
+  wrapIv: string;
+  wrapAuthTag: string;
+}
+
+export function wrapKeyWithAad(dataKey: Buffer, keyEncryptionKey: Buffer, aad: Buffer): WrappedKey {
+  requireKey(dataKey, "Data key");
+  requireKey(keyEncryptionKey, "Key-encryption key");
+  const wrapIv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(ALGORITHM, keyEncryptionKey, wrapIv, { authTagLength: AUTH_TAG_BYTES });
+  cipher.setAAD(aad);
+  const wrappedDek = Buffer.concat([cipher.update(dataKey), cipher.final()]);
+  return {
+    wrappedDek: wrappedDek.toString("base64url"),
+    wrapIv: wrapIv.toString("base64url"),
+    wrapAuthTag: cipher.getAuthTag().toString("base64url"),
+  };
+}
+
+/** Reverses `wrapKeyWithAad`; throws unless `aad` matches exactly what wrapped it. */
+export function unwrapKeyWithAad(wrapped: WrappedKey, keyEncryptionKey: Buffer, aad: Buffer): Buffer {
+  requireKey(keyEncryptionKey, "Key-encryption key");
+  const wrapIv = decodeFixed(wrapped.wrapIv, IV_BYTES, "Key-wrap IV");
+  const wrapTag = decodeFixed(wrapped.wrapAuthTag, AUTH_TAG_BYTES, "Key-wrap authentication tag");
+  const wrappedDek = Buffer.from(wrapped.wrappedDek, "base64url");
+  if (wrappedDek.length !== KEY_BYTES) throw new Error("Wrapped key has an invalid length");
+  const decipher = createDecipheriv(ALGORITHM, keyEncryptionKey, wrapIv, { authTagLength: AUTH_TAG_BYTES });
+  decipher.setAAD(aad);
+  decipher.setAuthTag(wrapTag);
+  const dataKey = Buffer.concat([decipher.update(wrappedDek), decipher.final()]);
+  requireKey(dataKey, "Unwrapped key");
+  return dataKey;
+}
+
+export interface EncryptedContent {
+  ciphertext: Buffer;
+  contentIv: string;
+  contentAuthTag: string;
+}
+
+/** Generic content-encryption primitive underlying `encryptDocument`. */
+export function encryptWithAad(plaintext: Buffer, dataKey: Buffer, aad: Buffer): EncryptedContent {
+  requireKey(dataKey, "Data key");
+  const contentIv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(ALGORITHM, dataKey, contentIv, { authTagLength: AUTH_TAG_BYTES });
+  cipher.setAAD(aad);
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return {
+    ciphertext,
+    contentIv: contentIv.toString("base64url"),
+    contentAuthTag: cipher.getAuthTag().toString("base64url"),
+  };
+}
+
+/** Reverses `encryptWithAad`; throws unless `aad` and the tag both authenticate. */
+export function decryptWithAad(
+  ciphertext: Buffer,
+  envelope: { contentIv: string; contentAuthTag: string },
+  dataKey: Buffer,
+  aad: Buffer,
+): Buffer {
+  requireKey(dataKey, "Data key");
+  const contentIv = decodeFixed(envelope.contentIv, IV_BYTES, "Content IV");
+  const contentTag = decodeFixed(envelope.contentAuthTag, AUTH_TAG_BYTES, "Content authentication tag");
+  const decipher = createDecipheriv(ALGORITHM, dataKey, contentIv, { authTagLength: AUTH_TAG_BYTES });
+  decipher.setAAD(aad);
+  decipher.setAuthTag(contentTag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+
 function wrapDocumentKey(
   documentKey: Buffer,
   documentId: string,
@@ -73,17 +160,7 @@ function wrapDocumentKey(
   keyId: string,
   purpose: DocumentEncryptionContext["purpose"] = "document",
 ): Pick<DocumentCryptoEnvelope, "wrappedDek" | "wrapIv" | "wrapAuthTag"> {
-  requireKey(documentKey, "Document key");
-  requireKey(keyEncryptionKey, "Key-encryption key");
-  const wrapIv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv(ALGORITHM, keyEncryptionKey, wrapIv, { authTagLength: AUTH_TAG_BYTES });
-  cipher.setAAD(keyAdditionalData(documentId, keyId, purpose));
-  const wrappedDek = Buffer.concat([cipher.update(documentKey), cipher.final()]);
-  return {
-    wrappedDek: wrappedDek.toString("base64url"),
-    wrapIv: wrapIv.toString("base64url"),
-    wrapAuthTag: cipher.getAuthTag().toString("base64url"),
-  };
+  return wrapKeyWithAad(documentKey, keyEncryptionKey, keyAdditionalData(documentId, keyId, purpose));
 }
 
 function unwrapDocumentKey(
@@ -92,20 +169,10 @@ function unwrapDocumentKey(
   keyEncryptionKey: Buffer,
   purpose: DocumentEncryptionContext["purpose"] = "document",
 ): Buffer {
-  requireKey(keyEncryptionKey, "Key-encryption key");
   if (envelope.envelopeVersion !== ENVELOPE_VERSION || envelope.algorithm !== ALGORITHM) {
     throw new Error("Unsupported document encryption envelope");
   }
-  const wrapIv = decodeFixed(envelope.wrapIv, IV_BYTES, "Key-wrap IV");
-  const wrapTag = decodeFixed(envelope.wrapAuthTag, AUTH_TAG_BYTES, "Key-wrap authentication tag");
-  const wrappedDek = Buffer.from(envelope.wrappedDek, "base64url");
-  if (wrappedDek.length !== KEY_BYTES) throw new Error("Wrapped document key has an invalid length");
-  const decipher = createDecipheriv(ALGORITHM, keyEncryptionKey, wrapIv, { authTagLength: AUTH_TAG_BYTES });
-  decipher.setAAD(keyAdditionalData(documentId, envelope.keyId, purpose));
-  decipher.setAuthTag(wrapTag);
-  const documentKey = Buffer.concat([decipher.update(wrappedDek), decipher.final()]);
-  requireKey(documentKey, "Unwrapped document key");
-  return documentKey;
+  return unwrapKeyWithAad(envelope, keyEncryptionKey, keyAdditionalData(documentId, envelope.keyId, purpose));
 }
 
 /** Encrypts validated document bytes and independently wraps their random DEK. */
@@ -119,20 +186,17 @@ export function encryptDocument(
   requireKey(keyEncryptionKey, "Key-encryption key");
 
   const documentKey = randomBytes(KEY_BYTES);
-  const contentIv = randomBytes(IV_BYTES);
   try {
-    const cipher = createCipheriv(ALGORITHM, documentKey, contentIv, { authTagLength: AUTH_TAG_BYTES });
-    cipher.setAAD(contentAdditionalData(context), { plaintextLength: plaintext.length });
-    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const encrypted = encryptWithAad(plaintext, documentKey, contentAdditionalData(context));
     const wrapped = wrapDocumentKey(documentKey, context.documentId, keyEncryptionKey, keyId, context.purpose);
     return {
-      ciphertext,
+      ciphertext: encrypted.ciphertext,
       envelope: {
         envelopeVersion: ENVELOPE_VERSION,
         algorithm: ALGORITHM,
         keyId,
-        contentIv: contentIv.toString("base64url"),
-        contentAuthTag: cipher.getAuthTag().toString("base64url"),
+        contentIv: encrypted.contentIv,
+        contentAuthTag: encrypted.contentAuthTag,
         ...wrapped,
       },
     };
@@ -150,12 +214,7 @@ export function decryptDocument(
 ): Buffer {
   const documentKey = unwrapDocumentKey(context.documentId, envelope, keyEncryptionKey, context.purpose);
   try {
-    const contentIv = decodeFixed(envelope.contentIv, IV_BYTES, "Content IV");
-    const contentTag = decodeFixed(envelope.contentAuthTag, AUTH_TAG_BYTES, "Content authentication tag");
-    const decipher = createDecipheriv(ALGORITHM, documentKey, contentIv, { authTagLength: AUTH_TAG_BYTES });
-    decipher.setAAD(contentAdditionalData(context), { plaintextLength: context.plaintextSize });
-    decipher.setAuthTag(contentTag);
-    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    const plaintext = decryptWithAad(ciphertext, envelope, documentKey, contentAdditionalData(context));
     if (plaintext.length !== context.plaintextSize) throw new Error("Decrypted document size does not match metadata");
     return plaintext;
   } finally {

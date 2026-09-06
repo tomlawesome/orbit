@@ -464,12 +464,17 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
           keyId: attachment.keyId,
         },
       }, { recipientUserId: userId, receiptId });
+      // A fresh const so the stream callback below closes over a binding
+      // TypeScript can narrow to `Buffer` on its own — narrowing a `let`
+      // through a nested closure is not reliable, and `bytes` itself must
+      // stay a `let` for the finally block's unconditional zeroing.
+      const heldBytes = bytes;
       const document = await uploadItemDocument({
         userId,
         householdId,
         itemId,
         filename: attachment.displayName,
-        body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }),
+        body: new ReadableStream({ start(controller) { controller.enqueue(heldBytes); controller.close(); } }),
         declaredBytes: attachment.sizeBytes,
         documentId: attachment.id,
       });

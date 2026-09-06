@@ -53,7 +53,6 @@ describe("preview-lane local preflight", () => {
       "docker-compose.build.yml",
       "docker-compose.acceptance.yml",
       "docker-compose.mail.yml",
-      "docker-compose.mail-alias-rotation.yml",
     ];
     for (const overlay of expectedOverlays) {
       expect(composeValidation).toContain(overlay);

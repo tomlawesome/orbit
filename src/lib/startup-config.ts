@@ -4,7 +4,6 @@ import { databaseConnectionString } from "@/db";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { getDocumentConfig } from "@/server/documents/config";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
-import { getImapIngestionConfig } from "@/server/imap-ingestion";
 import { setConfigurationProblems } from "@/lib/configuration-problems";
 import {
   logFormats,
@@ -145,13 +144,6 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
     getNotificationWorkerConfig(notificationEnvironment);
   } catch (error) {
     issues.push({ field: "mail", code: "configuration_optional", detail: detailFromCaughtError(error) });
-  }
-  if (environment.IMAP_ENABLED !== "false") {
-    try {
-      getImapIngestionConfig(environment);
-    } catch (error) {
-      issues.push({ field: "imap", code: "configuration_optional", detail: detailFromCaughtError(error) });
-    }
   }
   if (environment.ORBIT_LOG_LEVEL !== undefined && !(logLevels as readonly string[]).includes(environment.ORBIT_LOG_LEVEL)) {
     issues.push({ field: "logging", code: "configuration_optional" });

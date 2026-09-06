@@ -53,20 +53,18 @@ import {
  *     walked again here, at the phone viewport, to prove the phone's own
  *     rendering of them is still fully keyboard-reachable.
  *
- * A KNOWN GAP, NOT PAPERED OVER: pocket.svelte's mtop avatar (`.morb`) and
- * the dial's item/suggestion bodies bind no keyboard handler ANYWHERE in the
- * pocket dialect (pocket.behaviour.js only wires click listeners, and mtop's
- * `.morb` has no listener at all, of any kind — grepped for it). That means,
- * as this build stands, a pocket reader has no way at all — keyboard or
- * otherwise — to reach /inbox, /settings, /household or /administration from
- * `/home`'s own chrome, and no keyboard way to raise the bottom sheet from
- * the dial. The sub-screen tests below reach their screens by direct
- * navigation instead (the same thing a bookmark, a reminder link, or a
- * follow-up patch that wires the trigger would do), because that is the only
- * way this file can audit a real, rendered screen; the missing trigger
- * itself is reported alongside this file rather than invented around. The
- * bottom-sheet test below drives the real (missing) keyboard path on purpose
- * and is left failing — see its own comment.
+ * A KNOWN GAP, NOW PARTLY CLOSED (#852): mtop's avatar (`.morb`) used to bind
+ * no keyboard handler of any kind — it is a real `<button>` now
+ * (pocket.svelte), reached by Tab and activated natively by Enter/Space, and
+ * it opens the account menu (`#maccount`) with keyboard access to Inbox,
+ * Settings and Administration — see the two tests below. `/household` still
+ * has no route from pocket home's own chrome (the desk account panel #852
+ * mirrors has none either), and the dial's own item/suggestion bodies are
+ * unchanged by this issue. The sub-screen tests below still reach their
+ * screens by direct navigation as well, because that is the only way this
+ * file can audit a real, rendered screen on its own. The bottom-sheet test
+ * below (raising `#sheet` from a dial body) is unrelated to #852 and
+ * unchanged — see its own comment.
  */
 
 const READER = "Orbit Administrator";
@@ -250,6 +248,41 @@ test("home (pocket): the item sheet opens and light-dismisses by keyboard", asyn
     await expect(page.locator("#sheet")).toHaveClass(/open/);
     await page.keyboard.press("Escape");
     await expect(page.locator("#sheet")).not.toHaveClass(/open/);
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+/**
+ * #852: the account menu is the pocket dialect's own light-dismiss overlay,
+ * same shape as the "settings (pocket): the account panel is light-dismiss
+ * by keyboard" test below — opened by Tab+Enter on the toggle, closed by
+ * Escape, with focus returned to the toggle.
+ */
+test("home (pocket): the account menu is light-dismiss by keyboard", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHomePocket(page);
+  try {
+    await auditLightDismiss(page, "home (pocket)", "#morb", "#maccount");
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+/**
+ * #852: the real path onto /inbox from pocket home's own chrome — Tab to the
+ * avatar, Enter opens the menu, Tab reaches Inbox inside it, Enter navigates.
+ */
+test("home (pocket): the account menu's Inbox link is reachable by Tab and navigates on Enter", async ({ page }) => {
+  test.setTimeout(60_000);
+  const household = await arriveAtHomePocket(page);
+  try {
+    await tabTo(page, { selector: "#morb" }, { screen: "home (pocket)" });
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#maccount")).toHaveClass(/open/);
+    await tabTo(page, { selector: "#maccount nav a", textIncludes: "Inbox" }, { screen: "home (pocket) account menu" });
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/inbox/);
   } finally {
     await cleanup(page, household);
   }
@@ -453,7 +486,16 @@ test("admin (pocket): fully reachable by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
   await installKeyboardAudit(page);
   await signIn(page, "/home");
-  await page.goto("/admin");
-  await expect(page.locator(".obs")).toBeVisible({ timeout: 30_000 });
-  await auditTabOrder(page, "admin (pocket)");
+  /* #840: /admin is a gated route like any other, and this reader may own no
+     household at all at this point in the run -- unlike its neighbours
+     above, this test never otherwise needs one. Seeded and removed purely to
+     keep the door open. */
+  const household = await seedHousehold(page);
+  try {
+    await page.goto("/admin");
+    await expect(page.locator(".obs")).toBeVisible({ timeout: 30_000 });
+    await auditTabOrder(page, "admin (pocket)");
+  } finally {
+    await cleanup(page, household);
+  }
 });

@@ -54,6 +54,20 @@ const PLATFORM_KEYS = new Set([
   "ORBIT_CONFIGURE_APP_URL",
   "ORBIT_CONFIGURE_OIDC_ISSUER",
   "ORBIT_CONFIGURE_OIDC_CLIENT_ID",
+  // ADR-0017 slice 2 (#743): inbound mail (IMAP) credentials moved out of
+  // the environment entirely — every IMAP_* key was removed from
+  // ALLOWED_KEYS and no longer appears in .env-orbit.example. These five
+  // literal `environment.IMAP_ALIAS_*` reads remain only inside
+  // parseImapIngestionConfigFromEnvironment (src/server/mail-in/core/
+  // config.ts), which nothing in the running application calls any more
+  // (src/lib/startup-config.ts stopped calling it) but which stays because
+  // its characterization tests still exercise it. Dead code, not
+  // configuration; remove this exemption if that function is ever deleted.
+  "IMAP_ALIAS_CURRENT_GENERATION",
+  "IMAP_ALIAS_GENERATION",
+  "IMAP_ALIAS_PREVIOUS_GENERATION",
+  "IMAP_ALIAS_PREVIOUS_EXPIRES_AT",
+  "IMAP_ALIAS_PREVIOUS_EXPIRY",
 ]);
 
 function sourceFiles(dir: string): string[] {

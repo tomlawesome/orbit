@@ -84,7 +84,7 @@ export async function GET(event) {
 
     // A successful login always replaces the browser's previous session.
     await deleteSessionToken(event.cookies.get(sessionCookieName(config)));
-    const session = await createSession(user.id, config);
+    const session = await createSession(user.id, config, event.request.headers.get("user-agent"));
 
     clearTransactionCookie(event.cookies, config);
     setSessionCookie(event.cookies, session.token, config);

@@ -465,7 +465,7 @@ describe("exact-image publication workflow", () => {
     }
   });
 
-  it("validates both supported mail secret overlays", () => {
+  it("validates the supported mail secret overlay", () => {
     const configuration = ciScript("create-test-configuration.sh");
     expect(configuration).toContain(
       "openssl rand -hex 32 > .orbit-secrets/smtp-password",
@@ -473,20 +473,13 @@ describe("exact-image publication workflow", () => {
     expect(configuration).toContain(
       "SMTP_HOST=smtp.example.invalid",
     );
-    expect(configuration).toContain(
-      "IMAP_HOST=imap.example.invalid",
-    );
-    expect(configuration).toContain(
-      "IMAP_ENABLED=false",
-    );
+    expect(configuration).not.toContain("IMAP_");
 
     const composeValidation = ciScript("validate-compose.sh");
     expect(composeValidation).toContain(
       "-f docker-compose.yml -f docker-compose.mail.yml config --quiet",
     );
-    expect(composeValidation).toContain(
-      "-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.mail-alias-rotation.yml config --quiet",
-    );
+    expect(composeValidation).not.toContain("docker-compose.mail-alias-rotation.yml");
 
     /*
      * The acceptance stack runs the mail overlay too. Its file set became an

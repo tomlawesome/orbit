@@ -13,20 +13,11 @@ services:
       # start. This override exists only in the acceptance overlay.
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
       # The mail proving ground (#459): real IMAP collection from the
-      # disposable GreenMail sidecar below. The password and alias-secret
-      # files ride the mail overlay; GreenMail accepts any login (auth
-      # disabled), so the password value is irrelevant here. Outbound SMTP
-      # goes to the same sidecar — ingestion requires it configured.
-      IMAP_ENABLED: "true"
-      IMAP_HOST: orbit-greenmail
-      IMAP_PORT: "3993"
-      IMAP_USER: orbit-intake@in.orbit.test
-      IMAP_MAILBOX: INBOX
-      IMAP_TLS_SERVER_NAME: orbit-greenmail
-      IMAP_RECIPIENT_DOMAIN: in.orbit.test
-      IMAP_TRUSTED_RECIPIENT_HEADER: X-Orbit-Delivered-To
-      IMAP_ALIAS_CURRENT_GENERATION: "1"
-      IMAP_POLL_SECONDS: "30"
+      # disposable GreenMail sidecar below. The inbound mailbox credential
+      # is no longer environment configuration (ADR-0017) — it is set
+      # through the administration screen and stored encrypted in the
+      # database, so this overlay only points outbound SMTP at the same
+      # sidecar; ingestion requires it configured.
       SMTP_HOST: orbit-greenmail
       SMTP_PORT: "3465"
       SMTP_USER: orbit-notify@in.orbit.test

@@ -115,7 +115,7 @@ out. The contract test in `scripts/engine-runtime-deps-contract.test.mjs`
 catches the omission at commit time instead.
 
 **The route set is enumerated, not inferred.** `web/src/routes/api/` answers
-46 route families today (`tests/unit/api-route-set-contract.test.mjs` lists
+48 route families today (`tests/unit/api-route-set-contract.test.mjs` lists
 them literally), not the 24 first scoped when this packaging shape was
 proposed — the wider list is ADR-0012's own amendment: the cut ports what the
 new front end *needs*, not only what it currently calls. The test exists so a

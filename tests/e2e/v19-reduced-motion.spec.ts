@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #496 (epic #411 criterion 5): "`prefers-reduced-motion` and non-JS both
@@ -36,7 +37,7 @@ const NAME_PREFIX = "reduced-motion-";
 async function signIn(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await settleArrival(page);
 }
 
 /** A household with two items, spread across "this month" and "next month"
