@@ -241,7 +241,10 @@
         <div class="flex"><b>{hh.name}</b><span>{hh.requested ? "asked to join · waiting" : "tap to ask to join"}</span></div>
       </div>
     {/each}
-    <div class="burnup">the systems around you are labels until someone lets you in<br><a href={resolve("/create")}>— or start your own system →</a></div>
+    <!-- #840: the create card this leads to only ever appears at / (the
+         arrival), not on /create's full form -- there is no household yet
+         for that form to write into while the sky is empty. -->
+    <div class="burnup">the systems around you are labels until someone lets you in<br><a href={resolve("/")}>— or start your own system →</a></div>
   </div>
   {:else}
   <div class="mdial">

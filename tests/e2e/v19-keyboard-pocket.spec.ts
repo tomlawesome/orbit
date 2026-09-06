@@ -486,7 +486,16 @@ test("admin (pocket): fully reachable by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
   await installKeyboardAudit(page);
   await signIn(page, "/home");
-  await page.goto("/admin");
-  await expect(page.locator(".obs")).toBeVisible({ timeout: 30_000 });
-  await auditTabOrder(page, "admin (pocket)");
+  /* #840: /admin is a gated route like any other, and this reader may own no
+     household at all at this point in the run -- unlike its neighbours
+     above, this test never otherwise needs one. Seeded and removed purely to
+     keep the door open. */
+  const household = await seedHousehold(page);
+  try {
+    await page.goto("/admin");
+    await expect(page.locator(".obs")).toBeVisible({ timeout: 30_000 });
+    await auditTabOrder(page, "admin (pocket)");
+  } finally {
+    await cleanup(page, household);
+  }
 });
