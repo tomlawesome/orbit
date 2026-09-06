@@ -47,13 +47,14 @@ workflow:
     - if: $CI_COMMIT_TAG
       when: never
     # A scheduled pipeline is the Renovate lane, the sidecar-pin-freshness
-    # lane, or nothing (#801 step 6, #820). `renovate` and
-    # `sidecar_pin_freshness` are the only jobs that opt in, so a schedule
-    # that forgot its variable would produce a pipeline with no jobs, which
-    # GitLab rejects with a message that names neither the schedule nor the
-    # variable. Refusing it here says why.
+    # lane, the install-bootstrap lane, or nothing (#801 step 6, #820, #724).
+    # `renovate`, `sidecar_pin_freshness` and `install_bootstrap` are the only
+    # jobs that opt in, so a schedule that forgot its variable would produce a
+    # pipeline with no jobs, which GitLab rejects with a message that names
+    # neither the schedule nor the variable. Refusing it here says why.
     - if: $CI_PIPELINE_SOURCE == "schedule" && $RENOVATE == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -1799,3 +1800,75 @@ sidecar_pin_freshness:
         echo "sidecar pins: the check exited ${check_status}." >&2
         exit 1
       fi
+
+# Runs the strongest install evidence Orbit owns, which until now nothing
+# invoked (#724): scripts/test-install-bootstrap.sh fetches install.sh over
+# the real network from a branch, pipes it to bash, and asserts the channel
+# tag resolved to the digest ghcr.io serves right now. This is the schedule
+# half of #724's "at minimum on a schedule, and on the publication path"
+# criterion; the publication-path half is `verify_bootstrap` in
+# .github/workflows/publish-from-gitlab.yml, which runs the same harness
+# (green only) right after that workflow's `publish` job moves GHCR's
+# `preview` tag -- the event this job's own schedule cannot substitute for,
+# since a broken publish should fail visibly at publish time, not wait for
+# the next weekly run. This job also carries the `--red` self-test (see
+# below), which is a property of the harness, not of any one publish, so it
+# has no place in the publish-triggered job.
+#
+# Maintenance stage, schedule-gated, same as `renovate` and
+# `sidecar_pin_freshness`: this is deliberately not a required check on
+# ordinary merge requests (#724 non-goals) because it costs a real image pull
+# from the real registry every run.
+#
+# The in-job daemon (.docker_in_job), not the dind service, and $PLAYWRIGHT_IMAGE
+# rather than $NODE_IMAGE -- the same pairing `repair_journeys` and
+# `launcher_install_compat` use and for the same two reasons: the harness
+# publishes the disposable OIDC sidecar and the installed stack on 127.0.0.1
+# and then talks to them there, which a dind service's own network namespace
+# would put out of the job's reach; and the harness's `docker compose version`
+# preflight needs the v2 plugin, which Ubuntu Noble packages
+# (docker-compose-v2) and Debian Bookworm ($NODE_IMAGE) does not.
+#
+# No CI/CD variable to create beyond the schedule's own gate. The registry
+# pull is anonymous (the script requests its own short-lived token from
+# ghcr.io), and OIDC discovery is redirected to the disposable tests/oidc
+# sidecar the script builds itself -- both already true of the harness before
+# this issue, per its own header and #724's security considerations.
+#
+# One job, two invocations, rather than a second job for --red: both need the
+# same daemon, the same OIDC sidecar image build and the same registry pull,
+# so splitting them would double the runner claim and the network cost for
+# what is one harness proving itself before it reports. `--red` runs first,
+# the same order `sidecar_pin_freshness` uses for its own self-test, so a red
+# run that stopped firing fails the job before the green run's result could be
+# mistaken for a pass. Neither invocation's exit status is caught: `set -eu`
+# and the lack of any `|| true` mean either one failing fails this job, which
+# is #724's own requirement -- a failure here must be a failed job, not a line
+# in a log nobody opens.
+install_bootstrap:
+  stage: maintenance
+  extends: .privileged_runner
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  # The harness bounds its own install at 30m; two full runs (red, then
+  # green) plus the OIDC sidecar's one-time image build leave headroom above
+  # that without inflating it to cover a hang -- a genuinely stuck run is
+  # still caught by the harness's own internal timeout.
+  timeout: 45m
+  # A weekly maintenance run has nothing that could supersede it, same as
+  # `renovate` and `sidecar_pin_freshness`.
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
+  allow_failure: false
+  script:
+    - *docker_in_job
+    - |
+      set -eu
+      echo "install_bootstrap: red self-test — the digest comparison must fire"
+      bash scripts/test-install-bootstrap.sh --red
+      echo "install_bootstrap: green run — the published bootstrap against the live registry"
+      bash scripts/test-install-bootstrap.sh
+  after_script:
+    - *docker_in_job_teardown
