@@ -289,6 +289,7 @@ The administrator operations view exposes only these mailbox classes:
 | `available` | Both provider checks passed and polling may run. |
 | `provider_unavailable` | A bounded provider connection or authentication check failed. |
 | `unsafe_input` | Configuration is malformed or internally inconsistent. |
+| `credential_locked` | The stored credential could not be decrypted under the current key (ADR-0017); polling is stopped until an administrator re-enters it. |
 | `retrying` | A content-free notification is waiting for bounded retry. |
 | `exhausted` | A content-free notification reached its attempt limit. |
 | `retention_backlog` | Private staging cleanup needs operator attention. |

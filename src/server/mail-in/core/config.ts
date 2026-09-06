@@ -110,11 +110,18 @@ function previousExpiry(value: string | undefined): Date | undefined {
 }
 
 /**
- * Resolves the dedicated inbound mailbox configuration. IMAP is deliberately
- * disabled unless every required value is present; Orbit never downgrades to
- * plaintext IMAP or accepts a partial credential set.
+ * Parses the legacy environment-variable IMAP configuration shape.
+ *
+ * Renamed from `getImapIngestionConfig` by ADR-0017 slice 1 (orbit#742): the
+ * app's actual runtime mail-in configuration now comes from the database
+ * (`src/server/mail-in/mailbox-config.ts`, which owns that export name) with
+ * no environment fallback. This pure parser is kept, under its own name,
+ * purely so the environment-parsing edge cases pinned by
+ * `src/server/imap-characterization.test.ts` — a behavioural contract this
+ * module's README calls load-bearing — stay exercised unchanged; nothing in
+ * the running application calls it any more.
  */
-export function getImapIngestionConfig(environment: NodeJS.ProcessEnv = process.env): ImapIngestionConfig {
+export function parseImapIngestionConfigFromEnvironment(environment: NodeJS.ProcessEnv = process.env): ImapIngestionConfig {
   const parsed = ingestionEnvironmentSchema.parse({
     ...environment,
     IMAP_PASSWORD: readRuntimeSecret(environment, "IMAP_PASSWORD"),

@@ -33,8 +33,14 @@ import {
   parseTrustedRecipientHeader,
 } from "@/server/mail-in/core/imap-recipient";
 import { decideImapRotationState, ImapRotationStaleError } from "@/server/mail-in/core/imap-rotation";
+// Pinning the pure environment-parsing contract this file's suite is named
+// for (ADR-0017 slice 1, orbit#742): the app's runtime IMAP configuration is
+// now database-backed (src/server/mail-in/mailbox-config.ts), so the
+// `getImapIngestionConfig` name moved there; this parser is what it used to
+// be, renamed, imported here under its old local name so the fixtures below
+// need no other change.
+import { parseImapIngestionConfigFromEnvironment as getImapIngestionConfig } from "@/server/mail-in/core/config";
 import {
-  getImapIngestionConfig,
   imapAttachmentRetryDelayMs,
   imapProviderConfigCommitment,
   imapProviderConnectionOptions,
