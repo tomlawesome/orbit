@@ -84,7 +84,11 @@ test("a fresh sign-in returned to /home meets the arrival, not the item form", a
      of this spec is that a first-timer returned to /home reaches this UI at
      all. */
   await page.fill("#hhname", OWN_SYSTEM);
-  await expect(page.locator("#gobtn")).toHaveText(`create ${OWN_SYSTEM} →`);
+  /* #862 round 3: the act reads `Create`, one word, and no longer grows with
+     the typed name — the owner's ratified rule, so what is asserted is that
+     the button is armed by a name, not that it repeats one. */
+  await expect(page.locator("#gobtn")).toHaveText("Create");
+  await expect(page.locator("#gobtn")).toBeEnabled();
   const zone = await page.locator("#tz").inputValue();
   const money = await page.locator("#cur").inputValue();
   await page.locator("#gobtn").click();

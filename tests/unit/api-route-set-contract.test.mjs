@@ -88,6 +88,8 @@ const EXPECTED_ROUTES = [
   "/api/push/subscriptions",
   "/api/reviewed-intake/approve",
   "/api/settings/mail-relay",
+  "/api/settings/mail-relay/senders",
+  "/api/settings/mail-relay/verify",
   "/api/settings/reminders",
   "/api/settings/tour",
   "/api/workspace",
@@ -130,7 +132,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 50 route families -- no fewer, no more", () => {
+  it("has exactly the expected 52 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

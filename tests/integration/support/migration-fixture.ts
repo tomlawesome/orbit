@@ -38,12 +38,13 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   event_kind: ["renewal", "service"],
   imap_attachment_status: ["stored", "rejected", "assigned"],
   imap_recipient_alias_status: ["active", "legacy_inactive"],
-  imap_ingestion_status: ["processing", "pending_review", "quarantined", "failed", "completed", "discarded", "approving", "recoverable", "expired"],
+  imap_ingestion_status: ["processing", "pending_review", "quarantined", "failed", "completed", "discarded", "approving", "recoverable", "expired", "unattributed", "held"],
   imap_notification_kind: ["receipt", "review_ready"],
   item_status: ["active", "expired", "cancelled", "archived"],
   join_request_status: ["pending", "approved", "declined"],
   mail_in_secret_kind: ["imap_password", "alias_key", "oauth_refresh_token"],
   mail_in_provider_profile: ["mailcow", "gmail", "outlook", "other"],
+  mail_in_sender_source: ["account", "sso", "manual"],
   mail_in_auth_method: ["password", "xoauth2"],
   membership_role: ["owner", "member"],
   theme_mode: ["system", "light", "dark"],
@@ -65,7 +66,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   household_join_requests: ["id", "household_id", "user_id", "status", "created_at", "decided_at", "decided_by_user_id"],
   households: ["id", "name", "timezone", "default_currency", "setup_completed", "deletion_requested_at", "delete_after", "deletion_requested_by_user_id", "created_at", "updated_at"],
   imap_ingestion_attachments: ["id", "message_id", "display_name", "media_type", "size_bytes", "content_sha256", "storage_key", "ciphertext_size", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "status", "assigned_document_id", "transfer_claim_token", "transfer_claimed_at", "transfer_lease_expires_at", "purge_pending", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
-  imap_ingestion_messages: ["id", "mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256", "recipient_alias_generation", "user_id", "household_id", "review_item_id", "draft_version", "proposal", "field_evidence", "expires_at", "approval_operation_id", "approval_result_id", "approval_request_sha256", "approved_item_id", "approval_started_at", "approved_at", "discarded_at", "expired_at", "status", "attempts", "failure_code", "attachment_processing_attempts", "attachment_processing_locked_at", "attachment_processing_lease_token", "attachment_processing_next_attempt_at", "attachment_processing_failure_code", "receipt_status", "receipt_attempts", "receipt_locked_at", "receipt_lease_token", "receipt_sent_at", "receipt_failure_code", "received_at", "created_at", "updated_at"],
+  imap_ingestion_messages: ["id", "mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256", "recipient_alias_generation", "user_id", "household_id", "review_item_id", "draft_version", "proposal", "field_evidence", "expires_at", "approval_operation_id", "approval_result_id", "approval_request_sha256", "approved_item_id", "approval_started_at", "approved_at", "discarded_at", "expired_at", "status", "attempts", "failure_code", "attachment_processing_attempts", "attachment_processing_locked_at", "attachment_processing_lease_token", "attachment_processing_next_attempt_at", "attachment_processing_failure_code", "receipt_status", "receipt_attempts", "receipt_locked_at", "receipt_lease_token", "receipt_sent_at", "receipt_failure_code", "received_at", "created_at", "updated_at", "attributed_by"],
   items: ["id", "household_id", "section_id", "title", "subtype", "provider", "reference", "cost_minor", "currency", "start_date", "expiry_date", "renewal_date", "service_date", "recurrence_months", "snoozed_until", "notes", "external_document_url", "status", "requires_review", "version", "created_at", "updated_at"],
   memberships: ["household_id", "user_id", "role", "created_at"],
   notification_deliveries: ["id", "household_id", "event_id", "user_id", "channel", "scheduled_for", "status", "attempts", "locked_at", "lease_token", "last_error", "sent_at", "created_at", "updated_at"],
@@ -77,8 +78,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   sessions: ["id", "user_id", "token_hash", "active_household_id", "expires_at", "rotated_at", "created_at", "user_agent", "last_seen_at"],
   user_preferences: ["user_id", "theme_mode", "theme_id", "text_size", "urgency_palette", "email_notifications", "push_notifications", "first_warning_days", "final_warning_days", "tour_seen_at", "updated_at"],
   users: ["id", "email", "email_verified", "display_name", "avatar_url", "is_instance_admin", "disabled_at", "created_at", "updated_at"],
-  imap_recipient_aliases: ["id", "user_id", "generation", "alias_sha256", "status", "active_until", "created_at", "updated_at"],
-  imap_recipient_rotation_state: ["id", "current_generation", "current_commitment", "previous_generation", "previous_expires_at", "previous_commitment", "created_at", "updated_at"],
+  imap_recipient_aliases: ["id", "user_id", "generation", "alias_sha256", "alias_key_secret_id", "status", "active_until", "created_at", "updated_at"],
   instance_authority: ["singleton", "primary_user_id", "updated_at"],
   instance_maintenance: ["singleton", "id", "active", "current_window_id", "expected_end_at", "version", "updated_at"],
   instance_contact: ["singleton", "id", "public_address", "version", "updated_at"],
@@ -88,7 +88,10 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   imap_ingestion_staging_objects: ["id", "message_id", "lease_token", "storage_key", "status", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
   imap_notification_deliveries: ["id", "message_id", "user_id", "kind", "status", "attempts", "next_attempt_at", "locked_at", "lease_token", "sent_at", "failure_code", "created_at", "updated_at"],
   mail_in_secrets: ["id", "kind", "ciphertext", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "created_by_user_id", "created_at", "updated_at"],
-  mail_in_mailbox: ["singleton", "id", "host", "port", "account_user", "mailbox", "tls_server_name", "provider_profile", "auth_method", "trusted_recipient_header", "poll_seconds", "enabled", "verification_state", "verified_at", "password_secret_id", "alias_key_secret_id", "version", "created_at", "updated_at"],
+  mail_in_mailbox: ["singleton", "id", "host", "port", "account_user", "mailbox", "tls_server_name", "provider_profile", "auth_method", "trusted_recipient_header", "poll_seconds", "enabled", "verification_state", "verified_at", "password_secret_id", "alias_key_secret_id", "version", "created_at", "updated_at", "trusted_authserv_id"],
+  mail_in_relays: ["user_id", "current_generation", "previous_generation", "previous_expires_at", "ingest_paused_at", "rotated_at", "version", "created_at", "updated_at"],
+  mail_in_sender_addresses: ["id", "user_id", "address", "source", "verified_at", "verification_token_digest", "verification_expires_at", "created_at", "updated_at"],
+  mail_in_unattributed_replies: ["address_sha256", "last_replied_at", "created_at", "updated_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -133,6 +136,8 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   imap_recipient_alias_active_digest_unique: { table: "imap_recipient_aliases", columns: ["generation", "alias_sha256"], unique: true },
   imap_recipient_alias_user_generation_unique: { table: "imap_recipient_aliases", columns: ["user_id", "generation"], unique: true },
   imap_recipient_alias_user_status_idx: { table: "imap_recipient_aliases", columns: ["user_id", "status"], unique: false },
+  mail_in_sender_address_unique: { table: "mail_in_sender_addresses", columns: ["address"], unique: true },
+  mail_in_sender_address_user_idx: { table: "mail_in_sender_addresses", columns: ["user_id", "verified_at"], unique: false },
   // Partial: at most one open window, enforced by the database (orbit#585).
   maintenance_window_open_unique: { table: "maintenance_windows", columns: ["status"], unique: true },
   // Partial: the effective-state probe the guard pays on every request.
@@ -251,7 +256,6 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   imap_notification_deliveries_user_id_users_id_fk: foreign("imap_notification_deliveries", ["user_id"], "users", ["id"], "cascade"),
   imap_recipient_aliases_pkey: primary("imap_recipient_aliases", ["id"]),
   imap_recipient_aliases_user_id_users_id_fk: foreign("imap_recipient_aliases", ["user_id"], "users", ["id"], "cascade"),
-  imap_recipient_rotation_state_pkey: primary("imap_recipient_rotation_state", ["id"]),
   imap_attachment_message_hash_unique: unique("imap_ingestion_attachments", ["message_id", "content_sha256"]),
   items_household_id_households_id_fk: foreign("items", ["household_id"], "households", ["id"], "cascade"),
   items_section_id_sections_id_fk: foreign("items", ["section_id"], "sections", ["id"], "restrict"),
@@ -293,6 +297,14 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   mail_in_mailbox_pkey: primary("mail_in_mailbox", ["singleton"]),
   mail_in_mailbox_password_secret_id_mail_in_secrets_id_fk: foreign("mail_in_mailbox", ["password_secret_id"], "mail_in_secrets", ["id"], "set_null"),
   mail_in_mailbox_alias_key_secret_id_mail_in_secrets_id_fk: foreign("mail_in_mailbox", ["alias_key_secret_id"], "mail_in_secrets", ["id"], "set_null"),
+  mail_in_relays_pkey: primary("mail_in_relays", ["user_id"]),
+  mail_in_relays_user_id_users_id_fk: foreign("mail_in_relays", ["user_id"], "users", ["id"], "cascade"),
+  mail_in_sender_addresses_pkey: primary("mail_in_sender_addresses", ["id"]),
+  mail_in_sender_addresses_user_id_users_id_fk: foreign("mail_in_sender_addresses", ["user_id"], "users", ["id"], "cascade"),
+  mail_in_unattributed_replies_pkey: primary("mail_in_unattributed_replies", ["address_sha256"]),
+  /* Truncated to 63 characters by PostgreSQL's identifier limit, exactly as
+     the migration writes it. */
+  imap_recipient_aliases_alias_key_secret_id_mail_in_secrets_id_f: foreign("imap_recipient_aliases", ["alias_key_secret_id"], "mail_in_secrets", ["id"], "set_null"),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;

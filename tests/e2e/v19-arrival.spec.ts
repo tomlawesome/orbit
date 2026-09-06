@@ -277,7 +277,11 @@ test("naming your own system: the sealed refusal, then the create, then the laun
   /* THE SEALED REFUSAL, in one warm line: a name that is already out there is
      not created, and the line offers the road it names. */
   await page.fill("#hhname", HOUSEHOLD);
-  await expect(page.locator("#gobtn")).toHaveText(`create ${HOUSEHOLD} →`);
+  /* #862 round 3: the act reads `Create`, one word, and no longer grows with
+     the typed name — the owner's ratified rule, so what is asserted is that
+     the button is armed by a name, not that it repeats one. */
+  await expect(page.locator("#gobtn")).toHaveText("Create");
+  await expect(page.locator("#gobtn")).toBeEnabled();
   await page.locator("#gobtn").click();
   await expect(page.getByRole("alert")).toContainText("already exists here");
   await expect(page.getByRole("alert").getByRole("link", { name: "ask to join it" })).toBeVisible();

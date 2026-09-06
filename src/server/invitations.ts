@@ -423,9 +423,12 @@ export async function redeemInvitation(token: string, user: RedeemingUser): Prom
       changes: { emailSha256: invitationEmailDigest(row.email) },
     });
 
-    /* The arrival's household choice never appears because there is nothing
-       left to choose: Arrival.svelte hands straight to /home once the session
-       has an active household. */
+    /* The arrival's household CHOICE never appears because there is nothing
+       left to choose (#871: the sky moves to this household instead, once
+       the newcomer's own count has had its moment) — but the arrival itself
+       still plays, because `/invite/[token]/+page.server.js` redirects to
+       `/`, not `/home`, and sets the one-shot cookie that tells this landing
+       apart from an ordinary return visit. */
     await transaction.update(sessions)
       .set({ activeHouseholdId: row.householdId })
       .where(eq(sessions.id, user.sessionId));

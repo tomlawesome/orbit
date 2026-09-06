@@ -11,8 +11,8 @@
   import CreateSystem from "./CreateSystem.svelte";
   import Newcomer from "./Newcomer.svelte";
   import {
-    CREATE, DOOR, NEWCOMER, ONWARD,
-    arrivalStageOf, collidingHouseholdOf, createSystemCommand,
+    CREATE, DOOR, INVITED, NEWCOMER, ONWARD,
+    arrivalStageOf, collidingHouseholdOf, createSystemCommand, isInvitedLanding,
     preferredCurrency, preferredTimeZone,
   } from "./stage.js";
   import "./arrival.css";
@@ -36,6 +36,13 @@
    *               same ratified climb, the labelled sky, the boxless count and
    *               the question.
    *   onward    · a member. Home is theirs, and the door hands them on to it.
+   *   invited   · #871: a reader whose FIRST look at the session follows
+   *               redeeming an invitation (`isInvitedLanding`). The same
+   *               climb, sky and count as newcomer — the household is real
+   *               and theirs is one of the systems discovered — but at the
+   *               point the question would stand there is nothing to ask:
+   *               the sky moves to the household the invitation named
+   *               instead, by the same road ONWARD already takes there.
    *
    * THE TWO HONEST DEVIATIONS, both stated where they happen:
    *
@@ -75,12 +82,20 @@
    *   ?arrival=newcomer            the question, arrived at
    *   ?arrival=newcomer&at=<ms>    one millisecond of the newcomer's climb
    */
-  const fixture = browser && data?.fixtures ? page.url.searchParams.get("arrival") : null;
-  const fixtureReject = fixture ? page.url.searchParams.get("reject") : null;
-  const fixtureHandover = fixture ? page.url.searchParams.get("handover") === "1" : false;
-  const fixtureAt = fixture && page.url.searchParams.has("at")
+  /* $derived, not a plain const: `data` is a prop, and reading it through a
+     bare const only ever captures its value at this component's first run
+     (svelte-check's own state_referenced_locally). Nothing about the fixture
+     flag actually changes within a mounted session in practice — it is a
+     per-deployment flag read once per request (+page.server.js) — but the
+     read stays live rather than silently freezing if that ever stops being
+     true, which costs nothing since these are read a handful of times, all
+     from inside onMount's decide(). */
+  const fixture = $derived(browser && data?.fixtures ? page.url.searchParams.get("arrival") : null);
+  const fixtureReject = $derived(fixture ? page.url.searchParams.get("reject") : null);
+  const fixtureHandover = $derived(fixture ? page.url.searchParams.get("handover") === "1" : false);
+  const fixtureAt = $derived(fixture && page.url.searchParams.has("at")
     ? (Number(page.url.searchParams.get("at")) || 0)
-    : null;
+    : null);
 
   let stage = $state(DOOR);
   let galaxy = $state({});
@@ -168,6 +183,17 @@
          household its owner has since left is handed on the same way, and lands
          on home's own adrift surface, which is the honest answer there too. */
       const session = await response.json().catch(() => null);
+      if (isInvitedLanding(session)) {
+        visibleHouseholds = session.visibleHouseholds ?? [];
+        galaxy = labelledSkyOf(visibleHouseholds);
+        stage = INVITED;
+        /* Always the full climb, `launchOwed` or not: this landing only ever
+           happens the one time `isInvitedLanding` can be true at all (its own
+           note), so there is no "already arrived, refresh" case for it to
+           answer differently — see enterNewcomer's own note on that case. */
+        await enterNewcomer(true);
+        return;
+      }
       if (session?.activeHouseholdId) { handOn(); return; }
       workspace = await readWorkspace();
     } catch {
@@ -193,6 +219,22 @@
   function handOn() {
     if (launchOwed) markLaunch();
     location.replace("/home");
+  }
+
+  /**
+   * WHERE THE CHOOSER WOULD STAND (#871): the invited landing's own road out,
+   * fired by Flight's `onbelong` at the exact beat that draws `belong` for an
+   * ordinary newcomer. No new camera move — this is the same hand-off ONWARD
+   * takes with a launch owed (`handOn`, above) and the create card takes on
+   * success: a launch marker, then the navigation `/home` itself reads it
+   * back on (`consumeLaunch`, `$lib/flight/arrival.js`), so the dial and the
+   * rest of the instrument arrive exactly as they do for anyone. Nothing here
+   * names the household — the navigation is bare, and `/home` resolves it
+   * from the session the same way it always does.
+   */
+  function toHousehold() {
+    markLaunch();
+    location.assign("/home");
   }
 
   /** The fixture harness's own version of the same decision. */
@@ -372,7 +414,7 @@
 
   const title = $derived(
     stage === CREATE ? "Orbit — name your first system"
-      : stage === NEWCOMER ? "Orbit — arrival"
+      : stage === NEWCOMER || stage === INVITED ? "Orbit — arrival"
       : "Orbit — sign in");
 </script>
 
@@ -381,7 +423,7 @@
      is carried entirely by the mockups' own art (the lockup, the card, the
      climb), so the heading names the stage for a reader who cannot see it,
      rather than duplicating text already on screen. -->
-<main>
+<main class="arrival">
   <h1 class="sr-only">{title}</h1>
 
   <!-- THE LOGIN SCREEN IS THE BASE LAYER, exactly as the sheet builds it: the
@@ -391,17 +433,34 @@
   <SignIn gate={stage === DOOR} dawnShown={!climbing} {title} />
 
   {#if stage === CREATE}
+    <!-- #862 round 3: the login ring, enlarged, holding the questions. A
+         sibling of the dawn and of the card rather than a child of either,
+         because it has to outlive the card on the way into the launch (the
+         hand-over shrinks it to the login ring's own 302.4px in place,
+         `body.reclaimed` below) — see arrival.css for the ring itself. -->
+    <div class="bigring" aria-hidden="true">
+      <div class="ringglass"></div>
+      <div class="ringorbit"><i></i></div>
+    </div>
     <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
                   onsubmit={submit} onnaming={naming} onask={askFromCard} />
   {/if}
 
-  {#if stage === NEWCOMER}
-    <Newcomer {galaxy} {visibleHouseholds} onask={ask} oncreate={toCreate} />
+  {#if stage === NEWCOMER || stage === INVITED}
+    <!-- #871: `showChooser` is false only for INVITED — no chooser drawn at
+         any frame, not even one CSS hides, for a reader whose household is
+         not theirs to pick. -->
+    <Newcomer {galaxy} {visibleHouseholds} onask={ask} oncreate={toCreate}
+              showChooser={stage !== INVITED} />
     {#if climbing}
       <!-- The landing is the host's, as it is on home: the flight says WHEN and
-           this reveals the labelled sky at that exact beat. -->
-      <Flight bind:this={flight} landing="newcomer" name="" subtitle="you are new here"
-              onland={() => body().classList.add("shownew")} />
+           this reveals the labelled sky at that exact beat. landing="invited"
+           flies the identical beats and differs only at the one the chooser
+           would stand on (Flight.svelte's own note on `onbelong`). -->
+      <Flight bind:this={flight} landing={stage === INVITED ? "invited" : "newcomer"}
+              name="" subtitle="you are new here"
+              onland={() => body().classList.add("shownew")}
+              onbelong={stage === INVITED ? toHousehold : undefined} />
     {/if}
   {/if}
 </main>
