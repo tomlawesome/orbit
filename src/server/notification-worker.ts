@@ -100,6 +100,15 @@ export interface SmtpNotification {
   to: string;
   subject: string;
   text: string;
+  /**
+   * The HTML alternative, when the message has one (#481).
+   *
+   * Optional, and absent for every reminder: those are content-free operational
+   * mail and gain nothing from markup. The invitation is the one message drawn
+   * like the product, so it carries both parts and the client picks — which is
+   * why the text part is written to stand alone rather than as a fallback.
+   */
+  html?: string;
   tlsMode: NotificationWorkerConfig["smtpSecurity"];
 }
 
@@ -562,6 +571,10 @@ function createDefaultNotificationProviders(config: NotificationWorkerConfig): N
         to: notification.to,
         subject: notification.subject,
         text: notification.text,
+        /* Only when there is one: nodemailer sends a multipart/alternative
+           body for the pair and a plain text/plain body without it, so an
+           undefined html must not become an empty HTML part. */
+        ...(notification.html ? { html: notification.html } : {}),
       });
     },
     async sendPush(notification) {

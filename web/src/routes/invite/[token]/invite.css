@@ -1,0 +1,83 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   THE INVITATION OUTCOME (#481).
+
+   One line of copy and one action, on the sign-in's own ground.
+
+   Deliberately small, and drawn only for the endings: everything a WORKING
+   link does happens elsewhere — the reader is sent to the identity provider,
+   or to /home inside their new household — and never sees this screen at all.
+   What is drawn here is the calm end of a link that did not work.
+
+   The ground is the sign-in's own colour and the button is the flight's gate,
+   restated rather than imported: this screen needs two rules from a 15KB
+   sheet written for an animated dawn, and the reader is on a page with one
+   sentence on it.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.invite-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: #04060e;
+}
+
+.invite-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  min-height: 100dvh;
+  padding: 24px;
+  text-align: center;
+}
+
+.invite-card .name {
+  font: 500 13px var(--display, Georgia, serif);
+  letter-spacing: .42em;
+  text-transform: lowercase;
+  color: #8791b3;
+}
+
+.invite-card h1 {
+  margin: 0;
+  font: 600 25px var(--display, Georgia, serif);
+  letter-spacing: .01em;
+  line-height: 1.4;
+  color: #e6e9f2;
+  max-width: 30ch;
+}
+
+.invite-card .said {
+  margin: 0;
+  font: 11.5px var(--mono, ui-monospace, monospace);
+  letter-spacing: .06em;
+  line-height: 1.8;
+  color: #8791b3;
+  max-width: 46ch;
+}
+
+.invite-card .gate {
+  font: 600 12px var(--display, Georgia, serif);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #04060e;
+  background: #d8b45a;
+  border: 0;
+  border-radius: 3px;
+  padding: 13px 26px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.invite-card .gate:hover {
+  filter: brightness(1.08);
+}
+
+.invite-card .gate:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  filter: none;
+}
