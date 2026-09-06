@@ -12,8 +12,14 @@ import { redirect } from "@sveltejs/kit";
  * `/login` and `/logout` are the ratified dawn and dusk (§15); `/maintenance`
  * has to be reachable precisely when the instance cannot serve anything else.
  * None of them reads a session.
+ *
+ * `/invite/[token]` is open because a signed-out stranger is exactly who the
+ * address is written for (#481). It is the one open route that DOES read a
+ * session — its own load asks, so that the same screen serves the person
+ * arriving from the mail and the person coming back from the identity
+ * provider — but it is never gated on having one.
  */
-const OPEN_ROUTES = new Set(["/", "/login", "/logout", "/maintenance"]);
+const OPEN_ROUTES = new Set(["/", "/login", "/logout", "/maintenance", "/invite/[token]"]);
 
 /**
  * The screens maintenance never closes (#526; ADR-0013 decision 3): the door

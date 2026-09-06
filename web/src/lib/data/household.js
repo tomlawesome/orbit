@@ -12,7 +12,7 @@
  */
 
 import { bandOf, bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
-import { ago, tminus } from "$lib/format.js";
+import { ago, longDate, tminus } from "$lib/format.js";
 
 /**
  * Two letters from a chosen display name — never from an email address, which
@@ -140,6 +140,34 @@ export function deletionNameMatches(typed, householdName) {
 }
 
 /**
+ * The open-invitations rows (#481).
+ *
+ * The address IS the row — an invitation has no display name to stand in for
+ * it, because there may be no account behind it — so this is the one place on
+ * this screen where an email address is drawn at all. Everything else the row
+ * says is a time: when it went, and when it stops working.
+ *
+ * `sent` is null when the mail could not be handed to the provider, and the
+ * screen says so rather than claiming a send: an owner who thinks the mail
+ * left will wait for a reply that is never coming.
+ *
+ * @param {import('./workspace.js').Invitation[]} invitations
+ * @param {?string} now   pinned by the caller, never read from the clock here
+ * @returns {{ id: string, email: string, sent: ?string, failed: boolean, expires: string }[]}
+ */
+export function invitationRowsOf(invitations, now) {
+  return invitations.map((invitation) => ({
+    id: invitation.id,
+    email: invitation.email,
+    sent: invitation.sentAt && now ? ago(invitation.sentAt, now) : null,
+    failed: Boolean(invitation.sendError) || !invitation.sentAt,
+    /* A date, not a countdown: fourteen days out, "expires 20 September 2026"
+       is what an owner can act on, and T−14d is not. */
+    expires: longDate(invitation.expiresAt.slice(0, 10)),
+  }));
+}
+
+/**
  * One entry's star in the household's own constellation (§15 H2).
  *
  * @typedef {object} ConstellationMark
@@ -254,6 +282,7 @@ export function constellationOf(household, today) {
  * @param {import('./workspace.js').Member[]} [params.members]
  * @param {import('./workspace.js').Member[]} [params.candidates]
  * @param {import('./workspace.js').JoinRequest[]} [params.joinRequests]
+ * @param {import('./workspace.js').Invitation[]} [params.invitations]
  * @param {?string} [params.today]
  * @param {?string} [params.now]
  */
@@ -264,6 +293,7 @@ export function householdScreenOf({
   members = [],
   candidates = [],
   joinRequests = [],
+  invitations = [],
   today = null,
   now = null,
 }) {
@@ -332,6 +362,16 @@ export function householdScreenOf({
             waited: now ? ago(request.createdAt, now) : null,
           }))
       : [],
+    /* §11's "who sees what" (#481): members see the open invitations too. They
+       typed none of them and can change none of them, but a household where an
+       owner can quietly add people by mail and nobody else can see it
+       happening is not the household this product describes. The route already
+       answers every member, so this list is NOT gated on canManage — only the
+       controls beside it are. */
+    invitations: invitationRowsOf(
+      invitations.filter((invitation) => invitation.householdId === householdId),
+      now,
+    ),
     sections: canManage ? sectionRowsOf(household) : [],
     /* You are a member of this system if you have a row in its roster. An
        instance admin wearing the owner screen has none, and must not be

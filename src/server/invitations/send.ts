@@ -6,7 +6,7 @@ import {
   getNotificationWorkerConfig,
   type SmtpNotification,
 } from "@/server/notification-worker";
-import { renderInvitationMail, type InvitationMailContext } from "./mail";
+import { renderInvitationMail, type InvitationMailContext } from "@/server/invitations/mail";
 
 /**
  * Putting the invitation on the wire (#481).

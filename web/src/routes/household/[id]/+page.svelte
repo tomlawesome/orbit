@@ -12,7 +12,9 @@
     decideJoinRequest,
     removeMember,
     requestHouseholdDeletion,
+    sendInvitation,
     transferOwnership,
+    withdrawInvitation,
     writeHouseholdIdentity,
     writeSections,
   } from "$lib/data/workspace.js";
@@ -36,6 +38,7 @@
    *   add / remove / leave          → /api/households/{id}/members  POST · DELETE
    *   hand the system over          → /api/households/{id}/members  PATCH
    *   joiners (§15-2g, here only)   → POST /api/join-requests/{id}
+   *   invite / resend / withdraw    → /api/households/{id}/invitations  POST · DELETE
    *   request deletion              → POST /api/households/{id}/lifecycle
    *
    * 2f: restore-from-deletion and hard delete are ADMIN-ONLY and are drawn on
@@ -120,6 +123,13 @@
   let saidJoin = $state(null);
   /** @type {string | null} */
   let membersProblem = $state(null);
+
+  /* ── invitations by email (#481) ───────────────────────────────────────
+     The address is held here only while it is being typed: nothing keeps it
+     after the send, and the list that comes back is the server's. */
+  let inviteEmail = $state("");
+  /** @type {string | null} */
+  let saidInvite = $state(null);
 
   let confirming = $state(false);
   let typedName = $state("");
@@ -296,6 +306,46 @@
     act(async () => {
       await decideJoinRequest(request.id, action);
       if (action === "approve") saidJoin = request.name;
+    });
+
+  /* ── invitations (#481) ───────────────────────────────────────────────── */
+
+  /**
+   * Send, and say what happened.
+   *
+   * The screen never learns whether the address already had an account — the
+   * route answers the same either way, deliberately, because an owner able to
+   * ask "does this person use Orbit?" is an account-enumeration oracle with a
+   * household screen on top of it. So the confirmation says the mail went, and
+   * nothing about who it went to.
+   *
+   * @param {string} email
+   * @param {string} said
+   */
+  function offer(email, said) {
+    const address = email.trim();
+    if (!address) return;
+    act(async () => {
+      const { invitation } = await sendInvitation(v.id, address);
+      /* An honest confirmation: the row records a bounded failure class when
+         the provider would not take it, and pretending otherwise leaves the
+         owner waiting for a reply that cannot come. */
+      saidInvite = invitation.sentAt
+        ? `${said} to ${invitation.email}`
+        : `${invitation.email} is invited, but the mail could not be sent — try resend`;
+      inviteEmail = "";
+    });
+  }
+
+  const invite = () => offer(inviteEmail, "invitation sent");
+  /** @param {HouseholdView["invitations"][number]} row */
+  const resend = (row) => offer(row.email, "invitation sent again");
+
+  /** @param {HouseholdView["invitations"][number]} row */
+  const withdraw = (row) =>
+    act(async () => {
+      await withdrawInvitation(v.id, row.id);
+      saidInvite = `the invitation to ${row.email} has been withdrawn · its link no longer works`;
     });
 
   /* ── the danger line ──────────────────────────────────────────────────── */
@@ -887,8 +937,42 @@
           <p class="note top">
             people sign in through your identity provider first, then an owner puts<br>
             them in a system. Nobody’s email address is shown here, only the name<br>
-            they chose.<br>
-            <b>email invitations come later</b> — deferred as its own package (#481).
+            they chose.
+          </p>
+        </div>
+
+        <!-- #481: the other way in — for somebody who has no account yet.
+             One field, one button, and below it what is still outstanding.
+             The address is the row, because an invitation has no display name
+             to stand in for it; it is the only address this screen shows. -->
+        <div class="block">
+          <h3>Invite by email</h3>
+          <form class="invite" onsubmit={(event) => { event.preventDefault(); invite(); }}>
+            <input type="email" autocomplete="email" placeholder="name@example.com"
+                   aria-label="email address to invite" bind:value={inviteEmail}>
+            <button class="ghost" type="submit" disabled={!inviteEmail.trim()}>send invitation</button>
+          </form>
+
+          {#each v.invitations as invitation (invitation.id)}
+            <div class="inv">
+              <b>{invitation.email}</b>
+              <span class="when">
+                {invitation.failed ? "not sent" : `sent ${invitation.sent}`} · expires {invitation.expires}
+              </span>
+              <button class="ghost" onclick={() => resend(invitation)}>resend</button>
+              <button class="ghost" class:armed={armed === `inv:${invitation.id}`}
+                      onclick={() => twoTap(`inv:${invitation.id}`, () => withdraw(invitation))}>
+                {armed === `inv:${invitation.id}` ? "tap again to withdraw" : "withdraw"}</button>
+            </div>
+          {/each}
+          {#if !v.invitations.length}
+            <p class="note">no invitations are outstanding.</p>
+          {/if}
+          {#if saidInvite}<p class="said show">{saidInvite}</p>{/if}
+          <p class="note top">
+            they get one mail with one link, good for 14 days. Opening it signs<br>
+            them in and puts them straight in this system — but only if they<br>
+            sign in with the address you typed. Resending replaces the link.
           </p>
         </div>
 
@@ -931,6 +1015,20 @@
           an owner can’t be removed and can’t leave — hand the system over first.
         </p>
       {:else}
+        <!-- §11's "who sees what" (#481): a member sees who has been invited
+             and cannot touch it. An owner quietly adding people by mail, with
+             nobody else able to see it happening, is not this system. -->
+        {#if v.invitations.length}
+          <div class="block">
+            <h3>Invited, not yet arrived</h3>
+            {#each v.invitations as invitation (invitation.id)}
+              <div class="inv readonly">
+                <b>{invitation.email}</b>
+                <span class="when">expires {invitation.expires}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
         <p class="note top foot">
           <b>{v.owner?.name ?? "its owner"}</b> owns this system — they add and remove people.<br>
           you can leave whenever you like.

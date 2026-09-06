@@ -5,14 +5,14 @@ import { auditLog, householdInvitations, households, memberships, sessions, user
 import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { acquireActiveHouseholdLock, requireHouseholdAccess, requireUuid } from "@/server/workspace-access";
-import { sendInvitationMail, invitationLink, type InvitationMailer, type InvitationSendError } from "./send";
+import { sendInvitationMail, invitationLink, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import {
   createInvitationToken,
   invitationEmailDigest,
   invitationExpiry,
   invitationTokenDigest,
   normaliseInvitationEmail,
-} from "./token";
+} from "@/server/invitations/token";
 
 /**
  * EMAIL INVITATIONS (#481) — inviting somebody who has no account yet.
@@ -37,8 +37,8 @@ import {
  * is an account-enumeration oracle wearing a household screen.
  */
 
-export { INVITATION_LIFETIME_DAYS } from "./token";
-export type { InvitationSendError } from "./send";
+export { INVITATION_LIFETIME_DAYS } from "@/server/invitations/token";
+export type { InvitationSendError } from "@/server/invitations/send";
 
 /** Past this many open invitations a household is asked to tidy up first. */
 export const MAX_OPEN_INVITATIONS = 20;

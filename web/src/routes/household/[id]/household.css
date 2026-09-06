@@ -278,7 +278,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 /* v3 — the panel's other blocks. Members runs the full height of the right
    column now, so who is waiting and who you could add are simply BLOCKS of
    the same panel, each under its own small rule, instead of drawers you had
-   to open. Registered accounts only — the route has no email invite (#481). */
+   to open. Two ways in now (#481): an existing account, or an address. */
 .household-page .block{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)}
 .household-page .block h3{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
           color:var(--ink-faint);margin-bottom:9px}
@@ -286,6 +286,24 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
       border-bottom:1px solid var(--line-soft)}
 .household-page .cand:last-of-type{border-bottom:0}
 .household-page .cand b{flex:1;font-size:13px;font-weight:520}
+
+/* INVITATIONS BY EMAIL (#481) — the other way in, for somebody who has no
+   account yet. Drawn as the candidates list is, with one field above it: the
+   two blocks are the same act, and the only difference is whether the person
+   already exists on this instance. The address is the row, because there is no
+   display name to stand in for it — this is the one place on this screen where
+   an email address appears at all. */
+.household-page .invite{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.household-page .invite input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);
+       border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
+.household-page .invite input::placeholder{color:var(--ink-faint)}
+.household-page .invite input:focus{border-color:var(--accent)}
+.household-page .inv{display:flex;align-items:center;gap:12px;padding:6px 2px;
+      border-bottom:1px solid var(--line-soft)}
+.household-page .inv:last-of-type{border-bottom:0}
+.household-page .inv b{font-size:13px;font-weight:520;font-family:var(--mono);word-break:break-all}
+.household-page .inv .when{flex:1;font:10.5px var(--mono);letter-spacing:.04em;color:var(--ink-faint)}
+.household-page .inv.readonly .when{flex:none}
 
 /* the handover: two deliberate steps, and the second asks twice */
 .household-page .handover{display:none;margin-top:14px;border:1px solid var(--accent);border-radius:13px;

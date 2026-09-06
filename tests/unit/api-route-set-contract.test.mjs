@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
  *    them yet (the subscribe control is #763), but the back end works and the
  *    routes are not to be dropped for being unreferenced today.
  *
- * The list is all 45 families, not the 24 ported first. ADR-0012's amendment
+ * The list is all 46 families, not the 24 ported first. ADR-0012's amendment
  * was clarified by the owner on 2026-09-03: the cut keeps what the new front
  * end NEEDS, not what it currently calls, and a working back end whose screen
  * is merely undrawn is needed -- #410 defers sixteen such surfaces to M9
@@ -64,6 +64,7 @@ const EXPECTED_ROUTES = [
   "/api/documents/[documentId]/preview",
   "/api/documents/[documentId]/restore",
   "/api/health",
+  "/api/households/[householdId]/invitations",
   "/api/households/[householdId]/item-document-inspection",
   "/api/households/[householdId]/items/[itemId]/documents",
   "/api/households/[householdId]/join-requests",
@@ -124,7 +125,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 45 route families -- no fewer, no more", () => {
+  it("has exactly the expected 46 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
