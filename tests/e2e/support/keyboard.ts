@@ -292,6 +292,12 @@ export async function auditLightDismiss(p: Page, screen: string, toggle: string,
   await tabTo(p, { selector: toggle }, { screen });
   await p.keyboard.press("Enter");
   await expect.soft(p.locator(panel), `${screen}: opening ${toggle} did not reveal ${panel}`).toHaveClass(/open/);
+  /* Let the panel finish arriving before reading its contents: mid-fade its
+     opacity is still 0 and mid-slide its controls are off-screen, so
+     `collectVisible` saw nothing, the audit never tabbed in, and "Escape
+     returns focus" was being proved against a focus that had never left the
+     toggle (it passed or failed on how far the transition had got, #853). */
+  await p.locator(panel).evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
 
   const contents = await collectVisible(p, panel);
   if (contents.length > 1) {
