@@ -1269,6 +1269,43 @@ const UNAVAILABLE_REMINDERS = {
 };
 
 /**
+ * One row of "where you're signed in" (#482) — GET /api/auth/sessions.
+ *
+ * @typedef {object} SessionSummary
+ * @property {string} id
+ * @property {boolean} current
+ * @property {string} createdAt   ISO-8601
+ * @property {?string} lastSeenAt ISO-8601, or null if the session has never validated since #482 shipped
+ * @property {string} device      a coarse two-word description ("Chrome · Linux"); never the raw user agent
+ */
+
+/**
+ * Every session the caller holds, current session first and then most
+ * recently seen first — exactly the order the settings screen draws them in.
+ *
+ * @returns {Promise<SessionSummary[]>}
+ */
+export async function readSessions() {
+  /** @type {{ sessions?: SessionSummary[] }} */
+  const body = await json(await fetch("/api/auth/sessions", { credentials: "same-origin" }));
+  return body.sessions ?? [];
+}
+
+/**
+ * Signs out of exactly one device (#482) — the single-session counterpart to
+ * `signOutEverywhere`. If the ended session is this browser's own, the
+ * server has already cleared the cookie by the time this resolves, so a
+ * caller ending its own session should treat that the same way `signOut`
+ * does: there is nothing left to be signed into on this page.
+ *
+ * @param {string} sessionId
+ * @returns {Promise<void>}
+ */
+export async function revokeSession(sessionId) {
+  await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
+}
+
+/**
  * "Sign out of every device" (#468): ends every session this user holds and
  * answers how many that was.
  *
