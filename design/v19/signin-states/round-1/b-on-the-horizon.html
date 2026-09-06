@@ -10,7 +10,11 @@
   flight already writes on the void (#launchname: letterspaced small caps
   with a warm gold shadow). The condition belongs to the world, not to a
   broken control: the door is whole, the morning is not ready. The mono
-  subline answers beneath in the dusk farewell's quiet register.
+  subline answers beneath in the dusk farewell's quiet register. Both
+  lines sit in the inscription's own shade — a soft pool of the void
+  behind the words, the shadow a cut inscription casts on a lit surface —
+  so the copy holds WCAG AA (≥4.5:1) even where it crosses the bloom's
+  brightest reach, in every state at desktop and mobile.
 
   THE RECOVERY: while Orbit is waking, the inscription's gold shadow
   breathes on the sun's own period, the sun-point pulsing right below it.
@@ -117,10 +121,24 @@
         padding:0 20px;line-height:1.9;
         opacity:0;transform:translateY(6px);
         transition:opacity 1.4s ease 3.6s,transform 1.4s ease 3.6s}
-  .state-sub{font:10.5px var(--mono);color:#b7bfd6;letter-spacing:.08em;line-height:1.75;
+  .state-sub{font:10.5px var(--mono);color:#cfd3e4;letter-spacing:.08em;line-height:1.75;
         margin:11px auto 0;max-width:380px;padding:0 20px;
         text-shadow:0 1px 3px rgba(4,6,14,.95),0 0 12px rgba(4,6,14,.85),0 0 22px rgba(4,6,14,.7);
         opacity:0;transition:opacity 1.4s ease 3.9s}
+  /* the inscription's own shade: words cut into a lit limb sit in the
+     shadow they cast — a soft pool of the void behind both lines, so the
+     copy holds ≥4.5:1 where it crosses the bloom's brightest reach.
+     State layer only; the artwork underneath stays the shipped door. */
+  .state::before{content:"";position:absolute;left:50%;top:50%;z-index:-1;
+        transform:translate(-50%,-50%);width:min(620px,100vw);height:240px;
+        background:radial-gradient(50% 50% at 50% 50%,
+          rgba(4,6,14,.93) 0%,rgba(4,6,14,.85) 40%,rgba(4,6,14,.5) 66%,
+          rgba(4,6,14,0) 100%);
+        opacity:0;transition:opacity 1.4s ease 3.6s}
+  body.lit .state::before{opacity:1}
+  body.switched .state::before{transition-delay:.15s}
+  body.returning .state::before{opacity:0!important;
+        transition:opacity .9s ease!important}
   body.lit .state-primary{opacity:1;transform:none}
   body.lit .state-sub{opacity:1}
   /* a demo-bar switch should not replay the first-light hold */
@@ -161,7 +179,7 @@
   /* ── reduced motion: the story stays, the movement goes ──────────────── */
   @media (prefers-reduced-motion: reduce){
     #dawn *{animation:none!important}
-    .dawnlayer,.rim,.shimmer,.sunpt,.rays,.gate,.state-primary,.state-sub{
+    .dawnlayer,.rim,.shimmer,.sunpt,.rays,.gate,.state-primary,.state-sub,.state::before{
         transition-duration:.4s!important;transition-delay:0s!important}
     .rays{transform:scale(1,1)}
     .state-primary{animation:none!important}
