@@ -77,6 +77,12 @@ describe("PostgreSQL migration evidence", () => {
     // safety), unlike drizzle's mapped reads elsewhere in this suite.
     const maintenanceRows = await database.client.unsafe(`SELECT "singleton", "active", "version" FROM "instance_maintenance"`);
     expect(maintenanceRows).toEqual([{ singleton: true, active: false, version: "1" }]);
+
+    /* 0033 seeds the contact singleton unconditionally too (#860): every
+       fresh instance starts with no public contact address, which is a
+       supported, working state rather than an absent row. */
+    const contactRows = await database.client.unsafe(`SELECT "singleton", "public_address", "version" FROM "instance_contact"`);
+    expect(contactRows).toEqual([{ singleton: true, public_address: null, version: "1" }]);
   });
 
   it("converts a live maintenance singleton and its pending notices into windows and updates", async () => {
@@ -194,6 +200,13 @@ describe("PostgreSQL migration evidence", () => {
     expect((await readSchemaContract(database.client)).tables).toEqual(EXPECTED_TABLE_COLUMNS);
     expect((await readSchemaContract(database.client)).constraints).toEqual(EXPECTED_CONSTRAINTS);
     expect((await readSchemaContract(database.client)).indexes).toEqual(EXPECTED_INDEXES);
+
+    /* #860's operational impact: an upgrade from before 0033 must leave the
+       contact address unset, not absent — the same unconditional-seed
+       guarantee 0028 gives instance_maintenance. */
+    const contactRows = await database.client.unsafe(`SELECT "singleton", "public_address", "version" FROM "instance_contact"`);
+    expect(contactRows).toEqual([{ singleton: true, public_address: null, version: "1" }]);
+
     const expectedAfterUpgrade = structuredClone(beforeUpgrade);
     const legacyReceipt = expectedAfterUpgrade.imap_ingestion_messages.find((row) => row.review_item_id);
     if (!legacyReceipt) throw new Error("The migration fixture must include a legacy prototype receipt");
