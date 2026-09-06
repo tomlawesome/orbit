@@ -274,7 +274,9 @@
   .belt-page .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:13px;line-height:1.75}
   .belt-page .note b{color:var(--paper);font-weight:500}
   .belt-page .acts{display:flex;flex-wrap:wrap;gap:7px}
-  .belt-page .acts button{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+  /* #854: see item.css's .acts button — --act-text is the letterform's own
+     colour, set beside --act; --act itself still rings and fills unchanged. */
+  .belt-page .acts button{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
     border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
     border-radius:999px;padding:6px 13px;cursor:pointer}
   .belt-page .acts button:hover{border-color:var(--act,var(--ink))}
@@ -392,7 +394,7 @@
 .belt-page .cancel-link{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
   cursor:pointer;padding:0}
 .belt-page .cancel-link:hover{color:var(--ink-mid)}
-.belt-page .btn-quiet{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+.belt-page .btn-quiet{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
   border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
   border-radius:999px;padding:8px 16px;cursor:pointer}
 .belt-page .btn-quiet:hover{border-color:var(--act,var(--ink))}

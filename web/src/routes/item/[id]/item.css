@@ -57,7 +57,12 @@ html body{overflow-y:auto;overflow-x:hidden}
    buttons) — completing is the ok green, rescheduling the upcoming blue,
    snoozing the warm amber, editing the accent, retiring the overdue red. */
 .acts{display:flex;flex-wrap:wrap;gap:8px}
-.acts button{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+/* #854: the letterform reads --act-text (the -text-graded companion of
+   whichever status colour --act is set to), set beside --act at each of
+   this screen's usage sites; the ring and the fill keep reading --act's own
+   raw colour unchanged, because a mark is not a letterform (#491's own
+   distinction, extended to this variable). */
+.acts button{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
   border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
   border-radius:999px;padding:7px 14px;cursor:pointer}
 .acts button:hover{border-color:var(--act,var(--ink))}
@@ -91,7 +96,7 @@ html body{overflow-y:auto;overflow-x:hidden}
 .cancel-link:hover{color:var(--ink-mid)}
 /* A quieter sibling for the secondary destructive choice: the pill grammar
    at the save-row's size. */
-.btn-quiet{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+.btn-quiet{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
   border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
   border-radius:999px;padding:8px 16px;cursor:pointer}
 .btn-quiet:hover{border-color:var(--act,var(--ink))}
