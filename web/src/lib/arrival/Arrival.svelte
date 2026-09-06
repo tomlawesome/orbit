@@ -372,27 +372,36 @@
 
   const title = $derived(
     stage === CREATE ? "Orbit — name your first system"
-      : stage === NEWCOMER ? "Orbit — where do you belong?"
+      : stage === NEWCOMER ? "Orbit — arrival"
       : "Orbit — sign in");
 </script>
 
-<!-- THE LOGIN SCREEN IS THE BASE LAYER, exactly as the sheet builds it: the
-     dawn, the lockup and (only on the door) the gate. The card and the
-     newcomer's sky stand ON it, and the chrome is hidden by `showform` while
-     they do — no wordmark, no glyph, no button, no footer. -->
-<SignIn gate={stage === DOOR} dawnShown={!climbing} {title} />
+<!-- #843: one landmark and one heading for whichever stage is standing, since
+     the door/create/newcomer stages never render at once. The visible title
+     is carried entirely by the mockups' own art (the lockup, the card, the
+     climb), so the heading names the stage for a reader who cannot see it,
+     rather than duplicating text already on screen. -->
+<main>
+  <h1 class="sr-only">{title}</h1>
 
-{#if stage === CREATE}
-  <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
-                onsubmit={submit} onnaming={naming} onask={askFromCard} />
-{/if}
+  <!-- THE LOGIN SCREEN IS THE BASE LAYER, exactly as the sheet builds it: the
+       dawn, the lockup and (only on the door) the gate. The card and the
+       newcomer's sky stand ON it, and the chrome is hidden by `showform` while
+       they do — no wordmark, no glyph, no button, no footer. -->
+  <SignIn gate={stage === DOOR} dawnShown={!climbing} {title} />
 
-{#if stage === NEWCOMER}
-  <Newcomer {galaxy} {visibleHouseholds} onask={ask} oncreate={toCreate} />
-  {#if climbing}
-    <!-- The landing is the host's, as it is on home: the flight says WHEN and
-         this reveals the labelled sky at that exact beat. -->
-    <Flight bind:this={flight} landing="newcomer" name="" subtitle="you are new here"
-            onland={() => body().classList.add("shownew")} />
+  {#if stage === CREATE}
+    <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
+                  onsubmit={submit} onnaming={naming} onask={askFromCard} />
   {/if}
-{/if}
+
+  {#if stage === NEWCOMER}
+    <Newcomer {galaxy} {visibleHouseholds} onask={ask} oncreate={toCreate} />
+    {#if climbing}
+      <!-- The landing is the host's, as it is on home: the flight says WHEN and
+           this reveals the labelled sky at that exact beat. -->
+      <Flight bind:this={flight} landing="newcomer" name="" subtitle="you are new here"
+              onland={() => body().classList.add("shownew")} />
+    {/if}
+  {/if}
+</main>

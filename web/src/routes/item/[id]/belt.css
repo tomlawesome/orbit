@@ -267,7 +267,9 @@
   .belt-page .kv b.clean{color:var(--ok-text)}
   .belt-page .kv b.over{color:var(--overdue-text)} .belt-page .kv b.soon{color:var(--warm)}
   .belt-page .kv b.up{color:var(--upcoming)} .belt-page .kv b.ok{color:var(--ok-text)}
-  .belt-page .item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  /* #843: h3, not h4 -- these follow the card's own h2 and must not skip a
+     level. The look is unchanged. */
+  .belt-page .item-card h3{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
                 color:var(--ink-faint);margin:16px 0 8px}
   .belt-page .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:13px;line-height:1.75}
   .belt-page .note b{color:var(--paper);font-weight:500}
@@ -298,7 +300,7 @@
      box-shadow:0 10px 0 var(--line),0 20px 0 var(--line-soft),0 30px 0 var(--line-soft),
                 0 40px 0 var(--line-soft),0 50px 0 var(--line-soft)}
   .belt-page .docbody{flex:1;min-width:0}
-  .belt-page .docbody h3{font:520 14px var(--mono);line-height:1.35;word-break:break-all}
+  .belt-page .docbody h2{font:520 14px var(--mono);line-height:1.35;word-break:break-all}
   .belt-page .docbody .sub{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
                 margin:5px 0 12px}
   .belt-page .getrow{display:flex;align-items:center;gap:18px;margin-top:16px}

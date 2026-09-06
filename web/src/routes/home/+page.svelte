@@ -609,7 +609,9 @@
   <Flight bind:this={flight} name={view?.household?.name ?? ""} onfarewell={onFarewell} />
 {/if}
 
-<div class="desk" class:arrive>
+<div class="desk" class:arrive role="main">
+<!-- #843: sr-only, since the wordmark and dial carry the title visually. -->
+<h1 class="sr-only">Orbit</h1>
 <!-- ══ THE SKY WAVE (§15, the v1.3.0 roster) ═════════════════════════════════
      Three packs gained their own sky in the same batch, and every layer below
      belongs to exactly one of them. All of them live INSIDE .desk, which is
@@ -802,7 +804,7 @@
 <!-- CON-12: creation drawer — full width, from the top; the north star is its handle -->
 <aside class="drawer-top" id="createdrawer" role="region" aria-label="Add to your orbit">
   <div class="inner">
-    <h4>Add to your orbit</h4>
+    <h2>Add to your orbit</h2>
     <div class="ctypes">
       <button class="ctype"><span class="dot con"></span>renewal</button>
       <button class="ctype"><span class="dot"></span>service</button>
@@ -1156,36 +1158,36 @@
   </div>
 </div>
 
-<aside class="drawer drawer-left" id="statusdrawer" role="region" aria-label="System status">
+<aside class="drawer drawer-left" id="statusdrawer" role="region" aria-live="polite" aria-label="System status">
   <button class="handle" id="edge-health" aria-expanded="false">
     <i></i><span>degraded</span></button>
-  <h4>System status</h4>
+  <h2>System status</h2>
   <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy &middot; 40s ago</small></div>
   <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy &middot; 40s ago</small></div>
   <div class="svc"><i style="background:var(--degraded)"></i><b>orbit-clamav</b><small>unreachable &middot; 2m ago</small></div>
   <div class="svc"><i style="background:var(--ink-faint)"></i><b>orbit-tika</b><small>not enabled</small></div>
   <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running &middot; 12s ago</small></div>
-  <h4>Last health check</h4>
+  <h2>Last health check</h2>
   <div class="svc"><i style="background:var(--degraded)"></i><b>scan readiness</b><small>failed &middot; scanner-unreachable</small></div>
   <div class="svc"><i style="background:var(--ok)"></i><b>application</b><small>ready</small></div>
-  <h4>Full diagnostics</h4>
+  <h2>Full diagnostics</h2>
   <div class="svc" style="color:var(--ink-faint)">container logs &middot; or the launcher repair flow</div>
 </aside>
 {#if !view?.emptySky}
 <aside class="drawer drawer-right" id="keydrawer" role="region" aria-label="Chart key">
   <button class="handle" aria-expanded="false">
     <i></i><span>key</span></button>
-  <h4>Urgency</h4>
+  <h2>Urgency</h2>
   <div class="keyrow"><span class="sw" style="background:var(--overdue)"></span>overdue &mdash; inside the ring</div>
   <div class="keyrow"><span class="sw" style="background:var(--warm)"></span>due soon</div>
   <div class="keyrow"><span class="sw" style="background:var(--upcoming)"></span>upcoming</div>
   <div class="keyrow"><span class="sw" style="background:var(--ok)"></span>on track &mdash; wide orbit</div>
-  <h4>Types</h4>
+  <h2>Types</h2>
   <div class="keyrow"><span class="sw" style="background:var(--ink-mid)"></span>routine service</div>
   <div class="keyrow"><span class="sw" style="background:radial-gradient(circle,var(--ink-mid) 24%,var(--panel-raised) 34%,var(--ink-mid) 52%)"></span>renewal / contract</div>
   <div class="keyrow"><span class="sw" style="background:linear-gradient(90deg,var(--ink-mid) 50%,rgba(0,0,0,.55) 50%)"></span>inspection / certification</div>
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
-  <h4>Physics</h4>
+  <h2>Physics</h2>
   <div class="keyrow">closer = sooner</div>
   <div class="keyrow">bigger = costlier</div>
   <div class="keyrow">belt = documents attached</div>
@@ -1193,7 +1195,7 @@
 </aside>
 <div class="docview" id="docview" role="dialog" aria-label="Documents">
   <button class="close">×</button>
-  <h4 id="docview-title">Car full service</h4>
+  <h2 id="docview-title">Car full service</h2>
   <div class="sub">2 documents · encrypted · scanned clean</div>
   <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
   <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>

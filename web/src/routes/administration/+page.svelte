@@ -131,7 +131,7 @@
 <Chrome user={view?.user} current="administration"
         role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
 
-<div class="page">
+<div class="page" role="main">
   <header class="screen">
     <h1>Administration</h1>
     <div class="sub">{view
@@ -143,7 +143,7 @@
     <div class="grid">
 
       <div class="card">
-        <div class="cardhead"><h3>People</h3><button>invite someone</button></div>
+        <div class="cardhead"><h2>People</h2><button>invite someone</button></div>
         {#each view.users as person (person.id)}
           <div class="person">
             <span class="avatar">{initialsOf(person.displayName)}</span>
@@ -169,7 +169,7 @@
       </div>
 
       <div class="card">
-        <div class="cardhead"><h3>Systems</h3><button>new system</button></div>
+        <div class="cardhead"><h2>Systems</h2><button>new system</button></div>
         {#each view.households as household (household.id)}
           <div class="system">
             <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
@@ -194,7 +194,7 @@
       <!-- §15: mail machinery sits WITH operations — one panel, two halves. -->
       <div class="card wide machinery">
         <div class="half">
-          <div class="cardhead"><h3>Mail machinery</h3></div>
+          <div class="cardhead"><h2>Mail machinery</h2></div>
           {#each view.relay as [label, value, extra] (label)}
             <div class="kv"><span>{label}</span>
               {#if extra === "on"}<b class="on">{value}</b>
@@ -205,7 +205,7 @@
         </div>
 
         <div class="half">
-          <div class="cardhead"><h3>Operations</h3><a href={resolve("/admin")}>open operations →</a></div>
+          <div class="cardhead"><h2>Operations</h2><a href={resolve("/admin")}>open operations →</a></div>
           {#each view.services as [tone, name, detail] (name)}
             <div class="svc"><i style="background:var(--{tone})"></i><b>{name}</b><small>{detail}</small></div>
           {/each}
