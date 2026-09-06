@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DOOR, FAILED, STARTING, UNCONFIGURED,
-  availabilityOf, doorMessageFor, failedMessage, nextDoorState, readinessOf,
+  availabilityOf, doorMessageFor, failedMessage, nextDoorState, phaseOf, readinessOf,
 } from "$lib/flight/door-state.js";
 
 /*
@@ -26,6 +26,21 @@ describe("reading /api/health's public body", () => {
     expect(readinessOf("ready")).toBeNull();
     expect(readinessOf({ status: "starting-up" })).toBeNull();
     expect(readinessOf({})).toBeNull();
+  });
+});
+
+describe("reading /api/auth/availability's phase field (#869)", () => {
+  it("recognises both boot-phase words", () => {
+    expect(phaseOf({ phase: "starting" })).toBe("starting");
+    expect(phaseOf({ phase: "running" })).toBe("running");
+  });
+
+  it("trusts nothing it cannot parse: not a third state, just unreadable", () => {
+    expect(phaseOf(null)).toBeNull();
+    expect(phaseOf(undefined)).toBeNull();
+    expect(phaseOf("starting")).toBeNull();
+    expect(phaseOf({ phase: "booting" })).toBeNull();
+    expect(phaseOf({})).toBeNull();
   });
 });
 
@@ -63,34 +78,45 @@ describe("reading /api/auth/availability's public body", () => {
   });
 });
 
-describe("deciding the door's next state", () => {
-  it("opens the door when ready and configured", () => {
-    expect(nextDoorState({ readiness: "ready", availability: { configured: true, contactAddress: null } }))
+describe("deciding the door's next state (#869: phase, not readiness, decides starting)", () => {
+  it("opens the door when running, ready and configured", () => {
+    expect(nextDoorState({ phase: "running", readiness: "ready", availability: { configured: true, contactAddress: null } }))
       .toBe(DOOR);
   });
 
   it("treats maintenance as healthy for the door's own purposes", () => {
-    expect(nextDoorState({ readiness: "maintenance", availability: { configured: true, contactAddress: null } }))
+    expect(nextDoorState({ phase: "running", readiness: "maintenance", availability: { configured: true, contactAddress: null } }))
       .toBe(DOOR);
   });
 
-  it("is starting whenever readiness is degraded, whatever availability says", () => {
-    expect(nextDoorState({ readiness: "degraded", availability: null })).toBe(STARTING);
-    expect(nextDoorState({ readiness: "degraded", availability: { configured: true, contactAddress: null } }))
+  it("is starting whenever phase is starting, whatever readiness or availability say (criterion 1)", () => {
+    expect(nextDoorState({ phase: "starting", readiness: null, availability: null })).toBe(STARTING);
+    expect(nextDoorState({ phase: "starting", readiness: "degraded", availability: null })).toBe(STARTING);
+    expect(nextDoorState({ phase: "starting", readiness: "ready", availability: { configured: true, contactAddress: null } }))
       .toBe(STARTING);
   });
 
   it("names the unconfigured state on its own, distinct from a hard failure", () => {
-    expect(nextDoorState({ readiness: "ready", availability: { configured: false, contactAddress: null } }))
+    expect(nextDoorState({ phase: "running", readiness: "ready", availability: { configured: false, contactAddress: null } }))
       .toBe(UNCONFIGURED);
   });
 
-  it("fails closed when readiness could not be read at all", () => {
-    expect(nextDoorState({ readiness: null, availability: null })).toBe(FAILED);
+  it("fails at once, not waiting, when phase is running but readiness is degraded (criterion 2: boot is done, the database is the problem)", () => {
+    expect(nextDoorState({ phase: "running", readiness: "degraded", availability: { configured: true, contactAddress: null } }))
+      .toBe(FAILED);
   });
 
-  it("fails closed when availability could not be read, even though readiness was fine", () => {
-    expect(nextDoorState({ readiness: "ready", availability: null })).toBe(FAILED);
+  it("fails closed when phase is running but readiness could not be read at all", () => {
+    expect(nextDoorState({ phase: "running", readiness: null, availability: null })).toBe(FAILED);
+  });
+
+  it("fails closed when phase itself could not be read, regardless of anything else", () => {
+    expect(nextDoorState({ phase: null, readiness: "ready", availability: { configured: true, contactAddress: null } }))
+      .toBe(FAILED);
+  });
+
+  it("fails closed when running and ready but availability could not be read", () => {
+    expect(nextDoorState({ phase: "running", readiness: "ready", availability: null })).toBe(FAILED);
   });
 });
 

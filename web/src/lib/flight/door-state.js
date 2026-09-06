@@ -7,9 +7,10 @@
  * direction C, "the held dawn").
  *
  * `DOOR` is the ordinary case — the button. The other three replace it:
- * `UNCONFIGURED` (authentication is not set up), `STARTING` (readiness is
- * degraded and expected to clear on its own), `FAILED` ("Orbit couldn't open
- * safely" — the catch-all for a check that could not be trusted at all).
+ * `UNCONFIGURED` (authentication is not set up), `STARTING` (the server's own
+ * boot sequence has not finished yet, and is expected to clear on its own —
+ * #869), `FAILED` ("Orbit couldn't open safely" — the catch-all for a check
+ * that could not be trusted at all, or a genuine fault once boot is done).
  */
 export const DOOR = "door";
 export const UNCONFIGURED = "unconfigured";
@@ -83,6 +84,23 @@ export function readinessOf(body) {
 }
 
 /**
+ * Reads `GET /api/auth/availability`'s `phase` field (#869) into one of the
+ * two words `registerNode`'s boot sequence can be in (`src/server/boot.ts`),
+ * or `null` when it cannot be trusted at all — same convention as
+ * {@link readinessOf}. Kept separate from {@link availabilityOf} rather than
+ * folded into its shape, so a caller that only needs to decide whether to
+ * poll again never has to also parse `configured`.
+ *
+ * @param {unknown} body
+ * @returns {"starting" | "running" | null}
+ */
+export function phaseOf(body) {
+  if (!body || typeof body !== "object") return null;
+  const phase = /** @type {{ phase?: unknown }} */ (body).phase;
+  return phase === "starting" || phase === "running" ? phase : null;
+}
+
+/**
  * Reads `GET /api/auth/availability`'s public body (#788, #860): whether the
  * door may offer to sign in, and the address to name if it cannot. This
  * function reads only these two fields — anything else on the body, however
@@ -104,22 +122,31 @@ export function availabilityOf(body) {
 }
 
 /**
- * The one decision this module exists for: given this round's readiness and
- * availability reads, what the door becomes next.
+ * The one decision this module exists for: given this round's boot phase,
+ * readiness and availability reads, what the door becomes next (#869).
  *
- * Precedence, in order: an unreadable readiness answer fails closed to
- * `FAILED` rather than guessing; a degraded readiness is `STARTING`
- * regardless of anything else (availability is not even worth asking about
- * yet); an unreadable availability answer — asked only once readiness is not
- * degraded — is also `FAILED`; otherwise the door opens, or names why it
- * cannot, purely on `configured`.
+ * `phase` decides starting vs. not, not readiness: the server's own boot
+ * fact terminates by construction (`registerNode`), which is what lets the
+ * door's poll end instead of running forever on a broken instance. A
+ * `degraded` or unreadable readiness answer is no longer read as "still
+ * starting" — read that way, a dead database looked identical to a slow
+ * boot and the door waited on it forever.
  *
- * @param {{ readiness: "ready" | "degraded" | "maintenance" | null, availability: { configured: boolean, contactAddress: string | null } | null }} read
+ * Precedence, in order: an unreadable phase fails closed to `FAILED`;
+ * `"starting"` is always `STARTING`, whatever readiness or availability say
+ * — there is nothing to report as broken yet. Once `"running"`, a degraded
+ * or unreadable readiness read is a genuine fault and fails immediately to
+ * `FAILED` rather than waiting on it; an unreadable availability answer is
+ * `FAILED` too; otherwise the door opens, or names why it cannot, purely on
+ * `configured`.
+ *
+ * @param {{ phase: "starting" | "running" | null, readiness: "ready" | "degraded" | "maintenance" | null, availability: { configured: boolean, contactAddress: string | null } | null }} read
  * @returns {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED}
  */
 export function nextDoorState(read) {
-  if (read.readiness === null) return FAILED;
-  if (read.readiness === "degraded") return STARTING;
+  if (read.phase === null) return FAILED;
+  if (read.phase === "starting") return STARTING;
+  if (read.readiness === null || read.readiness === "degraded") return FAILED;
   if (read.availability === null) return FAILED;
   return read.availability.configured ? DOOR : UNCONFIGURED;
 }
