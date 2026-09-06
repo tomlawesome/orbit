@@ -129,7 +129,7 @@
 <div class="sky" aria-hidden="true" bind:this={sky}></div>
 
 <div class="stage">
-  <article class="glass item-card" style="--act:var(--ok)">
+  <article class="glass item-card" style="--act:var(--ok);--act-text:var(--ok-text)">
     <input class="name-title" bind:value={sform.title} aria-label="name"
            class:sugg={marked("title")}>
     <div class="sub">suggested from your documents · {item.sourceDocument}</div>
@@ -161,7 +161,7 @@
         <button class="btn-primary" disabled={busy || !sform.title.trim()} onclick={accept}>
           accept into orbit
         </button>
-        <button class="btn-quiet" style="--act:var(--overdue)" disabled={busy} onclick={dismissSuggestion}>
+        <button class="btn-quiet" style="--act:var(--overdue);--act-text:var(--overdue-text)" disabled={busy} onclick={dismissSuggestion}>
           {acceptArmedDismiss ? "tap again to dismiss" : "dismiss"}
         </button>
         <a class="back" style="margin-top:0" href={resolve("/home")}>← back to your orbit</a>

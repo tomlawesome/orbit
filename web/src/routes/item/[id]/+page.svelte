@@ -435,7 +435,7 @@
           something to carry.</div>
         <h3>start</h3>
         <div class="acts" role="group" aria-label="Actions">
-          <button style="--act:var(--accent)" onclick={() => goto(resolve("/create"))}>add an item</button>
+          <button style="--act:var(--accent);--act-text:var(--accent-text)" onclick={() => goto(resolve("/create"))}>add an item</button>
           <button style="--act:var(--upcoming)" onclick={() => goto(resolve("/inbox"))}>mail something in</button>
         </div>
         <a class="back" href={resolve("/home")}>← back to your orbit</a>
@@ -510,28 +510,28 @@
         <h3>actions</h3>
         <div class="acts" role="group" aria-label="Item actions">
           {#if row.status === "active"}
-            <button style="--act:var(--ok)" aria-pressed={panel === "complete"}
+            <button style="--act:var(--ok);--act-text:var(--ok-text)" aria-pressed={panel === "complete"}
                     onclick={() => open("complete", record)}>complete</button>
             <button style="--act:var(--upcoming)" aria-pressed={panel === "reschedule"}
                     onclick={() => open("reschedule", record)}>reschedule</button>
-            <button style="--act:var(--warm)" aria-pressed={panel === "snooze"}
+            <button style="--act:var(--warm);--act-text:var(--warm-text)" aria-pressed={panel === "snooze"}
                     onclick={() => open("snooze", record)}>snooze</button>
-            <button style="--act:var(--accent)" aria-pressed={panel === "edit"}
+            <button style="--act:var(--accent);--act-text:var(--accent-text)" aria-pressed={panel === "edit"}
                     onclick={() => open("edit", record)}>edit</button>
-            <button style="--act:var(--overdue)" aria-pressed={panel === "retire"}
+            <button style="--act:var(--overdue);--act-text:var(--overdue-text)" aria-pressed={panel === "retire"}
                     onclick={() => open("retire", record)}>retire</button>
           {:else}
-            <button style="--act:var(--ok)" disabled={busy}
+            <button style="--act:var(--ok);--act-text:var(--ok-text)" disabled={busy}
                     onclick={() => run(() => statusCommand(record, "active"))}>restore</button>
             {#if row.status !== "archived"}
-              <button style="--act:var(--overdue)" aria-pressed={panel === "retire"}
+              <button style="--act:var(--overdue);--act-text:var(--overdue-text)" aria-pressed={panel === "retire"}
                       onclick={() => open("retire", record)}>retire</button>
             {/if}
           {/if}
         </div>
 
         {#if panel === "complete"}
-          <div class="panel" style="--act:var(--ok)">
+          <div class="panel" style="--act:var(--ok);--act-text:var(--ok-text)">
             <div class="row2">
               <div class="field"><label for="a-done">completed on</label>
                 <input id="a-done" type="date" bind:value={form.completedDate}></div>
@@ -572,7 +572,7 @@
         {/if}
 
         {#if panel === "snooze"}
-          <div class="panel" style="--act:var(--warm)">
+          <div class="panel" style="--act:var(--warm);--act-text:var(--warm-text)">
             <div class="field"><label for="a-until">snooze until</label>
               <input id="a-until" type="date" bind:value={form.until}></div>
             <div class="save-row">
@@ -584,7 +584,7 @@
         {/if}
 
         {#if panel === "edit"}
-          <div class="panel" style="--act:var(--accent)">
+          <div class="panel" style="--act:var(--accent);--act-text:var(--accent-text)">
             <div class="field"><label for="e-title">title</label>
               <input id="e-title" bind:value={form.title}></div>
             <div class="row2">
@@ -612,7 +612,7 @@
         {/if}
 
         {#if panel === "retire"}
-          <div class="panel" style="--act:var(--overdue)">
+          <div class="panel" style="--act:var(--overdue);--act-text:var(--overdue-text)">
             <div class="note">
               retiring takes this item off the belt — archive keeps its history;
               cancel marks it stood down and it can be restored later
