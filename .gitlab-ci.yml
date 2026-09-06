@@ -671,6 +671,77 @@ sidecar_images:
     expire_in: 14 days
     when: always
 
+# Generic-secret detection over full git history (#707). GitHub's free tier
+# gives this public repository push protection for provider-registered
+# patterns only; the paid add-on that would cover bespoke tokens and private
+# keys cannot be turned on (confirmed by the owner, two repositories). This is
+# the only check that ever looks at commits older than the current diff, so it
+# is not gated on the classifier and does not scope to the branches touched --
+# a secret can sit in a commit no diff ever revisits.
+#
+# `gitleaks detect`, not `--no-git`: the working tree is already covered by
+# supply_chain_source's `trivy fs --scanners vuln,secret` above; this job's
+# job is the history that job cannot see. Cheap -- the issue that asked for
+# this measured 163 commits in 1.5s -- so there is no reason to shallow-clone.
+#
+# Detects rather than prevents: push protection is still the only control that
+# stops a secret landing. A failure here means "rotate the credential", not
+# "amend the commit".
+#
+# The binary, not `gitleaks/gitleaks-action`: that action is commercially
+# licensed for organisations (`NOASSERTION` on the GitHub API) and would be a
+# third-party action to pin and review besides. gitleaks itself is MIT.
+# Version and checksum come from the release's own `_checksums.txt`, verified
+# before the tarball is trusted; bump both together on upgrade.
+#
+# --redact covers both the console log and --report-path: this repository is
+# public, and an unredacted finding would republish the secret it just found.
+# The report artifact keeps `when: always` so a finding is still visible on a
+# failed run, exactly as redacted as the log.
+#
+# .gitleaksignore at the repo root carries 8 fingerprints found and reviewed
+# at adoption (2026-09-06): test fixture strings and a recovery-bundle
+# manifest's `key_encryption=` cipher-spec line, none a real credential. Each
+# entry is one exact commit/file/line, not a pattern, so it exempts nothing
+# new -- this is the "real false positive" the issue's non-goal reserves an
+# allowlist for, not a preemptive one.
+gitleaks:
+  stage: policy
+  tags: [light]
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 10m
+  rules:
+    - *not_scheduled
+    - when: on_success
+  needs: []
+  variables:
+    GIT_DEPTH: 0
+    GITLEAKS_VERSION: "8.30.1"
+    GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  script:
+    - |
+      set -eu
+      curl -fsSL -o /tmp/gitleaks.tar.gz \
+        "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+      echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+      tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+      install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+      rm -f /tmp/gitleaks.tar.gz /tmp/gitleaks
+      gitleaks version
+    - |
+      set -eu
+      mkdir -p .orbit-gitleaks
+      gitleaks detect --source . --redact --no-banner \
+        --report-format json --report-path .orbit-gitleaks/report.json
+  artifacts:
+    name: orbit-gitleaks
+    paths:
+      - .orbit-gitleaks/report.json
+    expire_in: 14 days
+    when: always
+
 # --- acceptance --------------------------------------------------------------
 
 # The only automatic check the v19 presentation layer has (#620). A change that
