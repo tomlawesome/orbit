@@ -198,7 +198,9 @@ body.shownew.instrument .nf .nstar{animation:chromein .95s ease .34s both}
 .nf .disc{position:absolute;left:50%;top:50%;z-index:4;text-align:center;
           width:min(560px,86vw);opacity:0;pointer-events:none;
           transform:translate(-50%,calc(-50% + 14px));
-          transition:opacity .8s ease,transform .8s cubic-bezier(.3,.7,.3,1)}
+          /* #870: retimed 800ms -> 450ms, the beat before it (countGap,
+             flight/timeline.js) and its hold (countHold) alongside it */
+          transition:opacity .45s ease,transform .45s cubic-bezier(.3,.7,.3,1)}
 body.counting .nf .disc{opacity:1;transform:translate(-50%,-50%)}
 .nf .disc .big{font:600 clamp(72px,8.6vw,118px) var(--display);line-height:.84;
                letter-spacing:-.035em;color:var(--accent-text)}
