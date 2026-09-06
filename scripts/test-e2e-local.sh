@@ -206,7 +206,12 @@ for required in .orbit-secrets/greenmail.p12 .orbit-secrets/greenmail-ca.pem; do
   [[ -f "$required" ]] || fail "missing GreenMail TLS material: ${required}"
 done
 
-for secret_file in smtp-password imap-password imap-alias-current-secret; do
+# Only SMTP now: the inbound mailbox credential is set through the
+# administration screen and stored encrypted in the database (ADR-0017 slice
+# 2), so there is no host secret file for it and no alias key to generate --
+# Orbit makes its own. tests/e2e/v19-mail-collection.spec.ts configures the
+# mailbox as the administrator before it sends anything.
+for secret_file in smtp-password; do
   path=".orbit-secrets/${secret_file}"
   if [[ ! -f "$path" ]]; then
     log "generating missing secret: ${path}"

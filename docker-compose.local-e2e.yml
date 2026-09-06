@@ -6,8 +6,8 @@
 # real deployment on the same host cannot coexist under those fixed names no
 # matter what Compose project name the disposable run uses. This overlay
 # renames them to the disposable project's own name so the two can coexist.
-# Internal service discovery (SMTP_HOST, IMAP_HOST, OIDC_ISSUER's
-# "orbit-oidc" host, `docker compose exec`/`logs`/`ps`) all address services
+# Internal service discovery (SMTP_HOST, OIDC_ISSUER's "orbit-oidc" host,
+# `docker compose exec`/`logs`/`ps`) all address services
 # by Compose *service* name, which is unaffected by container_name, so this
 # rename is cosmetic to Docker's global container namespace only and changes
 # no behaviour under test.
