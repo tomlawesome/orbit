@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, householdRegister, sessionHeaders } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #453: membership and the empty sky (§11). A newcomer with no household
@@ -28,15 +29,7 @@ let seeded = false;
 async function signInAs(page: Page, account: string) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
-  /* Not a fixed destination: #840 sends a session with no household of its
-     own to the arrival at `/` instead of /home, and this account may have
-     none at this point in the run. Every caller below either only needs an
-     authenticated session (the API calls that follow carry it regardless of
-     which page is showing) or creates its own household first -- the one
-     exception, the newcomer who must land ON /home with none, is
-     `arriveAdrift` below, not this helper. */
-  const session = await page.request.get("/api/auth/session");
-  expect(session.ok()).toBe(true);
+  await settleArrival(page);
 }
 
 /* A fresh instance promotes its first sign-in to instance admin — and an

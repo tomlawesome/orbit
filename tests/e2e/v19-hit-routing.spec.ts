@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #641: the household hit-area fix, proved by a real hit-test.
@@ -64,12 +65,7 @@ type Overlap = {
 async function signIn(page: Page, account: string) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
-  /* Not a fixed destination: #840 sends a session with no household of its
-     own to the arrival at `/` instead of /home, and this account has none at
-     this point in the run -- see arriveAdrift below for how this file still
-     reaches /home to draw the sky it needs. */
-  const session = await page.request.get("/api/auth/session");
-  expect(session.ok()).toBe(true);
+  await settleArrival(page);
 }
 
 /**

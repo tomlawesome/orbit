@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #434: mail-in review on the v19 surfaces — the manifest row's two-tap
@@ -29,13 +30,7 @@ const households = householdRegister();
 async function signInToHome(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  /* Not a fixed destination: #840 sends a session with no household of its
-     own to the arrival at `/` instead of /home, and this account may have
-     none at this point in the run. seedHousehold below creates one from
-     here regardless of which page is showing; callers reach /home again by
-     an explicit goto rather than a reload once it exists. */
-  const session = await page.request.get("/api/auth/session");
-  expect(session.ok()).toBe(true);
+  await settleArrival(page);
 }
 
 async function seedHousehold(page: Page): Promise<{ householdId: string; itemId: string }> {
