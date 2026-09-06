@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASKING, CREATE, DOOR, NEWCOMER, ONWARD,
   CURRENCIES, DEFAULT_SECTIONS, NAME_LIMIT, TIME_ZONES,
-  arrivalStageOf, belongRowsOf, collidingHouseholdOf, createButtonLabel,
+  arrivalStageOf, belongRowsOf, collidingHouseholdOf,
   createSystemCommand, discoveredCountOf, preferredCurrency, preferredTimeZone,
   sectionNote, sectionNoteTitle,
 } from "$lib/arrival/stage.js";
@@ -130,12 +130,6 @@ describe("the card asks three things only", () => {
       { uuid: () => "id-1" },
     );
     expect(command.household.name).toHaveLength(60);
-  });
-
-  it("writes the system's name into the button as it is typed", () => {
-    expect(createButtonLabel("")).toBe("create this system →");
-    expect(createButtonLabel("   ")).toBe("create this system →");
-    expect(createButtonLabel("Lawson Home")).toBe("create Lawson Home →");
   });
 
   it("admits to the four default sections in one quiet line, counted not typed", () => {

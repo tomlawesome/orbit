@@ -176,16 +176,6 @@ export function createSystemCommand({ name, timezone, currency }, ids = { uuid: 
 }
 
 /**
- * What the button says. The sheet writes the system's name into it as it is
- * typed — "create Lawson Home →" — and falls back to the unnamed word.
- * @param {string} [name]
- */
-export function createButtonLabel(name) {
-  const trimmed = String(name ?? "").trim();
-  return trimmed ? `create ${trimmed} →` : "create this system →";
-}
-
-/**
  * The one line that survives the strip, read off the real default set rather
  * than a typed number: "4 sections to start · change them later".
  *

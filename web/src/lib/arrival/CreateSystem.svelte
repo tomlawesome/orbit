@@ -1,25 +1,29 @@
 <script>
   import {
     CURRENCIES, TIME_ZONES, NAME_LIMIT,
-    createButtonLabel, sectionNote, sectionNoteTitle,
+    sectionNote, sectionNoteTitle,
   } from "./stage.js";
 
   /**
-   * THE CREATE-SYSTEM CARD (#410, §15 — design/v19/first-run.html, block 2).
+   * THE CREATE-SYSTEM CARD (#410, §15 — design/v19/first-run.html, block 2;
+   * #862 round 3 — design/v19/first-run-card/round-3/ring.html, "the ring
+   * holds the questions").
    *
-   * Three fields, a button and air, standing alone on the dawn with the login
-   * screen taken off it entirely (§15, fourth pass). No wordmark, no glyph, no
-   * identity-provider button, no footer and no mark on the card — the login's
-   * own 420px hero ring is behind it the whole time, which is what the flight
-   * lifts off when the card dissolves.
+   * Three fields and a button, standing inside the login ring itself — no
+   * card of its own any more. No wordmark, no glyph, no identity-provider
+   * button, no footer: the login's own hero ring is enlarged to 500px behind
+   * this form (the host's `.bigring`) and IS the card, which is what the
+   * flight closes back to 302.4px on submit.
    *
    * The card asks three things and nothing else (§15, "first-run asks three
-   * things only"): a name, a time zone, a currency. The four default sections
-   * are applied by the server and admitted to in one quiet mono line. The
-   * refusal is one warm line under the field it is about.
+   * things only"): a name, a time zone, a currency, one column, values and
+   * labels centred on the ring's own axis. The four default sections are
+   * applied by the server and admitted to in one quiet mono line. The
+   * refusal is one warm line under the field it is about. The act reads
+   * `Create` — one word, the ratified gate rule verbatim (#862).
    *
    * This component is the form and only the form: the host owns the stage, the
-   * submit, the reclaim and the launch.
+   * ring, the submit, the reclaim and the launch.
    */
   /**
    * @type {{
@@ -57,8 +61,8 @@
   <form class="card" aria-label="Name your first system"
         onsubmit={(event) => { event.preventDefault(); onsubmit(); }}>
     <div class="field">
-      <label for="hhname">what is it</label>
-      <input id="hhname" placeholder="Lawson Home" maxlength={NAME_LIMIT} autocomplete="off"
+      <label for="hhname">name</label>
+      <input id="hhname" placeholder="Your world" maxlength={NAME_LIMIT} autocomplete="off"
              aria-label="System name" bind:value={name} oninput={onnaming}
              title="A house, a flat, a boat, a parent’s place — whatever you keep in orbit. It is the name everyone in it sees." />
       <!-- the refusal, in one line, in the warm tone. The only word the
@@ -95,8 +99,12 @@
          count is the real default set's, never a typed number. -->
     <p class="note" title={sectionNoteTitle()}>{sectionNote()}</p>
 
-    <!-- No whitespace inside the button: the label is centred, and a collapsed
-         newline either side of it moves the words off the mockup's own pixels. -->
-    <button class="btn" id="gobtn" type="submit" disabled={!trimmed || busy}>{createButtonLabel(name)}</button>
+    <!-- THE ACT (#862): the ratified gate rule verbatim, at its own size,
+         reading `Create` — one word. It no longer grows with the typed name
+         (§15 already requires the two surfaces to carry the identical
+         control; the owner's round-3 word closes the last difference). No
+         whitespace inside the button: the label is centred, and a collapsed
+         newline either side of it moves the word off the mockup's own pixels. -->
+    <button class="btn" id="gobtn" type="submit" disabled={!trimmed || busy}>Create</button>
   </form>
 </div>
