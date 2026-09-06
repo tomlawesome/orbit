@@ -82,11 +82,12 @@ const AUDIT_SCRIPT = `
         .filter(isReallyVisible)
         .map(describe);
     },
-    focused: function () {
+    focused: function (excludeSelector) {
       var el = document.activeElement;
       if (!el || el === document.body || el === document.documentElement) return null;
       var info = describe(el);
       info.focusVisible = focusVisible(el);
+      info.excluded = Boolean(excludeSelector && el.closest(excludeSelector));
       return info;
     },
   };
@@ -101,17 +102,17 @@ export async function installKeyboardAudit(p: Page) {
 }
 
 export type Described = { key: string; label: string };
-export type FocusedInfo = Described & { focusVisible: boolean };
+export type FocusedInfo = Described & { focusVisible: boolean; excluded: boolean };
 type KbWindow = typeof window & {
-  __kb: { collect(root: string | null, exclude: string | null): Described[]; focused(): FocusedInfo | null };
+  __kb: { collect(root: string | null, exclude: string | null): Described[]; focused(exclude: string | null): FocusedInfo | null };
 };
 
 export async function collectVisible(p: Page, root: string | null = null, exclude: string | null = null): Promise<Described[]> {
   return p.evaluate(([r, x]) => (window as unknown as KbWindow).__kb.collect(r, x), [root, exclude] as const);
 }
 
-export async function currentFocus(p: Page): Promise<FocusedInfo | null> {
-  return p.evaluate(() => (window as unknown as KbWindow).__kb.focused());
+export async function currentFocus(p: Page, exclude: string | null = null): Promise<FocusedInfo | null> {
+  return p.evaluate((x) => (window as unknown as KbWindow).__kb.focused(x), exclude);
 }
 
 type Match = { selector?: string; tag?: string; textIncludes?: string };
@@ -187,12 +188,19 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
     for (let retry = 0; retry < 6; retry += 1) {
       await p.keyboard.press("Tab");
       await p.waitForTimeout(20); // pacing this loop matters, not just its length
-      info = await currentFocus(p);
+      info = await currentFocus(p, exclude);
       if (!info || info.key !== lastKey) break;
       await p.waitForTimeout(50);
     }
     if (!info) continue; // focus passed through browser chrome; keep pressing rather than giving up
     lastKey = info.key;
+    /* `exclude` names a region the screen shows but this audit is not
+       proving (an unbounded list, say): its controls are left out of
+       `expected`, so a stop inside it must be walked through rather than
+       reported as "reached but not visible" — which is exactly what happened
+       on the runner, where other specs had created accounts the household
+       page then listed (pipeline 487, job 3948). */
+    if (info.excluded) continue;
     if (firstKey === null) firstKey = info.key;
     else if (info.key === firstKey) { cycled = true; break; }
     if (seenKeys.has(info.key)) break; // revisited something that wasn't the start: stuck
@@ -220,14 +228,6 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
 
 /** Dismisses the first-run tour if it turns up — see the desktop file's
  *  header note on why it is skipped rather than proven here. */
-export async function dismissTourIfShown(p: Page) {
-  const tour = p.locator(".tourcard");
-  if (await tour.isVisible().catch(() => false)) {
-    await p.keyboard.press("Escape");
-    await expect(tour).toBeHidden();
-  }
-}
-
 /* This host runs other agents' work concurrently (builds, other browser
    suites against this same shared acceptance stack), and a page load that
    is normally sub-second has been observed taking well over 15s under that
@@ -238,6 +238,21 @@ export async function dismissTourIfShown(p: Page) {
    asserted, just given room to be true on a slow host rather than a fast
    one. `test.setTimeout` in every test below is widened to match. */
 export const SETTLE_TIMEOUT = 60_000;
+
+export async function dismissTourIfShown(p: Page) {
+  /* Ask the record, not the screen: the card is drawn only after /home has
+     fetched /api/settings/tour, so an instant "is it visible?" right after
+     navigation says no on a fresh account and the walk then runs under the
+     tour. A reader who has never taken it is about to see it — wait for
+     the card; one who has is not — move on. */
+  const record = await p.request.get("/api/settings/tour").then((r) => r.json() as Promise<{ tour?: { tourSeenAt: string | null } }>).catch(() => null);
+  if (!record || record.tour?.tourSeenAt) return;
+  const tour = p.locator(".tourcard");
+  await expect(tour).toBeVisible({ timeout: SETTLE_TIMEOUT });
+  await p.keyboard.press("Escape");
+  await expect(tour).toBeHidden();
+}
+
 
 /** Desktop-only: `#explore` is drawn by the desk dialect
  *  (web/src/routes/home/+page.svelte); the pocket dialect has no such

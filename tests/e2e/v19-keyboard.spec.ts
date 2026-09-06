@@ -240,34 +240,48 @@ async function openSettingsFromHome(page: Page) {
  * its own household (where one is needed), and cleans it up in `finally`.
  * ──────────────────────────────────────────────────────────────────────── */
 
-test("arrive: the sign-in door opens by Tab and Enter alone", async ({ page }) => {
+test("arrive: the sign-in door opens by Tab and Enter alone", async ({ page, context }) => {
   test.setTimeout(60_000);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
 
-  /* Signed out, asking for /home is redirected to Orbit's own /login — the
-     door every screen sends a signed-out reader through (v19-entry.spec.ts). */
-  await page.goto("/home");
-  await expect(page).toHaveURL(/\/login\?returnTo=%2Fhome$/);
+  /* A reader with no household lands on the newcomer stage, not the dial
+     `settled` waits for — and on a fresh stack every other test here has
+     cleaned its household away (pipeline 487, job 3948). Seed one first,
+     then drop the session so the walk really starts from the door. */
+  await signIn(page, "/home");
+  const household = await seedHousehold(page);
+  await context.clearCookies();
+  try {
+    /* Signed out, asking for /home is redirected to Orbit's own /login — the
+       door every screen sends a signed-out reader through (v19-entry.spec.ts). */
+    await page.goto("/home");
+    await expect(page).toHaveURL(/\/login\?returnTo=%2Fhome$/);
 
-  await tabTo(page, { selector: "#gate" }, { screen: "sign-in" });
-  const gate = await currentFocus(page);
-  expect(gate?.focusVisible, "sign-in: the Sign in button has no visible focus indicator").toBe(true);
-  await page.keyboard.press("Enter");
+    await tabTo(page, { selector: "#gate" }, { screen: "sign-in" });
+    const gate = await currentFocus(page);
+    expect(gate?.focusVisible, "sign-in: the Sign in button has no visible focus indicator").toBe(true);
+    await page.keyboard.press("Enter");
 
-  /* SignIn.svelte's press() hands off to /api/auth/login after its own
-     flight beat, which redirects on to the OIDC provider. Wait for the /login
-     screen itself to be left rather than guessing the provider's URL shape. */
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 10_000 });
+    /* SignIn.svelte's press() hands off to /api/auth/login after its own
+       flight beat, which redirects on to the OIDC provider. Wait for the /login
+       screen itself to be left rather than guessing the provider's URL shape. */
+    await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 10_000 });
 
-  /* The provider lists identities as links (tests/e2e/v19-entry.spec.ts);
-     Tab to the one this suite signs in as and press Enter rather than
-     clicking it. */
-  await tabTo(page, { tag: "A", textIncludes: READER }, { screen: "identity provider" });
-  await page.keyboard.press("Enter");
+    /* The provider lists identities as links (tests/e2e/v19-entry.spec.ts);
+       Tab to the one this suite signs in as and press Enter rather than
+       clicking it. */
+    await tabTo(page, { tag: "A", textIncludes: READER }, { screen: "identity provider" });
+    await page.keyboard.press("Enter");
 
-  await expect(page).toHaveURL(/\/home$/, { timeout: 15_000 });
-  await settled(page);
+    await expect(page).toHaveURL(/\/home$/, { timeout: 15_000 });
+    await settled(page);
+  } finally {
+    // The walk may have failed before the door was through: sign in again
+    // so the seed is removed either way.
+    await signIn(page, "/home");
+    await cleanup(page, household);
+  }
 });
 
 test("home: every control is reachable, focus is visible, and Tab is not trapped", async ({ page }) => {
