@@ -22,8 +22,8 @@ becomes 302.4px across, its 2-unit stroke becomes 4.2px, and the orb's r=7
 becomes 29.4px across, riding 151.2px out from the centre at -30.1 degrees.
 
 The big ring keeps every one of those numbers except the diameter, which goes
-to 660px — 2.18x the login's, and the largest that still leaves the fields a
-comfortable rectangle inside a circle. To hold the line weight and the orb
+to 500px — 1.65x the login's. The fields stack in one column, which narrows
+the block enough for the circle to come down this far and still clear it. To hold the line weight and the orb
 size still while the diameter changes, the ring is drawn in CSS rather than
 scaled as an SVG: a border in pixels does not thin when its element shrinks,
 and the orb is its own element, placed by percentage so it keeps its station
@@ -68,7 +68,12 @@ RING = """
      pixels does not thin when its element shrinks, and the orb is its own
      element, stationed by percentage so it keeps its place on the ring at
      any size. Scaling the SVG would have thinned both, which the owner ruled
-     out in the same breath as asking for the bigger ring. */
+     out in the same breath as asking for the bigger ring.
+
+     Every rule here is scoped to .bigring and the parts are named for it.
+     An unscoped `.disc` is not free: the newcomer frame already owns that
+     class for its discovered-count, and claiming it put this ring around
+     the count and shoved it off centre. */
   /* THE SWAP. The two rings are the same circle at the end of the shrink, so
      the changeover is invisible only if it happens THEN: the big ring holds
      full strength while it closes and clears in .16s once it has arrived,
@@ -78,7 +83,13 @@ RING = """
   .bigring{position:fixed;inset:0;display:grid;place-items:center;z-index:3;
            opacity:0;visibility:hidden;pointer-events:none;
            transition:opacity .16s ease .46s,visibility .16s .46s}
-  body.showform:not(.reclaimed) .bigring{opacity:1;visibility:visible;
+  /* The create path and nothing else. `showform` stays set while the sheet
+     runs its other journeys -- the newcomer arrival, the discovered count,
+     the home instrument -- so a rule keyed on it alone left this ring
+     hanging over screens it has no business being on. Each of those states
+     has its own body class; the ring is gone the moment any of them is up. */
+  body.showform:not(.reclaimed):not(.shownew):not(.showhome):not(.showwarp):not(.showdusk):not(.counting):not(.instrument) .bigring{
+           opacity:1;visibility:visible;
            transition:opacity .8s ease,visibility .8s}
   .bigring>*{grid-area:1/1}
 
@@ -86,7 +97,7 @@ RING = """
      and nowhere else. It is a darkening rather than a paint, so a light pack
      cannot wash it out and no per-pack exception list is needed -- the defect
      that opened this issue cannot recur here. */
-  .disc{width:660px;height:660px;border-radius:50%;
+  .bigring .ringglass{width:500px;height:500px;border-radius:50%;
         border:4.2px solid #8791b3;
         background:rgba(6,10,22,.56);
         -webkit-backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
@@ -100,19 +111,19 @@ RING = """
      ring's 302.4px, in its place, and the glass clears as it goes -- so what
      the ratified reclaim brings back is not a new screen but the one already
      standing there. The ascent then runs unchanged. */
-  body.reclaimed .disc{width:302.4px;height:302.4px;
+  body.reclaimed .bigring .ringglass{width:302.4px;height:302.4px;
         background:rgba(7,11,24,0);
         -webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px)}
 
   /* The orb keeps its 29.4px and its station: 43.26% out and 25.06% up is
      the login orb's own angle, and a percentage holds it there as the ring
      closes. One turn per 40s, the only motion CON-19 allows the mark. */
-  .orbit{width:660px;height:660px;position:relative;
+  .bigring .ringorbit{width:500px;height:500px;position:relative;
          animation:spinback 40s linear infinite;
          transition:width .5s cubic-bezier(.55,0,.2,1),
                     height .5s cubic-bezier(.55,0,.2,1)}
-  body.reclaimed .orbit{width:302.4px;height:302.4px}
-  .orbit i{position:absolute;left:93.26%;top:24.94%;
+  body.reclaimed .bigring .ringorbit{width:302.4px;height:302.4px}
+  .bigring .ringorbit i{position:absolute;left:93.26%;top:24.94%;
            width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px;
            border-radius:50%;background:#d8b45a}
 
@@ -125,7 +136,13 @@ RING = """
      Ink is the sky's and fixed, not the pack's, for the reason the whole
      issue exists: the ground here is a night sky whatever pack is chosen. */
   #formlayer{display:grid;place-items:center;z-index:4}
-  .card{width:404px;max-width:404px;background:none;backdrop-filter:none;
+  /* One column: time zone, then currency beneath it (owner, 2026-09-06).
+     Stacking narrows the block, which is what lets the circle come down --
+     a 300px column inside a 500px ring still clears its widest point. */
+  .card .row2{display:block}
+  .card .row2>.field{margin-bottom:18px}
+  .card .row2>.field:last-child{margin-bottom:0}
+  .card{width:300px;max-width:300px;background:none;backdrop-filter:none;
         border:none;box-shadow:none;padding:0;
         --ink:#f0f4fb; --ink-mid:#c0cade; --ink-faint:#9aa6bf;
         --line:rgba(240,244,251,.26); --line-soft:rgba(240,244,251,.14);
@@ -136,6 +153,13 @@ RING = """
   .card .field input,.card .field select{
         background:rgba(5,9,20,.42);border-color:rgba(240,244,251,.22);
         color:#f0f4fb}
+  /* Typed text sits centred (owner, 2026-09-06): everything in the ring is
+     centred on its axis, so a name growing out from the left edge was the
+     one thing in here still reading as a form. The labels centre with them,
+     because a left-set label over a centred value reads as a mistake. */
+  .card .field input,.card .field select,.card .field label{text-align:center}
+  .card .field select{text-align-last:center;padding-right:12px}
+  .card .selwrap::after{display:none}
   .card .field input::placeholder{color:rgba(240,244,251,.36)}
   .card .field input:focus,.card .field select:focus{border-color:#d8b45a}
   .card .selwrap::after{border-color:#9aa6bf}
@@ -203,8 +227,8 @@ RING_MARKUP = """
      sibling of the dawn and of the form layer rather than a child of either,
      because it has to outlive the card on the way into the launch. -->
 <div class="bigring" aria-hidden="true">
-  <div class="disc"></div>
-  <div class="orbit"><i></i></div>
+  <div class="ringglass"></div>
+  <div class="ringorbit"><i></i></div>
 </div>
 """
 
