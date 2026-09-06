@@ -250,7 +250,18 @@ test("reverting the pointer-events rule gives the click to the neighbour, as #63
 
 test("a household the packed sky cannot draw is still reachable by name", async ({ page, browser }) => {
   test.setTimeout(120_000);
-  await page.unroute("**/api/workspace");
+  /* The sky this test needs is not the one beforeEach installed, so the
+     first stub has to come off first. `unroute` on its own is not enough:
+     beforeEach's own navigation may still have a workspace request in
+     flight, and dropping its handler mid-request orphans it -- the handler
+     resolves against a route Playwright has already discarded and throws
+     "Route is already handled!", which fails this test from outside its own
+     assertions. `unrouteAll` with `ignoreErrors` waits for those handlers
+     and swallows exactly that. It shows up only when the whole suite runs
+     serially against one instance, which is CI's shape, not the default
+     local one. */
+  await page.waitForLoadState("networkidle").catch(() => {});
+  await page.unrouteAll({ behavior: "ignoreErrors" });
   await stubSky(page, OVERFULL_SKY);
   await page.setViewportSize(DESK_VIEWPORTS[0]);
   await page.goto("/home");
