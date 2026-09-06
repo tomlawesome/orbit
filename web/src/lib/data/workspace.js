@@ -424,10 +424,30 @@ async function json(response) {
 let sessionPromise = null;
 
 /**
+ * `fetch` is a parameter throughout this seam so a SvelteKit server `load` can
+ * hand over its own (#842): that one resolves a relative URL against the app
+ * and forwards the incoming request's cookies, which is what lets the same
+ * read run on the server for the first render. Everywhere else it is the
+ * browser's, exactly as before.
+ *
+ * @typedef {typeof globalThis.fetch} Fetch
+ */
+
+/**
  * @param {{ refresh?: boolean }} [options]
+ * @param {Fetch} [fetchImpl]
  * @returns {Promise<Session>}
  */
-export function readSession({ refresh = false } = {}) {
+export function readSession({ refresh = false } = {}, fetchImpl) {
+  /* A caller that brings its own fetch is one request on a shared server
+     process, and the cache below lives as long as that process — so it is
+     neither read nor written here. Caching a session there would hand the
+     next reader the previous reader's identity and CSRF token. */
+  if (fetchImpl) {
+    return /** @type {Promise<Session>} */ (
+      fetchImpl("/api/auth/session", { credentials: "same-origin" }).then(json)
+    );
+  }
   if (refresh || !sessionPromise) {
     /* The route this chain asks is the one that answers a Session; `json` is
        generic and has nothing to infer that from when it is handed over
@@ -447,12 +467,13 @@ export function readSession({ refresh = false } = {}) {
 /**
  * The whole workspace: households, their sections, items and activity.
  *
+ * @param {Fetch} [fetchImpl]
  * @returns {Promise<Workspace>}
  */
-export async function readWorkspace() {
+export async function readWorkspace(fetchImpl = globalThis.fetch) {
   /** @type {{ workspace: Workspace }} */
   const body = await json(
-    await fetch("/api/workspace", { credentials: "same-origin" }),
+    await fetchImpl("/api/workspace", { credentials: "same-origin" }),
   );
   return body.workspace;
 }
@@ -546,11 +567,12 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
  * private mailbox (the route answers empty for them), and a broken inbox must
  * never take home down with it — the caller treats this as additive.
  *
+ * @param {Fetch} [fetchImpl]
  * @returns {Promise<Inbox>}
  */
-export async function readInbox() {
+export async function readInbox(fetchImpl = globalThis.fetch) {
   /** @type {Partial<Inbox>} */
-  const body = await json(await fetch("/api/imap-inbox", { credentials: "same-origin" }));
+  const body = await json(await fetchImpl("/api/imap-inbox", { credentials: "same-origin" }));
   return { receipts: body.receipts ?? [], households: body.households ?? [], filed: body.filed ?? [] };
 }
 
@@ -691,14 +713,15 @@ function todayOf(workspace) {
  */
 
 /**
+ * @param {Fetch} [fetchImpl]  a server `load`'s fetch, for the first render (#842)
  * @returns {Promise<HomeView>}
  */
-export async function readHome() {
+export async function readHome(fetchImpl) {
   const [workspace, session, inbox] = await Promise.all([
-    readWorkspace(),
-    readSession(),
+    readWorkspace(fetchImpl),
+    readSession({}, fetchImpl),
     /* Additive: mail-in suggestions enrich home, they must never sink it. */
-    readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
+    readInbox(fetchImpl).catch(() => /** @type {Inbox} */ ({ receipts: [] })),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const today = todayOf(workspace);
