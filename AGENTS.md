@@ -112,9 +112,12 @@ Check the list before building a test rig or handing a check to the owner.
   channel tag resolved to the digest the registry serves right now. Real
   network and registry; only OIDC discovery is redirected, to the `tests/oidc`
   sidecar. Non-interactive path only; `--red` proves the digest assertion
-  fires. Runs on its own weekly schedule via the `install_bootstrap` job in
+  fires. Runs two ways (#724): weekly, via the `install_bootstrap` job in
   `.gitlab-ci.yml` (maintenance stage, `INSTALL_BOOTSTRAP=true`) — `--red`
-  then the green run, both in that one job (#724)
+  then the green run, both in that one job; and green-only, via
+  `verify_bootstrap` in `.github/workflows/publish-from-gitlab.yml`, right
+  after that workflow's `publish` job moves GHCR's `preview` tag — the
+  publication path that can actually invalidate what the harness asserts
 - `scripts/test-backup-restore.sh` — backup and restore acceptance drill
 - `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
   stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which

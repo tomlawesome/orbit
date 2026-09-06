@@ -1804,11 +1804,16 @@ sidecar_pin_freshness:
 # Runs the strongest install evidence Orbit owns, which until now nothing
 # invoked (#724): scripts/test-install-bootstrap.sh fetches install.sh over
 # the real network from a branch, pipes it to bash, and asserts the channel
-# tag resolved to the digest ghcr.io serves right now. Weekly is enough --
-# nothing about a channel tag's target moves faster than the publish path
-# that already builds fresh preview images -- and this job stands in for the
-# publication-path trigger too, since it is not a container publish itself and
-# has nowhere else to hook into.
+# tag resolved to the digest ghcr.io serves right now. This is the schedule
+# half of #724's "at minimum on a schedule, and on the publication path"
+# criterion; the publication-path half is `verify_bootstrap` in
+# .github/workflows/publish-from-gitlab.yml, which runs the same harness
+# (green only) right after that workflow's `publish` job moves GHCR's
+# `preview` tag -- the event this job's own schedule cannot substitute for,
+# since a broken publish should fail visibly at publish time, not wait for
+# the next weekly run. This job also carries the `--red` self-test (see
+# below), which is a property of the harness, not of any one publish, so it
+# has no place in the publish-triggered job.
 #
 # Maintenance stage, schedule-gated, same as `renovate` and
 # `sidecar_pin_freshness`: this is deliberately not a required check on
