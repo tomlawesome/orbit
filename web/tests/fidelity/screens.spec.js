@@ -744,6 +744,22 @@ async function capture(
     await page.route("**/api/auth/session", (/** @type {import("@playwright/test").Route} */ route) =>
       route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"unauthenticated"}' }),
     );
+    /*
+     * And the door is open. The sign-in door asks two more questions on
+     * mount (#788): is the instance ready, and is sign-in configured at all.
+     * The fixture harness has no identity provider, so left to itself it
+     * answers "not configured" and the door photographs its held-dawn state
+     * instead of the ratified button. The mockups these screens are measured
+     * against draw a healthy, configured instance, so the harness states that
+     * reader too. The three cannot-open states have their own coverage in
+     * tests/unit/door-state.test.mjs and the e2e suite, not here.
+     */
+    await page.route("**/api/health", (/** @type {import("@playwright/test").Route} */ route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"ready"}' }),
+    );
+    await page.route("**/api/auth/availability", (/** @type {import("@playwright/test").Route} */ route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: '{"configured":true,"contactAddress":null}' }),
+    );
   }
 
   /* Most of the family is drawn for a desk. The mobile dialect is drawn for a
