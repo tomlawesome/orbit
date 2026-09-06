@@ -357,7 +357,9 @@
   .drawer{position:fixed;top:0;bottom:0;z-index:10;width:290px;
           background:var(--panel-raised);backdrop-filter:blur(16px);
           padding:26px;transition:transform .35s cubic-bezier(.3,.7,.3,1)}
-  .drawer h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  /* #843: h2, not h4 -- these are the first headings after the page's own
+     (sr-only) h1, so the level must not skip. The look is unchanged. */
+  .drawer h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
              color:var(--ink-faint);margin:18px 0 10px}
   .drawer .close{position:absolute;top:12px;background:none;border:0;
                  color:var(--ink-faint);font:14px var(--mono);cursor:pointer}
@@ -373,7 +375,7 @@
   .svc small{color:var(--ink-faint);font-size:10.5px}
   .keyrow{display:flex;align-items:center;gap:10px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
   .keyrow .sw{width:12px;height:12px;border-radius:50%;flex:none}
-  .docview h4{font-size:14.5px;font-weight:600}
+  .docview h2{font-size:14.5px;font-weight:600}
   .docview .sub{font:11px var(--mono);color:var(--ink-faint);margin:2px 0 14px}
   .docview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
                 border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
@@ -393,7 +395,7 @@
   .drawer-top .inner{max-width:880px;margin:0 auto;padding:30px 24px 26px;
                      display:flex;flex-direction:column;gap:18px;align-items:center}
   .drawer-top .crow{align-self:stretch}
-  .drawer-top h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  .drawer-top h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
                  color:var(--ink-faint)}
   .ctypes{display:flex;gap:10px;flex-wrap:wrap}
   .ctype{display:flex;align-items:center;gap:9px;font:12.5px var(--mono);color:var(--ink-mid);
@@ -593,7 +595,10 @@
   @keyframes settle{from{opacity:0}to{opacity:1}}
 
   @media (prefers-reduced-motion: reduce){
-    .sky .far,.sky .near,.nstar .glint,.rotor{animation:none!important}
+    /* #841: the health dot's breathe, the waiting inbox orb's, and the
+       overdue/amber bodies' `.breathe` on the dial were the continuous
+       animations this block missed. */
+    .sky .far,.sky .near,.nstar .glint,.rotor,.handle i,.inbox-orb.waiting svg,.breathe{animation:none!important}
   }
 
 /* ---- #453: the labelled sky's quiet centre and the one question -------- */

@@ -64,7 +64,9 @@
 
 <!-- §14 (#471): clicking off the form returns to the landing page — the same
      light-dismiss the item view has. -->
-<div class="stage" onclick={(event) => { if (event.target === event.currentTarget) goto(resolve("/home")); }}>
+<div class="stage" role="main" onclick={(event) => { if (event.target === event.currentTarget) goto(resolve("/home")); }}>
+  <!-- #843: sr-only -- the card's own name field carries the visible title. -->
+  <h1 class="sr-only">Add to your orbit</h1>
   <div class="lanes">
 
   <form class="glass card" id="card">
@@ -108,12 +110,12 @@
 
         <div class="daterow">
           <div class="field f-date" id="field-date">
-            <label>key date</label>
+            <label for="f-date">key date</label>
             <input id="f-date" type="date">
             <div class="tag">&#9670; from document <button type="button" class="accept" data-accept="field-date">&#10003; accept</button></div>
           </div>
           <div class="field f-recur">
-            <label>recurrence</label>
+            <label for="f-recur">recurrence</label>
             <select id="f-recur">
               <option value="once">one-off</option>
               <option value="monthly">monthly</option>
@@ -130,7 +132,7 @@
             <div class="tag">&#9670; from document <button type="button" class="accept" data-accept="field-cost">&#10003; accept</button></div>
           </div>
           <div class="field">
-            <label>reminder</label>
+            <label for="f-reminder">reminder</label>
             <select id="f-reminder">
               <option value="7">1 week before</option>
               <option value="14" selected>2 weeks before</option>
@@ -140,7 +142,7 @@
         </div>
 
         <div class="field">
-          <label>assign to</label>
+          <label for="f-assign">assign to</label>
           <select id="f-assign">
             <option value="">household &middot; shared</option>
             <option>Tom</option>
@@ -169,7 +171,7 @@
        (#476) — so it is unreachable here; only "Focusing on the anomaly"
        shows while a document is held. -->
   <aside class="glass readcard" id="readcard" aria-live="polite">
-    <h3 id="read-head">Reading your document</h3>
+    <h2 id="read-head">Reading your document</h2>
 
     <div class="focus">
       <svg class="reticle" viewBox="0 0 96 96" aria-hidden="true">

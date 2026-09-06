@@ -103,12 +103,15 @@ describe("the minimal request event", () => {
 });
 
 describe("loading a ported route family", () => {
+  /* The first real route module this run imports pays to transform its
+     whole graph; that passed 5 s on a starved runner lane (pipeline 483,
+     job 3880, alongside #839). Slow, not stuck — give the transform room. */
   it("resolves a real route module through SvelteKit's aliases", async () => {
     const module = await loadRoute("settings/tour");
 
     expect(typeof module.GET).toBe("function");
     expect(typeof module.PUT).toBe("function");
-  });
+  }, 60_000);
 
   it("rejects a family that does not exist rather than answering undefined", async () => {
     await expect(loadRoute("settings/not-a-family")).rejects.toThrow();

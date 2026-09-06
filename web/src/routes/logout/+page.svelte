@@ -62,15 +62,21 @@
   <title>Orbit — signed out</title>
 </svelte:head>
 
-<!-- The dusk's own page ground, carried as a layer rather than as a rule on
-     <body>: a stylesheet that reached the document would follow the reader
-     onto every other screen once its chunk had loaded. The sign-in does the
-     same thing with the same colour. -->
-<div class="signin-stage" aria-hidden="true"></div>
-<Dusk>
-  <!-- The LOGIN'S GATE, identical (§15, 2026-08-17). "/" is the front door:
-       signed out it IS the sign-in, so the way back in is one hop and the
-       identity provider asks its question there. -->
-  <a class="gate" href={resolve("/")}>Sign back in</a>
-</Dusk>
-<Grain slope={0.08} />
+<!-- #843: one landmark and one heading, sr-only because the goodbye is told
+     entirely by the descent's own art, not by document text. -->
+<main>
+  <h1 class="sr-only">Orbit — signed out</h1>
+
+  <!-- The dusk's own page ground, carried as a layer rather than as a rule on
+       <body>: a stylesheet that reached the document would follow the reader
+       onto every other screen once its chunk had loaded. The sign-in does the
+       same thing with the same colour. -->
+  <div class="signin-stage" aria-hidden="true"></div>
+  <Dusk>
+    <!-- The LOGIN'S GATE, identical (§15, 2026-08-17). "/" is the front door:
+         signed out it IS the sign-in, so the way back in is one hop and the
+         identity provider asks its question there. -->
+    <a class="gate" href={resolve("/")}>Sign back in</a>
+  </Dusk>
+  <Grain slope={0.08} />
+</main>
