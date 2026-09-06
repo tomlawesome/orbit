@@ -23,26 +23,42 @@
 #                    desktop-chromium or mobile-chromium. Default: both.
 #   --keep          Leave the stack up on exit instead of tearing it down, so a
 #                    failed run can be inspected: query the database, read the
-#                    container logs, open the app. Tear it down afterwards with:
-#                      docker compose -p orbit-e2e-local --env-file .env-orbit \
+#                    container logs, open the app. The run logs its own
+#                    project name and app port at startup ("starting the
+#                    acceptance stack (project ..., app on ...)"); tear that
+#                    project down afterwards with:
+#                      docker compose -p <project> --env-file .env-orbit \
 #                        -f docker-compose.yml -f docker-compose.mail.yml \
 #                        -f docker-compose.acceptance.yml \
 #                        -f docker-compose.local-e2e.yml down --volumes
 #
+# #875: the Compose project name and app port used to be fixed
+# ("orbit-e2e-local" on 13777), so two concurrent runs -- two worktrees, two
+# agent sessions -- fought over one stack, and whichever run finished first
+# tore the other's database down mid-test while the survivor kept running
+# against an empty stack. Both are now derived per run instead: the project
+# name from this worktree's path and this process's PID (below), the app
+# port from whatever the kernel hands out. Set COMPOSE_PROJECT_NAME or
+# ORBIT_PORT in the environment to override either.
+#
 # Test fixtures left behind by a spec show up as a household count above zero
 # after a run (#730), which is the cheap way to find a spec that does not clean
-# up after itself:
-#   docker exec orbit-e2e-local-db sh -c \
+# up after itself -- substitute this run's own project name, logged at
+# startup, for <project>:
+#   docker exec <project>-db sh -c \
 #     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select name from households"'
 #
 # AGENTS.md "Traps when running things locally" applies here directly: this
-# script always passes an explicit, distinctive Compose `-p` project name
-# (below) so it can never attach to whatever project a real deployment's
-# .env-orbit happens to name, and it only ever tears down that same project.
-# docker-compose.yml also pins container_name for orbit-app/orbit-db/
-# orbit-clamav, which would block a second stack under those names
-# regardless of project; docker-compose.local-e2e.yml renames them for this
-# script only. Never runs `pnpm db:generate` (also an AGENTS.md trap) and
+# script always passes an explicit Compose `-p` project name (below, per-run
+# rather than fixed since #875) so it can never attach to whatever project a
+# real deployment's .env-orbit happens to name, it checks that name against
+# the running container's own label before tearing anything down, and it
+# only ever tears down that same project. docker-compose.yml also pins
+# container_name for orbit-app/orbit-db/orbit-clamav, which would block a
+# second stack under those names regardless of project;
+# docker-compose.local-e2e.yml renames them to `${COMPOSE_PROJECT_NAME}-*`
+# for this script only, so a per-run project name also gives per-run
+# container names. Never runs `pnpm db:generate` (also an AGENTS.md trap) and
 # never writes to .env-orbit or an existing file under .orbit-secrets/ --
 # scripts/configure.sh and the secret generation below only fill in what is
 # missing.
@@ -50,15 +66,6 @@ set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
-
-readonly project_name="orbit-e2e-local"
-readonly app_port="13777"
-# Exported rather than set per-invocation: docker-compose.local-e2e.yml reads
-# it to build the application's own APP_URL and OIDC callback URL, so every
-# compose call in this script has to agree about the published port.
-export ORBIT_PORT="$app_port"
-readonly base_url="http://127.0.0.1:${app_port}"
-readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml -f docker-compose.local-e2e.yml)
 
 spec=""
 playwright_project=""
@@ -112,6 +119,37 @@ orbit_image=""
 log() { printf 'test-e2e-local: %s\n' "$*" >&2; }
 fail() { log "$*"; exit 1; }
 
+free_port() {
+  node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});'
+}
+
+# --- Per-run isolation: unique Compose project name and app port ------------
+#
+# #875: this project name and app port used to be fixed, so two concurrent
+# runs of this script -- two worktrees, two agent sessions -- adopted the
+# same Compose project and the same published port, and whichever run
+# finished first tore the other's database down mid-test. Derive both per
+# run instead: the project name from this worktree's path and this process's
+# PID (so even two runs from the same worktree cannot collide), the port
+# from whatever the kernel hands out (free_port() above, the same bind-then-
+# release approach the TEST_SMTP_PORT/TEST_OIDC_PORT/TEST_IMAPS_PORT
+# selection below uses). An explicit override already set in the caller's
+# environment -- COMPOSE_PROJECT_NAME or ORBIT_PORT -- always wins.
+worktree_hash="$(printf '%s' "$repo_dir" | md5sum | cut -c1-8)"
+project_name="${COMPOSE_PROJECT_NAME:-orbit-e2e-local-${worktree_hash}-$$}"
+readonly project_name
+app_port="${ORBIT_PORT:-$(free_port)}"
+readonly app_port
+# Exported rather than set per-invocation: docker-compose.local-e2e.yml reads
+# it to build the application's own APP_URL and OIDC callback URL, so every
+# compose call in this script has to agree about the published port. The
+# "port already in use" bind-test below (the "${app_port}:the Orbit
+# application" entry in the port_check loop) confirms a freshly-picked port
+# is still free -- and rejects a bad override -- before anything starts.
+export ORBIT_PORT="$app_port"
+readonly base_url="http://127.0.0.1:${app_port}"
+readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml -f docker-compose.local-e2e.yml)
+
 compose() {
   env ORBIT_IMAGE="$orbit_image" COMPOSE_PROJECT_NAME="$project_name" \
     docker compose -p "$project_name" --env-file .env-orbit "${compose_files[@]}" "$@"
@@ -129,6 +167,21 @@ cleanup() {
   cleaned_up=1
   if [[ "$keep" == 1 ]]; then
     log "leaving project ${project_name} up (--keep); tear it down with the command in this script's usage"
+    return 0
+  fi
+  # AGENTS.md's standing Compose trap ("Compose commands attach to whatever
+  # project .env-orbit names") is exactly the failure #875 hit, so confirm
+  # this run's own db container still carries the label "$project_name"
+  # before running `down --volumes` against it -- the same check AGENTS.md
+  # asks for before trusting Compose isolation. A container that does not
+  # exist (nothing ever came up) is fine to "tear down" (a no-op below);
+  # one that exists under a different project's label means this run's
+  # isolation did not hold, and destroying it would be the same bug again,
+  # so leave it alone and say so instead.
+  db_container="${project_name}-db"
+  actual_label="$(docker inspect "$db_container" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+  if [[ -n "$actual_label" && "$actual_label" != "$project_name" ]]; then
+    log "refusing to tear down: ${db_container} belongs to project '${actual_label}', not '${project_name}'. Leaving it alone -- investigate manually."
     return 0
   fi
   log "tearing down project ${project_name}"
@@ -158,10 +211,8 @@ port_free() {
 # readers agrees -- the test and the compose host-binding must always
 # resolve to the SAME number, which is why this is one variable each rather
 # than two that could diverge. An explicit override from the caller's
-# environment is respected as-is.
-free_port() {
-  node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});'
-}
+# environment is respected as-is. free_port() is defined above, alongside
+# the app port selection that uses it first.
 export TEST_SMTP_PORT="${TEST_SMTP_PORT:-$(free_port)}"
 export TEST_OIDC_PORT="${TEST_OIDC_PORT:-$(free_port)}"
 while [[ "$TEST_OIDC_PORT" == "$TEST_SMTP_PORT" ]]; do
