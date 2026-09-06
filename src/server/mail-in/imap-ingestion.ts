@@ -23,20 +23,22 @@ import {
   type ImapRotationState,
 } from "./core/imap-rotation";
 import {
-  getImapIngestionConfig,
   imapProviderConnectionOptions,
   imapProviderConfigCommitment,
   imapAttachmentRetryDelayMs,
   type ImapIngestionConfig,
 } from "./core/config";
+import { getImapIngestionConfig, MailInCredentialLockedError } from "./mailbox-config";
 
 // Re-exported so `@/server/imap-ingestion` (now a deprecated stub pointing
-// here) keeps every existing import path working churn-free. See
-// src/server/mail-in/core/config.ts for the implementations.
-export { getImapIngestionConfig, imapProviderConnectionOptions, imapProviderConfigCommitment, imapAttachmentRetryDelayMs };
+// here) keeps every existing import path working churn-free.
+// `getImapIngestionConfig` is database-backed as of ADR-0017 slice 1
+// (orbit#742, src/server/mail-in/mailbox-config.ts) — no environment
+// fallback. The others are still the pure helpers in core/config.ts.
+export { getImapIngestionConfig, imapProviderConnectionOptions, imapProviderConfigCommitment, imapAttachmentRetryDelayMs, MailInCredentialLockedError };
 export type { ImapIngestionConfig };
 
-export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_pending" | "available" | "provider_unavailable" | "unsafe_input" | "retrying" | "exhausted" | "retention_backlog";
+export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_pending" | "available" | "provider_unavailable" | "unsafe_input" | "credential_locked" | "retrying" | "exhausted" | "retention_backlog";
 
 /**
  * How long a mail-in receipt (and its held suggestion) waits for review
@@ -44,6 +46,13 @@ export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_
  * a forwarded document should survive a long holiday.
  */
 export const RECEIPT_RETENTION_MS = 45 * 86_400_000;
+
+/**
+ * How often the worker looks again when there is no mailbox configured. It is
+ * a cheap database read, and it bounds how long an administrator waits after
+ * saving a mailbox before collection starts (ADR-0017 slice 2).
+ */
+const UNCONFIGURED_RECHECK_MS = 60_000;
 
 export interface ImapProviderPreflightState {
   status: ImapPreflightStatus;
@@ -69,7 +78,13 @@ export function setImapClientFactoryForTests(factory: ImapClientFactory | undefi
   imapClientFactoryForTests = factory;
 }
 
-function createImapClient(config: ImapIngestionConfig, verifyOnly = false): ImapFlow {
+/**
+ * The one place an ImapFlow client is built, so `setImapClientFactoryForTests`
+ * covers every caller. Exported for the administrator setup probe
+ * (`mailbox-settings.ts`), which opens its own bounded connection rather than
+ * riding the poll cycle's.
+ */
+export function createImapClient(config: ImapIngestionConfig, verifyOnly = false): ImapFlow {
   if (imapClientFactoryForTests) return imapClientFactoryForTests(config);
   return new ImapFlow({ ...imapProviderConnectionOptions(config), ...(verifyOnly ? { verifyOnly: true } : {}) });
 }
@@ -86,9 +101,16 @@ export function getImapProviderPreflightState(config?: ImapIngestionConfig, smtp
   };
 }
 
-/** Verifies both independent providers before a worker is allowed to poll. */
+/**
+ * Verifies both independent providers before a worker is allowed to poll.
+ * `config` must already be resolved by the caller (ADR-0017 slice 1):
+ * resolving it is now a database read that can fail closed with
+ * `MailInCredentialLockedError`, which this function has no bounded way to
+ * turn into a preflight status — the caller (the poll loop, or the
+ * administrator operations view) is what reports `credential_locked`.
+ */
 export async function verifyImapIngestionProviders(
-  config = getImapIngestionConfig(),
+  config: ImapIngestionConfig,
   smtp = getNotificationWorkerConfig(),
   dependencies: ImapProviderVerificationDependencies = {},
 ): Promise<ImapProviderPreflightState> {
@@ -131,16 +153,16 @@ export async function verifyImapIngestionProviders(
 }
 
 /** A deterministic opaque forwarding alias; the user ID, key, and generation never appear in the address. */
-export function imapRecipientAlias(userId: string, config = getImapIngestionConfig()): string {
+export function imapRecipientAlias(userId: string, config: ImapIngestionConfig): string {
   if (!config.enabled) throw new Error("IMAP ingestion is not configured");
-  return deriveImapRecipientAlias(userId, config.recipientDomain, config.aliasCurrent);
+  return deriveImapRecipientAlias(userId, config.aliasBase, config.aliasCurrent);
 }
 
 /** Constant-time comparison for the provider-injected delivery recipient value. */
-export function matchesImapRecipientAlias(value: string, userId: string, config = getImapIngestionConfig()): boolean {
+export function matchesImapRecipientAlias(value: string, userId: string, config: ImapIngestionConfig): boolean {
   if (!config.enabled) return false;
-  return matchImapRecipientAliasGeneration(value, userId, config.recipientDomain, config.aliasCurrent)
-    || Boolean(config.aliasPrevious && matchImapRecipientAliasGeneration(value, userId, config.recipientDomain, config.aliasPrevious));
+  return matchImapRecipientAliasGeneration(value, userId, config.aliasBase, config.aliasCurrent)
+    || Boolean(config.aliasPrevious && matchImapRecipientAliasGeneration(value, userId, config.aliasBase, config.aliasPrevious));
 }
 
 /** Reads one provider-injected recipient header without retaining raw mail headers. */
@@ -174,10 +196,10 @@ function rotationConfigState(config: ImapIngestionConfig, now: Date): ImapRotati
     : undefined;
   return {
     currentGeneration: config.aliasCurrent.generation,
-    currentCommitment: digestImapAliasConfiguration(config.recipientDomain, config.trustedRecipientHeader, config.aliasCurrent),
+    currentCommitment: digestImapAliasConfiguration(config.aliasBase, config.trustedRecipientHeader, config.aliasCurrent),
     previousGeneration: activePrevious?.generation,
     previousExpiresAt: activePrevious?.expiresAt,
-    previousCommitment: activePrevious ? digestImapAliasConfiguration(config.recipientDomain, config.trustedRecipientHeader, activePrevious) : undefined,
+    previousCommitment: activePrevious ? digestImapAliasConfiguration(config.aliasBase, config.trustedRecipientHeader, activePrevious) : undefined,
   };
 }
 
@@ -268,7 +290,7 @@ export async function reconcileImapRecipientAliases(config: ImapIngestionConfig,
           continue;
         }
 
-        const currentDigest = digestImapRecipientAlias(deriveImapRecipientAlias(candidate.id, config.recipientDomain, config.aliasCurrent));
+        const currentDigest = digestImapRecipientAlias(deriveImapRecipientAlias(candidate.id, config.aliasBase, config.aliasCurrent));
         await transaction.insert(imapRecipientAliases).values({
           userId: candidate.id,
           generation: config.aliasCurrent.generation,
@@ -282,7 +304,7 @@ export async function reconcileImapRecipientAliases(config: ImapIngestionConfig,
         });
 
         if (activePrevious) {
-          const previousDigest = digestImapRecipientAlias(deriveImapRecipientAlias(candidate.id, config.recipientDomain, activePrevious));
+          const previousDigest = digestImapRecipientAlias(deriveImapRecipientAlias(candidate.id, config.aliasBase, activePrevious));
           await transaction.insert(imapRecipientAliases).values({
             userId: candidate.id,
             generation: activePrevious.generation,
@@ -314,7 +336,7 @@ async function userForRecipientAlias(headers: Buffer | undefined, config: ImapIn
   const parsedHeader = parseTrustedRecipientHeader(headers, config.trustedRecipientHeader);
   const structuralFailure = trustedRecipientFailure(parsedHeader);
   if (structuralFailure || parsedHeader.kind !== "value") return { failureCode: structuralFailure ?? "recipient_missing" };
-  const normalizedRecipient = normalizeImapRecipientAlias(parsedHeader.value, config.recipientDomain);
+  const normalizedRecipient = normalizeImapRecipientAlias(parsedHeader.value, config.aliasBase);
   if (!normalizedRecipient) {
     const domain = parsedHeader.value.slice(parsedHeader.value.lastIndexOf("@") + 1).toLowerCase();
     return { failureCode: domain && domain !== config.recipientDomain ? "recipient_wrong_domain" : "recipient_malformed" };
@@ -339,7 +361,7 @@ async function userForRecipientAlias(headers: Buffer | undefined, config: ImapIn
   const matches = rows.filter((row) => {
     if (row.disabledAt || row.status !== "active" || (row.activeUntil && row.activeUntil.getTime() <= now.getTime())) return false;
     const key = row.generation === authority.currentGeneration ? config.aliasCurrent : activePrevious;
-    return Boolean(key && matchImapRecipientAliasGeneration(normalizedRecipient, row.userId, config.recipientDomain, key, now));
+    return Boolean(key && matchImapRecipientAliasGeneration(normalizedRecipient, row.userId, config.aliasBase, key, now));
   });
   if (matches.length > 1) return { failureCode: "recipient_alias_ambiguous", digest: aliasDigest };
   if (matches.length === 1) return { userId: matches[0].userId, generation: matches[0].generation, digest: aliasDigest };
@@ -824,7 +846,7 @@ async function processImapAttachments(
  * not parse, retain, attach, create, or merge household data; later review
  * work must explicitly choose a household and approve a document draft.
  */
-export async function runImapIngestionCycle(config = getImapIngestionConfig()): Promise<void> {
+export async function runImapIngestionCycle(config: ImapIngestionConfig): Promise<void> {
   if (!config.enabled) return;
   await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
@@ -942,21 +964,43 @@ export function getImapIngestionWorkerHealth() {
   };
 }
 
-/** Starts one polling loop per process; provider preflight gates every poll. */
+/**
+ * Starts one polling loop per process; provider preflight gates every poll.
+ *
+ * With no `config` argument — which is how `boot.ts` calls it — every cycle
+ * re-reads `mail_in_mailbox`/`mail_in_secrets`, so a mailbox an administrator
+ * sets, changes, rotates, enables or disables takes effect on the next cycle
+ * with no restart (ADR-0017 slice 2). The interval follows the same read, so
+ * the poll seconds the administrator chose are the ones that apply.
+ */
 export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
   if (workerState.__orbitImapWorkerStarted) return;
   workerState.__orbitImapWorkerStarted = true;
+  let nextPollMilliseconds = config?.pollMilliseconds ?? UNCONFIGURED_RECHECK_MS;
   const poll = async () => {
     workerState.__orbitImapWorkerRunning = true;
     try {
       let currentConfig = config;
       try {
-        currentConfig ??= getImapIngestionConfig();
-      } catch {
-        workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
-        log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
+        currentConfig ??= await getImapIngestionConfig();
+      } catch (error) {
+        // The database read and decrypt already logged and audited
+        // mail_in_credential_locked with no secret or stack trace
+        // (src/server/mail-in/mailbox-config.ts); this just records the
+        // worker-visible health class (ADR-0017 decision 1).
+        workerState.__orbitImapWorkerLastErrorCode = error instanceof MailInCredentialLockedError ? "credential_locked" : "unsafe_input";
+        if (!(error instanceof MailInCredentialLockedError)) {
+          log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
+        }
         return;
       }
+      /* An instance with no mailbox yet is not polling anything, so its
+         interval is how long an administrator waits after saving one before
+         collection starts — not the poll seconds they chose, which do not
+         exist yet. The "not configured" shape carries the schema default
+         (300s), and adopting it would make a freshly configured mailbox look
+         broken for five minutes. */
+      nextPollMilliseconds = currentConfig.configured ? currentConfig.pollMilliseconds : UNCONFIGURED_RECHECK_MS;
       let smtp: NotificationWorkerConfig;
       try {
         smtp = getNotificationWorkerConfig();
@@ -989,15 +1033,14 @@ export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
       });
     } finally {
       workerState.__orbitImapWorkerRunning = false;
-      const pollMilliseconds = config?.pollMilliseconds ?? 60_000;
-      setTimeout(poll, pollMilliseconds).unref();
+      setTimeout(poll, nextPollMilliseconds).unref();
     }
   };
   void poll();
 }
 
 /** Establishes a bounded TLS-only connection without listing or fetching mail. */
-export async function verifyImapProvider(config = getImapIngestionConfig()): Promise<"ready" | "imap_unconfigured" | "imap_unavailable"> {
+export async function verifyImapProvider(config: ImapIngestionConfig): Promise<"ready" | "imap_unconfigured" | "imap_unavailable"> {
   if (!config.enabled) return "imap_unconfigured";
   const client = createImapClient(config, true);
   try {

@@ -23,6 +23,10 @@ beforeEach(async () => {
   await getDb().delete(imapRecipientRotationState);
 });
 
+/* Derived from the account address in the running application (ADR-0017
+   decision 1); pinned here so the digests these cases assert stay stable. */
+const aliasBase = { localPart: "orbit", domain: "ingest.example.test" };
+
 function config(currentGeneration = 1, previous?: { generation: number; expiresAt: Date }, mailbox = "INBOX"): ImapIngestionConfig {
   const current = { generation: currentGeneration, secret: `current-secret-generation-${currentGeneration}-that-is-long-enough` };
   const aliasPrevious = previous ? {
@@ -40,6 +44,7 @@ function config(currentGeneration = 1, previous?: { generation: number; expiresA
     mailbox,
     tlsServerName: "imap.example.test",
     recipientDomain: "ingest.example.test",
+    aliasBase: aliasBase,
     currentAliasGeneration: current.generation,
     currentAliasSecret: current.secret,
     previousAliasGeneration: aliasPrevious?.generation,
@@ -72,7 +77,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
         currentCommitment: imapRecipientRotationState.currentCommitment,
         previousCommitment: imapRecipientRotationState.previousCommitment,
       }).from(imapRecipientRotationState);
-      expect(authority).toMatchObject({ currentGeneration: 2, previousGeneration: 1, currentCommitment: digestImapAliasConfiguration("ingest.example.test", "X-Original-To", { generation: 2, secret: "current-secret-generation-2-that-is-long-enough" }), previousCommitment: digestImapAliasConfiguration("ingest.example.test", "X-Original-To", { generation: 1, secret: "current-secret-generation-1-that-is-long-enough" }) });
+      expect(authority).toMatchObject({ currentGeneration: 2, previousGeneration: 1, currentCommitment: digestImapAliasConfiguration(aliasBase, "X-Original-To", { generation: 2, secret: "current-secret-generation-2-that-is-long-enough" }), previousCommitment: digestImapAliasConfiguration(aliasBase, "X-Original-To", { generation: 1, secret: "current-secret-generation-1-that-is-long-enough" }) });
       expect(authority.previousExpiresAt).toEqual(previousExpiry);
 
       const fixtureUserIds = Object.values(fixture.users).map((user) => user.id);
@@ -95,7 +100,18 @@ describe("receipt identity PostgreSQL boundaries", () => {
         .from(imapRecipientAliases).orderBy(imapRecipientAliases.userId, imapRecipientAliases.generation)).toEqual(rowsBeforeStale);
       await expect(runImapIngestionCycle(initial)).rejects.toThrow("stale or invalid");
       expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(eq(imapIngestionMessages.mailbox, mailbox))).toHaveLength(0);
-      await expect(reconcileImapRecipientAliases({ ...rotation, recipientDomain: "other.example.test" }, 1)).rejects.toThrow("stale or invalid");
+      /* The alias base, not the bare recipient domain, is what the
+         commitment binds since ADR-0017 decision 1 made the base
+         account-derived: a moved domain reaches the digest through it. */
+      await expect(reconcileImapRecipientAliases({
+        ...rotation,
+        recipientDomain: "other.example.test",
+        aliasBase: { ...aliasBase, domain: "other.example.test" },
+      }, 1)).rejects.toThrow("stale or invalid");
+      await expect(reconcileImapRecipientAliases({
+        ...rotation,
+        aliasBase: { ...aliasBase, localPart: "different" },
+      }, 1)).rejects.toThrow("stale or invalid");
       await expect(reconcileImapRecipientAliases({ ...rotation, trustedRecipientHeader: "X-Envelope-To" }, 1)).rejects.toThrow("stale or invalid");
 
       await reconcileImapRecipientAliases(config(3, undefined, mailbox));

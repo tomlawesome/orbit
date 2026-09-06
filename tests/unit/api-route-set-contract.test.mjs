@@ -42,6 +42,7 @@ const HANDLER_NAMES = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 const EXPECTED_ROUTES = [
   "/api/admin/documents/health",
+  "/api/admin/mailbox",
   "/api/admin/maintenance",
   "/api/admin/operations",
   "/api/admin/operations/deliveries/[deliveryId]",

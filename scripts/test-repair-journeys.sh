@@ -1156,7 +1156,7 @@ journey_successful_rollback() {
   # migration's whole-directory copy already leans on it.
   local managed
   for managed in docker-compose.yml docker-compose.mail.yml \
-      docker-compose.mail-alias-rotation.yml .env-orbit.example \
+      .env-orbit.example \
       config/tika-config.json scripts/configure.sh scripts/installer-ui.sh \
       scripts/configuration.sh scripts/backup.sh scripts/restore.sh \
       scripts/repair.sh scripts/engine-check.sh .env-orbit .orbit-secrets; do
