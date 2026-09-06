@@ -968,6 +968,38 @@ export async function commandMailbox(command) {
 }
 
 /**
+ * The instance's one public contact address, as an administrator sees it
+ * (#860). `null` means the route could not answer — under fixtures, or for a
+ * signed-in user who is not an instance administrator.
+ *
+ * @typedef {object} ContactSettings
+ * @property {?string} address
+ * @property {number} version
+ * @property {string} updatedAt
+ *
+ * @returns {Promise<?ContactSettings>}
+ */
+export async function readContactSettings() {
+  try {
+    /** @type {{ contact?: ?ContactSettings }} */
+    const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
+    return body.contact ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sets, changes or clears the address, and answers with it as it now stands.
+ *
+ * @param {{ action: "set", expectedVersion: number, address: string } | { action: "clear", expectedVersion: number }} command
+ * @returns {Promise<{ contact: ContactSettings }>}
+ */
+export async function commandContact(command) {
+  return json(await csrfFetch("/api/admin/contact", { body: command }));
+}
+
+/**
  * Everything mission control renders (#465): the instance's people (real
  * route), its systems from the workspace (admins see everything, §11), the
  * live mailbox settings (#743), and the parts no route can answer yet —
@@ -976,7 +1008,7 @@ export async function commandMailbox(command) {
  * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox] = await Promise.all([
+  const [workspace, session, users, mailbox, contact] = await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
@@ -986,6 +1018,7 @@ export async function readAdminScreen() {
       )
       .catch(() => []),
     readMailboxSettings(),
+    readContactSettings(),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   /* Real owner names where the members route answers (#453); the fixture's
@@ -1017,6 +1050,7 @@ export async function readAdminScreen() {
        (#465, §15) while a real deployment shows its real mailbox. */
     relay: mailbox ? relayRowsOf(mailbox) : adminFixture.relay,
     mailbox,
+    contact,
     owners,
   };
 }
