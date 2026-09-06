@@ -45,24 +45,13 @@ git ls-files --cached --others --exclude-standard -z \
 
 cd "$sandbox"
 GIT_DIR="$git_directory" GIT_WORK_TREE="$sandbox" bash scripts/configure.sh
+# SMTP only: the mailbox credential is app-managed since ADR-0017 slice 2.
 printf 'preflight-only\n' > .orbit-secrets/smtp-password
-printf 'preflight-only\n' > .orbit-secrets/imap-password
-printf 'preflight-only\n' > .orbit-secrets/imap-alias-current-secret
-printf 'preflight-only\n' > .orbit-secrets/imap-alias-previous-secret
-chmod 600 \
-  .orbit-secrets/smtp-password \
-  .orbit-secrets/imap-password \
-  .orbit-secrets/imap-alias-current-secret \
-  .orbit-secrets/imap-alias-previous-secret
+chmod 600 .orbit-secrets/smtp-password
 {
   printf '%s\n' \
     'SMTP_HOST=smtp.example.invalid' \
     'SMTP_USER=orbit@example.invalid' \
-    'IMAP_HOST=imap.example.invalid' \
-    'IMAP_USER=orbit@example.invalid' \
-    'IMAP_TLS_SERVER_NAME=imap.example.invalid' \
-    'IMAP_RECIPIENT_DOMAIN=ingest.example.invalid' \
-    'IMAP_ENABLED=false' \
     'OIDC_CLIENT_ID=orbit-smoke' \
     'OIDC_CLIENT_SECRET=orbit-smoke-only-secret'
 } >> .env-orbit

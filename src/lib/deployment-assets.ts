@@ -22,7 +22,6 @@ import type { ManagedPath } from "./install-transaction";
 export const DEPLOYMENT_ASSETS: readonly string[] = [
   "docker-compose.yml",
   "docker-compose.mail.yml",
-  "docker-compose.mail-alias-rotation.yml",
   ".env-orbit.example",
   "config/tika-config.json",
   "scripts/configure.sh",
