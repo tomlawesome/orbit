@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, imapIngestionMessages, imapRecipientRotationState, mailInMailbox, mailInSecrets } from "@/db/schema";
+import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { getDocumentConfig } from "@/server/documents/config";
 import { decryptMailInSecret } from "@/server/mail-in/core/secret-crypto";
@@ -38,6 +38,7 @@ const settings: MailboxSettingsInput = {
   tlsServerName: "imap.example.test",
   providerProfile: "mailcow",
   trustedRecipientHeader: "X-Original-To",
+  trustedAuthservId: "mx.provider.test",
   pollSeconds: 300,
   password: FIRST_PASSWORD,
 };
@@ -58,7 +59,8 @@ beforeEach(async () => {
 afterEach(async () => {
   const db = getDb();
   await db.delete(imapIngestionMessages);
-  await db.delete(imapRecipientRotationState);
+  await db.delete(imapRecipientAliases);
+  await db.delete(mailInRelays);
   await db.update(mailInMailbox).set({ passwordSecretId: null, aliasKeySecretId: null });
   await db.delete(mailInMailbox);
   await db.delete(mailInSecrets);
@@ -232,21 +234,28 @@ describe("administrator mailbox settings (ADR-0017 decision 1, slice 2)", () => 
     expect(actions[0].changes).toEqual({ kind: "imap_password", keyId: getDocumentConfig().keyId });
   });
 
-  it("clears the alias-rotation singleton when a new alias key is generated", async () => {
-    /* Reproduces the failure seen against the real acceptance stack: the
-       singleton commits to the alias key that was in force, so a mailbox set
-       against a leftover commitment made every poll cycle throw
-       ImapRotationStaleError and no mail was ever collected. The singleton
-       goes away in slice 3; until then setting a mailbox has to leave it
-       describing something that exists. */
-    await getDb().insert(imapRecipientRotationState).values({
-      currentGeneration: 1,
-      currentCommitment: "a".repeat(64),
-    });
-
+  it("moves every relay on and retires every alias row when the account moves", async () => {
+    /* The singleton this used to reconcile against is gone (ADR-0017 slice 3,
+       orbit#744). What has to stay true is the reason it existed: a new alias
+       key means every derived address changes, so nothing may be left saying
+       an old address is still eligible. */
     await setUpMailbox();
+    const member = fixture.users.member.id;
+    await getDb().insert(mailInRelays).values({ userId: member });
+    await getDb().insert(imapRecipientAliases).values({
+      userId: member, generation: 1, aliasSha256: "a".repeat(64), status: "active",
+    });
+    const [before] = await getDb().select().from(mailInMailbox);
 
-    expect(await getDb().select().from(imapRecipientRotationState)).toHaveLength(0);
+    await setMailboxSettings(admin, before.version, {
+      ...settings, accountUser: "moved@example.test", password: SECOND_PASSWORD,
+    }, providerReady);
+
+    const [relay] = await getDb().select().from(mailInRelays).where(eq(mailInRelays.userId, member));
+    expect(relay.currentGeneration).toBe(2);
+    expect(relay.previousGeneration).toBeNull();
+    const aliases = await getDb().select().from(imapRecipientAliases).where(eq(imapRecipientAliases.userId, member));
+    expect(aliases.map((row) => row.status)).toEqual(["legacy_inactive"]);
   });
 
   it("keeps the alias key, and the addresses derived from it, when only the port changes", async () => {

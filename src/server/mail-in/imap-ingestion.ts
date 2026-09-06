@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ImapFlow, type MessageStructureObject } from "imapflow";
-import { and, asc, eq, gt, inArray, isNull, lte, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, imapRecipientRotationState, users } from "@/db/schema";
+import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, users } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
@@ -11,17 +11,29 @@ import { LocalDocumentStorage } from "@/server/documents/storage";
 import { classifyImapBodyStructure, IMAP_ATTACHMENT_LIMITS, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
 import {
   deriveImapRecipientAlias,
-  digestImapAliasConfiguration,
   digestImapRecipientAlias,
   matchImapRecipientAliasGeneration,
   normalizeImapRecipientAlias,
   parseTrustedRecipientHeader,
 } from "./core/imap-recipient";
 import {
-  decideImapRotationState,
-  type ImapRotationConfigState,
-  type ImapRotationState,
-} from "./core/imap-rotation";
+  ensureRelayAliases,
+  ensureRelayRow,
+  expireLapsedRelayAliases,
+  relayIngestIsPaused,
+  retireAliasesForDisabledUsers,
+} from "./relays";
+import {
+  decideAttribution,
+  parseMailHeaders,
+  senderAddressFromHeaders,
+  senderDomainOf,
+  senderIsAuthenticated,
+  SENDER_AUTHENTICATION_HEADERS,
+  type ParsedHeader,
+} from "./core/sender-authentication";
+import { userForVerifiedSender } from "./sender-addresses";
+import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import {
   imapProviderConnectionOptions,
   imapProviderConfigCommitment,
@@ -152,17 +164,21 @@ export async function verifyImapIngestionProviders(
   return inFlight;
 }
 
-/** A deterministic opaque forwarding alias; the user ID, key, and generation never appear in the address. */
-export function imapRecipientAlias(userId: string, config: ImapIngestionConfig): string {
+/**
+ * A deterministic opaque forwarding alias; the user ID, key, and generation
+ * never appear in the address. Since ADR-0017 slice 3 the generation is the
+ * user's own, from `mail_in_relays`; the default is the generation a member is
+ * enrolled at, which is what a caller with no row yet should be shown.
+ */
+export function imapRecipientAlias(userId: string, config: ImapIngestionConfig, generation = 1): string {
   if (!config.enabled) throw new Error("IMAP ingestion is not configured");
-  return deriveImapRecipientAlias(userId, config.aliasBase, config.aliasCurrent);
+  return deriveImapRecipientAlias(userId, config.aliasBase, { generation, secret: config.aliasCurrent.secret });
 }
 
 /** Constant-time comparison for the provider-injected delivery recipient value. */
-export function matchesImapRecipientAlias(value: string, userId: string, config: ImapIngestionConfig): boolean {
+export function matchesImapRecipientAlias(value: string, userId: string, config: ImapIngestionConfig, generation = 1): boolean {
   if (!config.enabled) return false;
-  return matchImapRecipientAliasGeneration(value, userId, config.aliasBase, config.aliasCurrent)
-    || Boolean(config.aliasPrevious && matchImapRecipientAliasGeneration(value, userId, config.aliasBase, config.aliasPrevious));
+  return matchImapRecipientAliasGeneration(value, userId, config.aliasBase, { generation, secret: config.aliasCurrent.secret });
 }
 
 /** Reads one provider-injected recipient header without retaining raw mail headers. */
@@ -188,150 +204,52 @@ function trustedRecipientFailure(result: ReturnType<typeof parseTrustedRecipient
   }
 }
 
-type ImapDbExecutor = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update">;
-
-function rotationConfigState(config: ImapIngestionConfig, now: Date): ImapRotationConfigState {
-  const activePrevious = config.aliasPrevious && config.aliasPrevious.expiresAt && config.aliasPrevious.expiresAt.getTime() > now.getTime()
-    ? config.aliasPrevious
-    : undefined;
-  return {
-    currentGeneration: config.aliasCurrent.generation,
-    currentCommitment: digestImapAliasConfiguration(config.aliasBase, config.trustedRecipientHeader, config.aliasCurrent),
-    previousGeneration: activePrevious?.generation,
-    previousExpiresAt: activePrevious?.expiresAt,
-    previousCommitment: activePrevious ? digestImapAliasConfiguration(config.aliasBase, config.trustedRecipientHeader, activePrevious) : undefined,
-  };
-}
-
-function sameRotationState(left: ImapRotationState, right: ImapRotationState): boolean {
-  return left.currentGeneration === right.currentGeneration
-    && left.currentCommitment === right.currentCommitment
-    && left.previousGeneration === right.previousGeneration
-    && left.previousExpiresAt?.getTime() === right.previousExpiresAt?.getTime()
-    && left.previousCommitment === right.previousCommitment;
-}
-
-async function readPersistedImapRotationState(executor: ImapDbExecutor, lock: boolean): Promise<ImapRotationState | null> {
-  const query = executor.select({
-    currentGeneration: imapRecipientRotationState.currentGeneration,
-    currentCommitment: imapRecipientRotationState.currentCommitment,
-    previousGeneration: imapRecipientRotationState.previousGeneration,
-    previousExpiresAt: imapRecipientRotationState.previousExpiresAt,
-    previousCommitment: imapRecipientRotationState.previousCommitment,
-  }).from(imapRecipientRotationState).where(eq(imapRecipientRotationState.id, 1)).limit(1);
-  const rows = lock ? await query.for("update") : await query;
-  const row = rows[0];
-  return row
-    ? {
-      currentGeneration: row.currentGeneration,
-      currentCommitment: row.currentCommitment,
-      previousGeneration: row.previousGeneration,
-      previousExpiresAt: row.previousExpiresAt,
-      previousCommitment: row.previousCommitment,
-    }
-    : null;
-}
-
-/** Locks and advances the database-authoritative singleton before any alias or receipt mutation. */
-async function ensureImapRotationAuthority(executor: ImapDbExecutor, config: ImapIngestionConfig, now: Date): Promise<ImapRotationState> {
-  let persisted = await readPersistedImapRotationState(executor, true);
-  if (!persisted) {
-    const initial = decideImapRotationState(null, rotationConfigState(config, now), now);
-    await executor.insert(imapRecipientRotationState).values({
-      id: 1,
-      currentGeneration: initial.currentGeneration,
-      currentCommitment: initial.currentCommitment,
-      previousGeneration: initial.previousGeneration,
-      previousExpiresAt: initial.previousExpiresAt,
-      previousCommitment: initial.previousCommitment,
-      createdAt: now,
-      updatedAt: now,
-    }).onConflictDoNothing();
-    persisted = await readPersistedImapRotationState(executor, true);
-    if (!persisted) throw new Error("IMAP alias rotation state could not be initialized");
-  }
-
-  const next = decideImapRotationState(persisted, rotationConfigState(config, now), now);
-  if (!sameRotationState(persisted, next)) {
-    await executor.update(imapRecipientRotationState).set({
-      currentGeneration: next.currentGeneration,
-      currentCommitment: next.currentCommitment,
-      previousGeneration: next.previousGeneration,
-      previousExpiresAt: next.previousExpiresAt,
-      previousCommitment: next.previousCommitment,
-      updatedAt: now,
-    }).where(eq(imapRecipientRotationState.id, 1));
-  }
-  return next;
-}
-
-/** Reconciles current and at most one previous aliases from trusted application code. */
+/**
+ * Enrols every user in `mail_in_relays` and keeps their alias rows saying what
+ * their relay row says (ADR-0017 slice 3).
+ *
+ * What used to be here was a reconciliation between two authorities — the
+ * environment's alias generations and a database singleton that policed them.
+ * There is only one authority now, so this shrank to enrolling new users at
+ * generation 1, letting lapsed previous generations expire, and retiring the
+ * rows of users who have been disabled.
+ */
 export async function reconcileImapRecipientAliases(config: ImapIngestionConfig, limit = 1_000, now = new Date()): Promise<void> {
   if (!config.enabled) return;
   if (!Number.isInteger(limit) || limit < 1) throw new Error("IMAP alias reconciliation limit must be positive");
   const database = getDb();
-  await database.transaction(async (transaction) => {
-    await ensureImapRotationAuthority(transaction, config, now);
-  });
   let lastUserId: string | undefined;
   while (true) {
     const candidates = await database.select({ id: users.id, disabledAt: users.disabledAt }).from(users)
       .where(lastUserId ? gt(users.id, lastUserId) : undefined).orderBy(asc(users.id)).limit(limit);
     if (candidates.length === 0) break;
-    await database.transaction(async (transaction) => {
-      const authority = await ensureImapRotationAuthority(transaction, config, now);
-      const activePrevious = authority.previousGeneration && authority.previousExpiresAt && config.aliasPrevious?.generation === authority.previousGeneration
-        ? { ...config.aliasPrevious, expiresAt: authority.previousExpiresAt }
-        : undefined;
-      for (const candidate of candidates) {
-        if (candidate.disabledAt) {
-          await transaction.update(imapRecipientAliases).set({ status: "legacy_inactive", activeUntil: now, updatedAt: now })
-            .where(and(eq(imapRecipientAliases.userId, candidate.id), eq(imapRecipientAliases.status, "active")));
-          continue;
-        }
-
-        const currentDigest = digestImapRecipientAlias(deriveImapRecipientAlias(candidate.id, config.aliasBase, config.aliasCurrent));
-        await transaction.insert(imapRecipientAliases).values({
-          userId: candidate.id,
-          generation: config.aliasCurrent.generation,
-          aliasSha256: currentDigest,
-          status: "active",
-          activeUntil: null,
-          updatedAt: now,
-        }).onConflictDoUpdate({
-          target: [imapRecipientAliases.userId, imapRecipientAliases.generation],
-          set: { aliasSha256: currentDigest, status: "active", activeUntil: null, updatedAt: now },
-        });
-
-        if (activePrevious) {
-          const previousDigest = digestImapRecipientAlias(deriveImapRecipientAlias(candidate.id, config.aliasBase, activePrevious));
-          await transaction.insert(imapRecipientAliases).values({
-            userId: candidate.id,
-            generation: activePrevious.generation,
-            aliasSha256: previousDigest,
-            status: "active",
-            activeUntil: activePrevious.expiresAt,
-            updatedAt: now,
-          }).onConflictDoUpdate({
-            target: [imapRecipientAliases.userId, imapRecipientAliases.generation],
-            set: { aliasSha256: previousDigest, status: "active", activeUntil: activePrevious.expiresAt, updatedAt: now },
-          });
-        }
-
-        const retainedGenerations = [authority.currentGeneration, ...(activePrevious ? [activePrevious.generation] : [])];
-        await transaction.update(imapRecipientAliases).set({ status: "legacy_inactive", activeUntil: now, updatedAt: now })
-          .where(and(
-            eq(imapRecipientAliases.userId, candidate.id),
-            eq(imapRecipientAliases.status, "active"),
-            notInArray(imapRecipientAliases.generation, retainedGenerations),
-          ));
+    for (const candidate of candidates) {
+      /* A disabled account is still seated, so it keeps its place in the
+         counter: re-enabling it must never reissue an address somebody else
+         has been given since. Only its alias ROWS are retired, below. */
+      if (candidate.disabledAt) {
+        await ensureRelayRow(candidate.id);
+        continue;
       }
-    });
+      await ensureRelayAliases(candidate.id, config, now);
+    }
     if (candidates.length < limit) break;
     lastUserId = candidates[candidates.length - 1].id;
   }
+  await retireAliasesForDisabledUsers(now);
+  await expireLapsedRelayAliases(now);
 }
 
+/**
+ * Resolves the provider-injected recipient to the member whose relay it names.
+ *
+ * The instance-generation filter is gone (ADR-0017 slice 3): a row is eligible
+ * on its own terms — `status = 'active'`, and an `active_until` that is either
+ * absent or still in the future — and the HMAC is then verified with the key
+ * the row itself names, that row's generation and that row's user. Two members
+ * sitting at the same generation number is ordinary and means nothing, so the
+ * generation can no longer be part of the WHERE clause.
+ */
 async function userForRecipientAlias(headers: Buffer | undefined, config: ImapIngestionConfig, now = new Date()): Promise<RecipientResolution> {
   const parsedHeader = parseTrustedRecipientHeader(headers, config.trustedRecipientHeader);
   const structuralFailure = trustedRecipientFailure(parsedHeader);
@@ -342,34 +260,57 @@ async function userForRecipientAlias(headers: Buffer | undefined, config: ImapIn
     return { failureCode: domain && domain !== config.recipientDomain ? "recipient_wrong_domain" : "recipient_malformed" };
   }
   const aliasDigest = digestImapRecipientAlias(normalizedRecipient);
-  const authority = await getDb().transaction(async (transaction) => ensureImapRotationAuthority(transaction, config, now));
-  const activePrevious = authority.previousGeneration && authority.previousExpiresAt && config.aliasPrevious?.generation === authority.previousGeneration
-    ? { ...config.aliasPrevious, expiresAt: authority.previousExpiresAt }
-    : undefined;
-  const generations = [authority.currentGeneration, ...(activePrevious ? [activePrevious.generation] : [])];
   const rows = await getDb().select({
     userId: imapRecipientAliases.userId,
     generation: imapRecipientAliases.generation,
+    aliasKeySecretId: imapRecipientAliases.aliasKeySecretId,
     status: imapRecipientAliases.status,
     activeUntil: imapRecipientAliases.activeUntil,
     disabledAt: users.disabledAt,
-  }).from(imapRecipientAliases).innerJoin(users, eq(users.id, imapRecipientAliases.userId)).where(and(
-    eq(imapRecipientAliases.aliasSha256, aliasDigest),
-    inArray(imapRecipientAliases.generation, generations),
-  ));
+  }).from(imapRecipientAliases).innerJoin(users, eq(users.id, imapRecipientAliases.userId))
+    .where(eq(imapRecipientAliases.aliasSha256, aliasDigest));
   const disabled = rows.some((row) => row.disabledAt);
+  const expired = rows.some((row) => row.activeUntil && row.activeUntil.getTime() <= now.getTime());
   const matches = rows.filter((row) => {
     if (row.disabledAt || row.status !== "active" || (row.activeUntil && row.activeUntil.getTime() <= now.getTime())) return false;
-    const key = row.generation === authority.currentGeneration ? config.aliasCurrent : activePrevious;
-    return Boolean(key && matchImapRecipientAliasGeneration(normalizedRecipient, row.userId, config.aliasBase, key, now));
+    // A row derived under a key the administrator has since replaced verifies
+    // against that key for as long as its own expiry runs; a row naming a key
+    // this instance can no longer decrypt verifies against nothing.
+    const secret = (row.aliasKeySecretId ? config.aliasKeys?.[row.aliasKeySecretId] : undefined) ?? config.aliasCurrent.secret;
+    if (!secret) return false;
+    return matchImapRecipientAliasGeneration(normalizedRecipient, row.userId, config.aliasBase, { generation: row.generation, secret }, now);
   });
   if (matches.length > 1) return { failureCode: "recipient_alias_ambiguous", digest: aliasDigest };
   if (matches.length === 1) return { userId: matches[0].userId, generation: matches[0].generation, digest: aliasDigest };
   if (disabled) return { failureCode: "recipient_disabled", digest: aliasDigest };
-  if (activePrevious && rows.some((row) => row.generation === activePrevious.generation && row.activeUntil && row.activeUntil.getTime() <= now.getTime())) {
-    return { failureCode: "recipient_alias_expired", digest: aliasDigest };
-  }
+  if (expired) return { failureCode: "recipient_alias_expired", digest: aliasDigest };
   return { failureCode: "recipient_unverified", digest: aliasDigest };
+}
+
+type SenderResolution = {
+  headers?: ParsedHeader[];
+  address?: string;
+  userId?: string;
+  authenticated: boolean;
+};
+
+/**
+ * Who a message says it is from, and whether that may be believed.
+ *
+ * Every step fails closed. An unreadable header block, a `From` that is not
+ * one plain address, an address no member has verified, or a provider verdict
+ * that is absent, forged-looking or for the wrong domain all end in
+ * `authenticated: false` with no user — which the caller reads as
+ * unattributed.
+ */
+async function senderResolution(headers: Buffer | undefined, config: ImapIngestionConfig): Promise<SenderResolution> {
+  const parsed = parseMailHeaders(headers);
+  if (!parsed) return { authenticated: false };
+  const address = senderAddressFromHeaders(parsed);
+  if (!address) return { headers: parsed, authenticated: false };
+  const authenticated = senderIsAuthenticated(parsed, senderDomainOf(address), config.trustedAuthservId ?? "");
+  const userId = await userForVerifiedSender(address);
+  return { headers: parsed, address, userId, authenticated };
 }
 
 type ImapReceiptValues = {
@@ -382,15 +323,15 @@ type ImapReceiptValues = {
   userId: string | null;
   householdId: string | null;
   expiresAt: Date;
-  status: "processing" | "pending_review" | "failed" | "quarantined";
+  status: "processing" | "pending_review" | "failed" | "quarantined" | "unattributed" | "held";
+  attributedBy: "sender" | "sender_and_alias" | null;
   failureCode: string | null;
   receiptStatus: "processing" | "cancelled";
   receivedAt: Date;
 };
 
-async function recordImapReceipt(config: ImapIngestionConfig, values: ImapReceiptValues) {
+async function recordImapReceipt(_config: ImapIngestionConfig, values: ImapReceiptValues) {
   return getDb().transaction(async (transaction) => {
-    await ensureImapRotationAuthority(transaction, config, new Date());
     const inserted = await transaction.insert(imapIngestionMessages).values(values).onConflictDoNothing().returning({ id: imapIngestionMessages.id, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status });
     if (inserted.length) return inserted;
     return transaction.select({ id: imapIngestionMessages.id, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status })
@@ -846,11 +787,19 @@ async function processImapAttachments(
  * not parse, retain, attach, create, or merge household data; later review
  * work must explicitly choose a household and approve a document draft.
  */
-export async function runImapIngestionCycle(config: ImapIngestionConfig): Promise<void> {
+export async function runImapIngestionCycle(
+  config: ImapIngestionConfig,
+  replyDependencies: UnattributedReplyDependencies = {},
+): Promise<void> {
   if (!config.enabled) return;
   await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
   const client = createImapClient(config);
+  /* Collected during the read-only pass and acted on after it. Ordinary
+     collection must never hold a writable mailbox: opening one only when
+     there is something to delete keeps the destructive action (ADR-0017
+     decision 3, mail-in's first) to the messages that earned it. */
+  const unattributedUids: number[] = [];
   try {
     await client.connect();
     const lock = await client.getMailboxLock(config.mailbox, { readOnly: true });
@@ -873,13 +822,34 @@ export async function runImapIngestionCycle(config: ImapIngestionConfig): Promis
         eq(imapIngestionMessages.mailbox, config.mailbox),
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
       ));
-      const fetchOptions = { uid: true, headers: [config.trustedRecipientHeader], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
+      /* Both header sets in one fetch: the provider's envelope recipient, and
+         everything the sender rules read (ADR-0017 decision 3). A header
+         nobody fetched reads exactly like a header nobody sent, so the list
+         lives beside the rules in core/sender-authentication.ts. */
+      const fetchOptions = { uid: true, headers: [config.trustedRecipientHeader, ...SENDER_AUTHENTICATION_HEADERS], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
       const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }) => {
         try {
         const source = message.source;
         const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
-        const userId = recipient.userId;
+        const sender = await senderResolution(message.headers, config);
+        /* THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES (ADR-0017 decision 3).
+           Nothing is attributed on an alias alone any more: the alias is a
+           capability whoever holds it can post with, so it can confirm an
+           identity but never establish one. */
+        const attribution = decideAttribution({
+          senderUserId: sender.userId,
+          senderAuthenticated: sender.authenticated,
+          aliasUserId: recipient.userId,
+        });
+        const userId = attribution.userId;
+        /* A paused member's mail is HELD, not skipped and not processed
+           (ADR-0017 decision 2, slice 5). Held means the receipt records that
+           it arrived and nothing else: no attachment downloaded, nothing
+           staged, nobody notified. It has to be a receipt rather than a skip
+           because the cursor is max(uid) — a UID nobody recorded would never
+           be revisited, so skipping would lose the message outright. */
+        const held = Boolean(userId) && await relayIngestIsPaused(userId!);
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
@@ -889,18 +859,33 @@ export async function runImapIngestionCycle(config: ImapIngestionConfig): Promis
           contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
           userId: userId ?? null, householdId: null,
           expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
-          status: oversized ? "failed" : userId ? "processing" : "quarantined",
-          failureCode: oversized ? "message_too_large" : userId ? null : recipient.failureCode ?? "recipient_unverified",
+          status: oversized ? "failed" : held ? "held" : userId ? "processing" : "unattributed",
+          attributedBy: userId ? attribution.attributedBy ?? null : null,
+          failureCode: oversized ? "message_too_large" : userId ? null : attribution.failureCode ?? "sender_unverified",
           // A receipt is only meaningful once a verified recipient's attachments
           // have been held successfully. All other outcomes are terminal here.
-          receiptStatus: userId && !oversized ? "processing" : "cancelled",
+          // A held receipt notifies nobody: the member paused collection, so
+          // telling them something arrived is the one thing they asked not to
+          // happen.
+          receiptStatus: userId && !oversized && !held ? "processing" : "cancelled",
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
         });
         if (receipt && userId !== (receipt.userId ?? undefined) && receipt.status === "processing") {
           await getDb().update(imapIngestionMessages).set({ status: "quarantined", receiptStatus: "cancelled", failureCode: "recipient_mismatch", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() })
             .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "processing")));
         }
-        if (receipt && userId && receipt.userId === userId && !oversized) {
+        /* Unattributed mail is answered once, where the conditions allow, and
+           then deleted: nothing is kept for an administrator or anyone else.
+           The delete happens after the read-only pass, in its own read-write
+           lock, so ordinary collection never runs against a writable mailbox.
+           The receipt already exists, so a crash between here and the delete
+           costs a duplicate receipt at worst, never a lost message. */
+        if (receipt && !userId && !oversized && receipt.status === "unattributed") {
+          await replyToUnattributedSender(sender.headers, sender.address, config.trustedAuthservId ?? "", replyDependencies)
+            .catch(() => undefined);
+          unattributedUids.push(message.uid);
+        }
+        if (receipt && userId && receipt.userId === userId && !oversized && !held) {
           const claim = await claimImapAttachmentProcessing(receipt.id);
           if (claim) await processImapAttachments(client, message, claim, receipt.userId);
         }
@@ -940,8 +925,32 @@ export async function runImapIngestionCycle(config: ImapIngestionConfig): Promis
         for (const uid of batch) await fetchThenProcess(uid);
       }
     } finally { lock.release(); }
+    if (unattributedUids.length) await deleteUnattributedMessages(client, config, unattributedUids);
   } finally {
     try { await client.logout(); } catch { /* Network failure already has no raw-mail logging. */ }
+  }
+}
+
+/**
+ * Removes the messages that matched nobody, in their own read-write lock.
+ *
+ * `\Deleted` and an expunge, so the UID is gone rather than merely flagged: a
+ * message no member owns is not kept for an administrator to read, which is
+ * the whole of ADR-0017 decision 3's answer to the retired "hold it for
+ * somebody to sort out" rung. A provider that refuses the delete leaves the
+ * receipt exactly as it is — content-free and terminal — so the message is
+ * never re-attributed on a later cycle, and the next poll's cursor has already
+ * moved past it.
+ */
+async function deleteUnattributedMessages(client: ImapFlow, config: ImapIngestionConfig, uids: number[]): Promise<void> {
+  let lock: { release: () => void } | undefined;
+  try {
+    lock = await client.getMailboxLock(config.mailbox);
+    await client.messageDelete(uids.map(String).join(","), { uid: true });
+  } catch {
+    log.warn({ event: "imap.ingestion", state: "retrying", reason: "provider_unavailable", action: "check_provider", impact: "mail_receipt_delayed" });
+  } finally {
+    lock?.release();
   }
 }
 
