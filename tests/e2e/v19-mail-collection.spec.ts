@@ -112,7 +112,12 @@ async function establishInstanceAdmin(browser: Browser) {
  * mailbox rather than failing on a version conflict.
  */
 async function configureMailbox(page: Page) {
-  const outcome = await page.evaluate(async ([account, password]) => {
+  /* Everything this callback needs is passed in, because it is serialised and
+     run inside the browser: a constant from this module's scope is simply not
+     defined there. #745 added `trustedAuthservId` reading TRUSTED_AUTHSERV_ID
+     directly and pipeline 577's `smoke` died on
+     `ReferenceError: TRUSTED_AUTHSERV_ID is not defined`. */
+  const outcome = await page.evaluate(async ([account, password, authservId]) => {
     const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
     const current = (await (await fetch("/api/admin/mailbox", { credentials: "same-origin" })).json()) as { mailbox?: { version?: number | null } | null };
     const response = await fetch("/api/admin/mailbox", {
@@ -131,7 +136,7 @@ async function configureMailbox(page: Page) {
         trustedRecipientHeader: "X-Orbit-Delivered-To",
         // #745: the provider identity `sendMail` above writes into
         // Authentication-Results -- GreenMail never adds this header itself.
-        trustedAuthservId: TRUSTED_AUTHSERV_ID,
+        trustedAuthservId: authservId,
         /* The floor the settings schema allows; the poll loop follows it, so
            a receipt appears within seconds rather than a minute. */
         pollSeconds: 30,
@@ -140,7 +145,7 @@ async function configureMailbox(page: Page) {
     });
     if (!response.ok) throw new Error(`mailbox set failed: ${response.status}`);
     return ((await response.json()) as { outcome?: string }).outcome ?? "";
-  }, [MAILBOX_ACCOUNT, MAILBOX_PASSWORD]);
+  }, [MAILBOX_ACCOUNT, MAILBOX_PASSWORD, TRUSTED_AUTHSERV_ID]);
   /* A refusal here is the provider check doing its job, and every assertion
      below would fail for a reason that named the wrong thing. */
   expect(outcome, "the administrator API must verify the GreenMail mailbox before committing it").toBe("verified");
