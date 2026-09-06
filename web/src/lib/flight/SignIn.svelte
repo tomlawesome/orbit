@@ -3,6 +3,7 @@
   import Grain from "$lib/Grain.svelte";
   import Dawn from "./Dawn.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
+  import { DOOR, STARTING, availabilityOf, doorMessageFor, nextDoorState, readinessOf } from "./door-state.js";
   import "./flight.css";
 
   /**
@@ -62,6 +63,57 @@
 
   let leaving = false;
 
+  const reduced = () =>
+    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /*
+   * THE THREE STATES WHERE THE DOOR CANNOT OPEN (#788, design/v19/
+   * signin-states/round-1/, direction C, owner-ratified 2026-09-06).
+   *
+   * Default optimistic: the door's own `data-state` starts (and, for a
+   * healthy instance, stays) unset — the ordinary button, unchanged from
+   * before this issue — so a healthy sign-in shows nothing different at all,
+   * and the very first paint (this route is prerendered, static HTML with no
+   * JS run yet) is always the door. Only once a check answers with a real
+   * problem does `onMount` below set `data-state` at all.
+   *
+   * The button itself stays in the markup throughout (`{#if gate}`, as
+   * before this issue) — flight.css hides `.gate-wrap` by `data-state`,
+   * exactly as the ratified sheet does, rather than this component removing
+   * and re-inserting the button. That is what lets its ratified 3.6s-delayed
+   * entrance replay correctly on recovery: a freshly inserted element has no
+   * "before" style to transition from, but a `display:none` element coming
+   * back already does. `display:none` still meets the round-1 README's
+   * accessibility bar ("not rendered... not merely hidden"): unlike
+   * `opacity:0` or `visibility:hidden`, it drops the button from both the
+   * layout and the accessibility tree, so it is not reachable by keyboard or
+   * screen reader while sign-in is unavailable.
+   */
+  let statePrimary = $state("");
+  let stateSub = $state("");
+
+  /** Fetches JSON, answering `null` for anything that cannot be trusted — a
+   *  network failure, a non-2xx the caller still wants the body of, or a
+   *  response that is not JSON at all. Never throws. @param {string} url */
+  async function fetchJson(url) {
+    try {
+      const response = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
+
+  /** One round of both checks (#788): readiness first, and availability only
+   *  once readiness says there is a point asking. */
+  async function checkOnce() {
+    const readiness = readinessOf(await fetchJson("/api/health"));
+    const availability = readiness === "ready" || readiness === "maintenance"
+      ? availabilityOf(await fetchJson("/api/auth/availability"))
+      : null;
+    return { state: nextDoorState({ readiness, availability }), contactAddress: availability?.contactAddress ?? null };
+  }
+
   onMount(() => {
     /* A marker left over from an abandoned sign-in must never fire later. */
     clearLaunch();
@@ -73,15 +125,69 @@
     /* first light: the dawn breaks once on load (CON-9, POL-13) */
     const frame = requestAnimationFrame(() => after(180, () => document.body.classList.add("lit")));
 
+    let disposed = false;
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let pollTimer;
+
+    /**
+     * Shows a state other than the door: fixed words, styled to match it.
+     * @param {Parameters<typeof doorMessageFor>[0]} state
+     * @param {string | null} [contactAddress]
+     */
+    function showState(state, contactAddress) {
+      const message = doorMessageFor(state, contactAddress);
+      statePrimary = message.primary;
+      stateSub = message.sub;
+      document.body.classList.add("switched");
+      document.body.dataset.state = state;
+    }
+
+    /* The waking instance comes up on its own — no action from the reader
+       (round-1 README, "deliberately not done": no Try again control). The
+       held sky releases into the ratified first light exactly as it would on
+       a fresh, healthy load; only the words fade out first. */
+    function recoverToDoor() {
+      document.body.classList.add("returning");
+      after(reduced() ? 200 : 800, () => {
+        if (disposed) return;
+        statePrimary = "";
+        stateSub = "";
+        document.body.dataset.state = DOOR;
+        document.body.classList.add("returned");
+      });
+    }
+
+    async function run() {
+      const first = await checkOnce();
+      if (disposed || first.state === DOOR) return;
+      const wasStarting = first.state === STARTING;
+      showState(first.state, first.contactAddress);
+      if (!wasStarting) return;
+
+      const poll = async () => {
+        if (disposed) return;
+        const next = await checkOnce();
+        if (disposed) return;
+        if (next.state === STARTING) {
+          pollTimer = setTimeout(poll, 4000);
+          return;
+        }
+        if (next.state === DOOR) recoverToDoor();
+        else showState(next.state, next.contactAddress);
+      };
+      pollTimer = setTimeout(poll, 4000);
+    }
+    run();
+
     return () => {
+      disposed = true;
+      clearTimeout(pollTimer);
       cancelAnimationFrame(frame);
       timers.forEach(clearTimeout);
-      document.body.classList.remove("lit");
+      document.body.classList.remove("lit", "switched", "returning", "returned");
+      delete document.body.dataset.state;
     };
   });
-
-  const reduced = () =>
-    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   /** @param {MouseEvent} event */
   function press(event) {
@@ -105,7 +211,7 @@
      a rule on <body>: a stylesheet that reached the document would follow the
      reader onto every other screen once its chunk had loaded. -->
 <div class="signin-stage" aria-hidden="true"></div>
-<Dawn shown={dawnShown}>
+<Dawn shown={dawnShown} {statePrimary} {stateSub}>
   <!-- `Sign in`, the ratified word (08-14), and the word the sunset's own
        pill was reworded to match. The sheet's longer
        "Continue with your identity provider" belonged to the v18 chrome
