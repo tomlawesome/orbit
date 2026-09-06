@@ -19,8 +19,10 @@
    * mockup's own via the ORBIT_FIXTURES stand-in route. "rotate address" is
    * live since ADR-0017 slice 3 (#744): it asks for a new address, keeping the
    * old one collecting for fourteen days so mail already on its way still
-   * arrives. "pause ingest" is still inert — its column exists, its behaviour
-   * lands in slice 5 (#746).
+   * arrives. "pause ingest" is live since slice 5 (#746): paused, mail
+   * addressed to this member is recorded and held — nothing fetched, staged or
+   * announced — and resuming stages all of it exactly once. Both act on the
+   * signed-in member alone; neither can touch anybody else's relay.
    *
    * The living backdrop (#475, §14) is $lib/backdrops/satellites.js, ported
    * from design/v19/relay-satellites.html — this file only mounts it and
@@ -33,7 +35,7 @@
   /* The rotated relay replaces the loaded one for the rest of this visit: the
      member has to be able to read and save the address they just asked for. */
   let rotated = $state(/** @type {typeof data.relay | null} */ (null));
-  let rotating = $state(false);
+  let working = $state(false);
   const relay = $derived(rotated ?? data.relay);
   const failures = $derived(data.failures ?? []);
   /** @type {(value: string | number | Date) => string} */
@@ -47,15 +49,18 @@
 
   /* Nothing here can name another member: the endpoint takes the session's
      own user and this sends no user, no generation and no address. */
-  const rotate = async () => {
-    if (rotating) return;
-    rotating = true;
+  /** @param {"rotate" | "pause" | "resume"} action */
+  const act = async (action) => {
+    if (working) return;
+    working = true;
     try {
-      rotated = await rotateRelay("rotate");
+      rotated = await rotateRelay(action);
     } finally {
-      rotating = false;
+      working = false;
     }
   };
+  const rotate = () => act("rotate");
+  const toggleIngest = () => act(relay.ingest === "paused" ? "resume" : "pause");
 
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
@@ -81,7 +86,7 @@
   <div class="kv"><span>status</span><b>{relay.status}</b></div>
   <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>
   <div class="kv"><span>ingest</span><b>{relay.ingest}</b></div>
-  <div class="btns"><button class="pri" disabled={rotating} onclick={rotate}>rotate address</button><button>pause ingest</button></div>
+  <div class="btns"><button class="pri" disabled={working} onclick={rotate}>rotate address</button><button disabled={working} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
   {#if failures.length}
     <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
     <div class="failures">

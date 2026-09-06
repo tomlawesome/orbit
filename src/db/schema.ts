@@ -50,6 +50,11 @@ export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
      downloaded, staged or notified — the message was answered once, where the
      reply conditions allowed it, and deleted from the provider mailbox. */
   "unattributed",
+  /* ADR-0017 slice 5 (orbit#746): the member it belongs to has collection
+     paused, so the receipt records that it arrived and nothing else —
+     content-free, nothing downloaded, nothing staged, nobody notified. Resume
+     turns it back into `processing` and the ordinary retry pass fetches it. */
+  "held",
 ]);
 export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
 export const imapRecipientAliasStatus = pgEnum("imap_recipient_alias_status", ["active", "legacy_inactive"]);

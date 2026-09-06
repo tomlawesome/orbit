@@ -307,6 +307,17 @@ nothing is kept for you or anyone else to look at. The sender is told once, and
 only when your provider vouched for them — never a mailing list, never an
 autoresponder, never twice in a day, and never quoting what they sent.
 
+Each member can also pause their own collection from the same page. While they
+are paused, mail addressed to them is recorded as having arrived and nothing
+else happens to it: no attachment is fetched, nothing is stored, and they are
+not told. Turning it back on prepares everything that was waiting, once. A held
+message expires on the same schedule as any other, after which it lives only in
+the provider mailbox. One member pausing changes nothing for anybody else.
+
+What you see of any of this is a count. The operations view reports how many
+receipts sit in each state, including held and unattributed, and never whose
+they are or what address they came to.
+
 Members rotate their own relay address from their relay page, and one member
 rotating changes nothing for anybody else. The one exception is an emergency:
 an administrator can replace the alias key for the whole instance, which

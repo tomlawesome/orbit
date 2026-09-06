@@ -19,7 +19,7 @@ import { getDb } from "@/db";
 import { imapIngestionMessages } from "@/db/schema";
 import { getImapIngestionConfig } from "./mailbox-config";
 import type { ImapIngestionConfig } from "./core/config";
-import { ensureRelayAliases, readRelayRow, relayAddressFor, rotateRelay, type RelayRotationMode } from "./relays";
+import { ensureRelayAliases, readRelayRow, relayAddressFor, rotateRelay, setRelayIngestPaused, type RelayRotationMode } from "./relays";
 import { hasVerifiedSenderAddress, seedSenderAddress } from "./sender-addresses";
 
 /** Mail-in is configured, switched on, and this account has a mailbox. */
@@ -49,9 +49,9 @@ export type RelayListening =
   | typeof RELAY_NOT_USABLE;
 
 /**
- * The instance-level ingest flag, still reported read-only here. The per-user
- * pause has its column since ADR-0017 slice 3 and its behaviour in slice 5
- * (#746), which is where this word starts following the member's own row.
+ * Whether this member is collecting or holding. Since ADR-0017 slice 5
+ * (#746) it follows the MEMBER'S OWN row, not the instance flag it used to
+ * stand in for: one member pausing changes nothing for anybody else.
  */
 export type RelayIngest = "enabled" | "paused";
 
@@ -107,6 +107,8 @@ export async function readRelaySettings(
      Orbit knowing an address is not the member proving they send from it. */
   await seedSenderAddress(user.id);
   const usable = await hasVerifiedSenderAddress(user.id);
+  const relay = await ensureRelayAliases(user.id, config);
+  const ownIngest: RelayIngest = relay.ingestPausedAt ? "paused" : ingest;
   const [latest] = await getDb()
     .select({ receivedAt: imapIngestionMessages.receivedAt })
     .from(imapIngestionMessages)
@@ -116,7 +118,6 @@ export async function readRelaySettings(
   /* Enrolling on read is what makes the address on this screen the same
      address the receipt path will attribute: the member's row and their
      `active` alias row both exist before the address is ever shown. */
-  const relay = await ensureRelayAliases(user.id, config);
   const [unattributed] = await getDb()
     .select({ count: sql<number>`count(*)::int` })
     .from(imapIngestionMessages)
@@ -131,7 +132,7 @@ export async function readRelaySettings(
        plainly that nothing will be matched until they check an address. */
     listening: usable ? RELAY_LISTENING : RELAY_NOT_USABLE,
     lastReceived: latest?.receivedAt ? latest.receivedAt.toISOString() : null,
-    ingest,
+    ingest: ownIngest,
     unattributed: unattributed?.count ?? 0,
   };
 }
@@ -160,6 +161,26 @@ export async function rotateRelayAddress(
     return readRelaySettings(user);
   }
   await rotateRelay(user.id, mode, config);
+  return readRelaySettings(user);
+}
+
+/**
+ * Pauses or resumes the signed-in member's own collection (ADR-0017 decision
+ * 2, slice 5, #746), replacing the read-only instance flag this screen used to
+ * report.
+ *
+ * Paused, mail addressed to them is HELD: the receipt says it arrived and
+ * nothing else, no attachment is fetched, nothing is staged and nobody is
+ * told. Resuming stages every held message exactly once. Like rotation, this
+ * takes the session's own user rather than an id from the request.
+ */
+export async function setRelayIngest(
+  user: { id: string; isInstanceAdmin: boolean },
+  paused: boolean,
+): Promise<RelaySettings> {
+  const config = await resolvedConfig();
+  if (user.isInstanceAdmin || !config?.enabled) return readRelaySettings(user);
+  await setRelayIngestPaused(user.id, paused);
   return readRelaySettings(user);
 }
 

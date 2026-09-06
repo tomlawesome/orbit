@@ -38,7 +38,7 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   event_kind: ["renewal", "service"],
   imap_attachment_status: ["stored", "rejected", "assigned"],
   imap_recipient_alias_status: ["active", "legacy_inactive"],
-  imap_ingestion_status: ["processing", "pending_review", "quarantined", "failed", "completed", "discarded", "approving", "recoverable", "expired", "unattributed"],
+  imap_ingestion_status: ["processing", "pending_review", "quarantined", "failed", "completed", "discarded", "approving", "recoverable", "expired", "unattributed", "held"],
   imap_notification_kind: ["receipt", "review_ready"],
   item_status: ["active", "expired", "cancelled", "archived"],
   join_request_status: ["pending", "approved", "declined"],

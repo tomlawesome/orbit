@@ -20,7 +20,7 @@
  */
 import { and, eq, inArray, isNotNull, lte, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, imapRecipientAliases, mailInRelays, users } from "@/db/schema";
+import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInRelays, users } from "@/db/schema";
 import type { ImapIngestionConfig } from "./core/config";
 import { deriveImapRecipientAlias, digestImapRecipientAlias } from "./core/imap-recipient";
 import {
@@ -236,6 +236,76 @@ export async function rotateRelay(
       previousExpiresAt: updated.previousExpiresAt!,
     };
   });
+}
+
+/**
+ * Pauses or resumes the acting user's own collection (ADR-0017 decision 2,
+ * slice 5, orbit#746).
+ *
+ * Same sibling invariant as rotation, and the same version guard: the caller
+ * passes the session's own user, every statement names that id, and no
+ * statement on this path carries a wider predicate.
+ *
+ * RESUMING IS A REAL ACTION, not just a flag. Every `held` receipt of this
+ * member's goes back to `processing` with its next attempt due now, and the
+ * poll cycle's existing exact-UID retry pass fetches and stages them — which
+ * is why a paused message had to leave a receipt in the first place. The
+ * cursor is `max(uid)`, so a UID nobody recorded would never be looked at
+ * again.
+ *
+ * Doing it exactly once falls out of the predicate: only rows still `held`
+ * move, so a second resume, or a repeated retry pass, finds nothing left to
+ * take and stages nothing twice.
+ */
+export async function setRelayIngestPaused(
+  userId: string,
+  paused: boolean,
+  now = new Date(),
+): Promise<RelayRow> {
+  return getDb().transaction(async (transaction) => {
+    const relay = await ensureRelayRow(userId, transaction);
+    if (Boolean(relay.ingestPausedAt) === paused) return relay;
+    const [updated] = await transaction.update(mailInRelays).set({
+      ingestPausedAt: paused ? now : null,
+      version: relay.version + 1,
+      updatedAt: now,
+    }).where(and(
+      eq(mailInRelays.userId, userId),
+      eq(mailInRelays.version, relay.version),
+    )).returning(relayColumns);
+    if (!updated) throw new RelayConflictError();
+
+    if (!paused) {
+      await transaction.update(imapIngestionMessages).set({
+        status: "processing",
+        receiptStatus: "processing",
+        failureCode: null,
+        attachmentProcessingNextAttemptAt: now,
+        attachmentProcessingLockedAt: null,
+        attachmentProcessingLeaseToken: null,
+        updatedAt: now,
+      }).where(and(
+        eq(imapIngestionMessages.userId, userId),
+        eq(imapIngestionMessages.status, "held"),
+      ));
+    }
+
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId: userId,
+      entityType: "mail_in_relay",
+      entityId: userId,
+      action: paused ? "mail_in_relay_paused" : "mail_in_relay_resumed",
+      changes: {},
+    });
+    return updated;
+  });
+}
+
+/** Whether this member is holding their mail rather than collecting it. */
+export async function relayIngestIsPaused(userId: string): Promise<boolean> {
+  const relay = await readRelayRow(userId);
+  return Boolean(relay?.ingestPausedAt);
 }
 
 /**

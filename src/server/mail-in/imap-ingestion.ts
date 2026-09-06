@@ -20,6 +20,7 @@ import {
   ensureRelayAliases,
   ensureRelayRow,
   expireLapsedRelayAliases,
+  relayIngestIsPaused,
   retireAliasesForDisabledUsers,
 } from "./relays";
 import {
@@ -322,7 +323,7 @@ type ImapReceiptValues = {
   userId: string | null;
   householdId: string | null;
   expiresAt: Date;
-  status: "processing" | "pending_review" | "failed" | "quarantined" | "unattributed";
+  status: "processing" | "pending_review" | "failed" | "quarantined" | "unattributed" | "held";
   attributedBy: "sender" | "sender_and_alias" | null;
   failureCode: string | null;
   receiptStatus: "processing" | "cancelled";
@@ -842,6 +843,13 @@ export async function runImapIngestionCycle(
           aliasUserId: recipient.userId,
         });
         const userId = attribution.userId;
+        /* A paused member's mail is HELD, not skipped and not processed
+           (ADR-0017 decision 2, slice 5). Held means the receipt records that
+           it arrived and nothing else: no attachment downloaded, nothing
+           staged, nobody notified. It has to be a receipt rather than a skip
+           because the cursor is max(uid) — a UID nobody recorded would never
+           be revisited, so skipping would lose the message outright. */
+        const held = Boolean(userId) && await relayIngestIsPaused(userId!);
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
@@ -851,12 +859,15 @@ export async function runImapIngestionCycle(
           contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
           userId: userId ?? null, householdId: null,
           expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
-          status: oversized ? "failed" : userId ? "processing" : "unattributed",
+          status: oversized ? "failed" : held ? "held" : userId ? "processing" : "unattributed",
           attributedBy: userId ? attribution.attributedBy ?? null : null,
           failureCode: oversized ? "message_too_large" : userId ? null : attribution.failureCode ?? "sender_unverified",
           // A receipt is only meaningful once a verified recipient's attachments
           // have been held successfully. All other outcomes are terminal here.
-          receiptStatus: userId && !oversized ? "processing" : "cancelled",
+          // A held receipt notifies nobody: the member paused collection, so
+          // telling them something arrived is the one thing they asked not to
+          // happen.
+          receiptStatus: userId && !oversized && !held ? "processing" : "cancelled",
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
         });
         if (receipt && userId !== (receipt.userId ?? undefined) && receipt.status === "processing") {
@@ -874,7 +885,7 @@ export async function runImapIngestionCycle(
             .catch(() => undefined);
           unattributedUids.push(message.uid);
         }
-        if (receipt && userId && receipt.userId === userId && !oversized) {
+        if (receipt && userId && receipt.userId === userId && !oversized && !held) {
           const claim = await claimImapAttachmentProcessing(receipt.id);
           if (claim) await processImapAttachments(client, message, claim, receipt.userId);
         }

@@ -1,6 +1,6 @@
 import { json } from "@sveltejs/kit";
 
-import { readRelaySettings, rotateRelayAddress } from "orbit/server/mail-in/relay-settings";
+import { readRelaySettings, rotateRelayAddress, setRelayIngest } from "orbit/server/mail-in/relay-settings";
 
 import { RELAY_FIXTURE } from "$lib/data/fixtures/relay.js";
 import { read, write } from "$lib/server/api.js";
@@ -24,8 +24,8 @@ export const GET = read(
 );
 
 /**
- * Rotating the member's own relay address (ADR-0017 decision 2, slice 3,
- * orbit#744).
+ * Acting on the member's own relay: rotating the address (ADR-0017 decision 2,
+ * slice 3, #744) and pausing or resuming collection (slice 5, #746).
  *
  * The body carries an action and nothing else. THERE IS NO USER FIELD, and
  * adding one would break the invariant this endpoint exists to keep: the
@@ -35,7 +35,9 @@ export const GET = read(
  *
  * `rotate` keeps the old address working for fourteen days so mail already in
  * flight still arrives. `cut_off` stops it now, which is what a member reaches
- * for when the address has leaked.
+ * for when the address has leaked. `pause` holds whatever arrives — recorded,
+ * but nothing fetched, staged or notified — and `resume` stages all of it,
+ * exactly once.
  *
  * The response is the same shape a GET answers with, including the NEW address
  * — the member has to be able to save it — and the same `no-store`, for the
@@ -44,12 +46,14 @@ export const GET = read(
 export const PUT = write(async (event, session) => {
   const body = await event.request.json().catch(() => null);
   const action = body && typeof body === "object" ? body.action : undefined;
-  if (action !== "rotate" && action !== "cut_off") {
+  if (!["rotate", "cut_off", "pause", "resume"].includes(action)) {
     return json(
-      { error: { code: "relay_action_invalid", message: "The relay action must be rotate or cut_off" } },
+      { error: { code: "relay_action_invalid", message: "The relay action must be rotate, cut_off, pause or resume" } },
       { status: 400, headers: { "cache-control": "no-store" } },
     );
   }
-  const relay = await rotateRelayAddress(session.user, action);
+  const relay = action === "pause" || action === "resume"
+    ? await setRelayIngest(session.user, action === "pause")
+    : await rotateRelayAddress(session.user, action);
   return json({ relay }, { headers: { "cache-control": "no-store" } });
 });
