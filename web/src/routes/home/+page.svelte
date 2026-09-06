@@ -803,19 +803,9 @@
 
 <!-- CON-12: creation drawer — full width, from the top; the north star is its handle -->
 <aside class="drawer-top" id="createdrawer" role="region" aria-label="Add to your orbit">
-  <div class="inner">
-    <h2>Add to your orbit</h2>
-    <div class="ctypes">
-      <button class="ctype"><span class="dot con"></span>renewal</button>
-      <button class="ctype"><span class="dot"></span>service</button>
-      <button class="ctype"><span class="dot ter"></span>inspection</button>
-      <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
-    </div>
-    <div class="crow">
-      <div class="cdrop">drop a document here — we'll read what we can</div>
-      <a class="cfull" href={resolve("/create")}>open the full form →</a>
-    </div>
-  </div>
+  <!-- the handle comes first in the markup so that Tab from an opened
+       north star walks into the drawer's own controls next (#853); it is
+       positioned absolutely, so this changes nothing on screen. -->
   <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit">
     <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
       <defs>
@@ -915,6 +905,19 @@
     </svg>
     <span>create</span>
   </button>
+  <div class="inner">
+    <h2>Add to your orbit</h2>
+    <div class="ctypes">
+      <button class="ctype"><span class="dot con"></span>renewal</button>
+      <button class="ctype"><span class="dot"></span>service</button>
+      <button class="ctype"><span class="dot ter"></span>inspection</button>
+      <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
+    </div>
+    <div class="crow">
+      <div class="cdrop">drop a document here — we'll read what we can</div>
+      <a class="cfull" href={resolve("/create")}>open the full form →</a>
+    </div>
+  </div>
 </aside>
 
 <div class="scrim" aria-hidden="true"></div>

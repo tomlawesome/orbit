@@ -438,8 +438,21 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     closeOverlays(hit ? hit[1] : null);
   });
 
+  /* Escape from inside an overlay hands focus back to whatever opened it
+     (#853), the way Chrome.svelte's account panel already does: once the
+     panel goes visibility:hidden (#847) a focus left inside it falls to
+     <body>, and a keyboard reader is stranded at the top of the page. */
+  const OVERLAY_OPENER = [
+    ["#account", "button.orb"],
+    ["#createdrawer", "#nstar"],
+    ["#statusdrawer", "#edge-health"],
+    ["#keydrawer", "#keydrawer .handle"],
+  ];
   addEventListener("keydown", (/** @type {KeyboardEvent} */ event) => {
-    if (event.key === "Escape") closeOverlays(null);
+    if (event.key !== "Escape") return;
+    const within = OVERLAY_OPENER.find(([panel]) => document.getElementById(panel.slice(1))?.contains(document.activeElement));
+    closeOverlays(null);
+    if (within) /** @type {HTMLElement | null} */ (document.querySelector(within[1]))?.focus();
   });
   /* v17, amended §14: any scroll movement sends every drawer home */
   let lastY = scrollY;
