@@ -3,7 +3,7 @@
   import Grain from "$lib/Grain.svelte";
   import Dawn from "./Dawn.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
-  import { DOOR, STARTING, availabilityOf, doorMessageFor, nextDoorState, readinessOf } from "./door-state.js";
+  import { DOOR, FAILED, STARTING, availabilityOf, doorMessageFor, nextDoorState, phaseOf, readinessOf } from "./door-state.js";
   import "./flight.css";
 
   /**
@@ -104,15 +104,25 @@
     }
   }
 
-  /** One round of both checks (#788): readiness first, and availability only
-   *  once readiness says there is a point asking. */
+  /** One round of both checks (#788, #869): availability first, since its
+   *  `phase` field is what decides whether there is any point asking
+   *  readiness at all — `phase: "starting"` is `STARTING` regardless of
+   *  what `/api/health` would say, so a booting instance costs one request,
+   *  not two. Readiness is only fetched once `phase` says boot is done and
+   *  a degraded or unreadable answer becomes a fault worth failing on. */
   async function checkOnce() {
-    const readiness = readinessOf(await fetchJson("/api/health"));
-    const availability = readiness === "ready" || readiness === "maintenance"
-      ? availabilityOf(await fetchJson("/api/auth/availability"))
-      : null;
-    return { state: nextDoorState({ readiness, availability }), contactAddress: availability?.contactAddress ?? null };
+    const availabilityBody = await fetchJson("/api/auth/availability");
+    const phase = phaseOf(availabilityBody);
+    const availability = availabilityOf(availabilityBody);
+    const readiness = phase === "running" ? readinessOf(await fetchJson("/api/health")) : null;
+    return { state: nextDoorState({ phase, readiness, availability }), contactAddress: availability?.contactAddress ?? null };
   }
+
+  /* The backstop (#869): a process can hang mid-boot without exiting, so the
+     STARTING poll cannot run forever on the strength of "boot terminates" alone.
+     Not the mechanism — `phase` flipping to "running" is — only the fallback
+     for when it never does. */
+  const STARTING_BACKSTOP_MS = 120_000;
 
   onMount(() => {
     /* A marker left over from an abandoned sign-in must never fire later. */
@@ -164,11 +174,18 @@
       showState(first.state, first.contactAddress);
       if (!wasStarting) return;
 
+      /* Measured from the first paint of STARTING, not from the server's own
+         boot start, which this page never learns. */
+      const backstopAt = Date.now() + STARTING_BACKSTOP_MS;
       const poll = async () => {
         if (disposed) return;
         const next = await checkOnce();
         if (disposed) return;
         if (next.state === STARTING) {
+          if (Date.now() >= backstopAt) {
+            showState(FAILED, next.contactAddress);
+            return;
+          }
           pollTimer = setTimeout(poll, 4000);
           return;
         }
