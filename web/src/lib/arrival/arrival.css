@@ -110,11 +110,11 @@ body.arming .card{border-color:var(--accent);
    card the whole time. */
 
 .field{margin-bottom:18px}
-.field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
+.field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
              text-transform:uppercase;margin:0 0 6px}
 .field input,.field select{width:100%;background:var(--panel);border:1px solid var(--line);
        border-radius:9px;color:var(--ink);font-size:13.5px;padding:10px 12px;font-family:var(--ui)}
-.field input::placeholder{color:var(--ink-faint)}
+.field input::placeholder{color:var(--ink-quiet)}
 .field input:focus,.field select:focus{border-color:var(--accent)}
 .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
 #hhname{font:600 16.5px var(--display);padding:10px 13px}
@@ -144,7 +144,7 @@ body.rejected #hhname{border-color:var(--warm);
 
 /* the one reassurance that survives: it admits to the four sections that were
    made without being asked for, and says nothing else */
-.note{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.05em;
+.note{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.05em;
       margin:-4px 0 20px}
 
 .btn{width:100%;font:600 14px var(--display);color:var(--bg);background:var(--accent);
@@ -173,7 +173,7 @@ body.shownew .nf{opacity:1;pointer-events:auto}
            background:none;border:0;cursor:pointer}
 .nf .nstar .glint{animation:northpulse 5.5s ease-in-out infinite;transform-origin:0 0}
 @keyframes northpulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.18)}}
-.nf .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-faint);text-transform:uppercase}
+.nf .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-quiet);text-transform:uppercase}
 .nf .nstar:hover span{color:var(--accent-text)}
 .nf .minisys{position:absolute;transform-origin:118px 95px}
 .nf .minisys svg{display:block}
@@ -229,7 +229,7 @@ body.belong .nf .belong{opacity:1}
 .nf .belong li .nm{flex:1;min-width:0;font:12.5px var(--ui);color:var(--ink);
      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nf .belong li .act{flex:none;font:10px var(--mono);letter-spacing:.13em;
-     color:var(--ink-faint);text-transform:uppercase}
+     color:var(--ink-quiet);text-transform:uppercase}
 .nf .belong li button:hover .act{color:var(--accent-text)}
 .nf .belong li.waiting .act{color:var(--warm)}
 .nf .belong li.waiting button{cursor:default}
@@ -237,7 +237,7 @@ body.belong .nf .belong{opacity:1}
 .nf .belong .own button{font:11.5px var(--mono);color:var(--accent-text);letter-spacing:.04em;
      background:none;border:0;padding:0;cursor:pointer}
 .nf .belong .own button:hover{text-decoration:underline}
-.nf .belong .own span{display:block;font:10px var(--mono);color:var(--ink-faint);margin-top:7px}
+.nf .belong .own span{display:block;font:10px var(--mono);color:var(--ink-quiet);margin-top:7px}
 
 /* ══ PINNED ══════════════════════════════════════════════════════════════
    A fixture asks for one millisecond of the journey and then holds it still,
