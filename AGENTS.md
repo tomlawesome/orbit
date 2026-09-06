@@ -117,6 +117,9 @@ Check the list before building a test rig or handing a check to the owner.
   stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
   journeys are live and which are still absent)
 - `scripts/test-malware-scanner.sh` — ClamAV detection
+- `scripts/test-secret-scan.sh` — proves the `gitleaks` CI job's full-history
+  scan actually fires: plants a synthetic secret in a throwaway `mktemp -d`
+  git repo (never committed to Orbit) and asserts detection and redaction
 - `scripts/test-tika-processor.mjs` — Tika document extraction
 - `scripts/installer-simulation.sh` — installer command centre UI, no Docker
 - `scripts/install-test-browser.sh` — one-time headless browser download
