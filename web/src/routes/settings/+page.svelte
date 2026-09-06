@@ -2,7 +2,15 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import { clearTourSeen, readSettingsScreen, signOutEverywhere, writeReminders } from "$lib/data/workspace.js";
+  import {
+    clearTourSeen,
+    readSessions,
+    readSettingsScreen,
+    revokeSession,
+    signOutEverywhere,
+    writeReminders,
+  } from "$lib/data/workspace.js";
+  import { agoLong } from "$lib/format.js";
   import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
   import { relaunchTour } from "$lib/tour/relaunch.js";
   import { fillStarTiles } from "$lib/sky.js";
@@ -177,6 +185,51 @@
   }
 
   /**
+   * "Where you're signed in" (#482): every session the caller holds, loaded
+   * alongside the rest of the screen. Additive like the relay and reminders
+   * cards above — a session list that cannot be reached costs the reader
+   * that one list, not the screen, so a failure here holds an empty list and
+   * says so rather than throwing.
+   */
+  /** @type {Awaited<ReturnType<typeof readSessions>>} */
+  let sessions = $state([]);
+  /** @type {string | null} */
+  let sessionsProblem = $state(null);
+  /** @type {Record<string, boolean>} */
+  let armedRevoke = $state({});
+  /** @type {Record<string, string>} */
+  let revokeProblem = $state({});
+
+  /**
+   * Sign out of one device — armed by a first tap, done by a second, same
+   * family protocol as `tapSignOutEverywhere` below. Ending the current
+   * device's own session leaves nothing to come back to, so that case goes
+   * straight to the sign-in the way `tapSignOutEverywhere` does; ending any
+   * other device just drops its row.
+   *
+   * @param {Awaited<ReturnType<typeof readSessions>>[number]} row
+   */
+  async function tapRevokeSession(row) {
+    revokeProblem = { ...revokeProblem, [row.id]: "" };
+    if (!armedRevoke[row.id]) {
+      armedRevoke = { ...armedRevoke, [row.id]: true };
+      return;
+    }
+    try {
+      await revokeSession(row.id);
+      if (row.current) {
+        location.assign("/login");
+        return;
+      }
+      sessions = sessions.filter((session) => session.id !== row.id);
+      armedRevoke = { ...armedRevoke, [row.id]: false };
+    } catch {
+      armedRevoke = { ...armedRevoke, [row.id]: false };
+      revokeProblem = { ...revokeProblem, [row.id]: "still signed in — try again" };
+    }
+  }
+
+  /**
    * "Sign out of every device" — armed by a first tap, done by a second, the
    * family protocol the inbox and the item view already use for anything
    * that cannot be undone. This one ends the caller's own session too, so on
@@ -215,6 +268,11 @@
     active = document.documentElement.dataset.theme || "starchart";
     view = await readSettingsScreen();
     emailReminders = /** @type {Awaited<ReturnType<typeof readSettingsScreen>>} */ (view).reminders.emailEnabled;
+    try {
+      sessions = await readSessions();
+    } catch {
+      sessionsProblem = "not shown — Orbit could not reach your session list";
+    }
   });
 </script>
 
@@ -304,7 +362,27 @@
 
     </div><!-- /cards -->
 
-    <div class="danger"><button onclick={tapSignOutEverywhere}>{armedSignOut ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}</div>
+    <div class="danger">
+      <h2>Where you're signed in</h2>
+      <ul class="sessions-list">
+        {#each sessions as row (row.id)}
+          <li class="session-row">
+            <div class="session-info">
+              <b>{row.device}</b>
+              <span>{row.current ? "this device" : row.lastSeenAt ? `last seen ${agoLong(row.lastSeenAt, new Date().toISOString())}` : "never used"}</span>
+            </div>
+            <button onclick={() => tapRevokeSession(row)} aria-label={`sign out of ${row.device}`}>
+              {armedRevoke[row.id]
+                ? `tap again to sign out${row.current ? " here" : ""}`
+                : row.current ? "sign out here" : "sign out"}
+            </button>
+            {#if revokeProblem[row.id]}<div class="note">{revokeProblem[row.id]}</div>{/if}
+          </li>
+        {/each}
+      </ul>
+      {#if sessionsProblem}<div class="note">{sessionsProblem}</div>{/if}
+      <button onclick={tapSignOutEverywhere}>{armedSignOut ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}
+    </div>
   {/if}
 </div>
 </div>
