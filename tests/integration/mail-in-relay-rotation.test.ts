@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets } from "@/db/schema";
+import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, mailInSenderAddresses } from "@/db/schema";
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings, rotateRelayAddress } from "@/server/mail-in/relay-settings";
@@ -14,6 +14,7 @@ import {
 } from "@/server/mail-in/imap-ingestion";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
+import { attributedHeaders, verifiedSenderFor } from "./support/mail-in";
 
 /*
  * ADR-0017 slice 3 (orbit#744): per-user relay generations, against a real
@@ -32,6 +33,7 @@ const settings: MailboxSettingsInput = {
   tlsServerName: "imap.example.test",
   providerProfile: "mailcow",
   trustedRecipientHeader: "X-Original-To",
+  trustedAuthservId: "mx.provider.test",
   pollSeconds: 300,
   password: "fake-relay-rotation-password",
 };
@@ -55,6 +57,7 @@ afterEach(async () => {
   setImapClientFactoryForTests(undefined);
   await db.delete(imapIngestionMessages);
   await db.delete(imapRecipientAliases);
+  await db.delete(mailInSenderAddresses);
   await db.delete(mailInRelays);
   await db.update(mailInMailbox).set({ passwordSecretId: null, aliasKeySecretId: null });
   await db.delete(mailInMailbox);
@@ -79,16 +82,24 @@ async function aliasRowsOf(userId: string) {
     .orderBy(imapRecipientAliases.generation);
 }
 
-/** A provider fake that offers exactly one message, addressed where we say. */
-function mailboxOf(recipient: () => string, uidValidity: bigint) {
+/**
+ * A provider fake that offers exactly one message, from a verified member and
+ * addressed to whichever relay address we say.
+ *
+ * The `From` and the provider verdict are what attribute it since ADR-0017
+ * slice 4; the alias is corroboration, and it is the corroboration these cases
+ * are about.
+ */
+function mailboxOf(sender: () => string, recipient: () => string, uidValidity: bigint) {
   setImapClientFactoryForTests(() => ({
     mailbox: { uidValidity, uidNext: 1_000_000 },
     async connect() {},
     async logout() {},
     async getMailboxLock() { return { release() {} }; },
     async search() { return [1]; },
+    async messageDelete() { return true; },
     async fetchOne() {
-      return { uid: 1, headers: Buffer.from(`X-Original-To: ${recipient()}\r\n`), source: Buffer.from("sibling-message") };
+      return { uid: 1, headers: attributedHeaders(sender(), recipient()), source: Buffer.from("sibling-message") };
     },
   } as unknown as import("imapflow").ImapFlow));
 }
@@ -117,7 +128,8 @@ describe("per-user relay generations (ADR-0017 slice 3)", () => {
 
     /* And B's mail still arrives, which is the half of the invariant a rows
        comparison alone cannot prove. */
-    mailboxOf(() => bAddressBefore, 900n);
+    const bSender = await verifiedSenderFor(b, `sibling-b-${b}@example.test`);
+    mailboxOf(() => bSender, () => bAddressBefore, 900n);
     await runImapIngestionCycle(config);
     expect(await getDb().select({ userId: imapIngestionMessages.userId, generation: imapIngestionMessages.recipientAliasGeneration })
       .from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, "900")))
@@ -134,25 +146,27 @@ describe("per-user relay generations (ADR-0017 slice 3)", () => {
     const rotation = await rotateRelay(member, "rotate", config, rotatedAt);
     expect(rotation.previousExpiresAt.getTime()).toBe(rotatedAt.getTime() + 14 * 86_400_000);
 
-    mailboxOf(() => oldAddress, 901n);
+    const memberSender = await verifiedSenderFor(member, `expiry-${member}@example.test`);
+    mailboxOf(() => memberSender, () => oldAddress, 901n);
     await runImapIngestionCycle(config);
-    /* Attribution is the claim: the message belongs to this member at the
-       generation the outgoing address names. What happens to its attachments
-       afterwards is another module's business, and this fake carries none. */
-    expect(await getDb().select({ userId: imapIngestionMessages.userId, generation: imapIngestionMessages.recipientAliasGeneration })
+    /* The alias corroborates: the message belongs to this member, and the
+       receipt records that both the sender and the alias said so. */
+    expect(await getDb().select({ userId: imapIngestionMessages.userId, generation: imapIngestionMessages.recipientAliasGeneration, attributedBy: imapIngestionMessages.attributedBy })
       .from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, "901")))
-      .toEqual([{ userId: member, generation: 1 }]);
+      .toEqual([{ userId: member, generation: 1, attributedBy: "sender_and_alias" }]);
 
     /* Past the expiry the same address is not "nearly valid": it is gone, and
-       the receipt says which failure it is rather than a generic refusal. */
+       stops corroborating anything. The member's mail still arrives, because
+       since ADR-0017 slice 4 it is the verified sender that attributes and the
+       alias only ever agreed with it. */
     await getDb().update(mailInRelays)
       .set({ previousExpiresAt: new Date(Date.now() - 1_000) })
       .where(eq(mailInRelays.userId, member));
-    mailboxOf(() => oldAddress, 902n);
+    mailboxOf(() => memberSender, () => oldAddress, 902n);
     await runImapIngestionCycle(config);
-    expect(await getDb().select({ userId: imapIngestionMessages.userId, status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode })
+    expect(await getDb().select({ userId: imapIngestionMessages.userId, generation: imapIngestionMessages.recipientAliasGeneration, attributedBy: imapIngestionMessages.attributedBy })
       .from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, "902")))
-      .toEqual([{ userId: null, status: "quarantined", failureCode: "recipient_alias_expired" }]);
+      .toEqual([{ userId: member, generation: null, attributedBy: "sender" }]);
   }, 20_000);
 
   it("never reuses a generation across repeated rotate and cut-off (acceptance 3)", async () => {

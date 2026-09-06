@@ -239,6 +239,13 @@
       "when": 1788048000000,
       "tag": "0034_mail_in_relays",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1788134400000,
+      "tag": "0035_mail_in_sender_addresses",
+      "breakpoints": true
     }
   ]
 }

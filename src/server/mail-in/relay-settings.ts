@@ -14,12 +14,13 @@
  * user, so there is nothing to name and therefore no way to read someone
  * else's relay.
  */
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages } from "@/db/schema";
 import { getImapIngestionConfig } from "./mailbox-config";
 import type { ImapIngestionConfig } from "./core/config";
 import { ensureRelayAliases, readRelayRow, relayAddressFor, rotateRelay, type RelayRotationMode } from "./relays";
+import { hasVerifiedSenderAddress, seedSenderAddress } from "./sender-addresses";
 
 /** Mail-in is configured, switched on, and this account has a mailbox. */
 export const RELAY_LISTENING = "connected · listening";
@@ -32,11 +33,20 @@ export const RELAY_NOT_LISTENING = "not listening";
  * that this account has no relay rather than being shown a dead one.
  */
 export const RELAY_NO_MAILBOX = "no relay on this account";
+/**
+ * The member has no checked sending address, so nothing they forward can be
+ * matched to them (ADR-0017 decision 3, slice 4). Said plainly rather than
+ * shown as a working relay that quietly swallows mail: relay usability now
+ * depends on a verified address, which depends on Orbit being able to send
+ * mail at all.
+ */
+export const RELAY_NOT_USABLE = "no checked sending address";
 
 export type RelayListening =
   | typeof RELAY_LISTENING
   | typeof RELAY_NOT_LISTENING
-  | typeof RELAY_NO_MAILBOX;
+  | typeof RELAY_NO_MAILBOX
+  | typeof RELAY_NOT_USABLE;
 
 /**
  * The instance-level ingest flag, still reported read-only here. The per-user
@@ -52,6 +62,12 @@ export interface RelaySettings {
   /** The newest arrival's timestamp, or null. No document name — that is #467. */
   lastReceived: string | null;
   ingest: RelayIngest;
+  /**
+   * How much mail arrived that matched nobody and was deleted (ADR-0017
+   * decision 3). A count, never a sender or a subject: the member can see that
+   * something is going wrong without being shown mail that was never theirs.
+   */
+  unattributed: number;
 }
 
 /**
@@ -79,13 +95,18 @@ export async function readRelaySettings(
   const config = await resolvedConfig();
   const ingest: RelayIngest = config?.enabled ? "enabled" : "paused";
   if (user.isInstanceAdmin) {
-    return { address: null, listening: RELAY_NO_MAILBOX, lastReceived: null, ingest };
+    return { address: null, listening: RELAY_NO_MAILBOX, lastReceived: null, ingest, unattributed: 0 };
   }
   // `enabled` already folds in `configured`, so this one test covers both an
   // instance that was never wired up and one whose operator switched mail-in off.
   if (!config?.enabled) {
-    return { address: null, listening: RELAY_NOT_LISTENING, lastReceived: null, ingest };
+    return { address: null, listening: RELAY_NOT_LISTENING, lastReceived: null, ingest, unattributed: 0 };
   }
+  /* Seeding here, on the member's own read, is what puts the account address
+     in front of them without anybody typing it — still unverified, because
+     Orbit knowing an address is not the member proving they send from it. */
+  await seedSenderAddress(user.id);
+  const usable = await hasVerifiedSenderAddress(user.id);
   const [latest] = await getDb()
     .select({ receivedAt: imapIngestionMessages.receivedAt })
     .from(imapIngestionMessages)
@@ -96,11 +117,22 @@ export async function readRelaySettings(
      address the receipt path will attribute: the member's row and their
      `active` alias row both exist before the address is ever shown. */
   const relay = await ensureRelayAliases(user.id, config);
+  const [unattributed] = await getDb()
+    .select({ count: sql<number>`count(*)::int` })
+    .from(imapIngestionMessages)
+    .where(and(
+      eq(imapIngestionMessages.userId, user.id),
+      eq(imapIngestionMessages.status, "unattributed"),
+    ));
   return {
     address: relayAddressFor(user.id, relay.currentGeneration, config),
-    listening: RELAY_LISTENING,
+    /* The address is still shown when there is no checked sending address:
+       the member needs it to set the forward up, and the word beside it says
+       plainly that nothing will be matched until they check an address. */
+    listening: usable ? RELAY_LISTENING : RELAY_NOT_USABLE,
     lastReceived: latest?.receivedAt ? latest.receivedAt.toISOString() : null,
     ingest,
+    unattributed: unattributed?.count ?? 0,
   };
 }
 

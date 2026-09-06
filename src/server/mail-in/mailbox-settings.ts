@@ -46,7 +46,7 @@ import {
 } from "./imap-ingestion";
 import { deriveImapRecipientAlias, imapAliasBaseFromAccount, normalizeImapRecipientAlias } from "./core/imap-recipient";
 import { encryptMailInSecret, type MailInSecretKind } from "./core/secret-crypto";
-import { getImapIngestionConfig, imapConfigFromMailbox, MailInCredentialLockedError } from "./mailbox-config";
+import { getImapIngestionConfig, imapConfigFromMailbox, MailInCredentialLockedError, resolveTrustedAuthservId } from "./mailbox-config";
 import { resetAllRelaysForMovedAccount, rotateAllRelaysForNewAliasKey } from "./relays";
 import { RELAY_MAX_GRACE_MS } from "./core/relay-generations";
 import type { ImapIngestionConfig } from "./core/config";
@@ -122,6 +122,11 @@ export const mailboxSettingsInputSchema = z.object({
   tlsServerName: z.string().trim().max(253).default(""),
   providerProfile: z.enum(mailboxProviderProfiles),
   trustedRecipientHeader: z.string().trim().regex(/^[A-Za-z0-9-]{1,80}$/u),
+  /* Whose Authentication-Results verdict this instance believes (ADR-0017
+     decision 3, slice 4). Optional: Gmail and Outlook have a known identity,
+     and leaving it blank for any other provider means nothing is believed —
+     which fails closed rather than guessing at a hostname. */
+  trustedAuthservId: z.string().trim().max(253).regex(/^[A-Za-z0-9.:-]*$/u).default(""),
   pollSeconds: z.number().int().min(30).max(3_600),
   password: passwordSchema,
 });
@@ -146,6 +151,10 @@ export interface MailboxSettingsView {
   providerProfile: MailboxProviderProfile;
   authMethod: "password" | "xoauth2";
   trustedRecipientHeader: string;
+  /** As configured; blank means "the provider profile's own", or none at all. */
+  trustedAuthservId: string;
+  /** What attribution will actually use, after the profile default is applied. */
+  effectiveAuthservId: string;
   pollSeconds: number;
   verificationState: "unverified" | "verified" | "failed";
   verifiedAt: string | null;
@@ -315,7 +324,7 @@ export async function readMailboxSettings(actorUserId: string): Promise<MailboxS
     return {
       configured: false, enabled: false, host: "", port: 993, accountUser: "", mailbox: "INBOX",
       tlsServerName: "", providerProfile: "other", authMethod: "password", trustedRecipientHeader: "",
-      pollSeconds: 300, verificationState: "unverified", verifiedAt: null, aliasPattern: null,
+      trustedAuthservId: "", effectiveAuthservId: "", pollSeconds: 300, verificationState: "unverified", verifiedAt: null, aliasPattern: null,
       credentialSetAt: null, credentialSetBy: null, hasPassword: false, hasAliasKey: false,
       version: null, health,
     };
@@ -332,6 +341,8 @@ export async function readMailboxSettings(actorUserId: string): Promise<MailboxS
     providerProfile: providerProfileOf(row.providerProfile),
     authMethod: row.authMethod === "xoauth2" ? "xoauth2" : "password",
     trustedRecipientHeader: row.trustedRecipientHeader,
+    trustedAuthservId: row.trustedAuthservId,
+    effectiveAuthservId: resolveTrustedAuthservId(row.providerProfile, row.trustedAuthservId),
     pollSeconds: row.pollSeconds,
     verificationState: verificationStateOf(row.verificationState),
     verifiedAt: row.verifiedAt ? row.verifiedAt.toISOString() : null,
@@ -414,6 +425,7 @@ export async function setMailboxSettings(
       providerProfile: input.providerProfile,
       authMethod: "password" as const,
       trustedRecipientHeader: input.trustedRecipientHeader,
+      trustedAuthservId: input.trustedAuthservId,
       pollSeconds: input.pollSeconds,
       passwordSecretId: password.id,
       aliasKeySecretId,
