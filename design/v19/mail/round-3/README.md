@@ -33,3 +33,15 @@ wide plus frames at 1.2 s, 3.2 s and 4.6 s.
 
 Data story unchanged: Sam Okafor invites priya@example.com to Harbour House;
 the link is good until 20 September 2026.
+
+## Verdicts
+
+Owner, 2026-09-06, on #481:
+
+- F ignition — "I like this!"
+- G the living system — "even better!! This is the one." **Ratified: the
+  template in `src/server/invitations/mail.ts` is built from
+  `g-the-living-system.html`.**
+- On the gold hairline along the card's top: "Why are they randomly yellow
+  at the top on phones?" — it is deliberate (the sun's colour on the card
+  edge, on desk too); kept or dropped on the owner's word.
