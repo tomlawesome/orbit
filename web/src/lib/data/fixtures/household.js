@@ -84,3 +84,23 @@ export const MEMBERS_FIXTURE = {
     candidates: [],
   },
 };
+
+/**
+ * The open invitations `GET /api/households/{householdId}/invitations`
+ * answers (#481), in that route's exact shape.
+ *
+ * Empty everywhere, and that is the fixture's whole content: an address is the
+ * one thing this screen shows that a display name is not, so a fixture holding
+ * one would put a plausible email address into a photographed screen and into
+ * every developer's `vite dev`. The empty state is also the state the ratified
+ * mockup draws, so the gate measures the port rather than invented data.
+ *
+ * @type {Record<string, { id: string, householdId: string, email: string, createdAt: string, sentAt: string | null, sendError: string | null, expiresAt: string }[]>}
+ */
+export const INVITATIONS_FIXTURE = {
+  "hh-lawson-1": [],
+  "hh-seaside-4551": [],
+  "hh-mumdad-2480": [],
+  "hh-narrow-15033": [],
+  "hh-grans-1307": [],
+};

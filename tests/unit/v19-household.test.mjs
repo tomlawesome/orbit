@@ -11,6 +11,7 @@ import {
   householdScreenOf,
   householdUpdateCommandOf,
   initialsOf,
+  invitationRowsOf,
   sectionRowsOf,
   sectionsCommandOf,
 } from "../../web/src/lib/data/household.js";
@@ -259,5 +260,84 @@ describe("an instance admin wearing the owner screen (§15-2i)", () => {
     });
     expect(screen.canManage).toBe(true);
     expect(screen.you).toBeNull();
+  });
+});
+
+/* ── EMAIL INVITATIONS (#481) ─────────────────────────────────────────────
+   The address is the row: an invitation has no display name to stand in for
+   it, so this is the one place on this screen where an email address is
+   drawn at all. Everything else the row says is a time. */
+
+const INVITATION = {
+  id: "inv-priya",
+  householdId: "hh-lawson-1",
+  email: "priya@example.com",
+  createdAt: "2026-08-13T09:00:00.000Z",
+  sentAt: "2026-08-13T09:00:00.000Z",
+  sendError: null,
+  expiresAt: "2026-08-27T09:00:00.000Z",
+};
+
+describe("the open-invitations rows", () => {
+  it("reads as an address, when it went and when it stops working", () => {
+    expect(invitationRowsOf([INVITATION], NOON)).toEqual([{
+      id: "inv-priya",
+      email: "priya@example.com",
+      sent: "3h ago",
+      failed: false,
+      expires: "27 August 2026",
+    }]);
+  });
+
+  it("says the mail did not go rather than claiming a send that failed", () => {
+    const [row] = invitationRowsOf([{ ...INVITATION, sentAt: null, sendError: "smtp_unavailable" }], NOON);
+    expect(row.failed).toBe(true);
+    expect(row.sent).toBeNull();
+  });
+
+  // "now" is passed in, never read from the clock, so the fidelity gate holds
+  // still and production stays live — readHome's rule.
+  it("has no elapsed time to print without a pinned now", () => {
+    expect(invitationRowsOf([INVITATION], null)[0].sent).toBeNull();
+  });
+});
+
+describe("invitations on the household screen", () => {
+  it("reaches an owner, keyed to this household and no other", () => {
+    const screen = ownerScreen({
+      invitations: [INVITATION, { ...INVITATION, id: "inv-other", householdId: "hh-seaside-4551" }],
+    });
+    expect(screen.invitations.map((row) => row.id)).toEqual(["inv-priya"]);
+  });
+
+  // §11's "who sees what": a member sees who has been invited and cannot
+  // touch it. An owner quietly adding people by mail, with nobody else able
+  // to see it happening, is not the household this product describes.
+  it("reaches a plain member too, unlike the candidates list", () => {
+    const screen = householdScreenOf({
+      workspace: WORKSPACE_FIXTURE,
+      householdId: "hh-seaside-4551",
+      user: TOM,
+      members: MEMBERS_FIXTURE["hh-seaside-4551"].members,
+      candidates: MEMBERS_FIXTURE["hh-seaside-4551"].candidates,
+      invitations: [{ ...INVITATION, householdId: "hh-seaside-4551" }],
+      today: TODAY,
+      now: NOON,
+    });
+    expect(screen.canManage).toBe(false);
+    expect(screen.candidates).toEqual([]);
+    expect(screen.invitations).toHaveLength(1);
+  });
+
+  it("is an empty list, not a hole, when a household has none", () => {
+    expect(ownerScreen().invitations).toEqual([]);
+  });
+
+  // The screen is built from what the route answered, and the route answers
+  // no token on any verb. Nothing here can print one because nothing here
+  // ever holds one.
+  it("carries no token, on any row", () => {
+    const rows = ownerScreen({ invitations: [INVITATION] }).invitations;
+    expect(Object.keys(rows[0]).sort()).toEqual(["email", "expires", "failed", "id", "sent"]);
   });
 });

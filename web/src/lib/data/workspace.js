@@ -1350,7 +1350,7 @@ export async function signOut() {
  */
 export async function readHouseholdScreen(householdId) {
   const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
-  const [roster, joinRequests] = await Promise.all([
+  const [roster, joinRequests, invitations] = await Promise.all([
     /** @type {Promise<Partial<Roster>>} */ (
       json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
     ).catch(() => ({ members: [], candidates: [] })),
@@ -1359,6 +1359,9 @@ export async function readHouseholdScreen(householdId) {
     json(await fetch("/api/join-requests", { credentials: "same-origin" }))
       .then((/** @type {{ requests?: JoinRequest[] }} */ body) => body.requests ?? [])
       .catch(() => []),
+    /* #481: additive, like the roster — an invitations route that cannot be
+       reached must not take the household screen down with it. */
+    readInvitations(householdId).catch(() => []),
   ]);
   /* household.js's householdScreenOf infers its parameter shape from its own
      defaults (e.g. `members = []` reads as `never[]`), so this call is cast
@@ -1371,6 +1374,7 @@ export async function readHouseholdScreen(householdId) {
     members: roster.members ?? [],
     candidates: roster.candidates ?? [],
     joinRequests,
+    invitations,
     today: todayOf(workspace),
     /* Pinned "now" so "2d ago" on a waiting joiner holds still under the gate
        and stays live in production — readHome's rule. */
@@ -1470,6 +1474,69 @@ export async function decideJoinRequest(requestId, action) {
 export async function requestHouseholdDeletion(householdId, confirmation) {
   return json(await csrfFetch(`/api/households/${householdId}/lifecycle`, {
     body: { action: "delete", confirmation },
+  }));
+}
+
+/* ---------------------------------------------------------------------------
+ * EMAIL INVITATIONS (#481) — the same block, for somebody with no account.
+ */
+
+/**
+ * One open invitation, as its route reports it. There is no token in this
+ * shape, and there never will be: the link exists in the mail and nowhere
+ * else, and a screen that could show it could also leak it.
+ *
+ * @typedef {object} Invitation
+ * @property {string} id
+ * @property {string} householdId
+ * @property {string} email
+ * @property {string} createdAt
+ * @property {?string} sentAt      null while a send has failed
+ * @property {?string} sendError   a bounded class, never a provider message
+ * @property {string} expiresAt
+ */
+
+/**
+ * The household's open invitations. Every member may read them.
+ *
+ * @param {string} householdId
+ * @returns {Promise<Invitation[]>}
+ */
+export async function readInvitations(householdId) {
+  /** @type {{ invitations?: Invitation[] }} */
+  const body = await json(await fetch(`/api/households/${householdId}/invitations`, {
+    credentials: "same-origin",
+  }));
+  return body.invitations ?? [];
+}
+
+/**
+ * Send — or resend, which is the same act to the protocol.
+ *
+ * There is one open invitation per address, so sending to an address that
+ * already has one replaces it: new token, new expiry, and the earlier link
+ * stops working. The screen offers the two under different words because they
+ * are different intentions; the route has one.
+ *
+ * @param {string} householdId
+ * @param {string} email
+ * @returns {Promise<{ invitation: Invitation, invitations: Invitation[] }>}
+ */
+export async function sendInvitation(householdId, email) {
+  return json(await csrfFetch(`/api/households/${householdId}/invitations`, { body: { email } }));
+}
+
+/**
+ * Withdraw an open invitation; its link then fails as "withdrawn".
+ *
+ * @param {string} householdId
+ * @param {string} invitationId
+ * @returns {Promise<{ invitations: Invitation[] }>}
+ */
+export async function withdrawInvitation(householdId, invitationId) {
+  return json(await csrfFetch(`/api/households/${householdId}/invitations`, {
+    method: "DELETE",
+    body: { invitationId },
   }));
 }
 
