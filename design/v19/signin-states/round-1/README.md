@@ -116,8 +116,13 @@ account.
 
 ## Dependency this round created
 
-The "could not open safely" line cannot ship until an instance carries a
-public contact address as a setting (#860). Until then the first two states
-are implementable and the third is not, because the alternative — showing a
-real administrator's own email on a signed-out page — is exactly what the
-owner ruled out.
+The "could not open safely" line names a public contact address an
+administrator sets (#860). Where no address is set, **the sentence is
+dropped entirely** and the state reads:
+
+> Orbit couldn't open safely.
+> It's not you, it's us.
+
+Owner's decision, 2026-09-06. So the unset case is a shorter line rather
+than a missing one, and nothing on the page ever points at a real
+administrator's own mailbox — which is what the owner ruled out.
