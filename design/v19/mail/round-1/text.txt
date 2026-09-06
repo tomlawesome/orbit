@@ -1,0 +1,14 @@
+Sam Okafor has a place for you in Harbour House on Orbit.
+
+Orbit keeps a household's year in one calm view - the boiler service,
+the insurance renewal, the MOT - and Sam would like you in theirs.
+
+Open your invitation and sign in with this address; you'll land
+straight in the house:
+
+  https://orbit.example/invite/...
+
+Sent to priya@example.com. Good until 20 Sep 2026.
+Not expecting this? There is nothing to do - the link simply lapses.
+
+Orbit at orbit.example, run by Sam's household, not a company.
