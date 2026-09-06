@@ -104,8 +104,7 @@ function resolveColor(pack, rawValue) {
 /** Composites a possibly-translucent colour over an opaque base RGB — plain
  * "over" blending (out = fg*a + bg*(1-a)), matching how a browser paints a
  * CSS layer over a solid background beneath it. An opaque colour (alpha 1)
- * is simply itself, so this also covers panels defined as a flat #rrggbb
- * (atlas's --panel-raised). */
+ * is simply itself, so this also covers a panel defined as a flat #rrggbb. */
 function compositeOver({ rgb, alpha }, baseRgb) {
   if (alpha === 1) return rgb;
   return rgb.map((c, i) => c * alpha + baseRgb[i] * (1 - alpha));

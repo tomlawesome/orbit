@@ -95,10 +95,12 @@ body.igniting .card,body.reclaimed .card{
 body.arming .card{border-color:var(--accent);
       box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px var(--accent) inset,
                  0 0 70px -12px color-mix(in srgb,var(--accent) 55%,transparent)}
-/* the two light packs paint an ink-on-paper card onto a night sky: thinning
+/* the light packs paint an ink-on-paper card onto a night sky: thinning
    their veil the way the dark packs' is thinned washes their faint ink out
-   altogether, so they keep the body they were designed with */
-[data-theme=atlas] .card,[data-theme=dawn] .card{
+   altogether, so they keep the body they were designed with. Atlas is gone
+   (#865); clouds is missing here on purpose — this line is #862's to touch,
+   not this one's, so it is left alone rather than collide with that rework. */
+[data-theme=dawn] .card{
       background:color-mix(in srgb,var(--panel) 92%,transparent)}
 
 /* THE CARD HAS NO MARK (owner, 2026-08-17, verbatim): "I actually want the
