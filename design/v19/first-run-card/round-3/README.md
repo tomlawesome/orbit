@@ -22,12 +22,12 @@ The ratified login glyph is an SVG 420px wide on a 200 viewBox, so it draws at
 
 | | login ring | this ring |
 |---|---|---|
-| circle | 302.4px | **660px** |
+| circle | 302.4px | **500px** |
 | line weight | 4.2px | 4.2px |
 | orb | 29.4px across | 29.4px across |
 | orb station | 151.2px out, −30.1° | same angle, on the ring |
 
-660px is 2.18× the login's and the largest circle that still leaves the fields
+500px is 1.65× the login's and the largest circle that still leaves the fields
 a comfortable rectangle inside it.
 
 Holding the line weight and the orb still while the diameter moves is why the
