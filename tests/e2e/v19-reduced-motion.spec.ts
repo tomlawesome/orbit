@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #496 (epic #411 criterion 5): "`prefers-reduced-motion` and non-JS both
@@ -36,12 +37,7 @@ const NAME_PREFIX = "reduced-motion-";
 async function signIn(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  /* Not a fixed destination: #840 sends a session with no household of its
-     own to the arrival at `/` instead of /home, and this account may have
-     none at this point in the run. Every caller seeds a household next and
-     then navigates explicitly, so only the session needs to be real here. */
-  const session = await page.request.get("/api/auth/session");
-  expect(session.ok()).toBe(true);
+  await settleArrival(page);
 }
 
 /** A household with two items, spread across "this month" and "next month"

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createTransport } from "nodemailer";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #459: the mail proving ground — no interception anywhere. A real message
@@ -47,14 +48,7 @@ const TINY_PDF = Buffer.from(
 async function signInAsMember(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Member" }).click();
-  /* Not a fixed destination: #840 sends a session with no household of its
-     own to the arrival at `/` instead of /home, and this member may have
-     none at this point in the run (the arrival's own specs sweep theirs
-     away again). seedHousehold below reuses or creates one from here
-     regardless of which page is showing, and this file reaches /home by an
-     explicit goto once mail has arrived. */
-  const session = await page.request.get("/api/auth/session");
-  expect(session.ok()).toBe(true);
+  await settleArrival(page);
 }
 
 // A fresh instance promotes its first sign-in to instance admin, and admins
