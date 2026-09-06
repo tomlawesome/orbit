@@ -75,6 +75,14 @@
       .slice(0, 2)
       .toUpperCase(),
   );
+  /* #852: the same "household · role" line the desk account panel derives
+     inline (+page.svelte, the `#who-role` span) — copied rather than shared
+     because that one is a plain template expression, not a function. */
+  const roleLine = $derived(
+    view
+      ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}`
+      : "",
+  );
   const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   const QUARTER_POS = [[190, 26], [356, 196], [190, 364], [24, 196]];
   const quarters = $derived(
@@ -186,7 +194,41 @@
 <div class="mpage">
   <div class="mtop">
     <div class="mark-row" style="font-size:15px"><svg width="22" height="22" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg> orbit</div>
-    <div class="morb">{initials}</div>
+    <!-- #852: the avatar opens the same account panel the desk orb does
+         (+page.svelte's `.account`/`#account`), laid out as a bottom sheet
+         here — see `.msheet` below and pocket.behaviour.js for the wiring. -->
+    <button class="morb" id="morb" aria-expanded="false" aria-controls="maccount" title="Menu">{initials}</button>
+    <!-- #852: the account menu as a bottom sheet — same contents as the desk
+         `.account` (+page.svelte lines ~779-810), same wiring (pocket.behaviour.js
+         imports setSwatch/packOf from ./swatches.js, the same functions
+         home.behaviour.js's swatches use, and drives sign-out the way
+         Chrome.svelte's sub-screen orb does: two taps, the second one revoking
+         the session before it navigates). Only one of `#sheet`/`#maccount` is
+         ever open at a time — pocket.behaviour.js enforces that. It sits here,
+         straight after `#morb`, for the same reason the desk `.account` follows
+         its orb: one Tab from the open toggle must land inside the sheet
+         (tests/e2e/support/keyboard.ts auditLightDismiss). It is position:fixed,
+         so its place in the DOM changes nothing visually. -->
+    <div class="msheet" id="maccount" role="region" aria-label="Account and menu">
+      <div class="grab"></div>
+      <div class="mwho"><b>{view?.user?.displayName ?? ""}</b><span>{roleLine}</span></div>
+      <nav>
+        <a href={resolve("/inbox")}>Inbox</a>
+        <a href={resolve("/settings")}>Settings</a>
+        <a href={resolve("/administration")}>Administration</a>
+      </nav>
+      <div class="mswatches" role="group" aria-label="Theme">
+        <span>THEME</span>
+        <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
+        <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
+        <button style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
+        <button style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
+        <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
+                aria-pressed="false"></button>
+      </div>
+      <button class="msignout" id="msignout">sign out →</button>
+      <div class="msignout-problem" id="msignout-problem" hidden></div>
+    </div>
   </div>
   {#if view?.emptySky}
   <!-- §11 (#453): the pocket's labelled sky is a list — each system a ring
