@@ -379,8 +379,8 @@
   /* v3 — the panel's other blocks. Members runs the full height of the
      right column now, so who is waiting and who you could add are simply
      BLOCKS of the same panel, each under its own small rule, instead of
-     drawers you had to open. Registered accounts only — the route has no
-     email invite (#481). */
+     drawers you had to open. Two ways in now (#481): an existing account,
+     or an address. */
   .block{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)}
   .block h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
             color:var(--ink-faint);margin-bottom:9px}
@@ -391,6 +391,37 @@
   /* the resting state of the joiners block: it says so, rather than vanishing */
   .restline{display:block}
   body.wants .restline{display:none}
+
+  /* INVITATIONS BY EMAIL (#481) — the other way in, for somebody with no
+     account here yet. An outstanding invitation is NOT a third list of
+     people: it is a seat held open. So the row wears a dashed EMPTY ring
+     where a member's avatar would sit — the same pen the joiners' dashed
+     border uses for "not in yet" — and its name is the address the owner
+     typed, set in mono because it is a string, not a chosen name. That is
+     the deliberate answer to this screen's names-only rule: an ACCOUNT is
+     never shown by its address, and an invitation has nothing else to be
+     shown by. The address exists here only while the person doesn't, and
+     leaves the moment they arrive — they join the roster above under the
+     name they chose, and the seat closes. Members see what is outstanding
+     (Q44) but the field and the controls are the owner's; in the client a
+     member with nothing outstanding sees no block at all. */
+  .invite{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .invite input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);
+         border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
+  .invite input::placeholder{color:var(--ink-quiet)}
+  .invite input:focus{outline:none;border-color:var(--accent)}
+  .inv{display:flex;align-items:center;gap:12px;padding:8px 2px;
+       border-bottom:1px solid var(--line-soft)}
+  .inv:last-of-type{border-bottom:0}
+  /* the held seat: an avatar's geometry with nobody in it yet */
+  .seat{width:32px;height:32px;border-radius:50%;flex:none;
+        border:1px dashed var(--line)}
+  .inv .who{flex:1;min-width:0}
+  .inv b{display:block;font-size:13px;font-weight:520;font-family:var(--mono);
+         word-break:break-all}
+  .inv .when{display:block;margin-top:2px;font:10.5px var(--mono);
+             letter-spacing:.04em;color:var(--ink-quiet)}
+  .inv .ghost{padding:5px 11px;flex:none}
 
   /* the handover: two deliberate steps, and the second asks twice */
   .handover{display:none;margin-top:14px;border:1px solid var(--accent);border-radius:13px;
@@ -845,9 +876,57 @@
           <button class="ghost" onclick="addMember('Ada Reid','AR')">add</button></div>
         <p class="note top">
           people sign in through your identity provider first, then an owner puts<br>
-          them in a system. Nobody’s email address is shown here, only the name<br>
-          they chose.<br>
-          <b>email invitations come later</b> — deferred as its own package (#481).
+          them in a system. An account is named here by the name its owner<br>
+          chose — never by its address.
+        </p>
+      </div>
+
+      <!-- #481: the other way in — for somebody with no account here yet.
+           One field, one button, and beneath them the seats held open: a
+           dashed empty ring (no person yet), the typed address, when it
+           went and when it lapses. Redeemed and withdrawn rows leave the
+           list; the audit trail keeps them. Members see the seats but the
+           field and the controls are own-only (Q44). -->
+      <div class="block" id="invitepeople">
+        <h4><span class="own-only">Invite by email</span><span class="mem-only">Invited by email</span></h4>
+        <form class="invite own-only" onsubmit="sendInvite(event)">
+          <input type="email" autocomplete="off" placeholder="name@example.com"
+                 aria-label="email address to invite" id="inviteaddr" oninput="armInvite()">
+          <button class="ghost" type="submit" id="invitebtn" disabled>send invitation</button>
+        </form>
+        <div id="invitelist" class="own-only">
+          <div class="inv">
+            <span class="seat" aria-hidden="true"></span>
+            <span class="who"><b>daniel.lawson@example.com</b>
+              <span class="when">sent 2d ago · expires 18 Sep 2026</span></span>
+            <button class="ghost" onclick="resent(this)">resend</button>
+            <button class="ghost" data-rest="withdraw"
+                    onclick="twoTap(this,'tap again to withdraw',()=>withdrew(this))">withdraw</button>
+          </div>
+        </div>
+        <!-- the member view is Seaside Cottage, so the seat a member sees
+             is Emma's doing — same row, no controls -->
+        <div class="mem-only">
+          <div class="inv">
+            <span class="seat" aria-hidden="true"></span>
+            <span class="who"><b>sofia.marsh@example.com</b>
+              <span class="when">sent 5d ago · expires 15 Sep 2026</span></span>
+          </div>
+        </div>
+        <p class="note own-only" id="noinvites" style="display:none">
+          nobody is invited just now — a seat appears here when you send an<br>
+          invitation, and closes when it is answered, lapses, or you call it back.
+        </p>
+        <p class="said" id="said-invite"></p>
+        <p class="note top own-only">
+          one mail, one link, good for 14 days; resending replaces it. The link<br>
+          admits only someone signed in with <b>this exact address</b> — and the<br>
+          address is the invitation’s only name: the moment they arrive they<br>
+          join the roster above as whoever they chose to be, and it leaves too.
+        </p>
+        <p class="note top mem-only">
+          only Emma Lawson can invite someone, or call an invitation back.<br>
+          when they arrive, they join the members above under their own name.
         </p>
       </div>
 
@@ -1138,6 +1217,56 @@ function approveJoin(btn){
 }
 function declineJoin(btn){
   btn.closest(".joinreq").style.display = "none";
+}
+
+/* ── invitations by email (#481) ───────────────────────────────────────────
+   A seat is held the moment the mail goes. The sheet never shows a token —
+   the route hands one to the mail and to nobody else — so a row is only the
+   address, when it went and when it lapses. Withdrawing the last seat brings
+   the resting line back. */
+function armInvite(){
+  const field = document.getElementById("inviteaddr");
+  const btn = document.getElementById("invitebtn");
+  btn.disabled = !field.value.trim();
+}
+function saidInvite(text){
+  const line = document.getElementById("said-invite");
+  line.textContent = text;
+  line.classList.add("show");
+}
+function sendInvite(event){
+  event.preventDefault();
+  const field = document.getElementById("inviteaddr");
+  const address = field.value.trim();
+  if (!address) return;
+  const row = document.createElement("div");
+  row.className = "inv";
+  row.innerHTML =
+    '<span class="seat" aria-hidden="true"></span>' +
+    '<span class="who"><b></b><span class="when">sent just now · expires 20 Sep 2026</span></span>' +
+    '<button class="ghost">resend</button>' +
+    '<button class="ghost" data-rest="withdraw">withdraw</button>';
+  row.querySelector("b").textContent = address;
+  const [again, drop] = row.querySelectorAll("button");
+  again.addEventListener("click", () => resent(again));
+  drop.addEventListener("click", () => twoTap(drop, "tap again to withdraw", () => withdrew(drop)));
+  document.getElementById("invitelist").appendChild(row);
+  document.getElementById("noinvites").style.display = "none";
+  saidInvite("invitation sent to " + address + " · a seat is held for 14 days");
+  field.value = "";
+  armInvite();
+}
+function resent(btn){
+  const address = btn.closest(".inv").querySelector("b").textContent;
+  saidInvite("a fresh link went to " + address + " · the old one no longer works");
+}
+function withdrew(btn){
+  const row = btn.closest(".inv");
+  const address = row.querySelector("b").textContent;
+  row.remove();
+  if (!document.querySelector("#invitelist .inv"))
+    document.getElementById("noinvites").style.display = "block";
+  saidInvite("the invitation to " + address + " is withdrawn · its link now says so");
 }
 
 /* ── the danger line ──────────────────────────────────────────────────────── */
