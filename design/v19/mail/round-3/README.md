@@ -47,3 +47,5 @@ Owner, 2026-09-06, on #481:
   edge, on desk too). Owner: "Drop the gold line at the top, and instead,
   give the whole card a feint, thin gold outline." **Applied in the
   template, not re-drawn as a round.**
+- On the built template (real render, faint gold outline): "Templates are
+  fantastic now." **Shipped as `src/server/invitations/mail.ts`.**
