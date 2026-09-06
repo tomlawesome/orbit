@@ -102,7 +102,8 @@ vi.mock("@/db", async () => {
     }),
     mail_in_secrets: () => ({ id: randomUUID(), createdByUserId: null, createdAt: new Date(), updatedAt: new Date() }),
     audit_log: () => ({ id: randomUUID(), createdAt: new Date() }),
-    imap_recipient_rotation_state: () => ({ id: 1, createdAt: new Date(), updatedAt: new Date() }),
+    mail_in_relays: () => ({ currentGeneration: 1, previousGeneration: null, previousExpiresAt: null, ingestPausedAt: null, rotatedAt: null, version: 1, createdAt: new Date(), updatedAt: new Date() }),
+    imap_recipient_aliases: () => ({ id: randomUUID(), status: "active", activeUntil: null, createdAt: new Date(), updatedAt: new Date() }),
   };
 
   function makeSelect(projection?: unknown) {
@@ -162,8 +163,8 @@ vi.mock("@/db", async () => {
     update: (table: unknown) => {
       const name = getTableName(table as never);
       return {
-        set: (values: Row) => ({
-          where(condition: unknown) {
+        set: (values: Row) => {
+          const apply = (condition?: unknown) => {
             const rows = rowsOf(name);
             const changed: Row[] = [];
             for (let index = 0; index < rows.length; index += 1) {
@@ -171,12 +172,21 @@ vi.mock("@/db", async () => {
               rows[index] = { ...rows[index], ...values };
               changed.push(rows[index]);
             }
-            return {
-              returning: (projection?: unknown) => Promise.resolve(changed.map((row) => project(projection, name, row))),
-              then: (onFulfilled: (value: number) => unknown) => Promise.resolve(changed.length).then(onFulfilled),
-            };
-          },
-        }),
+            return changed;
+          };
+          return {
+            where(condition: unknown) {
+              const changed = apply(condition);
+              return {
+                returning: (projection?: unknown) => Promise.resolve(changed.map((row) => project(projection, name, row))),
+                then: (onFulfilled: (value: number) => unknown) => Promise.resolve(changed.length).then(onFulfilled),
+              };
+            },
+            /* An UPDATE with no WHERE is the whole table, which is exactly what
+               a moved mailbox account means for every relay (ADR-0017 slice 3). */
+            then: (onFulfilled: (value: number) => unknown) => Promise.resolve(apply().length).then(onFulfilled),
+          };
+        },
       };
     },
     delete: (table: unknown) => {
@@ -238,8 +248,9 @@ vi.mock("@/lib/logger", () => ({
   log: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
+import { randomUUID } from "node:crypto";
 import { getTableName } from "drizzle-orm";
-import { auditLog, imapRecipientRotationState, mailInMailbox, mailInSecrets } from "@/db/schema";
+import { auditLog, imapRecipientAliases, mailInMailbox, mailInSecrets } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { decryptMailInSecret } from "./core/secret-crypto";
 import { imapAliasBaseFromAccount, normalizeImapRecipientAlias } from "./core/imap-recipient";
@@ -265,6 +276,7 @@ const settings: MailboxSettingsInput = {
   tlsServerName: "imap.example.test",
   providerProfile: "mailcow",
   trustedRecipientHeader: "X-Original-To",
+  trustedAuthservId: "mx.provider.test",
   pollSeconds: 300,
   password: FIRST_PASSWORD,
 };
@@ -790,27 +802,27 @@ describe("the alias key follows the account, not the edit", () => {
     expect((await readMailboxSettings(ADMIN)).aliasPattern).toBe("intake+<code>@example.test");
   });
 
-  it("drops the rotation commitment when a new alias key is generated, so ingestion is not left wedged", async () => {
-    mocks.tables[getTableName(imapRecipientRotationState)] = [{
-      id: 1, currentGeneration: 1, currentCommitment: "commitment-from-a-previous-key",
-      previousGeneration: null, previousExpiresAt: null, previousCommitment: null,
-    }];
-
+  it("retires every alias row when a new alias key is generated, so no dead address stays eligible", async () => {
     await configureMailbox();
+    mocks.tables[getTableName(imapRecipientAliases)] = [
+      { id: randomUUID(), userId: randomUUID(), generation: 1, aliasSha256: "a".repeat(64), status: "active", activeUntil: null },
+      { id: randomUUID(), userId: randomUUID(), generation: 1, aliasSha256: "b".repeat(64), status: "active", activeUntil: null },
+    ];
 
-    expect(rows(imapRecipientRotationState)).toHaveLength(0);
+    await configureMailbox({ ...settings, accountUser: "moved@example.test" });
+
+    expect(rows(imapRecipientAliases).map((row) => row.status)).toEqual(["legacy_inactive", "legacy_inactive"]);
   });
 
-  it("leaves the rotation commitment alone when the alias key is kept", async () => {
+  it("leaves every alias row alone when the alias key is kept", async () => {
     await configureMailbox();
-    mocks.tables[getTableName(imapRecipientRotationState)] = [{
-      id: 1, currentGeneration: 1, currentCommitment: "commitment-for-the-current-key",
-      previousGeneration: null, previousExpiresAt: null, previousCommitment: null,
-    }];
+    mocks.tables[getTableName(imapRecipientAliases)] = [
+      { id: randomUUID(), userId: randomUUID(), generation: 1, aliasSha256: "a".repeat(64), status: "active", activeUntil: null },
+    ];
 
     await configureMailbox({ ...settings, pollSeconds: 600 });
 
-    expect(rows(imapRecipientRotationState)).toHaveLength(1);
+    expect(rows(imapRecipientAliases).map((row) => row.status)).toEqual(["active"]);
   });
 });
 

@@ -5,6 +5,7 @@ import {
   mailboxSettingsInputSchema,
   readMailboxSettings,
   removeMailboxCredential,
+  rotateMailboxAliasKey,
   rotateMailboxPassword,
   runMailboxSetupProbe,
   setMailboxIngestEnabled,
@@ -57,6 +58,16 @@ const mutationSchema = z.discriminatedUnion("action", [
     action: z.literal("disable"),
     expectedVersion: z.number().int().positive(),
   }),
+  /* The emergency alias-key rotation (ADR-0017 slice 3, #744): the one action
+     that changes EVERY member's address. `graceDays` is how long the outgoing
+     addresses keep collecting, 0 for "cut them all off now"; the 90-day
+     ceiling is the product's, and the engine refuses anything past it whatever
+     arrives here. */
+  z.object({
+    action: z.literal("rotate_alias_key"),
+    expectedVersion: z.number().int().positive(),
+    graceDays: z.number().int().min(0).max(90),
+  }),
 ]);
 
 const noMailbox = () =>
@@ -105,6 +116,10 @@ export const POST = write(async (event, session) => {
     }
     case "remove": {
       const mailbox = await removeMailboxCredential(actor, command.expectedVersion);
+      return json({ mailbox }, { headers: { "cache-control": "no-store" } });
+    }
+    case "rotate_alias_key": {
+      const mailbox = await rotateMailboxAliasKey(actor, command.expectedVersion, command.graceDays);
       return json({ mailbox }, { headers: { "cache-control": "no-store" } });
     }
     default: {

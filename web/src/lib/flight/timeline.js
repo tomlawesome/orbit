@@ -85,9 +85,9 @@ const countGap = 300;
 const countHold = 3200;
 const countFade = 900;
 const newInstrumentAt = ASCENT_BASE.condensed + newDwell;  /*  9400 */
-const countOn = newInstrumentAt + countGap;                /*  9900 */
-const countOff = countOn + countHold;                      /* 11900 */
-const belongAt = countOff + countFade;                     /* 12800 */
+const countOn = newInstrumentAt + countGap;                /*  9700 */
+const countOff = countOn + countHold;                      /* 12900 */
+const belongAt = countOff + countFade;                     /* 13800 */
 
 export const T = {
   ...ASCENT_BASE,

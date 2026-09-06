@@ -284,6 +284,49 @@ encrypted alongside the password, and never shown to anyone — members
 included. Changing the account address generates a new one, which changes
 every member's relay address; correcting a host, port or folder does not.
 
+**Forward, do not redirect.** The only supported way to use a relay address is
+for a member to forward mail to it from their own mailbox. A redirect keeps the
+original sender's address, so the message looks to Orbit as though somebody
+else sent it, matches nobody, and is deleted. Handing a relay address to a
+supplier, a bank or a web form is unsupported for the same reason. Tell members
+this when you tell them the relay exists.
+
+Orbit matches a forwarded message to a member by the address it was sent from,
+and only when your provider's own check says that address is genuine. That
+check is the `Authentication-Results` header your provider writes, and Orbit
+has to know whose header to believe: that is the **trusted authserv-id** on the
+mail settings screen. Gmail and Outlook are known, so leaving it blank works
+for them. For Mailcow or any other provider it is your own mail server's
+hostname — the name it writes at the start of that header — and until you fill
+it in Orbit believes nothing, matches nothing to anybody, and says so on each
+member's relay page. That is deliberate: guessing would be the guess an
+attacker gets to use.
+
+A message Orbit cannot match to a member is deleted from the mailbox, and
+nothing is kept for you or anyone else to look at. The sender is told once, and
+only when your provider vouched for them — never a mailing list, never an
+autoresponder, never twice in a day, and never quoting what they sent.
+
+Each member can also pause their own collection from the same page. While they
+are paused, mail addressed to them is recorded as having arrived and nothing
+else happens to it: no attachment is fetched, nothing is stored, and they are
+not told. Turning it back on prepares everything that was waiting, once. A held
+message expires on the same schedule as any other, after which it lives only in
+the provider mailbox. One member pausing changes nothing for anybody else.
+
+What you see of any of this is a count. The operations view reports how many
+receipts sit in each state, including held and unattributed, and never whose
+they are or what address they came to.
+
+Members rotate their own relay address from their relay page, and one member
+rotating changes nothing for anybody else. The one exception is an emergency:
+an administrator can replace the alias key for the whole instance, which
+changes every member's address at once. Choose how long the old addresses keep
+collecting — anything from none at all up to 90 days — and mail already on its
+way arrives at the old address until that runs out. Everything else about
+rotation belongs to the member, not to you: you can see that a rotation
+happened and who did it, never the address itself.
+
 The container bootstrap copies mounted Compose secrets into a private tmpfs,
 sets ownership to Orbit's unprivileged runtime user, applies mode `0400`, then
 drops root. The application reads only the `/run/orbit-secrets/...` copies.

@@ -94,20 +94,20 @@ body.showform.grounded #formlayer{animation:settleback .85s cubic-bezier(.2,.9,.
        newcomer arrival, the discovered count, the reclaim), so the rule that
        shows the ring is scoped to every one of THIS app's own body classes
        for those journeys, not to `showform` alone. */
-.bigring{position:fixed;inset:0;display:grid;place-items:center;z-index:3;
+:where(.arrival) .bigring{position:fixed;inset:0;display:grid;place-items:center;z-index:3;
          opacity:0;visibility:hidden;pointer-events:none;
          transition:opacity .16s ease .46s,visibility .16s .46s}
 body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
-  :not(.bare):not(.showwarp):not(.launching):not(.belong) .bigring{
+  :not(.bare):not(.showwarp):not(.launching):not(.belong) :where(.arrival) .bigring{
          opacity:1;visibility:visible;
          transition:opacity .8s ease,visibility .8s}
-.bigring>*{grid-area:1/1}
+:where(.arrival) .bigring>*{grid-area:1/1}
 
 /* The glass: the night sky itself, held still and quieted, inside the ring
    and nowhere else. It is a darkening rather than a paint, so a light pack
    cannot wash it out — the per-pack opacity exception that opened this
    issue is deleted above, not extended here. */
-.bigring .ringglass{width:500px;height:500px;border-radius:50%;
+:where(.arrival) .bigring .ringglass{width:500px;height:500px;border-radius:50%;
       border:4.2px solid #8791b3;
       background:rgba(6,10,22,.56);
       -webkit-backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
@@ -123,7 +123,7 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    the reclaimed login chrome (flight.css/arrival.css) is held back to meet
    it there. Both land before the ascent starts at 620ms, so the ratified
    launch runs unchanged. */
-body.reclaimed .bigring .ringglass{width:302.4px;height:302.4px;
+body.reclaimed :where(.arrival) .bigring .ringglass{width:302.4px;height:302.4px;
       background:rgba(7,11,24,0);
       -webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px)}
 
@@ -131,12 +131,12 @@ body.reclaimed .bigring .ringglass{width:302.4px;height:302.4px;
    as a percentage, so it keeps its place on the ring at any size — one turn
    per 40s, the only motion CON-19 allows the mark (@keyframes spinback is
    flight.css's, shared rather than redeclared). */
-.bigring .ringorbit{width:500px;height:500px;position:relative;
+:where(.arrival) .bigring .ringorbit{width:500px;height:500px;position:relative;
        animation:spinback 40s linear infinite;
        transition:width .5s cubic-bezier(.55,0,.2,1),
                   height .5s cubic-bezier(.55,0,.2,1)}
-body.reclaimed .bigring .ringorbit{width:302.4px;height:302.4px}
-.bigring .ringorbit i{position:absolute;left:93.26%;top:24.94%;
+body.reclaimed :where(.arrival) .bigring .ringorbit{width:302.4px;height:302.4px}
+:where(.arrival) .bigring .ringorbit i{position:absolute;left:93.26%;top:24.94%;
          width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px;
          border-radius:50%;background:#d8b45a}
 
@@ -144,7 +144,7 @@ body.reclaimed .bigring .ringorbit{width:302.4px;height:302.4px}
    blur, the border and the shadow all go. Ink is the sky's and fixed, not
    the pack's, for the reason the whole issue exists: the ground here is a
    night sky whatever pack is chosen. */
-.card{width:300px;max-width:300px;
+:where(.arrival) .card{width:300px;max-width:300px;
       background:none;backdrop-filter:none;border:none;box-shadow:none;padding:0;
       --ink:#f0f4fb; --ink-mid:#c0cade; --ink-faint:#9aa6bf;
       --line:rgba(240,244,251,.26); --line-soft:rgba(240,244,251,.14);
@@ -155,9 +155,9 @@ body.reclaimed .bigring .ringorbit{width:302.4px;height:302.4px}
 /* `reclaimed` is the create path's hand-over beat and `igniting` is the
    flight's own: the card leaves on the same curve for both, so the pre-beat
    runs straight into the ascent with nothing to see at the joint. */
-body.igniting .card,body.reclaimed .card{
+body.igniting :where(.arrival) .card,body.reclaimed :where(.arrival) .card{
       opacity:0;transform:translateY(16px) scale(.965);pointer-events:none}
-body.arming .card{border-color:var(--accent);
+body.arming :where(.arrival) .card{border-color:var(--accent);
       box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px var(--accent) inset,
                  0 0 70px -12px color-mix(in srgb,var(--accent) 55%,transparent)}
 /* THE PER-PACK EXCEPTION IS DELETED, NOT EXTENDED (#862). This used to paint
@@ -185,23 +185,23 @@ body.arming .card{border-color:var(--accent);
    its own station — and the card's fields stand INSIDE it: no panel, no
    blur, no border, no shadow of its own, because the ring is the card. */
 
-.field{margin-bottom:18px}
-.field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
+:where(.arrival) .field{margin-bottom:18px}
+:where(.arrival) .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
              text-transform:uppercase;margin:0 0 6px}
-.field input,.field select{width:100%;background:var(--panel);border:1px solid var(--line);
+:where(.arrival) .field input,:where(.arrival) .field select{width:100%;background:var(--panel);border:1px solid var(--line);
        border-radius:9px;color:var(--ink);font-size:13.5px;padding:10px 12px;font-family:var(--ui)}
-.field input::placeholder{color:var(--ink-quiet)}
-.field input:focus,.field select:focus{border-color:var(--accent)}
-.field select{appearance:none;-webkit-appearance:none;padding-right:30px}
+:where(.arrival) .field input::placeholder{color:var(--ink-quiet)}
+:where(.arrival) .field input:focus,:where(.arrival) .field select:focus{border-color:var(--accent)}
+:where(.arrival) .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
 #hhname{font:600 16.5px var(--display);padding:10px 13px}
 /* ONE COLUMN (#862, owner, 2026-09-06): name, then time zone, then currency
    — stacking narrows the block, which is what lets the circle come down: a
    ~300px column inside a 500px ring still clears its widest point. */
-.row2{display:block}
-.row2>.field{margin-bottom:18px}
-.row2>.field:last-child{margin-bottom:0}
-.selwrap{position:relative}
-.selwrap::after{content:"";position:absolute;right:13px;top:calc(50% + 8px);width:6px;height:6px;
+:where(.arrival) .row2{display:block}
+:where(.arrival) .row2>.field{margin-bottom:18px}
+:where(.arrival) .row2>.field:last-child{margin-bottom:0}
+:where(.arrival) .selwrap{position:relative}
+:where(.arrival) .selwrap::after{content:"";position:absolute;right:13px;top:calc(50% + 8px);width:6px;height:6px;
                 border-right:1.4px solid var(--ink-faint);border-bottom:1.4px solid var(--ink-faint);
                 transform:translateY(-50%) rotate(45deg);pointer-events:none}
 .pair{margin-bottom:18px}
@@ -213,14 +213,14 @@ body.arming .card{border-color:var(--accent);
    mistake. Colours are literal, not pack tokens, for the same reason the
    glass is a darkening rather than a paint — the ground is a night sky
    whatever pack is chosen. */
-.card .field input,.card .field select,.card .field label{text-align:center}
-.card .field select{text-align-last:center;padding-right:12px}
-.card .selwrap::after{display:none}
-.card .field label{color:#9aa6bf;text-shadow:0 1px 8px rgba(2,5,14,.8)}
-.card .field input,.card .field select{
+:where(.arrival) .card .field input,:where(.arrival) .card .field select,:where(.arrival) .card .field label{text-align:center}
+:where(.arrival) .card .field select{text-align-last:center;padding-right:12px}
+:where(.arrival) .card .selwrap::after{display:none}
+:where(.arrival) .card .field label{color:#9aa6bf;text-shadow:0 1px 8px rgba(2,5,14,.8)}
+:where(.arrival) .card .field input,:where(.arrival) .card .field select{
       background:rgba(5,9,20,.42);border-color:rgba(240,244,251,.22);color:#f0f4fb}
-.card .field input::placeholder{color:rgba(240,244,251,.36)}
-.card .field input:focus,.card .field select:focus{border-color:#d8b45a}
+:where(.arrival) .card .field input::placeholder{color:rgba(240,244,251,.36)}
+:where(.arrival) .card .field input:focus,:where(.arrival) .card .field select:focus{border-color:#d8b45a}
 
 /* ── THE REJECTION, in one line ──────────────────────────────────────────
    Third pass: the three-line banner (code · sentence · footnote) is gone. The
@@ -240,9 +240,9 @@ body.rejected #hhname{border-color:var(--warm);
 
 /* the one reassurance that survives: it admits to the four sections that were
    made without being asked for, and says nothing else */
-.note{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.05em;
+:where(.arrival) .note{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.05em;
       margin:-4px 0 20px}
-.card .note{color:#8f9bb5;text-align:center}
+:where(.arrival) .card .note{color:#8f9bb5;text-align:center}
 
 .btn{width:100%;font:600 14px var(--display);color:var(--bg);background:var(--accent);
      border:0;border-radius:11px;padding:12px 24px;cursor:pointer;
@@ -255,14 +255,14 @@ body.rejected #hhname{border-color:var(--warm);
    requires the two surfaces to carry the identical control). Overrides .btn
    above by id, rather than growing it, so the card's own width-100% button
    stays exactly what a caller outside the ring still gets. */
-#gobtn{display:block;margin:20px auto 0;width:auto;
+:where(.arrival) #gobtn{display:block;margin:20px auto 0;width:auto;
        font:600 12px var(--display);color:#04060e;background:#d8b45a;
        border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
        letter-spacing:.04em;line-height:normal;
        box-shadow:0 0 28px rgba(216,180,90,.22);
        transition:filter .35s ease,box-shadow .3s ease,opacity .4s ease}
-#gobtn:hover:not(:disabled){filter:brightness(1.08)}
-#gobtn:disabled{opacity:.34;cursor:default;box-shadow:none}
+:where(.arrival) #gobtn:hover:not(:disabled){filter:brightness(1.08)}
+:where(.arrival) #gobtn:disabled{opacity:.34;cursor:default;box-shadow:none}
 
 /* ══ THE NEWCOMER'S LANDING (§15 second pass, ruling 4) ═══════════════════
    A reader who belongs to nothing yet flies exactly the same launch and sets
@@ -357,8 +357,8 @@ body.belong .nf .belong{opacity:1}
    so the transitions must not play out from where they were — they are the
    journey, and the journey is already over. Fixture-only: nothing sets
    `pinned` in the product. */
-body.pinned #formlayer,body.pinned .card,body.pinned .nf,body.pinned .bigring,
-body.pinned .bigring .ringglass,body.pinned .bigring .ringorbit,
+body.pinned #formlayer,body.pinned :where(.arrival) .card,body.pinned .nf,body.pinned :where(.arrival) .bigring,
+body.pinned :where(.arrival) .bigring .ringglass,body.pinned :where(.arrival) .bigring .ringorbit,
 body.pinned .nf .disc,body.pinned .nf .belong{transition:none!important}
 body.pinned .nf .minisys,body.pinned .nf .nstar{animation:none!important;opacity:1}
 
@@ -369,7 +369,7 @@ body.pinned .nf .minisys,body.pinned .nf .nstar{animation:none!important;opacity
    Only the movement goes. */
 @media (prefers-reduced-motion: reduce){
   .nf *{animation:none!important}
-  #formlayer,.card,.nf,.bigring,.bigring .ringglass,.bigring .ringorbit{
+  #formlayer,:where(.arrival) .card,.nf,:where(.arrival) .bigring,:where(.arrival) .bigring .ringglass,:where(.arrival) .bigring .ringorbit{
     transition-duration:.7s!important;transition-timing-function:ease!important}
   #formlayer{animation:none!important}
   .nf .minisys,.nf .nstar{opacity:1}
