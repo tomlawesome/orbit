@@ -37,7 +37,15 @@ let seeded = false;
 async function signInAs(page: Page, account: string) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  /* Not a fixed destination: #840 sends a session with no household of its
+     own to the arrival at `/` instead of /home, and both callers below sign
+     in before any household exists for that account (establishInstanceAdmin
+     is the instance's very first sign-in; the owner's own signInAs runs
+     before createHousehold). Neither needs the landing page -- only a real
+     session, which every request after this one carries regardless of which
+     screen is showing. */
+  const session = await page.request.get("/api/auth/session");
+  expect(session.ok()).toBe(true);
 }
 
 /* A fresh instance promotes its first sign-in to instance admin, and only an
