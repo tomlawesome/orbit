@@ -968,6 +968,38 @@ export async function commandMailbox(command) {
 }
 
 /**
+ * The instance's one public contact address, as an administrator sees it
+ * (#860). `null` means the route could not answer — under fixtures, or for a
+ * signed-in user who is not an instance administrator.
+ *
+ * @typedef {object} ContactSettings
+ * @property {?string} address
+ * @property {number} version
+ * @property {string} updatedAt
+ *
+ * @returns {Promise<?ContactSettings>}
+ */
+export async function readContactSettings() {
+  try {
+    /** @type {{ contact?: ?ContactSettings }} */
+    const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
+    return body.contact ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sets, changes or clears the address, and answers with it as it now stands.
+ *
+ * @param {{ action: "set", expectedVersion: number, address: string } | { action: "clear", expectedVersion: number }} command
+ * @returns {Promise<{ contact: ContactSettings }>}
+ */
+export async function commandContact(command) {
+  return json(await csrfFetch("/api/admin/contact", { body: command }));
+}
+
+/**
  * Everything mission control renders (#465): the instance's people (real
  * route), its systems from the workspace (admins see everything, §11), the
  * live mailbox settings (#743), and the parts no route can answer yet —
@@ -976,7 +1008,7 @@ export async function commandMailbox(command) {
  * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox] = await Promise.all([
+  const [workspace, session, users, mailbox, contact] = await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
@@ -986,6 +1018,7 @@ export async function readAdminScreen() {
       )
       .catch(() => []),
     readMailboxSettings(),
+    readContactSettings(),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   /* Real owner names where the members route answers (#453); the fixture's
@@ -1017,6 +1050,7 @@ export async function readAdminScreen() {
        (#465, §15) while a real deployment shows its real mailbox. */
     relay: mailbox ? relayRowsOf(mailbox) : adminFixture.relay,
     mailbox,
+    contact,
     owners,
   };
 }
@@ -1506,7 +1540,7 @@ export async function signOut() {
  */
 export async function readHouseholdScreen(householdId) {
   const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
-  const [roster, joinRequests] = await Promise.all([
+  const [roster, joinRequests, invitations] = await Promise.all([
     /** @type {Promise<Partial<Roster>>} */ (
       json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
     ).catch(() => ({ members: [], candidates: [] })),
@@ -1515,6 +1549,9 @@ export async function readHouseholdScreen(householdId) {
     json(await fetch("/api/join-requests", { credentials: "same-origin" }))
       .then((/** @type {{ requests?: JoinRequest[] }} */ body) => body.requests ?? [])
       .catch(() => []),
+    /* #481: additive, like the roster — an invitations route that cannot be
+       reached must not take the household screen down with it. */
+    readInvitations(householdId).catch(() => []),
   ]);
   /* household.js's householdScreenOf infers its parameter shape from its own
      defaults (e.g. `members = []` reads as `never[]`), so this call is cast
@@ -1527,6 +1564,7 @@ export async function readHouseholdScreen(householdId) {
     members: roster.members ?? [],
     candidates: roster.candidates ?? [],
     joinRequests,
+    invitations,
     today: todayOf(workspace),
     /* Pinned "now" so "2d ago" on a waiting joiner holds still under the gate
        and stays live in production — readHome's rule. */
@@ -1626,6 +1664,69 @@ export async function decideJoinRequest(requestId, action) {
 export async function requestHouseholdDeletion(householdId, confirmation) {
   return json(await csrfFetch(`/api/households/${householdId}/lifecycle`, {
     body: { action: "delete", confirmation },
+  }));
+}
+
+/* ---------------------------------------------------------------------------
+ * EMAIL INVITATIONS (#481) — the same block, for somebody with no account.
+ */
+
+/**
+ * One open invitation, as its route reports it. There is no token in this
+ * shape, and there never will be: the link exists in the mail and nowhere
+ * else, and a screen that could show it could also leak it.
+ *
+ * @typedef {object} Invitation
+ * @property {string} id
+ * @property {string} householdId
+ * @property {string} email
+ * @property {string} createdAt
+ * @property {?string} sentAt      null while a send has failed
+ * @property {?string} sendError   a bounded class, never a provider message
+ * @property {string} expiresAt
+ */
+
+/**
+ * The household's open invitations. Every member may read them.
+ *
+ * @param {string} householdId
+ * @returns {Promise<Invitation[]>}
+ */
+export async function readInvitations(householdId) {
+  /** @type {{ invitations?: Invitation[] }} */
+  const body = await json(await fetch(`/api/households/${householdId}/invitations`, {
+    credentials: "same-origin",
+  }));
+  return body.invitations ?? [];
+}
+
+/**
+ * Send — or resend, which is the same act to the protocol.
+ *
+ * There is one open invitation per address, so sending to an address that
+ * already has one replaces it: new token, new expiry, and the earlier link
+ * stops working. The screen offers the two under different words because they
+ * are different intentions; the route has one.
+ *
+ * @param {string} householdId
+ * @param {string} email
+ * @returns {Promise<{ invitation: Invitation, invitations: Invitation[] }>}
+ */
+export async function sendInvitation(householdId, email) {
+  return json(await csrfFetch(`/api/households/${householdId}/invitations`, { body: { email } }));
+}
+
+/**
+ * Withdraw an open invitation; its link then fails as "withdrawn".
+ *
+ * @param {string} householdId
+ * @param {string} invitationId
+ * @returns {Promise<{ invitations: Invitation[] }>}
+ */
+export async function withdrawInvitation(householdId, invitationId) {
+  return json(await csrfFetch(`/api/households/${householdId}/invitations`, {
+    method: "DELETE",
+    body: { invitationId },
   }));
 }
 

@@ -63,3 +63,8 @@ services:
       # SMTP_PORT exactly -- both read the same variable so they can never
       # diverge.
       - "127.0.0.1:${TEST_SMTP_PORT:-3025}:3025"
+      # IMAPS, loopback only: the invitation journey (#481) reads Orbit's own
+      # outbound mail back out of this sidecar instead of intercepting it --
+      # tests/e2e/support/mail.ts's TEST_IMAPS_PORT must match this binding
+      # exactly, for the same reason as TEST_SMTP_PORT above.
+      - "127.0.0.1:${TEST_IMAPS_PORT:-3993}:3993"

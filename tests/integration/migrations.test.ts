@@ -77,6 +77,12 @@ describe("PostgreSQL migration evidence", () => {
     // safety), unlike drizzle's mapped reads elsewhere in this suite.
     const maintenanceRows = await database.client.unsafe(`SELECT "singleton", "active", "version" FROM "instance_maintenance"`);
     expect(maintenanceRows).toEqual([{ singleton: true, active: false, version: "1" }]);
+
+    /* 0033 seeds the contact singleton unconditionally too (#860): every
+       fresh instance starts with no public contact address, which is a
+       supported, working state rather than an absent row. */
+    const contactRows = await database.client.unsafe(`SELECT "singleton", "public_address", "version" FROM "instance_contact"`);
+    expect(contactRows).toEqual([{ singleton: true, public_address: null, version: "1" }]);
   });
 
   it("converts a live maintenance singleton and its pending notices into windows and updates", async () => {
@@ -194,6 +200,13 @@ describe("PostgreSQL migration evidence", () => {
     expect((await readSchemaContract(database.client)).tables).toEqual(EXPECTED_TABLE_COLUMNS);
     expect((await readSchemaContract(database.client)).constraints).toEqual(EXPECTED_CONSTRAINTS);
     expect((await readSchemaContract(database.client)).indexes).toEqual(EXPECTED_INDEXES);
+
+    /* #860's operational impact: an upgrade from before 0033 must leave the
+       contact address unset, not absent — the same unconditional-seed
+       guarantee 0028 gives instance_maintenance. */
+    const contactRows = await database.client.unsafe(`SELECT "singleton", "public_address", "version" FROM "instance_contact"`);
+    expect(contactRows).toEqual([{ singleton: true, public_address: null, version: "1" }]);
+
     const expectedAfterUpgrade = structuredClone(beforeUpgrade);
     const legacyReceipt = expectedAfterUpgrade.imap_ingestion_messages.find((row) => row.review_item_id);
     if (!legacyReceipt) throw new Error("The migration fixture must include a legacy prototype receipt");
@@ -257,6 +270,36 @@ describe("PostgreSQL migration evidence", () => {
       data: await readFixtureSnapshot(database.client),
     }).toEqual(beforeRerun);
     expect(BASELINE_MIGRATION_TAG).toBe("0017_imap_recipient_alias_index");
+  });
+
+  it("lets only one invitation per household and address stay open, and bounds send_error to its classes (#481)", async () => {
+    const database = await createMigrationTestDatabase("invitations");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+    const insert = (digest: string) => database.client.unsafe(
+      `INSERT INTO "household_invitations" ("household_id", "email", "token_digest", "expires_at")
+       VALUES ($1, $2, $3, now() + interval '14 days')`,
+      [householdId, "invited@example.invalid", digest],
+    );
+
+    await expect(insert("a".repeat(64))).resolves.toBeDefined();
+    /* The partial unique index is the "resend replaces" rule in the database:
+       a second OPEN invitation to the same address cannot exist at all. */
+    await expect(insert("b".repeat(64))).rejects.toThrow(/household_invitation_open_once/u);
+    /* Withdrawn, and the address is free again — the audit row survives. */
+    await database.client.unsafe(`UPDATE "household_invitations" SET "revoked_at" = now()`);
+    await expect(insert("c".repeat(64))).resolves.toBeDefined();
+
+    /* send_error carries a bounded class, never a provider message. */
+    await expect(
+      database.client.unsafe(`UPDATE "household_invitations" SET "send_error" = 'smtp_rejected'`),
+    ).resolves.toBeDefined();
+    await expect(
+      database.client.unsafe(`UPDATE "household_invitations" SET "send_error" = '550 no such user invited@example.invalid'`),
+    ).rejects.toThrow(/household_invitation_send_error_valid/u);
   });
 
   it("reports an invalid next migration without recording it", async () => {

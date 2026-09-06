@@ -92,7 +92,22 @@
    * the exact cost this fix exists to remove, for however briefly it hung
    * around.
    */
-  let { children = undefined, shown = false } = $props();
+  let {
+    children = undefined,
+    shown = false,
+    /*
+     * THE THREE STATES WHERE THE DOOR CANNOT OPEN (#788): fixed Orbit-owned
+     * text, set by SignIn.svelte, that stands where the gate would. `.state`
+     * is always in the DOM — never conditionally rendered — because it is an
+     * `aria-live="polite"` region: a reader using a screen reader needs the
+     * element to already exist for a later text change to announce.
+     * SignIn.svelte controls the door/state SWITCH itself by not rendering
+     * the button at all (not merely hiding it) and by flight.css's
+     * `[data-state]` rules on `<body>`, which this component does not touch.
+     */
+    statePrimary = "",
+    stateSub = "",
+  } = $props();
   /** @type {HTMLDivElement} */
   let world;
   /** @type {SVGImageElement} */
@@ -386,6 +401,10 @@
         <g class="tr"><circle cx="163" cy="63.5" r="7" fill="#d8b45a"/></g></svg></div>
       <div class="name">orbit</div>
       <div class="gate-wrap">{@render children?.()}</div>
+      <div class="state" role="status" aria-live="polite">
+        <div class="state-primary">{statePrimary}</div>
+        <div class="state-sub">{stateSub}</div>
+      </div>
     </div>
   </div>
 </div>

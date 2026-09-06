@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { THEME_PACKS } from "../../web/src/lib/theme.js";
+
 /*
  * #491 item 3: every "-text" companion (and --ink-quiet) is a promise that a
  * letterform drawn in that colour clears WCAG 2's 4.5:1 body-text floor on
@@ -11,10 +13,15 @@ import { describe, expect, it } from "vitest";
  * the real web/src/lib/packs.css (not a copy of it) and measures every pack,
  * rather than asserting a handful of hand-picked spots.
  *
- * Grounds, per the 2026-09-02 ruling: atlas against --bg; dawn and clouds
- * against --sky-1 (the coolest, darkest stop of the gradient, which is what
- * the top of the dial screen actually paints); the remaining packs against
- * their own --bg.
+ * Grounds, per the 2026-09-02 ruling: dawn and clouds against --sky-1 (the
+ * coolest, darkest stop of the gradient, which is what the top of the dial
+ * screen actually paints); the remaining packs against their own --bg.
+ *
+ * PACK_NAMES is hand-written here rather than discovered from the file (the
+ * way v19-pack-contrast.test.mjs does) because each pack also needs its own
+ * ground token — atlas was removed from both lists at #865, along with its
+ * own [data-theme=atlas] block, so nothing here grades a pack that no longer
+ * exists.
  */
 
 const PACKS_CSS = readFileSync(
@@ -22,12 +29,11 @@ const PACKS_CSS = readFileSync(
   "utf8",
 );
 
-const PACK_NAMES = ["starchart", "afterdark", "atlas", "dawn", "clouds", "retrograde"];
+const PACK_NAMES = ["starchart", "afterdark", "dawn", "clouds", "retrograde"];
 
 const GROUND_TOKEN = {
   starchart: "--bg",
   afterdark: "--bg",
-  atlas: "--bg",
   dawn: "--sky-1",
   clouds: "--sky-1",
   retrograde: "--bg",
@@ -109,7 +115,7 @@ function parseRgba(pack, rawValue) {
     const [, r, g, b, a] = rgbaMatch;
     return { rgb: [Number(r), Number(g), Number(b)], alpha: Number(a) };
   }
-  // A solid colour (e.g. atlas's --panel-raised) is opaque.
+  // A solid colour (e.g. a flat #rrggbb --panel-raised) is opaque.
   return { rgb: resolveColor(pack, value), alpha: 1 };
 }
 
@@ -142,6 +148,10 @@ function contrastRatio(rgbA, rgbB) {
 const AA_TEXT_FLOOR = 4.5;
 
 describe("packs.css text-grade companions clear WCAG 2 AA on their pack's ground (#491)", () => {
+  it("grades exactly the roster theme.js names (#865)", () => {
+    expect(new Set(PACK_NAMES)).toEqual(new Set(THEME_PACKS));
+  });
+
   it.each(PACK_NAMES)("%s defines every -text companion and --ink-quiet", (pack) => {
     for (const token of TEXT_TOKENS) {
       expect(BLOCKS[pack]).toHaveProperty(token);

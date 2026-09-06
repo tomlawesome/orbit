@@ -24,6 +24,7 @@ import { verifySenderAddress } from "orbit/server/mail-in/sender-addresses";
  */
 const RELAY_PAGE = "/settings/mail";
 
+/** @param {string} location */
 function seeOther(location) {
   return new Response(null, { status: 303, headers: { location, "cache-control": "no-store" } });
 }
