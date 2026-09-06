@@ -6,9 +6,9 @@ import { formatInvitationDate, renderInvitationMail } from "./mail";
  *
  * The template's own data story — Sam Okafor invites priya@example.com to
  * Harbour House, good until 20 Sep 2026 — is used verbatim, so this file also
- * records what `design/v19/mail/round-1/text.txt` said. When the approved
- * mockup replaces the HTML part, the text assertions below must still pass
- * unchanged: the look is being chosen, the words are not.
+ * records what `design/v19/mail/round-1/text.txt` said. The text assertions
+ * below survived the approved mockup landing in the HTML part unchanged, and
+ * are meant to keep surviving: the look was chosen, the words were not.
  */
 
 const CONTEXT = {
@@ -51,16 +51,24 @@ describe("the invitation mail", () => {
   });
 
   it("says the same things in the HTML part, and carries the link as its one remote resource", () => {
-    const { html } = renderInvitationMail(CONTEXT);
+    const { html, subject } = renderInvitationMail(CONTEXT);
     for (const words of [
-      "Sam Okafor has a place for you in Harbour House on Orbit.",
-      "Sent to priya@example.com.",
-      "Good until 20 Sep 2026.",
-      "Open your invitation",
-      "not a company.",
+      /* "the living system" splits the opening line over two: the inviter's
+         sentence, then the household on its own at display size. */
+      "Sam Okafor has a place for you in",
+      "Harbour House",
+      "Orbit keeps a household’s year in one calm view. Sam would like you in theirs.",
+      "sent to <span style=\"color:#7c8699;\">priya@example.com</span> · sign in with that address",
+      "good until <span style=\"color:#7c8699;\">20 Sep 2026</span>",
+      "not expecting this? nothing to do — the link simply lapses.",
+      "Take your place",
+      "Orbit at <span style=\"color:#7c8699;\">orbit.example</span> · run by Sam’s household, not a company.",
+      /* The preheader: what a phone's list view shows beside the subject. */
+      "Sam has a place for you in Harbour House. The link is good until 20 Sep 2026.",
     ]) {
       expect(html).toContain(words);
     }
+    expect(html).toContain(`<title>${subject}</title>`);
     /* No remote images, no web fonts, no stylesheets: the mail has to be
        legible with images off, and a blocked resource must not be able to
        report that it was opened. */
@@ -69,6 +77,56 @@ describe("the invitation mail", () => {
     expect(html).not.toMatch(/@import|url\(/iu);
     const remote = [...html.matchAll(/https?:\/\/[^"'\s<>]+/gu)].map((match) => match[0]);
     expect(new Set(remote)).toEqual(new Set([CONTEXT.link]));
+  });
+
+  it("holds the design's own constraints: no images, and nothing positioned", () => {
+    const { html } = renderInvitationMail(CONTEXT);
+    /* The mockup places the comet's tail and the sun's warmth with margins on
+       purpose: `position:` is dropped or mangled by enough clients that the
+       layout has to work without it (#481, round 3 direction G). */
+    expect(html).not.toMatch(/position\s*:/iu);
+    expect(html).not.toMatch(/<img\b/iu);
+    expect(html).not.toMatch(/<svg\b/iu);
+    expect(html).toContain("width:100%;max-width:560px;");
+    /* The animation is enhancement, and it is stoppable. */
+    expect(html).toContain("@media (prefers-reduced-motion: reduce)");
+  });
+
+  it("carries the link exactly twice — the button and the copy-this line — and escapes it", () => {
+    const { html } = renderInvitationMail(CONTEXT);
+    expect(html.split(CONTEXT.link)).toHaveLength(3);
+
+    /* A real token is base64url and has no metacharacters, but the link is
+       built from an instance's own base URL, which can carry a query. */
+    const awkward = "https://orbit.example/invite/abc?a=1&b=2";
+    const escaped = renderInvitationMail({ ...CONTEXT, link: awkward }).html;
+    expect(escaped).not.toContain(awkward);
+    expect(escaped.split("https://orbit.example/invite/abc?a=1&amp;b=2")).toHaveLength(3);
+  });
+
+  it("escapes the inviter, the household, the address and the date into the HTML", () => {
+    const { html } = renderInvitationMail({
+      ...CONTEXT,
+      inviterName: "Ada <b>Byron",
+      householdName: "Harbour <b>& House",
+      email: "priya+<b>@example.com",
+    });
+    expect(html).toContain("Ada &lt;b&gt;Byron has a place for you in");
+    expect(html).toContain("Harbour &lt;b&gt;&amp; House");
+    expect(html).toContain("priya+&lt;b&gt;@example.com");
+    expect(html).toContain("20 Sep 2026");
+    expect(html).not.toContain("<b>");
+  });
+
+  it("escapes a household name for the HTML part while leaving the text part alone", () => {
+    const { html, text } = renderInvitationMail({ ...CONTEXT, householdName: "Nest <b>& Co" });
+    expect(html).toContain("Nest &lt;b&gt;&amp; Co");
+    expect(html).not.toContain("Nest <b>& Co");
+    /* The text part is not markup; escaping it would put "&amp;" in front of
+       someone reading the mail with HTML off. */
+    expect(text).toContain("Nest <b>& Co");
+    expect(text).not.toContain("&lt;");
+    expect(text).not.toContain("&amp;");
   });
 
   it("escapes a chosen display name rather than letting it write markup", () => {
