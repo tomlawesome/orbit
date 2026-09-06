@@ -9,8 +9,8 @@
  *               turning DOWN the opacity of the token colours already there.
  *               No colour is invented for the purpose.
  *
- *   "forward" — atlas, dawn, clouds. Nothing dims, because dimming a daylight
- *               sky just greys the whole page. The explained thing is pushed
+ *   "forward" — dawn, clouds. Nothing dims, because dimming a daylight sky
+ *               just greys the whole page. The explained thing is pushed
  *               FORWARD by colour instead: quiet tokens step up to full ink,
  *               structural lines and borders take --accent, and it wears a
  *               soft accent halo. Still pack tokens, still no invented hex.
@@ -20,17 +20,21 @@
  * place the JAVASCRIPT needs it: on a "forward" pack the engine never marks
  * anything but the target, so nothing that is not being explained is touched
  * at all. tests/unit/v19-tour-emphasis.test.mjs pins the two halves together
- * so the list here and the selectors there cannot drift apart.
+ * so the list here and the selectors there cannot drift apart, and pins both
+ * against the roster in theme.js (#865): a pack added or removed there and
+ * left unclassified here fails that test instead of shipping unemphasised.
  *
- * packs.css holds exactly these six; a seventh would have to name its mode
+ * packs.css holds exactly these five; a sixth would have to name its mode
  * here and add its override there, together.
  */
+import { DEFAULT_THEME } from "../theme.js";
 
 /** The packs whose skies are dark enough to dim. */
 export const DIMMING_PACKS = ["starchart", "afterdark", "retrograde"];
 
-/** The daylight packs, which push the target forward instead. */
-export const FORWARD_PACKS = ["atlas", "dawn", "clouds"];
+/** The daylight packs, which push the target forward instead. Atlas was here
+ *  until #865 removed it from the roster entirely. */
+export const FORWARD_PACKS = ["dawn", "clouds"];
 
 /**
  * @param {string | null | undefined} pack
@@ -42,7 +46,7 @@ export function emphasisModeOf(pack) {
 
 /** The pack in force, read where every screen writes it (app.html, Chrome). */
 export function packOf(/** @type {Document} */ doc) {
-  return doc.documentElement.dataset.theme || "starchart";
+  return doc.documentElement.dataset.theme || DEFAULT_THEME;
 }
 
 /**

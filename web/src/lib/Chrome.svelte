@@ -1,6 +1,7 @@
 <script>
   import { resolve } from "$app/paths";
   import { signOut } from "$lib/data/workspace.js";
+  import { DEFAULT_THEME, THEME_PACKS } from "$lib/theme.js";
 
   /**
    * The sub-screens' shared chrome (#461): the "← YOUR SKY" way back, the
@@ -31,29 +32,31 @@
   /*
    * THE v1.3.0 ROSTER, FINAL (§15, owner: "the release theme list is star
    * chart, after dark, CLOUDS, dawn terminator, and retrograde"). Five packs,
-   * five swatches. Atlas, hanami, porcelain, miami and solarium are on the
-   * records shelf — their code stays and a stored preference still renders,
-   * but they are offered nowhere a reader can choose, and this row is one of
-   * those places (the precedent is atlas leaving at #480/f9261c6).
+   * five swatches, in the order and membership theme.js names (#865) — atlas,
+   * hanami, porcelain, miami and solarium are on the records shelf, offered
+   * nowhere a reader can choose, and this row is one of those places (atlas
+   * left at #480/f9261c6 and its code followed at #865).
    *
    * The dot is the pack's most telling colour rather than strictly its --bg:
    * clouds shows the cool white of a cloud crest, which is the lighter end of
    * the range it was admitted to carry, and dawn shows the temperature story's
    * own ground now that the terminator has moved it off #c3ccdb.
    */
-  const PACKS = [
-    ["starchart", "star-chart", "#060b1c", ""],
-    ["afterdark", "after dark", "#05070d", ""],
-    ["clouds", "clouds", "#eef2f9", ""],
-    ["dawn", "dawn", "#d2d3d4", ""],
-    ["retrograde", "retrograde", "#080a14", "inset 0 0 0 1px #ff4fd8"],
-  ];
+  /** @type {Record<string, [string, string, string]>} */
+  const SWATCH = {
+    starchart: ["star-chart", "#060b1c", ""],
+    afterdark: ["after dark", "#05070d", ""],
+    clouds: ["clouds", "#eef2f9", ""],
+    dawn: ["dawn", "#d2d3d4", ""],
+    retrograde: ["retrograde", "#080a14", "inset 0 0 0 1px #ff4fd8"],
+  };
+  const PACKS = THEME_PACKS.map((id) => [id, ...SWATCH[id]]);
 
   let open = $state(false);
-  let active = $state("starchart");
+  let active = $state(DEFAULT_THEME);
 
   $effect(() => {
-    active = document.documentElement.dataset.theme || "afterdark";
+    active = document.documentElement.dataset.theme || DEFAULT_THEME;
     const close = (/** @type {Event} */ event) => {
       if (!(event.target instanceof Element) || !event.target.closest(".account,.orb")) open = false;
     };

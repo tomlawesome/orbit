@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { defaultSections } from "./domain";
 import {
+  DEFAULT_THEME_PACK,
   legacyToThemePack,
   sectionPreferenceSchema,
   textSizes,
   themePackInfo,
+  themePackOrDefault,
   themePacks,
   themePreferenceSchema,
 } from "./preferences";
@@ -36,8 +38,28 @@ describe("personalisation preferences", () => {
     });
   });
 
-  it("rejects a theme id outside the four v19 packs", () => {
+  it("rejects a theme id outside the v19 packs this schema validates", () => {
     expect(themePreferenceSchema.safeParse({ theme: "after-dark" }).success).toBe(false);
+  });
+
+  it("no longer accepts atlas, removed at #865", () => {
+    expect(themePacks).not.toContain("atlas");
+    expect(themePreferenceSchema.safeParse({ theme: "atlas" }).success).toBe(false);
+  });
+
+  it("defaults to after dark (#865)", () => {
+    expect(DEFAULT_THEME_PACK).toBe("afterdark");
+  });
+
+  it("resolves a stored preference naming a theme that no longer exists to after dark", () => {
+    expect(themePackOrDefault("atlas")).toBe("afterdark");
+    expect(themePackOrDefault("not-a-real-pack")).toBe("afterdark");
+    expect(themePackOrDefault(null)).toBe("afterdark");
+    expect(themePackOrDefault(undefined)).toBe("afterdark");
+  });
+
+  it("still honours a valid stored preference", () => {
+    for (const theme of themePacks) expect(themePackOrDefault(theme)).toBe(theme);
   });
 
   it("every theme pack has a name, description and three swatches", () => {
@@ -48,17 +70,21 @@ describe("personalisation preferences", () => {
     }
   });
 
-  it("maps every legacy colourway to its nearest theme pack (#325)", () => {
+  it("maps every legacy colourway to its nearest theme pack (#325, #865)", () => {
     expect(legacyToThemePack("after-dark", "system")).toBe("afterdark");
     expect(legacyToThemePack("coast", "light")).toBe("dawn");
     expect(legacyToThemePack("coast", "dark")).toBe("afterdark");
-    expect(legacyToThemePack("verdant", "system")).toBe("atlas");
+    /* atlas, the light-mode nearest match for a warm accent, left the roster
+       at #865 — both modes of a warm-accent legacy colourway now land on
+       starchart, the one remaining warm-accent pack. */
+    expect(legacyToThemePack("verdant", "system")).toBe("starchart");
     expect(legacyToThemePack("verdant", "dark")).toBe("starchart");
-    expect(legacyToThemePack("ember", "light")).toBe("atlas");
+    expect(legacyToThemePack("ember", "light")).toBe("starchart");
     expect(legacyToThemePack("ember", "dark")).toBe("starchart");
     expect(legacyToThemePack("berry", "system")).toBe("dawn");
     expect(legacyToThemePack("berry", "dark")).toBe("afterdark");
-    expect(legacyToThemePack("unknown-legacy-id", "dark")).toBe("starchart");
+    /* Unrecognised lands on the default pack, which #865 made after dark. */
+    expect(legacyToThemePack("unknown-legacy-id", "dark")).toBe("afterdark");
   });
 
   it("rejects duplicate section identifiers", () => {
