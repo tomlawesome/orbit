@@ -60,8 +60,32 @@ const NOT_CONFIGURED: ImapIngestionConfig = {
   aliasCurrent: { generation: 1, secret: "" },
   aliasSecret: "",
   trustedRecipientHeader: "",
+  trustedAuthservId: "",
   pollMilliseconds: 300_000,
 };
+
+/**
+ * Whose `Authentication-Results` verdict this instance believes (ADR-0017
+ * decision 3, slice 4).
+ *
+ * The administrator's explicit value always wins. Gmail and Outlook write a
+ * known, fixed identity, so those two profiles work without one being typed.
+ * Mailcow and `other` are the operator's own host, which only they can supply,
+ * and until they do this answers empty — which means nothing is believed, no
+ * mail is attributed by sender and no reply is ever sent. Guessing the host
+ * would be inventing a rule ADR-0017 did not make, and the guess would be the
+ * one an attacker gets to exploit.
+ */
+const PROFILE_AUTHSERV_IDS: Record<string, string> = {
+  gmail: "mx.google.com",
+  outlook: "protection.outlook.com",
+};
+
+export function resolveTrustedAuthservId(providerProfile: string | undefined, configured: string | undefined): string {
+  const explicit = configured?.trim().toLowerCase();
+  if (explicit) return explicit;
+  return PROFILE_AUTHSERV_IDS[providerProfile ?? ""] ?? "";
+}
 
 type MailInSecretRow = typeof mailInSecrets.$inferSelect;
 
@@ -122,6 +146,7 @@ export function imapConfigFromMailbox(
   mailbox: {
     host: string; port: number; accountUser: string; mailbox: string; tlsServerName: string;
     trustedRecipientHeader: string; pollSeconds: number; enabled: boolean;
+    providerProfile?: string; trustedAuthservId?: string;
   },
   password: string,
   aliasSecret: string,
@@ -151,6 +176,7 @@ export function imapConfigFromMailbox(
     aliasCurrent,
     aliasSecret: aliasCurrent.secret,
     trustedRecipientHeader: mailbox.trustedRecipientHeader,
+    trustedAuthservId: resolveTrustedAuthservId(mailbox.providerProfile, mailbox.trustedAuthservId),
     pollMilliseconds: mailbox.pollSeconds * 1_000,
   };
 }

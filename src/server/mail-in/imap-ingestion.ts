@@ -23,6 +23,17 @@ import {
   retireAliasesForDisabledUsers,
 } from "./relays";
 import {
+  decideAttribution,
+  parseMailHeaders,
+  senderAddressFromHeaders,
+  senderDomainOf,
+  senderIsAuthenticated,
+  SENDER_AUTHENTICATION_HEADERS,
+  type ParsedHeader,
+} from "./core/sender-authentication";
+import { userForVerifiedSender } from "./sender-addresses";
+import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
+import {
   imapProviderConnectionOptions,
   imapProviderConfigCommitment,
   imapAttachmentRetryDelayMs,
@@ -275,6 +286,32 @@ async function userForRecipientAlias(headers: Buffer | undefined, config: ImapIn
   return { failureCode: "recipient_unverified", digest: aliasDigest };
 }
 
+type SenderResolution = {
+  headers?: ParsedHeader[];
+  address?: string;
+  userId?: string;
+  authenticated: boolean;
+};
+
+/**
+ * Who a message says it is from, and whether that may be believed.
+ *
+ * Every step fails closed. An unreadable header block, a `From` that is not
+ * one plain address, an address no member has verified, or a provider verdict
+ * that is absent, forged-looking or for the wrong domain all end in
+ * `authenticated: false` with no user — which the caller reads as
+ * unattributed.
+ */
+async function senderResolution(headers: Buffer | undefined, config: ImapIngestionConfig): Promise<SenderResolution> {
+  const parsed = parseMailHeaders(headers);
+  if (!parsed) return { authenticated: false };
+  const address = senderAddressFromHeaders(parsed);
+  if (!address) return { headers: parsed, authenticated: false };
+  const authenticated = senderIsAuthenticated(parsed, senderDomainOf(address), config.trustedAuthservId ?? "");
+  const userId = await userForVerifiedSender(address);
+  return { headers: parsed, address, userId, authenticated };
+}
+
 type ImapReceiptValues = {
   mailbox: string;
   mailboxUidValidity: string;
@@ -285,7 +322,8 @@ type ImapReceiptValues = {
   userId: string | null;
   householdId: string | null;
   expiresAt: Date;
-  status: "processing" | "pending_review" | "failed" | "quarantined";
+  status: "processing" | "pending_review" | "failed" | "quarantined" | "unattributed";
+  attributedBy: "sender" | "sender_and_alias" | null;
   failureCode: string | null;
   receiptStatus: "processing" | "cancelled";
   receivedAt: Date;
@@ -748,11 +786,19 @@ async function processImapAttachments(
  * not parse, retain, attach, create, or merge household data; later review
  * work must explicitly choose a household and approve a document draft.
  */
-export async function runImapIngestionCycle(config: ImapIngestionConfig): Promise<void> {
+export async function runImapIngestionCycle(
+  config: ImapIngestionConfig,
+  replyDependencies: UnattributedReplyDependencies = {},
+): Promise<void> {
   if (!config.enabled) return;
   await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
   const client = createImapClient(config);
+  /* Collected during the read-only pass and acted on after it. Ordinary
+     collection must never hold a writable mailbox: opening one only when
+     there is something to delete keeps the destructive action (ADR-0017
+     decision 3, mail-in's first) to the messages that earned it. */
+  const unattributedUids: number[] = [];
   try {
     await client.connect();
     const lock = await client.getMailboxLock(config.mailbox, { readOnly: true });
@@ -775,13 +821,27 @@ export async function runImapIngestionCycle(config: ImapIngestionConfig): Promis
         eq(imapIngestionMessages.mailbox, config.mailbox),
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
       ));
-      const fetchOptions = { uid: true, headers: [config.trustedRecipientHeader], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
+      /* Both header sets in one fetch: the provider's envelope recipient, and
+         everything the sender rules read (ADR-0017 decision 3). A header
+         nobody fetched reads exactly like a header nobody sent, so the list
+         lives beside the rules in core/sender-authentication.ts. */
+      const fetchOptions = { uid: true, headers: [config.trustedRecipientHeader, ...SENDER_AUTHENTICATION_HEADERS], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
       const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }) => {
         try {
         const source = message.source;
         const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
-        const userId = recipient.userId;
+        const sender = await senderResolution(message.headers, config);
+        /* THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES (ADR-0017 decision 3).
+           Nothing is attributed on an alias alone any more: the alias is a
+           capability whoever holds it can post with, so it can confirm an
+           identity but never establish one. */
+        const attribution = decideAttribution({
+          senderUserId: sender.userId,
+          senderAuthenticated: sender.authenticated,
+          aliasUserId: recipient.userId,
+        });
+        const userId = attribution.userId;
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
@@ -791,8 +851,9 @@ export async function runImapIngestionCycle(config: ImapIngestionConfig): Promis
           contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
           userId: userId ?? null, householdId: null,
           expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
-          status: oversized ? "failed" : userId ? "processing" : "quarantined",
-          failureCode: oversized ? "message_too_large" : userId ? null : recipient.failureCode ?? "recipient_unverified",
+          status: oversized ? "failed" : userId ? "processing" : "unattributed",
+          attributedBy: userId ? attribution.attributedBy ?? null : null,
+          failureCode: oversized ? "message_too_large" : userId ? null : attribution.failureCode ?? "sender_unverified",
           // A receipt is only meaningful once a verified recipient's attachments
           // have been held successfully. All other outcomes are terminal here.
           receiptStatus: userId && !oversized ? "processing" : "cancelled",
@@ -801,6 +862,17 @@ export async function runImapIngestionCycle(config: ImapIngestionConfig): Promis
         if (receipt && userId !== (receipt.userId ?? undefined) && receipt.status === "processing") {
           await getDb().update(imapIngestionMessages).set({ status: "quarantined", receiptStatus: "cancelled", failureCode: "recipient_mismatch", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() })
             .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "processing")));
+        }
+        /* Unattributed mail is answered once, where the conditions allow, and
+           then deleted: nothing is kept for an administrator or anyone else.
+           The delete happens after the read-only pass, in its own read-write
+           lock, so ordinary collection never runs against a writable mailbox.
+           The receipt already exists, so a crash between here and the delete
+           costs a duplicate receipt at worst, never a lost message. */
+        if (receipt && !userId && !oversized && receipt.status === "unattributed") {
+          await replyToUnattributedSender(sender.headers, sender.address, config.trustedAuthservId ?? "", replyDependencies)
+            .catch(() => undefined);
+          unattributedUids.push(message.uid);
         }
         if (receipt && userId && receipt.userId === userId && !oversized) {
           const claim = await claimImapAttachmentProcessing(receipt.id);
@@ -842,8 +914,32 @@ export async function runImapIngestionCycle(config: ImapIngestionConfig): Promis
         for (const uid of batch) await fetchThenProcess(uid);
       }
     } finally { lock.release(); }
+    if (unattributedUids.length) await deleteUnattributedMessages(client, config, unattributedUids);
   } finally {
     try { await client.logout(); } catch { /* Network failure already has no raw-mail logging. */ }
+  }
+}
+
+/**
+ * Removes the messages that matched nobody, in their own read-write lock.
+ *
+ * `\Deleted` and an expunge, so the UID is gone rather than merely flagged: a
+ * message no member owns is not kept for an administrator to read, which is
+ * the whole of ADR-0017 decision 3's answer to the retired "hold it for
+ * somebody to sort out" rung. A provider that refuses the delete leaves the
+ * receipt exactly as it is — content-free and terminal — so the message is
+ * never re-attributed on a later cycle, and the next poll's cursor has already
+ * moved past it.
+ */
+async function deleteUnattributedMessages(client: ImapFlow, config: ImapIngestionConfig, uids: number[]): Promise<void> {
+  let lock: { release: () => void } | undefined;
+  try {
+    lock = await client.getMailboxLock(config.mailbox);
+    await client.messageDelete(uids.map(String).join(","), { uid: true });
+  } catch {
+    log.warn({ event: "imap.ingestion", state: "retrying", reason: "provider_unavailable", action: "check_provider", impact: "mail_receipt_delayed" });
+  } finally {
+    lock?.release();
   }
 }
 

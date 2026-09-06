@@ -66,6 +66,12 @@ export interface ImapIngestionConfig {
   /** Deprecated in-memory compatibility name; never persist or log it. */
   aliasSecret: string;
   trustedRecipientHeader: string;
+  /**
+   * Whose `Authentication-Results` verdict this instance believes (ADR-0017
+   * decision 3). Absent or empty means it has not said, so no sender is ever
+   * authenticated and nothing is attributed — the fail-closed default.
+   */
+  trustedAuthservId?: string;
   pollMilliseconds: number;
 }
 

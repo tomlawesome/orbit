@@ -13,6 +13,7 @@ import {
 import { digestImapRecipientAlias } from "@/server/mail-in/core/imap-recipient";
 import { rotateRelay } from "@/server/mail-in/relays";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { attributedHeaders, fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
 import { syntheticPdf } from "../support/synthetic-documents";
 
 afterAll(async () => {
@@ -50,6 +51,7 @@ function config(mailbox = "INBOX"): ImapIngestionConfig {
     aliasCurrent: current,
     aliasSecret: current.secret,
     trustedRecipientHeader: "X-Original-To",
+    trustedAuthservId: TRUSTED_AUTHSERV_ID,
     pollMilliseconds: 30_000,
   };
 }
@@ -93,6 +95,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("recipient-steady-state-no-refetch");
     const current = config();
     const alias = imapRecipientAlias(fixture.users.member.id, current);
+    const sender = await verifiedSenderFor(fixture.users.member.id, `steady-${fixture.users.member.id}@example.test`);
     const ranges: string[] = [];
     setImapClientFactoryForTests(() => ({
       // Exactly one message exists, at UID 1, so the mailbox's own uidNext
@@ -109,7 +112,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
         return [1];
       },
       async fetchOne() {
-        return { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from("steady-state-message") };
+        return { uid: 1, headers: attributedHeaders(sender, alias), source: Buffer.from("steady-state-message") };
       },
     } as unknown as import("imapflow").ImapFlow));
     try {
@@ -131,6 +134,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const current = config();
     const ranges: string[] = [];
     let alias = "";
+    const sender = await verifiedSenderFor(fixture.users.member.id, `expiry-${fixture.users.member.id}@example.test`);
     setImapClientFactoryForTests(() => ({
       // Comfortably above every UID this fixture's fake mailboxes use, so
       // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
@@ -144,7 +148,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
         return [1];
       },
       async fetchOne() {
-        return { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from("post-expiry-current") };
+        return { uid: 1, headers: attributedHeaders(sender, alias), source: Buffer.from("post-expiry-current") };
       },
     } as unknown as import("imapflow").ImapFlow));
     try {
@@ -191,11 +195,12 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("recipient-provider-replay");
     const current = config();
     const alias = imapRecipientAlias(fixture.users.member.id, current);
+    const sender = await verifiedSenderFor(fixture.users.member.id, `replay-${fixture.users.member.id}@example.test`);
     const verifiedPdfBodyStructure = { part: "1", type: "application", subtype: "pdf", disposition: "attachment", dispositionParameters: { filename: "verified.pdf" }, size: 31 };
     const messages = [
-      { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\nTo: attacker@example.invalid\r\n`), source: Buffer.from("message-one"), bodyStructure: verifiedPdfBodyStructure },
-      { uid: 2, headers: Buffer.from("To: attacker@example.invalid\r\n"), source: Buffer.from("message-two") },
-      { uid: 3, headers: Buffer.from("X-Original-To: one@example.invalid\r\nX-Original-To: two@example.invalid\r\n"), source: Buffer.from("message-three") },
+      { uid: 1, headers: attributedHeaders(sender, alias), source: Buffer.from("message-one"), bodyStructure: verifiedPdfBodyStructure },
+      { uid: 2, headers: fixtureHeaders({ extra: ["To: attacker@example.invalid"] }), source: Buffer.from("message-two") },
+      { uid: 3, headers: fixtureHeaders({ extra: ["X-Original-To: one@example.invalid", "X-Original-To: two@example.invalid"] }), source: Buffer.from("message-three") },
     ];
     const fakeClient = {
       // Comfortably above every UID this fixture's fake mailboxes use, so
@@ -222,10 +227,13 @@ describe("receipt identity PostgreSQL boundaries", () => {
       await runImapIngestionCycle(current);
       const receipts = await getDb().select({ uid: imapIngestionMessages.mailboxUid, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode })
         .from(imapIngestionMessages).where(and(eq(imapIngestionMessages.mailbox, "INBOX"), eq(imapIngestionMessages.mailboxUidValidity, "42"))).orderBy(imapIngestionMessages.mailboxUid);
+      /* Since ADR-0017 slice 4 a message that matches no verified sender is
+         `unattributed` rather than quarantined: nobody owns it, so nothing is
+         kept for anybody to sort out. */
       expect(receipts).toEqual([
         { uid: 1, userId: fixture.users.member.id, status: "failed", failureCode: "scanner_disabled" },
-        { uid: 2, userId: null, status: "quarantined", failureCode: "recipient_missing" },
-        { uid: 3, userId: null, status: "quarantined", failureCode: "recipient_header_ambiguous" },
+        { uid: 2, userId: null, status: "unattributed", failureCode: "sender_unverified" },
+        { uid: 3, userId: null, status: "unattributed", failureCode: "sender_unverified" },
       ]);
       expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
         .where(and(
@@ -243,6 +251,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("recipient-uidvalidity-rollover");
     const current = config();
     const alias = imapRecipientAlias(fixture.users.member.id, current);
+    const sender = await verifiedSenderFor(fixture.users.member.id, `rollover-${fixture.users.member.id}@example.test`);
     const ranges: string[] = [];
     let poll = 0;
     setImapClientFactoryForTests(() => {
@@ -261,7 +270,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
           return [uid];
         },
         async fetchOne() {
-          return { uid, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from(`rollover-${uidValidity}`) };
+          return { uid, headers: attributedHeaders(sender, alias), source: Buffer.from(`rollover-${uidValidity}`) };
         },
       };
       return client as unknown as import("imapflow").ImapFlow;
@@ -283,6 +292,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("recipient-crash-restart-cursor");
     const current = config();
     const alias = imapRecipientAlias(fixture.users.member.id, current);
+    const sender = await verifiedSenderFor(fixture.users.member.id, `restart-${fixture.users.member.id}@example.test`);
     const ranges: string[] = [];
     let poll = 0;
     setImapClientFactoryForTests(() => {
@@ -307,7 +317,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
         async fetchOne(uid: string) {
           const numericUid = Number(uid);
           if (firstPoll && numericUid === 2) throw new Error("provider disconnect after durable receipt");
-          return { uid: numericUid, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from(`restart-${numericUid}`) };
+          return { uid: numericUid, headers: attributedHeaders(sender, alias), source: Buffer.from(`restart-${numericUid}`) };
         },
       };
       return client as unknown as import("imapflow").ImapFlow;
