@@ -102,7 +102,10 @@ export function write(handler, options) {
  * Wraps a read handler that needs a session but writes nothing.
  *
  * @param {(event: import("@sveltejs/kit").RequestEvent, session: import("orbit/lib/auth/session").AuthenticatedSession) => Promise<Response> | Response} handler
- * @param {{ fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response }} [options]
+ * @param {{
+ *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response,
+ *   errorResponse?: (error: unknown) => Response,
+ * }} [options]
  * @returns {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response>}
  */
 export function read(handler, options) {

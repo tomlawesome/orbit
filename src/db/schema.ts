@@ -1,5 +1,12 @@
-import { bigint, boolean, check, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, customType, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+/** Raw encrypted bytes; postgres.js already maps `bytea` to/from `Buffer`. */
+const bytea = customType<{ data: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 export const membershipRole = pgEnum("membership_role", ["owner", "member"]);
 export const itemStatus = pgEnum("item_status", ["active", "expired", "cancelled", "archived"]);
@@ -46,6 +53,9 @@ export const imapNotificationKind = pgEnum("imap_notification_kind", ["receipt",
 export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
 export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
+export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token"]);
+export const mailInProviderProfile = pgEnum("mail_in_provider_profile", ["mailcow", "gmail", "outlook", "other"]);
+export const mailInAuthMethod = pgEnum("mail_in_auth_method", ["password", "xoauth2"]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -219,6 +229,12 @@ export const sessions = pgTable("sessions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   rotatedAt: timestamp("rotated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // #482: bounded per-session facts for "where you're signed in" — a coarse
+  // user-agent string (never shown raw; see lib/auth/device.ts) and when the
+  // session was last validated, so the reader can tell a live device from a
+  // stale one.
+  userAgent: text("user_agent"),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
 });
 
 export const households = pgTable("households", {
@@ -692,6 +708,61 @@ export const imapIngestionStagingObjects = pgTable("imap_ingestion_staging_objec
   index("imap_staging_object_message_status_idx").on(table.messageId, table.status),
   index("imap_staging_object_created_idx").on(table.status, table.createdAt),
   check("imap_staging_object_status_valid", sql`${table.status} IN ('pending', 'committed', 'purge_pending')`),
+]);
+
+/**
+ * One row per app-managed mail-in secret (ADR-0017 decision 1, slice 1):
+ * the mailbox password and the instance's alias-derivation key, envelope-
+ * encrypted under the document KEK exactly as `documentCrypto` is. A
+ * superseded secret is deleted, not kept — rotation and removal both take
+ * the old row out in the same transaction that stops referencing it.
+ */
+export const mailInSecrets = pgTable("mail_in_secrets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: mailInSecretKind("kind").notNull(),
+  ciphertext: bytea("ciphertext").notNull(),
+  envelopeVersion: integer("envelope_version").notNull(),
+  contentIv: text("content_iv").notNull(),
+  contentAuthTag: text("content_auth_tag").notNull(),
+  wrappedDek: text("wrapped_dek").notNull(),
+  wrapIv: text("wrap_iv").notNull(),
+  wrapAuthTag: text("wrap_auth_tag").notNull(),
+  keyId: text("key_id").notNull(),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  ...auditColumns,
+});
+
+/**
+ * The instance's one admin-managed mailbox (ADR-0017 decision 1, slice 1):
+ * non-secret provider configuration only, following the `instance_maintenance`
+ * shape (singleton PK, `id` for `audit_log.entity_id`, `version`). The
+ * recipient domain and alias base local part are derived from `accountUser`,
+ * not configured separately. No row means mail-in has never been set up —
+ * there is no environment fallback (decision 6, as rescoped: no upgrade path,
+ * nothing to import).
+ */
+export const mailInMailbox = pgTable("mail_in_mailbox", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  host: text("host").notNull().default(""),
+  port: integer("port").notNull().default(993),
+  accountUser: text("account_user").notNull().default(""),
+  mailbox: text("mailbox").notNull().default("INBOX"),
+  tlsServerName: text("tls_server_name").notNull().default(""),
+  providerProfile: mailInProviderProfile("provider_profile").notNull().default("other"),
+  authMethod: mailInAuthMethod("auth_method").notNull().default("password"),
+  trustedRecipientHeader: text("trusted_recipient_header").notNull().default(""),
+  pollSeconds: integer("poll_seconds").notNull().default(300),
+  enabled: boolean("enabled").notNull().default(false),
+  verificationState: text("verification_state").notNull().default("unverified"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  passwordSecretId: uuid("password_secret_id").references(() => mailInSecrets.id, { onDelete: "set null" }),
+  aliasKeySecretId: uuid("alias_key_secret_id").references(() => mailInSecrets.id, { onDelete: "set null" }),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  ...auditColumns,
+}, (table) => [
+  check("mail_in_mailbox_singleton", sql`${table.singleton}`),
+  check("mail_in_mailbox_verification_state_valid", sql`${table.verificationState} IN ('unverified', 'verified', 'failed')`),
 ]);
 
 /* ── EMAIL INVITATIONS (#481) ─────────────────────────────────────────────

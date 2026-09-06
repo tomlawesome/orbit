@@ -161,6 +161,35 @@ async function arriveWithHousehold(page: Page) {
 }
 
 test.describe("the signed-in v19 sweep", () => {
+  /*
+   * #840: a fresh administrator sign-in with no household anywhere on the
+   * instance is sent to the arrival at `/` instead of returnTo. Most tests
+   * below seed their own household first and reach a route by explicit
+   * goto, so that never bites them, but the tour-overlay test and the plain
+   * gated routes below sign in and go straight to a screen with none of
+   * their own. hasOnwardHousehold lets an administrator through as long as
+   * ANY household exists on the instance, so one anchor -- kept up for this
+   * whole file rather than per test, since the others come and go around it
+   * -- is enough.
+   */
+  let anchor: { id: string; name: string };
+
+  test.beforeAll(async ({ browser }) => {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    await signIn(page, "/home");
+    anchor = await seedHousehold(page);
+    await context.close();
+  });
+
+  test.afterAll(async ({ browser }) => {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    await signIn(page, "/home");
+    await cleanup(page, anchor);
+    await context.close();
+  });
+
   test("/home has no automated WCAG A/AA violations", async ({ page }) => {
     const household = await arriveWithHousehold(page);
     try {
@@ -183,6 +212,22 @@ test.describe("the signed-in v19 sweep", () => {
     try {
       await page.locator("button.orb").click();
       await expect(page.locator("button.orb")).toHaveAttribute("aria-expanded", "true");
+      await axeCheck(page);
+    } finally {
+      await cleanup(page, household);
+    }
+  });
+
+  // #852: the pocket dialect's own account menu — the mobile mirror of the
+  // desk `button.orb`/`#account` state above. `#morb`/`#maccount` are the
+  // pocket dialect's own trigger and panel (pocket.svelte), so this is
+  // skipped on desktop the same way the state above skips mobile.
+  test("/home pocket account menu open has no automated WCAG A/AA violations", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "#morb/#maccount are pocket-only chrome; the desk dialect's own state is covered above");
+    const household = await arriveWithHousehold(page);
+    try {
+      await page.locator("#morb").click();
+      await expect(page.locator("#morb")).toHaveAttribute("aria-expanded", "true");
       await axeCheck(page);
     } finally {
       await cleanup(page, household);

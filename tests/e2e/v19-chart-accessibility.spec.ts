@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #495 + #660: the gravity well dial announces itself as a labelled group
@@ -15,7 +16,7 @@ import { expect, test, type Page } from "@playwright/test";
 async function signIn(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await settleArrival(page);
 }
 
 async function sessionHeaders(page: Page) {

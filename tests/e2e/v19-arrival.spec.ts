@@ -76,7 +76,14 @@ async function establishInstanceAdmin(browser: Browser) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   await signInAs(page, "Orbit Administrator", "/home");
-  await expect(page).toHaveURL(/\/home$/);
+  /* Not a fixed destination: this claims the promotion and nothing else, so
+     it must not assume a household exists anywhere yet. On a genuinely
+     empty database this is the instance's first-ever administrator sign-in
+     -- exactly the reader #840 sends to the arrival at `/` instead of
+     /home, which every other spec in this run relies on this identity
+     already having outgrown by the time IT signs in. */
+  const session = await page.request.get("/api/auth/session");
+  expect(session.ok()).toBe(true);
   await context.close();
 }
 
@@ -170,7 +177,10 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
   await signInAs(ownerPage, "Orbit Member", "/home");
-  await expect(ownerPage).toHaveURL(/\/home$/);
+  /* Not a fixed destination: this is "Orbit Member"'s own first sign-in with
+     no household yet, exactly the reader #840 sends to the arrival instead
+     -- createSystem below talks to the API from whatever page that landed
+     on, same origin either way. */
   const created = await createSystem(ownerPage, HOUSEHOLD);
   households.track(created);
   seeded = true;

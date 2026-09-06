@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #455: the item view's writes, for real — a household and item seeded
@@ -19,6 +20,12 @@ import { householdRegister } from "./support/households";
    asserts the name. */
 const HOUSEHOLD_PREFIX = "Actions Proving Ground";
 const households = householdRegister();
+
+async function signInAsAdmin(page: Page) {
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: "Orbit Administrator" }).click();
+  await settleArrival(page);
+}
 
 async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; householdId: string }> {
   const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
@@ -74,9 +81,7 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
 }
 
 test("completing an item from the v19 view moves its orbit", async ({ page }) => {
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await signInAsAdmin(page);
 
   const { itemId } = await seedHouseholdWithItem(page);
 
@@ -110,9 +115,7 @@ test("completing an item from the v19 view moves its orbit", async ({ page }) =>
 });
 
 test("a stale version is refused and the view says so", async ({ page }) => {
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await signInAsAdmin(page);
 
   const { itemId, householdId } = await seedHouseholdWithItem(page);
 

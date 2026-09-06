@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #434: mail-in review on the v19 surfaces — the manifest row's two-tap
@@ -29,7 +30,7 @@ const households = householdRegister();
 async function signInToHome(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await settleArrival(page);
 }
 
 async function seedHousehold(page: Page): Promise<{ householdId: string; itemId: string }> {
@@ -129,7 +130,10 @@ test("the manifest row approves in two taps, idempotently under partial success"
     const approvals: Record<string, unknown>[] = [];
     await interceptMail(page, householdId, approvals, { firstPartial: true });
 
-    await page.reload();
+    /* goto rather than reload: the sign-in above may have landed on the
+       arrival rather than /home (#840), and household.create's own
+       activeHouseholdId write means this reaches /home either way now. */
+    await page.goto("/home");
     const row = page.locator(".item.suggest", { hasText: "Reviewed intake 1786823446152" });
     await expect(row.first()).toBeVisible();
     const approve = row.first().getByRole("button", { name: "Add to orbit" });
@@ -228,7 +232,10 @@ test("a dismissal takes two taps and mail that failed is visible on the relay", 
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
     });
 
-    await page.reload();
+    /* goto rather than reload: the sign-in above may have landed on the
+       arrival rather than /home (#840), and household.create's own
+       activeHouseholdId write means this reaches /home either way now. */
+    await page.goto("/home");
     const row = page.locator(".item.suggest", { hasText: "Reviewed intake 1786823446152" }).first();
     await expect(row).toBeVisible();
     await row.getByRole("button", { name: "Dismiss" }).click();

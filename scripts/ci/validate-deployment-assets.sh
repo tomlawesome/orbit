@@ -17,7 +17,7 @@ readonly repo_root
 cd "${repo_root}"
 
 deployment="$(mktemp -d)"
-cp docker-compose.yml docker-compose.mail.yml docker-compose.mail-alias-rotation.yml "${deployment}/"
+cp docker-compose.yml docker-compose.mail.yml "${deployment}/"
 cp .env-orbit "${deployment}/"
 mkdir -p "${deployment}/config"
 cp config/tika-config.json "${deployment}/config/"

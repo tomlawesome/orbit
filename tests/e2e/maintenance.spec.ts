@@ -22,7 +22,15 @@ const VERIFYING = "Verifying the copied documents before we reopen.";
 async function signInAs(page: Page, account: string) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  /* Not a fixed destination: #840 sends a session with no household of its
+     own to the arrival at `/` instead of /home, and this file's very first
+     sign-in is the instance's first-ever administrator on what may still be
+     a genuinely empty database -- exactly that reader. Every caller here
+     only needs an authenticated session (the API calls below carry it
+     regardless of which page is showing); the maintenance-screen assertions
+     that DO care what is on screen check for their own heading, not a URL. */
+  const session = await page.request.get("/api/auth/session");
+  expect(session.ok(), `sign-in as ${account} did not establish a session`).toBe(true);
 }
 
 type MaintenanceState = { version: number; effectivelyActive: boolean };
@@ -116,7 +124,12 @@ test("the API keeps its own guard and its own envelope", async ({ request }) => 
 
 test("the administrator passes; an ordinary member is shown the screen", async ({ browser }) => {
   const passed = await adminPage.request.get("/home", { maxRedirects: 0 });
-  expect(passed.status()).toBe(200);
+  /* Not always a flat 200: #840 sends a reader with no household of their
+     own on to the arrival at `/` (303) rather than /home directly, and this
+     administrator has created nothing in this file. Either way is "passing"
+     -- the maintenance screen (503) is what a blocked reader gets instead,
+     and that is the one status this proves the administrator does not see. */
+  expect(passed.status()).not.toBe(503);
 
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   try {

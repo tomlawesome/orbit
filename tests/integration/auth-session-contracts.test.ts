@@ -19,7 +19,9 @@ import { callRoute, callRouteForSession, loadRoute } from "./support/request-eve
 const { POST: logout } = await loadRoute("auth/logout");
 const { GET: sessionStatus } = await loadRoute("auth/session");
 const { POST: refresh } = await loadRoute("auth/session/refresh");
+const { GET: listSessions } = await loadRoute("auth/sessions");
 const { POST: revokeSessions } = await loadRoute("auth/sessions/revoke");
+const { POST: revokeOneSession } = await loadRoute("auth/sessions/[sessionId]/revoke");
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -30,6 +32,8 @@ afterEach(() => {
 });
 
 const REVOKE_URL = "http://127.0.0.1:3000/api/auth/sessions/revoke";
+const LIST_URL = "http://127.0.0.1:3000/api/auth/sessions";
+const revokeOneUrl = (sessionId: string) => `http://127.0.0.1:3000/api/auth/sessions/${sessionId}/revoke`;
 
 function checkSession(session: IntegrationSession, overrides: Record<string, string> = {}): Promise<Response> {
   return callRouteForSession(sessionStatus, session, {
@@ -273,5 +277,148 @@ describe("PostgreSQL authentication session contracts", () => {
     expect(invalidCsrf.headers.get("cache-control")).toBe("no-store");
     expect(await sessionRows(session.sessionId)).toHaveLength(1);
     expect((await checkSession(session)).status).toBe(200);
+  });
+
+  it("lists only the caller's own sessions, current first, and never the raw user agent", async () => {
+    const fixture = await createIntegrationFixture("auth-sessions-list");
+    const laptop = await fixture.session("member");
+    const phone = await fixture.session("member");
+    const someoneElse = await fixture.session("owner");
+
+    const response = await callRouteForSession(listSessions, laptop, { url: LIST_URL });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    const ids = body.sessions.map((row: { id: string }) => row.id);
+    expect(ids).toEqual(expect.arrayContaining([laptop.sessionId, phone.sessionId]));
+    expect(ids).not.toContain(someoneElse.sessionId);
+
+    const current = body.sessions.find((row: { id: string }) => row.id === laptop.sessionId);
+    expect(current).toEqual({
+      id: laptop.sessionId,
+      current: true,
+      createdAt: expect.any(String),
+      lastSeenAt: expect.any(String),
+      device: expect.any(String),
+    });
+    // No fixture in this suite sets a User-Agent header, so the coarse
+    // description resolves to the "no user agent recorded" case — and,
+    // whatever it resolves to, the raw header is never a key in the payload.
+    expect(current.device).toBe("unknown device");
+    expect(Object.keys(current).sort()).toEqual(["createdAt", "current", "device", "id", "lastSeenAt"]);
+    expect(body.sessions[0].id).toBe(laptop.sessionId); // current sorts first
+  });
+
+  it("revokes exactly one session, leaving the caller's other sessions and other accounts untouched", async () => {
+    const fixture = await createIntegrationFixture("auth-sessions-revoke-one");
+    const laptop = await fixture.session("member");
+    const phone = await fixture.session("member");
+
+    const response = await callRouteForSession(revokeOneSession, laptop, {
+      url: revokeOneUrl(phone.sessionId),
+      method: "POST",
+      params: { sessionId: phone.sessionId },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ revoked: true });
+    // Not the caller's own session, so nothing about this browser's cookie
+    // changes.
+    expect(response.headers.get("set-cookie")).toBeNull();
+
+    expect(await sessionRows(phone.sessionId)).toHaveLength(0);
+    expect(await sessionRows(laptop.sessionId)).toHaveLength(1);
+    expect((await checkSession(laptop)).status).toBe(200);
+
+    const [entry] = await getDb().select({
+      actorUserId: auditLog.actorUserId,
+      entityType: auditLog.entityType,
+      entityId: auditLog.entityId,
+      action: auditLog.action,
+    }).from(auditLog).where(eq(auditLog.entityId, phone.sessionId));
+    expect(entry).toEqual({
+      actorUserId: laptop.userId,
+      entityType: "session",
+      entityId: phone.sessionId,
+      action: "session_revoked",
+    });
+  });
+
+  it("answers like logout when the caller revokes their own current session", async () => {
+    const fixture = await createIntegrationFixture("auth-sessions-revoke-self");
+    const laptop = await fixture.session("member");
+    const config = getAuthConfig();
+
+    const response = await callRouteForSession(revokeOneSession, laptop, {
+      url: revokeOneUrl(laptop.sessionId),
+      method: "POST",
+      params: { sessionId: laptop.sessionId },
+    });
+    expect(response.status).toBe(200);
+    expect(readSetCookie(response, sessionCookieName(config))?.value).toBe("");
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(await sessionRows(laptop.sessionId)).toHaveLength(0);
+    expect((await checkSession(laptop)).status).toBe(401);
+  });
+
+  it("answers 404 for a nonexistent session id and for another account's session id, changing nothing either way", async () => {
+    const fixture = await createIntegrationFixture("auth-sessions-revoke-refused");
+    const member = await fixture.session("member");
+    const someoneElse = await fixture.session("owner");
+
+    const missing = await callRouteForSession(revokeOneSession, member, {
+      url: revokeOneUrl("00000000-0000-4000-8000-000000000000"),
+      method: "POST",
+      params: { sessionId: "00000000-0000-4000-8000-000000000000" },
+    });
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("cache-control")).toBe("no-store");
+
+    // Same answer for a session id that exists but belongs to someone else —
+    // the response must not distinguish "not yours" from "does not exist".
+    const wrongOwner = await callRouteForSession(revokeOneSession, member, {
+      url: revokeOneUrl(someoneElse.sessionId),
+      method: "POST",
+      params: { sessionId: someoneElse.sessionId },
+    });
+    expect(wrongOwner.status).toBe(404);
+    expect((await missing.json()).error.code).toBe((await wrongOwner.json()).error.code);
+
+    expect(await sessionRows(someoneElse.sessionId)).toHaveLength(1);
+    expect(await fixture.auditCount(someoneElse.sessionId)).toBe(0);
+  });
+
+  it("refuses to list or revoke a single session without a session, a CSRF token, or a same-origin post", async () => {
+    const fixture = await createIntegrationFixture("auth-sessions-refused");
+    const session = await fixture.session("member");
+    const config = getAuthConfig();
+
+    expect((await callRoute(listSessions, { url: LIST_URL })).status).toBe(401);
+
+    const signedOut = await callRoute(revokeOneSession, {
+      url: revokeOneUrl(session.sessionId),
+      method: "POST",
+      params: { sessionId: session.sessionId },
+      headers: { origin: config.appUrl.origin },
+    });
+    expect(signedOut.status).toBe(401);
+
+    const noCsrf = await callRouteForSession(revokeOneSession, session, {
+      url: revokeOneUrl(session.sessionId),
+      method: "POST",
+      params: { sessionId: session.sessionId },
+      headers: { "x-csrf-token": "invalid-csrf" },
+    });
+    expect(noCsrf.status).toBe(403);
+
+    const crossSite = await callRouteForSession(revokeOneSession, session, {
+      url: revokeOneUrl(session.sessionId),
+      method: "POST",
+      params: { sessionId: session.sessionId },
+      headers: { origin: "https://attacker.invalid" },
+    });
+    expect(crossSite.status).toBe(403);
+
+    expect(await sessionRows(session.sessionId)).toHaveLength(1);
   });
 });

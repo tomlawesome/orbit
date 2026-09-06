@@ -2,7 +2,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getImapIngestionConfig, imapAttachmentRetryDelayMs, imapProviderConfigCommitment, imapProviderConnectionOptions, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
+import { imapAttachmentRetryDelayMs, imapProviderConfigCommitment, imapProviderConnectionOptions, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
+// ADR-0017 slice 1 (orbit#742): `getImapIngestionConfig` from `./imap-ingestion`
+// is now the database-backed runtime config. These fixtures only need a
+// plain ImapIngestionConfig built from env-shaped values, which is exactly
+// what the renamed pure parser still does.
+import { parseImapIngestionConfigFromEnvironment as getImapIngestionConfig } from "./core/config";
 import { getNotificationWorkerConfig } from "../notification-worker";
 import { deriveImapRecipientAlias } from "./core/imap-recipient";
 
@@ -136,8 +141,8 @@ describe("IMAP ingestion configuration", () => {
     expect(config).toMatchObject({ currentAliasGeneration: 2, previousAliasGeneration: 1 });
     expect(config.previousAliasExpiresAt?.toISOString()).toBe(previousExpiry);
     const userId = "6f7aa3dc-347d-4ff4-bf50-bc4f4ffc054a";
-    expect(matchesImapRecipientAlias(deriveImapRecipientAlias(userId, config.recipientDomain, config.aliasPrevious!), userId, config)).toBe(true);
-    expect(imapRecipientAlias(userId, config)).toBe(deriveImapRecipientAlias(userId, config.recipientDomain, config.aliasCurrent));
+    expect(matchesImapRecipientAlias(deriveImapRecipientAlias(userId, config.aliasBase, config.aliasPrevious!), userId, config)).toBe(true);
+    expect(imapRecipientAlias(userId, config)).toBe(deriveImapRecipientAlias(userId, config.aliasBase, config.aliasCurrent));
   });
 
   it("uses bounded exponential attachment backoff and rejects invalid attempts", () => {
