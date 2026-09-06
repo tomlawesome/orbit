@@ -62,7 +62,8 @@ export function failedMessage(contactAddress) {
  */
 export function doorMessageFor(state, contactAddress) {
   if (state === FAILED) return failedMessage(contactAddress);
-  return FIXED_MESSAGES[state] ?? { primary: "", sub: "" };
+  if (state === UNCONFIGURED || state === STARTING) return FIXED_MESSAGES[state];
+  return { primary: "", sub: "" };
 }
 
 /**
