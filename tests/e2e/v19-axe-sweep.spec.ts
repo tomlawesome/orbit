@@ -189,6 +189,22 @@ test.describe("the signed-in v19 sweep", () => {
     }
   });
 
+  // #852: the pocket dialect's own account menu — the mobile mirror of the
+  // desk `button.orb`/`#account` state above. `#morb`/`#maccount` are the
+  // pocket dialect's own trigger and panel (pocket.svelte), so this is
+  // skipped on desktop the same way the state above skips mobile.
+  test("/home pocket account menu open has no automated WCAG A/AA violations", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "#morb/#maccount are pocket-only chrome; the desk dialect's own state is covered above");
+    const household = await arriveWithHousehold(page);
+    try {
+      await page.locator("#morb").click();
+      await expect(page.locator("#morb")).toHaveAttribute("aria-expanded", "true");
+      await axeCheck(page);
+    } finally {
+      await cleanup(page, household);
+    }
+  });
+
   test("/home add-to-orbit drawer open has no automated WCAG A/AA violations", async ({ page, isMobile }) => {
     test.skip(isMobile, "the create drawer is desk-only chrome; the pocket dialect has no drawers");
     const household = await arriveWithHousehold(page);

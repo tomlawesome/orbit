@@ -18,6 +18,7 @@ import { fillStarTiles } from "$lib/sky.js";
 import { placeGalaxy } from "./placement.js";
 import { mountSkies } from "./skies.js";
 import { seedFromWorkspace } from "$lib/sky.js";
+import { packOf, setSwatch, syncSwatches } from "./swatches.js";
 
 /**
  * The sun's address (§15, the 08-17 morning batch): the centre body of the
@@ -348,35 +349,13 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     const open = card.classList.toggle("open");
     button.setAttribute("aria-expanded", String(open));
   }
-  /* title -> pack name, the mapping the swatch buttons encode:
-     "star-chart" is starchart, "after dark" is afterdark. */
-  /** @type {(button: HTMLElement) => string} */
-  const packOf = (button) => button.title.replace(/[\s-]/g, "");
-
-  /**
-   * @param {string} name
-   * @param {HTMLElement} button
-   */
-  function setSwatch(name, button){
-    document.documentElement.dataset.theme = name;
-    for (const other of /** @type {HTMLElement} */ (button.parentElement).querySelectorAll("button"))
-      other.setAttribute("aria-pressed", String(other === button));
-    /* Survive a refresh. See the note in app.html: the server holds the real
-       preference once the shell is wired; this is the pre-paint cache. */
-    try { localStorage.setItem("orbit-theme", name); } catch {}
-    /* The constellation leaders are measured from the rendered label, and
-       the engraved packs size that label differently, so re-measure. */
-    if (!flying) renderGalaxy(false);
-  }
-
-  /* The markup ships with star-chart pressed, because that is what the mockup
-     draws. If the reader restored a different pack before paint, the pressed
-     swatch and the live theme disagree until they click - so reconcile once. */
-  (function syncSwatches(){
-    const active = document.documentElement.dataset.theme;
-    for (const button of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".swatches button")))
-      button.setAttribute("aria-pressed", String(packOf(button) === active));
-  })();
+  /* packOf, setSwatch and syncSwatches moved to ./swatches.js (#852) so the
+     pocket dialect's own sheet could import the same wiring rather than
+     copy it. The desk's own follow-up — re-measuring the constellation
+     leaders, since the engraved packs size that label differently — is
+     passed in as setSwatch's onChange, which the pocket sheet has no
+     equivalent of and simply omits. */
+  syncSwatches();
   /** @param {HTMLElement} button */
   function toggleCreate(button){
     const drawer = /** @type {HTMLElement} */ (document.getElementById("createdrawer"));
@@ -603,7 +582,14 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
   /* title -> theme name: "star-chart" is the starchart pack, "after dark" afterdark */
   for (const swatch of document.querySelectorAll(".swatches button")) {
     on(swatch, "click", (/** @type {MouseEvent} */ event) =>
-      setSwatch(packOf(/** @type {HTMLElement} */ (event.currentTarget)), /** @type {HTMLElement} */ (event.currentTarget)));
+      setSwatch(
+        packOf(/** @type {HTMLElement} */ (event.currentTarget)),
+        /** @type {HTMLElement} */ (event.currentTarget),
+        /* The constellation leaders are measured from the rendered label,
+           and the engraved packs size that label differently, so re-measure
+           on a theme change. */
+        () => { if (!flying) renderGalaxy(false); },
+      ));
   }
 
   const explore = /** @type {HTMLElement} */ (document.getElementById("explore"));

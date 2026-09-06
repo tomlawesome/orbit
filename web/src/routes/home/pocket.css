@@ -55,7 +55,11 @@
 @keyframes drift{to{transform:translateX(-40px)}}
 .pocket .mpage{position:relative;z-index:2;max-width:400px;margin:0 auto;padding:14px 12px 40px}
 .pocket .mtop{display:flex;justify-content:space-between;align-items:center;padding:4px 6px 10px}
-.pocket .morb{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
+/* #852: a <button> now (it opens the account sheet), reset to draw exactly as
+ * the plain div it replaces — same size, border, background and font, so the
+ * fidelity screenshots do not move. */
+.pocket .morb{appearance:none;padding:0;margin:0;cursor:pointer;
+      width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
       background:var(--panel);backdrop-filter:blur(8px);display:grid;place-items:center;
       font:11px var(--mono);color:var(--ink-mid)}
 .pocket .mdial{width:100%;aspect-ratio:1;position:relative}
@@ -83,15 +87,34 @@
  * or disabled do. Same fix as home.css's .account/.drawer/.drawer-top
  * (#847): visibility is delayed to match the close animation, so the
  * closed sheet's controls stop being real Tab stops only once it is fully
- * off-screen. */
-.pocket .sheet{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:18px 18px 0 0;
+ * off-screen. `.msheet` (#852, the account menu) is the same bottom-sheet
+ * frame as `.sheet` — one rule for both rather than a second copy. */
+.pocket .sheet,.pocket .msheet{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:18px 18px 0 0;
        background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
        padding:18px 22px 26px;transform:translateY(105%);visibility:hidden;
        transition:transform .3s cubic-bezier(.3,.7,.3,1),visibility 0s .3s}
-.pocket .sheet.open{transform:none;visibility:visible;transition-delay:0s}
-.pocket .sheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
+.pocket .sheet.open,.pocket .msheet.open{transform:none;visibility:visible;transition-delay:0s}
+.pocket .sheet .grab,.pocket .msheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
 .pocket .sheet b{font-size:15px;font-weight:600}
 .pocket .sheet .meta{font:12px var(--mono);color:var(--ink-mid);margin:4px 0 14px}
+/* ---- #852: the account menu's own contents, adapted from home.css's
+ * `.account` rules (desk, 240px fixed panel) to the sheet's full width. ---- */
+.pocket .msheet .mwho b{display:block;font-size:14px;font-weight:560}
+.pocket .msheet .mwho span{font-size:12px;color:var(--ink-mid)}
+.pocket .msheet nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+             padding:12px 0;border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft)}
+.pocket .msheet nav a{font-size:14px;color:var(--ink-mid);text-decoration:none;padding:8px}
+.pocket .msheet nav a:hover{color:var(--ink);background:var(--panel)}
+.pocket .msheet .mswatches{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+.pocket .msheet .mswatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+.pocket .msheet .mswatches button{width:20px;height:20px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+.pocket .msheet .mswatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+.pocket .msheet .msignout{font:13px var(--mono);color:var(--ink-faint);background:none;
+         border:0;cursor:pointer;padding:0}
+.pocket .msheet .msignout:hover{color:var(--overdue-text)}
+.pocket .msheet .msignout-problem:not([hidden]){font:10.5px var(--mono);color:var(--overdue-text);
+                margin-top:7px;line-height:1.7}
 /* #850: :not([hidden]) so the hidden attribute on #sh-acts-sugg wins — an
  * ordinary author rule like the old .acts{display:flex} always outranks the
  * user-agent stylesheet's [hidden]{display:none} regardless of specificity. */

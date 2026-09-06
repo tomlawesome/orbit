@@ -156,16 +156,64 @@ describe("secrets are never printed (SECURITY: no plaintext secret in any thrown
     assertNoSecretLeak(error, [a, b]);
   });
 
-  it("a document-KEK decryption failure never leaks the key or the plaintext document bytes (backup.sh #19)", () => {
-    const plaintext = Buffer.from("sensitive document tar bytes that must never leak");
-    const envelope = encryptDocumentArchive(plaintext, KEK);
-    const wrongKey = "d".repeat(64);
-    let error: unknown;
-    try {
-      decryptDocumentArchive(envelope, wrongKey);
-    } catch (caught) {
-      error = caught;
-    }
-    assertNoSecretLeak(error, [KEK, wrongKey, plaintext.toString("utf8")]);
+  describe("a document-KEK decryption failure never leaks the key or the plaintext document bytes (backup.sh #19, #772)", () => {
+    // decryptDocumentArchive is unauthenticated AES-256-CBC by design
+    // (recovery-bundle.ts:569-584, byte-compatible with `openssl enc
+    // -pbkdf2` as backup.sh writes it): a wrong key is only *noticed* when
+    // PKCS#7 unpadding fails on the final block, so about 1 wrong key in
+    // 256 decrypts to garbage that happens to unpad and is returned rather
+    // than refused. Asserting "always throws" against a freshly random salt
+    // therefore flaked roughly 1 CI run in 278 (#772, which absorbed #727 —
+    // same defect, same root cause #723 already fixed in the sibling
+    // recovery-bundle.test.ts). The contract this module actually keeps: a
+    // wrong key never yields the original plaintext, and neither branch —
+    // refusal or returned garbage — leaks the KEK, the wrong key, or the
+    // plaintext.
+    //
+    // The two envelopes below pin one salt from each side of that coin
+    // flip, so both branches run on every test execution instead of being
+    // sampled at random. To regenerate: for salt = the 8-byte big-endian
+    // counter in the header bytes, PBKDF2-HMAC-SHA256(kek, salt, 600000,
+    // 48)-derive key||iv, AES-256-CBC-encrypt PLAINTEXT under KEK, then try
+    // to decrypt the resulting ciphertext under WRONG_KEY and keep the
+    // first salt that throws and the first that doesn't. Walking salts
+    // 0-999: salt 0 refuses, salt 24 silently "succeeds" (1 of 1,000,
+    // consistent with the ~1/278 measured rate).
+    const PLAINTEXT = Buffer.from("sensitive document tar bytes that must never leak");
+    const WRONG_KEY = "d".repeat(64);
+    // salt 0x0000000000000000 — decrypting under WRONG_KEY fails to unpad (the common case).
+    const REFUSED_ENVELOPE = Buffer.from(
+      "53616c7465645f5f0000000000000000bf621ba45921f0b75b765b2d3adfccab58fd4423f301a537888b66341f296456575bd73018ac7f1e1ad07d52456f55d800b35bbd5cd43d59931956d41a7a510d",
+      "hex",
+    );
+    // salt 0x0000000000000018 (24) — decrypting under WRONG_KEY unpads by luck (the rare case).
+    const ACCEPTED_ENVELOPE = Buffer.from(
+      "53616c7465645f5f0000000000000018ac3a2b0611e86c4436c1b92edf9b4c66d3263ac63bc4362530c6815b7bbaf3c538871b617a26f76bca4a08f9c1a1b993d8c58b0d9d014b39b8551f563d6eb98c",
+      "hex",
+    );
+
+    it("both fixtures are genuine envelopes: each decrypts to the same plaintext under the right KEK", () => {
+      expect(decryptDocumentArchive(REFUSED_ENVELOPE, KEK)).toEqual(PLAINTEXT);
+      expect(decryptDocumentArchive(ACCEPTED_ENVELOPE, KEK)).toEqual(PLAINTEXT);
+    });
+
+    it("the refusing branch: throws RecoveryBundleRefusal and leaks neither key nor plaintext", () => {
+      let error: unknown;
+      try {
+        decryptDocumentArchive(REFUSED_ENVELOPE, WRONG_KEY);
+      } catch (caught) {
+        error = caught;
+      }
+      assertNoSecretLeak(error, [KEK, WRONG_KEY, PLAINTEXT.toString("utf8")]);
+    });
+
+    it("the silent-garbage branch (#659): never returns the original plaintext, and the garbage leaks neither key nor plaintext", () => {
+      const decrypted = decryptDocumentArchive(ACCEPTED_ENVELOPE, WRONG_KEY);
+      expect(decrypted.equals(PLAINTEXT)).toBe(false);
+      const rendered = decrypted.toString("utf8");
+      for (const secret of [KEK, WRONG_KEY, PLAINTEXT.toString("utf8")]) {
+        expect(rendered).not.toContain(secret);
+      }
+    });
   });
 });
