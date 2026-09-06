@@ -3,7 +3,7 @@ import { redirect } from "@sveltejs/kit";
 import { readSession } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 import { inspectInvitation, redeemInvitation } from "orbit/server/invitations";
-import { clearInvitationCookie, setInvitationCookie } from "orbit/server/invitations/cookie";
+import { clearInvitationCookie, setInvitationCookie, setInvitedLandingCookie } from "orbit/server/invitations/cookie";
 
 /**
  * THE LINK IN THE MAIL (#481, steps 3 to 5).
@@ -21,10 +21,16 @@ import { clearInvitationCookie, setInvitationCookie } from "orbit/server/invitat
  *   The callback sends them back HERE, now with a session, and the branch
  *   below does the work. So redemption is written once, not twice.
  *
- *   SIGNED IN — redeem, and on success go straight to /home. The session's
- *   active household is already set by then, so the arrival's household choice
- *   never appears and the first-run tour shows exactly as it would for anyone
- *   whose `tour_seen_at` is null.
+ *   SIGNED IN — redeem, and on success go to `/`, not `/home` (#871). The
+ *   session's active household is already set by then, but the arrival still
+ *   plays: the same climb, the same labelled sky, the same discovered count
+ *   every newcomer gets. What never appears is the household CHOICE — there
+ *   is nothing left to choose — so at the point that choice would stand, the
+ *   sky moves to the household the invitation named instead, and the dial
+ *   arrives exactly as it does for anyone. `setInvitedLandingCookie` is how
+ *   the arrival tells this first landing apart from an ordinary return visit,
+ *   both of which carry the same `activeHouseholdId` by then; the first-run
+ *   tour shows exactly as it would for anyone whose `tour_seen_at` is null.
  *
  * Every other outcome renders this screen with one line and one action. None
  * of them names the household: a spent, withdrawn or misaddressed link tells
@@ -48,7 +54,8 @@ export async function load({ params, cookies }) {
       sessionId: session.id,
     });
     if (outcome.state === "joined" || outcome.state === "already_member") {
-      redirect(303, "/home");
+      setInvitedLandingCookie(cookies, config);
+      redirect(303, "/");
     }
     return { state: outcome.state, inviterName: outcome.inviterName };
   }
