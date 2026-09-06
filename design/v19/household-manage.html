@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — your system: household management (proposal v3 — §15 column swap + danger zone)</title>
+<title>Orbit — your system: household management (#481 round 2 — the prose comes off)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <style>
@@ -235,37 +235,31 @@
                  right │ members, running the FULL height of that column
                  foot  │ the danger line, across both
 
-       NON-OWNER left  │ the system (read-only)  →  leaving
-                 right │ members, full height
+       NON-OWNER left  │ the system (read-only)
+                 right │ members
 
-     Members is stretched, not floated: its box ends level with sections, so
-     both columns finish on the same rule and the closing line inside it is
-     pinned to its own foot rather than leaving a gap under the roster. The
-     old lone wide card at the bottom of the member's screen is gone with the
-     same move — the member now reads two tidy columns like the owner does. */
+     Members is stretched, not floated: its box ends level with sections and
+     the slack shares out between its blocks. Round 2: the foot notes and the
+     member's Leaving card are gone — a member reads one card per column and
+     the panel takes its own height. */
   .card.c-system  {grid-column:1;grid-row:1}
   .card.c-sections{grid-column:1;grid-row:2}
-  .card.c-leaving {grid-column:1;grid-row:2}
   .card.c-members {grid-column:2;grid-row:1 / span 2;align-self:stretch;
                    display:flex;flex-direction:column}
   .card.c-danger  {grid-column:1 / -1;grid-row:3}
   /* the panel is taller than its content in a family this size, so the slack
      is SHARED between the blocks instead of collecting in one hole at the
      bottom: three auto margins, three even breaths, rules evenly spaced. */
-  .c-members .block,
-  .c-members .note.foot{margin-top:auto}
-  .c-members .note.foot{padding-top:14px;border-top:1px solid var(--line-soft)}
+  .c-members .block{margin-top:auto}
   /* the member's screen has only three blocks in the whole desk, so the panel
      takes its own height instead of stretching over air — nothing sits under
      it to frame a hole, and the two columns simply finish where they finish */
   body.member .card.c-members{align-self:start}
-  body.member .c-members .note.foot{margin-top:14px}
   @media (max-width:880px){
     .cards{grid-template-columns:1fr}
-    .card.c-system,.card.c-sections,.card.c-leaving,.card.c-members,.card.c-danger{
+    .card.c-system,.card.c-sections,.card.c-members,.card.c-danger{
       grid-column:1;grid-row:auto;align-self:auto}
     .c-members .block{margin-top:16px}
-    .c-members .note.foot{margin-top:13px;padding-top:0}
   }
   .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:15px}
   .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
@@ -316,6 +310,12 @@
   .note b{color:var(--ink-mid);font-weight:400}
   .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
   .said.show{display:block}
+  /* a line that exists only at the moment it applies (#481 round 2) */
+  .moment{display:none;margin-top:10px;font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85}
+  .moment.show{display:block}
+  .moment.warn{color:var(--warm)}
+  .ghost.beckon{border-color:var(--accent);color:var(--accent-text);
+                box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 
   /* sections: one editable list, saved whole. OWNER-ONLY (2b) — a plain
      member never sees this card at all, not even read-only. */
@@ -388,9 +388,10 @@
         border-bottom:1px solid var(--line-soft)}
   .cand:last-of-type{border-bottom:0}
   .cand b{flex:1;font-size:13px;font-weight:520}
-  /* the resting state of the joiners block: it says so, rather than vanishing */
-  .restline{display:block}
-  body.wants .restline{display:none}
+  /* round 2 (#481 verdict): the joiners block exists only while somebody is
+     knocking — no resting line, no empty state to caption */
+  .block.knocking{display:none}
+  body.wants .block.knocking{display:block}
 
   /* INVITATIONS BY EMAIL (#481) — the other way in, for somebody with no
      account here yet. An outstanding invitation is NOT a third list of
@@ -437,9 +438,8 @@
   .handover .row{display:flex;align-items:center;gap:12px}
 
   /* joiners (§11) — the same protocol administration draws */
-  .joinreq{display:none;align-items:center;gap:12px;border:1px dashed var(--warm);
+  .joinreq{display:flex;align-items:center;gap:12px;border:1px dashed var(--warm);
            border-radius:12px;padding:11px 14px}
-  body.wants .joinreq{display:flex}
   .joinreq .avatar{width:28px;height:28px;font-size:10px}
   .joinreq p{flex:1;font-size:13px;color:var(--ink-mid)}
   .joinreq p b{color:var(--ink);font-weight:530}
@@ -456,11 +456,11 @@
      top edge, the heading in red, and a red-outlined button that FILLS red
      the moment it is armed.
 
-     And it is SMALLER than v2: the copy runs ACROSS the card in two short
-     columns instead of stacking in a tall left-hand block, and the button
-     sits UP on the right of the heading line where it can be seen — never
-     buried at the bottom. The protocol underneath is untouched: type the
-     system's name exactly, then tap twice. */
+     Round 2 makes it smaller still: at rest the card is the heading and the
+     act, with the button UP on the right of the heading line. What deletion
+     costs is printed only when somebody presses the opener, beside the name
+     they must type. The protocol is untouched: the name exactly, then tap
+     twice. */
   .card.dangercard{position:relative;overflow:hidden;
                    border:1.5px solid var(--overdue);padding:15px 22px 17px}
   /* the wash — one flat plane of the same red, laid under the panel */
@@ -482,16 +482,9 @@
                   stroke-linecap:round;stroke-linejoin:round}
   .dangerhead .spacer{margin-left:auto}
 
-  /* the copy, spread across the width: the act on the left, the small print
-     about who holds the clock on the right */
-  .dangerbody{display:grid;grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:start}
   .dangercard p{font-size:13px;color:var(--ink-mid);max-width:none;line-height:1.62}
   .dangercard p b{color:var(--ink);font-weight:560}
   .dangercard p b.red{color:var(--overdue);font-weight:600}
-  /* the card's prose is 13px; its mono asides are not — say so, or the
-     prose rule out-specifies .note and .said and swallows them */
-  .dangercard .note{font-size:10.5px;color:var(--ink-faint);max-width:none;margin-top:0}
-  .dangercard .note b{color:var(--ink-mid);font-weight:400}
   .dangercard .said{font-size:11px;color:var(--ok-text);max-width:none}
 
   /* the button: red on the outside at rest, SOLID red once armed */
@@ -507,15 +500,14 @@
 
   .confirm{display:none;margin-top:13px;padding-top:13px;
            border-top:1px dashed color-mix(in srgb,var(--overdue) 55%,transparent)}
-  .confirm.open{display:grid;grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:end}
-  .confirm .field{margin-bottom:0;min-width:0}
+  .confirm.open{display:block}
+  .confirm .stake{margin:0 0 13px;max-width:72ch}
+  .confirm .field{margin-bottom:0;min-width:0;max-width:430px}
   .confirm .field label{color:var(--overdue);opacity:.9}
   .confirm .field input{font-family:var(--mono);font-size:12.5px;
                         border-color:color-mix(in srgb,var(--overdue) 60%,transparent)}
   .confirm .field input:focus{border-color:var(--overdue)}
-  .confirm .note{align-self:end;padding-bottom:2px}
   @media (max-width:880px){
-    .dangerbody,.confirm.open{grid-template-columns:1fr;gap:10px}
     .dangerhead{flex-wrap:wrap}
   }
 
@@ -528,6 +520,12 @@
   body.member .own-only{display:none!important}
   .mem-only{display:none!important}
   body.member .mem-only{display:revert!important}
+  /* round 2: a member's identity card prints values, not greyed controls —
+     the shape says read-only without a caption */
+  body.member .c-system .field input:disabled,
+  body.member .c-system .field select:disabled{
+    background:none;border-color:transparent;opacity:1;color:var(--ink);padding:9px 0}
+  body.member .c-system .selwrap::after{display:none}
 
   footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
          color:var(--ink-faint);padding:10px 24px 44px;line-height:1.95;max-width:960px;margin:0 auto}
@@ -684,15 +682,10 @@
           </select>
         </div>
       </div>
-      <p class="note top own-only">
-        each field saves on its own — <b>name</b>, <b>time zone</b> and<br>
-        <b>currency</b> are three small acts, not one form
-      </p>
-      <p class="note top">
-        the name is what you type to delete this system later,<br>
-        and what a joiner sees when they ask to come in
-      </p>
-      <p class="note top mem-only"><b>read-only</b> — only Emma Lawson can change this system</p>
+      <!-- round 2 (#481): the notes that stood here are gone. Three save
+           buttons already say the fields save alone, and the member's copy
+           prints as plain values (body.member CSS), which says read-only
+           without a caption. -->
     </div>
 
     <!-- ── sections: one list, replaced whole. OWNER-ONLY (2b) ──────────────
@@ -777,15 +770,12 @@
       <button class="addsec lock" id="addsec" onclick="addSec()">+ add a section</button>
       <div class="savebar">
         <button class="btn" onclick="say('sections')">save</button>
-        <span class="note">the whole list saves at once</span>
       </div>
-      <p class="said" id="said-sections">saved · the manifest prints the new names beside their entries</p>
-      <p class="note top">
-        each entry wears one section, printed beside it in the manifest,<br>
-        and the mark travels with it. a section holding entries can be<br>
-        <b>hidden</b>, never removed — its entries would have nowhere to sit.<br>
-        <b>open question:</b> choosing a mark for a NEW section isn’t drawn yet.
-      </p>
+      <p class="said" id="said-sections">saved</p>
+      <!-- round 2: one button under one list says the list saves whole, and
+           the × that only exists on empty rows says "hidden, never removed".
+           The open question (choosing a mark for a NEW section) is off the
+           screen and on #481. -->
     </div>
 
     <!-- ── members: v3 moves this to the right-hand column, running its full
@@ -800,8 +790,15 @@
           <span class="avatar" aria-hidden="true">TL</span>
           <b>Tom Lawson <em>· you</em></b>
           <span class="role owner">owner</span>
-          <button class="ghost" onclick="toggleDrawer('handover', this)">hand over →</button>
+          <button class="ghost" id="handbtn" onclick="toggleDrawer('handover', this)">hand over →</button>
+          <button class="ghost" onclick="ownerLeave()">leave this system</button>
         </div>
+        <!-- #481 verdict 2: the owner's row carries the same act every "you"
+             row has, and the rule that used to stand at the card's foot now
+             answers only the person it stops, at the moment they try. -->
+        <p class="moment warn" id="refuse-ownerleave" role="status">
+          an owner can’t be removed and can’t leave — hand the system over first
+        </p>
         <div class="memb">
           <span class="avatar" aria-hidden="true">EL</span>
           <b>Emma Lawson</b>
@@ -832,16 +829,17 @@
           <span class="avatar" aria-hidden="true">TL</span>
           <b>Tom Lawson <em>· you</em></b>
           <span class="role">member</span>
-          <button class="ghost" data-rest="leave this system"
+          <button class="ghost" data-rest="leave this system" data-moment="moment-leave"
                   onclick="twoTap(this,'tap again to leave',left)">leave this system</button>
         </div>
+        <p class="moment" id="moment-leave">nothing you added goes with you — the entries stay with Seaside Cottage</p>
         <div class="memb">
           <span class="avatar" aria-hidden="true">RL</span>
           <b>Rob Lawson</b>
           <span class="role">member</span>
         </div>
       </div>
-      <p class="said" id="said-left">you’ve left Seaside Cottage · it becomes a label in your sky again, and you can ask to rejoin</p>
+      <p class="said" id="said-left">you’ve left Seaside Cottage · it’s a label in your sky again, and you can ask to rejoin</p>
 
       <!-- §11 + 2g: the owner decides who comes in, and this is the ONLY
            place the decision is offered. Administration's join-requests
@@ -850,22 +848,19 @@
 
            v3: now that members owns the whole right-hand column, the two
            other halves of "who is in this system" come out of their drawers
-           and stand as blocks of the same panel — who is waiting, and who
-           you could add. Nothing is hidden behind a button that had only
-           been there to save room the column no longer lacks. -->
-      <div class="block own-only">
-        <h4>Waiting to come in</h4>
+           and stand as blocks of the same panel. Round 2 (#481 verdicts 3+4):
+           the joiners block is "Knocking on the door", and it exists only
+           while somebody is knocking — an empty state that must explain
+           itself is exactly the paragraph the verdict cut. -->
+      <div class="block own-only knocking">
+        <h4>Knocking on the door</h4>
         <div class="joinreq">
           <span class="avatar" aria-hidden="true">SL</span>
           <p><b>Sue Lawson</b> asks to join <b>Lawson Home</b> · 2d ago</p>
           <button class="yes" onclick="approveJoin(this)">approve</button>
           <button onclick="declineJoin(this)">decline</button>
         </div>
-        <p class="restline note">
-          nobody is asking just now — when someone picks this system out of<br>
-          their sky and asks, they appear here, and <b>only</b> here (2g).
-        </p>
-        <p class="said" id="said-join">Sue Lawson is in · she sees this system’s entries from her next sign-in</p>
+        <p class="said" id="said-join">Sue Lawson is in</p>
       </div>
 
       <div class="block own-only" id="addpeople">
@@ -874,11 +869,8 @@
           <button class="ghost" onclick="addMember('Ben Lawson','BL')">add</button></div>
         <div class="cand"><span class="avatar" aria-hidden="true">AR</span><b>Ada Reid</b>
           <button class="ghost" onclick="addMember('Ada Reid','AR')">add</button></div>
-        <p class="note top">
-          people sign in through your identity provider first, then an owner puts<br>
-          them in a system. An account is named here by the name its owner<br>
-          chose — never by its address.
-        </p>
+        <!-- the names-only rule still binds (an account is never shown by its
+             address) — round 2 stops printing it (#481 verdict 4). -->
       </div>
 
       <!-- #481: the other way in — for somebody with no account here yet.
@@ -913,20 +905,9 @@
               <span class="when">sent 5d ago · expires 15 Sep 2026</span></span>
           </div>
         </div>
-        <p class="note own-only" id="noinvites" style="display:none">
-          nobody is invited just now — a seat appears here when you send an<br>
-          invitation, and closes when it is answered, lapses, or you call it back.
-        </p>
         <p class="said" id="said-invite"></p>
         <p class="note top own-only">
-          one mail, one link, good for 14 days; resending replaces it. The link<br>
-          admits only someone signed in with <b>this exact address</b> — and the<br>
-          address is the invitation’s only name: the moment they arrive they<br>
-          join the roster above as whoever they chose to be, and it leaves too.
-        </p>
-        <p class="note top mem-only">
-          only Emma Lawson can invite someone, or call an invitation back.<br>
-          when they arrive, they join the members above under their own name.
+          the link admits only someone signed in with <b>this exact address</b>
         </p>
       </div>
 
@@ -944,21 +925,10 @@
             <button class="ghost" onclick="closeDrawer('handover')">cancel</button>
           </div>
         </div>
-        <p class="note">
-          you stay a member and keep everything you added.<br>
-          only the new owner can hand it back — and an owner<br>
-          can never leave a system, so this is the way out.
-        </p>
+        <p class="note">you stay a member and keep everything you added</p>
         <p class="said" id="said-handover">Emma Lawson owns Lawson Home now · you’re a member</p>
       </div>
 
-      <p class="note top foot own-only">
-        an owner can’t be removed and can’t leave — hand the system over first.
-      </p>
-      <p class="note top foot mem-only">
-        <b>Emma Lawson</b> owns this system — she adds and removes people.<br>
-        you can leave whenever you like.
-      </p>
     </div>
 
     <!-- ── THE DANGER ZONE ──────────────────────────────────────────────────
@@ -979,48 +949,30 @@
         <button class="dangerbtn" id="delbtn" data-rest="request deletion" disabled hidden
                 onclick="twoTap(this,'tap again to schedule deletion',requested)">request deletion</button>
       </div>
-      <div class="dangerbody">
-        <p>
-          <b class="red">Request deletion.</b> Everything in Lawson Home — 6 entries, their
-          documents, their history and every reminder still queued — stops the moment you
-          ask. You have <b class="red">30 days</b> to change your mind; after that it is
-          gone for good, and nothing on this machine can bring it back.
-        </p>
-        <p class="note">
-          asking is all this screen does — the countdown,<br>
-          the restore and the final hard delete are<br>
-          instance-admin acts, drawn on the admin panel (2f).
-        </p>
-      </div>
+      <!-- round 2: at rest the danger line IS a line — the rule, the heading
+           and the act. What deletion costs is said to the person stepping
+           toward it, not to everyone who scrolls past. -->
       <div class="confirm" id="delconfirm">
+        <p class="stake">
+          Everything in Lawson Home — 6 entries, their documents, their history and
+          every reminder still queued — stops the moment you ask. You have
+          <b class="red">30 days</b> to change your mind; after that it is gone for good.
+        </p>
         <div class="field">
           <label>type the system’s name exactly to wake the button above</label>
           <input id="delname" placeholder="Lawson Home" autocomplete="off" oninput="checkName()"
                  aria-label="Type the household name to confirm">
         </div>
-        <p class="note">
-          the name is the first ask, the second tap is<br>
-          the second — this is the one act with a clock on it.
-        </p>
       </div>
       <p class="said" id="said-doom">
         requested · Lawson Home stops now, and is gone for good in 30 days ·
-        changing your mind is an instance-admin act now — the admin panel carries the restore (2f)
+        an instance admin can turn this back until then
       </p>
     </div>
 
-    <!-- ── leaving: the member's second card, and it sits UNDER the system in
-         the left column, exactly where sections sits for an owner — so the
-         member reads two tidy columns too, with no lone card across the foot -->
-    <div class="card c-leaving mem-only">
-      <div class="cardhead"><h3>Leaving</h3></div>
-      <p style="font-size:13.5px;color:var(--ink-mid)">
-        You can leave Seaside Cottage whenever you like. Nothing you added goes with you —
-        the entries belong to the system, not to you. It returns to your sky as a label,
-        and you can ask to come back.
-      </p>
-      <p class="note top">only Emma Lawson can rename, restructure or delete this system.</p>
-    </div>
+    <!-- round 2: the member's "Leaving" card is gone — it was a card made
+         entirely of paragraphs. The act lives on the member's own roster row,
+         and its one consequence appears while that button is armed. -->
 
   </div><!-- /cards -->
 </div>
@@ -1029,7 +981,7 @@
   <span>DEMOS</span>
   <button id="d-owner" aria-pressed="true" onclick="setRole('owner')">owner</button>
   <button id="d-member" aria-pressed="false" onclick="setRole('member')">non-owner</button>
-  <button id="d-wants" aria-pressed="false" onclick="toggleWants()">someone wants in</button>
+  <button id="d-wants" aria-pressed="false" onclick="toggleWants()">someone knocks</button>
   <button id="d-marks" aria-pressed="true" onclick="toggleMarks()">section marks on</button>
   <button id="d-door" aria-pressed="false" onclick="toggleDoor()">came in by the helm</button>
   <button onclick="location.reload()">reset</button>
@@ -1042,16 +994,10 @@
 </div>
 
 <footer>
-  orbit · your system · PROPOSAL v3 for the /settings cutover family (#410) — §15 rulings 2a–2m, then the owner’s v2 review: sections under the system, members down the right, and a danger line that looks like one ·
-  reached from the helm’s memberships card · name, time zone and currency each save on their own to the eye
-  while the client sends the one bundled household.update underneath; sections are still one list, replaced whole ·
-  the sections editor belongs to owners alone · joiners are answered here and nowhere else ·
-  <b style="color:var(--ink-mid);font-weight:400">the way back is the way you came</b>: the helm's memberships card
-  leaves it reading ← SETTINGS, and the sun at the centre of the dial leaves it reading ← YOUR SKY (demos) ·
-  deletion is requested here and recovered only from the admin panel ·
-  every destructive act asks twice (§14) and deletion also asks for the name ·
-  members are shown by the name they chose, never by email, because the route never discloses one ·
-  an instance admin needing owner powers sees this same screen for the household they pick off the dial
+  orbit · your system · #481 ROUND 2 — the screen stops explaining itself: what the paragraphs carried
+  now sits on the rows, or is said at the moment it applies, or is simply not printed ·
+  reached from the helm’s memberships card · <b style="color:var(--ink-mid);font-weight:400">the way back
+  is the way you came</b> (demos) · every destructive act asks twice, and deletion also asks for the name
 </footer>
 
 <script>
@@ -1070,6 +1016,11 @@ function setTheme(name){
 /* ── the two-tap protocol (§14): the first tap arms, the second fires, and an
       unfired arm relaxes on its own so nothing stays cocked. ─────────────── */
 const armed = new WeakMap();
+/* a button may name a .moment line — one sentence that exists only while
+   the act is armed, and leaves when the act fires or the arm lapses */
+function momentOf(btn){
+  return btn.dataset.moment ? document.getElementById(btn.dataset.moment) : null;
+}
 function disarm(btn){
   const state = armed.get(btn);
   if (!state) return;
@@ -1077,11 +1028,15 @@ function disarm(btn){
   armed.delete(btn);
   btn.textContent = btn.dataset.rest;
   btn.classList.remove("armed");
+  const line = momentOf(btn);
+  if (line) line.classList.remove("show");
 }
 function twoTap(btn, label, fire){
   if (armed.get(btn)) { disarm(btn); fire(btn); return; }
   btn.classList.add("armed");
   btn.textContent = label;
+  const line = momentOf(btn);
+  if (line) line.classList.add("show");
   armed.set(btn, { timer: setTimeout(() => disarm(btn), 5000) });
 }
 
@@ -1210,6 +1165,20 @@ function handedOver(){
 function left(){
   say("left");
 }
+/* #481 verdict 2: the owner-can't-leave rule is drawn ONLY at the moment it
+   bites. The owner's row carries the same "leave" act every member's row has;
+   for an owner it answers with the rule and lights the way out. */
+function ownerLeave(){
+  const line = document.getElementById("refuse-ownerleave");
+  const hand = document.getElementById("handbtn");
+  line.classList.add("show");
+  if (hand) hand.classList.add("beckon");
+  clearTimeout(ownerLeave._t);
+  ownerLeave._t = setTimeout(() => {
+    line.classList.remove("show");
+    if (hand) hand.classList.remove("beckon");
+  }, 6000);
+}
 function approveJoin(btn){
   btn.closest(".joinreq").style.display = "none";
   addMember("Sue Lawson", "SL");
@@ -1222,8 +1191,8 @@ function declineJoin(btn){
 /* ── invitations by email (#481) ───────────────────────────────────────────
    A seat is held the moment the mail goes. The sheet never shows a token —
    the route hands one to the mail and to nobody else — so a row is only the
-   address, when it went and when it lapses. Withdrawing the last seat brings
-   the resting line back. */
+   address, when it went and when it lapses. An empty list is simply empty —
+   the field above it is the affordance (round 2: no resting line). */
 function armInvite(){
   const field = document.getElementById("inviteaddr");
   const btn = document.getElementById("invitebtn");
@@ -1251,8 +1220,7 @@ function sendInvite(event){
   again.addEventListener("click", () => resent(again));
   drop.addEventListener("click", () => twoTap(drop, "tap again to withdraw", () => withdrew(drop)));
   document.getElementById("invitelist").appendChild(row);
-  document.getElementById("noinvites").style.display = "none";
-  saidInvite("invitation sent to " + address + " · a seat is held for 14 days");
+  saidInvite("invitation sent to " + address);
   field.value = "";
   armInvite();
 }
@@ -1264,8 +1232,6 @@ function withdrew(btn){
   const row = btn.closest(".inv");
   const address = row.querySelector("b").textContent;
   row.remove();
-  if (!document.querySelector("#invitelist .inv"))
-    document.getElementById("noinvites").style.display = "block";
   saidInvite("the invitation to " + address + " is withdrawn · its link now says so");
 }
 
