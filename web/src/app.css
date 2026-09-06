@@ -14,3 +14,9 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* Keyboard focus is visible on every text-like field (#848); the per-screen
+   :focus border shifts are too faint on their own. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

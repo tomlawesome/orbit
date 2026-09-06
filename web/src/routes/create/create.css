@@ -87,7 +87,7 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 .field input,.field select,.field textarea{width:100%;background:var(--panel);border:1px solid var(--line);
        border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
 .field input::placeholder{color:var(--ink-faint)}
-.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--accent)}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent)}
 .field textarea{resize:vertical;line-height:1.5}
 .field.mono input{font-family:var(--mono)}
 
@@ -95,7 +95,7 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
    card itself, so there is no separate name box. Styled as the card's h2. */
 .name-title{display:block;width:100%;background:none;border:0;padding:0;
   font:600 22px var(--display);line-height:1.25;color:var(--ink)}
-.name-title:focus{outline:none;border-bottom:1px solid var(--accent)}
+.name-title:focus{border-bottom:1px solid var(--accent)}
 
 .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
 .types button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
@@ -105,7 +105,10 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 
 .dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:19px;text-align:center;
           cursor:pointer;transition:border-color .2s,background .2s}
-.dropzone:hover,.dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04);outline:none}
+.dropzone:hover,.dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04)}
+/* #848: the dashed border's colour shift alone is too quiet for a keyboard
+   user to find; the same ring as every other field. */
+.dropzone:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .dropzone .dz-main{font-size:13.5px;color:var(--ink-mid)}
 .dropzone .dz-hint{font:10px var(--mono);color:var(--ink-faint);margin-top:7px;letter-spacing:.06em}
 /* once the document is in the right-hand lane, the zone states the fact */

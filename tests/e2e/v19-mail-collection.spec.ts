@@ -118,13 +118,15 @@ async function sendMail(alias: string, subject: string, attachment: { filename: 
   transport.close();
 }
 
-async function waitForReceipts(page: Page, count: number, timeoutMs = 120_000) {
+type Receipt = { canApprove: boolean; classification: string; message: string };
+
+async function waitForReceipts(page: Page, count: number, timeoutMs = 120_000, of: (receipt: Receipt) => boolean = () => true) {
   await expect
     .poll(
       async () => {
         const response = await page.request.get("/api/imap-inbox");
-        const body = (await response.json()) as { receipts?: unknown[] };
-        return body.receipts?.length ?? 0;
+        const body = (await response.json()) as { receipts?: Receipt[] };
+        return (body.receipts ?? []).filter(of).length;
       },
       { timeout: timeoutMs, intervals: [5_000] },
     )
@@ -165,10 +167,21 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   });
 
   // Orbit polls every 30s: the receipt appears without any interception.
-  await waitForReceipts(page, 1);
+  // Home reads the inbox once on arrival and only an approvable receipt is a
+  // suggestion row, so wait until the server has finished reading the mail —
+  // a receipt still "waiting" renders nothing on home (seen locally, 2026-09-06).
+  await waitForReceipts(page, 1, 120_000, (receipt) => receipt.canApprove);
 
   // The suggestion is on home, from the real pipe.
   await page.goto("/home");
+  /* The member's first landing on a fresh stack gets the first-run tour,
+     and the dimmed page behind it is inert (#844) — a reader has to skip
+     the walk before tapping anything, so this test does too. */
+  const tour = page.locator(".tourcard");
+  if (await tour.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) {
+    await page.locator("#tour-skip").click();
+    await expect(tour).toHaveCount(0);
+  }
   const row = page.locator(".item.suggest").first();
   await expect(row).toBeVisible({ timeout: 30_000 });
 
@@ -219,9 +232,7 @@ test("a message with no readable document lands in a bounded state on the relay"
   // Whatever bounded state it reached, the user can SEE that mail arrived:
   // either it is reviewable (a suggestion) or its failure is dated on the
   // relay in the server's own words — never silence.
-  const inbox = (await (await page.request.get("/api/imap-inbox")).json()) as {
-    receipts: Array<{ canApprove: boolean; classification: string; message: string }>;
-  };
+  const inbox = (await (await page.request.get("/api/imap-inbox")).json()) as { receipts: Receipt[] };
   const receipt = inbox.receipts[0];
   expect(receipt.message.length).toBeGreaterThan(0);
   if (!receipt.canApprove && receipt.classification !== "waiting") {
