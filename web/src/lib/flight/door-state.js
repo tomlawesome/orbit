@@ -150,3 +150,35 @@ export function nextDoorState(read) {
   if (read.availability === null) return FAILED;
   return read.availability.configured ? DOOR : UNCONFIGURED;
 }
+
+/**
+ * The STARTING backstop's own bound (#869): 2 minutes, matching the issue's
+ * own words. A process can hang mid-boot without exiting, so the STARTING
+ * poll cannot rely on "boot terminates" alone to end — this is the
+ * fallback, not the mechanism.
+ */
+export const STARTING_BACKSTOP_MS = 120_000;
+
+/**
+ * The other pure decision in this module (#869): given the state
+ * {@link nextDoorState} already decided for this round, a deadline and the
+ * caller's own clock read, whether the door keeps polling or gives up.
+ *
+ * Only ever changes anything when `state` is `STARTING`: any other state
+ * has already resolved to something the door acts on immediately, and is
+ * returned unchanged regardless of the deadline — there is nothing left to
+ * poll for. `SignIn.svelte` owns the timer and the deadline arithmetic
+ * (`Date.now() + STARTING_BACKSTOP_MS`, read once when STARTING is first
+ * shown); this function only ever reads clock values it was handed, which
+ * is what lets the backstop itself be pinned without a browser or a real
+ * clock, the same way {@link nextDoorState} is.
+ *
+ * @param {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED} state
+ * @param {number} deadline epoch ms after which STARTING gives up
+ * @param {number} now epoch ms, the caller's own `Date.now()` read
+ * @returns {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED}
+ */
+export function applyStartingBackstop(state, deadline, now) {
+  if (state !== STARTING) return state;
+  return now >= deadline ? FAILED : STARTING;
+}

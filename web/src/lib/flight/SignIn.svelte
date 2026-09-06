@@ -3,7 +3,10 @@
   import Grain from "$lib/Grain.svelte";
   import Dawn from "./Dawn.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
-  import { DOOR, FAILED, STARTING, availabilityOf, doorMessageFor, nextDoorState, phaseOf, readinessOf } from "./door-state.js";
+  import {
+    DOOR, STARTING, STARTING_BACKSTOP_MS,
+    applyStartingBackstop, availabilityOf, doorMessageFor, nextDoorState, phaseOf, readinessOf,
+  } from "./door-state.js";
   import "./flight.css";
 
   /**
@@ -118,12 +121,6 @@
     return { state: nextDoorState({ phase, readiness, availability }), contactAddress: availability?.contactAddress ?? null };
   }
 
-  /* The backstop (#869): a process can hang mid-boot without exiting, so the
-     STARTING poll cannot run forever on the strength of "boot terminates" alone.
-     Not the mechanism — `phase` flipping to "running" is — only the fallback
-     for when it never does. */
-  const STARTING_BACKSTOP_MS = 120_000;
-
   onMount(() => {
     /* A marker left over from an abandoned sign-in must never fire later. */
     clearLaunch();
@@ -175,22 +172,22 @@
       if (!wasStarting) return;
 
       /* Measured from the first paint of STARTING, not from the server's own
-         boot start, which this page never learns. */
+         boot start, which this page never learns. Only Date.now() and
+         setTimeout live here; whether that makes the door give up or poll
+         again is applyStartingBackstop's decision, pinned without a
+         browser in door-state.test.mjs. */
       const backstopAt = Date.now() + STARTING_BACKSTOP_MS;
       const poll = async () => {
         if (disposed) return;
         const next = await checkOnce();
         if (disposed) return;
-        if (next.state === STARTING) {
-          if (Date.now() >= backstopAt) {
-            showState(FAILED, next.contactAddress);
-            return;
-          }
+        const resolved = applyStartingBackstop(next.state, backstopAt, Date.now());
+        if (resolved === STARTING) {
           pollTimer = setTimeout(poll, 4000);
           return;
         }
-        if (next.state === DOOR) recoverToDoor();
-        else showState(next.state, next.contactAddress);
+        if (resolved === DOOR) recoverToDoor();
+        else showState(resolved, next.contactAddress);
       };
       pollTimer = setTimeout(poll, 4000);
     }

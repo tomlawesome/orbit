@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  DOOR, FAILED, STARTING, UNCONFIGURED,
-  availabilityOf, doorMessageFor, failedMessage, nextDoorState, phaseOf, readinessOf,
+  DOOR, FAILED, STARTING, STARTING_BACKSTOP_MS, UNCONFIGURED,
+  applyStartingBackstop, availabilityOf, doorMessageFor, failedMessage, nextDoorState, phaseOf, readinessOf,
 } from "$lib/flight/door-state.js";
 
 /*
@@ -117,6 +117,30 @@ describe("deciding the door's next state (#869: phase, not readiness, decides st
 
   it("fails closed when running and ready but availability could not be read", () => {
     expect(nextDoorState({ phase: "running", readiness: "ready", availability: null })).toBe(FAILED);
+  });
+});
+
+describe("the STARTING backstop (#869, criterion 3): a pure decision over a passed-in clock, not a wall-clock wait", () => {
+  it("keeps polling before the deadline", () => {
+    expect(applyStartingBackstop(STARTING, 1_000, 999)).toBe(STARTING);
+  });
+
+  it("fails at the deadline, not only strictly after it", () => {
+    expect(applyStartingBackstop(STARTING, 1_000, 1_000)).toBe(FAILED);
+  });
+
+  it("fails once the deadline has passed", () => {
+    expect(applyStartingBackstop(STARTING, 1_000, 1_001)).toBe(FAILED);
+  });
+
+  it("leaves a state that is no longer STARTING unaffected, whatever the clock says", () => {
+    expect(applyStartingBackstop(DOOR, 1_000, 5_000)).toBe(DOOR);
+    expect(applyStartingBackstop(UNCONFIGURED, 1_000, 5_000)).toBe(UNCONFIGURED);
+    expect(applyStartingBackstop(FAILED, 1_000, 0)).toBe(FAILED);
+  });
+
+  it("is bounded at 2 minutes, matching the issue's own words", () => {
+    expect(STARTING_BACKSTOP_MS).toBe(120_000);
   });
 });
 
