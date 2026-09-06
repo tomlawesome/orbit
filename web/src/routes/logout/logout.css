@@ -107,7 +107,7 @@ body.set .shimmer-ember{opacity:.7}
 body.set .gate{opacity:1;transform:none}
 .gate:hover{filter:brightness(1.08)}
 .below{position:fixed;bottom:4.5vh;left:0;right:0;text-align:center;z-index:3;
-       font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.16em}
+       font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.16em}
 @media (prefers-reduced-motion: reduce){
   .sunpt,.rays,.zodiacal-wrap,.scatter-day,.skywash-day,.rim-day{
     opacity:0!important;transform:none!important;transition:none}

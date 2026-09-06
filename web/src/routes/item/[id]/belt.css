@@ -208,7 +208,7 @@
      far corners of the sky on the search field's own baseline, because that
      is the one line across this screen the band never reaches — anywhere on
      the band itself, a jumbled body would eventually sit on top of them. */
-  .belt-page .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-faint);
+  .belt-page .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-quiet);
           text-transform:uppercase}
 
   /* ---- THE DOCUMENTS' MARK -------------------------------------------
@@ -270,8 +270,8 @@
   /* #843: h3, not h4 -- these follow the card's own h2 and must not skip a
      level. The look is unchanged. */
   .belt-page .item-card h3{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-                color:var(--ink-faint);margin:16px 0 8px}
-  .belt-page .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:13px;line-height:1.75}
+                color:var(--ink-quiet);margin:16px 0 8px}
+  .belt-page .note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:13px;line-height:1.75}
   .belt-page .note b{color:var(--paper);font-weight:500}
   .belt-page .acts{display:flex;flex-wrap:wrap;gap:7px}
   /* #854: see item.css's .acts button — --act-text is the letterform's own
@@ -323,10 +323,10 @@
   .belt-page .find input{background:none;border:0;outline:0;border-bottom:1px solid var(--line);
     width:100%;text-align:center;font:12.5px var(--mono);color:var(--ink);
     padding:6px 4px;transition:border-color .25s;-webkit-appearance:none;appearance:none}
-  .belt-page .find input::placeholder{color:var(--ink-faint)}
+  .belt-page .find input::placeholder{color:var(--ink-quiet)}
   .belt-page .find input:focus{border-color:var(--accent)}
   .belt-page .find input::-webkit-search-cancel-button{display:none}
-  .belt-page .findnote{font:9.5px var(--mono);letter-spacing:.14em;color:var(--ink-faint);
+  .belt-page .findnote{font:9.5px var(--mono);letter-spacing:.14em;color:var(--ink-quiet);
             margin-top:7px;text-transform:uppercase}
   /* The hit list drops BESIDE the field, not beneath it: beneath it is where
      the card is, and the search must never cover the thing you are looking
@@ -345,7 +345,7 @@
                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .belt-page .hits button small{font-size:10px;font-variant-numeric:tabular-nums}
   .belt-page .hits button:hover,.belt-page .hits button.pick{background:var(--panel);color:var(--ink)}
-  .belt-page .hits .none{padding:8px 9px;font:11.5px var(--mono);color:var(--ink-faint)}
+  .belt-page .hits .none{padding:8px 9px;font:11.5px var(--mono);color:var(--ink-quiet)}
   @media (max-width:1140px){ .belt-page .hits{position:static;width:auto;margin-top:9px} }
 
   /* ---- chrome ----------------------------------------------------------
@@ -381,7 +381,7 @@
 .belt-page .panel{margin-top:16px;padding-top:4px}
 .belt-page .panel .field{margin-bottom:13px}
 .belt-page .panel .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;
-  color:var(--ink-faint);text-transform:uppercase;margin:0 0 6px}
+  color:var(--ink-quiet);text-transform:uppercase;margin:0 0 6px}
 .belt-page .panel .field input,.belt-page .panel .field textarea{width:100%;background:var(--panel);
   border:1px solid var(--line);border-radius:9px;color:var(--ink);font-size:13.5px;
   padding:9px 12px;font-family:var(--ui)}
@@ -391,7 +391,7 @@
 .belt-page .panel .row2{display:flex;gap:14px}
 .belt-page .panel .row2>.field{flex:1;min-width:0}
 .belt-page .save-row{display:flex;align-items:center;gap:18px;margin-top:6px}
-.belt-page .cancel-link{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
+.belt-page .cancel-link{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;
   cursor:pointer;padding:0}
 .belt-page .cancel-link:hover{color:var(--ink-mid)}
 .belt-page .btn-quiet{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);

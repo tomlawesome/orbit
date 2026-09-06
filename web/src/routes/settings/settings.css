@@ -34,7 +34,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .helm-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
       border-radius:16px;padding:20px 22px;margin-top:22px}
 .helm-page .card h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
-         color:var(--ink-faint);margin-bottom:14px}
+         color:var(--ink-quiet);margin-bottom:14px}
 .helm-page .idrow{display:flex;align-items:center;gap:16px}
 .helm-page .idrow .avatar{width:46px;height:46px;border-radius:50%;flex:none;
                border:1px solid var(--line);background:var(--panel-raised);
@@ -108,14 +108,14 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .helm-page .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
       border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
 .helm-page .role.owner{color:var(--accent-text);border-color:var(--accent)}
-.helm-page .memb small{font:10.5px var(--mono);color:var(--ink-faint)}
+.helm-page .memb small{font:10.5px var(--mono);color:var(--ink-quiet)}
 
 .helm-page .danger{margin-top:26px;text-align:center}
 
 /* #482: the sessions list sits above the existing sign-out-everywhere
    button, left-aligned rows inside an otherwise centred danger area. */
 .helm-page .danger h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
-      color:var(--ink-faint);margin-bottom:12px;text-align:left}
+      color:var(--ink-quiet);margin-bottom:12px;text-align:left}
 .helm-page .sessions-list{list-style:none;margin:0 0 18px;padding:0;text-align:left;
       background:var(--panel);border:1px solid var(--line-soft);border-radius:14px;overflow:hidden}
 .helm-page .session-row{display:flex;align-items:center;justify-content:space-between;gap:14px;
@@ -126,7 +126,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .helm-page .session-info span{font:11px var(--mono);color:var(--ink-mid)}
 .helm-page .session-row .note{margin-top:6px;text-align:left}
 
-.helm-page .danger button{font:11.5px var(--mono);color:var(--ink-faint);background:none;
+.helm-page .danger button{font:11.5px var(--mono);color:var(--ink-quiet);background:none;
                border:1px solid var(--line-soft);border-radius:9px;padding:8px 16px;cursor:pointer}
 .helm-page .danger button:hover{color:var(--overdue-text);border-color:var(--overdue)}
 .helm-page .session-row button{flex:none;padding:7px 14px}
