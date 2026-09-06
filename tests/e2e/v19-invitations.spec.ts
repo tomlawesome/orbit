@@ -188,6 +188,17 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
     // rendered then hidden" (#871's own rule) means in a running browser.
     await expect(newcomerPage.locator(".nf .belong")).toHaveCount(0);
 
+    // NOTHING NAMES THE HOUSEHOLD BEFORE THE MOVE (#871 criterion 4). The
+    // point of the invited landing is that the reader is carried somewhere
+    // rather than asked to pick it, so the destination must not be spoken
+    // aloud on the way. `textContent` rather than `innerText` deliberately:
+    // it reads hidden and off-screen nodes too, so a name parked in a
+    // not-yet-revealed element still fails this. Asserted here, while the
+    // URL is still the arrival's, because after the move /home names the
+    // household legitimately.
+    const beforeMove = await newcomerPage.evaluate(() => document.body.textContent ?? "");
+    expect(beforeMove, "the arrival named the household before moving to it").not.toContain(invitedHousehold);
+
     // THE COUNT STILL SHOWS: this reader's own household is one of the
     // systems the universe answers with (`listVisibleHouseholds` does not
     // exclude it), so the boxless count is a real, positive number -- not
@@ -205,6 +216,14 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
     const workspace = await workspaceOf(newcomerPage);
     const joined = workspace.households.find((one) => one.id === created.id);
     expect(joined, "the invited household is not in the invited reader's own workspace").toBeTruthy();
+
+    // AND THE TOUR STILL RUNS (#871 criterion 3). The invited landing skips
+    // the chooser, not the welcome: this reader has never seen /home before,
+    // so the first-run tour is exactly as due to them as to any newcomer.
+    // #864 is why this is asserted rather than assumed -- the tour was
+    // offered to a reader it could light nothing for, and nothing caught it.
+    await expect(newcomerPage.locator(".tourcard")).toBeVisible({ timeout: 30_000 });
+    await expect(newcomerPage.locator(".tourcard")).toHaveAttribute("data-tour-stop", "1");
   } finally {
     await newcomerContext.close();
   }
