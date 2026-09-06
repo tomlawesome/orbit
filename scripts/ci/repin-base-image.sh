@@ -86,6 +86,12 @@
 #                             request instead of opening a duplicate.
 #   BASE_REPIN_TARGET_BRANCH  The merge request's target. Defaults to `dev`.
 set -Eeuo pipefail
+# Belt and braces on top of never putting the token in argv below: forced off
+# regardless of how this script is invoked (a stray `bash -x`, an inherited
+# `SHELLOPTS`), because xtrace prints each command after expansion and would
+# otherwise echo BASE_REPIN_TOKEN's value the moment it is read into a
+# variable or a file.
+set +x
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dockerfile="${DOCKERFILE:-$repo_dir/Dockerfile}"
@@ -113,6 +119,28 @@ done
 
 log() { printf 'repin-base-image: %s\n' "$1"; }
 fail() { printf 'repin-base-image: %s\n' "$1" >&2; exit 2; }
+
+# Every file this script writes a credential or a token into goes through
+# here, so there is exactly one cleanup path and it cannot be forgotten on a
+# new call site. Registered before anything that could fail, so the trap
+# covers every exit this script can take -- success, `fail`'s exit 2, an
+# unhandled error under `set -e`, or a signal -- not just the tidy one.
+_secret_files=()
+_cleanup_secret_files() { [[ ${#_secret_files[@]} -eq 0 ]] || rm -f "${_secret_files[@]}"; }
+trap _cleanup_secret_files EXIT INT TERM
+
+# A mode-600 temp file, tracked for cleanup. Never the token itself: callers
+# write the secret into the file with a builtin (`printf ... > "$file"`,
+# never `command printf` or an external process), so the value is never an
+# argv of anything a process listing could show, and `set +x` above keeps it
+# out of a trace too.
+new_secret_file() {
+  local f
+  f="$(mktemp)"
+  chmod 600 "$f"
+  _secret_files+=("$f")
+  printf '%s' "$f"
+}
 
 DIGEST_PATTERN='^sha256:[0-9a-f]{64}$'
 
@@ -192,8 +220,14 @@ else
   : "${BASE_REPIN_TOKEN:?BASE_REPIN_TOKEN is not set. See the base_image_repin job in .gitlab-ci.yml for the exact grant this needs.}"
   : "${CI_API_V4_URL:?CI_API_V4_URL is not set; this must run inside a GitLab CI job}"
   artifact_url="${CI_API_V4_URL%/}/projects/${base_image_project}/jobs/artifacts/${base_image_ref}/raw/published-digest.txt?job=${base_image_job}"
+  # The token goes in a header file, never on curl's command line: `-H
+  # "PRIVATE-TOKEN: $TOKEN"` would put it in this process's argv, which a
+  # process listing on the shared runner can read for as long as curl runs.
+  # `--header @file` is curl's own way to read a header's value from a file.
+  artifact_header_file="$(new_secret_file)"
+  printf 'PRIVATE-TOKEN: %s\n' "$BASE_REPIN_TOKEN" > "$artifact_header_file"
   if ! trusted_reference="$(curl --silent --show-error --fail --location --max-time 60 \
-      --header "PRIVATE-TOKEN: ${BASE_REPIN_TOKEN}" "$artifact_url")"; then
+      --header @"$artifact_header_file" "$artifact_url")"; then
     fail "could not fetch published-digest.txt from ai/orbit-base-image (project ${base_image_project}, ref ${base_image_ref}, job ${base_image_job})"
   fi
 fi
@@ -350,13 +384,26 @@ git -C "$repo_dir" config user.name "base-image-repin"
 git -C "$repo_dir" checkout -B "$branch_name"
 git -C "$repo_dir" add -- "$dockerfile" "$policy_path"
 git -C "$repo_dir" commit -m "$commit_message"
-git -C "$repo_dir" push --force \
-  "https://oauth2:${BASE_REPIN_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" \
-  "HEAD:refs/heads/${branch_name}"
 
-header_file="$(mktemp)"
-body_file="$(mktemp)"
-trap 'rm -f "$header_file" "$body_file"' EXIT
+# The token never goes in the push URL: `https://oauth2:$TOKEN@host/...` as an
+# argument to `git push` would sit in this process's argv for the life of the
+# push, readable by anything else on the shared runner via a process listing,
+# and would be echoed verbatim if xtrace were ever on. A mode-600
+# credential-store file plays the same role for git that the header files
+# above and below play for curl: git reads the secret from a file, and the
+# command it execs never contains it. `-c credential.helper=` first clears
+# any helper already configured (same defensive shape as AGENTS.md's
+# documented push pattern) so only the one named here is consulted.
+credential_file="$(new_secret_file)"
+printf 'https://oauth2:%s@%s\n' "$BASE_REPIN_TOKEN" "$CI_SERVER_HOST" > "$credential_file"
+push_url="https://${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+git -C "$repo_dir" \
+  -c credential.helper= \
+  -c "credential.helper=store --file=${credential_file}" \
+  push --force "$push_url" "HEAD:refs/heads/${branch_name}"
+
+header_file="$(new_secret_file)"
+body_file="$(new_secret_file)"
 printf 'PRIVATE-TOKEN: %s\n' "$BASE_REPIN_TOKEN" > "$header_file"
 api_call() { curl --silent --show-error --fail --location --max-time 60 --header @"$header_file" "$@"; }
 api="${CI_API_V4_URL%/}/projects/${CI_PROJECT_ID}"
@@ -386,7 +433,8 @@ fi
     printf '%s\n\n' "$pending"
   fi
   printf '`scripts/check-base-image-current.sh` passes on this branch.\n\n'
-  printf 'Nothing here merges itself. The normal required checks still gate this merge request.\n'
+  printf 'Nothing here merges itself. The normal required checks still gate this merge request.\n\n'
+  printf 'Cut: risk -- a base image re-pin is a dependency change and belongs on its own.\n'
 } > "$body_file"
 
 created_iid="$(
