@@ -47,14 +47,16 @@ workflow:
     - if: $CI_COMMIT_TAG
       when: never
     # A scheduled pipeline is the Renovate lane, the sidecar-pin-freshness
-    # lane, the install-bootstrap lane, or nothing (#801 step 6, #820, #724).
-    # `renovate`, `sidecar_pin_freshness` and `install_bootstrap` are the only
-    # jobs that opt in, so a schedule that forgot its variable would produce a
-    # pipeline with no jobs, which GitLab rejects with a message that names
-    # neither the schedule nor the variable. Refusing it here says why.
+    # lane, the install-bootstrap lane, the base-image-repin lane, or nothing
+    # (#801 step 6, #820, #724, #708). `renovate`, `sidecar_pin_freshness`,
+    # `install_bootstrap` and `base_image_repin` are the only jobs that opt
+    # in, so a schedule that forgot its variable would produce a pipeline
+    # with no jobs, which GitLab rejects with a message that names neither
+    # the schedule nor the variable. Refusing it here says why.
     - if: $CI_PIPELINE_SOURCE == "schedule" && $RENOVATE == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $BASE_IMAGE_REPIN == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -1872,3 +1874,69 @@ install_bootstrap:
       bash scripts/test-install-bootstrap.sh
   after_script:
     - *docker_in_job_teardown
+
+# Detects the pinned Orbit base image being behind and proposes the fix as a
+# merge request, rather than leaving the freshness gate red from the moment a
+# condition arises until a person happens to be working on Orbit (#708). Two
+# owner rulings bound this job and are not revisited here: nothing is
+# rebuilt or committed straight to a branch history someone else owns
+# (2026-08-29), and a bot-opened merge request is an acceptable way to
+# propose a fix, since the required checks on it are what actually carry the
+# safety (2026-09-01). So this job never pushes to `dev`, `preview` or
+# `main` directly, and it never merges anything -- it pushes its own branch
+# and asks the API to open or refresh a merge request against `dev`. See
+# scripts/ci/repin-base-image.sh for the two axes and why the digest comes
+# from ai/orbit-base-image's own `publish` job artifact rather than an
+# independently resolved tag.
+#
+# Both axes go through Docker -- `docker buildx imagetools inspect` to
+# corroborate the artifact's digest against the live index, and an `apk
+# upgrade --simulate` inside the image to catch a still-current tag with
+# stale packages -- so this runs on `orbit-build` via `.dind_service`, the
+# same shape as `sidecar_pin_freshness`.
+#
+# The self-test is `--red` (proves the digest comparison fires both ways)
+# before the real run, same convention as `sidecar_pin_freshness` and
+# `install_bootstrap`: a report that never fires red teaches nothing when it
+# is finally asked to. Unlike those two, `--red` here touches no docker, no
+# network and no file -- it only proves the comparison function, because the
+# real run's own side effects (a branch push, a merge-request call) are not
+# something to rehearse against the real repository on a schedule.
+#
+# One CI/CD variable the owner creates under Settings > CI/CD > Variables,
+# masked, unprotected unless the schedule's branch is itself protected (same
+# reasoning as RENOVATE_TOKEN above):
+#
+#   BASE_REPIN_TOKEN   Needs two things at once, so a single project access
+#                       token on ai/orbit cannot cover it: read access to
+#                       ai/orbit-base-image's job artifacts (that project is
+#                       private), and the `api` scope with Developer role on
+#                       ai/orbit to push a branch and open a merge request.
+#                       A group access token on the `ai` group, scope `api`,
+#                       role Developer, covers both projects with one token.
+#                       It must never hold registry push credentials --
+#                       nothing here publishes an image, only proposes a
+#                       pin. Never printed; read by
+#                       scripts/ci/repin-base-image.sh, which fails clearly
+#                       if it is unset.
+base_image_repin:
+  stage: maintenance
+  extends: .dind_service
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  # One image pull, one apk simulate, one small artifact fetch and a handful
+  # of API calls -- a fraction of sidecar_pin_freshness's budget, which pulls
+  # every sidecar.
+  timeout: 15m
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $BASE_IMAGE_REPIN == "true"
+  script:
+    - *docker_cli
+    - |
+      set -eu
+      echo "base_image_repin: red self-test — the digest comparison must fire"
+      bash scripts/ci/repin-base-image.sh --red
+      echo "base_image_repin: real run — compares the artifact digest to the pin"
+      bash scripts/ci/repin-base-image.sh
