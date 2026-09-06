@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<meta name="color-scheme" content="dark">
+<title>Sam Okafor invited you to Harbour House on Orbit</title>
+<!--
+  ORBIT · v19 · INVITATION MAIL · round 2 · direction E — "the arrival"
+  #481. The sun again, but as a ceremony rather than a card: no panel, the
+  whole mail is the sky. Three rings widen out from the sun the way the star
+  chart's do, the invitee's marker appears on the innermost one, and the
+  household name is the largest thing on the page. One action, centred, in the
+  sun's own colour: "Step into Harbour House". Motion (the rings appearing
+  outward, the marker arriving, the sun breathing) is in the <style> block as
+  a progressive enhancement — Apple Mail, iOS, Samsung, Thunderbird and Outlook
+  for Mac play it; Gmail and Outlook for Windows show the still. The still is
+  the design. prefers-reduced-motion stops it. Everything else is inline:
+  tables, no SVG, no images, no web fonts, no gradients, no absolute position.
+  Data story (shared by every round): Sam Okafor invites priya@example.com to
+  Harbour House; the link lasts until 20 September 2026.
+-->
+<style>
+  /* Each ring's own line fades up from the sky colour — never opacity, which
+     would dim the sun and marker nested inside it. */
+  @keyframes orbit-ripple-out { from { border-color: #05070d; } to { border-color: #151b28; } }
+  @keyframes orbit-ripple-mid { from { border-color: #05070d; } to { border-color: #1c2434; } }
+  @keyframes orbit-ripple-in  { from { border-color: #05070d; } to { border-color: #2f3a52; } }
+  @keyframes orbit-appear { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes orbit-breathe { 0%, 55% { transform: scale(1); } 75% { transform: scale(1.12); } 100% { transform: scale(1); } }
+  @keyframes orbit-settle { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .o-out { animation: orbit-ripple-out 1.4s ease-out 1.2s 1 both; }
+  .o-mid { animation: orbit-ripple-mid 1.2s ease-out .7s 1 both; }
+  .o-in  { animation: orbit-ripple-in 1.0s ease-out .2s 1 both; }
+  .o-mark { animation: orbit-appear .8s ease-out 2.4s 1 both; }
+  .o-sun { animation: orbit-breathe 3.6s ease-in-out 1 both; }
+  .o-words { animation: orbit-settle 1.2s ease-out 2.8s 1 both; }
+  @media (prefers-reduced-motion: reduce) { .o-out, .o-mid, .o-in, .o-mark, .o-sun, .o-words { animation: none; } }
+</style>
+</head>
+<body style="margin:0;padding:0;background:#05070d;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#05070d;">
+<tr><td align="center" style="padding:44px 16px 60px;">
+
+  <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#05070d;">Sam has a place for you in Harbour House. The link is good until 20 September.</div>
+
+  <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;">
+
+    <!-- the wordmark, alone -->
+    <tr><td align="center" style="padding:0 0 40px;font-family:Georgia,'Times New Roman',serif;font-size:15px;letter-spacing:.22em;color:#7c8699;">O R B I T</td></tr>
+
+    <!-- the sky: three rings out from the sun, the marker on the innermost -->
+    <tr><td align="center" style="padding:0 16px;">
+      <div class="o-out" style="width:200px;height:200px;border:1px solid #151b28;border-radius:50%;margin:0 auto;">
+        <div class="o-mid" style="width:160px;height:160px;border:1px solid #1c2434;border-radius:50%;margin:19px auto 0;">
+          <div class="o-in" style="width:120px;height:120px;border:1px solid #2f3a52;border-radius:50%;margin:19px auto 0;">
+            <div class="o-mark" style="width:14px;height:14px;background:#7dd3fc;border-radius:50%;margin:10px 0 0 94px;"></div>
+            <div class="o-sun" style="width:30px;height:30px;background:#f0b429;border-radius:50%;margin:20px auto 0;"></div>
+          </div>
+        </div>
+      </div>
+    </td></tr>
+
+    <!-- the words: the household name is the largest thing on the page -->
+    <tr><td class="o-words" align="center" style="padding:40px 16px 0;font-family:'Courier New',Courier,monospace;font-size:11px;letter-spacing:.18em;color:#4a5468;">SAM OKAFOR HAS A PLACE FOR YOU IN</td></tr>
+    <tr><td class="o-words" align="center" style="padding:14px 24px 0;font-family:Georgia,'Times New Roman',serif;font-size:38px;line-height:1.1;letter-spacing:-.01em;color:#f0b429;">Harbour House</td></tr>
+    <tr><td class="o-words" align="center" style="padding:22px 56px 0;font-family:Georgia,'Times New Roman',serif;font-size:17px;line-height:1.55;color:#a7afc0;">
+      A household’s year in one calm view — the boiler service, the insurance renewal, the MOT — and Sam would like you in theirs.
+    </td></tr>
+
+    <!-- the one action, in the sun's own colour -->
+    <tr><td class="o-words" align="center" style="padding:36px 40px 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>
+        <td style="border:1.5px solid #f0b429;border-radius:999px;">
+          <a href="https://orbit.example/invite/…" style="display:inline-block;padding:15px 34px;font-family:Georgia,'Times New Roman',serif;font-size:17px;letter-spacing:.02em;color:#f0b429;text-decoration:none;">Step into Harbour House</a>
+        </td>
+      </tr></table>
+    </td></tr>
+
+    <!-- a thin rule, then the facts -->
+    <tr><td align="center" style="padding:44px 0 0;"><div style="width:48px;height:1px;background:#1c2434;margin:0 auto;"></div></td></tr>
+    <tr><td align="center" style="padding:24px 40px 0;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.9;color:#4a5468;">
+      sent to <span style="color:#7c8699;">priya@example.com</span> · sign in with that address<br>
+      good until <span style="color:#7c8699;">20 Sep 2026</span><br>
+      not expecting this? there is nothing to do — the link simply lapses.
+    </td></tr>
+
+    <!-- the footer, quiet -->
+    <tr><td align="center" style="padding:40px 8px 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#4a5468;">
+      Orbit at <span style="color:#7c8699;">orbit.example</span> · run by Sam’s household, not a company.<br>
+      If the button does nothing, copy this into your browser: <span style="color:#7c8699;word-break:break-all;">https://orbit.example/invite/…</span>
+    </td></tr>
+
+  </table>
+</td></tr>
+</table>
+</body>
+</html>

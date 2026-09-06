@@ -61,6 +61,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   documents: ["id", "household_id", "item_id", "uploaded_by_user_id", "display_name", "media_type", "size_bytes", "content_sha256", "lifecycle", "scan_status", "failure_code", "delete_after", "deleted_at", "available_at", "version", "created_at", "updated_at"],
   due_events: ["id", "household_id", "item_id", "kind", "due_date", "completed_at", "completed_by_user_id", "completion_key", "next_event_id", "created_at"],
   external_identities: ["id", "user_id", "issuer", "subject", "last_login_at", "created_at", "updated_at"],
+  household_invitations: ["id", "household_id", "email", "role", "invited_by_user_id", "token_digest", "expires_at", "sent_at", "send_error", "redeemed_at", "redeemed_by_user_id", "revoked_at", "revoked_by_user_id", "created_at"],
   household_join_requests: ["id", "household_id", "user_id", "status", "created_at", "decided_at", "decided_by_user_id"],
   households: ["id", "name", "timezone", "default_currency", "setup_completed", "deletion_requested_at", "delete_after", "deletion_requested_by_user_id", "created_at", "updated_at"],
   imap_ingestion_attachments: ["id", "message_id", "display_name", "media_type", "size_bytes", "content_sha256", "storage_key", "ciphertext_size", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "status", "assigned_document_id", "transfer_claim_token", "transfer_claimed_at", "transfer_lease_expires_at", "purge_pending", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
@@ -140,6 +141,13 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   reviewed_intake_operation_result_unique: { table: "reviewed_intake_operations", columns: ["result_id"], unique: true },
   reviewed_intake_operation_actor_idx: { table: "reviewed_intake_operations", columns: ["actor_user_id", "created_at"], unique: false },
   reviewed_intake_operation_item_idx: { table: "reviewed_intake_operations", columns: ["item_id"], unique: false },
+  // Partial: at most one OPEN invitation per household and address (#481), so
+  // a resend replaces rather than accumulates.
+  household_invitation_open_once: { table: "household_invitations", columns: ["household_id", "email"], unique: true },
+  // Deliberately NOT partial: a spent token still has to find its own row, or
+  // a second visit to a used link would read as "no such invitation".
+  household_invitation_token_digest_unique: { table: "household_invitations", columns: ["token_digest"], unique: true },
+  household_invitation_household_idx: { table: "household_invitations", columns: ["household_id", "created_at"], unique: false },
   join_request_household_idx: { table: "household_join_requests", columns: ["household_id", "status"], unique: false },
   join_request_pending_once: { table: "household_join_requests", columns: ["household_id", "user_id"], unique: true },
   join_request_user_idx: { table: "household_join_requests", columns: ["user_id", "status"], unique: false },
@@ -216,6 +224,11 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   maintenance_window_absorbed_into_id_fk: foreign("maintenance_windows", ["absorbed_into_id"], "maintenance_windows", ["id"], "no_action"),
   maintenance_updates_pkey: primary("maintenance_updates", ["id"]),
   maintenance_updates_window_id_fk: foreign("maintenance_updates", ["window_id"], "maintenance_windows", ["id"], "cascade"),
+  household_invitations_household_id_households_id_fk: foreign("household_invitations", ["household_id"], "households", ["id"], "cascade"),
+  household_invitations_invited_by_user_id_users_id_fk: foreign("household_invitations", ["invited_by_user_id"], "users", ["id"], "set_null"),
+  household_invitations_pkey: primary("household_invitations", ["id"]),
+  household_invitations_redeemed_by_user_id_users_id_fk: foreign("household_invitations", ["redeemed_by_user_id"], "users", ["id"], "set_null"),
+  household_invitations_revoked_by_user_id_users_id_fk: foreign("household_invitations", ["revoked_by_user_id"], "users", ["id"], "set_null"),
   household_join_requests_household_id_households_id_fk: foreign("household_join_requests", ["household_id"], "households", ["id"], "cascade"),
   household_join_requests_pkey: primary("household_join_requests", ["id"]),
   household_join_requests_user_id_users_id_fk: foreign("household_join_requests", ["user_id"], "users", ["id"], "cascade"),
