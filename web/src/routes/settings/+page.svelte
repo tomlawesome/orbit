@@ -14,6 +14,7 @@
   import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
   import { relaunchTour } from "$lib/tour/relaunch.js";
   import { fillStarTiles } from "$lib/sky.js";
+  import { DEFAULT_THEME, THEME_PACKS } from "$lib/theme.js";
   import Chrome from "$lib/Chrome.svelte";
   import "./settings.css";
 
@@ -33,38 +34,41 @@
 
   /*
    * THE v1.3.0 ROSTER, FINAL (§15, owner): star-chart, after dark, CLOUDS,
-   * dawn (which now means the terminator) and retrograde. Atlas, hanami,
-   * porcelain, miami and solarium are on the records shelf — packs.css still
-   * defines atlas in full and forcing data-theme=atlas still renders it, so the
-   * record survives. What goes is the OFFER, and this card is the only place in
-   * the product that makes one in words as well as colour.
+   * dawn (which now means the terminator) and retrograde — theme.js's own
+   * THEME_PACKS, in the order and membership named there (#865). Atlas,
+   * hanami, porcelain, miami and solarium are on the records shelf: their
+   * code is gone (#865 removed atlas's own, the last one still present), and
+   * what goes here is the OFFER — this card is the only place in the product
+   * that makes one in words as well as colour.
    *
-   * Two rows change with the roster, and both of them because the sheet ruled
-   * the picture rather than because a preference was tidied:
-   *   · CLOUDS joins, carrying the lighter end of the range (owner: "one of
+   * Two rows changed with the roster, and both of them because the sheet
+   * ruled the picture rather than because a preference was tidied:
+   *   · CLOUDS joined, carrying the lighter end of the range (owner: "one of
    *     Orbit's MAIN LIGHTER THEMES"). Its strip shows the cool white of a
    *     cloud crest and its own hazy pastel bodies.
-   *   · DAWN's ground moves to the temperature story's own #d2d3d4 and its
-   *     line stops saying "first light" — that is the pair's shared light, and
-   *     what this pack IS now is the crossing. The words are the sheet's:
+   *   · DAWN's ground moved to the temperature story's own #d2d3d4 and its
+   *     line stopped saying "first light" — that is the pair's shared light,
+   *     and what this pack IS now is the crossing. The words are the sheet's:
    *     design/v19/dawn-terminator.html, "night hands the sky to day".
    * Both strips' bodies are the pastels the refresh gave the light packs, so
    * the swatch is made of the same paint as the screen it promises.
    */
-  /** @type {[string, string, string, string, string[]][]} */
-  const PACKS = [
-    ["starchart", "star-chart", "the ratified night", "#060b1c",
+  /** @type {Record<string, [string, string, string, string[]]>} */
+  const META = {
+    starchart: ["star-chart", "the ratified night", "#060b1c",
       ["radial-gradient(circle at 35% 30%,#fff6e6,#ffe9c4 45%,transparent 72%)", "#f0b429", "#4ade80", "#8fb8ff"]],
-    ["afterdark", "after dark", "lights out, ink up", "#05070d",
+    afterdark: ["after dark", "lights out, ink up", "#05070d",
       ["radial-gradient(circle at 35% 30%,#ffffff,#dbe9ff 45%,transparent 72%)", "#f0b429", "#4ade80", "#7dd3fc"]],
-    ["clouds", "clouds", "first light, from altitude", "#eef2f9",
+    clouds: ["clouds", "first light, from altitude", "#eef2f9",
       ["radial-gradient(circle at 35% 30%,#9c4a10,#eda253 45%,transparent 72%)", "#f0c076", "#95cfab", "#9dbce6"]],
-    ["dawn", "dawn", "night hands the sky to day", "#d2d3d4",
+    dawn: ["dawn", "night hands the sky to day", "#d2d3d4",
       ["radial-gradient(circle at 35% 30%,#9c4a10,#eda253 45%,transparent 72%)", "#f0c076", "#95cfab", "#9dbce6"]],
-    ["retrograde", "retrograde", "the eighties, classy", "#080a14",
+    retrograde: ["retrograde", "the eighties, classy", "#080a14",
       ["radial-gradient(circle at 35% 30%,#fff0fb,#ff4fd8 45%,transparent 72%)", "#ffd23f", "#3ef2a0", "#2de2e6"]],
-  ];
-  let active = $state("starchart");
+  };
+  /** @type {[string, string, string, string, string[]][]} */
+  const PACKS = THEME_PACKS.map((id) => [id, ...META[id]]);
+  let active = $state(DEFAULT_THEME);
   /** @param {string} name */
   function pickPack(name) {
     active = name;
@@ -265,7 +269,7 @@
       /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("fartile"))),
       /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("neartile"))),
     );
-    active = document.documentElement.dataset.theme || "starchart";
+    active = document.documentElement.dataset.theme || DEFAULT_THEME;
     view = await readSettingsScreen();
     emailReminders = /** @type {Awaited<ReturnType<typeof readSettingsScreen>>} */ (view).reminders.emailEnabled;
     try {

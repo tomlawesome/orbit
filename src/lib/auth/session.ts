@@ -8,6 +8,7 @@ import { clearSessionCookie, sessionCookieName, setSessionCookie } from "@/lib/a
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
 import type { TextSize, UrgencyPalette } from "@/lib/preferences";
+import { themePackOrDefault } from "@/lib/preferences";
 
 export interface AuthenticatedSession {
   id: string;
@@ -220,7 +221,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       avatarUrl: record.avatarUrl,
       isInstanceAdmin: record.isInstanceAdmin,
       themeMode: record.themeMode ?? "system",
-      themeId: record.themeId ?? "after-dark",
+      /* #865: a stale stored value — a removed pack (atlas), or the column's
+         own pre-#325 legacy default ("after-dark", with the hyphen, which
+         was never a v19 pack id either) — resolves to the current default
+         rather than reaching the client unfiltered. */
+      themeId: themePackOrDefault(record.themeId),
       textSize: record.textSize === "standard" || record.textSize === "large" || record.textSize === "extra-large"
         ? record.textSize
         : "comfortable",
