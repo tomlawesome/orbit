@@ -212,6 +212,27 @@ export const instanceMaintenance = pgTable("instance_maintenance", {
   check("instance_maintenance_singleton", sql`${table.singleton}`),
 ]);
 
+/**
+ * The instance's one public contact address (#860): an address an
+ * administrator deliberately sets for the signed-out sign-in door's "could
+ * not open safely" state (#788). Follows `instance_maintenance`'s shape
+ * (singleton PK, `id` for `audit_log.entity_id`, `version`) and — like that
+ * table, unlike `mail_in_mailbox` — its migration seeds the row
+ * unconditionally, so an upgrade always finds a working row with no address
+ * rather than an absent one. Never populated from any user account's own
+ * email; `public_address` is nullable, and null is the normal, supported
+ * "not set" state, not an error.
+ */
+export const instanceContact = pgTable("instance_contact", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  publicAddress: text("public_address"),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_contact_singleton", sql`${table.singleton}`),
+]);
+
 export const externalIdentities = pgTable("external_identities", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
