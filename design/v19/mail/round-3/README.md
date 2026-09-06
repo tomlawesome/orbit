@@ -44,4 +44,6 @@ Owner, 2026-09-06, on #481:
   `g-the-living-system.html`.**
 - On the gold hairline along the card's top: "Why are they randomly yellow
   at the top on phones?" — it is deliberate (the sun's colour on the card
-  edge, on desk too); kept or dropped on the owner's word.
+  edge, on desk too). Owner: "Drop the gold line at the top, and instead,
+  give the whole card a feint, thin gold outline." **Applied in the
+  template, not re-drawn as a round.**
