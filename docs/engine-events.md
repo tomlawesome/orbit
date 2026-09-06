@@ -327,14 +327,20 @@ guided machine prompts above.
 ready <FIELD>
 missing <FIELD>
 optional <FIELD>
+app-managed <FIELD>
 ```
 
 - One line per readiness item, in the fixed order below.
 - A consumer parses exactly the first two whitespace-separated tokens per
   line; orbit-launcher's own parser discards any line that does not split
   into exactly two fields, and treats a run that produces no `ready`,
-  `missing` or `optional` line at all as a structural failure rather than
-  "everything is ready".
+  `missing`, `optional` or `app-managed` line at all as a structural failure
+  rather than "everything is ready".
+- `app-managed <FIELD>` means the field's credential is administration-
+  screen configuration stored encrypted in the database, not .env-orbit
+  (ADR-0017): it is reported unconditionally, regardless of any environment
+  content, is never counted toward `Missing`/`Unfixable`, and never turns
+  the exit status non-zero.
 - `<FIELD>` is always a fixed name, never a configured value: `--check` never
   discloses secrets, URLs or other configured content, by field name alone.
 - Exit status is non-zero whenever any line reports `missing`, zero
@@ -361,8 +367,14 @@ absent:
 processing
 ai
 mail
-imap
 push
+```
+
+App-managed groups — always reported as `app-managed <FIELD>`, never `ready`,
+`missing` or `optional`, regardless of environment content:
+
+```
+imap
 ```
 
 ### Consumer guidance
@@ -373,6 +385,10 @@ push
   machine-prompt field (see "field" under "Machine prompts (v0)" above) nor
   `OIDC_CLIENT_SECRET` nor `ORBIT_IMAGE` — `install.sh` persists `ORBIT_IMAGE`
   itself, from the image it resolves, before this readiness gate ever runs.
+- An `app-managed` field is never `missing` and never appears in
+  `ConfigCheck.Missing`: there is nothing for the environment or the guided
+  machine prompts to fix, because the credential lives in the database and is
+  set from the administration screen after Orbit is up.
 - The readiness report never reveals which value is wrong for a `missing`
   field, only that it is missing; the guided machine prompts above are the
   only path for a consumer to learn more.
@@ -385,6 +401,16 @@ and back) by `scripts/configure-check-contract.test.mjs`, mirroring
 `scripts/engine-events.test.mjs` above. Renaming or removing a field, or
 changing whether it can report `optional`, is a breaking change requiring a
 version bump and coordination with orbit-launcher.
+
+`imap` moved from "Optional groups" to "App-managed groups" in the same
+change that removed every `IMAP_*` .env-orbit key (ADR-0017 slice 2, issue
+#743): a consumer that still expects `optional imap`/`missing imap`/
+`ready imap` will not see any of those three words for this field again.
+This is exactly the breaking change the paragraph above describes; it ships
+without a version bump only because there are no external operators of this
+interface to coordinate with yet (the same reasoning ADR-0017 gives for
+dropping the deployment contract's `IMAP_*` deprecation window). Coordinate
+with orbit-launcher before relying on this if that stops being true.
 
 ## Machine prompts: backup/restore/recovery (v0)
 

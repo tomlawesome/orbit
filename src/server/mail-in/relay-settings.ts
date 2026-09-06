@@ -17,7 +17,8 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages } from "@/db/schema";
-import { getImapIngestionConfig, type ImapIngestionConfig } from "./core/config";
+import { getImapIngestionConfig } from "./mailbox-config";
+import type { ImapIngestionConfig } from "./core/config";
 import { deriveImapRecipientAlias } from "./core/imap-recipient";
 
 /** Mail-in is configured, switched on, and this account has a mailbox. */
@@ -55,10 +56,14 @@ export interface RelaySettings {
  * screen can do nothing with it either way. Misconfiguration belongs on the
  * operator's surface (#411), where it is already reported.
  */
-function resolvedConfig(): ImapIngestionConfig | undefined {
+async function resolvedConfig(): Promise<ImapIngestionConfig | undefined> {
   try {
-    return getImapIngestionConfig();
+    return await getImapIngestionConfig();
   } catch {
+    // A locked credential (ADR-0017) is bounded the same way as any other
+    // unresolvable configuration here: this screen has nothing a member can
+    // act on either way, and the operator surface (#411) is where it is
+    // reported in full.
     return undefined;
   }
 }
@@ -67,7 +72,7 @@ function resolvedConfig(): ImapIngestionConfig | undefined {
 export async function readRelaySettings(
   user: { id: string; isInstanceAdmin: boolean },
 ): Promise<RelaySettings> {
-  const config = resolvedConfig();
+  const config = await resolvedConfig();
   const ingest: RelayIngest = config?.enabled ? "enabled" : "paused";
   if (user.isInstanceAdmin) {
     return { address: null, listening: RELAY_NO_MAILBOX, lastReceived: null, ingest };
@@ -84,7 +89,7 @@ export async function readRelaySettings(
     .orderBy(desc(imapIngestionMessages.receivedAt))
     .limit(1);
   return {
-    address: deriveImapRecipientAlias(user.id, config.recipientDomain, config.aliasCurrent),
+    address: deriveImapRecipientAlias(user.id, config.aliasBase, config.aliasCurrent),
     listening: RELAY_LISTENING,
     lastReceived: latest?.receivedAt ? latest.receivedAt.toISOString() : null,
     ingest,

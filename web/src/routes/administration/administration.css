@@ -123,3 +123,19 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
         border:1px solid var(--line);border-radius:99px;padding:4px 11px;cursor:pointer}
 .mission-page .placerow button:hover{border-color:var(--accent);color:var(--accent-text)}
 .mission-page .adminproblem{margin-top:10px;font:11px var(--mono);color:var(--warm)}
+
+/* Mail machinery, live (#743, ADR-0017 slice 2). The controls borrow the
+   panel's existing furniture — .kv rows, .placerow buttons, .adminproblem —
+   so this reads as the same card rather than a second design; only the form
+   itself is new, because the sheet had no form to borrow from. */
+.mission-page .mailboxrow{padding:10px 2px 4px}
+.mission-page .mailboxform{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;padding:12px 2px 2px}
+.mission-page .mailboxform label{display:flex;flex-direction:column;gap:4px;
+  font:10.5px var(--mono);letter-spacing:.06em;color:var(--ink-faint)}
+.mission-page .mailboxform :is(input,select){font:12px var(--mono);color:var(--ink);
+  background:none;border:1px solid var(--line-soft);border-radius:6px;padding:5px 7px}
+.mission-page .mailboxform :is(input,select):focus-visible{outline:none;border-color:var(--accent)}
+.mission-page .mailboxform .mailboxnote,
+.mission-page .mailboxform .mailboxrow{grid-column:1 / -1}
+.mission-page .mailboxform .mailboxnote{font:10.5px var(--mono);line-height:1.5;color:var(--ink-faint);margin-top:2px}
+.mission-page .adminproblem.ok{color:var(--ok-text)}

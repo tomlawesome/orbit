@@ -156,9 +156,6 @@ const fixtures: Record<string, Fixture> = {
       SMTP_PASSWORD_FILE: "/run/orbit-secrets/orbit-smtp-password",
     },
   },
-  "IMAP enabled without the boundary reports missing imap": {
-    record: { ...completeCore, IMAP_ENABLED: "true" },
-  },
   "tika URL without the profile reports missing processing": {
     record: { ...completeCore, TIKA_URL: "http://orbit-tika:9998" },
   },

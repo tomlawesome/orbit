@@ -64,7 +64,6 @@ export const ALLOWED_KEYS = [
   "OLLAMA_CPUS",
   "OLLAMA_MAX_QUEUE",
   "OLLAMA_KEEP_ALIVE",
-  "IMAP_ENABLED",
   "SMTP_HOST",
   "SMTP_PORT",
   "SMTP_SECURITY",
@@ -74,31 +73,6 @@ export const ALLOWED_KEYS = [
   "SMTP_FROM",
   "SMTP_URL",
   "SMTP_URL_FILE",
-  "IMAP_HOST",
-  "IMAP_PORT",
-  "IMAP_USER",
-  "IMAP_PASSWORD",
-  "IMAP_PASSWORD_FILE",
-  "IMAP_MAILBOX",
-  "IMAP_TLS_SERVER_NAME",
-  "IMAP_RECIPIENT_DOMAIN",
-  "IMAP_TRUSTED_RECIPIENT_HEADER",
-  "IMAP_POLL_SECONDS",
-  "IMAP_ALIAS_CURRENT_GENERATION",
-  "IMAP_ALIAS_CURRENT_SECRET",
-  "IMAP_ALIAS_CURRENT_SECRET_FILE",
-  "IMAP_ALIAS_PREVIOUS_GENERATION",
-  "IMAP_ALIAS_PREVIOUS_SECRET",
-  "IMAP_ALIAS_PREVIOUS_SECRET_FILE",
-  "IMAP_ALIAS_PREVIOUS_EXPIRES_AT",
-  "IMAP_ALIAS_GENERATION",
-  "IMAP_ALIAS_CURRENT_KEY",
-  "IMAP_ALIAS_CURRENT_KEY_FILE",
-  "IMAP_ALIAS_SECRET",
-  "IMAP_ALIAS_SECRET_FILE",
-  "IMAP_ALIAS_PREVIOUS_KEY",
-  "IMAP_ALIAS_PREVIOUS_KEY_FILE",
-  "IMAP_ALIAS_PREVIOUS_EXPIRY",
   "VAPID_SUBJECT",
   "SESSION_TTL_SECONDS",
   "OIDC_SCOPES",
@@ -285,7 +259,6 @@ export const envOrbitSchema = z
     ORBIT_LOG_FORMAT: z.enum(["", "text", "json"]).optional(),
     DOCUMENT_SCAN_MODE: z.enum(["", "required", "disabled"]).optional(),
     SMTP_SECURITY: z.enum(["", "starttls", "implicit_tls"]).optional(),
-    IMAP_ENABLED: z.enum(["", "true", "false"]).optional(),
     MIGRATE_ON_START: z.enum(["", "true", "false"]).optional(),
     WORKER_ENABLED: z.enum(["", "true", "false"]).optional(),
   })
@@ -307,7 +280,6 @@ export const envOrbitSchema = z
       ["OIDC_CLIENT_SECRET", "OIDC_CLIENT_SECRET_FILE"],
       ["VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY_FILE"],
       ["SMTP_PASSWORD", "SMTP_PASSWORD_FILE"],
-      ["IMAP_PASSWORD", "IMAP_PASSWORD_FILE"],
       ["DATABASE_URL", "DATABASE_URL_FILE"],
       ["SMTP_URL", "SMTP_URL_FILE"],
     ];
@@ -383,6 +355,12 @@ export function evaluateReadiness(
       ok = false;
     } else lines.push(`optional ${label}`);
   };
+  // A service configured entirely from the administration screen (its
+  // credential lives in the database, not .env-orbit) is never ready/missing
+  // from environment facts alone, and never fails readiness.
+  const appManaged = (label: string) => {
+    lines.push(`app-managed ${label}`);
+  };
 
   const normalizedAppUrl = isSet(record, "APP_URL")
     ? normalizePublicOrigin(record.APP_URL as string)
@@ -457,35 +435,7 @@ export function evaluateReadiness(
   }
   optional("mail", mailReady, mailPresent);
 
-  const imapEnabled = (record.IMAP_ENABLED ?? "false") === "true";
-  const imapPresent =
-    imapEnabled ||
-    anySet(
-      record,
-      "IMAP_HOST",
-      "IMAP_USER",
-      "IMAP_PASSWORD",
-      "IMAP_PASSWORD_FILE",
-      "IMAP_RECIPIENT_DOMAIN",
-      "IMAP_ALIAS_CURRENT_GENERATION",
-      "IMAP_ALIAS_CURRENT_SECRET",
-      "IMAP_ALIAS_CURRENT_SECRET_FILE",
-      "IMAP_TRUSTED_RECIPIENT_HEADER",
-    );
-  const imapReady =
-    imapEnabled &&
-    allSet(
-      record,
-      "IMAP_HOST",
-      "IMAP_USER",
-      "IMAP_RECIPIENT_DOMAIN",
-      "IMAP_ALIAS_CURRENT_GENERATION",
-      "IMAP_TRUSTED_RECIPIENT_HEADER",
-    ) &&
-    exactlyOneSet(record, "IMAP_PASSWORD", "IMAP_PASSWORD_FILE") &&
-    exactlyOneSet(record, "IMAP_ALIAS_CURRENT_SECRET", "IMAP_ALIAS_CURRENT_SECRET_FILE") &&
-    mailReady;
-  optional("imap", imapReady, imapPresent);
+  appManaged("imap");
 
   const pushPresent = isSet(record, "VAPID_SUBJECT");
   const pushReady =

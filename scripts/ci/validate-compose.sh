@@ -49,7 +49,6 @@ docker compose --env-file .env-orbit config --quiet
 docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.build.yml config --quiet
 docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml config --quiet
 docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml config --quiet
-docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.mail-alias-rotation.yml config --quiet
 docker compose --env-file .env-orbit --profile processing --profile ai config --quiet
 
 # Optional services must be selectable by configuration alone, so

@@ -24,6 +24,7 @@ import {
   getImapIngestionConfig,
   getImapIngestionWorkerHealth,
   getImapProviderPreflightState,
+  MailInCredentialLockedError,
   verifyImapIngestionProviders,
 } from "@/server/imap-ingestion";
 import { requireInstanceAdministrator } from "@/server/authorization";
@@ -135,9 +136,15 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
   let config: ReturnType<typeof getNotificationWorkerConfig> | undefined;
   let notificationConfigError = false;
   try { config = getNotificationWorkerConfig(); } catch { notificationConfigError = true; }
-  let imapConfig: ReturnType<typeof getImapIngestionConfig> | undefined;
+  let imapConfig: Awaited<ReturnType<typeof getImapIngestionConfig>> | undefined;
   let imapConfigError = false;
-  try { imapConfig = getImapIngestionConfig(); } catch { imapConfigError = true; }
+  let imapCredentialLocked = false;
+  try {
+    imapConfig = await getImapIngestionConfig();
+  } catch (error) {
+    if (error instanceof MailInCredentialLockedError) imapCredentialLocked = true;
+    else imapConfigError = true;
+  }
   const decodedCursor = decodeAuditCursor(auditCursor);
   const auditQuery = getDb().select({
     id: auditLog.id,
@@ -228,11 +235,12 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
     mailboxIngestion: {
       enabled: imapConfig?.enabled ?? false,
       configured: imapConfig?.configured ?? false,
-      status: imapConfigError ? "unsafe_input" as const
+      status: imapCredentialLocked ? "credential_locked" as const
+        : imapConfigError ? "unsafe_input" as const
         : notificationConfigError ? "unsafe_input" as const
         : imapConfig?.configured ? preflight.status : "not_configured" as const,
       smtp: notificationConfigError ? "unsafe_input" as const : preflight.smtp,
-      imap: imapConfigError ? "unsafe_input" as const : preflight.imap,
+      imap: imapCredentialLocked ? "unsafe_input" as const : imapConfigError ? "unsafe_input" as const : preflight.imap,
       worker: {
         started: imapWorker.started,
         running: imapWorker.running,
@@ -480,7 +488,7 @@ export async function verifyImapIngestionProvider(actorUserId: string): Promise<
   const inFlight = (async () => {
     try {
       if (adminImapVerificationDependenciesForTests?.verify) return await adminImapVerificationDependenciesForTests.verify();
-      const state = await verifyImapIngestionProviders(getImapIngestionConfig(), getNotificationWorkerConfig());
+      const state = await verifyImapIngestionProviders(await getImapIngestionConfig(), getNotificationWorkerConfig());
       return state.status;
     } catch {
       return "unsafe_input";
