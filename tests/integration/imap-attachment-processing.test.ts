@@ -20,6 +20,7 @@ import { parseImapIngestionConfigFromEnvironment as getImapIngestionConfig } fro
 import { holdImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
 import { syntheticPdf } from "../support/synthetic-documents";
 
 afterAll(async () => {
@@ -56,6 +57,14 @@ function mailboxConfig() {
     IMAP_ALIAS_CURRENT_SECRET: "test-only-current-alias-secret-is-long-enough",
     IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To",
   });
+}
+
+/* Attribution is by verified sender since ADR-0017 slice 4 (orbit#745), so a
+   fixture message has to say who it is from and carry the provider verdict
+   that backs it. The env parser knows nothing about authserv-ids, so the
+   trusted one is set on the resolved configuration here. */
+function attributedConfig() {
+  return { ...mailboxConfig(), trustedAuthservId: TRUSTED_AUTHSERV_ID };
 }
 
 function pdfBodyStructure() {
@@ -134,9 +143,10 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
   it("keeps poison retries bounded, continues with later UIDs, and fences a changed recipient", async () => {
     const fixture = await createIntegrationFixture("imap-provider-bounds");
     try {
-      const config = mailboxConfig();
+      const config = attributedConfig();
+      const memberSender = await verifiedSenderFor(fixture.users.member.id, `member-${fixture.users.member.id}@example.test`);
       const alias = imapRecipientAlias(fixture.users.member.id, config);
-      const header = Buffer.from(`X-Original-To: ${alias}\r\n\r\n`);
+      const header = attributedHeaders(memberSender, alias);
       await getDb().insert(imapIngestionMessages).values({
         mailbox: config.mailbox, mailboxUidValidity: "77", mailboxUid: 800, contentSha256: randomUUID().replaceAll("-", ""),
         recipientAliasSha256: "retry", userId: fixture.users.member.id, status: "processing",
@@ -169,7 +179,8 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
 
       const changedRecipient = fixture.users.owner.id;
       const changedAlias = imapRecipientAlias(changedRecipient, config);
-      const mismatchProvider = fakeClient([{ uid: 900, headers: Buffer.from(`X-Original-To: ${changedAlias}\r\n\r\n`), bodyStructure: pdfBodyStructure(), source: Buffer.from("changed"), size: 7 }]);
+      const changedSender = await verifiedSenderFor(changedRecipient, `owner-${changedRecipient}@example.test`);
+      const mismatchProvider = fakeClient([{ uid: 900, headers: attributedHeaders(changedSender, changedAlias), bodyStructure: pdfBodyStructure(), source: Buffer.from("changed"), size: 7 }]);
       await getDb().insert(imapIngestionMessages).values({
         mailbox: config.mailbox, mailboxUidValidity: "77", mailboxUid: 900, contentSha256: randomUUID().replaceAll("-", ""),
         recipientAliasSha256: "durable", userId: fixture.users.member.id, status: "processing",
@@ -415,7 +426,8 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
   it("holds terminal exhaustion in recoverable cleanup until all staged bytes are purged", async () => {
     const fixture = await createIntegrationFixture("imap-terminal-staging-cleanup");
     try {
-      const config = mailboxConfig();
+      const config = attributedConfig();
+      const memberSender = await verifiedSenderFor(fixture.users.member.id, `terminal-${fixture.users.member.id}@example.test`);
       const alias = imapRecipientAlias(fixture.users.member.id, config);
       const receiptId = randomUUID();
       const leaseToken = randomUUID();
@@ -423,7 +435,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: config.mailbox, mailboxUidValidity: "77", mailboxUid: 910, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "terminal", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingAttempts: 5, attachmentProcessingLockedAt: new Date(Date.now() - 11 * 60_000), attachmentProcessingLeaseToken: leaseToken, attachmentProcessingNextAttemptAt: new Date(0) });
       await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored" });
       await getDb().insert(imapIngestionStagingObjects).values({ messageId: receiptId, leaseToken, storageKey: held.storageKey, status: "committed" });
-      const provider = fakeClient([{ uid: 910, headers: Buffer.from(`X-Original-To: ${alias}\r\n\r\n`), bodyStructure: pdfBodyStructure(), source: Buffer.from("later retry") }]);
+      const provider = fakeClient([{ uid: 910, headers: attributedHeaders(memberSender, alias), bodyStructure: pdfBodyStructure(), source: Buffer.from("later retry") }]);
       setImapClientFactoryForTests(() => provider.client as never);
 
       await runImapIngestionCycle(config);

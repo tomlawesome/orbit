@@ -423,7 +423,7 @@
      is carried entirely by the mockups' own art (the lockup, the card, the
      climb), so the heading names the stage for a reader who cannot see it,
      rather than duplicating text already on screen. -->
-<main>
+<main class="arrival">
   <h1 class="sr-only">{title}</h1>
 
   <!-- THE LOGIN SCREEN IS THE BASE LAYER, exactly as the sheet builds it: the

@@ -46,6 +46,15 @@ export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
   "expired",
   "quarantined",
   "failed",
+  /* ADR-0017 slice 4 (orbit#745): matched no verified sender, so nothing was
+     downloaded, staged or notified — the message was answered once, where the
+     reply conditions allowed it, and deleted from the provider mailbox. */
+  "unattributed",
+  /* ADR-0017 slice 5 (orbit#746): the member it belongs to has collection
+     paused, so the receipt records that it arrived and nothing else —
+     content-free, nothing downloaded, nothing staged, nobody notified. Resume
+     turns it back into `processing` and the ordinary retry pass fetches it. */
+  "held",
 ]);
 export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
 export const imapRecipientAliasStatus = pgEnum("imap_recipient_alias_status", ["active", "legacy_inactive"]);
@@ -55,6 +64,7 @@ export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_s
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
 export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token"]);
 export const mailInProviderProfile = pgEnum("mail_in_provider_profile", ["mailcow", "gmail", "outlook", "other"]);
+export const mailInSenderSource = pgEnum("mail_in_sender_source", ["account", "sso", "manual"]);
 export const mailInAuthMethod = pgEnum("mail_in_auth_method", ["password", "xoauth2"]);
 
 const auditColumns = {
@@ -567,6 +577,12 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   discardedAt: timestamp("discarded_at", { withTimezone: true }),
   expiredAt: timestamp("expired_at", { withTimezone: true }),
   status: imapIngestionStatus("status").notNull(),
+  /**
+   * How the message reached its owner (ADR-0017 decision 3, slice 4): the
+   * verified sender alone, or the sender with the member's own alias
+   * corroborating it. Null for everything that was never attributed.
+   */
+  attributedBy: text("attributed_by"),
   attempts: integer("attempts").notNull().default(1),
   failureCode: text("failure_code"),
   attachmentProcessingAttempts: integer("attachment_processing_attempts").notNull().default(0),
@@ -594,6 +610,7 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
   index("imap_message_recipient_content_idx").on(table.userId, table.contentSha256),
   index("imap_attachment_processing_claim_idx").on(table.status, table.attachmentProcessingLockedAt, table.createdAt),
+  check("imap_message_attributed_by_valid", sql`${table.attributedBy} IS NULL OR ${table.attributedBy} IN ('sender', 'sender_and_alias')`),
 ]);
 
 /** Content-free, leased notification operations for private mailbox receipts. */
@@ -616,12 +633,19 @@ export const imapNotificationDeliveries = pgTable("imap_notification_deliveries"
 ]);
 
 /** Generation-aware per-user aliases. Legacy prototype digests are retained
- * only as explicitly inactive rows and are never eligible for lookup. */
+ * only as explicitly inactive rows and are never eligible for lookup.
+ *
+ * Since ADR-0017 slice 3 (orbit#744) `generation` is the owning user's own
+ * counter, not the instance's, and this table is the whole lookup authority:
+ * `alias_key_secret_id` records which `mail_in_secrets` row of kind
+ * `alias_key` derived the digest, so a row still verifies after the
+ * administrator's emergency key rotation replaces the instance key. */
 export const imapRecipientAliases = pgTable("imap_recipient_aliases", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   generation: integer("generation").notNull(),
   aliasSha256: text("alias_sha256").notNull(),
+  aliasKeySecretId: uuid("alias_key_secret_id").references(() => mailInSecrets.id, { onDelete: "set null" }),
   status: imapRecipientAliasStatus("status").notNull().default("active"),
   activeUntil: timestamp("active_until", { withTimezone: true }),
   ...auditColumns,
@@ -632,21 +656,74 @@ export const imapRecipientAliases = pgTable("imap_recipient_aliases", {
   check("imap_recipient_alias_generation_valid", sql`${table.generation} > 0 OR ${table.status} = 'legacy_inactive'`),
 ]);
 
-/** Database-authoritative singleton for monotonic alias rotation handover. */
-export const imapRecipientRotationState = pgTable("imap_recipient_rotation_state", {
-  id: integer("id").primaryKey().default(1),
-  currentGeneration: integer("current_generation").notNull(),
-  currentCommitment: text("current_commitment").notNull(),
+/**
+ * One relay per user (ADR-0017 decision 2, slice 3, orbit#744), replacing the
+ * instance-wide `imap_recipient_rotation_state` singleton it retires.
+ *
+ * Generations are this user's own monotonic counter: exactly one current, at
+ * most one previous with an explicit expiry, never lowered and never reused.
+ * `version` carries the same optimistic-concurrency discipline as
+ * `instance_maintenance`, and every user-initiated transition is an UPDATE
+ * predicated on `user_id = $self AND version = $expected` — the sibling
+ * invariant is that no statement on that path has a wider predicate.
+ */
+export const mailInRelays = pgTable("mail_in_relays", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  currentGeneration: integer("current_generation").notNull().default(1),
   previousGeneration: integer("previous_generation"),
   previousExpiresAt: timestamp("previous_expires_at", { withTimezone: true }),
-  previousCommitment: text("previous_commitment"),
+  /** Set here in slice 3, given its receipt-time behaviour in slice 5 (#746). */
+  ingestPausedAt: timestamp("ingest_paused_at", { withTimezone: true }),
+  rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
   ...auditColumns,
 }, (table) => [
-  check("imap_recipient_rotation_state_singleton", sql`${table.id} = 1`),
-  check("imap_recipient_rotation_state_current_valid", sql`${table.currentGeneration} > 0`),
-  check("imap_recipient_rotation_state_previous_valid", sql`${table.previousGeneration} IS NULL OR (${table.previousGeneration} > 0 AND ${table.previousGeneration} <> ${table.currentGeneration})`),
-  check("imap_recipient_rotation_state_previous_pair", sql`(${table.previousGeneration} IS NULL) = (${table.previousExpiresAt} IS NULL) AND (${table.previousGeneration} IS NULL) = (${table.previousCommitment} IS NULL)`),
+  check("mail_in_relay_current_valid", sql`${table.currentGeneration} > 0`),
+  check("mail_in_relay_previous_valid", sql`${table.previousGeneration} IS NULL OR (${table.previousGeneration} > 0 AND ${table.previousGeneration} < ${table.currentGeneration})`),
+  check("mail_in_relay_previous_pair", sql`(${table.previousGeneration} IS NULL) = (${table.previousExpiresAt} IS NULL)`),
 ]);
+
+/**
+ * The addresses a member may send from (ADR-0017 decision 3, slice 4,
+ * orbit#745).
+ *
+ * A sender address is a CLAIM, not a credential: no row here attributes
+ * anything until `verified_at` is set, because one member claiming another's
+ * address would otherwise be enough to receive their forwarded documents. The
+ * address is unique across the instance for the same reason — one address
+ * attributes to exactly one member, so attribution is never a guess.
+ */
+export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** Normalised on the way in: trimmed, unwrapped, case-folded. */
+  address: text("address").notNull(),
+  source: mailInSenderSource("source").notNull().default("manual"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  /** The one-use link's token, digested. The token itself is never stored. */
+  verificationTokenDigest: text("verification_token_digest"),
+  verificationExpiresAt: timestamp("verification_expires_at", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("mail_in_sender_address_unique").on(table.address),
+  index("mail_in_sender_address_user_idx").on(table.userId, table.verifiedAt),
+  check("mail_in_sender_address_verification_pair", sql`(${table.verificationTokenDigest} IS NULL) = (${table.verificationExpiresAt} IS NULL)`),
+]);
+
+/**
+ * When each unknown sender was last answered (ADR-0017 decision 3, slice 4).
+ *
+ * At most one reply per sender address per day, so the reply cannot be turned
+ * into a flood against the household mailbox or a stranger's. The address is
+ * held as a DIGEST: an unattributed sender is not a member and Orbit keeps
+ * nothing readable about them, which is the same rule
+ * `imap_recipient_aliases` follows for relay addresses.
+ */
+export const mailInUnattributedReplies = pgTable("mail_in_unattributed_replies", {
+  addressSha256: text("address_sha256").primaryKey(),
+  lastRepliedAt: timestamp("last_replied_at", { withTimezone: true }).notNull(),
+  ...auditColumns,
+});
 
 /** Durable idempotency/result state for an explicit reviewed approval. This is
  * an operation ledger, not a private mailbox draft aggregate. */
@@ -773,6 +850,15 @@ export const mailInMailbox = pgTable("mail_in_mailbox", {
   providerProfile: mailInProviderProfile("provider_profile").notNull().default("other"),
   authMethod: mailInAuthMethod("auth_method").notNull().default("password"),
   trustedRecipientHeader: text("trusted_recipient_header").notNull().default(""),
+  /**
+   * Whose `Authentication-Results` verdict this instance believes (ADR-0017
+   * decision 3, slice 4). It belongs to the provider profile: Gmail and
+   * Outlook have known values, and a Mailcow or other provider is the
+   * operator's own hostname, which only they can supply. Empty means the
+   * instance has not said, and nothing is believed — no sender is
+   * authenticated, so no mail is attributed and no reply is ever sent.
+   */
+  trustedAuthservId: text("trusted_authserv_id").notNull().default(""),
   pollSeconds: integer("poll_seconds").notNull().default(300),
   enabled: boolean("enabled").notNull().default(false),
   verificationState: text("verification_state").notNull().default("unverified"),

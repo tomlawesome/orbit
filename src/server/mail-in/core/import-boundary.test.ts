@@ -33,7 +33,7 @@ describe("mail-in/core import boundary", () => {
       "review-state.ts",
       "imap-attachment-validation.ts",
       "imap-recipient.ts",
-      "imap-rotation.ts",
+      "relay-generations.ts",
     ]));
   });
 

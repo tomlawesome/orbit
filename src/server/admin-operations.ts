@@ -8,6 +8,7 @@ import {
   documentStagingObjects,
   documents,
   households,
+  imapIngestionMessages,
   imapNotificationDeliveries,
   notificationDeliveries,
   users,
@@ -164,6 +165,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
   const [
     deliveryCountRows,
     documentJobCountRows,
+    mailboxReceiptCountRows,
     deliveries,
     jobs,
     historyRows,
@@ -177,6 +179,13 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
       status: documentJobs.status,
       count: sql<number>`count(*)::int`,
     }).from(documentJobs).groupBy(documentJobs.status),
+    /* Aggregate only, and deliberately so (ADR-0017 decision 2 and 5): how
+       many receipts sit in each state, including `held` and `unattributed`,
+       and never whose they are or what address they came to. */
+    getDb().select({
+      status: imapIngestionMessages.status,
+      count: sql<number>`count(*)::int`,
+    }).from(imapIngestionMessages).groupBy(imapIngestionMessages.status),
     getDb().select({
       id: notificationDeliveries.id,
       channel: notificationDeliveries.channel,
@@ -251,6 +260,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
     },
     deliveryCounts: boundedCounts(deliveryCountRows),
     documentJobCounts: boundedCounts(documentJobCountRows),
+    mailboxReceiptCounts: boundedCounts(mailboxReceiptCountRows),
     mailboxNotifications: { status: mailboxNotificationStatus },
     deliveries: deliveries.map(({ lastError, ...delivery }) => ({
       ...delivery,

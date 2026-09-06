@@ -60,10 +60,15 @@ safety property while giving both sources one approval boundary.
   HMAC-SHA-256 from a secret-backed alias key, stable user identity, and key
   generation. Alias digests and generations are indexed; user identifiers and
   alias secrets do not appear in addresses or logs.
-- Rotation supports the current and one previous alias-key generation for a
-  bounded administrator-selected transition. Users see the new alias; the old
-  generation expires explicitly. Emergency rotation may invalidate the
-  previous generation immediately.
+- Rotation supports the current and one previous alias generation for a
+  bounded transition. Users see the new alias; the old generation expires
+  explicitly. Emergency rotation may invalidate the previous generation
+  immediately. **Amended by [ADR-0017](0017-mail-in-credential-ownership-and-per-user-relay.md)
+  decision 2 (slice 3, orbit#744):** generations are per user, not per
+  instance, and the transition is fixed by the product at 14 days rather than
+  selected by an administrator. What an administrator retains is the
+  instance-wide emergency alias-key rotation, whose grace they do choose, up
+  to the same 90-day ceiling.
 - Missing, ambiguous, or unverified envelope identity produces a quarantined
   receipt with sanitized diagnostics. It cannot be manually associated by an
   administrator in v1.
