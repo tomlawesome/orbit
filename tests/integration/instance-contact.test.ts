@@ -109,10 +109,16 @@ describe("PostgreSQL public-contact-address contracts (#860)", () => {
     expect(signedOut.contactAddress).toBe("public-contact@example.invalid");
     expect(signedOut.contactAddress).not.toBe(fixture.users.admin.email);
     expect(signedOut.contactAddress).not.toBe(fixture.users.owner.email);
-    // The whole body is bounded to these two fields (door-state.js's
+    // The whole body is bounded to these three fields (door-state.js's
     // availabilityOf reads only them, but the route itself is asserted here
-    // too): nothing about any account rides along on this read.
-    expect(Object.keys(signedOut).sort()).toEqual(["configured", "contactAddress"]);
+    // too): nothing about any account rides along on this read. `phase`
+    // joined them in #869 and is deliberately inside the bound rather than
+    // outside it — it is one of two words, "starting" or "running", and
+    // names neither a subsystem nor an error, so it tells a signed-out
+    // visitor when the door is worth polling and nothing else. Widening
+    // this list is a decision about an unauthenticated surface; make it
+    // here, on purpose, or not at all.
+    expect(Object.keys(signedOut).sort()).toEqual(["configured", "contactAddress", "phase"]);
   });
 
   it("reflects whether authentication is configured, without ever naming why not", async () => {

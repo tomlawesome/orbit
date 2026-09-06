@@ -10,6 +10,34 @@ const SCANNER_STARTUP_WINDOW_MS = 180_000;
 const SCANNER_READINESS_RETRY_INTERVAL_MS = 5_000;
 
 /**
+ * The two words `GET /api/auth/availability` exposes as `phase` (#869): a
+ * strict, terminating fact the process itself holds, so the sign-in door can
+ * stop inferring boot from a content-free `degraded` readiness answer.
+ * `"starting"` for every process from the moment it is created; `"running"`
+ * exactly once, when {@link registerNode}'s own sequence — configuration,
+ * readiness reports, migrate-on-boot, workers — has finished. A
+ * `registerNode` rejection never flips it: `web/src/hooks.server.js` exits
+ * the process instead, so a process still answering "starting" is never
+ * wrong to have said so — it is dying, not stuck.
+ */
+export type BootPhase = "starting" | "running";
+
+let bootPhase: BootPhase = "starting";
+
+export function getBootPhase(): BootPhase {
+  return bootPhase;
+}
+
+/**
+ * Test-only: set the phase directly, so a route or door-state test can
+ * exercise the "running" branch without paying for the full mocked
+ * `registerNode` sequence below.
+ */
+export function setBootPhaseForTests(phase: BootPhase | undefined): void {
+  bootPhase = phase ?? "starting";
+}
+
+/**
  * Validates authentication configuration in the Node runtime without making
  * startup or public health depend on private runtime configuration.
  */
@@ -317,6 +345,12 @@ export async function registerNode(): Promise<void> {
     // Unconditional: scheduled maintenance depends on no optional setting.
     startMaintenanceWorker();
   }
+
+  // The strict sequence (#869) is done: configuration, readiness reports,
+  // migrate-on-boot, workers. Everything past this point is best-effort
+  // post-boot reporting, not a boot step, so it flips before the scanner
+  // probe kicks off rather than after.
+  bootPhase = "running";
 
   // Probed after workers start so a slow or absent scanner never delays them.
   // Failure is reported, never thrown: readiness is the health surface's job.
