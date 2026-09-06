@@ -56,6 +56,8 @@ const EXPECTED_ROUTES = [
   "/api/auth/logout",
   "/api/auth/session",
   "/api/auth/session/refresh",
+  "/api/auth/sessions",
+  "/api/auth/sessions/[sessionId]/revoke",
   "/api/auth/sessions/revoke",
   "/api/document-drafts/[draftId]/approve",
   "/api/documents/[documentId]",
@@ -124,7 +126,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 45 route families -- no fewer, no more", () => {
+  it("has exactly the expected 47 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
