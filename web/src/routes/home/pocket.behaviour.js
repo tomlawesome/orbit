@@ -20,6 +20,23 @@ export function mountPocket({ approve, dismiss } = {}) {
   const on = (target, type, handler) =>
     target?.addEventListener(type, handler, { signal: controller.signal });
 
+  /* #851: the dial bodies and suggestion markers are SVG <circle>/<g>
+     elements carrying tabindex="0" and role="button" (pocket.svelte) so Tab
+     can reach them, but a real button also activates on Enter and Space —
+     neither of which an SVG element does natively. One shared binder for
+     both listener kinds, rather than a click handler and a hand-copied
+     keydown handler kept in sync by hand. */
+  /** @type {(target: EventTarget | null | undefined, handler: (event: Event) => void) => void} */
+  const onActivate = (target, handler) => {
+    on(target, "click", handler);
+    on(target, "keydown", (event) => {
+      const key = /** @type {KeyboardEvent} */ (event).key;
+      if (key !== "Enter" && key !== " " && key !== "Spacebar") return;
+      event.preventDefault();
+      handler(event);
+    });
+  };
+
   const sheet = /** @type {HTMLElement} */ (document.getElementById("sheet"));
   const title = /** @type {HTMLElement} */ (document.getElementById("sh-title"));
   const meta = /** @type {HTMLElement} */ (document.getElementById("sh-meta"));
@@ -36,7 +53,7 @@ export function mountPocket({ approve, dismiss } = {}) {
   };
 
   for (const body of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-sheet-title]"))) {
-    on(body, "click", () => {
+    onActivate(body, () => {
       title.textContent = /** @type {string} */ (body.dataset.sheetTitle);
       meta.textContent = /** @type {string} */ (body.dataset.sheetMeta);
       fields.replaceChildren();
@@ -53,7 +70,7 @@ export function mountPocket({ approve, dismiss } = {}) {
   /** @type {string | null | undefined} */
   let activeSuggestion = null;
   for (const trigger of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-sheet-sugg]"))) {
-    on(trigger, "click", () => {
+    onActivate(trigger, () => {
       const id = trigger.dataset.sheetSugg;
       const template = /** @type {HTMLTemplateElement | null} */ (
         document.querySelector(`[data-sugg-template="${CSS.escape(/** @type {string} */ (id))}"]`)

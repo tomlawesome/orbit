@@ -163,6 +163,10 @@
   .splash-search input{border-bottom-color:var(--ink-faint)}
   .splash-search input:hover{border-color:var(--ink-mid)}
   .splash-search input:focus{border-color:var(--accent)}
+  /* #847: the hairline's own colour shift is not enough for keyboard users to
+     find the field, so it earns the same ring every other focusable control
+     on this screen gives (.body-link:focus-visible above). */
+  .splash-search input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   /* CON-7: the word IS the handle — attached to the drawer edge, riding the
      slide. v17: key is quiet ink, degraded is unmistakably orange, and the
@@ -235,8 +239,15 @@
            background:var(--panel-raised);backdrop-filter:blur(14px);
            border:1px solid var(--line);border-radius:16px;padding:18px 20px;
            opacity:0;transform:translateY(-6px);pointer-events:none;
-           transition:opacity .25s,transform .25s}
-  .account.open{opacity:1;transform:none;pointer-events:auto}
+           /* #847: closed, this must leave the tab order entirely — opacity
+              and pointer-events alone still let Tab land on the links and
+              swatch buttons inside. visibility is delayed to match the close
+              animation's own .25s so it still plays; opening clears the delay
+              so the panel is reachable the instant it appears. */
+           visibility:hidden;
+           transition:opacity .25s,transform .25s,visibility 0s .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto;
+                visibility:visible;transition-delay:0s}
   .account .who b{display:block;font-size:14px;font-weight:560}
   .account .who span{font-size:12px;color:var(--ink-mid)}
   .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
@@ -352,11 +363,26 @@
            max-height:76vh;overflow:auto;overscroll-behavior:contain;
            width:300px;background:var(--panel-raised);backdrop-filter:blur(16px);
            border:1px solid var(--line);border-radius:16px;padding:20px 22px;
-           opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
-  .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%)}
+           opacity:0;pointer-events:none;
+           /* #847: closed, the viewer's close button must leave the tab
+              order, on the same delayed-visibility rule as .account above. */
+           visibility:hidden;
+           transition:opacity .25s,transform .25s,visibility 0s .25s}
+  .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%);
+                visibility:visible;transition-delay:0s}
   .drawer{position:fixed;top:0;bottom:0;z-index:10;width:290px;
           background:var(--panel-raised);backdrop-filter:blur(16px);
-          padding:26px;transition:transform .35s cubic-bezier(.3,.7,.3,1)}
+          padding:26px;
+          /* #847: closed, the drawer is only off-screen via transform — Tab
+             still walks into it. visibility follows the same rule as .account
+             above: delayed on close to let the slide finish, immediate on
+             open. */
+          visibility:hidden;
+          transition:transform .35s cubic-bezier(.3,.7,.3,1),visibility 0s .35s}
+  .drawer.open{visibility:visible;transition-delay:0s}
+  /* the handle rides the drawer's own edge and is meant to stay reachable
+     (and visible) while its drawer is closed — CON-7 — so it opts back in. */
+  .drawer>button.handle{visibility:visible}
   /* #843: h2, not h4 -- these are the first headings after the page's own
      (sr-only) h1, so the level must not skip. The look is unchanged. */
   .drawer h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
@@ -390,8 +416,15 @@
   .drawer-top{position:fixed;top:0;left:0;right:0;z-index:11;
               background:var(--panel-raised);backdrop-filter:blur(16px);
               border-bottom:1px solid var(--line);
-              transform:translateY(-102%);transition:transform .4s cubic-bezier(.3,.7,.3,1)}
-  .drawer-top.open{transform:none}
+              transform:translateY(-102%);
+              /* #847: same fix as .account/.drawer above — closed, this must
+                 leave the tab order, delayed to let the slide finish. */
+              visibility:hidden;
+              transition:transform .4s cubic-bezier(.3,.7,.3,1),visibility 0s .4s}
+  .drawer-top.open{transform:none;visibility:visible;transition-delay:0s}
+  /* the north star is this drawer's own handle (CON-12) and rides the same
+     slide as .drawer's handle above — it must stay reachable while closed. */
+  .drawer-top .nstar{visibility:visible}
   .drawer-top .inner{max-width:880px;margin:0 auto;padding:30px 24px 26px;
                      display:flex;flex-direction:column;gap:18px;align-items:center}
   .drawer-top .crow{align-self:stretch}

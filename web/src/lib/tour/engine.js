@@ -70,6 +70,39 @@ export function createTour({
   let written = false;
   /** Guards against a second stop starting while the first is still arriving. */
   let generation = 0;
+  /** Elements the walk has put `inert` on for the stop now showing, tracked so
+   *  moving on removes exactly these rather than guessing which they were.
+   *  @type {Element[]} */
+  let inerted = [];
+
+  /**
+   * Drops every dimmed-but-not-lit region out of the tab order and the
+   * accessibility tree (#844): the CSS already fades this text to a contrast
+   * axe fails, and a reader can't usefully land on or read text nobody can
+   * see clearly. The walk stays non-modal — this narrows what is reachable,
+   * it does not trap anything — so the card itself is never a candidate: it
+   * carries no `data-tour-dim` (stops.js's regions never name it), and the
+   * ancestor check below is belt and braces against that changing.
+   *
+   * @param {Element[]} lit
+   */
+  function markInert(lit) {
+    for (const element of inerted) element.removeAttribute("inert");
+    inerted = [];
+    const card = cardOf();
+    for (const element of doc.querySelectorAll("[data-tour-dim]")) {
+      if (lit.includes(element)) continue;
+      if (card && element.contains(card)) continue;
+      element.setAttribute("inert", "");
+      inerted.push(element);
+    }
+  }
+
+  /** Puts every element the walk made inert back the way it found them. */
+  function clearInert() {
+    for (const element of inerted) element.removeAttribute("inert");
+    inerted = [];
+  }
 
   /** @param {KeyboardEvent} event */
   function onKeydown(event) {
@@ -133,6 +166,7 @@ export function createTour({
       mode: emphasisModeOf(packOf(doc)),
     });
     for (const element of lit) element.setAttribute("aria-describedby", CARD_COPY_IDS);
+    markInert(lit);
     /* Full brightness is no use off the bottom of the page. */
     lit[0]?.scrollIntoView?.({ block: "center", behavior: "auto" });
     /** @type {HTMLElement | null} */ (cardOf())?.focus?.();
@@ -165,6 +199,7 @@ export function createTour({
     doc.removeEventListener("keydown", onKeydown);
     doc.body.classList.remove(RUNNING_CLASS);
     clearEmphasis(doc);
+    clearInert();
     removeExampleBody(doc);
     onChange(null);
     if (written) return;
@@ -187,6 +222,7 @@ export function createTour({
       doc.removeEventListener("keydown", onKeydown);
       doc.body.classList.remove(RUNNING_CLASS);
       clearEmphasis(doc);
+      clearInert();
       removeExampleBody(doc);
     },
     get index() { return index; },
