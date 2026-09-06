@@ -16,14 +16,20 @@ open · the shipped door.
 
 | State | Primary | Subline |
 |---|---|---|
-| Not configured | Sign-in isn’t set up yet. | Whoever runs this Orbit needs to configure authentication before the door can open. |
+| Not configured | Sign-in isn’t set up yet. | The administrator needs to configure authentication before the door can open. |
 | Starting | Orbit is waking up. | Sign-in will appear by itself in a moment. |
-| Could not open safely | Orbit couldn’t open safely. | Nothing you did caused this. If it keeps happening, tell whoever runs this Orbit. |
+| Could not open safely | Orbit couldn’t open safely. | It’s not you, it’s us. If it keeps happening, let us know at «public contact address». |
 
 Fixed copy Orbit owns; provider-supplied text appears nowhere (the
 zero-occurrence assertion survives). The guidance names the administrator's
-action and never blames the visitor. "Whoever runs this Orbit" rather than
-"your administrator": self-hosted, the reader often is that person.
+action and never blames the visitor.
+
+The table above is the copy the owner ratified on 2026-09-06, not the copy
+this round proposed. The round wrote "whoever runs this Orbit" on the
+reasoning that self-hosted, the reader often is that person; the owner
+rejected it ("crap") in favour of naming the administrator plainly, and
+replaced the third state's subline outright. That third line needs a
+setting that does not exist yet — see the dependency below.
 
 ## Directions
 
@@ -90,6 +96,28 @@ real pressable gate behind identical pixels.
   one door would read as an instrument, not artwork.
 - No provider or error detail anywhere, per the security property.
 
-## Verdicts (owner)
+## Verdicts (owner, 2026-09-06)
 
-_(recorded verbatim when the batch returns)_
+**C — the held dawn is ratified.** In the owner's own words: *"the choice
+for 788 is the held dawn"*. The sheet's own flag — that holding the sky
+might read as redesigning the door — is answered by the choice: it does
+not. Recovery being a real sunrise is the direction, not a decoration on
+it.
+
+A, B and D are dropped. They are kept in this round as the browsable
+record of what was considered; nothing is carried forward from them.
+
+Wording, same message: *"'Whoever runs' is .. crap"*, so the second state's
+subline names the administrator. The third state's subline is replaced
+wholesale with the owner's own line, quoted in the table above, and with it
+a new requirement: the address shown there is a **public contact address an
+administrator sets**, never a private administrator mailbox scraped from an
+account.
+
+## Dependency this round created
+
+The "could not open safely" line cannot ship until an instance carries a
+public contact address as a setting (#860). Until then the first two states
+are implementable and the third is not, because the alternative — showing a
+real administrator's own email on a signed-out page — is exactly what the
+owner ruled out.
