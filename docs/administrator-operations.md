@@ -284,6 +284,15 @@ encrypted alongside the password, and never shown to anyone — members
 included. Changing the account address generates a new one, which changes
 every member's relay address; correcting a host, port or folder does not.
 
+Members rotate their own relay address from their relay page, and one member
+rotating changes nothing for anybody else. The one exception is an emergency:
+an administrator can replace the alias key for the whole instance, which
+changes every member's address at once. Choose how long the old addresses keep
+collecting — anything from none at all up to 90 days — and mail already on its
+way arrives at the old address until that runs out. Everything else about
+rotation belongs to the member, not to you: you can see that a rotation
+happened and who did it, never the address itself.
+
 The container bootstrap copies mounted Compose secrets into a private tmpfs,
 sets ownership to Orbit's unprivileged runtime user, applies mode `0400`, then
 drops root. The application reads only the `/run/orbit-secrets/...` copies.

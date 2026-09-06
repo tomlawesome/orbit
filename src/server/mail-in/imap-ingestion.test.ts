@@ -140,9 +140,17 @@ describe("IMAP ingestion configuration", () => {
     }));
     expect(config).toMatchObject({ currentAliasGeneration: 2, previousAliasGeneration: 1 });
     expect(config.previousAliasExpiresAt?.toISOString()).toBe(previousExpiry);
+    /* The environment parser still reads the tuple, and this test still pins
+       it, because the characterization suite is the only caller left. Nothing
+       in the running application matches against it any more: ADR-0017 slice 3
+       moved generations into each member's own `mail_in_relays` row, so an
+       address is identified by (user, generation) against the one instance key
+       and never by an instance-wide previous tuple. */
     const userId = "6f7aa3dc-347d-4ff4-bf50-bc4f4ffc054a";
-    expect(matchesImapRecipientAlias(deriveImapRecipientAlias(userId, config.aliasBase, config.aliasPrevious!), userId, config)).toBe(true);
-    expect(imapRecipientAlias(userId, config)).toBe(deriveImapRecipientAlias(userId, config.aliasBase, config.aliasCurrent));
+    const alias = imapRecipientAlias(userId, config, config.aliasCurrent.generation);
+    expect(alias).toBe(deriveImapRecipientAlias(userId, config.aliasBase, config.aliasCurrent));
+    expect(matchesImapRecipientAlias(alias, userId, config, config.aliasCurrent.generation)).toBe(true);
+    expect(matchesImapRecipientAlias(alias, userId, config, config.aliasPrevious!.generation)).toBe(false);
   });
 
   it("uses bounded exponential attachment backoff and rejects invalid attempts", () => {

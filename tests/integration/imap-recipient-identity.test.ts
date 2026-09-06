@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { imapIngestionMessages, imapRecipientAliases, imapRecipientRotationState, users } from "@/db/schema";
+import { imapIngestionMessages, imapRecipientAliases, mailInRelays, users } from "@/db/schema";
 import {
   imapRecipientAlias,
   reconcileImapRecipientAliases,
@@ -10,7 +10,8 @@ import {
   setImapClientFactoryForTests,
   type ImapIngestionConfig,
 } from "@/server/imap-ingestion";
-import { digestImapAliasConfiguration, digestImapRecipientAlias } from "@/server/mail-in/core/imap-recipient";
+import { digestImapRecipientAlias } from "@/server/mail-in/core/imap-recipient";
+import { rotateRelay } from "@/server/mail-in/relays";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { syntheticPdf } from "../support/synthetic-documents";
 
@@ -20,20 +21,19 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await getDb().delete(imapRecipientRotationState);
+  await getDb().delete(imapRecipientAliases);
+  await getDb().delete(mailInRelays);
 });
 
 /* Derived from the account address in the running application (ADR-0017
    decision 1); pinned here so the digests these cases assert stay stable. */
 const aliasBase = { localPart: "orbit", domain: "ingest.example.test" };
 
-function config(currentGeneration = 1, previous?: { generation: number; expiresAt: Date }, mailbox = "INBOX"): ImapIngestionConfig {
-  const current = { generation: currentGeneration, secret: `current-secret-generation-${currentGeneration}-that-is-long-enough` };
-  const aliasPrevious = previous ? {
-    generation: previous.generation,
-    secret: `current-secret-generation-${previous.generation}-that-is-long-enough`,
-    expiresAt: previous.expiresAt,
-  } : undefined;
+/* One instance alias key; generations belong to each member's own
+   `mail_in_relays` row since ADR-0017 slice 3 (orbit#744), so this no longer
+   carries any. */
+function config(mailbox = "INBOX"): ImapIngestionConfig {
+  const current = { generation: 1, secret: "the-instance-alias-key-that-is-long-enough" };
   return {
     configured: true,
     enabled: true,
@@ -47,11 +47,7 @@ function config(currentGeneration = 1, previous?: { generation: number; expiresA
     aliasBase: aliasBase,
     currentAliasGeneration: current.generation,
     currentAliasSecret: current.secret,
-    previousAliasGeneration: aliasPrevious?.generation,
-    previousAliasSecret: aliasPrevious?.secret,
-    previousAliasExpiresAt: aliasPrevious?.expiresAt,
     aliasCurrent: current,
-    aliasPrevious,
     aliasSecret: current.secret,
     trustedRecipientHeader: "X-Original-To",
     pollMilliseconds: 30_000,
@@ -59,72 +55,35 @@ function config(currentGeneration = 1, previous?: { generation: number; expiresA
 }
 
 describe("receipt identity PostgreSQL boundaries", () => {
-  it("reconciles current and one previous alias idempotently and disables users fail closed", async () => {
+  it("enrols every active member at generation one, idempotently, and fails closed for a disabled account", async () => {
     const fixture = await createIntegrationFixture("recipient-reconcile");
     try {
       await fixture.disableUser("disabled");
-      const previousExpiry = new Date(Date.now() + 86_400_000);
-      const mailbox = "recipient-reconcile-mailbox";
-      const initial = config(1, undefined, mailbox);
+      const initial = config("recipient-reconcile-mailbox");
+      /* Run concurrently: enrolment races a poll cycle in production, and the
+         only safe outcome is one row per member either way. */
       await Promise.all([reconcileImapRecipientAliases(initial, 5), reconcileImapRecipientAliases(initial, 5)]);
-      const rotation = config(2, { generation: 1, expiresAt: previousExpiry }, mailbox);
-      await Promise.all([reconcileImapRecipientAliases(rotation, 5), reconcileImapRecipientAliases(rotation, 5)]);
-
-      const [authority] = await getDb().select({
-        currentGeneration: imapRecipientRotationState.currentGeneration,
-        previousGeneration: imapRecipientRotationState.previousGeneration,
-        previousExpiresAt: imapRecipientRotationState.previousExpiresAt,
-        currentCommitment: imapRecipientRotationState.currentCommitment,
-        previousCommitment: imapRecipientRotationState.previousCommitment,
-      }).from(imapRecipientRotationState);
-      expect(authority).toMatchObject({ currentGeneration: 2, previousGeneration: 1, currentCommitment: digestImapAliasConfiguration(aliasBase, "X-Original-To", { generation: 2, secret: "current-secret-generation-2-that-is-long-enough" }), previousCommitment: digestImapAliasConfiguration(aliasBase, "X-Original-To", { generation: 1, secret: "current-secret-generation-1-that-is-long-enough" }) });
-      expect(authority.previousExpiresAt).toEqual(previousExpiry);
+      await reconcileImapRecipientAliases(initial, 5);
 
       const fixtureUserIds = Object.values(fixture.users).map((user) => user.id);
-      const activeRows = await getDb().select({ userId: imapRecipientAliases.userId, generation: imapRecipientAliases.generation, status: imapRecipientAliases.status })
+      const activeRows = await getDb().select({ userId: imapRecipientAliases.userId, generation: imapRecipientAliases.generation })
         .from(imapRecipientAliases).where(and(
           eq(imapRecipientAliases.status, "active"),
           inArray(imapRecipientAliases.userId, fixtureUserIds),
         ));
-      expect(activeRows).toHaveLength(10);
-      expect(new Set(activeRows.map((row) => row.userId))).toHaveLength(5);
-      expect(new Set(activeRows.map((row) => row.generation))).toEqual(new Set([1, 2]));
+      /* Six fixture users, one of them disabled: five active rows, all at
+         generation 1, one apiece. Members sharing a generation number is
+         ordinary — the counter is each member's own. */
+      expect(activeRows).toHaveLength(5);
+      expect(new Set(activeRows.map((row) => row.userId)).size).toBe(5);
+      expect(new Set(activeRows.map((row) => row.generation))).toEqual(new Set([1]));
       expect(await getDb().select({ id: imapRecipientAliases.id }).from(imapRecipientAliases)
         .innerJoin(users, eq(users.id, imapRecipientAliases.userId))
         .where(and(eq(users.id, fixture.users.disabled.id), eq(imapRecipientAliases.status, "active")))).toHaveLength(0);
-
-      const rowsBeforeStale = await getDb().select({ userId: imapRecipientAliases.userId, generation: imapRecipientAliases.generation, status: imapRecipientAliases.status, activeUntil: imapRecipientAliases.activeUntil })
-        .from(imapRecipientAliases).orderBy(imapRecipientAliases.userId, imapRecipientAliases.generation);
-      await expect(reconcileImapRecipientAliases(initial, 1)).rejects.toThrow("stale or invalid");
-      expect(await getDb().select({ userId: imapRecipientAliases.userId, generation: imapRecipientAliases.generation, status: imapRecipientAliases.status, activeUntil: imapRecipientAliases.activeUntil })
-        .from(imapRecipientAliases).orderBy(imapRecipientAliases.userId, imapRecipientAliases.generation)).toEqual(rowsBeforeStale);
-      await expect(runImapIngestionCycle(initial)).rejects.toThrow("stale or invalid");
-      expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(eq(imapIngestionMessages.mailbox, mailbox))).toHaveLength(0);
-      /* The alias base, not the bare recipient domain, is what the
-         commitment binds since ADR-0017 decision 1 made the base
-         account-derived: a moved domain reaches the digest through it. */
-      await expect(reconcileImapRecipientAliases({
-        ...rotation,
-        recipientDomain: "other.example.test",
-        aliasBase: { ...aliasBase, domain: "other.example.test" },
-      }, 1)).rejects.toThrow("stale or invalid");
-      await expect(reconcileImapRecipientAliases({
-        ...rotation,
-        aliasBase: { ...aliasBase, localPart: "different" },
-      }, 1)).rejects.toThrow("stale or invalid");
-      await expect(reconcileImapRecipientAliases({ ...rotation, trustedRecipientHeader: "X-Envelope-To" }, 1)).rejects.toThrow("stale or invalid");
-
-      await reconcileImapRecipientAliases(config(3, undefined, mailbox));
-      expect(await getDb().select({ currentGeneration: imapRecipientRotationState.currentGeneration, previousGeneration: imapRecipientRotationState.previousGeneration, previousExpiresAt: imapRecipientRotationState.previousExpiresAt })
-        .from(imapRecipientRotationState)).toEqual([{ currentGeneration: 3, previousGeneration: null, previousExpiresAt: null }]);
-      expect(await getDb().select({ generation: imapRecipientAliases.generation, status: imapRecipientAliases.status })
-        .from(imapRecipientAliases).where(eq(imapRecipientAliases.userId, fixture.users.member.id)))
-        .toEqual(expect.arrayContaining([
-          { generation: 1, status: "legacy_inactive" },
-          { generation: 2, status: "legacy_inactive" },
-          { generation: 3, status: "active" },
-        ]));
-      await expect(reconcileImapRecipientAliases(rotation)).rejects.toThrow("stale or invalid");
+      /* A disabled member keeps their place in the counter, so re-enabling
+         them can never reissue an address somebody else already holds. */
+      expect(await getDb().select({ currentGeneration: mailInRelays.currentGeneration }).from(mailInRelays)
+        .where(eq(mailInRelays.userId, fixture.users.disabled.id))).toEqual([{ currentGeneration: 1 }]);
     } finally {
       await fixture.cleanup();
     }
@@ -167,13 +126,11 @@ describe("receipt identity PostgreSQL boundaries", () => {
     }
   });
 
-  it("keeps current G2 receipt ingestion available when its static previous tuple expires", async () => {
+  it("keeps the rotated-to address collecting after the member's own previous generation lapses", async () => {
     const fixture = await createIntegrationFixture("recipient-expiry-boundary");
-    const expiry = new Date(Date.now() - 1_000);
-    const rotation = config(2, { generation: 1, expiresAt: expiry });
-    const beforeExpiry = new Date(expiry.getTime() - 1);
-    const alias = imapRecipientAlias(fixture.users.member.id, rotation);
+    const current = config();
     const ranges: string[] = [];
+    let alias = "";
     setImapClientFactoryForTests(() => ({
       // Comfortably above every UID this fixture's fake mailboxes use, so
       // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
@@ -191,14 +148,14 @@ describe("receipt identity PostgreSQL boundaries", () => {
       },
     } as unknown as import("imapflow").ImapFlow));
     try {
-      await reconcileImapRecipientAliases(config(1));
-      await reconcileImapRecipientAliases(rotation, 1_000, beforeExpiry);
-      expect(await getDb().select({ previousGeneration: imapRecipientRotationState.previousGeneration })
-        .from(imapRecipientRotationState)).toEqual([{ previousGeneration: 1 }]);
-      await reconcileImapRecipientAliases(rotation, 1_000, expiry);
-      expect(await getDb().select({ currentGeneration: imapRecipientRotationState.currentGeneration, previousGeneration: imapRecipientRotationState.previousGeneration })
-        .from(imapRecipientRotationState)).toEqual([{ currentGeneration: 2, previousGeneration: null }]);
-      await runImapIngestionCycle(rotation);
+      await reconcileImapRecipientAliases(current);
+      /* Rotate and cut off: the outgoing generation 1 expires at once, so the
+         only address left standing is generation 2's. */
+      const rotated = await rotateRelay(fixture.users.member.id, "cut_off", current);
+      expect(rotated.toGeneration).toBe(2);
+      alias = imapRecipientAlias(fixture.users.member.id, current, rotated.toGeneration);
+
+      await runImapIngestionCycle(current);
       expect(ranges).toEqual(["1:*"]);
       expect(await getDb().select({ uid: imapIngestionMessages.mailboxUid, userId: imapIngestionMessages.userId, generation: imapIngestionMessages.recipientAliasGeneration })
         .from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, "300")))

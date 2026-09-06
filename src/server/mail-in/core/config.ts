@@ -51,6 +51,18 @@ export interface ImapIngestionConfig {
   previousAliasExpiresAt?: Date;
   aliasCurrent: ImapAliasGeneration;
   aliasPrevious?: ImapAliasGeneration;
+  /**
+   * The `mail_in_secrets` row of kind `alias_key` the mailbox currently points
+   * at, recorded on every alias row this key derives (ADR-0017 slice 3). Absent
+   * for the retired environment parser, which had no rows to name.
+   */
+  aliasKeySecretId?: string;
+  /**
+   * Every alias key by row id, so an address minted under a key the
+   * administrator has since replaced still verifies for as long as the grace
+   * they set runs. The current key is in here too.
+   */
+  aliasKeys?: Record<string, string>;
   /** Deprecated in-memory compatibility name; never persist or log it. */
   aliasSecret: string;
   trustedRecipientHeader: string;

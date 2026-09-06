@@ -8,8 +8,8 @@
  * body, are encrypted into `mail_in_secrets` and are never read back out:
  * nothing this module returns, logs, audits or throws carries either of them,
  * and there is no read path that could. The precedent is
- * `ImapRotationStaleError` in `core/imap-rotation.ts`, which deliberately
- * names no secret in its message.
+ * `RelayConflictError` in `relays.ts`, which deliberately names no secret,
+ * digest or address in its message.
  *
  * A credential is VERIFIED BEFORE IT IS COMMITTED. Setting and rotating both
  * build a candidate configuration in memory, run the same bounded TLS connect
@@ -30,7 +30,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, imapRecipientRotationState, mailInMailbox, mailInSecrets, users } from "@/db/schema";
+import { auditLog, mailInMailbox, mailInSecrets, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { getDocumentConfig } from "@/server/documents/config";
 import { requireInstanceAdministrator } from "@/server/authorization";
@@ -47,6 +47,8 @@ import {
 import { deriveImapRecipientAlias, imapAliasBaseFromAccount, normalizeImapRecipientAlias } from "./core/imap-recipient";
 import { encryptMailInSecret, type MailInSecretKind } from "./core/secret-crypto";
 import { getImapIngestionConfig, imapConfigFromMailbox, MailInCredentialLockedError } from "./mailbox-config";
+import { resetAllRelaysForMovedAccount, rotateAllRelaysForNewAliasKey } from "./relays";
+import { RELAY_MAX_GRACE_MS } from "./core/relay-generations";
 import type { ImapIngestionConfig } from "./core/config";
 
 type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
@@ -90,6 +92,13 @@ const PROBE_POLL_INTERVAL_MS = 3_000;
 
 /** Alias keys are 32 random bytes; the legacy shape check required at least 32 characters. */
 const ALIAS_KEY_BYTES = 32;
+
+/**
+ * How long the outgoing addresses keep working after an emergency alias-key
+ * rotation. The administrator chooses; the ceiling is the product's, not
+ * theirs (ADR-0017 decision 2, `RELAY_MAX_GRACE_MS`).
+ */
+const graceDaysSchema = z.number().int().min(0).max(RELAY_MAX_GRACE_MS / 86_400_000);
 
 const hostSchema = z.string().trim().min(1).max(253);
 const accountSchema = z.string().trim().min(3).max(512)
@@ -389,20 +398,12 @@ export async function setMailboxSettings(
       const created = await insertSecret(transaction, "alias_key", Buffer.from(aliasSecret, "utf8"), account, actorUserId);
       supersededAliasKeyId = aliasKeySecretId;
       aliasKeySecretId = created.id;
-      /* The rotation singleton is a commitment to the alias key that WAS in
-         force, and the poll loop fails every cycle closed against a
-         commitment it cannot match (`ImapRotationStaleError`). A new key
-         means every derived address changes, so the old commitment describes
-         nothing that still exists: it is dropped here, in the same
-         transaction, and the next cycle rebuilds it from the new key and
-         re-derives every user's alias row.
-
-         ADR-0017 decision 2 retires this singleton in slice 3, when
-         generations become per-user rows and there is no second authority
-         left to reconcile against. Until then it has to be kept honest, or
-         the first mailbox an administrator sets leaves ingestion
-         permanently stuck. */
-      await transaction.delete(imapRecipientRotationState);
+      /* A new alias key means every derived address changes, and the account
+         it was a sub-address of has moved, so there is nothing to keep alive:
+         every relay moves to its next generation with no previous at all and
+         every old alias row goes inactive. The next poll cycle materialises
+         each member's new row under the new key (ADR-0017 slice 3). */
+      await resetAllRelaysForMovedAccount(transaction, now);
     }
     const values = {
       host: input.host,
@@ -559,6 +560,51 @@ export async function setMailboxIngestEnabled(
       .returning({ id: mailInMailbox.id });
     if (!updated) throw new AppError("mailbox_version_conflict", "The mailbox settings changed; reload and try again", 409);
     await recordMailboxAudit(transaction, updated.id, actorUserId, enabled ? "mail_in_ingest_enabled" : "mail_in_ingest_disabled", {});
+  });
+  return readMailboxSettings(actorUserId);
+}
+
+/**
+ * The administrator's emergency instance-wide alias-key rotation (ADR-0017
+ * decision 2, slice 3, orbit#744).
+ *
+ * This is the ONE operation that changes every member's address, and it is
+ * deliberately not something a member can trigger: a new `alias_key` row is
+ * minted, the mailbox is re-pointed at it, and every relay is rotated in the
+ * same transaction with the grace the administrator chose — 0 to 90 days,
+ * which is the same ceiling the environment-era configuration capped an alias
+ * transition at.
+ *
+ * The superseded key row is KEPT, not deleted, unlike a password rotation:
+ * every outgoing address is spelt in its bytes, and deleting it would cut the
+ * grace period off at the moment it was granted. It goes when the last row
+ * naming it lapses.
+ */
+export async function rotateMailboxAliasKey(
+  actorUserId: string,
+  expectedVersion: number,
+  graceDays: number,
+  dependencies: MailboxSettingsDependencies = {},
+): Promise<MailboxSettingsView> {
+  await requireInstanceAdministrator(actorUserId);
+  const grace = graceDaysSchema.parse(graceDays);
+  const now = dependencies.now?.() ?? new Date();
+  await getDb().transaction(async (transaction) => {
+    const row = requireMailbox(await lockMailbox(transaction, expectedVersion));
+    if (!row.passwordSecretId) throw new AppError("mailbox_not_configured", "Mail-in has not been set up", 409);
+    const account = { host: row.host, user: row.accountUser };
+    const aliasSecret = randomBytes(ALIAS_KEY_BYTES).toString("base64url");
+    const created = await insertSecret(transaction, "alias_key", Buffer.from(aliasSecret, "utf8"), account, actorUserId);
+    const [updated] = await transaction.update(mailInMailbox)
+      .set({ aliasKeySecretId: created.id, version: row.version + 1, updatedAt: now })
+      .where(eq(mailInMailbox.version, row.version))
+      .returning({ id: mailInMailbox.id });
+    if (!updated) throw new AppError("mailbox_version_conflict", "The mailbox settings changed; reload and try again", 409);
+    const config = imapConfigFromMailbox({ ...row, enabled: row.enabled }, "unused-for-derivation", aliasSecret, {
+      currentId: created.id,
+      byId: { [created.id]: aliasSecret },
+    });
+    await rotateAllRelaysForNewAliasKey(transaction, actorUserId, config, created.id, grace * 86_400_000, now);
   });
   return readMailboxSettings(actorUserId);
 }
