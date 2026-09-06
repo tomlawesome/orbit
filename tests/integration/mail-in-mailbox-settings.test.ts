@@ -249,7 +249,7 @@ describe("administrator mailbox settings (ADR-0017 decision 1, slice 2)", () => 
     expect(await getDb().select().from(imapRecipientRotationState)).toHaveLength(0);
   });
 
-  it("keeps the alias key, and the addresses derived from it, when only the host changes", async () => {
+  it("keeps the alias key, and the addresses derived from it, when only the port changes", async () => {
     const created = await setUpMailbox();
     const [before] = await getDb().select().from(mailInMailbox);
 
