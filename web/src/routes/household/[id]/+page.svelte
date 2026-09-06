@@ -124,6 +124,19 @@
   /** @type {string | null} */
   let membersProblem = $state(null);
 
+  /* #481 round 2: the owner's row carries the same "leave this system" act
+     every "you" row has, and the rule that used to stand as a paragraph at
+     the card's foot now answers only the person it stops, while it stops
+     them — with the way out lit beside it. It fades on its own. */
+  let ownerRefused = $state(false);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let refuseTimer = null;
+  function ownerLeave() {
+    ownerRefused = true;
+    clearTimeout(refuseTimer ?? undefined);
+    refuseTimer = setTimeout(() => (ownerRefused = false), 6000);
+  }
+
   /* ── invitations by email (#481) ───────────────────────────────────────
      The address is held here only while it is being typed: nothing keeps it
      after the send, and the list that comes back is the server's. */
@@ -802,19 +815,10 @@
           </select>
         </div>
       </div>
-      {#if v.canManage}
-        <p class="note top">
-          each field saves on its own — <b>name</b>, <b>time zone</b> and<br>
-          <b>currency</b> are three small acts, not one form
-        </p>
-      {/if}
-      <p class="note top">
-        the name is what you type to delete this system later,<br>
-        and what a joiner sees when they ask to come in
-      </p>
-      {#if !v.canManage}
-        <p class="note top"><b>read-only</b> — only {v.owner?.name ?? "its owner"} can change this system</p>
-      {/if}
+      <!-- round 2 (#481): the notes that stood here are gone. Three save
+           buttons already say the fields save alone, and a member's copy
+           prints as plain values (the .member rules in household.css), which
+           says read-only without a caption. -->
       {#if identityProblem}<p class="problem">not saved — {identityProblem}</p>{/if}
     </div>
 
@@ -847,18 +851,15 @@
         <button class="addsec" disabled={shown.length >= MAX_SECTIONS} onclick={addSection}>+ add a section</button>
         <div class="savebar">
           <button class="btn" onclick={saveSections}>save</button>
-          <span class="note">the whole list saves at once</span>
         </div>
         {#if saidSections}
-          <p class="said show">saved · the manifest prints the new names beside their entries</p>
+          <p class="said show">saved</p>
         {/if}
         {#if sectionsProblem}<p class="problem">not saved — {sectionsProblem}</p>{/if}
-        <p class="note top">
-          each entry wears one section, printed beside it in the manifest,<br>
-          and the mark travels with it. a section holding entries can be<br>
-          <b>hidden</b>, never removed — its entries would have nowhere to sit.<br>
-          <b>open question:</b> choosing a mark for a NEW section isn’t drawn yet.
-        </p>
+        <!-- round 2 (#481): one button under one list says the list saves
+             whole, and the × that only exists on empty rows says "hidden,
+             never removed". The open question — choosing a mark for a NEW
+             section — is off the screen and on the issue. -->
       </div>
     {/if}
 
@@ -878,8 +879,9 @@
             <b>{person.name}{#if person.you}{SPACE}<em>· you</em>{/if}</b>
             <span class="role" class:owner={person.role === "owner"}>{person.role}</span>
             {#if person.role === "owner" && person.you}
-              <button class="ghost" aria-expanded={handoverOpen}
+              <button class="ghost" class:beckon={ownerRefused} aria-expanded={handoverOpen}
                       onclick={() => (handoverOpen = !handoverOpen)}>hand over →</button>
+              <button class="ghost" onclick={ownerLeave}>leave this system</button>
             {:else if v.canManage && person.role !== "owner"}
               <button class="ghost" class:armed={armed === `drop:${person.id}`}
                       onclick={() => twoTap(`drop:${person.id}`, () => dropMember(person))}>
@@ -890,10 +892,19 @@
                 {armed === "leave" ? "tap again to leave" : "leave this system"}</button>
             {/if}
           </div>
+          <!-- the two lines this card says only at the moment they apply -->
+          {#if person.role === "owner" && person.you && ownerRefused}
+            <p class="moment warn" role="status">
+              an owner can’t be removed and can’t leave — hand the system over first
+            </p>
+          {/if}
+          {#if person.you && person.role !== "owner" && armed === "leave"}
+            <p class="moment">nothing you added goes with you — the entries stay with {v.name}</p>
+          {/if}
         {/each}
       </div>
       {#if saidLeft}
-        <p class="said show">you’ve left {saidLeft} · it becomes a label in your sky again, and you can ask to rejoin</p>
+        <p class="said show">you’ve left {saidLeft} · it’s a label in your sky again, and you can ask to rejoin</p>
       {/if}
       {#if membersProblem}<p class="problem">{membersProblem}</p>{/if}
 
@@ -901,50 +912,49 @@
         <!-- §11 + 2g: the owner decides who comes in, and this is the ONLY
              place the decision is offered. Administration's join-requests
              block is dropped — an instance admin who needs to answer one
-             opens the household from the dial and answers it here. -->
-        <div class="block">
-          <h3>Waiting to come in</h3>
-          {#each v.joinRequests as request (request.id)}
-            <div class="joinreq">
-              <span class="avatar" aria-hidden="true">{request.initials}</span>
-              <p><b>{request.name}</b> asks to join <b>{v.name}</b>{request.waited ? ` · ${request.waited}` : ""}</p>
-              <button class="yes" onclick={() => decide(request, "approve")}>approve</button>
-              <button onclick={() => decide(request, "decline")}>decline</button>
-            </div>
-          {/each}
-          {#if !v.joinRequests.length}
-            <p class="restline note">
-              nobody is asking just now — when someone picks this system out of<br>
-              their sky and asks, they appear here, and <b>only</b> here (2g).
-            </p>
-          {/if}
-          {#if saidJoin}
-            <p class="said show">{saidJoin} is in · they see this system’s entries from their next sign-in</p>
-          {/if}
-        </div>
+             opens the household from the dial and answers it here.
 
-        <div class="block">
-          <h3>Add someone who already has an account</h3>
-          {#each v.candidates as candidate (candidate.id)}
-            <div class="cand">
-              <span class="avatar" aria-hidden="true">{candidate.initials}</span><b>{candidate.name}</b>
-              <button class="ghost" onclick={() => putMember(candidate)}>add</button>
-            </div>
-          {/each}
-          {#if !v.candidates.length}
-            <p class="note">everybody with an account on this instance is already in this system.</p>
-          {/if}
-          <p class="note top">
-            people sign in through your identity provider first, then an owner puts<br>
-            them in a system. Nobody’s email address is shown here, only the name<br>
-            they chose.
-          </p>
-        </div>
+             Round 2 (#481): the block is "Knocking on the door", and it
+             exists only while somebody is knocking — an empty state that has
+             to explain itself is exactly the paragraph the verdict cut. -->
+        {#if v.joinRequests.length || saidJoin}
+          <div class="block">
+            <h3>Knocking on the door</h3>
+            {#each v.joinRequests as request (request.id)}
+              <div class="joinreq">
+                <span class="avatar" aria-hidden="true">{request.initials}</span>
+                <p><b>{request.name}</b> asks to join <b>{v.name}</b>{request.waited ? ` · ${request.waited}` : ""}</p>
+                <button class="yes" onclick={() => decide(request, "approve")}>approve</button>
+                <button onclick={() => decide(request, "decline")}>decline</button>
+              </div>
+            {/each}
+            {#if saidJoin}
+              <p class="said show">{saidJoin} is in</p>
+            {/if}
+          </div>
+        {/if}
 
-        <!-- #481: the other way in — for somebody who has no account yet.
-             One field, one button, and below it what is still outstanding.
-             The address is the row, because an invitation has no display name
-             to stand in for it; it is the only address this screen shows. -->
+        <!-- the same rule: a list with nobody in it is not a list with a
+             caption, it is no block at all. The names-only rule still binds —
+             an account is never shown by its address — round 2 stops printing
+             it (#481 verdict 4). -->
+        {#if v.candidates.length}
+          <div class="block">
+            <h3>Add someone who already has an account</h3>
+            {#each v.candidates as candidate (candidate.id)}
+              <div class="cand">
+                <span class="avatar" aria-hidden="true">{candidate.initials}</span><b>{candidate.name}</b>
+                <button class="ghost" onclick={() => putMember(candidate)}>add</button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        <!-- #481: the other way in — for somebody with no account here yet.
+             One field, one button, and beneath them the seats held open: a
+             dashed empty ring (no person yet), the typed address, when it
+             went and when it lapses. An empty list is simply empty — the
+             field above it is the affordance. -->
         <div class="block">
           <h3>Invite by email</h3>
           <form class="invite" onsubmit={(event) => { event.preventDefault(); invite(); }}>
@@ -955,9 +965,12 @@
 
           {#each v.invitations as invitation (invitation.id)}
             <div class="inv">
-              <b>{invitation.email}</b>
-              <span class="when">
-                {invitation.failed ? "not sent" : `sent ${invitation.sent}`} · expires {invitation.expires}
+              <span class="seat" aria-hidden="true"></span>
+              <span class="who">
+                <b>{invitation.email}</b>
+                <span class="when">
+                  {invitation.failed ? "not sent" : `sent ${invitation.sent}`} · expires {invitation.expires}
+                </span>
               </span>
               <button class="ghost" onclick={() => resend(invitation)}>resend</button>
               <button class="ghost" class:armed={armed === `inv:${invitation.id}`}
@@ -965,14 +978,9 @@
                 {armed === `inv:${invitation.id}` ? "tap again to withdraw" : "withdraw"}</button>
             </div>
           {/each}
-          {#if !v.invitations.length}
-            <p class="note">no invitations are outstanding.</p>
-          {/if}
           {#if saidInvite}<p class="said show">{saidInvite}</p>{/if}
           <p class="note top">
-            they get one mail with one link, good for 14 days. Opening it signs<br>
-            them in and puts them straight in this system — but only if they<br>
-            sign in with the address you typed. Resending replaces the link.
+            the link admits only someone signed in with <b>this exact address</b>
           </p>
         </div>
 
@@ -1001,38 +1009,31 @@
               <button class="ghost" onclick={() => (handoverOpen = false)}>cancel</button>
             </div>
           </div>
-          <p class="note">
-            you stay a member and keep everything you added.<br>
-            only the new owner can hand it back — and an owner<br>
-            can never leave a system, so this is the way out.
-          </p>
+          <!-- kept: a consequence, said at the moment of the act -->
+          <p class="note">you stay a member and keep everything you added</p>
           {#if saidHandover}
             <p class="said show">{saidHandover} owns {v.name} now · you’re a member</p>
           {/if}
         </div>
-
-        <p class="note top foot">
-          an owner can’t be removed and can’t leave — hand the system over first.
-        </p>
       {:else}
         <!-- §11's "who sees what" (#481): a member sees who has been invited
              and cannot touch it. An owner quietly adding people by mail, with
-             nobody else able to see it happening, is not this system. -->
+             nobody else able to see it happening, is not this system. Same
+             row, no controls; nothing outstanding means no block at all. -->
         {#if v.invitations.length}
           <div class="block">
-            <h3>Invited, not yet arrived</h3>
+            <h3>Invited by email</h3>
             {#each v.invitations as invitation (invitation.id)}
-              <div class="inv readonly">
-                <b>{invitation.email}</b>
-                <span class="when">expires {invitation.expires}</span>
+              <div class="inv">
+                <span class="seat" aria-hidden="true"></span>
+                <span class="who">
+                  <b>{invitation.email}</b>
+                  <span class="when">expires {invitation.expires}</span>
+                </span>
               </div>
             {/each}
           </div>
         {/if}
-        <p class="note top foot">
-          <b>{v.owner?.name ?? "its owner"}</b> owns this system — they add and remove people.<br>
-          you can leave whenever you like.
-        </p>
       {/if}
     </div>
 
@@ -1059,56 +1060,36 @@
               {armed === "doom" ? "tap again to schedule deletion" : "request deletion"}</button>
           {/if}
         </div>
-        <div class="dangerbody">
-          <p>
-            <b class="red">Request deletion.</b> Everything in {v.name} — {v.entries}
-            {v.entries === 1 ? "entry" : "entries"}, their
-            documents, their history and every reminder still queued — stops the moment you
-            ask. You have <b class="red">30 days</b> to change your mind; after that it is
-            gone for good, and nothing on this machine can bring it back.
-          </p>
-          <p class="note">
-            asking is all this screen does — the countdown,<br>
-            the restore and the final hard delete are<br>
-            instance-admin acts, drawn on the admin panel (2f).
-          </p>
-        </div>
+        <!-- round 2 (#481): at rest the danger line IS a line — the rule, the
+             heading and the act. What deletion costs is said to the person
+             stepping toward it, not to everyone who scrolls past. -->
         {#if confirming}
           <div class="confirm">
+            <p class="stake">
+              Everything in {v.name} — {v.entries} {v.entries === 1 ? "entry" : "entries"},
+              their documents, their history and every reminder still queued — stops the
+              moment you ask. You have <b class="red">30 days</b> to change your mind;
+              after that it is gone for good.
+            </p>
             <div class="field">
               <label for="delname">type the system’s name exactly to wake the button above</label>
               <input id="delname" placeholder={v.name} autocomplete="off" bind:value={typedName}>
             </div>
-            <p class="note">
-              the name is the first ask, the second tap is<br>
-              the second — this is the one act with a clock on it.
-            </p>
           </div>
         {/if}
         {#if saidDoom}
           <p class="said show">
             requested · {v.name} stops now, and is gone for good in 30 days ·
-            changing your mind is an instance-admin act now — the admin panel carries the restore (2f)
+            an instance admin can turn this back until then
           </p>
         {/if}
         {#if doomProblem}<p class="problem">not requested — {doomProblem}</p>{/if}
       </div>
     {/if}
 
-    <!-- ── leaving: the member's second card, sitting UNDER the system in the
-         left column, exactly where sections sits for an owner — so the member
-         reads two tidy columns too, with no lone card across the foot -->
-    {#if !v.canManage}
-      <div class="card c-leaving">
-        <div class="cardhead"><h2>Leaving</h2></div>
-        <p style="font-size:13.5px;color:var(--ink-mid)">
-          You can leave {v.name} whenever you like. Nothing you added goes with you —
-          the entries belong to the system, not to you. It returns to your sky as a label,
-          and you can ask to come back.
-        </p>
-        <p class="note top">only {v.owner?.name ?? "its owner"} can rename, restructure or delete this system.</p>
-      </div>
-    {/if}
+    <!-- round 2 (#481): the member's "Leaving" card is gone — it was a card
+         made entirely of paragraphs. The act lives on the member's own roster
+         row, and its one consequence appears while that button is armed. -->
 
   </div><!-- /cards -->
 </div>
