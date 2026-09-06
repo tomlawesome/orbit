@@ -42,7 +42,13 @@ async function seedHousehold(page: Page): Promise<{ id: string; name: string }> 
 test("the create form saves a real item into the orbit", async ({ page }) => {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  /* Not a fixed destination: #840 sends a session with no household of its
+     own to the arrival at `/` instead of /home, and this account may have
+     none at this point in the run. seedHousehold below creates one from
+     here regardless of which page is showing, and /create is reached by an
+     explicit goto next. */
+  const session = await page.request.get("/api/auth/session");
+  expect(session.ok()).toBe(true);
   households.track(await seedHousehold(page));
 
   try {

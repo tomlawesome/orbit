@@ -20,6 +20,18 @@ import { householdRegister } from "./support/households";
 const HOUSEHOLD_PREFIX = "Actions Proving Ground";
 const households = householdRegister();
 
+async function signInAsAdmin(page: Page) {
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: "Orbit Administrator" }).click();
+  /* Not a fixed destination: #840 sends a session with no household of its
+     own to the arrival at `/` instead of /home, and this account may have
+     none at this point in the run. seedHouseholdWithItem below creates one
+     from here regardless of which page is showing, and /item/[id] is
+     reached by an explicit goto next. */
+  const session = await page.request.get("/api/auth/session");
+  expect(session.ok()).toBe(true);
+}
+
 async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; householdId: string }> {
   const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
   const seeded = await page.evaluate(async (householdName) => {
@@ -74,9 +86,7 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
 }
 
 test("completing an item from the v19 view moves its orbit", async ({ page }) => {
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await signInAsAdmin(page);
 
   const { itemId } = await seedHouseholdWithItem(page);
 
@@ -110,9 +120,7 @@ test("completing an item from the v19 view moves its orbit", async ({ page }) =>
 });
 
 test("a stale version is refused and the view says so", async ({ page }) => {
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await signInAsAdmin(page);
 
   const { itemId, householdId } = await seedHouseholdWithItem(page);
 

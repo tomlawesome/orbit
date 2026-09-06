@@ -1,4 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { expect, test, type Browser, type Page } from "@playwright/test";
+import { cleanupHousehold, sessionHeaders } from "./support/households";
 
 /**
  * #641: the household hit-area fix, proved by a real hit-test.
@@ -62,7 +64,57 @@ type Overlap = {
 async function signIn(page: Page, account: string) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  /* Not a fixed destination: #840 sends a session with no household of its
+     own to the arrival at `/` instead of /home, and this account has none at
+     this point in the run -- see arriveAdrift below for how this file still
+     reaches /home to draw the sky it needs. */
+  const session = await page.request.get("/api/auth/session");
+  expect(session.ok()).toBe(true);
+}
+
+/**
+ * THE VIEWER'S OWN ARRIVAL ON /home, ADRIFT (#840).
+ *
+ * Before #840 a fresh sign-in with no household anywhere landed on /home
+ * directly, which is the whole precondition this file's sky needs: a viewer
+ * who belongs to nothing. Now hooks.server.js sends that reader to the
+ * arrival at `/` instead. The one road still open is the carve-out
+ * hooks.server.js's own comment names: a session whose OWN
+ * activeHouseholdId is set -- even to a household since hard-deleted --
+ * skips the redirect outright, because household.create only ever writes
+ * that field on the session that called it, and a hard delete never clears
+ * it back off.
+ *
+ * So this reader is given a household of their own, the administrator
+ * removes it again from underneath them, and only then is `/home` asked
+ * for. Their real membership set is empty either way, which is what
+ * "adrift" is a picture of -- stubSky only ever substitutes the LIST of
+ * visible households, never this reader's own, so the throwaway household
+ * never appears in the sky this file measures.
+ */
+async function arriveAdrift(page: Page, browser: Browser, account: string) {
+  await signIn(page, account);
+  const headers = { ...(await sessionHeaders(page)), "content-type": "application/json" };
+  const household = { id: randomUUID(), name: `${account} throwaway ${Date.now()}` };
+  const created = await page.request.post("/api/workspace/commands", {
+    headers,
+    data: {
+      type: "household.create",
+      household: { ...household, timezone: "Europe/London", currency: "GBP", onboardingComplete: true },
+    },
+  });
+  if (!created.ok()) throw new Error(`could not seed a throwaway household for ${account} (${created.status()})`);
+
+  const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const adminPage = await adminContext.newPage();
+  try {
+    await signIn(adminPage, "Orbit Administrator");
+    await cleanupHousehold(adminPage, await sessionHeaders(adminPage), household.id, household.name);
+  } finally {
+    await adminContext.close();
+  }
+
+  await page.goto("/home");
 }
 
 /* The viewer stays adrift — no household of their own — and sees exactly the
@@ -138,10 +190,10 @@ async function packUntilOverlapping(page: Page) {
 
 test.describe.configure({ mode: "serial" });
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the labelled sky is the desk dialect; the pocket draws no constellations");
   await stubSky(page, FULL_SKY);
-  await signIn(page, "Orbit Outsider");
+  await arriveAdrift(page, browser, "Orbit Outsider");
   await expect(page.getByRole("heading", { name: "you’re adrift" })).toBeVisible();
 });
 

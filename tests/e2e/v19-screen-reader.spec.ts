@@ -50,9 +50,15 @@ async function signIn(page: Page, returnTo = "/home") {
   // The click starts a redirect chain through the identity provider and back
   // through /api/auth/callback, which is what actually sets the session
   // cookie -- proceeding before it lands (as every other spec's idiom does)
-  // races page.request calls against a cookie that is not there yet.
+  // races page.request calls against a cookie that is not there yet. Not
+  // necessarily AT returnTo, though: #840 sends a session with no household
+  // of its own to the arrival at `/` instead, which is exactly this
+  // account's state the very first time beforeAll below claims it. Every
+  // caller after that keeps the household beforeAll seeds until afterAll, so
+  // this only needs the chain settled -- at returnTo or at the arrival --
+  // not literally on returnTo.
   const escaped = returnTo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  await page.waitForURL(new RegExp(`${escaped}$`), { timeout: 30_000 });
+  await page.waitForURL((url) => new RegExp(`${escaped}$`).test(url.pathname) || url.pathname === "/", { timeout: 30_000 });
 }
 
 /**
