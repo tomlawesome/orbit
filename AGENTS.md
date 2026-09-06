@@ -78,10 +78,26 @@ The `base_image_repin` job (#708) detects the pinned Orbit base image being
 behind and opens a merge request re-pinning it, sourced from
 `ai/orbit-base-image`'s own `publish` job artifact rather than an
 independently resolved tag. It needs its own schedule (variable
-`BASE_IMAGE_REPIN=true`) and its own token, `BASE_REPIN_TOKEN` -- see the
-job's comment in `.gitlab-ci.yml` for the exact grant. It never rebuilds
-anything, never pushes to `dev`/`preview`/`main`, and never merges; it pushes
+`BASE_IMAGE_REPIN=true`). It never rebuilds anything, never pushes to
+`dev`/`preview`/`main`, and never merges; it pushes
 `chore/base-image-repin` and opens or refreshes one merge request from it.
+
+Reading that artifact needs no stored credential (investigated on #708,
+2026-09-06 -- a group-wide `ai` token was the first cut and was narrowed
+once cross-project job-token access turned out to cover artifact downloads):
+the job's own `CI_JOB_TOKEN` does it, because `ai/orbit-base-image`'s CI/CD
+job token allowlist (Settings > CI/CD > Job token permissions > **CI/CD job
+token allowlist** > Add) names `ai/orbit`, and the user the schedule runs as
+already has at least Reporter access to `ai/orbit-base-image` -- job-token
+cross-project reads need both the allowlist entry and that membership.
+Create the schedule under the same user as `renovate` and
+`sidecar_pin_freshness` (currently `Claude`, already Maintainer on
+`ai/orbit-base-image`) and the membership half needs nothing further.
+Pushing the branch and opening the merge request still needs a stored
+token, since `CI_JOB_TOKEN`'s Merge Requests API access is read-only:
+`BASE_REPIN_TOKEN`, a project access token on `ai/orbit` ONLY (`api` scope,
+Developer role) -- see the job's comment in `.gitlab-ci.yml` for why a
+group token or a second project token were not adopted.
 
 ## Delivery workflow
 

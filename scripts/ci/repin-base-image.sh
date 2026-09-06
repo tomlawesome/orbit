@@ -19,6 +19,18 @@
 # to point at right now, which is the exact property pinning exists to
 # remove.
 #
+# The artifact read needs no stored credential at all (#708, narrowed
+# 2026-09-06): it authenticates with this job's own CI_JOB_TOKEN, which
+# GitLab issues automatically, scopes to the running job, and expires when
+# the job ends. This works because ai/orbit-base-image's "CI/CD job token
+# allowlist" (Settings > CI/CD > Job token permissions) lists ai/orbit, and
+# because the user this schedule runs as already has at least Reporter
+# access to ai/orbit-base-image -- job-token cross-project access is
+# project-to-project (the allowlist) AND user-scoped (the triggering user's
+# own membership and permissions), both are required. See AGENTS.md for the
+# exact setting and why the existing schedules' owner already satisfies the
+# membership half.
+#
 # Two axes, sourced this way:
 #
 #   1. Tag moved: the artifact's digest differs from what Dockerfile pins.
@@ -48,22 +60,31 @@
 #               network, no docker, no git, and needs no token.
 #
 # Inputs (environment):
-#   BASE_REPIN_TOKEN         Required for a real run (not --red). A token
-#                             with read access to ai/orbit-base-image's job
-#                             artifacts and the `api` scope plus Developer
-#                             role on ai/orbit. See .gitlab-ci.yml for the
-#                             exact grant this needs. Never printed; passed
-#                             to curl and git only via header file / URL
-#                             embedding, never logged.
+#   CI_JOB_TOKEN              GitLab predefined; used to read the artifact
+#                             (JOB-TOKEN header) from ai/orbit-base-image.
+#                             No owner setup needed beyond the allowlist
+#                             entry -- GitLab issues this to every job
+#                             automatically. Never printed; passed to curl
+#                             only via header file, never logged or put in
+#                             argv.
+#   BASE_REPIN_TOKEN          Required for a real run (not --red, and not
+#                             --dry-run if BASE_IMAGE_DIGEST_FILE is set). A
+#                             project access token on ai/orbit ONLY -- `api`
+#                             scope, Developer role -- used to push the
+#                             re-pin branch and open or refresh the merge
+#                             request. It has nothing to do with reading
+#                             ai/orbit-base-image; see .gitlab-ci.yml for the
+#                             exact grant. Never printed; passed to curl and
+#                             git only via a mode-600 file, never logged.
 #   CI_API_V4_URL             GitLab predefined; the API base URL.
 #   CI_PROJECT_ID             GitLab predefined; this project's numeric id.
 #   CI_PROJECT_PATH           GitLab predefined; e.g. ai/orbit.
 #   CI_SERVER_HOST            GitLab predefined; used to build the push URL.
 #   CI_PIPELINE_URL           GitLab predefined; recorded in the merge
 #                             request body.
-#   BASE_IMAGE_PROJECT        ai/orbit-base-image's API project reference
-#                             (URL-encoded path or numeric id). Defaults to
-#                             the URL-encoded path.
+#   BASE_IMAGE_PROJECT        ai/orbit-base-image's numeric project id.
+#                             Defaults to 48. A numeric id survives a rename;
+#                             the project is gitlab.tomlawson.io/ai/orbit-base-image.
 #   BASE_IMAGE_REF            The ref whose latest `publish` job artifact is
 #                             read. Defaults to `primary` (that project's
 #                             protected default branch).
@@ -72,7 +93,7 @@
 #   BASE_IMAGE_DIGEST_FILE    Testing seam: a local file holding the trusted
 #                             `image@sha256:...` reference, used instead of
 #                             fetching the artifact over the network. Lets
-#                             this script be exercised without a token.
+#                             this script be exercised without CI_JOB_TOKEN.
 #   BASE_IMAGE_PACKAGES_SIMULATION
 #                             Testing seam: canned `apk upgrade --simulate`
 #                             output, used instead of running docker. Lets
@@ -86,11 +107,11 @@
 #                             request instead of opening a duplicate.
 #   BASE_REPIN_TARGET_BRANCH  The merge request's target. Defaults to `dev`.
 set -Eeuo pipefail
-# Belt and braces on top of never putting the token in argv below: forced off
+# Belt and braces on top of never putting a token in argv below: forced off
 # regardless of how this script is invoked (a stray `bash -x`, an inherited
 # `SHELLOPTS`), because xtrace prints each command after expansion and would
-# otherwise echo BASE_REPIN_TOKEN's value the moment it is read into a
-# variable or a file.
+# otherwise echo CI_JOB_TOKEN's or BASE_REPIN_TOKEN's value the moment either
+# is read into a variable or a file.
 set +x
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -98,7 +119,7 @@ dockerfile="${DOCKERFILE:-$repo_dir/Dockerfile}"
 policy_path="${POLICY_PATH:-$repo_dir/.github/supply-chain-policy.json}"
 check_script="${CHECK_SCRIPT:-$repo_dir/scripts/check-base-image-current.sh}"
 
-base_image_project="${BASE_IMAGE_PROJECT:-ai%2Forbit-base-image}"
+base_image_project="${BASE_IMAGE_PROJECT:-48}"
 base_image_ref="${BASE_IMAGE_REF:-primary}"
 base_image_job="${BASE_IMAGE_JOB:-publish}"
 branch_name="${BASE_REPIN_BRANCH:-chore/base-image-repin}"
@@ -217,18 +238,26 @@ log "pinned reference: $pinned_reference"
 if [[ -n "${BASE_IMAGE_DIGEST_FILE:-}" ]]; then
   trusted_reference="$(cat "$BASE_IMAGE_DIGEST_FILE")"
 else
-  : "${BASE_REPIN_TOKEN:?BASE_REPIN_TOKEN is not set. See the base_image_repin job in .gitlab-ci.yml for the exact grant this needs.}"
+  # CI_JOB_TOKEN, not a stored credential (#708, narrowed 2026-09-06): GitLab
+  # issues this to every job automatically, scopes it to the running job, and
+  # expires it when the job ends. It authenticates here because
+  # ai/orbit-base-image's CI/CD job token allowlist names ai/orbit, and the
+  # user this pipeline runs as already has at least Reporter access there --
+  # job-token cross-project access needs both. See AGENTS.md.
+  : "${CI_JOB_TOKEN:?CI_JOB_TOKEN is not set; this must run inside a GitLab CI job}"
   : "${CI_API_V4_URL:?CI_API_V4_URL is not set; this must run inside a GitLab CI job}"
   artifact_url="${CI_API_V4_URL%/}/projects/${base_image_project}/jobs/artifacts/${base_image_ref}/raw/published-digest.txt?job=${base_image_job}"
   # The token goes in a header file, never on curl's command line: `-H
-  # "PRIVATE-TOKEN: $TOKEN"` would put it in this process's argv, which a
+  # "JOB-TOKEN: $TOKEN"` would put it in this process's argv, which a
   # process listing on the shared runner can read for as long as curl runs.
   # `--header @file` is curl's own way to read a header's value from a file.
+  # Masked-in-logs (which GitLab already does for CI_JOB_TOKEN) is not the
+  # same protection: a process listing is not a log.
   artifact_header_file="$(new_secret_file)"
-  printf 'PRIVATE-TOKEN: %s\n' "$BASE_REPIN_TOKEN" > "$artifact_header_file"
+  printf 'JOB-TOKEN: %s\n' "$CI_JOB_TOKEN" > "$artifact_header_file"
   if ! trusted_reference="$(curl --silent --show-error --fail --location --max-time 60 \
       --header @"$artifact_header_file" "$artifact_url")"; then
-    fail "could not fetch published-digest.txt from ai/orbit-base-image (project ${base_image_project}, ref ${base_image_ref}, job ${base_image_job})"
+    fail "could not fetch published-digest.txt from ai/orbit-base-image (project ${base_image_project}, ref ${base_image_ref}, job ${base_image_job}). Check that ai/orbit is on that project's CI/CD job token allowlist, and that this pipeline's user has at least Reporter access there."
   fi
 fi
 trusted_reference="$(printf '%s' "$trusted_reference" | tr -d '[:space:]')"
@@ -364,7 +393,15 @@ if $dry_run; then
 fi
 
 # --- Commit, push, and open or refresh the merge request ---------------------
+#
+# Unlike the artifact read above, this half genuinely needs a stored
+# credential: CI_JOB_TOKEN cannot open a merge request (its Merge Requests
+# API access is read-only) and pushing a branch with it needs a separate,
+# project-wide "allow CI job tokens to push" setting this script does not
+# ask for. BASE_REPIN_TOKEN is scoped to ai/orbit alone, never
+# ai/orbit-base-image.
 
+: "${BASE_REPIN_TOKEN:?BASE_REPIN_TOKEN is not set. See the base_image_repin job in .gitlab-ci.yml for the exact grant this needs.}"
 : "${CI_PROJECT_ID:?CI_PROJECT_ID is not set; this must run inside a GitLab CI job}"
 : "${CI_PROJECT_PATH:?CI_PROJECT_PATH is not set; this must run inside a GitLab CI job}"
 : "${CI_SERVER_HOST:?CI_SERVER_HOST is not set; this must run inside a GitLab CI job}"
