@@ -248,7 +248,7 @@ test("reverting the pointer-events rule gives the click to the neighbour, as #63
   await expect(page.getByRole("heading", { name: `Request to join ${overlap.neighbour} system?` })).toBeVisible();
 });
 
-test("a household the packed sky cannot draw is still reachable by name", async ({ page }) => {
+test("a household the packed sky cannot draw is still reachable by name", async ({ page, browser }) => {
   test.setTimeout(120_000);
   await page.unroute("**/api/workspace");
   await stubSky(page, OVERFULL_SKY);
@@ -264,10 +264,27 @@ test("a household the packed sky cannot draw is still reachable by name", async 
   const undrawn = OVERFULL_SKY.map((household) => household.name).filter((name) => !drawn.includes(name));
   expect(undrawn.length).toBeGreaterThan(0);
 
-  await page.goto("/");
-  const belong = page.getByRole("group", { name: "Where do you belong?" });
-  await expect(belong).toBeVisible();
-  for (const name of undrawn) {
-    await expect(belong.getByRole("button", { name: `Request to join ${name}` })).toBeVisible();
+  /* The join list is read in a SECOND session, deliberately.
+     `arriveAdrift` leaves this page's session pointing at a household that
+     has since been hard-deleted -- the carve-out that keeps /home reachable
+     while adrift (#840) -- and the arrival takes that same field as its fast
+     path, handing the reader straight on to /home. So `/` can never show its
+     newcomer stage to THIS session, and asserting it here would be asserting
+     against the product's own rule. A fresh sign-in as the same reader has no
+     such field, meets the door as a newcomer does, and is the honest place to
+     read the list. */
+  const newcomerContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  try {
+    const newcomer = await newcomerContext.newPage();
+    await stubSky(newcomer, OVERFULL_SKY);
+    await signIn(newcomer, "Orbit Outsider");
+    await newcomer.goto("/");
+    const belong = newcomer.getByRole("group", { name: "Where do you belong?" });
+    await expect(belong).toBeVisible();
+    for (const name of undrawn) {
+      await expect(belong.getByRole("button", { name: `Request to join ${name}` })).toBeVisible();
+    }
+  } finally {
+    await newcomerContext.close();
   }
 });
