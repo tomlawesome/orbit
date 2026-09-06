@@ -382,10 +382,20 @@ variables:
 # artifact every later job reads.
 classify:
   stage: classify
-  # Light lane (#830): a git/node script over history and lockfile
-  # snapshots -- no pnpm install, no build.
-  tags: [light]
-  extends: .node
+  # A git/node script over history and lockfile snapshots -- no pnpm install,
+  # no build -- but twelve jobs wait on it, so where it queues is where the
+  # pipeline queues. It started on `light` (#830) and waited up to 42 minutes
+  # there for a slot behind another project's shards (#878). `orbit-build` is
+  # orbit's own runner, idle when the pipeline starts; the privilege it grants
+  # is unused here and no wider than `fast` already has. When a shared gate
+  # lane exists (short timeout, no Docker socket) this job belongs on it.
+  extends:
+    - .node
+    - .privileged_runner
+  # No install here, so restoring the pnpm store and uploading it back at the
+  # end is pure cost, and so is activating pnpm.
+  cache: []
+  before_script: []
   timeout: 10m
   rules:
     - *not_scheduled
