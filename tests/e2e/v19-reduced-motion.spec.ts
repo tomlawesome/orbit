@@ -301,9 +301,6 @@ test.describe("no JavaScript", () => {
   // session would see it.
   test("home degrades to the plain manifest list", async ({ page, context, browser, isMobile }) => {
     test.skip(isMobile, "the no-JS fallback is checked once, on desktop");
-    // Expected to fail until #842 lands a server load for /home; the
-    // assertion below is the real criterion and stays as written.
-    test.fail(true, "#842: /home renders no list without JavaScript");
 
     await signIn(page);
     const household = await seedHousehold(page);
