@@ -252,7 +252,7 @@
       <circle cx="190" cy="190" r="150" fill="none" stroke="var(--line)" stroke-width="1.5"/>
       <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3"
               stroke-width="1" stroke-dasharray="3 5"/>
-      <g font-size="11" fill="var(--ink-faint)" text-anchor="middle" font-family="JetBrains Mono,monospace">
+      <g font-size="11" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
         {#each quarters as q, k (k)}<text x={q.x} y={q.y}>{q.label}</text>{/each}</g>
       <path d="M190 34 l6 10 h-12 Z" style="fill:var(--accent)"/>
       <circle cx="190" cy="190" r="8" style="fill:#fff6e6"/>

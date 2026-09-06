@@ -75,7 +75,7 @@ body.tour-running [data-tour-dim].lit { opacity: 1; }
 }
 .tourbtns button:hover { border-color: var(--accent); color: var(--accent-text); }
 .tourbtns button:disabled { opacity: .35; cursor: default; }
-.tourbtns .skip { color: var(--ink-faint); border-color: var(--line-soft); }
+.tourbtns .skip { color: var(--ink-quiet); border-color: var(--line-soft); }
 .tourbtns .skip:hover { color: var(--overdue); border-color: var(--overdue); }
 
 /* The pocket walk: the card spans the phone rather than floating in a corner

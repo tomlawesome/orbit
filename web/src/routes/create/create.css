@@ -82,11 +82,11 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;margin:6px 0 22px}
 
 .field{margin-bottom:13px}
-.field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
+.field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
              text-transform:uppercase;margin:0 0 6px}
 .field input,.field select,.field textarea{width:100%;background:var(--panel);border:1px solid var(--line);
        border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
-.field input::placeholder{color:var(--ink-faint)}
+.field input::placeholder{color:var(--ink-quiet)}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent)}
 .field textarea{resize:vertical;line-height:1.5}
 .field.mono input{font-family:var(--mono)}
@@ -110,7 +110,7 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
    user to find; the same ring as every other field. */
 .dropzone:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .dropzone .dz-main{font-size:13.5px;color:var(--ink-mid)}
-.dropzone .dz-hint{font:10px var(--mono);color:var(--ink-faint);margin-top:7px;letter-spacing:.06em}
+.dropzone .dz-hint{font:10px var(--mono);color:var(--ink-quiet);margin-top:7px;letter-spacing:.06em}
 /* once the document is in the right-hand lane, the zone states the fact */
 body.doc .dropzone{border-style:solid;border-color:var(--line-soft);cursor:default;background:none}
 body.doc .dropzone .dz-main,body.doc .dropzone .dz-hint{display:none}
@@ -123,7 +123,7 @@ body.doc .dz-held{display:block}
 .disclose-inner{overflow:hidden}
 .disclose-content{padding-top:20px;margin-top:18px;border-top:1px solid var(--line-soft)}
 
-.docnote{display:none;font:10.5px var(--mono);color:var(--ink-faint);line-height:1.6;margin:0 0 18px}
+.docnote{display:none;font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.6;margin:0 0 18px}
 .docnote.show{display:block}
 
 .row2{display:flex;gap:14px}
@@ -149,7 +149,7 @@ body.doc .dz-held{display:block}
 .btn-primary{flex:0 0 auto;padding:12px 26px;border-radius:11px;border:0;cursor:pointer;
              font:600 14px var(--display);color:var(--bg);background:var(--accent)}
 .btn-primary:hover{filter:brightness(1.05)}
-.cancel-link{font:12px var(--mono);color:var(--ink-faint);text-decoration:none}
+.cancel-link{font:12px var(--mono);color:var(--ink-quiet);text-decoration:none}
 .cancel-link:hover{color:var(--ink-mid)}
 
 /* ---- the right lane: reading, then the top sheet (#476 placeholder) ---- */
@@ -158,7 +158,7 @@ body.doc .dz-held{display:block}
           transition:opacity .55s ease .18s,transform .65s cubic-bezier(.4,.5,.15,1) .18s}
 body.doc .readcard{opacity:1;transform:none;pointer-events:auto}
 .readcard h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
-             color:var(--ink-faint);margin-bottom:16px}
+             color:var(--ink-quiet);margin-bottom:16px}
 
 .focus{display:flex;flex-direction:column;align-items:center;text-align:center;padding:16px 0 6px}
 body.snap .focus{display:none}
@@ -171,7 +171,7 @@ body.snap .focus{display:none}
 .focusline{font:600 15.5px var(--display);letter-spacing:.01em;color:var(--ink);
            animation:breathe 4.2s ease-in-out infinite}
 @keyframes breathe{0%,100%{opacity:.96}50%{opacity:.42}}
-.focus .why{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.9;margin-top:12px}
+.focus .why{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.9;margin-top:12px}
 
 /* the top sheet: a real picture of page one, so the eye can confirm it.
    #476: the product has no server render yet, so this stays the sheet's own
@@ -187,13 +187,13 @@ body.snap .topsheet{display:block;animation:landed .6s cubic-bezier(.3,.7,.2,1) 
 .sheet svg{display:block;width:100%;height:auto;border-radius:2px}
 .cap{font:10.5px var(--mono);color:var(--ink-mid);line-height:1.8;margin-top:14px;text-align:center}
 .cap b{color:var(--ink);font-weight:400}
-.honest{font:9.5px var(--mono);color:var(--ink-faint);line-height:1.8;margin-top:8px;text-align:center}
+.honest{font:9.5px var(--mono);color:var(--ink-quiet);line-height:1.8;margin-top:8px;text-align:center}
 .attach{display:flex;flex-wrap:wrap;align-items:center;gap:5px 10px;font:11px var(--mono);
         color:var(--ink-mid);border:1px solid var(--line-soft);border-radius:9px;
         padding:9px 12px;margin-top:16px}
 .attach .file{flex:1 1 100%;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .attach .clean{color:var(--ok-text)}
-.attach button{margin-left:auto;font:10.5px var(--mono);color:var(--ink-faint);
+.attach button{margin-left:auto;font:10.5px var(--mono);color:var(--ink-quiet);
                background:none;border:0;cursor:pointer;padding:0}
 .attach button:hover{color:var(--overdue)}
 /* the three marks the read actually produced, lit on the page they came from */
