@@ -21,16 +21,14 @@ body.tour-running [data-tour-dim] { opacity: .24; }
 body.tour-running [data-tour-dim].lit { opacity: 1; }
 
 /* ---- light packs go the other way (owner, 2026-09-03) --------------------
-   Dimming a daylight sky turns the whole page grey, so atlas, dawn and clouds
-   dim nothing. The lit thing is pushed forward instead, by colour: its quiet
+   Dimming a daylight sky turns the whole page grey, so dawn and clouds dim
+   nothing. The lit thing is pushed forward instead, by colour: its quiet
    tokens step up to full ink, its structural lines take the accent, and it
    wears a soft accent halo. Still the pack's own tokens, still no invented
    hex. (The engine also stops marking anything else on these packs, so the
    first rule below is belt and braces — see emphasis.js.) */
-[data-theme=atlas] body.tour-running [data-tour-dim],
 [data-theme=dawn] body.tour-running [data-tour-dim],
 [data-theme=clouds] body.tour-running [data-tour-dim] { opacity: 1; }
-[data-theme=atlas] body.tour-running [data-tour-dim].lit,
 [data-theme=dawn] body.tour-running [data-tour-dim].lit,
 [data-theme=clouds] body.tour-running [data-tour-dim].lit {
   --ink-quiet: var(--ink); --ink-faint: var(--ink-mid); --ink-mid: var(--ink);
@@ -39,7 +37,6 @@ body.tour-running [data-tour-dim].lit { opacity: 1; }
   filter: drop-shadow(0 0 3px var(--accent))
           drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 45%, transparent));
 }
-[data-theme=atlas] .tourcard,
 [data-theme=dawn] .tourcard,
 [data-theme=clouds] .tourcard {
   border-color: var(--accent);
