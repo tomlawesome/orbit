@@ -141,9 +141,14 @@
   --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
   --star-far:#e9edf8; --star-near:#f4f0ff;
   --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#717c8e;
-  /* #491: the faint tier now clears the law on its own, so this pack's quiet
-     ink IS its faint ink — stated rather than left to be inferred. */
-  --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 said this pack's quiet ink IS its faint ink, because the faint tier
+     cleared the law on its own. It cleared it against --bg. On this pack's
+     own --panel-raised the same value measures 4.42:1, so the words carried
+     the failure onto every raised surface (#861). Lifted just far enough to
+     clear the law on the worst ground this pack paints text on: #768295 is
+     4.80:1 on --panel-raised and 5.18:1 on --bg. --ink-faint keeps the old
+     value, because a hairline is not a letterform. */
+  --ink-quiet:#768295; --accent-text:var(--accent); --ok-text:var(--ok);
   /* #491 item 3: 7.28:1 / 8.46:1 as words on this ground — the companions are
      the originals, same reason as star-chart above. */
   --overdue-text:var(--overdue); --degraded-text:var(--degraded);
@@ -181,7 +186,11 @@
 [data-theme=atlas]{
   --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
   --line:#a89c80; --line-soft:#b8ae95;
-  --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+  /* --ink-mid was #4a5570: 4.07:1 on this pack's own --bg, failing outright
+     and never caught, because the axe sweep only ever runs one pack (#861).
+     It also sat WEAKER than --ink-quiet (4.55:1), which no other pack does.
+     #3a4358 is 5.41:1 and restores the order the tier names imply. */
+  --ink:#1c2b4a; --ink-mid:#3a4358; --ink-faint:#7b8296;
   --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
   --degraded:#c2570e;
   --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;

@@ -179,7 +179,7 @@
                 text-anchor={c.away ? "end" : undefined}>{c.label}</text>
           {#if c.requested}
             <text x={c.nameX} y="30" font-size="8.5" letter-spacing=".14em"
-                  style="fill:var(--ink-faint)"
+                  style="fill:var(--ink-quiet)"
                   text-anchor={c.away ? "end" : undefined}>ASKED TO JOIN · WAITING</text>
           {/if}
           <path d={c.veer} fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55" />
