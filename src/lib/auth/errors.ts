@@ -9,6 +9,7 @@ export type AuthErrorCode =
   | "missing_email"
   | "account_disabled"
   | "session_required"
+  | "session_not_found"
   | "csrf_failed";
 
 /**
