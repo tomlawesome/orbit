@@ -218,6 +218,13 @@
       "when": 1787702400000,
       "tag": "0030_tour_seen_at",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787961600000,
+      "tag": "0033_household_invitations",
+      "breakpoints": true
     }
   ]
 }
