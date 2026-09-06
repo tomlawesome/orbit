@@ -1,6 +1,7 @@
 import { createTransport } from "nodemailer";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #459: the mail proving ground — no interception anywhere. A real message
@@ -60,7 +61,7 @@ const TINY_PDF = Buffer.from(
 async function signInAsMember(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Member" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await settleArrival(page);
 }
 
 // A fresh instance promotes its first sign-in to instance admin, and admins
@@ -72,7 +73,11 @@ async function establishInstanceAdmin(browser: Browser) {
   const page = await context.newPage();
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  /* Not a fixed destination (#840): this only needs the promotion claimed,
+     not a landing on /home -- see signInAsMember above. */
+  const session = await page.request.get("/api/auth/session");
+  expect(session.ok()).toBe(true);
+  await settleArrival(page);
   await configureMailbox(page);
   await context.close();
 }

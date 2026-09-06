@@ -28,6 +28,16 @@ const users = new Map([
    * on a database that is not reset between specs.
    */
   ["newcomer", { sub: "oidc-test-newcomer", email: "newcomer@example.test", name: "Orbit Newcomer" }],
+  /*
+   * THE FIRST-RUN DOOR'S OWN READER (#840). The arrival journeys above all
+   * cover a reader who signs in AT `/` -- this identity is signed in nowhere
+   * but a `returnTo=/home` login, the road a first user actually walks when
+   * every "start your own system" pointer on /home used to send them to the
+   * item form instead of the arrival. A fifth identity, for the same reason
+   * "newcomer" needed a fourth: the database is not reset between specs, so a
+   * reader who belongs to nothing has to be one nothing else has touched.
+   */
+  ["doorstep", { sub: "oidc-test-doorstep", email: "doorstep@example.test", name: "Orbit Doorstep" }],
 ]);
 const codes = new Map();
 

@@ -523,7 +523,16 @@
          same bearings, label only, click to ask. */
       if (view?.emptySky) {
         if (query.matches) {
-          teardown = mountEmptySky({ galaxy: view.galaxy, onAsk: (id, name, requested) => { if (!requested) askTarget = { id, name }; } });
+          /* #840: the adrift copy still says "follow the north star to start
+             your own", but there is no household yet for the drawer's quick-add
+             to write into — the create card that actually starts one only ever
+             appears at /, so the star sends a reader there instead of opening
+             the drawer while the sky is empty. */
+          const controller = new AbortController();
+          document.getElementById("nstar")?.addEventListener(
+            "click", () => location.assign("/"), { signal: controller.signal });
+          const stopSky = mountEmptySky({ galaxy: view.galaxy, onAsk: (id, name, requested) => { if (!requested) askTarget = { id, name }; } });
+          teardown = () => { controller.abort(); stopSky(); };
         } else {
           /* The pocket's labelled sky is a list; asking rides data attributes
              because the hidden dialect must never bind listeners. */
