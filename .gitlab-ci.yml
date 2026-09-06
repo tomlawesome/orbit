@@ -1903,22 +1903,37 @@ install_bootstrap:
 # real run's own side effects (a branch push, a merge-request call) are not
 # something to rehearse against the real repository on a schedule.
 #
-# One CI/CD variable the owner creates under Settings > CI/CD > Variables,
-# masked, unprotected unless the schedule's branch is itself protected (same
-# reasoning as RENOVATE_TOKEN above):
+# Two credential sources, narrowed as far as they go (#708, 2026-09-06;
+# investigated rather than assumed -- see the commit for what was ruled out
+# and why):
 #
-#   BASE_REPIN_TOKEN   Needs two things at once, so a single project access
-#                       token on ai/orbit cannot cover it: read access to
-#                       ai/orbit-base-image's job artifacts (that project is
-#                       private), and the `api` scope with Developer role on
-#                       ai/orbit to push a branch and open a merge request.
-#                       A group access token on the `ai` group, scope `api`,
-#                       role Developer, covers both projects with one token.
-#                       It must never hold registry push credentials --
-#                       nothing here publishes an image, only proposes a
-#                       pin. Never printed; read by
-#                       scripts/ci/repin-base-image.sh, which fails clearly
-#                       if it is unset.
+#   Reading ai/orbit-base-image's artifact needs no stored credential at
+#   all. This job's own CI_JOB_TOKEN does it: GitLab issues one to every job
+#   automatically, scopes it to that job, and expires it when the job ends.
+#   It works because job-token cross-project access is both a project grant
+#   and a user grant -- ai/orbit-base-image's CI/CD job token allowlist
+#   (Settings > CI/CD > Job token permissions > CI/CD job token allowlist)
+#   must name ai/orbit, AND the user this schedule runs as must already have
+#   at least Reporter access to ai/orbit-base-image. The other three
+#   schedules on this project all run as the same user, who already holds
+#   Maintainer there, so create this one the same way and the second half
+#   is already satisfied.
+#
+#   Pushing the branch and opening the merge request cannot go through
+#   CI_JOB_TOKEN: its Merge Requests API access is read-only, and letting it
+#   push at all needs a separate, project-wide "allow push" setting this job
+#   does not ask for. That half needs one CI/CD variable the owner creates
+#   under Settings > CI/CD > Variables, masked, unprotected unless the
+#   schedule's branch is itself protected (same reasoning as RENOVATE_TOKEN
+#   above):
+#
+#   BASE_REPIN_TOKEN   A project access token on ai/orbit ONLY -- never
+#                       ai/orbit-base-image, and never a group token -- with
+#                       the `api` scope and the Developer role. It must
+#                       never hold registry push credentials: nothing here
+#                       publishes an image, only proposes a pin. Never
+#                       printed; read by scripts/ci/repin-base-image.sh,
+#                       which fails clearly if it is unset.
 base_image_repin:
   stage: maintenance
   extends: .dind_service
