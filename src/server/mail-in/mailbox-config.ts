@@ -60,8 +60,32 @@ const NOT_CONFIGURED: ImapIngestionConfig = {
   aliasCurrent: { generation: 1, secret: "" },
   aliasSecret: "",
   trustedRecipientHeader: "",
+  trustedAuthservId: "",
   pollMilliseconds: 300_000,
 };
+
+/**
+ * Whose `Authentication-Results` verdict this instance believes (ADR-0017
+ * decision 3, slice 4).
+ *
+ * The administrator's explicit value always wins. Gmail and Outlook write a
+ * known, fixed identity, so those two profiles work without one being typed.
+ * Mailcow and `other` are the operator's own host, which only they can supply,
+ * and until they do this answers empty — which means nothing is believed, no
+ * mail is attributed by sender and no reply is ever sent. Guessing the host
+ * would be inventing a rule ADR-0017 did not make, and the guess would be the
+ * one an attacker gets to exploit.
+ */
+const PROFILE_AUTHSERV_IDS: Record<string, string> = {
+  gmail: "mx.google.com",
+  outlook: "protection.outlook.com",
+};
+
+export function resolveTrustedAuthservId(providerProfile: string | undefined, configured: string | undefined): string {
+  const explicit = configured?.trim().toLowerCase();
+  if (explicit) return explicit;
+  return PROFILE_AUTHSERV_IDS[providerProfile ?? ""] ?? "";
+}
 
 type MailInSecretRow = typeof mailInSecrets.$inferSelect;
 
@@ -122,14 +146,21 @@ export function imapConfigFromMailbox(
   mailbox: {
     host: string; port: number; accountUser: string; mailbox: string; tlsServerName: string;
     trustedRecipientHeader: string; pollSeconds: number; enabled: boolean;
+    providerProfile?: string; trustedAuthservId?: string;
   },
   password: string,
   aliasSecret: string,
+  aliasKeys: { currentId?: string | null; byId?: Record<string, string> } = {},
 ): ImapIngestionConfig {
   const configured = Boolean(mailbox.host && mailbox.accountUser && password);
+  /* Generation 1 is the shape a not-yet-enrolled member starts at; since
+     ADR-0017 slice 3 the live number is the user's own, read from
+     `mail_in_relays`, and this field carries only the instance's key bytes. */
   const aliasCurrent = { generation: 1, secret: aliasSecret };
   const aliasBase = imapAliasBaseFromAccount(mailbox.accountUser);
   return {
+    ...(aliasKeys.currentId ? { aliasKeySecretId: aliasKeys.currentId } : {}),
+    ...(aliasKeys.byId ? { aliasKeys: aliasKeys.byId } : {}),
     configured,
     enabled: configured && mailbox.enabled,
     host: mailbox.host,
@@ -145,6 +176,7 @@ export function imapConfigFromMailbox(
     aliasCurrent,
     aliasSecret: aliasCurrent.secret,
     trustedRecipientHeader: mailbox.trustedRecipientHeader,
+    trustedAuthservId: resolveTrustedAuthservId(mailbox.providerProfile, mailbox.trustedAuthservId),
     pollMilliseconds: mailbox.pollSeconds * 1_000,
   };
 }
@@ -180,20 +212,33 @@ export async function getImapIngestionConfig(): Promise<ImapIngestionConfig> {
     }
   }
 
+  /* Every alias key, not just the mailbox's current one. An emergency
+     instance-wide rotation (ADR-0017 slice 3) mints a new key and keeps the
+     superseded one until the grace the administrator set has lapsed, because
+     the outgoing addresses are spelt in the old key's bytes and
+     `imap_recipient_aliases.alias_key_secret_id` names which. */
+  const aliasKeysById: Record<string, string> = {};
   if (mailboxRow.aliasKeySecretId) {
-    const [secretRow] = await getDb().select().from(mailInSecrets)
-      .where(eq(mailInSecrets.id, mailboxRow.aliasKeySecretId)).limit(1);
-    if (secretRow) {
+    const secretRows = await getDb().select().from(mailInSecrets).where(eq(mailInSecrets.kind, "alias_key"));
+    for (const secretRow of secretRows) {
       try {
-        aliasSecret = decryptSecretRow(secretRow, account, documentConfig.keyEncryptionKey).toString("utf8");
+        aliasKeysById[secretRow.id] = decryptSecretRow(secretRow, account, documentConfig.keyEncryptionKey).toString("utf8");
       } catch {
+        // A superseded key that no longer decrypts only costs its own grace
+        // period; the CURRENT key failing is what locks mail-in, because
+        // nothing can be derived or verified without it.
+        if (secretRow.id !== mailboxRow.aliasKeySecretId) continue;
         await reportCredentialLocked(mailboxRow.id, secretRow.keyId);
         throw new MailInCredentialLockedError(secretRow.keyId);
       }
     }
+    aliasSecret = aliasKeysById[mailboxRow.aliasKeySecretId] ?? "";
   }
 
-  return imapConfigFromMailbox(mailboxRow, password, aliasSecret);
+  return imapConfigFromMailbox(mailboxRow, password, aliasSecret, {
+    currentId: mailboxRow.aliasKeySecretId,
+    byId: aliasKeysById,
+  });
 }
 
 /** Test-only reset for the per-process locked-audit dedupe guard. */

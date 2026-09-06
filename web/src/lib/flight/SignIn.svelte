@@ -3,7 +3,10 @@
   import Grain from "$lib/Grain.svelte";
   import Dawn from "./Dawn.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
-  import { DOOR, STARTING, availabilityOf, doorMessageFor, nextDoorState, readinessOf } from "./door-state.js";
+  import {
+    DOOR, STARTING, STARTING_BACKSTOP_MS,
+    applyStartingBackstop, availabilityOf, doorMessageFor, nextDoorState, phaseOf, readinessOf,
+  } from "./door-state.js";
   import "./flight.css";
 
   /**
@@ -104,14 +107,18 @@
     }
   }
 
-  /** One round of both checks (#788): readiness first, and availability only
-   *  once readiness says there is a point asking. */
+  /** One round of both checks (#788, #869): availability first, since its
+   *  `phase` field is what decides whether there is any point asking
+   *  readiness at all — `phase: "starting"` is `STARTING` regardless of
+   *  what `/api/health` would say, so a booting instance costs one request,
+   *  not two. Readiness is only fetched once `phase` says boot is done and
+   *  a degraded or unreadable answer becomes a fault worth failing on. */
   async function checkOnce() {
-    const readiness = readinessOf(await fetchJson("/api/health"));
-    const availability = readiness === "ready" || readiness === "maintenance"
-      ? availabilityOf(await fetchJson("/api/auth/availability"))
-      : null;
-    return { state: nextDoorState({ readiness, availability }), contactAddress: availability?.contactAddress ?? null };
+    const availabilityBody = await fetchJson("/api/auth/availability");
+    const phase = phaseOf(availabilityBody);
+    const availability = availabilityOf(availabilityBody);
+    const readiness = phase === "running" ? readinessOf(await fetchJson("/api/health")) : null;
+    return { state: nextDoorState({ phase, readiness, availability }), contactAddress: availability?.contactAddress ?? null };
   }
 
   onMount(() => {
@@ -164,16 +171,23 @@
       showState(first.state, first.contactAddress);
       if (!wasStarting) return;
 
+      /* Measured from the first paint of STARTING, not from the server's own
+         boot start, which this page never learns. Only Date.now() and
+         setTimeout live here; whether that makes the door give up or poll
+         again is applyStartingBackstop's decision, pinned without a
+         browser in door-state.test.mjs. */
+      const backstopAt = Date.now() + STARTING_BACKSTOP_MS;
       const poll = async () => {
         if (disposed) return;
         const next = await checkOnce();
         if (disposed) return;
-        if (next.state === STARTING) {
+        const resolved = applyStartingBackstop(next.state, backstopAt, Date.now());
+        if (resolved === STARTING) {
           pollTimer = setTimeout(poll, 4000);
           return;
         }
-        if (next.state === DOOR) recoverToDoor();
-        else showState(next.state, next.contactAddress);
+        if (resolved === DOOR) recoverToDoor();
+        else showState(resolved, next.contactAddress);
       };
       pollTimer = setTimeout(poll, 4000);
     }

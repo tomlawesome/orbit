@@ -195,6 +195,14 @@
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
   }
+  [data-theme=clouds]{
+    --bg:#d2d3d4;
+    --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+    --line:#a6b2c5; --line-soft:#c0c8d6;
+    --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --star-far:var(--ink); --star-near:var(--ink);
+  }
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.72); --panel-raised:rgba(16,26,38,.86);
     --line:#1d4a5a; --line-soft:#12303c;
@@ -417,11 +425,6 @@
   body.arming .card{border-color:var(--accent);
         box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px var(--accent) inset,
                    0 0 70px -12px color-mix(in srgb,var(--accent) 55%,transparent)}
-  /* the two light packs paint an ink-on-paper card onto a night sky: thinning
-     their veil the way the dark packs' is thinned washes their faint ink out
-     altogether, so they keep the body they were designed with */
-  [data-theme=atlas] .card,[data-theme=dawn] .card{
-        background:color-mix(in srgb,var(--panel) 92%,transparent)}
 
   /* ── THE CARD HAS NO MARK (owner, 2026-08-17) ────────────────────────────
      Verbatim: "I actually want the ring logo removed from the card. Just fade
@@ -830,6 +833,133 @@
        fade and no drift, so the beat survives without the movement */
     .nf .disc{transition:none!important;transform:translate(-50%,-50%)!important}
   }
+
+  /* ── THE RING HOLDS THE QUESTIONS (#862, round 3 — owner's design) ───────
+     Numbers, all of them the login ring's own: it draws at 2.1x, so its
+     stroke is 4.2px, its orb is 29.4px across, and the circle itself is
+     302.4px. The big ring changes the diameter to 500px and nothing else.
+
+     Drawn in CSS, not as a scaled SVG, precisely so that the line weight and
+     the orb hold still while the diameter moves -- a border measured in
+     pixels does not thin when its element shrinks, and the orb is its own
+     element, stationed by percentage so it keeps its place on the ring at
+     any size. Scaling the SVG would have thinned both, which the owner ruled
+     out in the same breath as asking for the bigger ring.
+
+     Every rule here is scoped to .bigring and the parts are named for it.
+     An unscoped `.disc` is not free: the newcomer frame already owns that
+     class for its discovered-count, and claiming it put this ring around
+     the count and shoved it off centre. */
+  /* THE SWAP. The two rings are the same circle at the end of the shrink, so
+     the changeover is invisible only if it happens THEN: the big ring holds
+     full strength while it closes and clears in .16s once it has arrived,
+     and the ratified login chrome is held back to meet it there rather than
+     appearing at full size beside a ring still travelling. Both land before
+     the ascent starts at 620ms. */
+  .bigring{position:fixed;inset:0;display:grid;place-items:center;z-index:3;
+           opacity:0;visibility:hidden;pointer-events:none;
+           transition:opacity .16s ease .46s,visibility .16s .46s}
+  /* The create path and nothing else. `showform` stays set while the sheet
+     runs its other journeys -- the newcomer arrival, the discovered count,
+     the home instrument -- so a rule keyed on it alone left this ring
+     hanging over screens it has no business being on. Each of those states
+     has its own body class; the ring is gone the moment any of them is up. */
+  body.showform:not(.reclaimed):not(.shownew):not(.showhome):not(.showwarp):not(.showdusk):not(.counting):not(.instrument) .bigring{
+           opacity:1;visibility:visible;
+           transition:opacity .8s ease,visibility .8s}
+  .bigring>*{grid-area:1/1}
+
+  /* The glass: the night sky itself, held still and quieted, inside the ring
+     and nowhere else. It is a darkening rather than a paint, so a light pack
+     cannot wash it out and no per-pack exception list is needed -- the defect
+     that opened this issue cannot recur here. */
+  .bigring .ringglass{width:500px;height:500px;border-radius:50%;
+        border:4.2px solid #8791b3;
+        background:rgba(6,10,22,.56);
+        -webkit-backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
+        backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
+        box-shadow:0 40px 120px -50px rgba(0,0,0,.8),
+                   0 0 90px -40px rgba(216,180,90,.18) inset;
+        transition:width .5s cubic-bezier(.55,0,.2,1),
+                   height .5s cubic-bezier(.55,0,.2,1),
+                   background .5s ease,backdrop-filter .5s ease}
+  /* THE HAND-OVER. On create the circle animates inward to exactly the login
+     ring's 302.4px, in its place, and the glass clears as it goes -- so what
+     the ratified reclaim brings back is not a new screen but the one already
+     standing there. The ascent then runs unchanged. */
+  body.reclaimed .bigring .ringglass{width:302.4px;height:302.4px;
+        background:rgba(7,11,24,0);
+        -webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px)}
+
+  /* The orb keeps its 29.4px and its station: 43.26% out and 25.06% up is
+     the login orb's own angle, and a percentage holds it there as the ring
+     closes. One turn per 40s, the only motion CON-19 allows the mark. */
+  .bigring .ringorbit{width:500px;height:500px;position:relative;
+         animation:spinback 40s linear infinite;
+         transition:width .5s cubic-bezier(.55,0,.2,1),
+                    height .5s cubic-bezier(.55,0,.2,1)}
+  body.reclaimed .bigring .ringorbit{width:302.4px;height:302.4px}
+  .bigring .ringorbit i{position:absolute;left:93.26%;top:24.94%;
+           width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px;
+           border-radius:50%;background:#d8b45a}
+
+  /* ── THE FIELDS, INSIDE THE RING ─────────────────────────────────────────
+     No card of its own any more: the ring is the card, so the panel, the
+     blur, the border and the shadow all go and the glass behind them is the
+     ring's. The fields keep their labels -- the owner asked that it be clear
+     what each box is for -- and the name's suggestion is "Your world".
+
+     Ink is the sky's and fixed, not the pack's, for the reason the whole
+     issue exists: the ground here is a night sky whatever pack is chosen. */
+  #formlayer{display:grid;place-items:center;z-index:4}
+  /* One column: time zone, then currency beneath it (owner, 2026-09-06).
+     Stacking narrows the block, which is what lets the circle come down --
+     a 300px column inside a 500px ring still clears its widest point. */
+  .card .row2{display:block}
+  .card .row2>.field{margin-bottom:18px}
+  .card .row2>.field:last-child{margin-bottom:0}
+  .card{width:300px;max-width:300px;background:none;backdrop-filter:none;
+        border:none;box-shadow:none;padding:0;
+        --ink:#f0f4fb; --ink-mid:#c0cade; --ink-faint:#9aa6bf;
+        --line:rgba(240,244,251,.26); --line-soft:rgba(240,244,251,.14);
+        --panel:rgba(6,10,22,.34);
+        color:var(--ink)}
+  body.showform:not(.reclaimed) .card{background:none}
+  .card .field label{color:#9aa6bf;text-shadow:0 1px 8px rgba(2,5,14,.8)}
+  .card .field input,.card .field select{
+        background:rgba(5,9,20,.42);border-color:rgba(240,244,251,.22);
+        color:#f0f4fb}
+  /* Typed text sits centred (owner, 2026-09-06): everything in the ring is
+     centred on its axis, so a name growing out from the left edge was the
+     one thing in here still reading as a form. The labels centre with them,
+     because a left-set label over a centred value reads as a mistake. */
+  .card .field input,.card .field select,.card .field label{text-align:center}
+  .card .field select{text-align-last:center;padding-right:12px}
+  .card .selwrap::after{display:none}
+  .card .field input::placeholder{color:rgba(240,244,251,.36)}
+  .card .field input:focus,.card .field select:focus{border-color:#d8b45a}
+  .card .selwrap::after{border-color:#9aa6bf}
+  .card .note{color:#8f9bb5;text-align:center}
+
+  /* THE ACT: the ratified gate rule, verbatim and at its own size, because
+     the owner asked for the login button in everything but the word (§15
+     already requires the two surfaces to carry the identical control). */
+  #gobtn{display:block;margin:20px auto 0;width:auto;
+         font:600 12px var(--display);color:#04060e;background:#d8b45a;
+         border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
+         letter-spacing:.04em;line-height:normal;
+         box-shadow:0 0 28px rgba(216,180,90,.22);
+         transition:filter .35s ease,box-shadow .3s ease,opacity .4s ease}
+  #gobtn:hover:not(:disabled){filter:brightness(1.08)}
+  #gobtn:disabled{opacity:.34;cursor:default;box-shadow:none}
+
+  body.reclaimed #dawn .loginchrome{transition:opacity .22s ease .45s,
+                                    visibility .22s .45s}
+
+  /* The sheet's running commentary describes the passes that produced the
+     card this round replaces. It stays in the file and out of the view. */
+  .sheet{display:none}
+
 </style>
 </head>
 <body>
@@ -1187,20 +1317,26 @@
 </div>
 
 <!-- ══════════ THE FIRST-RUN CARD ══════════ -->
+
+<!-- #862 round 3: the login ring, enlarged, holding the questions. It is a
+     sibling of the dawn and of the form layer rather than a child of either,
+     because it has to outlive the card on the way into the launch. -->
+<div class="bigring" aria-hidden="true">
+  <div class="ringglass"></div>
+  <div class="ringorbit"><i></i></div>
+</div>
 <div id="formlayer">
   <!-- THIRD PASS: three fields, a button, air. Everything that was prose is
        either gone or moved to a title/aria attribute — the household screen
        and settings say all of it again, later, where it is actually needed. -->
   <form class="card" id="setup" onsubmit="attempt();return false"
         aria-label="Name your first system">
-    <!-- No mark here (owner, 2026-08-17). The ring the flight leaves on is the
-         login's own 420px hero, standing behind this card the whole time. -->
+
     <div class="field">
-      <label for="hhname">what is it</label>
-      <input id="hhname" placeholder="Lawson Home" maxlength="60" autocomplete="off"
+      <label for="hhname">name</label>
+      <input id="hhname" placeholder="Your world" maxlength="60" autocomplete="off"
              aria-label="System name" oninput="naming()"
              title="A house, a flat, a boat, a parent’s place — whatever you keep in orbit. It is the name everyone in it sees.">
-      <!-- the server's refusal, in one line, in the warm tone -->
       <p class="err" role="alert"><b id="errname">“Lawson Home”</b> already exists here —
         <a href="#" onclick="newcomerArrival();return false">ask to join it →</a></p>
     </div>
@@ -1227,10 +1363,10 @@
       </div>
     </div>
 
-    <!-- the ONE line that survives the strip -->
     <p class="note">four sections to start &middot; change them later</p>
 
-    <button class="btn" id="gobtn" type="submit" disabled>create this system →</button>
+    <button class="btn" id="gobtn" type="submit" disabled>Create</button>
+
   </form>
 </div>
 
@@ -1281,6 +1417,7 @@
   <button class="sw" data-swatch="afterdark" style="background:#05070d" title="after dark" aria-pressed="false" onclick="setTheme('afterdark')"></button>
   <button class="sw" data-swatch="atlas" style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setTheme('atlas')"></button>
   <button class="sw" data-swatch="dawn" style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setTheme('dawn')"></button>
+  <button class="sw" data-swatch="clouds" style="background:#d2d3d4" title="clouds" aria-pressed="false" onclick="setTheme('clouds')"></button>
   <button class="sw" data-swatch="retrograde" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setTheme('retrograde')"></button>
 </div>
 
@@ -2509,5 +2646,11 @@ fillTile("nf-near", 46, .8, .7, .30, .40, false);
 /* first light: the login's dawn breaks once, then the card rises onto it */
 toForm();
 requestAnimationFrame(() => setTimeout(() => body.classList.add("lit"), 180));
+</script>
+<script>
+  const _go = document.getElementById("gobtn");
+  const _fix = () => { if (_go.textContent !== "Create") _go.textContent = "Create"; };
+  new MutationObserver(_fix).observe(_go, { childList: true, characterData: true, subtree: true });
+  _fix();
 </script>
 </body></html>

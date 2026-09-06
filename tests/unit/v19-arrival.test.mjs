@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  ASKING, CREATE, DOOR, NEWCOMER, ONWARD,
+  ASKING, CREATE, DOOR, INVITED, NEWCOMER, ONWARD,
   CURRENCIES, DEFAULT_SECTIONS, NAME_LIMIT, TIME_ZONES,
-  arrivalStageOf, belongRowsOf, collidingHouseholdOf, createButtonLabel,
-  createSystemCommand, discoveredCountOf, preferredCurrency, preferredTimeZone,
+  arrivalStageOf, belongRowsOf, collidingHouseholdOf,
+  createSystemCommand, discoveredCountOf, isInvitedLanding, preferredCurrency, preferredTimeZone,
   sectionNote, sectionNoteTitle,
 } from "$lib/arrival/stage.js";
 import {
@@ -58,6 +58,54 @@ describe("which surface an arrival lands on", () => {
 
   it("treats a workspace with the fields missing as the empty instance it is", () => {
     expect(arrivalStageOf({})).toBe(CREATE);
+  });
+});
+
+describe("the invited landing, told apart from an ordinary return (#871)", () => {
+  it("fires only with both the active household and the redemption's own one-shot flag", () => {
+    expect(isInvitedLanding({ activeHouseholdId: "hh-lawson-1", justJoined: true })).toBe(true);
+  });
+
+  it("never fires for a returning member: the same household, without the flag", () => {
+    /* This is the whole point: #481's redemption sets `activeHouseholdId` the
+       same way an ordinary sign-in's session already carries it, so the flag
+       — set once by `/invite/[token]/+page.server.js` and read-and-cleared by
+       `GET /api/auth/session` — is the only thing that can ever be true here
+       and false there. */
+    expect(isInvitedLanding({ activeHouseholdId: "hh-lawson-1" })).toBe(false);
+    expect(isInvitedLanding({ activeHouseholdId: "hh-lawson-1", justJoined: false })).toBe(false);
+  });
+
+  it("never fires off the flag alone: a household to land on is the other half", () => {
+    expect(isInvitedLanding({ justJoined: true })).toBe(false);
+  });
+
+  it("answers false rather than guessing on the door's own null and undefined", () => {
+    expect(isInvitedLanding(null)).toBe(false);
+    expect(isInvitedLanding(undefined)).toBe(false);
+  });
+
+  it("is its own stage, not one arrivalStageOf's workspace read could ever answer", () => {
+    expect(INVITED).toBe("invited");
+    expect(new Set([DOOR, ASKING, CREATE, NEWCOMER, ONWARD, INVITED]).size).toBe(6);
+  });
+});
+
+describe("the invited landing's climb is the newcomer's own, to the beat the chooser would stand on", () => {
+  it("flies the newcomer's beats to the same last one, full motion and reduced alike", () => {
+    /* Flight.svelte's landing="invited" reuses these two arrays UNCHANGED —
+       it only reads the terminal "belong" act differently (hands off to the
+       household instead of drawing the chooser) — so a later retiming that
+       moved "belong" off the end, or dropped it, would silently strand the
+       invited reader on a sky, no chooser and no move either. Pinned here
+       rather than left to that surface's own DOM tests. */
+    const full = newcomerAscentBeats();
+    expect(full.at(-1)).toEqual({ at: T.belongAt, act: "belong" });
+
+    const reduced = newcomerAscentBeatsReduced();
+    expect(reduced.at(-1)).toEqual({ at: 700 + T.newDwell + 1900, act: "belong" });
+    /* the count still takes its turn before that last beat, ordering unchanged */
+    expect(reduced.map((beat) => beat.act)).toEqual(["land", "instrument", "countOn", "countOff", "belong"]);
   });
 });
 
@@ -132,12 +180,6 @@ describe("the card asks three things only", () => {
     expect(command.household.name).toHaveLength(60);
   });
 
-  it("writes the system's name into the button as it is typed", () => {
-    expect(createButtonLabel("")).toBe("create this system →");
-    expect(createButtonLabel("   ")).toBe("create this system →");
-    expect(createButtonLabel("Lawson Home")).toBe("create Lawson Home →");
-  });
-
   it("admits to the four default sections in one quiet line, counted not typed", () => {
     expect(DEFAULT_SECTIONS).toEqual(["Home", "Vehicles", "Devices", "Services"]);
     expect(sectionNote()).toBe("4 sections to start · change them later");
@@ -205,12 +247,12 @@ describe("the newcomer's clock is the sealed one", () => {
     expect(T.newInstrumentAt).toBe(9400);
   });
 
-  it("opens the count a second earlier than it first did, and holds its rhythm", () => {
-    expect(T.countOn).toBe(9900);
-    expect(T.countOff).toBe(11900);
-    expect(T.belongAt).toBe(12800);
-    /* ~2.8s of screen time in all: 0.8s in, 2s held, 0.8s out */
-    expect(T.countOff - T.countOn).toBe(2000);
+  it("opens the count sooner and holds it longer (#870)", () => {
+    expect(T.countOn).toBe(9700);
+    expect(T.countOff).toBe(12900);
+    expect(T.belongAt).toBe(13800);
+    /* ~4.55s of screen time in all: 0.45s in, 3.2s held, 0.9s out */
+    expect(T.countOff - T.countOn).toBe(3200);
     expect(T.belongAt - T.countOff).toBe(900);
   });
 

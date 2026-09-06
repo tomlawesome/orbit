@@ -1182,6 +1182,38 @@ export async function readRelay() {
   };
 }
 
+/**
+ * Rotates the signed-in member's own relay address (ADR-0017 slice 3, #744).
+ *
+ * The body carries an action and NOTHING ELSE — no user, no generation, no
+ * address. The endpoint acts on the session's own member and cannot be asked
+ * to act on anyone else, and the seam must not be the place that changes that.
+ *
+ * `rotate` keeps the old address collecting for fourteen days so mail already
+ * on its way still arrives; `cutOff` stops it immediately, which is what a
+ * leaked address needs. The answer is the same shape `readRelay` returns,
+ * carrying the NEW address for the member to save.
+ *
+ * `pause` and `resume` (ADR-0017 slice 5, #746) go through the same endpoint
+ * and the same rule: the session names the member, the body names only what to
+ * do. Paused, mail addressed to them is recorded and held; resuming stages all
+ * of it exactly once.
+ *
+ * @param {"rotate" | "cut_off" | "pause" | "resume"} action
+ * @returns {Promise<Relay>}
+ */
+export async function rotateRelay(action) {
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string } }} */
+  const body = await json(await csrfFetch("/api/settings/mail-relay", { method: "PUT", body: { action } }));
+  const relay = body.relay ?? {};
+  return {
+    address: relay.address ?? NO_ADDRESS,
+    status: relay.listening ?? UNAVAILABLE_RELAY.status,
+    lastReceived: relay.lastReceived ? ago(relay.lastReceived, new Date().toISOString()) : "nothing yet",
+    ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
+  };
+}
+
 const NO_ADDRESS = "no address yet";
 
 /**
