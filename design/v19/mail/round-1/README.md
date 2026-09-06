@@ -37,4 +37,12 @@ Files: `a-the-sun.html`, `b-the-letter.html`, `c-the-chart.html`,
 
 ## Verdicts
 
-_Awaiting the owner (posted on #481, 2026-09-06)._
+Owner, 2026-09-06, on #481:
+
+- A the sun — "Not bad, but we can do much better I know it. Can html emails
+  have animation? At the bare minimum the open invitation button needs
+  centralisation, and the text on it changing to something much more
+  elegant." **Survives; round 2 carries it forward.**
+- B the letter — "No." Killed.
+- C the chart — "No." Killed. Feature idea kept: the dim neighbouring
+  systems as a way of saying "you are joining one of several".
