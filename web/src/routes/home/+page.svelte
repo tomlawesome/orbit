@@ -40,9 +40,18 @@
    */
   const DESK = "(min-width: 901px)";
 
+  /* Declared before `view` because `view` starts from it; the launch below is
+     what the rest of this prop is for. */
+  let { data } = $props();
+
   /** @typedef {import('$lib/data/workspace.js').HomeView} HomeView */
+  /* Straight from the server's read (#842), so the FIRST render already has
+     the manifest, the dial and the corridor — a reader with no JavaScript gets
+     a page rather than an empty one. Null only when that read failed; onMount
+     reads again either way and replaces this with a live view. */
   /** @type {HomeView | null} */
-  let view = $state(null);
+  // svelte-ignore state_referenced_locally
+  let view = $state(data?.view ?? null);
   /* Some of the $derived expressions below build a value from `view` inside a
      single ternary, and svelte-check's control-flow narrowing does not carry
      the `view ? ... : ...` guard through into the branch in that position —
@@ -75,7 +84,6 @@
    * as it reads it: an ordinary navigation, a refresh, a Back or a second tab
    * never flies. See $lib/flight/arrival.js.
    */
-  let { data } = $props();
   /* The fixture harness (see +page.server.js): drives either journey to one
      millisecond and holds it there. Off unless the server says ORBIT_FIXTURES,
      so the query string is inert in the product. */
