@@ -74,7 +74,7 @@ body{background:#060a18}
 .msg{margin:0;font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
      text-transform:uppercase}
 .latest{display:flex;flex-direction:column;gap:6px;max-width:44ch}
-.when{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-faint);
+.when{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-quiet);
       text-transform:uppercase}
 .body{font:400 15px/1.5 var(--ui);color:var(--ink)}
 .back{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
@@ -86,7 +86,7 @@ body{background:#060a18}
 .earlier{display:flex;flex-direction:column;align-items:center;
          flex:1 1 auto;min-height:0;max-width:44ch;width:100%;
          overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--ink-faint) transparent}
-.earlier summary{list-style:none;cursor:pointer;color:var(--ink-faint);
+.earlier summary{list-style:none;cursor:pointer;color:var(--ink-quiet);
                  padding:6px 12px;border-radius:999px;display:inline-flex;
                  position:sticky;top:0;transition:color .18s ease}
 .earlier[open]{mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent)}

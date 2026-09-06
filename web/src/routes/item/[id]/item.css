@@ -42,7 +42,7 @@ html body{overflow-y:auto;overflow-x:hidden}
 /* Section headings inside the card borrow the drawer's, which is the design's
    existing "quiet label above a group" treatment. */
 .item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-              color:var(--ink-faint);margin:22px 0 8px}
+              color:var(--ink-quiet);margin:22px 0 8px}
 
 /* home.css's document row, which is already the ratified way to list a
    document with a size beneath it. */
@@ -50,7 +50,7 @@ html body{overflow-y:auto;overflow-x:hidden}
      border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
 .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
 
-.note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:18px;line-height:1.8}
+.note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:18px;line-height:1.8}
 
 /* The action pills: create.html's .types button grammar, carrying each
    action's own ink (owner, 2026-08-15: more colour, especially the action
@@ -76,7 +76,7 @@ html body{overflow-y:auto;overflow-x:hidden}
 .panel{margin-top:16px;padding-top:4px}
 .panel .field{margin-bottom:13px}
 .panel .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;
-  color:var(--ink-faint);text-transform:uppercase;margin:0 0 6px}
+  color:var(--ink-quiet);text-transform:uppercase;margin:0 0 6px}
 .panel .field input,.panel .field textarea{width:100%;background:var(--panel);
   border:1px solid var(--line);border-radius:9px;color:var(--ink);font-size:13.5px;
   padding:9px 12px;font-family:var(--ui)}
@@ -91,7 +91,7 @@ html body{overflow-y:auto;overflow-x:hidden}
 .btn-primary:hover{filter:brightness(1.05)}
 .btn-primary:disabled{opacity:.5;cursor:default}
 /* create.html's cancel link as a button — same type, no chrome. */
-.cancel-link{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
+.cancel-link{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;
   cursor:pointer;padding:0}
 .cancel-link:hover{color:var(--ink-mid)}
 /* A quieter sibling for the secondary destructive choice: the pill grammar

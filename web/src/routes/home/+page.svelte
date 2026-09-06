@@ -1191,7 +1191,7 @@
   <div class="svc"><i style="background:var(--degraded)"></i><b>scan readiness</b><small>failed &middot; scanner-unreachable</small></div>
   <div class="svc"><i style="background:var(--ok)"></i><b>application</b><small>ready</small></div>
   <h2>Full diagnostics</h2>
-  <div class="svc" style="color:var(--ink-faint)">container logs &middot; or the launcher repair flow</div>
+  <div class="svc" style="color:var(--ink-quiet)">container logs &middot; or the launcher repair flow</div>
 </aside>
 {#if !view?.emptySky}
 <aside class="drawer drawer-right" id="keydrawer" role="region" aria-label="Chart key">

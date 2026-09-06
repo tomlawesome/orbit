@@ -203,11 +203,11 @@
   .account nav a:hover{color:var(--ink);background:var(--panel)}
   .account nav a[aria-current]{color:var(--accent-text)}
   .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
-  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-quiet);margin-right:2px}
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
                    border:1px solid var(--line);padding:0}
   .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
-  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
+  .signout{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue-text)}
   .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
 </style>
