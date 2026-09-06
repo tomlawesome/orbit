@@ -75,12 +75,20 @@
    *   ?arrival=newcomer            the question, arrived at
    *   ?arrival=newcomer&at=<ms>    one millisecond of the newcomer's climb
    */
-  const fixture = browser && data?.fixtures ? page.url.searchParams.get("arrival") : null;
-  const fixtureReject = fixture ? page.url.searchParams.get("reject") : null;
-  const fixtureHandover = fixture ? page.url.searchParams.get("handover") === "1" : false;
-  const fixtureAt = fixture && page.url.searchParams.has("at")
+  /* $derived, not a plain const: `data` is a prop, and reading it through a
+     bare const only ever captures its value at this component's first run
+     (svelte-check's own state_referenced_locally). Nothing about the fixture
+     flag actually changes within a mounted session in practice — it is a
+     per-deployment flag read once per request (+page.server.js) — but the
+     read stays live rather than silently freezing if that ever stops being
+     true, which costs nothing since these are read a handful of times, all
+     from inside onMount's decide(). */
+  const fixture = $derived(browser && data?.fixtures ? page.url.searchParams.get("arrival") : null);
+  const fixtureReject = $derived(fixture ? page.url.searchParams.get("reject") : null);
+  const fixtureHandover = $derived(fixture ? page.url.searchParams.get("handover") === "1" : false);
+  const fixtureAt = $derived(fixture && page.url.searchParams.has("at")
     ? (Number(page.url.searchParams.get("at")) || 0)
-    : null;
+    : null);
 
   let stage = $state(DOOR);
   let galaxy = $state({});
@@ -381,7 +389,7 @@
      is carried entirely by the mockups' own art (the lockup, the card, the
      climb), so the heading names the stage for a reader who cannot see it,
      rather than duplicating text already on screen. -->
-<main>
+<main class="arrival">
   <h1 class="sr-only">{title}</h1>
 
   <!-- THE LOGIN SCREEN IS THE BASE LAYER, exactly as the sheet builds it: the
@@ -391,6 +399,15 @@
   <SignIn gate={stage === DOOR} dawnShown={!climbing} {title} />
 
   {#if stage === CREATE}
+    <!-- #862 round 3: the login ring, enlarged, holding the questions. A
+         sibling of the dawn and of the card rather than a child of either,
+         because it has to outlive the card on the way into the launch (the
+         hand-over shrinks it to the login ring's own 302.4px in place,
+         `body.reclaimed` below) — see arrival.css for the ring itself. -->
+    <div class="bigring" aria-hidden="true">
+      <div class="ringglass"></div>
+      <div class="ringorbit"><i></i></div>
+    </div>
     <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
                   onsubmit={submit} onnaming={naming} onask={askFromCard} />
   {/if}

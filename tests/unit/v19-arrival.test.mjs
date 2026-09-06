@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASKING, CREATE, DOOR, NEWCOMER, ONWARD,
   CURRENCIES, DEFAULT_SECTIONS, NAME_LIMIT, TIME_ZONES,
-  arrivalStageOf, belongRowsOf, collidingHouseholdOf, createButtonLabel,
+  arrivalStageOf, belongRowsOf, collidingHouseholdOf,
   createSystemCommand, discoveredCountOf, preferredCurrency, preferredTimeZone,
   sectionNote, sectionNoteTitle,
 } from "$lib/arrival/stage.js";
@@ -132,12 +132,6 @@ describe("the card asks three things only", () => {
     expect(command.household.name).toHaveLength(60);
   });
 
-  it("writes the system's name into the button as it is typed", () => {
-    expect(createButtonLabel("")).toBe("create this system →");
-    expect(createButtonLabel("   ")).toBe("create this system →");
-    expect(createButtonLabel("Lawson Home")).toBe("create Lawson Home →");
-  });
-
   it("admits to the four default sections in one quiet line, counted not typed", () => {
     expect(DEFAULT_SECTIONS).toEqual(["Home", "Vehicles", "Devices", "Services"]);
     expect(sectionNote()).toBe("4 sections to start · change them later");
@@ -205,12 +199,12 @@ describe("the newcomer's clock is the sealed one", () => {
     expect(T.newInstrumentAt).toBe(9400);
   });
 
-  it("opens the count a second earlier than it first did, and holds its rhythm", () => {
-    expect(T.countOn).toBe(9900);
-    expect(T.countOff).toBe(11900);
-    expect(T.belongAt).toBe(12800);
-    /* ~2.8s of screen time in all: 0.8s in, 2s held, 0.8s out */
-    expect(T.countOff - T.countOn).toBe(2000);
+  it("opens the count sooner and holds it longer (#870)", () => {
+    expect(T.countOn).toBe(9700);
+    expect(T.countOff).toBe(12900);
+    expect(T.belongAt).toBe(13800);
+    /* ~4.55s of screen time in all: 0.45s in, 3.2s held, 0.9s out */
+    expect(T.countOff - T.countOn).toBe(3200);
     expect(T.belongAt - T.countOff).toBe(900);
   });
 

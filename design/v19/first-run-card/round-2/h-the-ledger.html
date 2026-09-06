@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — first light: the launch (proposal, #410 cutover · §15)</title>
+<title>#862 H · the ledger — Orbit — first light: the launch (proposal, #410 cutover · §15)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <style>
@@ -834,131 +834,93 @@
     .nf .disc{transition:none!important;transform:translate(-50%,-50%)!important}
   }
 
-  /* ── THE RING HOLDS THE QUESTIONS (#862, round 3 — owner's design) ───────
-     Numbers, all of them the login ring's own: it draws at 2.1x, so its
-     stroke is 4.2px, its orb is 29.4px across, and the circle itself is
-     302.4px. The big ring changes the diameter to 500px and nothing else.
+  /* The sheet's running commentary describes the passes that produced the
+     card this round replaces, so on these pages it would read as the round's
+     own argument. It stays in the file and out of the view. */
+  .sheet{display:none}
 
-     Drawn in CSS, not as a scaled SVG, precisely so that the line weight and
-     the orb hold still while the diameter moves -- a border measured in
-     pixels does not thin when its element shrinks, and the orb is its own
-     element, stationed by percentage so it keeps its place on the ring at
-     any size. Scaling the SVG would have thinned both, which the owner ruled
-     out in the same breath as asking for the bigger ring.
+  /* ── THE LOGIN SCREEN'S OWN COMPOSITION (#862, round 2) ──────────────────
+     Round 1 changed the card's ground and kept its form: a left-aligned
+     panel of labelled boxes, off in its own idiom. The owner's verdict was
+     that it tied to the login screen in no way at all, and it did not.
 
-     Every rule here is scoped to .bigring and the parts are named for it.
-     An unscoped `.disc` is not free: the newcomer frame already owns that
-     class for its discovered-count, and claiming it put this ring around
-     the count and shoved it off centre. */
-  /* THE SWAP. The two rings are the same circle at the end of the shrink, so
-     the changeover is invisible only if it happens THEN: the big ring holds
-     full strength while it closes and clears in .16s once it has arrived,
-     and the ratified login chrome is held back to meet it there rather than
-     appearing at full size beside a ring still travelling. Both land before
-     the ascent starts at 620ms. */
-  .bigring{position:fixed;inset:0;display:grid;place-items:center;z-index:3;
-           opacity:0;visibility:hidden;pointer-events:none;
-           transition:opacity .16s ease .46s,visibility .16s .46s}
-  /* The create path and nothing else. `showform` stays set while the sheet
-     runs its other journeys -- the newcomer arrival, the discovered count,
-     the home instrument -- so a rule keyed on it alone left this ring
-     hanging over screens it has no business being on. Each of those states
-     has its own body class; the ring is gone the moment any of them is up. */
-  body.showform:not(.reclaimed):not(.shownew):not(.showhome):not(.showwarp):not(.showdusk):not(.counting):not(.instrument) .bigring{
-           opacity:1;visibility:visible;
-           transition:opacity .8s ease,visibility .8s}
-  .bigring>*{grid-area:1/1}
+     This is the tie. The login screen is one centred line of 72px display
+     type with one small gold pill 74px beneath it, and nothing else on the
+     screen — no labels, no boxes, no footer. So the name the reader types
+     stands in exactly that slot, at that size, centred; and the act beneath
+     it is that pill, at its size, in its colour, at its offset. The window
+     pops up where the word was.
 
-  /* The glass: the night sky itself, held still and quieted, inside the ring
-     and nowhere else. It is a darkening rather than a paint, so a light pack
-     cannot wash it out and no per-pack exception list is needed -- the defect
-     that opened this issue cannot recur here. */
-  .bigring .ringglass{width:500px;height:500px;border-radius:50%;
-        border:4.2px solid #8791b3;
-        background:rgba(6,10,22,.56);
-        -webkit-backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
-        backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
-        box-shadow:0 40px 120px -50px rgba(0,0,0,.8),
-                   0 0 90px -40px rgba(216,180,90,.18) inset;
-        transition:width .5s cubic-bezier(.55,0,.2,1),
-                   height .5s cubic-bezier(.55,0,.2,1),
-                   background .5s ease,backdrop-filter .5s ease}
-  /* THE HAND-OVER. On create the circle animates inward to exactly the login
-     ring's 302.4px, in its place, and the glass clears as it goes -- so what
-     the ratified reclaim brings back is not a new screen but the one already
-     standing there. The ascent then runs unchanged. */
-  body.reclaimed .bigring .ringglass{width:302.4px;height:302.4px;
-        background:rgba(7,11,24,0);
-        -webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px)}
+     The mark itself is not borrowed and must not be: while the card shows,
+     the ring and the word are gone, by ruling (owner, verbatim: "no orbit
+     word, no orbit logo, this little window pops up"). The tie is the
+     composition, not the logo.
 
-  /* The orb keeps its 29.4px and its station: 43.26% out and 25.06% up is
-     the login orb's own angle, and a percentage holds it there as the ring
-     closes. One turn per 40s, the only motion CON-19 allows the mark. */
-  .bigring .ringorbit{width:500px;height:500px;position:relative;
-         animation:spinback 40s linear infinite;
-         transition:width .5s cubic-bezier(.55,0,.2,1),
-                    height .5s cubic-bezier(.55,0,.2,1)}
-  body.reclaimed .bigring .ringorbit{width:302.4px;height:302.4px}
-  .bigring .ringorbit i{position:absolute;left:93.26%;top:24.94%;
-           width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px;
-           border-radius:50%;background:#d8b45a}
-
-  /* ── THE FIELDS, INSIDE THE RING ─────────────────────────────────────────
-     No card of its own any more: the ring is the card, so the panel, the
-     blur, the border and the shadow all go and the glass behind them is the
-     ring's. The fields keep their labels -- the owner asked that it be clear
-     what each box is for -- and the name's suggestion is "Your world".
-
-     Ink is the sky's and fixed, not the pack's, for the reason the whole
-     issue exists: the ground here is a night sky whatever pack is chosen. */
-  #formlayer{display:grid;place-items:center;z-index:4}
-  /* One column: time zone, then currency beneath it (owner, 2026-09-06).
-     Stacking narrows the block, which is what lets the circle come down --
-     a 300px column inside a 500px ring still clears its widest point. */
-  .card .row2{display:block}
-  .card .row2>.field{margin-bottom:18px}
-  .card .row2>.field:last-child{margin-bottom:0}
-  .card{width:300px;max-width:300px;background:none;backdrop-filter:none;
+     There is no panel here at all, so the pack cannot wash it out and no
+     per-pack exception list exists to forget clouds in. Ink is the sky's,
+     fixed; the pill keeps the ratified gold on every pack, because it is the
+     same pill as the login's and that one never varied either. */
+  .card{max-width:none;width:auto;background:none;backdrop-filter:none;
         border:none;box-shadow:none;padding:0;
-        --ink:#f0f4fb; --ink-mid:#c0cade; --ink-faint:#9aa6bf;
-        --line:rgba(240,244,251,.26); --line-soft:rgba(240,244,251,.14);
-        --panel:rgba(6,10,22,.34);
-        color:var(--ink)}
-  body.showform:not(.reclaimed) .card{background:none}
-  .card .field label{color:#9aa6bf;text-shadow:0 1px 8px rgba(2,5,14,.8)}
-  .card .field input,.card .field select{
-        background:rgba(5,9,20,.42);border-color:rgba(240,244,251,.22);
-        color:#f0f4fb}
-  /* Typed text sits centred (owner, 2026-09-06): everything in the ring is
-     centred on its axis, so a name growing out from the left edge was the
-     one thing in here still reading as a form. The labels centre with them,
-     because a left-set label over a centred value reads as a mistake. */
-  .card .field input,.card .field select,.card .field label{text-align:center}
-  .card .field select{text-align-last:center;padding-right:12px}
-  .card .selwrap::after{display:none}
-  .card .field input::placeholder{color:rgba(240,244,251,.36)}
-  .card .field input:focus,.card .field select:focus{border-color:#d8b45a}
-  .card .selwrap::after{border-color:#9aa6bf}
-  .card .note{color:#8f9bb5;text-align:center}
+        display:grid;justify-items:center;gap:0;text-align:center}
+  #formlayer{display:grid;place-items:center;padding:24px}
 
-  /* THE ACT: the ratified gate rule, verbatim and at its own size, because
-     the owner asked for the login button in everything but the word (§15
-     already requires the two surfaces to carry the identical control). */
-  #gobtn{display:block;margin:20px auto 0;width:auto;
-         font:600 12px var(--display);color:#04060e;background:#d8b45a;
+  /* The name, in the word's place and at the word's weight. It steps down as
+     it grows -- 60 characters will not sit at 72px -- which is the display
+     word behaving like a field rather than a field borrowing a font. */
+  .nameline{grid-area:auto;display:grid;justify-items:center}
+  #hhname{font:600 72px var(--display);letter-spacing:.015em;line-height:1.06;
+          color:#e9edf8;background:none;border:none;border-radius:0;
+          padding:2px 0;text-align:center;width:min(78vw,900px);
+          text-shadow:0 2px 30px rgba(2,5,14,.85),0 0 70px rgba(2,5,14,.6);
+          transition:font-size .25s ease}
+  #hhname::placeholder{color:rgba(233,237,248,.34)}
+  #hhname:focus{outline:none}
+  #hhname.long{font-size:52px}
+  #hhname.longer{font-size:38px}
+
+  /* The pill: the ratified gate rule, verbatim, because §15 requires the two
+     surfaces to carry the identical control. Only the word differs. */
+  #gobtn{font:600 12px var(--display);color:#04060e;background:#d8b45a;
          border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
-         letter-spacing:.04em;line-height:normal;
+         letter-spacing:.04em;line-height:normal;width:auto;
          box-shadow:0 0 28px rgba(216,180,90,.22);
          transition:filter .35s ease,box-shadow .3s ease,opacity .4s ease}
   #gobtn:hover:not(:disabled){filter:brightness(1.08)}
   #gobtn:disabled{opacity:.34;cursor:default;box-shadow:none}
 
-  body.reclaimed #dawn .loginchrome{transition:opacity .22s ease .45s,
-                                    visibility .22s .45s}
+  /* Everything the old card said in labels is one quiet line in the sheet's
+     own caption register. It states what was assumed rather than asking. */
+  .assume{font:11px var(--mono);letter-spacing:.06em;color:#9aa5bd;
+          text-shadow:0 1px 10px rgba(2,5,14,.9)}
+  .assume .pick{color:#c9d2e6;border-bottom:1px solid rgba(201,210,230,.36);
+                cursor:pointer;position:relative}
+  .assume .pick:hover{color:#e9edf8;border-bottom-color:#d8b45a}
+  .assume select{position:absolute;inset:0;opacity:0;width:100%;height:100%;
+                 cursor:pointer;font:inherit}
+  .card .err{text-align:center}
+  .card .field,.card .pair,.card .note{margin:0}
+  /* The sheet's script writes the section count into `.card .note` on load
+     and dies at a null if it is not there, so the element stays in the
+     document. Its words are re-stated in the quiet line instead. */
+  .card .note{display:none}
 
-  /* The sheet's running commentary describes the passes that produced the
-     card this round replaces. It stays in the file and out of the view. */
-  .sheet{display:none}
+  /* H — the same composition, with what was assumed stated BEFORE the act
+     rather than after it, as a pair of engraved readings either side of a
+     rule. Nothing is a box; the values are the only bright thing in the line,
+     so the eye reads name, then readings, then act. */
+  .nameline{margin-bottom:20px}
+  .readings{display:flex;align-items:center;gap:0;margin-bottom:24px;
+            font:10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+            color:#7d879e;text-shadow:0 1px 10px rgba(2,5,14,.9)}
+  .readings .r{padding:0 20px;display:grid;justify-items:center;gap:5px}
+  .readings .r+.r{border-left:1px solid rgba(240,244,251,.16)}
+  .readings .r b{font:12.5px var(--mono);letter-spacing:.04em;
+                 text-transform:none;color:#dfe6f4;font-weight:500}
+  .readings .pick{border-bottom:1px solid rgba(223,230,244,.3);position:relative;cursor:pointer}
+  .readings .pick:hover{border-bottom-color:#d8b45a}
+  .readings select{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+  .assume{margin-top:20px}
 
 </style>
 </head>
@@ -1317,14 +1279,6 @@
 </div>
 
 <!-- ══════════ THE FIRST-RUN CARD ══════════ -->
-
-<!-- #862 round 3: the login ring, enlarged, holding the questions. It is a
-     sibling of the dawn and of the form layer rather than a child of either,
-     because it has to outlive the card on the way into the launch. -->
-<div class="bigring" aria-hidden="true">
-  <div class="ringglass"></div>
-  <div class="ringorbit"><i></i></div>
-</div>
 <div id="formlayer">
   <!-- THIRD PASS: three fields, a button, air. Everything that was prose is
        either gone or moved to a title/aria attribute — the household screen
@@ -1332,40 +1286,21 @@
   <form class="card" id="setup" onsubmit="attempt();return false"
         aria-label="Name your first system">
 
-    <div class="field">
-      <label for="hhname">name</label>
-      <input id="hhname" placeholder="Your world" maxlength="60" autocomplete="off"
-             aria-label="System name" oninput="naming()"
-             title="A house, a flat, a boat, a parent’s place — whatever you keep in orbit. It is the name everyone in it sees.">
+    <div class="nameline">
+      <input id="hhname" placeholder="name it" maxlength="60" autocomplete="off"
+             aria-label="System name" oninput="naming()">
       <p class="err" role="alert"><b id="errname">“Lawson Home”</b> already exists here —
         <a href="#" onclick="newcomerArrival();return false">ask to join it →</a></p>
     </div>
 
-    <div class="pair">
-      <div class="row2">
-        <div class="field selwrap">
-          <label for="tz">time zone</label>
-          <select id="tz" aria-label="Time zone"
-                  title="Read off your browser. It moves to settings afterwards, and dates read by it.">
-            <option>Europe/London</option><option>Europe/Dublin</option>
-            <option>Europe/Paris</option><option>America/New York</option>
-            <option>Australia/Sydney</option><option>UTC</option>
-          </select>
-        </div>
-        <div class="field selwrap">
-          <label for="cur">currency</label>
-          <select id="cur" aria-label="Currency"
-                  title="Read off your browser. It moves to settings afterwards, and costs read by it.">
-            <option>GBP</option><option>EUR</option><option>USD</option>
-            <option>CAD</option><option>AUD</option><option>NZD</option>
-          </select>
-        </div>
-      </div>
+    <div class="readings">
+      <span class="r">time<b class="pick">Europe/London<select id="tz" aria-label="Time zone"><option>Europe/London</option><option>Europe/Dublin</option><option>Europe/Paris</option><option>America/New York</option><option>Australia/Sydney</option><option>UTC</option></select></b></span>
+      <span class="r">money<b class="pick">GBP<select id="cur" aria-label="Currency"><option>GBP</option><option>EUR</option><option>USD</option><option>CAD</option><option>AUD</option><option>NZD</option></select></b></span>
+      <span class="r">sections<b>four</b></span>
     </div>
 
-    <p class="note">four sections to start &middot; change them later</p>
-
     <button class="btn" id="gobtn" type="submit" disabled>Create</button>
+    <p class="note" hidden>four sections to start &middot; change them later</p>
 
   </form>
 </div>
@@ -1401,6 +1336,7 @@
 
 <div class="demos" aria-label="Mockup state demos">
   <span>DEMOS</span>
+  <span style="color:#d8b45a">#862 H · THE LEDGER</span>
   <!-- §15: it is not "form over login" any more and never was meant to be —
        the login screen is gone while this shows. The chip is named for what
        the state actually is. -->
@@ -2648,9 +2584,21 @@ toForm();
 requestAnimationFrame(() => setTimeout(() => body.classList.add("lit"), 180));
 </script>
 <script>
+  /* The sheet's naming() rewrites the act to "create <name> →". The login
+     screen's pill is one short word and never grows, and §15 requires the
+     two surfaces to carry the identical control, so this round holds the
+     word still. */
   const _go = document.getElementById("gobtn");
   const _fix = () => { if (_go.textContent !== "Create") _go.textContent = "Create"; };
   new MutationObserver(_fix).observe(_go, { childList: true, characterData: true, subtree: true });
   _fix();
+  const _name = document.getElementById("hhname");
+  function stepName(){
+    const n = _name.value.length;
+    _name.classList.toggle("long", n > 13 && n <= 22);
+    _name.classList.toggle("longer", n > 22);
+  }
+  _name.addEventListener("input", stepName);
+  stepName();
 </script>
 </body></html>
