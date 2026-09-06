@@ -31,10 +31,26 @@ const mutationSchema = z.discriminatedUnion("action", [
   }),
 ]);
 
-export const GET = read(async (_event, session) => {
-  const contact = await readInstanceContactSettings(session.user.id);
-  return json({ contact }, { headers: { "cache-control": "no-store" } });
-});
+/*
+ * Under fixtures this answers "a settable address, not yet set" rather than
+ * reaching the engine, the rule every other route follows: a route answers
+ * from the fixture or from the engine, never half of each. Without it the
+ * read throws with no database, the screen renders the row without its one
+ * act, and the fidelity gate photographs a card the sheet does not draw.
+ */
+const unsetContact = () =>
+  json(
+    { contact: { address: null, version: 1, updatedAt: null } },
+    { headers: { "cache-control": "no-store" } },
+  );
+
+export const GET = read(
+  async (_event, session) => {
+    const contact = await readInstanceContactSettings(session.user.id);
+    return json({ contact }, { headers: { "cache-control": "no-store" } });
+  },
+  { fixture: unsetContact },
+);
 
 export const POST = write(async (event, session) => {
   const command = mutationSchema.parse(await event.request.json());
