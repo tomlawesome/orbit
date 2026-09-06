@@ -209,6 +209,23 @@ done
 bash scripts/configure.sh
 [[ -f .env-orbit ]] || fail "scripts/configure.sh did not create .env-orbit."
 
+# docker-compose.yml's orbit-oidc-client-secret Compose secret always needs a
+# host file to bind-mount, whether or not the container reads it.
+# configure.sh's ensure_oidc_secret_placeholder deliberately skips creating
+# one when .env-orbit already carries a direct-value OIDC_CLIENT_SECRET (a
+# real deployment form it must leave alone -- see the comment above that
+# function), which a worktree that reuses .env-orbit across runs can already
+# have from an earlier session (#857). Fill in the same placeholder the other
+# acceptance-style test scripts already write (test-install-acceptance.sh,
+# test-install-bootstrap.sh, test-repair-journeys.sh), only when it is
+# missing -- this script never overwrites an existing file under
+# .orbit-secrets/.
+if [[ ! -f .orbit-secrets/oidc-client-secret ]]; then
+  log "generating missing secret: .orbit-secrets/oidc-client-secret"
+  printf 'e2e-local-client-secret\n' > .orbit-secrets/oidc-client-secret
+  chmod 600 .orbit-secrets/oidc-client-secret
+fi
+
 if [[ ! -f .orbit-secrets/greenmail.p12 || ! -f .orbit-secrets/greenmail-ca.pem || ! -f .orbit-secrets/greenmail-key.pem ]]; then
   log "generating GreenMail TLS material (missing from .orbit-secrets/)"
   bash scripts/dev-greenmail-cert.sh
