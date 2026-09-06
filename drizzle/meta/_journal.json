@@ -234,24 +234,24 @@
       "breakpoints": true
     },
     {
-      "idx": 34,
-      "version": "7",
-      "when": 1788048000000,
-      "tag": "0034_mail_in_relays",
-      "breakpoints": true
-    },
-    {
       "idx": 35,
       "version": "7",
-      "when": 1788134400000,
-      "tag": "0035_mail_in_sender_addresses",
+      "when": 1788048000000,
+      "tag": "0035_mail_in_relays",
       "breakpoints": true
     },
     {
       "idx": 36,
       "version": "7",
+      "when": 1788134400000,
+      "tag": "0036_mail_in_sender_addresses",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
       "when": 1788220800000,
-      "tag": "0036_mail_in_held_receipts",
+      "tag": "0037_mail_in_held_receipts",
       "breakpoints": true
     }
   ]
