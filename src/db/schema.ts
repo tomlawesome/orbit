@@ -222,6 +222,27 @@ export const instanceMaintenance = pgTable("instance_maintenance", {
   check("instance_maintenance_singleton", sql`${table.singleton}`),
 ]);
 
+/**
+ * The instance's one public contact address (#860): an address an
+ * administrator deliberately sets for the signed-out sign-in door's "could
+ * not open safely" state (#788). Follows `instance_maintenance`'s shape
+ * (singleton PK, `id` for `audit_log.entity_id`, `version`) and — like that
+ * table, unlike `mail_in_mailbox` — its migration seeds the row
+ * unconditionally, so an upgrade always finds a working row with no address
+ * rather than an absent one. Never populated from any user account's own
+ * email; `public_address` is nullable, and null is the normal, supported
+ * "not set" state, not an error.
+ */
+export const instanceContact = pgTable("instance_contact", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  publicAddress: text("public_address"),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_contact_singleton", sql`${table.singleton}`),
+]);
+
 export const externalIdentities = pgTable("external_identities", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -849,4 +870,51 @@ export const mailInMailbox = pgTable("mail_in_mailbox", {
 }, (table) => [
   check("mail_in_mailbox_singleton", sql`${table.singleton}`),
   check("mail_in_mailbox_verification_state_valid", sql`${table.verificationState} IN ('unverified', 'verified', 'failed')`),
+]);
+
+/* ── EMAIL INVITATIONS (#481) ─────────────────────────────────────────────
+   Appended as its own block rather than filed beside `householdJoinRequests`
+   so parallel schema work on the same file does not collide.
+
+   A join request is somebody who already has an account asking to come in; an
+   invitation is an owner asking somebody who may have no account at all. The
+   token itself is never stored — only its SHA-256 digest — so the row can
+   confirm a link without being able to reconstruct one, and the link exists in
+   exactly two places: the mail, and the browser's own short-lived cookie.
+
+   "Open" means neither redeemed nor withdrawn; expiry is a date, not a state,
+   so a lapsed invitation still blocks a second open one for the same address
+   until it is replaced by a resend. That is deliberate: resend REPLACES the
+   row (new digest, new expiry), which is what makes the earlier link stop
+   working with no second row to reason about. */
+export const householdInvitations = pgTable("household_invitations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  /* Normalised at the seam (trimmed, lower-cased): the address the signed-in
+     identity must match, so the comparison is made on stored bytes. */
+  email: text("email").notNull(),
+  role: membershipRole("role").notNull().default("member"),
+  invitedByUserId: uuid("invited_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  tokenDigest: text("token_digest").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  /* A bounded class from the notification worker's own vocabulary, never a
+     provider message: those carry addresses, hosts and credentials. */
+  sendError: text("send_error"),
+  redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
+  redeemedByUserId: uuid("redeemed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedByUserId: uuid("revoked_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("household_invitation_open_once").on(table.householdId, table.email)
+    .where(sql`${table.redeemedAt} IS NULL AND ${table.revokedAt} IS NULL`),
+  /* Not partial: a spent token must still find its row, or a second visit to
+     a used link would read as "no such invitation" instead of "already used". */
+  uniqueIndex("household_invitation_token_digest_unique").on(table.tokenDigest),
+  index("household_invitation_household_idx").on(table.householdId, table.createdAt),
+  check(
+    "household_invitation_send_error_valid",
+    sql`${table.sendError} IS NULL OR ${table.sendError} IN ('smtp_unconfigured', 'smtp_unavailable', 'smtp_rejected', 'unknown')`,
+  ),
 ]);
