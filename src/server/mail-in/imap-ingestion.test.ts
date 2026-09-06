@@ -141,8 +141,8 @@ describe("IMAP ingestion configuration", () => {
     expect(config).toMatchObject({ currentAliasGeneration: 2, previousAliasGeneration: 1 });
     expect(config.previousAliasExpiresAt?.toISOString()).toBe(previousExpiry);
     const userId = "6f7aa3dc-347d-4ff4-bf50-bc4f4ffc054a";
-    expect(matchesImapRecipientAlias(deriveImapRecipientAlias(userId, config.recipientDomain, config.aliasPrevious!), userId, config)).toBe(true);
-    expect(imapRecipientAlias(userId, config)).toBe(deriveImapRecipientAlias(userId, config.recipientDomain, config.aliasCurrent));
+    expect(matchesImapRecipientAlias(deriveImapRecipientAlias(userId, config.aliasBase, config.aliasPrevious!), userId, config)).toBe(true);
+    expect(imapRecipientAlias(userId, config)).toBe(deriveImapRecipientAlias(userId, config.aliasBase, config.aliasCurrent));
   });
 
   it("uses bounded exponential attachment backoff and rejects invalid attempts", () => {

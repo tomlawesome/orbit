@@ -10,7 +10,7 @@ import { z } from "zod";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import type { NotificationWorkerConfig } from "@/server/notification-worker";
 import { IMAP_ATTACHMENT_LIMITS } from "./imap-attachment-validation";
-import type { ImapAliasGeneration } from "./imap-recipient";
+import { imapAliasBaseFromAccount, type ImapAliasBase, type ImapAliasGeneration } from "./imap-recipient";
 
 const ingestionEnvironmentSchema = z.object({
   IMAP_ENABLED: z.enum(["true", "false"]).optional().default("true").transform((value) => value === "true"),
@@ -37,6 +37,13 @@ export interface ImapIngestionConfig {
   mailbox: string;
   tlsServerName: string;
   recipientDomain: string;
+  /**
+   * The plus-address base every relay address is built on, derived from
+   * `user` (ADR-0017 decision 1). `recipientDomain` is the same domain, kept
+   * as its own field because the receipt path reports a wrong-domain failure
+   * distinctly from a malformed local part.
+   */
+  aliasBase: ImapAliasBase;
   currentAliasGeneration: number;
   currentAliasSecret: string;
   previousAliasGeneration?: number;
@@ -69,9 +76,10 @@ export function imapProviderConnectionOptions(config: ImapIngestionConfig) {
 /** Non-secret configuration commitment used only to invalidate stale preflight results. */
 export function imapProviderConfigCommitment(config: ImapIngestionConfig, smtp: NotificationWorkerConfig): string {
   return createHash("sha256").update(JSON.stringify([
-    "orbit:mail-provider-preflight:v1",
+    "orbit:mail-provider-preflight:v2",
     config.host, config.port, config.user, config.mailbox, config.tlsServerName,
-    config.recipientDomain, config.trustedRecipientHeader, config.currentAliasGeneration,
+    config.recipientDomain, config.aliasBase.localPart,
+    config.trustedRecipientHeader, config.currentAliasGeneration,
     config.previousAliasGeneration ?? null, config.previousAliasExpiresAt?.toISOString() ?? null,
     smtp.smtpSecurity, smtp.smtpFrom,
   ])).digest("hex");
@@ -175,6 +183,10 @@ export function parseImapIngestionConfigFromEnvironment(environment: NodeJS.Proc
     mailbox: parsed.IMAP_MAILBOX,
     tlsServerName: parsed.IMAP_TLS_SERVER_NAME,
     recipientDomain: parsed.IMAP_RECIPIENT_DOMAIN,
+    aliasBase: {
+      localPart: imapAliasBaseFromAccount(parsed.IMAP_USER).localPart,
+      domain: parsed.IMAP_RECIPIENT_DOMAIN,
+    },
     currentAliasGeneration: currentAlias.generation,
     currentAliasSecret: currentAlias.secret,
     previousAliasGeneration: aliasPrevious?.generation,

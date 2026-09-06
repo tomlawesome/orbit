@@ -89,7 +89,7 @@ export async function readRelaySettings(
     .orderBy(desc(imapIngestionMessages.receivedAt))
     .limit(1);
   return {
-    address: deriveImapRecipientAlias(user.id, config.recipientDomain, config.aliasCurrent),
+    address: deriveImapRecipientAlias(user.id, config.aliasBase, config.aliasCurrent),
     listening: RELAY_LISTENING,
     lastReceived: latest?.receivedAt ? latest.receivedAt.toISOString() : null,
     ingest,
