@@ -32,7 +32,6 @@ import {
   normalizeImapRecipientAlias,
   parseTrustedRecipientHeader,
 } from "@/server/mail-in/core/imap-recipient";
-import { decideImapRotationState, ImapRotationStaleError } from "@/server/mail-in/core/imap-rotation";
 // Pinning the pure environment-parsing contract this file's suite is named
 // for (ADR-0017 slice 1, orbit#742): the app's runtime IMAP configuration is
 // now database-backed (src/server/mail-in/mailbox-config.ts), so the
@@ -216,32 +215,33 @@ describe("IMAP attachment-processing backoff schedule", () => {
 });
 
 describe("IMAP recipient alias helpers wired through config", () => {
-  it("derives and matches an alias against the current generation, and refuses when disabled", () => {
+  it("derives and matches an alias at the generation it is given, and refuses when disabled", () => {
     const config = getImapIngestionConfig(env());
     const userId = "9c3b6f0a-2222-4aaa-8bbb-000000000001";
-    const alias = imapRecipientAlias(userId, config);
+    const generation = config.aliasCurrent.generation;
+    const alias = imapRecipientAlias(userId, config, generation);
     expect(alias).toBe(deriveImapRecipientAlias(userId, config.aliasBase, config.aliasCurrent));
-    expect(matchesImapRecipientAlias(alias, userId, config)).toBe(true);
-    expect(matchesImapRecipientAlias(alias, "a-different-user-id", config)).toBe(false);
+    expect(matchesImapRecipientAlias(alias, userId, config, generation)).toBe(true);
+    expect(matchesImapRecipientAlias(alias, "a-different-user-id", config, generation)).toBe(false);
 
     const disabled = getImapIngestionConfig(env({ IMAP_ENABLED: "false" }));
-    expect(() => imapRecipientAlias(userId, disabled)).toThrow("IMAP ingestion is not configured");
-    expect(matchesImapRecipientAlias(alias, userId, disabled)).toBe(false);
+    expect(() => imapRecipientAlias(userId, disabled, generation)).toThrow("IMAP ingestion is not configured");
+    expect(matchesImapRecipientAlias(alias, userId, disabled, generation)).toBe(false);
   });
 
-  it("still matches an unexpired previous-generation alias, but not once it has expired", () => {
-    const expiresAt = new Date(Date.now() + 5 * 86_400_000).toISOString();
-    const config = getImapIngestionConfig(env({
-      IMAP_ALIAS_PREVIOUS_GENERATION: "1",
-      IMAP_ALIAS_PREVIOUS_SECRET: "previous-alias-secret-that-is-at-least-32-chars",
-      IMAP_ALIAS_PREVIOUS_EXPIRES_AT: expiresAt,
-    }));
+  it("binds an alias to one generation only, so a rotated member's old address never matches the new one", () => {
+    /* Since ADR-0017 slice 3 (orbit#744) the generation is the member's own
+       and the instance holds one key, so the pair (user, generation) is the
+       whole identity of an address. Expiry moved with it: it is the alias
+       row's `active_until`, not a property of the key, and is proved in
+       tests/integration/mail-in-relay-rotation.test.ts against a real
+       database. */
+    const config = getImapIngestionConfig(env());
     const userId = "9c3b6f0a-2222-4aaa-8bbb-000000000002";
-    const previousAlias = deriveImapRecipientAlias(userId, config.aliasBase, config.aliasPrevious!);
-    expect(matchesImapRecipientAlias(previousAlias, userId, config)).toBe(true);
-
-    const alreadyExpired = { ...config, aliasPrevious: { ...config.aliasPrevious!, expiresAt: new Date(Date.now() - 1_000) } };
-    expect(matchesImapRecipientAlias(previousAlias, userId, alreadyExpired)).toBe(false);
+    const generation = config.aliasCurrent.generation;
+    const alias = imapRecipientAlias(userId, config, generation);
+    expect(matchesImapRecipientAlias(alias, userId, config, generation + 1)).toBe(false);
+    expect(imapRecipientAlias(userId, config, generation + 1)).not.toBe(alias);
   });
 });
 
@@ -426,44 +426,6 @@ describe("normalizeImapRecipientAlias — address-shape normalization", () => {
     const token = alias.slice("orbit+".length, atIndex);
     expect(matchImapRecipientAliasGeneration(alias, userId, base, key)).toBe(true);
     expect(matchImapRecipientAliasGeneration(`orbit+${token.toUpperCase()}@${domain.toUpperCase()}`, userId, base, key)).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 4. Alias rotation state machine (imap-rotation.ts)
-// ---------------------------------------------------------------------------
-
-describe("decideImapRotationState — boundary and fail-closed characterization", () => {
-  const now = new Date("2026-08-12T12:00:00.000Z");
-
-  it("treats the expiry instant itself as already-elapsed (strict greater-than, not greater-or-equal)", () => {
-    const expiresAt = new Date("2026-08-12T12:00:00.000Z");
-    const persisted = {
-      currentGeneration: 2,
-      currentCommitment: "c2",
-      previousGeneration: 1,
-      previousExpiresAt: expiresAt,
-      previousCommitment: "c1",
-    };
-    const config = { currentGeneration: 2, currentCommitment: "c2", previousGeneration: 1, previousExpiresAt: expiresAt, previousCommitment: "c1" };
-    expect(decideImapRotationState(persisted, config, expiresAt)).toEqual({
-      currentGeneration: 2, currentCommitment: "c2", previousGeneration: null, previousExpiresAt: null, previousCommitment: null,
-    });
-    const justBefore = new Date(expiresAt.getTime() - 1);
-    expect(decideImapRotationState(persisted, config, justBefore)).toEqual(persisted);
-  });
-
-  it("fails closed rather than silently accepting a lower generation than what is persisted", () => {
-    const persisted = { currentGeneration: 3, currentCommitment: "c3", previousGeneration: null, previousExpiresAt: null, previousCommitment: null };
-    const regressedConfig = { currentGeneration: 2, currentCommitment: "c2" };
-    expect(() => decideImapRotationState(persisted, regressedConfig, now)).toThrow(ImapRotationStaleError);
-  });
-
-  it("initializes a fresh singleton directly from configuration when nothing is persisted yet", () => {
-    const config = { currentGeneration: 1, currentCommitment: "c1" };
-    expect(decideImapRotationState(null, config, now)).toEqual({
-      currentGeneration: 1, currentCommitment: "c1", previousGeneration: null, previousExpiresAt: null, previousCommitment: null,
-    });
   });
 });
 

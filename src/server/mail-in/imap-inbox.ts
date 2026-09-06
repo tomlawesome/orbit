@@ -393,7 +393,11 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
         failureCode: imapIngestionMessages.failureCode,
         disabledAt: users.disabledAt,
       }).from(imapIngestionMessages).leftJoin(users, eq(users.id, imapIngestionMessages.userId)).where(and(
-        inArray(imapIngestionMessages.status, ["pending_review", "recoverable", "processing"]),
+        /* `held` expires on the ordinary schedule like anything else that
+           arrived (ADR-0017 slice 5): a member who pauses and never comes back
+           does not accumulate mail forever, and after it expires the message
+           lives only in the provider mailbox. */
+        inArray(imapIngestionMessages.status, ["pending_review", "recoverable", "processing", "held"]),
         or(lt(imapIngestionMessages.expiresAt, now), isNotNull(users.disabledAt), and(eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.failureCode, "attachment_processing_exhausted"))),
         or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))),
         or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)),
@@ -408,7 +412,7 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
         attachmentProcessingLeaseToken: token,
         attachmentProcessingNextAttemptAt: null,
         updatedAt: now,
-      }).where(and(eq(imapIngestionMessages.id, candidate.id), inArray(imapIngestionMessages.status, ["pending_review", "recoverable", "processing"]), or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))), or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)))).returning({ id: imapIngestionMessages.id, token: imapIngestionMessages.attachmentProcessingLeaseToken });
+      }).where(and(eq(imapIngestionMessages.id, candidate.id), inArray(imapIngestionMessages.status, ["pending_review", "recoverable", "processing", "held"]), or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))), or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)))).returning({ id: imapIngestionMessages.id, token: imapIngestionMessages.attachmentProcessingLeaseToken });
       if (!claimed?.token) return undefined;
       await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeFailureCode: null, updatedAt: now }).where(and(
         eq(imapIngestionAttachments.messageId, candidate.id),

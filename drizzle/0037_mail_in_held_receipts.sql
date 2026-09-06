@@ -1,0 +1,12 @@
+-- Per-user ingest pause (ADR-0017 decision 2, slice 5, orbit#746). The column
+-- the pause lives in arrived structurally with mail_in_relays in 0034; this is
+-- the receipt status its behaviour needs.
+--
+-- Held is deliberately a RECEIPT, not a skip. The mailbox cursor is max(uid),
+-- so a UID that was never recorded would never be revisited: skipping paused
+-- mail would lose it outright rather than hold it.
+--
+-- `ALTER TYPE ... ADD VALUE` is safe inside the migrator's transaction on
+-- PostgreSQL 12 and later as long as nothing in the same transaction uses the
+-- new label. Nothing below does — there is nothing below.
+ALTER TYPE "public"."imap_ingestion_status" ADD VALUE IF NOT EXISTS 'held';

@@ -114,3 +114,36 @@ export async function waitForInvitationLink(
     `#481: no mail to ${address} with subject containing "${subjectContains}" arrived within ${timeoutMs}ms${detail}`,
   );
 }
+
+/**
+ * Waits for the sender-verification mail Orbit sends to a claimed sending
+ * address (ADR-0017 slice 4, #745), and returns the `token=` value from its
+ * one-use link.
+ *
+ * The other direction from `waitForInvitationLink`: there Orbit is proving a
+ * mailbox to the person who owns it; here `v19-mail-collection.spec.ts` is
+ * proving, to Orbit, that it controls a mailbox it wants to send FROM. Reading
+ * this back through GreenMail rather than trusting a token minted in-process
+ * is what makes the check exercise the real one-use-link flow end to end.
+ */
+export async function waitForSenderVerificationToken(address: string, timeoutMs = 60_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  const tokenPattern = /[?&]token=([^&\s]+)/u;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      const body = await latestMatchingBody(address, "Check your Orbit sending address");
+      if (body) {
+        const match = body.match(tokenPattern);
+        if (match) return decodeURIComponent(match[1]);
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+
+  const detail = lastError instanceof Error ? `; last error: ${lastError.message}` : "";
+  throw new Error(`#745: no sender-verification mail to ${address} arrived within ${timeoutMs}ms${detail}`);
+}
