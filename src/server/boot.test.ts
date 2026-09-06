@@ -405,6 +405,32 @@ describe("strict startup ordering", () => {
     expect(JSON.stringify(mocks.log.error.mock.calls) + JSON.stringify(mocks.log.warn.mock.calls))
       .not.toContain("connection refused at 10.0.0.5");
   });
+
+  /*
+   * The boot phase (#869): `GET /api/auth/availability`'s `phase` field is
+   * this flag read straight through, which is what lets the sign-in door
+   * stop inferring boot from a content-free `degraded` readiness answer.
+   * `vi.resetModules()` in the outer `beforeEach` gives every test in this
+   * file a fresh module instance, so `getBootPhase()` starting at
+   * "starting" here is the same fresh-process guarantee a real server gets.
+   */
+  it("starts at \"starting\" and flips to \"running\" only once registerNode's full sequence completes", async () => {
+    const { registerNode, getBootPhase } = await import("./boot");
+    expect(getBootPhase()).toBe("starting");
+
+    await registerNode();
+
+    expect(getBootPhase()).toBe("running");
+  });
+
+  it("leaves the boot phase at \"starting\" when registerNode fails closed (the process exits instead, #717)", async () => {
+    mocks.validateStartupConfiguration.mockImplementation(() => { throw new Error("private configuration value"); });
+    const { registerNode, getBootPhase } = await import("./boot");
+
+    await expect(registerNode()).rejects.toThrow("configuration_invalid");
+
+    expect(getBootPhase()).toBe("starting");
+  });
 });
 
 describe("scanner readiness diagnostics", () => {
