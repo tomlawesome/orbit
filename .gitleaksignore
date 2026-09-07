@@ -1,0 +1,24 @@
+# Fingerprints gitleaks' full-history scan (issue #707) found in existing
+# commits at adoption time (2026-09-06), reviewed and confirmed benign: test
+# fixture strings and a manifest encryption-algorithm spec, not credentials.
+# Each is scoped to one exact commit, file and line -- not a pattern -- so it
+# ignores nothing new. A finding anywhere else still fails the job.
+#
+# Format: commit:file:rule-id:start-line (gitleaks' own Fingerprint field).
+
+# A recovery-bundle manifest line naming a KDF/cipher combination (algorithm
+# and parameters), not a key value. The field's name starts with "key" and is
+# followed by "=", which is what trips the generic-api-key rule's keyword
+# match -- deliberately not quoted here in full, so this file does not
+# reproduce the same shape and get flagged itself.
+4fefed5f99ad267b3aedfba12fbf442c59939ce9:src/lib/recovery-bundle.test.ts:generic-api-key:584
+d0a49decc4a144b5ee3118d41131f844defd4b2b:scripts/export-recovery-bundle.sh:generic-api-key:50
+
+# Test fixture: a hard-coded IMAP alias-rotation secret value used to exercise
+# alias-secret validation, not a live credential.
+28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:118
+28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:136
+28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:144
+28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:153
+28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:230
+28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:374
