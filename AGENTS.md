@@ -61,9 +61,10 @@ is not the merge request's author. Five branches went out as Codex on
 `glab issue create` has no `-F`: pass a body with `-d "$(cat file)"`. Notes go
 through `glab api -X POST projects/49/issues/<iid>/notes -f body=…`.
 
-Pipelines: an MR pipeline runs the acceptance stage automatically; a branch
-pipeline leaves those jobs manual, so an MR is the only way to see the full
-gate. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts one. Cancelling a
+Pipelines: an MR pipeline runs the acceptance stage when `classify` says the
+diff needs it, and skips it when the diff cannot affect it (#883); a branch
+pipeline leaves those jobs manual, so an MR is still the way to see the full
+gate on a change that warrants one. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts one. Cancelling a
 pipeline and playing a manual job are refused by the safety hook here, on top
 of the refusals the gitlab-first-migration skill lists.
 `dev`, `preview` and `main` all take push "No one", merge "Maintainers".
