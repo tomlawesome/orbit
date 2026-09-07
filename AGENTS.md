@@ -41,10 +41,28 @@ the stored credential:
 Codex uses its own `GLAB_CONFIG_DIR`; see the github-credentials skill. Host
 lookups fail now and then, so wrap calls in two or three tries rather than
 treating one failure as an answer. Pushing needs the credential helper
-explicitly, because git does not read `glab`'s config:
+explicitly, because git does not read `glab`'s config -- and needs the same
+env prefix on the `git` command itself:
 
-    git -c credential.helper= -c 'credential.helper=!glab auth git-credential' \
+    env -u GITLAB_TOKEN GLAB_CONFIG_DIR=/home/codex/.config/glab-claude \
+      GITLAB_HOST=gitlab.tomlawson.io \
+      git -c credential.helper= -c 'credential.helper=!glab auth git-credential' \
       push gitlab <branch>
+
+The prefix is on `git`, not on the surrounding shell, because git spawns
+`glab auth git-credential` as a subprocess: it reads the environment *git* was
+given, not the one your `glab` calls used. Prefix the glab calls alone and the
+helper falls back to the default glab config, which on this host is Codex.
+
+Nothing fails when that happens. The push succeeds, the commits keep their real
+author, and `glab api user` still answers Claude -- because it tests the api
+path, not the push path. The only trace is the *pipeline's trigger user*, which
+is not the merge request's author. Five branches went out as Codex on
+2026-09-07 before the owner spotted it. To check a push you have just made:
+
+    env -u GITLAB_TOKEN GLAB_CONFIG_DIR=/home/codex/.config/glab-claude \
+      GITLAB_HOST=gitlab.tomlawson.io glab api projects/49/pipelines/<id> \
+      | python3 -c "import json,sys; print(json.load(sys.stdin)['user']['username'])"
 
 `glab issue create` has no `-F`: pass a body with `-d "$(cat file)"`. Notes go
 through `glab api -X POST projects/49/issues/<iid>/notes -f body=…`.
