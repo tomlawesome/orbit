@@ -5,15 +5,9 @@ alongside the global agent instructions.
 
 ## Working model
 
-Orbit is maintained by its human owner with AI assistants working under
-direction. Architecture and security decisions are recorded in ADRs and
-reviewed by the owner; the durable governance decision is
+Architecture and security decisions are recorded in ADRs; the durable
+governance decision is
 [ADR-0011](docs/adr/0011-operator-experience-as-product.md).
-
-Orbit is Claude-delivered, so the design and architecture calls the global
-rules reserve for the top model are Fable's (owner decision, 2026-08-22).
-Everything else about who makes those calls, how they are labelled and how
-they are routed is global; it is not repeated here.
 
 `ai/orbit-base-image` (GitLab) is part of this project, not a sibling: standing
 authorisation to raise issues and make changes there (owner, 2026-08-30).
@@ -70,8 +64,8 @@ through `glab api -X POST projects/49/issues/<iid>/notes -f body=…`.
 Pipelines: an MR pipeline runs the acceptance stage automatically; a branch
 pipeline leaves those jobs manual, so an MR is the only way to see the full
 gate. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts one. Cancelling a
-pipeline and playing a manual job are both refused by the safety hook, as are
-protected-branch and CI-variable changes: hand the owner the exact steps.
+pipeline and playing a manual job are refused by the safety hook here, on top
+of the refusals the gitlab-first-migration skill lists.
 `dev`, `preview` and `main` all take push "No one", merge "Maintainers".
 
 Two runners serve this project, both on the host `gitlab-runners` (32 cores,
@@ -119,15 +113,9 @@ group token or a second project token were not adopted.
 
 ## Delivery workflow
 
-- Start from an issue with a user outcome, acceptance criteria, non-goals,
-  security considerations, test plan, operational impact, and closure evidence.
-- Write a failing test first for defects and testable new behaviour. Add
-  characterization tests before refactors.
-- Run fast checks before container and browser checks.
-- Do not close an issue until its acceptance evidence is linked.
-- Publish previews only after required checks pass on the protected `preview`
-  lane. Test immutable image digests, verify the exact preview source through
-  `main`, and promote only the accepted digest without rebuilding it.
+- Run fast checks before container and browser checks: this project's
+  container and browser suites cost minutes each, and the fast suite catches
+  most of what they would.
 - Nothing promotes to `main` before v1.3.0; #547 holds that promotion. So
   `main` stays at v1.2.0 and is expected to be far behind. A Renovate-flagged
   stale pin on `main` is not work: check `dev` first, and if `dev` is already
@@ -314,13 +302,8 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   that issue list is the delivery-status surface (owner, 2026-09-04). The
   [GitHub roadmap board](https://github.com/users/tomlawesome/projects/4) is
   retired: it and the GitHub issues are frozen at the 2026-09-04 import, so a
-  status read from either is stale. Milestones are capability slices (M0
-  onwards), each a coherent outcome with a definition of done; a version
-  release moment gets its own milestone holding only its promote-to-main
-  issue, and an empty version milestone is a deliberate placeholder for the
-  next release rather than clutter (owner, 2026-08-23 and 2026-09-01). Every
-  issue carries a milestone. The board's per-issue Status, Priority and Risk
-  fields have no GitLab equivalent and nothing replaces them (owner,
+  status read from either is stale. The board's per-issue Status, Priority and
+  Risk fields have no GitLab equivalent and nothing replaces them (owner,
   2026-09-04, #814): the milestone says what is scheduled and open/closed
   says what is done.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
