@@ -659,19 +659,45 @@ sidecar_images:
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       mkdir -p .orbit-supply-chain/sidecar-scans
+      # Fan the scans out, four at a time: this loop is almost all network
+      # wait, not CPU, because it pulls each image before scanning it. The lane
+      # is capped at 8 CPUs, so four concurrent pulls cannot swamp it (#879).
+      #
+      # Two things have to be true for that to work, and the first attempt got
+      # only one of them. Trivy takes an exclusive lock on its cache directory
+      # for the whole of a scan, so parallel workers sharing one cache do not
+      # queue politely -- they time out, and the job dies with "cache may be in
+      # use by another process". And a worker starting with an empty cache
+      # downloads the 111 MB vulnerability database for itself.
+      #
+      # So warm one cache, then hand each worker its own copy of it and tell it
+      # the database is already current. The copy is local and costs about a
+      # second; the download it replaces costs nine, and four of them would
+      # race for the same file.
+      export TRIVY_CACHE_DIR=/tmp/trivy-warm
+      trivy image --download-db-only
+      # -n 2 hands each worker one `slug reference` pair. xargs still exits
+      # non-zero if any scan fails, so the job fails the way it did before.
       # --ignore-unfixed because these are images Orbit pulls rather than
       # builds: a fixable HIGH is actionable (re-pin), an unfixable one is not.
       node scripts/sidecar-image-evidence.mjs --list-references \
         --policy .github/supply-chain-policy.json \
-        | while read -r slug reference; do
-            echo "scanning ${reference}"
+        | xargs -P 4 -n 2 sh -c '
+            set -e
+            cache="/tmp/trivy-cache-$1"
+            rm -rf "$cache"
+            cp -a "$TRIVY_CACHE_DIR" "$cache"
+            echo "scanning $2"
             trivy image \
+              --cache-dir "$cache" \
+              --skip-db-update \
               --scanners vuln \
               --ignore-unfixed \
               --format json \
-              --output ".orbit-supply-chain/sidecar-scans/${slug}.json" \
-              "${reference}"
-          done
+              --output ".orbit-supply-chain/sidecar-scans/$1.json" \
+              "$2"
+            rm -rf "$cache"
+          ' _
       trivy version --format json > .orbit-supply-chain/trivy-version.json
       set +e
       node scripts/sidecar-image-evidence.mjs evaluate \
