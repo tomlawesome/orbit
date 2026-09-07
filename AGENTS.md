@@ -181,7 +181,7 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Ten known ways to lose an afternoon, or worse. The first two have open issues;
+Nine known ways to lose an afternoon, or worse. The first two have open issues;
 until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
@@ -228,10 +228,6 @@ precisely so a half-written secret is impossible, which left the database
 container reading a spent copy and made repair diagnose its own successful
 rotation as failed. Postgres itself never notices, because it reads that file
 once at initdb and authenticates from its own catalogue afterwards. See #629.
-
-**Add `ci: acceptance` to a merge request touching schema, migrations or server
-code.** Without it the integration and compose jobs skip and the merge request
-still reports green.
 
 **`scripts/test-backup-restore.sh` seeds its own state with SQL and nothing
 else drives it.** A dropped column passes every unit and integration check and
