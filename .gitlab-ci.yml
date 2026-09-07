@@ -567,6 +567,13 @@ supply_chain_source:
       # comparison alone: no registry call, so it runs on everything that gets
       # here. Remedy is one command: node scripts/sidecar-pins.mjs sync (#771).
       node scripts/sidecar-pins.mjs check --offline
+      # The same failure shape one file over: pnpm override keys can name the
+      # version they apply through, and a bump elsewhere leaves the key
+      # selecting nothing. pnpm does not treat that as an error, so a security
+      # floor can stop applying in silence (#881). --red first, because a check
+      # nobody has watched fail is a check nobody should trust.
+      node scripts/check-override-pins.mjs --red
+      node scripts/check-override-pins.mjs
       mkdir -p .orbit-supply-chain
       trivy fs \
         --scanners vuln,secret \
