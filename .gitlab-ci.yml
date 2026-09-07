@@ -652,19 +652,28 @@ sidecar_images:
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       mkdir -p .orbit-supply-chain/sidecar-scans
+      # Warm the vulnerability database before fanning out. Four trivy
+      # processes that each decide the database is missing race to download it
+      # into the same cache directory; one that does it first leaves the rest
+      # nothing to do (#879).
+      trivy image --download-db-only
+      # -P 4 because this loop is almost all network wait, not CPU: it pulls
+      # each image before scanning it. The lane is capped at 8 CPUs, so four
+      # concurrent pulls cannot swamp it. -n 2 hands each worker one
+      # `slug reference` pair, and xargs still fails the job if any scan does.
       # --ignore-unfixed because these are images Orbit pulls rather than
       # builds: a fixable HIGH is actionable (re-pin), an unfixable one is not.
       node scripts/sidecar-image-evidence.mjs --list-references \
         --policy .github/supply-chain-policy.json \
-        | while read -r slug reference; do
-            echo "scanning ${reference}"
+        | xargs -P 4 -n 2 sh -c '
+            echo "scanning $2"
             trivy image \
               --scanners vuln \
               --ignore-unfixed \
               --format json \
-              --output ".orbit-supply-chain/sidecar-scans/${slug}.json" \
-              "${reference}"
-          done
+              --output ".orbit-supply-chain/sidecar-scans/$1.json" \
+              "$2"
+          ' _
       trivy version --format json > .orbit-supply-chain/trivy-version.json
       set +e
       node scripts/sidecar-image-evidence.mjs evaluate \

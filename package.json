@@ -10,7 +10,7 @@
   },
   "license": "AGPL-3.0-or-later",
   "scripts": {
-    "lint": "eslint .",
+    "lint": "eslint . --concurrency auto",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:integration": "node scripts/test-integration.mjs",

@@ -27,7 +27,7 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
   # A direct local fallback avoids reinstalling dependencies solely to obtain
   # a package-manager shim; CI continues to use the locked pnpm workflow.
   node node_modules/typescript/bin/tsc --noEmit
-  node node_modules/eslint/bin/eslint.js .
+  node node_modules/eslint/bin/eslint.js . --concurrency auto
   # Mirrors web/package.json's own `build`: the licence collector writes
   # static/licenses, which the SvelteKit build then bundles.
   (cd web && node scripts/collect-font-licences.mjs \
