@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
+import { gotoCreate } from "./support/keyboard";
 
 /**
  * #456: the create form, proven against the real engine — the wiring was
@@ -47,7 +48,9 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
   households.track(await seedHousehold(page));
 
   try {
-    await page.goto("/create");
+    /* #856: waits for the mount that attaches the listeners, not just for
+       `load` — `fill()` and the chip click below both need them. */
+    await gotoCreate(page);
     await page.locator("#f-name").fill("Gutter clearing proving");
     await page.locator('#types button[data-type="service"]').click();
     const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);

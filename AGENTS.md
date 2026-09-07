@@ -56,8 +56,8 @@ pipeline and playing a manual job are both refused by the safety hook, as are
 protected-branch and CI-variable changes: hand the owner the exact steps.
 `dev`, `preview` and `main` all take push "No one", merge "Maintainers".
 
-Two runners serve this project, both on the host `gitlab-runners` (8 cores,
-19 GB): the shared group runner, and runner 8, a privileged project runner
+Two runners serve this project, both on the host `gitlab-runners` (32 cores,
+48 GB): the shared group runner, and runner 8, a privileged project runner
 owned by `ai/orbit` and tagged `orbit-build`, that everything needing a
 Docker daemon reaches through `.privileged_runner` (#811). Its `/builds`
 persists between jobs, so a job that must start clean says so (#813, and the

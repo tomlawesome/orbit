@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
+import { gotoCreate } from "./support/keyboard";
 
 /**
  * #496: a screen-reader walkthrough of the core journeys.
@@ -266,7 +267,9 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
 
   test("/create", async ({ page }, testInfo) => {
     await signIn(page);
-    await page.goto("/create");
+    /* #856: the walk reads a hydrated screen, so wait for the mount rather
+       than for `load`. */
+    await gotoCreate(page);
     await walkScreen(page, testInfo, "create");
     await expect(page.locator(".backdrop")).toHaveAttribute("aria-hidden", "true");
   });
