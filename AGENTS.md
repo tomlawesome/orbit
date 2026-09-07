@@ -5,15 +5,9 @@ alongside the global agent instructions.
 
 ## Working model
 
-Orbit is maintained by its human owner with AI assistants working under
-direction. Architecture and security decisions are recorded in ADRs and
-reviewed by the owner; the durable governance decision is
+Architecture and security decisions are recorded in ADRs; the durable
+governance decision is
 [ADR-0011](docs/adr/0011-operator-experience-as-product.md).
-
-Orbit is Claude-delivered, so the design and architecture calls the global
-rules reserve for the top model are Fable's (owner decision, 2026-08-22).
-Everything else about who makes those calls, how they are labelled and how
-they are routed is global; it is not repeated here.
 
 `ai/orbit-base-image` (GitLab) is part of this project, not a sibling: standing
 authorisation to raise issues and make changes there (owner, 2026-08-30).
@@ -41,10 +35,28 @@ the stored credential:
 Codex uses its own `GLAB_CONFIG_DIR`; see the github-credentials skill. Host
 lookups fail now and then, so wrap calls in two or three tries rather than
 treating one failure as an answer. Pushing needs the credential helper
-explicitly, because git does not read `glab`'s config:
+explicitly, because git does not read `glab`'s config -- and needs the same
+env prefix on the `git` command itself:
 
-    git -c credential.helper= -c 'credential.helper=!glab auth git-credential' \
+    env -u GITLAB_TOKEN GLAB_CONFIG_DIR=/home/codex/.config/glab-claude \
+      GITLAB_HOST=gitlab.tomlawson.io \
+      git -c credential.helper= -c 'credential.helper=!glab auth git-credential' \
       push gitlab <branch>
+
+The prefix is on `git`, not on the surrounding shell, because git spawns
+`glab auth git-credential` as a subprocess: it reads the environment *git* was
+given, not the one your `glab` calls used. Prefix the glab calls alone and the
+helper falls back to the default glab config, which on this host is Codex.
+
+Nothing fails when that happens. The push succeeds, the commits keep their real
+author, and `glab api user` still answers Claude -- because it tests the api
+path, not the push path. The only trace is the *pipeline's trigger user*, which
+is not the merge request's author. Five branches went out as Codex on
+2026-09-07 before the owner spotted it. To check a push you have just made:
+
+    env -u GITLAB_TOKEN GLAB_CONFIG_DIR=/home/codex/.config/glab-claude \
+      GITLAB_HOST=gitlab.tomlawson.io glab api projects/49/pipelines/<id> \
+      | python3 -c "import json,sys; print(json.load(sys.stdin)['user']['username'])"
 
 `glab issue create` has no `-F`: pass a body with `-d "$(cat file)"`. Notes go
 through `glab api -X POST projects/49/issues/<iid>/notes -f body=…`.
@@ -52,12 +64,12 @@ through `glab api -X POST projects/49/issues/<iid>/notes -f body=…`.
 Pipelines: an MR pipeline runs the acceptance stage automatically; a branch
 pipeline leaves those jobs manual, so an MR is the only way to see the full
 gate. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts one. Cancelling a
-pipeline and playing a manual job are both refused by the safety hook, as are
-protected-branch and CI-variable changes: hand the owner the exact steps.
+pipeline and playing a manual job are refused by the safety hook here, on top
+of the refusals the gitlab-first-migration skill lists.
 `dev`, `preview` and `main` all take push "No one", merge "Maintainers".
 
-Two runners serve this project, both on the host `gitlab-runners` (8 cores,
-19 GB): the shared group runner, and runner 8, a privileged project runner
+Two runners serve this project, both on the host `gitlab-runners` (32 cores,
+48 GB): the shared group runner, and runner 8, a privileged project runner
 owned by `ai/orbit` and tagged `orbit-build`, that everything needing a
 Docker daemon reaches through `.privileged_runner` (#811). Its `/builds`
 persists between jobs, so a job that must start clean says so (#813, and the
@@ -70,19 +82,40 @@ the first push (#829). `gl-pipeline-run` still starts one on any branch.
 Renovate replaces Dependabot on this host: `renovate.json` at the repo root,
 the `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
 Mondays 05:00 London, ref `dev`, variable `RENOVATE=true`). It runs nowhere
-else and covers GitHub Actions too; `.github/dependabot.yml` is gone.
+else and covers GitHub Actions too; `.github/dependabot.yml` is gone. It
+deliberately excludes the Orbit base image (`renovate.json`'s
+`matchPackageNames` entry says why); `base_image_repin` below owns that one.
+
+The `base_image_repin` job (#708) detects the pinned Orbit base image being
+behind and opens a merge request re-pinning it, sourced from
+`ai/orbit-base-image`'s own `publish` job artifact rather than an
+independently resolved tag. It needs its own schedule (variable
+`BASE_IMAGE_REPIN=true`). It never rebuilds anything, never pushes to
+`dev`/`preview`/`main`, and never merges; it pushes
+`chore/base-image-repin` and opens or refreshes one merge request from it.
+
+Reading that artifact needs no stored credential (investigated on #708,
+2026-09-06 -- a group-wide `ai` token was the first cut and was narrowed
+once cross-project job-token access turned out to cover artifact downloads):
+the job's own `CI_JOB_TOKEN` does it, because `ai/orbit-base-image`'s CI/CD
+job token allowlist (Settings > CI/CD > Job token permissions > **CI/CD job
+token allowlist** > Add) names `ai/orbit`, and the user the schedule runs as
+already has at least Reporter access to `ai/orbit-base-image` -- job-token
+cross-project reads need both the allowlist entry and that membership.
+Create the schedule under the same user as `renovate` and
+`sidecar_pin_freshness` (currently `Claude`, already Maintainer on
+`ai/orbit-base-image`) and the membership half needs nothing further.
+Pushing the branch and opening the merge request still needs a stored
+token, since `CI_JOB_TOKEN`'s Merge Requests API access is read-only:
+`BASE_REPIN_TOKEN`, a project access token on `ai/orbit` ONLY (`api` scope,
+Developer role) -- see the job's comment in `.gitlab-ci.yml` for why a
+group token or a second project token were not adopted.
 
 ## Delivery workflow
 
-- Start from an issue with a user outcome, acceptance criteria, non-goals,
-  security considerations, test plan, operational impact, and closure evidence.
-- Write a failing test first for defects and testable new behaviour. Add
-  characterization tests before refactors.
-- Run fast checks before container and browser checks.
-- Do not close an issue until its acceptance evidence is linked.
-- Publish previews only after required checks pass on the protected `preview`
-  lane. Test immutable image digests, verify the exact preview source through
-  `main`, and promote only the accepted digest without rebuilding it.
+- Run fast checks before container and browser checks: this project's
+  container and browser suites cost minutes each, and the fast suite catches
+  most of what they would.
 - Nothing promotes to `main` before v1.3.0; #547 holds that promotion. So
   `main` stays at v1.2.0 and is expected to be far behind. A Renovate-flagged
   stale pin on `main` is not work: check `dev` first, and if `dev` is already
@@ -111,12 +144,21 @@ Check the list before building a test rig or handing a check to the owner.
   `install.sh` over the network from a branch, pipes it to bash, and proves the
   channel tag resolved to the digest the registry serves right now. Real
   network and registry; only OIDC discovery is redirected, to the `tests/oidc`
-  sidecar. Non-interactive path only; `--red` proves the digest assertion fires
+  sidecar. Non-interactive path only; `--red` proves the digest assertion
+  fires. Runs two ways (#724): weekly, via the `install_bootstrap` job in
+  `.gitlab-ci.yml` (maintenance stage, `INSTALL_BOOTSTRAP=true`) — `--red`
+  then the green run, both in that one job; and green-only, via
+  `verify_bootstrap` in `.github/workflows/publish-from-gitlab.yml`, right
+  after that workflow's `publish` job moves GHCR's `preview` tag — the
+  publication path that can actually invalidate what the harness asserts
 - `scripts/test-backup-restore.sh` — backup and restore acceptance drill
 - `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
   stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
   journeys are live and which are still absent)
 - `scripts/test-malware-scanner.sh` — ClamAV detection
+- `scripts/test-secret-scan.sh` — proves the `gitleaks` CI job's full-history
+  scan actually fires: plants a synthetic secret in a throwaway `mktemp -d`
+  git repo (never committed to Orbit) and asserts detection and redaction
 - `scripts/test-tika-processor.mjs` — Tika document extraction
 - `scripts/installer-simulation.sh` — installer command centre UI, no Docker
 - `scripts/install-test-browser.sh` — one-time headless browser download
@@ -131,6 +173,11 @@ Check the list before building a test rig or handing a check to the owner.
   between compose and policy, a moved tag, and stale packages inside a current
   pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync`
   re-pins both places after a Renovate bump
+- `scripts/ci/repin-base-image.sh` — base image freshness (#708): compares
+  the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact
+  and, on a mismatch, re-pins every location and opens a merge request;
+  `--red` proves the comparison fires, `--dry-run` stops before any commit,
+  push or merge-request call
 
 ## Traps when running things locally
 
@@ -255,13 +302,8 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   that issue list is the delivery-status surface (owner, 2026-09-04). The
   [GitHub roadmap board](https://github.com/users/tomlawesome/projects/4) is
   retired: it and the GitHub issues are frozen at the 2026-09-04 import, so a
-  status read from either is stale. Milestones are capability slices (M0
-  onwards), each a coherent outcome with a definition of done; a version
-  release moment gets its own milestone holding only its promote-to-main
-  issue, and an empty version milestone is a deliberate placeholder for the
-  next release rather than clutter (owner, 2026-08-23 and 2026-09-01). Every
-  issue carries a milestone. The board's per-issue Status, Priority and Risk
-  fields have no GitLab equivalent and nothing replaces them (owner,
+  status read from either is stale. The board's per-issue Status, Priority and
+  Risk fields have no GitLab equivalent and nothing replaces them (owner,
   2026-09-04, #814): the milestone says what is scheduled and open/closed
   says what is done.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
