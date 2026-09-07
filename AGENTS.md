@@ -70,7 +70,34 @@ the first push (#829). `gl-pipeline-run` still starts one on any branch.
 Renovate replaces Dependabot on this host: `renovate.json` at the repo root,
 the `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
 Mondays 05:00 London, ref `dev`, variable `RENOVATE=true`). It runs nowhere
-else and covers GitHub Actions too; `.github/dependabot.yml` is gone.
+else and covers GitHub Actions too; `.github/dependabot.yml` is gone. It
+deliberately excludes the Orbit base image (`renovate.json`'s
+`matchPackageNames` entry says why); `base_image_repin` below owns that one.
+
+The `base_image_repin` job (#708) detects the pinned Orbit base image being
+behind and opens a merge request re-pinning it, sourced from
+`ai/orbit-base-image`'s own `publish` job artifact rather than an
+independently resolved tag. It needs its own schedule (variable
+`BASE_IMAGE_REPIN=true`). It never rebuilds anything, never pushes to
+`dev`/`preview`/`main`, and never merges; it pushes
+`chore/base-image-repin` and opens or refreshes one merge request from it.
+
+Reading that artifact needs no stored credential (investigated on #708,
+2026-09-06 -- a group-wide `ai` token was the first cut and was narrowed
+once cross-project job-token access turned out to cover artifact downloads):
+the job's own `CI_JOB_TOKEN` does it, because `ai/orbit-base-image`'s CI/CD
+job token allowlist (Settings > CI/CD > Job token permissions > **CI/CD job
+token allowlist** > Add) names `ai/orbit`, and the user the schedule runs as
+already has at least Reporter access to `ai/orbit-base-image` -- job-token
+cross-project reads need both the allowlist entry and that membership.
+Create the schedule under the same user as `renovate` and
+`sidecar_pin_freshness` (currently `Claude`, already Maintainer on
+`ai/orbit-base-image`) and the membership half needs nothing further.
+Pushing the branch and opening the merge request still needs a stored
+token, since `CI_JOB_TOKEN`'s Merge Requests API access is read-only:
+`BASE_REPIN_TOKEN`, a project access token on `ai/orbit` ONLY (`api` scope,
+Developer role) -- see the job's comment in `.gitlab-ci.yml` for why a
+group token or a second project token were not adopted.
 
 ## Delivery workflow
 
@@ -111,12 +138,21 @@ Check the list before building a test rig or handing a check to the owner.
   `install.sh` over the network from a branch, pipes it to bash, and proves the
   channel tag resolved to the digest the registry serves right now. Real
   network and registry; only OIDC discovery is redirected, to the `tests/oidc`
-  sidecar. Non-interactive path only; `--red` proves the digest assertion fires
+  sidecar. Non-interactive path only; `--red` proves the digest assertion
+  fires. Runs two ways (#724): weekly, via the `install_bootstrap` job in
+  `.gitlab-ci.yml` (maintenance stage, `INSTALL_BOOTSTRAP=true`) — `--red`
+  then the green run, both in that one job; and green-only, via
+  `verify_bootstrap` in `.github/workflows/publish-from-gitlab.yml`, right
+  after that workflow's `publish` job moves GHCR's `preview` tag — the
+  publication path that can actually invalidate what the harness asserts
 - `scripts/test-backup-restore.sh` — backup and restore acceptance drill
 - `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
   stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
   journeys are live and which are still absent)
 - `scripts/test-malware-scanner.sh` — ClamAV detection
+- `scripts/test-secret-scan.sh` — proves the `gitleaks` CI job's full-history
+  scan actually fires: plants a synthetic secret in a throwaway `mktemp -d`
+  git repo (never committed to Orbit) and asserts detection and redaction
 - `scripts/test-tika-processor.mjs` — Tika document extraction
 - `scripts/installer-simulation.sh` — installer command centre UI, no Docker
 - `scripts/install-test-browser.sh` — one-time headless browser download
@@ -131,6 +167,11 @@ Check the list before building a test rig or handing a check to the owner.
   between compose and policy, a moved tag, and stale packages inside a current
   pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync`
   re-pins both places after a Renovate bump
+- `scripts/ci/repin-base-image.sh` — base image freshness (#708): compares
+  the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact
+  and, on a mismatch, re-pins every location and opens a merge request;
+  `--red` proves the comparison fires, `--dry-run` stops before any commit,
+  push or merge-request call
 
 ## Traps when running things locally
 
