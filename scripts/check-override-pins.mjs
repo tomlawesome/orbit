@@ -83,11 +83,27 @@ export function selectorsIn(key) {
   }));
 }
 
-export function findStaleSelectors(keys, locked) {
+/** The package an override key ultimately selects: the part after the last `>`. */
+export function targetOf(key) {
+  const target = key.slice(key.lastIndexOf(">") + 1);
+  const at = target.lastIndexOf("@");
+  return at > 0 ? target.slice(0, at) : target;
+}
+
+export function findStaleSelectors(keys, locked, lockedNames) {
   const stale = [];
   for (const key of keys) {
     for (const selector of selectorsIn(key)) {
       if (!locked.has(selector.id)) stale.push({ key, ...selector });
+    }
+    // A key with no version in it can still stop matching: if the package
+    // leaves the tree entirely, the override sits there selecting nothing, and
+    // the comment above it goes on describing a floor. Found while triaging
+    // !871 (#882), which removes eslint's last dependency on js-yaml and would
+    // strand the `js-yaml:` override that way.
+    const target = targetOf(key);
+    if (!lockedNames.has(target)) {
+      stale.push({ key, name: target, version: null, id: target });
     }
   }
   return stale;
@@ -98,9 +114,15 @@ function report(stale, write) {
     write(`override pins: '${entry.key}' selects ${entry.id}, which the lockfile does not contain.\n`);
     write(`  The override therefore applies to nothing, silently. Anything the\n`);
     write(`  comment above it promises is not in force.\n`);
-    write(`  Fix: drop the '@${entry.version}' from the key so it matches whatever\n`);
-    write(`  version of ${entry.name} is resolved, or re-scope it to the version now\n`);
-    write(`  in the lockfile and say in the comment why it is pinned that way.\n`);
+    if (entry.version === null) {
+      write(`  ${entry.name} is not in the tree at all any more. Delete the override\n`);
+      write(`  and the comment above it, rather than leaving a floor for a package\n`);
+      write(`  nothing depends on.\n`);
+    } else {
+      write(`  Fix: drop the '@${entry.version}' from the key so it matches whatever\n`);
+      write(`  version of ${entry.name} is resolved, or re-scope it to the version now\n`);
+      write(`  in the lockfile and say in the comment why it is pinned that way.\n`);
+    }
   }
 }
 
@@ -117,7 +139,13 @@ export function main(argv = process.argv.slice(2), write = process.stdout.write.
     keys = ["postcss@0.0.0-not-in-tree>nanoid"];
   }
 
-  const stale = findStaleSelectors(keys, locked);
+  const lockedNames = new Set(
+    [...locked].map((id) => {
+      const at = id.lastIndexOf("@");
+      return at > 0 ? id.slice(0, at) : id;
+    }),
+  );
+  const stale = findStaleSelectors(keys, locked, lockedNames);
 
   if (red) {
     if (stale.length === 0) {
