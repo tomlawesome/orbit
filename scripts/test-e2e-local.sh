@@ -62,6 +62,30 @@
 # never writes to .env-orbit or an existing file under .orbit-secrets/ --
 # scripts/configure.sh and the secret generation below only fill in what is
 # missing.
+#
+# #876: the dependency step below is `pnpm install --frozen-lockfile`. In
+# this repo a worktree's root node_modules is a directory symlink onto the
+# main checkout's, and its web/node_modules is a real directory of per-
+# package symlinks into the main checkout's web/node_modules -- so a
+# worktree that has been set up this way shares the main checkout's install
+# rather than owning one (AGENTS.md's worktree-install trap, #784, diagnosed
+# twice). An install run with a worktree as the working directory writes
+# through that symlink and rewires the main checkout -- invisibly, until the
+# worktree is later removed and the main checkout's own build breaks. Three
+# cases, handled where the install used to be unconditional:
+#   1. Main checkout: installs as before.
+#   2. Worktree, dependencies unchanged: root node_modules already mirrors
+#      the main checkout's, and this branch's pnpm-lock.yaml matches
+#      node_modules/.pnpm/lock.yaml there -- pnpm's own record of the
+#      lockfile it last installed from, a stronger signal than diffing the
+#      two committed pnpm-lock.yaml files, which could in principle be ahead
+#      of what the main checkout actually has installed. Nothing to do:
+#      skip the install and proceed. (web/node_modules isn't re-checked
+#      here -- this script never reads it on the host; the container build
+#      installs its own copy.)
+#   3. Worktree, no shared node_modules to check, or dependencies differ:
+#      refuse, naming the trap, rather than install here or trust an
+#      unverified workaround.
 set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -198,6 +222,16 @@ docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 plugin is requ
 docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable."
 [[ -f .env-orbit.example && -f docker-compose.yml ]] || fail "run from the Orbit repository root."
 
+# #876 / AGENTS.md worktree-install trap (#784): a git worktree's git-dir
+# sits under the main checkout's, so the two differ from --git-common-dir
+# only in a worktree. Used by the dependency step below -- see the header
+# comment for the three cases.
+main_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+main_checkout_dir="$(dirname "$main_common_dir")"
+in_worktree=1
+[[ "$(git rev-parse --path-format=absolute --git-dir)" != "$main_common_dir" ]] || in_worktree=0
+readonly main_checkout_dir in_worktree
+
 port_free() {
   ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
 }
@@ -301,7 +335,27 @@ done
 
 # --- Dependencies -------------------------------------------------------------
 
-pnpm install --frozen-lockfile
+if [[ "$in_worktree" == 0 ]]; then
+  pnpm install --frozen-lockfile
+else
+  # #876: do not install from here (see the header comment for why). Check
+  # instead whether the main checkout's shared node_modules already has what
+  # this branch needs, and only proceed if so.
+  worktree_lock="$repo_dir/pnpm-lock.yaml"
+  main_installed_lock="$main_checkout_dir/node_modules/.pnpm/lock.yaml"
+  shared_node_modules=0
+  if [[ -L "$repo_dir/node_modules" \
+     && "$(readlink -f "$repo_dir/node_modules")" == "$main_checkout_dir/node_modules" ]]; then
+    shared_node_modules=1
+  fi
+  if [[ "$shared_node_modules" != 1 || ! -f "$main_installed_lock" ]]; then
+    fail "refusing: this worktree has no usable dependencies to run against -- node_modules is either missing or is not the main checkout's shared install -- and installing them here would rewire the main checkout instead (AGENTS.md worktree-install trap, #784/#876). Run this script from the main Orbit checkout."
+  fi
+  if ! cmp -s "$worktree_lock" "$main_installed_lock"; then
+    fail "refusing: this branch's pnpm-lock.yaml differs from what pnpm actually installed in the main checkout (node_modules/.pnpm/lock.yaml) -- this branch changes dependencies, so they must be installed from the main checkout, not from a worktree (AGENTS.md worktree-install trap, #784/#876)."
+  fi
+  log "worktree dependencies already match the main checkout's installed lockfile; skipping pnpm install (#876)"
+fi
 
 # --- Build the application image ---------------------------------------------
 
