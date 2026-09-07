@@ -13,24 +13,26 @@ feature status.
 - Tests, CI and definition of done:
   [quality strategy](quality-strategy.md).
 - Detailed product direction: [feature register](feature-register.md).
-- Priority, ownership and delivery status: the
-  [Orbit Roadmap project board](https://github.com/users/tomlawesome/projects/4),
-  with GitHub milestones as capability slices (M0 onwards) mirrored by the
-  board's Slice field, and one milestone per version release moment holding
-  only its promote-to-main issue (owner decision, 2026-08-23, recorded on
-  issue #502).
+- Delivery status: the issue list on
+  [`ai/orbit`](https://gitlab.tomlawson.io/ai/orbit) (GitLab, project 49),
+  with milestones as capability slices (M0 onwards) and one milestone per
+  version release moment holding only its promote-to-main issue (owner
+  decision, 2026-08-23, recorded on issue #502). The milestone says what is
+  scheduled and open or closed says what is done. The GitHub roadmap board
+  that previously held per-issue status, priority and risk is retired, and
+  nothing replaces those fields (owner, 2026-09-04, #814).
 
 Historical delivery waves for v1.0–v1.2 were completed under the superseded
-plan structure; their evidence lives in the closed GitHub issues, merged pull
-requests, and git history of this file. This plan is forward-looking from the
-governance change recorded in
-[ADR-0011](adr/0011-operator-experience-as-product.md).
+plan structure; their evidence lives in the closed issues on GitLab, the
+merged pull requests still readable on the GitHub mirror, and the git history
+of this file. This plan is forward-looking from the governance change recorded
+in [ADR-0011](adr/0011-operator-experience-as-product.md).
 
 ## Governance
 
 Orbit is maintained by its human owner with AI assistants working under
 direction, as defined in the repository `AGENTS.md` and ADR-0011. Every change
-lands through a reviewed pull request on a protected branch.
+lands through a reviewed merge request on a protected branch.
 
 Every implementable issue must define:
 
@@ -44,14 +46,14 @@ Every implementable issue must define:
 Work uses short-lived branches created from and normally merged into protected
 `dev`. Release trains merge `dev` into protected `preview`, then move
 the accepted exact source through `main`; `hotfix/*` branches start from
-`main` and are reconciled into `dev` and `preview`. Because the `dev`
-ruleset requires up-to-date branches, keep at most two pull requests in
-flight.
+`main` and are reconciled into `dev` and `preview`. A merge request may only
+merge once its pipeline passes, and an acceptance run needs the `ci:
+acceptance` label when the change touches schema, migrations or server code.
 
 ## Phased roadmap
 
 Delivery is organised as five phases. Each phase makes the next one cheaper.
-The [Orbit Roadmap project board](https://github.com/users/tomlawesome/projects/4)
+The [`ai/orbit` issue list](https://gitlab.tomlawson.io/ai/orbit/-/issues)
 owns live status, and the
 [engineering baseline](engineering-baseline.md) rows moving to proven states
 are the exit evidence.
@@ -94,7 +96,7 @@ by flow, behind the Phase 1 harness:
    exit codes — consumed by the `orbit-launcher` project, which owns all
    interactive presentation and drives the engine in place of raw
    `install.sh`; the repair engine
-   ([#261](https://github.com/tomlawesome/orbit/issues/261)) is delivered
+   ([#261](https://gitlab.tomlawson.io/ai/orbit/-/issues/261)) is delivered
    against this interface.
 
 Once a flow's port is in progress, no new operational guarantee is added to
@@ -126,10 +128,10 @@ state.
 - **Active operator-experience track:** the interactive command centre is
   the dedicated `orbit-launcher` project (Go, Bubble Tea), which supersedes
   the closed in-repo command centre
-  [#260](https://github.com/tomlawesome/orbit/issues/260) and currently
+  [#260](https://gitlab.tomlawson.io/ai/orbit/-/issues/260) and currently
   fetches and drives this repository's `install.sh`. The engine contract the
   launcher consumes is what Phases 1–2 pin and port; the repair engine
-  [#261](https://github.com/tomlawesome/orbit/issues/261) is engine scope
+  [#261](https://gitlab.tomlawson.io/ai/orbit/-/issues/261) is engine scope
   here, surfaced through the launcher's Repair flow.
 - **Phase 0** is delivered by the governance-slimdown pull request that
   introduces this plan revision.
@@ -137,10 +139,10 @@ state.
   scenario. Its milestone has been retired along with the other phase
   milestones.
 - **Deferred portfolio work:**
-  [#75](https://github.com/tomlawesome/orbit/issues/75) awaits an explicit
+  [#75](https://gitlab.tomlawson.io/ai/orbit/-/issues/75) awaits an explicit
   destination-repository decision.
 
-## Pull-request lifecycle
+## Merge-request lifecycle
 
 1. Select a ready issue and confirm its acceptance cases.
 2. Add a failing or characterization test at the cheapest effective layer.
@@ -148,7 +150,7 @@ state.
 4. Run static, unit, relevant integration and targeted browser checks.
 5. Review the diff for security, data, dependency, migration and operational
    surprises.
-6. Open a focused pull request linked to the issue.
+6. Open a focused merge request linked to the issue.
 7. Merge only after required checks pass and conversations are resolved.
 8. Record any required preview or manual evidence before closing the issue.
 
