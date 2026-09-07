@@ -196,6 +196,50 @@ axis1_status() {
   fi
 }
 
+# OCI's multi-platform index and Docker's older manifest-list are both "an
+# index" for this script's purposes. check-base-image-current.sh's own
+# comment is explicit that a Dockerfile FROM pins one platform's manifest
+# digest, never the index digest that wraps it -- that value lives in
+# .github/supply-chain-policy.json's indexDigest field instead. So wherever
+# this script expects an index, it must say so plainly if what came back is
+# really a single-platform manifest.
+is_index_media_type() {
+  case "$1" in
+    application/vnd.oci.image.index.v1+json | application/vnd.docker.distribution.manifest.list.v2+json) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Classifies a corroboration comparison between the artifact's trusted digest
+# (expected to be an index digest) and a live-resolved tag's index digest plus
+# its children (the per-platform manifests, including any attestation
+# manifest, inside that index):
+#
+#   match          the trusted digest is the live index's own digest.
+#   child-platform the trusted digest is one of that index's *children*
+#                  instead -- #708's actual shape: a platform manifest digest
+#                  compared against an index digest. Reported distinctly from
+#                  a plain mismatch or a race, because re-running never fixes
+#                  it -- the thing that produced the trusted digest needs to
+#                  record the index digest instead.
+#   mismatch       neither: something else is wrong (wrong project/ref/job,
+#                  or the tag genuinely moved after the artifact was read).
+classify_corroboration() {
+  local trusted="$1" live_index="$2" child
+  shift 2
+  if [[ "$trusted" == "$live_index" ]]; then
+    printf 'match\n'
+    return
+  fi
+  for child in "$@"; do
+    if [[ -n "$child" && "$trusted" == "$child" ]]; then
+      printf 'child-platform\n'
+      return
+    fi
+  done
+  printf 'mismatch\n'
+}
+
 if $red; then
   pinned_reference="$(extract_pinned_reference "$dockerfile")"
   pinned_digest="${pinned_reference##*@}"
@@ -214,10 +258,46 @@ if $red; then
     printf 'repin-base-image: red self-test: expected "moved" for a rotated digest, got "%s"\n' "$status_diff" >&2
     ok=false
   fi
+
+  # #708 itself: an index digest compared against one of its own child
+  # platform digests must be reported as the mismatch it is -- not silently
+  # passed (it is not the same digest) and not reported as the generic,
+  # settling-will-fix-it race. Three synthetic, syntactically valid digests
+  # derived from the real pin by the same rotation used above, so this needs
+  # no docker, no network and no file beyond the Dockerfile already read.
+  fake_index="$pinned_digest"
+  fake_child_one="$rotated_digest"
+  fake_child_two="$(rotate_digest "$rotated_digest")"
+
+  corrob_match="$(classify_corroboration "$fake_index" "$fake_index")"
+  if [[ "$corrob_match" != "match" ]]; then
+    printf 'repin-base-image: red self-test: expected "match" comparing an index digest to itself, got "%s"\n' "$corrob_match" >&2
+    ok=false
+  fi
+  corrob_child="$(classify_corroboration "$fake_child_one" "$fake_index" "$fake_child_one" "$fake_child_two")"
+  if [[ "$corrob_child" != "child-platform" ]]; then
+    printf 'repin-base-image: red self-test: expected "child-platform" comparing an index to one of its own children, got "%s"\n' "$corrob_child" >&2
+    ok=false
+  fi
+  corrob_mismatch="$(classify_corroboration "$fake_child_two" "$fake_index" "$fake_child_one")"
+  if [[ "$corrob_mismatch" != "mismatch" ]]; then
+    printf 'repin-base-image: red self-test: expected "mismatch" for a digest that is neither the index nor a listed child, got "%s"\n' "$corrob_mismatch" >&2
+    ok=false
+  fi
+
+  if ! is_index_media_type "application/vnd.oci.image.index.v1+json"; then
+    printf 'repin-base-image: red self-test: expected the OCI index media type to be recognised as an index\n' >&2
+    ok=false
+  fi
+  if is_index_media_type "application/vnd.oci.image.manifest.v1+json"; then
+    printf 'repin-base-image: red self-test: expected a single-platform manifest media type to NOT be recognised as an index\n' >&2
+    ok=false
+  fi
+
   if ! $ok; then
     fail "the comparison did not fire both ways; see above"
   fi
-  log "red self-test passed -- the comparison reports current and moved correctly"
+  log "red self-test passed -- axis 1, the index/child corroboration classifier, and the media-type check all fire correctly"
   exit 0
 fi
 
@@ -273,15 +353,37 @@ fi
 log "trusted reference (from ai/orbit-base-image's publish job): $trusted_reference"
 
 # --- Axis 1: has the tag moved on? -------------------------------------------
+#
+# trusted_digest is an index digest (the artifact records the multi-platform
+# index, not one platform's manifest inside it -- confirmed against the
+# registry, #708). The Dockerfile's own pin is deliberately a platform
+# manifest digest, per check-base-image-current.sh and this image's
+# "platform": "linux/amd64" in the policy, so it is never the right-hand side
+# of this comparison: a platform digest can never equal an index digest, so
+# comparing pinned_digest here would report "moved" on every run regardless
+# of whether anything changed. The policy's own indexDigest field is this
+# image's last-corroborated index identity, and that is what compares
+# like-for-like against the artifact.
+pinned_index_digest="$(node -e '
+  const fs = require("fs");
+  const [policyPath, imageNamePrefix] = process.argv.slice(1);
+  const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+  const entry = (policy.containerImages || []).find((e) => e.tag && e.tag.startsWith(imageNamePrefix));
+  if (!entry) process.exit(1);
+  process.stdout.write(entry.indexDigest || "");
+' "$policy_path" "$image_name")" || fail "no containerImages entry in $policy_path starts with $image_name; cannot read its currently pinned index digest"
+if [[ ! "$pinned_index_digest" =~ $DIGEST_PATTERN ]]; then
+  fail "$policy_path's entry for $image_name does not hold a valid indexDigest: '${pinned_index_digest:-<empty>}'"
+fi
 
-axis1="$(axis1_status "$pinned_digest" "$trusted_digest")"
+axis1="$(axis1_status "$pinned_index_digest" "$trusted_digest")"
 tag_moved=false
 [[ "$axis1" == "moved" ]] && tag_moved=true
 
 if $tag_moved; then
-  log "axis 1: tag moved. pinned $pinned_digest, artifact reports $trusted_digest."
+  log "axis 1: index moved. pinned index $pinned_index_digest, artifact reports $trusted_digest."
 else
-  log "axis 1: pinned digest matches the artifact; nothing to re-pin on this axis."
+  log "axis 1: pinned index digest matches the artifact; nothing to re-pin on this axis."
 fi
 
 # The reference axis 2 checks: the new one if the tag moved, the existing pin
@@ -336,8 +438,16 @@ if ! manifest_json="$(docker buildx imagetools inspect "$pinned_tag" --format '{
   fail "could not resolve ${pinned_tag} to corroborate the artifact's digest"
 fi
 
-read -r live_platform_digest new_index_digest <<EOF
-$(printf '%s' "$manifest_json" | node -e '
+# doc.digest is the index's own digest (confirmed against the registry,
+# #708: resolving either the tag or the index digest itself back through
+# imagetools returns the same top-level "digest"). doc.manifests[] holds
+# every child underneath it -- the linux/amd64 platform manifest this repo
+# actually pins in the Dockerfile, plus (for this image) an attestation
+# manifest. Both are read here: the platform digest is what gets pinned once
+# corroboration passes below; the full child list lets classify_corroboration
+# tell "the artifact handed us a child digest" apart from "the artifact
+# handed us something unrelated".
+mapfile -t live_fields < <(printf '%s' "$manifest_json" | node -e '
   let input = "";
   process.stdin.on("data", (c) => (input += c)).on("end", () => {
     const doc = JSON.parse(input);
@@ -345,17 +455,40 @@ $(printf '%s' "$manifest_json" | node -e '
     const platform = manifests.find(
       (m) => m?.platform?.os === "linux" && m?.platform?.architecture === "amd64",
     );
-    process.stdout.write(`${platform?.digest ?? "none"} ${doc.digest ?? "none"}`);
+    process.stdout.write([
+      doc.mediaType ?? "none",
+      doc.digest ?? "none",
+      platform?.digest ?? "none",
+      manifests.map((m) => m?.digest).filter(Boolean).join(","),
+    ].join("\n") + "\n");
   });
 ')
-EOF
+live_media_type="${live_fields[0]:-none}"
+live_index_digest="${live_fields[1]:-none}"
+live_platform_digest="${live_fields[2]:-none}"
+IFS=',' read -r -a live_children <<<"${live_fields[3]:-}"
 
-if [[ "$live_platform_digest" != "$trusted_digest" ]]; then
-  fail "the artifact's digest (${trusted_digest}) does not match what ${pinned_tag} currently resolves to (${live_platform_digest}). This can happen if the tag published again after the artifact this run read. Re-run once it settles; not guessing."
+if ! is_index_media_type "$live_media_type"; then
+  fail "${pinned_tag} resolved to a ${live_media_type} manifest, not a multi-platform index. This image is pinned as an index (.github/supply-chain-policy.json's indexDigest field, platform linux/amd64 chosen from inside it) -- a single-platform manifest here means the tag was published without one. Check ai/orbit-base-image's publish job."
 fi
-log "corroborated: ${pinned_tag} currently resolves to the artifact's digest."
+if [[ "$live_platform_digest" == "none" ]]; then
+  fail "${pinned_tag}'s current index (${live_index_digest}) has no linux/amd64 manifest to pin; .github/supply-chain-policy.json records this image's platform as linux/amd64."
+fi
 
-new_reference="${pinned_tag}@${trusted_digest}"
+corroboration="$(classify_corroboration "$trusted_digest" "$live_index_digest" "${live_children[@]}")"
+case "$corroboration" in
+  match)
+    log "corroborated: ${pinned_tag}'s current index digest (${live_index_digest}) matches the artifact."
+    ;;
+  child-platform)
+    fail "the artifact's digest (${trusted_digest}) is one of ${pinned_tag}'s own platform-manifest digests inside its current index (${live_index_digest}), not the index digest itself. Whatever wrote published-digest.txt -- ai/orbit-base-image's publish job -- needs to record the index digest, not a platform manifest; re-running this job will not change that."
+    ;;
+  mismatch)
+    fail "the artifact's digest (${trusted_digest}) matches neither ${pinned_tag}'s current index digest (${live_index_digest}) nor any of its platform manifests. Check whether the tag was republished after this run's artifact was read, and whether BASE_IMAGE_PROJECT/BASE_IMAGE_REF/BASE_IMAGE_JOB (currently ${base_image_project}/${base_image_ref}/${base_image_job}) point at the right publish job."
+    ;;
+esac
+
+new_reference="${pinned_tag}@${live_platform_digest}"
 
 # --- Edit every location that holds the digest, together ---------------------
 
@@ -375,7 +508,7 @@ node -e '
   entry.indexDigest = newIndexDigest;
   entry.resolvedOn = today;
   fs.writeFileSync(policyPath, JSON.stringify(policy, null, 2) + "\n", "utf8");
-' "$policy_path" "$image_name" "$new_reference" "$new_index_digest" "$today"
+' "$policy_path" "$image_name" "$new_reference" "$trusted_digest" "$today"
 
 log "re-pinned Dockerfile and .github/supply-chain-policy.json to ${new_reference}"
 
@@ -406,10 +539,12 @@ fi
 : "${CI_PROJECT_PATH:?CI_PROJECT_PATH is not set; this must run inside a GitLab CI job}"
 : "${CI_SERVER_HOST:?CI_SERVER_HOST is not set; this must run inside a GitLab CI job}"
 
-commit_message="Re-pin the Orbit base image to ${trusted_digest}
+commit_message="Re-pin the Orbit base image to ${live_platform_digest}
 
 ai/orbit-base-image's ${base_image_job} job (ref ${base_image_ref}) recorded
-this digest the moment its push succeeded. scripts/check-base-image-current.sh
+this image's index digest, ${trusted_digest}, the moment its push succeeded;
+${pinned_tag} currently resolves that index to ${live_platform_digest} for
+linux/amd64, which is what the Dockerfile pins. scripts/check-base-image-current.sh
 passes against it.
 $($packages_stale && printf '\nPackages inside the new image were still reported behind at build time; see #706.\n')
 Opened automatically by the base_image_repin schedule (#708). Nothing here
@@ -462,7 +597,8 @@ fi
 {
   printf 'Reported by the weekly `base_image_repin` GitLab job.\n'
   printf 'Run: %s\n\n' "${CI_PIPELINE_URL:-<unknown>}"
-  printf 'Re-pins the Orbit base image from `%s` to `%s`, sourced from\n' "$pinned_digest" "$trusted_digest"
+  printf 'Re-pins the Orbit base image from `%s` to `%s` (linux/amd64), the\n' "$pinned_digest" "$live_platform_digest"
+  printf 'platform manifest inside index `%s`, sourced from\n' "$trusted_digest"
   printf 'ai/orbit-base-image'"'"'s own %s job artifact rather than an independently\n' "$base_image_job"
   printf 'resolved tag.\n\n'
   if $packages_stale; then
@@ -478,7 +614,7 @@ created_iid="$(
   api_call -X POST \
     --data-urlencode "source_branch=${branch_name}" \
     --data-urlencode "target_branch=${target_branch}" \
-    --data-urlencode "title=Re-pin the Orbit base image to ${trusted_digest}" \
+    --data-urlencode "title=Re-pin the Orbit base image to ${live_platform_digest}" \
     --data-urlencode "description@${body_file}" \
     --data-urlencode "labels=security,dependencies" \
     --data-urlencode "remove_source_branch=true" \
