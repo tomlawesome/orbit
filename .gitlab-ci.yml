@@ -237,14 +237,14 @@ variables:
     # 2026-09-04), so the host is the one place it is written down; a public
     # fallback in this file would send lookups off the network instead of
     # failing where the operator can see them (#810).
-    - docker:29-dind
+    - docker:29-dind@sha256:5efed980cba3fc126cf54e21a5a6ff8849d05b6e0623d6e7612f48e9cd6cd17e
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
 
 .dind:
   extends: .dind_service
-  image: docker:29-cli
+  image: docker:29-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
 
 # The daemon inside the job's own container, for the two jobs that stand up a
 # real deployment and then talk to it.
@@ -1702,7 +1702,7 @@ renovate:
   # pnpm that rewrites pnpm-lock.yaml comes from. `-full` preinstalls them and
   # costs several gigabytes of pull on a shared runner every week.
   image:
-    name: renovate/renovate:44.62.2@sha256:757c6c3b8b63dc5b2600855f277aaababf56344c507cc9636a3b3aece5752645
+    name: renovate/renovate:44.65.5@sha256:4e10f76a79f1c597f427f83c788a9f5b14a6295784c4cb68307b89b0a954abce
     pull_policy: if-not-present
   timeout: 1h
   # A weekly maintenance run has nothing that could supersede it, and being
