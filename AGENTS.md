@@ -242,7 +242,9 @@ worktree as the working directory. To check:
 `find node_modules web/node_modules -type l -lname '*worktrees*'` must be
 empty. Repair is `CI=true pnpm install` from the main checkout root, which
 breaks every other session's builds while it runs — agree a window first. See
-#784.
+#784. `verifyDepsBeforeRun: warn` in `pnpm-workspace.yaml` now stops pnpm
+starting that install by itself (#874); the warning it prints instead means run
+`pnpm install` from the main checkout, not from where you are.
 
 **A red compose smoke job can be hiding the next failure.** Its steps run in
 one job and it stops at the first, so fixing that step reveals what was behind
