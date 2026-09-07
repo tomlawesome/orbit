@@ -58,6 +58,14 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+    outputs:
+      # Space-separated, same value the "Decide which tags this commit may
+      # take" step below computes: "sha-<sha>" alone, or "sha-<sha> preview"
+      # when this commit is still the branch head and the channel tag moved.
+      # verify_bootstrap reads this to know whether there is a freshly moved
+      # channel tag worth re-proving, rather than re-running on every commit
+      # that only got a sha- tag.
+      tags: ${{ steps.tags.outputs.list }}
 
     steps:
       - name: Check out repository
@@ -189,3 +197,49 @@ jobs:
             printf -- '- Source branch: `%s`\n' "${GITHUB_REF_NAME}"
             printf '\nNo container was built here. Deploy this immutable digest for engineering or release acceptance; it is not stable until protected promotion succeeds.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  verify_bootstrap:
+    name: Prove the published channel tag resolves (#724)
+    # scripts/test-install-bootstrap.sh is the strongest install evidence
+    # Orbit owns, and until #724 nothing ran it -- not on a schedule and not
+    # on the one event that can actually invalidate what it asserts: a
+    # publish that moves ghcr.io/tomlawesome/orbit:preview to a digest the
+    # documented bootstrap then fails to resolve. `publish` above is that
+    # event for this repository: GitLab's own publish_gitlab job
+    # (.gitlab-ci.yml) pushes only to registry.tomlawson.io, so GHCR's
+    # channel tag -- the one this harness checks -- only ever moves here, in
+    # the "Copy the exact tested digest" step. Running immediately after that
+    # step is this repository's publication path.
+    #
+    # Gated on needs.publish.outputs.tags containing "preview" rather than
+    # needs.publish.result alone: a run for a commit that lost the race to be
+    # branch head (see "Decide which tags this commit may take" above)
+    # published only its sha- tag and left the channel tag untouched, so
+    # there is nothing this commit's publish changed for the harness to
+    # re-prove.
+    #
+    # Green only, not `--red`. `--red` corrupts the expected digest to prove
+    # the comparison can fail at all -- a property of the harness itself, not
+    # of any one publish -- so it stays on install_bootstrap's weekly
+    # schedule in .gitlab-ci.yml, where a self-test belongs. This job checks
+    # the thing that actually changed: does the tag this publish just moved
+    # resolve to the digest that was published.
+    needs: publish
+    if: success() && contains(needs.publish.outputs.tags, 'preview')
+    runs-on: ubuntu-latest
+    # The harness bounds its own install at 30 minutes; the rest is headroom
+    # for checkout and the OIDC sidecar's one-time image build.
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prove the published preview channel tag resolves
+        # ubuntu-latest ships Docker and the Compose v2 plugin already, so
+        # this needs none of the dind setup .gitlab-ci.yml's install_bootstrap
+        # job builds for itself -- the runner is already the daemon.
+        run: bash scripts/test-install-bootstrap.sh --branch "${GITHUB_REF_NAME}" --channel preview
