@@ -176,9 +176,6 @@ variables:
     esac
     return 1
   }
-  orbit_in_merge_request() {
-    [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ]
-  }
 
 # The scripts/ci steps were extracted from a GitHub workflow, so they hand a
 # value to a later step by appending a `key=value` line to $GITHUB_OUTPUT. A
@@ -555,7 +552,7 @@ supply_chain_source:
     - *reach_helpers
     - *apk_retry
     - |
-      if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
+      if ! orbit_on_delivery_branch && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
         echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
         exit 0
       fi
@@ -645,7 +642,7 @@ sidecar_images:
     - *reach_helpers
     - *apk_retry
     - |
-      if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
+      if ! orbit_on_delivery_branch && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
         echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
         exit 0
       fi
@@ -862,7 +859,7 @@ integration:
   script:
     - *reach_helpers
     - |
-      if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
+      if ! orbit_on_delivery_branch && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
         echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
         exit 0
       fi
