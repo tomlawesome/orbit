@@ -186,6 +186,39 @@ const CURL_STUB = [
   "",
 ].join("\n");
 
+// Stands in for scripts/ci/gitlab-await-tested-image.sh (#877's evidence
+// gate), which promote-stable.sh now runs before promoting. That script's
+// own refusals -- missing pipeline/job/artifact, evidence for another
+// commit/ref/pipeline/registry, evidence older than seven days -- are
+// already driven against the real script with a stub curl in
+// scripts/publish-from-gitlab-workflow.test.mjs; this stub is not a second
+// copy of that. It exists only to prove two things about the new call site
+// in promote-stable.sh: that it is invoked with the right commit, ref,
+// registry and token (STUB_EVIDENCE_FAIL unset, happy path -- the default
+// every other test in this file relies on to get past the gate), and that a
+// refusal from the gate script -- digest mismatch, which is new logic added
+// in promote-stable.sh itself, or a refusal propagated unchanged from the
+// real script, represented here as STUB_EVIDENCE_FAIL -- stops promotion
+// with its message intact rather than being swallowed.
+const AWAIT_STUB = [
+  "#!/usr/bin/env bash",
+  "set -uo pipefail",
+  'log="$STUB_LOG"',
+  "printf 'await\\x1f%s\\x1f%s\\x1f%s\\x1f%s\\x1f%s\\x1f%s\\x1e' \\",
+  '  "$GITLAB_API_URL" "$GITLAB_PROJECT_ID" "$GITLAB_READ_TOKEN" "$GITLAB_REGISTRY" "$ORBIT_COMMIT" "$ORBIT_REF" >> "$log"',
+  "",
+  'if [ -n "${STUB_EVIDENCE_FAIL:-}" ]; then',
+  "  printf 'gitlab-await-tested-image: %s\\n' \"$STUB_EVIDENCE_FAIL\" >&2",
+  "  exit 1",
+  "fi",
+  "",
+  'mkdir -p "$ORBIT_EVIDENCE_DIR"',
+  'printf \'{"imageDigest":"%s","commit":"%s","ref":"%s"}\' \\',
+  '  "${STUB_EVIDENCE_DIGEST:-$PREVIEW_DIGEST}" "$ORBIT_COMMIT" "$ORBIT_REF" \\',
+  '  > "$ORBIT_EVIDENCE_DIR/gitlab-tested-image.json"',
+  "",
+].join("\n");
+
 function makeStubs() {
   const dir = mkdtempSync(join(tmpdir(), "promote-stable-stub-"));
   const digestsDir = join(dir, "digests");
@@ -197,6 +230,7 @@ function makeStubs() {
     ["docker", DOCKER_STUB],
     ["git", GIT_STUB],
     ["curl", CURL_STUB],
+    ["await", AWAIT_STUB],
   ]) {
     const stubPath = join(dir, name);
     writeFileSync(stubPath, content);
@@ -206,6 +240,7 @@ function makeStubs() {
   return {
     dir,
     digestsDir,
+    awaitScript: join(dir, "await"),
     seedDigest: (ref, digest) => writeFileSync(join(digestsDir, sanitize(ref)), digest),
     calls: () =>
       readFileSync(logFile, "utf8")
@@ -237,6 +272,8 @@ function run({
   embeddedRevision = GOOD_SHA,
   embeddedChannel = "preview",
   reportedVersion = `Orbit ${VERSION}`,
+  evidenceDigest = null,
+  evidenceFail = null,
   env = {},
 } = {}) {
   const stubs = makeStubs();
@@ -254,8 +291,12 @@ function run({
         CI_PROJECT_ID: "49",
         GHCR_PUBLISH_TOKEN: GHCR_TOKEN,
         GITLAB_RELEASE_TOKEN: GITLAB_TOKEN,
+        CI_REGISTRY: "registry.tomlawson.io",
+        PROMOTE_AWAIT_SCRIPT: stubs.awaitScript,
         STUB_LOG: stubs.logFile,
         STUB_DIGESTS_DIR: stubs.digestsDir,
+        ...(evidenceDigest ? { STUB_EVIDENCE_DIGEST: evidenceDigest } : {}),
+        ...(evidenceFail ? { STUB_EVIDENCE_FAIL: evidenceFail } : {}),
         STUB_MAIN_HEAD: mainHead,
         STUB_PREVIEW_HEAD: previewHead,
         STUB_TAG_EXISTS_EXIT: tagExistsOnGitLab ? "0" : "2",
@@ -386,8 +427,13 @@ describe("scripts/ci/promote-stable.sh", () => {
     // Tokens only ever show up inlined from a stubbed file (tagged
     // "name@<...>") or as the piped stdin content recorded above -- never as
     // a bare argv word, which is what proves the real script kept them off
-    // the command line.
+    // the command line. The "await" entries are the exception: gitlab-await-
+    // tested-image.sh takes GITLAB_READ_TOKEN as an environment variable, so
+    // the stub logs it from the environment (asserted directly by "asks the
+    // evidence gate..." above) to prove the right value arrived -- that is a
+    // property of this test double, not argv exposure by the real script.
     for (const call of recordedCalls) {
+      if (call[0] === "await") continue;
       for (const part of call) {
         if (part.startsWith("<stdin:")) continue;
         if (part.includes("@<")) continue;
@@ -414,6 +460,56 @@ describe("scripts/ci/promote-stable.sh", () => {
       (call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"),
     );
     expect(createCall[1]).toContain(`--tag ${IMAGE}:v1.3.1`);
+  });
+
+  it("asks the evidence gate about the exact commit, ref and registry being promoted, reusing GITLAB_RELEASE_TOKEN", () => {
+    const { result, calls } = run();
+    expect(result.status, result.stderr).toBe(0);
+    const awaitCall = calls().find((call) => call[0] === "await");
+    expect(awaitCall).toBeDefined();
+    const [, apiUrl, projectId, readToken, registry, commit, ref] = awaitCall;
+    expect(apiUrl).toBe("https://gitlab.tomlawson.io/api/v4");
+    expect(projectId).toBe("49");
+    expect(readToken).toBe(GITLAB_TOKEN);
+    expect(registry).toBe("registry.tomlawson.io");
+    expect(commit).toBe(GOOD_SHA);
+    expect(ref).toBe("preview");
+  });
+
+  it("refuses when GitLab's evidence recorded a different digest than the one being promoted, without promoting", () => {
+    const { result, calls } = run({ evidenceDigest: OTHER_DIGEST });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("recorded digest");
+    expect(result.stderr).toContain(OTHER_DIGEST);
+    expect(result.stderr).toContain(PREVIEW_DIGEST);
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login"))).toBe(false);
+    expect(
+      calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
+    ).toBe(false);
+  });
+
+  it("refuses, without promoting, when the evidence gate finds no evidence for the commit", () => {
+    const { result, calls } = run({
+      evidenceFail: "pipeline 12345 has no successful publish_gitlab job",
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("has no successful publish_gitlab job");
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login"))).toBe(false);
+    expect(
+      calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
+    ).toBe(false);
+  });
+
+  it("refuses, without promoting, when the evidence gate finds evidence older than seven days", () => {
+    const { result, calls } = run({
+      evidenceFail: "evidence recorded at 2026-08-01T00:00:00Z is older than seven days",
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("older than seven days");
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login"))).toBe(false);
+    expect(
+      calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
+    ).toBe(false);
   });
 });
 
