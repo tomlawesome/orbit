@@ -239,6 +239,26 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
    one. `test.setTimeout` in every test below is widened to match. */
 export const SETTLE_TIMEOUT = 60_000;
 
+/** Navigates to /create and waits until the page can actually respond.
+ *
+ *  #856: `page.goto` resolves on `load`, which says the document arrived, not
+ *  that SvelteKit has hydrated it. `create.behaviour.js` attaches the `input`
+ *  listener that opens the disclosure during mount, and `input` is one-shot —
+ *  Playwright's auto-retry cannot recover a keystroke nobody was listening
+ *  for, so the assertion just burns its 5s and fails. Measured: 3 failures in
+ *  40 runs, with `load` at ~122ms and mount landing later; at the moment of
+ *  failure a synthetic `input` opened the panel at once, which is what proves
+ *  the listener was missing earlier rather than the class being slow.
+ *
+ *  `#card[data-ready]` is set as the last step of that mount, so waiting for
+ *  it waits for the listeners themselves. This is the same shape as home's
+ *  `settled()`, which waits on `body.launching` clearing — that wait is why
+ *  /home never showed this flake. */
+export async function gotoCreate(p: Page) {
+  await p.goto("/create");
+  await p.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE_TIMEOUT });
+}
+
 export async function dismissTourIfShown(p: Page) {
   /* Ask the record, not the screen: the card is drawn only after /home has
      fetched /api/settings/tour, so an instant "is it visible?" right after
@@ -316,7 +336,7 @@ export async function auditLightDismiss(p: Page, screen: string, toggle: string,
  *  the rest at their defaults — shared so every create test drives the
  *  identical keyboard sequence on its own fresh page. */
 export async function fillCreateForm(page: Page, name: string) {
-  await page.goto("/create");
+  await gotoCreate(page);
 
   await tabTo(page, { selector: "#f-name" }, { screen: "create form" });
   await page.keyboard.type(name);
