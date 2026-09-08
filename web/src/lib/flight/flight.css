@@ -40,16 +40,18 @@ body.showdusk #dusk{opacity:1}
    sway rasters (#502) took the same measurement and came back clean (0 px),
    which is the one difference: a still picture rotating loses nothing to
    layer promotion; many 1-2px circles repainted at a new layer boundary do. */
-#dawn .sky .far{animation:appr 360s linear infinite}
-#dawn .sky .near{animation:appr 180s linear infinite}
-@keyframes appr{to{transform:translateX(-1600px)}}
+/* the approach is POL-11's ordinary drift, at the flight's own periods, so it
+   names $lib/atmosphere.css's driftf/driftn rather than a seventh copy (#445) */
+#dawn .sky .far{animation:driftf 360s linear infinite}
+#dawn .sky .near{animation:driftn 180s linear infinite}
 /* the goodbye's stars drift back the way they came — same periods, reversed
-   (§15, owner 2026-08-17; see THE GOODBYE'S SKY below) */
+   (§15, owner 2026-08-17; see THE GOODBYE'S SKY below). The one drift that is
+   genuinely not POL-11's, so it is the one that keeps its own keyframes. */
 #dusk .sky .far{animation:recede 360s linear infinite}
 #dusk .sky .near{animation:recede 180s linear infinite}
 @keyframes recede{from{transform:translateX(-1600px)}to{transform:translateX(0)}}
+/* the shared twinkle curve's default range IS this pair (atmosphere.css) */
 #dawn .sky .tw,#dusk .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
-@keyframes twinkle{from{opacity:.15}to{opacity:.8}}
 /* first light: dawn breaks once on load, exactly as the login does it */
 .dawnlayer{opacity:0;transition:opacity 3s ease}
 body.lit .dawnlayer{opacity:1}

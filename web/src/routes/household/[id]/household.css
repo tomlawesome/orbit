@@ -116,9 +116,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
      transition:opacity .4s;z-index:0}
 .household-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
-.household-page .sky .far{animation:hh-drift 400s linear infinite}
-.household-page .sky .near{animation:hh-drift 195s linear infinite}
-@keyframes hh-drift{to{transform:translateX(-1600px)}}
+.household-page .sky .far{animation:driftf 400s linear infinite}
+.household-page .sky .near{animation:driftn 195s linear infinite}
 .household-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
 [data-theme=atlas] .household-page .vignette,
