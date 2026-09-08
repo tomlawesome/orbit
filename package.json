@@ -24,14 +24,14 @@
     "db:migrate": "node scripts/run-with-orbit-env.mjs node_modules/tsx/dist/cli.mjs src/db/migrate.ts"
   },
   "dependencies": {
-    "@napi-rs/canvas": "1.0.3",
-    "@napi-rs/canvas-linux-x64-gnu": "1.0.3",
-    "@napi-rs/canvas-linux-x64-musl": "1.0.3",
+    "@napi-rs/canvas": "1.0.8",
+    "@napi-rs/canvas-linux-x64-gnu": "1.0.8",
+    "@napi-rs/canvas-linux-x64-musl": "1.0.8",
     "drizzle-orm": "^0.45.2",
-    "imapflow": "1.5.0",
+    "imapflow": "1.7.8",
     "jose": "^6.0.0",
     "nodemailer": "^9.0.3",
-    "pdfjs-dist": "6.2.108",
+    "pdfjs-dist": "6.3.289",
     "postgres": "^3.4.7",
     "web-push": "^3.6.7",
     "zod": "^4.0.0"
@@ -42,9 +42,9 @@
     "@types/node": "^24.0.0",
     "@types/nodemailer": "^7.0.0",
     "@types/web-push": "^3.6.4",
-    "@vitest/coverage-v8": "4.1.10",
+    "@vitest/coverage-v8": "4.1.11",
     "drizzle-kit": "^0.31.0",
-    "esbuild": "0.28.1",
+    "esbuild": "0.28.2",
     "eslint": "^10.0.0",
     "eslint-plugin-svelte": "3.23.0",
     "happy-dom": "^20.11.2",
@@ -53,5 +53,5 @@
     "typescript-eslint": "^8.69.0",
     "vitest": "^4.0.0"
   },
-  "packageManager": "pnpm@11.11.0"
+  "packageManager": "pnpm@12.3.4"
 }
