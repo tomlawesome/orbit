@@ -45,7 +45,18 @@ resolve_compose_project() {
   shift
   local json
   json="$(docker compose --env-file "$env_file" "$@" config --format json 2>/dev/null)" || return 1
-  printf '%s' "$json" | jq -r '.name // empty'
+  # Read the name with node rather than jq: jq is not on the fast job's image,
+  # where this script's tests run, and node is on every image (the same reason
+  # scripts/ci/gitlab-await-tested-image.sh reads JSON with node).
+  printf '%s' "$json" | node -e '
+    let raw = "";
+    process.stdin.on("data", (chunk) => { raw += chunk; }).on("end", () => {
+      let input;
+      try { input = JSON.parse(raw); } catch { process.exit(3); }
+      const name = input && input.name;
+      process.stdout.write(name === undefined || name === null ? "" : String(name));
+    });
+  '
 }
 
 # compose_isolation_preflight <project> <safe-alternative-command>
