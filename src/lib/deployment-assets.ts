@@ -44,16 +44,30 @@ export const DEPLOYMENT_SCRIPTS: readonly string[] = [
   "scripts/engine-check.sh",
 ];
 
+/**
+ * install.sh:1371's deployment_assets_root: where an image built under
+ * ADR-0019 keeps the deployment assets it was built from. The installer
+ * refuses any image whose label names a different path — a bundle somewhere
+ * else is not the bundle this installer knows how to validate.
+ */
+export const DEPLOYMENT_ASSETS_ROOT = "/opt/orbit/deploy";
+
+/**
+ * install.sh:1372's image label naming DEPLOYMENT_ASSETS_ROOT (Dockerfile's
+ * own `LABEL io.orbit.deployment-assets`). An image without it predates
+ * ADR-0019 and carries no bundle to extract (guarantee #42).
+ */
+export const DEPLOYMENT_ASSETS_LABEL = "io.orbit.deployment-assets";
+
 export const ENVIRONMENT_FILE = ".env-orbit";
 export const SECRETS_DIRECTORY = ".orbit-secrets";
 
 /**
- * Mode install.sh installs every DEPLOYMENT_ASSETS entry at: install.sh's
- * asset fetch/install loop (:1405-1413, :1467-1474) never chmods a fetched
- * asset and sets no umask anywhere in the script, so each asset lands at
- * whatever the ambient umask allows a plain `curl --output`-created file
- * (typically 0644) — never InstallTransaction's SECURE_FILE_MODE (0600),
- * which is reserved for genuinely secret-bearing writes (the staged
+ * Mode install.sh installs every DEPLOYMENT_ASSETS entry at: its staging
+ * loop (install.sh:1488-1505) gives each extracted asset the mode the
+ * ambient umask would have produced (`0666 & ~umask`, typically 0644)
+ * rather than the mode the image chose — never InstallTransaction's
+ * SECURE_FILE_MODE (0600), which is reserved for genuinely secret-bearing writes (the staged
  * environment file and secrets directory tree). Notably, `config/tika-config.json`
  * is bind-mounted into the non-root orbit-tika container (docker-compose.yml's
  * `user: "35002:35002"`), so installing it at 0600 leaves it unreadable and

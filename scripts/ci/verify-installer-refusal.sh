@@ -38,6 +38,23 @@ refusal_output="${runner_temp}/orbit-installer-refusal-${ORBIT_RUN_ID}-${ORBIT_R
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   printf 'refusal_output=%s\n' "${refusal_output}" >> "${GITHUB_OUTPUT}"
 fi
+# install.sh's own database-volume-safety check refuses a fresh install into
+# an empty target for real if any volume on this Docker host already looks
+# like a recognized deployment's database (any name ending "orbit-db-data"),
+# so it cannot silently orphan that deployment. That refusal is correct and
+# deliberate (docs/installer-guarantees.md install.sh #13/#21) but it fires
+# before the field check this step asserts, and it is not this job's own
+# concern to leave lying around: a volume the acceptance stage or an earlier
+# job on this runner failed to tear down would make this step misreport as
+# the field-check assertion failing. Name that leak here, distinctly, before
+# running the installer at all (#770).
+stray_volumes="$(docker volume ls --filter 'name=orbit-db-data' --format '{{.Name}}' 2>/dev/null)" || stray_volumes=""
+if [[ -n "${stray_volumes}" ]]; then
+  printf 'A database volume from an earlier deployment already exists on this Docker host, before the installer even ran. install.sh would correctly refuse this fresh install because of it, not because of the field check this step means to prove -- that is a leaked-state defect in the environment, not the installer (#770).\n' >&2
+  printf -- '--- pre-existing volumes matching "orbit-db-data" ---\n' >&2
+  printf '%s\n' "${stray_volumes}" >&2
+  exit 1
+fi
 set +e
 exec < /dev/null
 [[ ! -t 0 ]] || {

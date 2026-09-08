@@ -10,6 +10,7 @@
   },
   "license": "AGPL-3.0-or-later",
   "scripts": {
+    "preinstall": "node scripts/guard-worktree-install.mjs",
     "lint": "eslint . --concurrency auto",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

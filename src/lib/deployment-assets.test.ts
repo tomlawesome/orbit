@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -6,6 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import {
   DEPLOYMENT_ASSETS,
+  DEPLOYMENT_ASSETS_LABEL,
+  DEPLOYMENT_ASSETS_ROOT,
   DEPLOYMENT_SCRIPTS,
   ENVIRONMENT_FILE,
   SECRETS_DIRECTORY,
@@ -61,6 +64,22 @@ describe("deployment_assets / deployment_scripts parity (install.sh:1313-1330, g
     for (const script of DEPLOYMENT_SCRIPTS) {
       expect(DEPLOYMENT_ASSETS).toContain(script);
     }
+  });
+});
+
+describe("bundled-asset location parity (ADR-0019, install.sh:1371-1372, guarantee #42)", () => {
+  const installScript = readFileSync(installScriptPath, "utf8");
+
+  it("agrees with install.sh's own deployment_assets_root", () => {
+    const match = /^readonly deployment_assets_root="([^"]+)"$/m.exec(installScript);
+    if (!match) throw new Error("Could not find deployment_assets_root in install.sh; it may have been renamed.");
+    expect(DEPLOYMENT_ASSETS_ROOT).toBe(match[1]);
+  });
+
+  it("agrees with the label install.sh reads that root from, and with the label the Dockerfile stamps on", () => {
+    expect(installScript).toContain(`{{index .Config.Labels "${DEPLOYMENT_ASSETS_LABEL}"}}`);
+    const dockerfile = readFileSync(join(repoRoot, "Dockerfile"), "utf8");
+    expect(dockerfile).toContain(`LABEL ${DEPLOYMENT_ASSETS_LABEL}="${DEPLOYMENT_ASSETS_ROOT}"`);
   });
 });
 

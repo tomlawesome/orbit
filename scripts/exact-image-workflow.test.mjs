@@ -589,6 +589,16 @@ describe("exact-image publication workflow", () => {
     expect(refusalStep).toContain("target directory contents");
     expect(refusalStep).toMatch(/did not restore the target to empty.*\$\{entries\[\*\]\}/);
 
+    // #770: install.sh's own database-volume-safety refusal is a legitimate,
+    // deliberate reason to fail closed (docs/installer-guarantees.md
+    // install.sh #13/#21), but it fires before the field check this step
+    // means to assert. A volume some earlier stage on this runner failed to
+    // tear down would otherwise make this step misreport as the field-check
+    // assertion failing, so it is named as a leaked-state defect and the
+    // step fails before the installer even runs.
+    expect(refusalStep).toContain("docker volume ls --filter 'name=orbit-db-data'");
+    expect(refusalStep).toContain("leaked-state defect in the environment, not the installer");
+
     // The unattended bootstrap uses only the documented example plus fixed
     // non-secret inputs and an owner-only generated secret file.
     const provisionStep = ciScript("provision-installer-target.sh");

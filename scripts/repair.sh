@@ -2745,6 +2745,8 @@ check_application_container() {
     else
       app_log="$(timeout "$docker_probe_timeout" docker logs --tail 50 "$app_id" 2>&1 || true)"
     fi
+    # These reason= literals are pinned to src/lib/logger.ts's operationalReasons
+    # by scripts/repair-log-contract.test.mjs (#447) — do not rename one without the other.
     if [[ "$app_log" == *"reason=database_mismatch"* ]]; then
       add_finding database-schema-mismatch application fail
     elif [[ "$app_log" == *"reason=database_below_floor"* ]]; then

@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Clock } from "./health-wait";
@@ -8,6 +8,7 @@ import type { EngineEvent } from "./engine-event";
 import type { ConfigurationScriptAdapter, ConfigurationScriptResult } from "./configuration-migration";
 import type { OidcDiscoveryFetchAdapter, OidcFetchResult } from "./oidc-discovery";
 import type { ConfigureScriptResult, GuidedConfigurationAdapter, MachinePromptAnswerProvider, MachinePromptSessionResult } from "./guided-configuration";
+import { DEPLOYMENT_ASSETS, DEPLOYMENT_ASSETS_ROOT } from "./deployment-assets";
 import { type InstallOrchestratorAdapters, type InstallOrchestratorContext, runInstall } from "./install-orchestrator";
 
 // Driven-flow coverage for issue #295 slice 5's install/update orchestrator
@@ -136,11 +137,63 @@ interface FakeDockerOptions {
   pullOllamaModelOk?: boolean;
   onCall?: (call: FakeDockerCall) => void;
   throwOnListVolumesByKeySubstring?: Error;
+  /** The io.orbit.deployment-assets label the fake image carries: the empty string stands for an image built before ADR-0019, null for an inspect failure. */
+  deploymentAssetsLabel?: string | null;
+  /** `docker create` fails outright. */
+  createContainerOk?: boolean;
+  /** `docker create` exits 0 but prints something that is not a container id. */
+  createContainerId?: string;
+  /** `docker cp` fails outright. */
+  copyFromContainerOk?: boolean;
+  /** Shapes what the fake image actually carries under its assets root — see fakeImageBundle. */
+  bundle?: BundleOptions;
 }
+
+interface BundleOptions {
+  /** Assets the image simply does not carry — `docker cp` still succeeds, and the per-asset check is what refuses. */
+  missing?: string[];
+  /** Assets carried as zero-length files. */
+  empty?: string[];
+  /** Assets carried as symlinks rather than regular files. */
+  symlink?: string[];
+  /** Assets carried unreadable (mode 000), so copying them into the staging directory fails. */
+  unreadable?: string[];
+  /** Overrides an asset's content, e.g. to hand `bash -n` something that does not parse. */
+  contentFor?: Record<string, string>;
+}
+
+/**
+ * What the fake image carries under its DEPLOYMENT_ASSETS_ROOT, written out
+ * by the fake `docker cp` below — the fake's stand-in for the real bundle
+ * baked in by the Dockerfile (ADR-0019).
+ */
+function writeImageBundle(destination: string, options: BundleOptions = {}): void {
+  for (const asset of DEPLOYMENT_ASSETS) {
+    if (options.missing?.includes(asset)) continue;
+    const path = join(destination, asset);
+    mkdirSync(dirname(path), { recursive: true });
+    if (options.symlink?.includes(asset)) {
+      symlinkSync("/etc/hostname", path);
+      continue;
+    }
+    let content = asset.startsWith("scripts/") ? VALID_BASH_SCRIPT : `content-for-${asset}`;
+    if (options.contentFor?.[asset] !== undefined) content = options.contentFor[asset];
+    if (options.empty?.includes(asset)) content = "";
+    writeFileSync(path, content);
+    if (options.unreadable?.includes(asset)) chmodSync(path, 0o000);
+  }
+}
+
+/** The id the fake `docker create` prints: 64 hex characters, the shape install.sh checks for (install.sh:1482). */
+const FAKE_CONTAINER_ID = "c".repeat(64);
 
 function createFakeDockerAdapter(options: FakeDockerOptions = {}) {
   const calls: FakeDockerCall[] = [];
   let composeProjectName = "";
+  // Only a container that was created and not yet removed can be copied
+  // out of, exactly as with the real `docker cp` (#616: a fake refuses
+  // whatever the real tool refuses).
+  let liveContainerId: string | null = null;
   function record(method: string, ...args: unknown[]): void {
     calls.push({ method, args });
     options.onCall?.({ method, args });
@@ -172,6 +225,30 @@ function createFakeDockerAdapter(options: FakeDockerOptions = {}) {
       runBanner: (...args: unknown[]) => {
         record("runBanner", ...args);
         return options.bannerOk ?? true;
+      },
+      inspectDeploymentAssetsLabel: (...args: unknown[]) => {
+        record("inspectDeploymentAssetsLabel", ...args);
+        return options.deploymentAssetsLabel !== undefined ? options.deploymentAssetsLabel : DEPLOYMENT_ASSETS_ROOT;
+      },
+      createAssetContainer: (...args: unknown[]) => {
+        record("createAssetContainer", ...args);
+        if (options.createContainerOk === false) return null;
+        liveContainerId = options.createContainerId ?? FAKE_CONTAINER_ID;
+        return liveContainerId;
+      },
+      copyFromContainer: (containerId: string, sourcePath: string, destinationPath: string) => {
+        record("copyFromContainer", containerId, sourcePath, destinationPath);
+        // `docker cp` refuses an unknown/removed container and a source
+        // path the image does not have; so does this fake.
+        if (containerId !== liveContainerId) return false;
+        if (sourcePath !== `${DEPLOYMENT_ASSETS_ROOT}/.`) return false;
+        if (options.copyFromContainerOk === false) return false;
+        writeImageBundle(destinationPath, options.bundle);
+        return true;
+      },
+      removeAssetContainer: (containerId: string) => {
+        record("removeAssetContainer", containerId);
+        if (containerId === liveContainerId) liveContainerId = null;
       },
       inspectVolumeLabels: (...args: unknown[]) => {
         record("inspectVolumeLabels", ...args);
@@ -261,30 +338,6 @@ function createFakeDockerAdapter(options: FakeDockerOptions = {}) {
   };
 }
 
-/** fetchAsset never mkdir's its own destination's parent — mirroring install-curl-adapter.ts's real createInstallAssetFetchAdapter exactly, so this suite would fail loudly if install-orchestrator.ts's own per-asset mkdir (install.sh:1406-1407) regressed. */
-function fakeFetchAsset(overrides: { failFor?: string; emptyFor?: string; unreadableFor?: string; scriptContentFor?: Record<string, string> } = {}) {
-  return (url: string, destinationPath: string): { ok: boolean } => {
-    // Strips "https://raw.githubusercontent.com/<owner>/<repo>/<revision>/"
-    // — 6 segments once split on "/" ("https:", "", "raw.githubusercontent.com",
-    // "<owner>", "<repo>", "<revision>"), since the owner/repo pair (this
-    // suite's own "tomlawesome/orbit") itself contains a slash.
-    const assetName = url.split("/").slice(6).join("/");
-    if (overrides.failFor && assetName.endsWith(overrides.failFor)) return { ok: false };
-    let content = `content-for-${assetName}`;
-    if (assetName.startsWith("scripts/")) {
-      content = overrides.scriptContentFor?.[assetName] ?? VALID_BASH_SCRIPT;
-    }
-    if (overrides.emptyFor && assetName.endsWith(overrides.emptyFor)) content = "";
-    writeFileSync(destinationPath, content);
-    // Unreadable, but still a non-empty regular file — passes the
-    // fetch-time lstat/size checks (install.sh:1410-1412) so this
-    // simulates an I/O failure surfacing only later, at commit time
-    // (readFileSync in the DEPLOYMENT_ASSETS loop, issue #383).
-    if (overrides.unreadableFor && assetName.endsWith(overrides.unreadableFor)) chmodSync(destinationPath, 0o000);
-    return { ok: true };
-  };
-}
-
 function fakeOidcFetch(overrides: { httpStatus?: string; curlExitCode?: number; writeContent?: string } = {}): OidcDiscoveryFetchAdapter {
   return {
     fetch: (_discoveryUrl: string, destinationPath: string): OidcFetchResult => {
@@ -359,7 +412,6 @@ const throwingAnswers: MachinePromptAnswerProvider = {
 
 interface ScenarioOptions {
   docker?: FakeDockerOptions;
-  fetchAsset?: Parameters<typeof fakeFetchAsset>[0];
   oidcFetch?: Parameters<typeof fakeOidcFetch>[0];
   configurationScript?: Parameters<typeof fakeConfigurationScript>[0];
   guided?: FakeGuidedOptions;
@@ -373,7 +425,6 @@ function buildScenario(targetDir: string, options: ScenarioOptions = {}) {
   const events: EngineEvent[] = [];
   const adapters: InstallOrchestratorAdapters = {
     docker: docker.adapter,
-    fetchAsset: fakeFetchAsset(options.fetchAsset),
     checkCurlAvailable: () => options.curlAvailable ?? true,
     oidcFetch: fakeOidcFetch(options.oidcFetch),
     configurationScript: fakeConfigurationScript(options.configurationScript),
@@ -664,32 +715,171 @@ describe("runInstall — image identity resolution (guarantees #41-44)", () => {
   });
 });
 
-describe("runInstall — asset fetch and syntax check (guarantee #45)", () => {
-  it("fails closed when a nested asset (config/tika-config.json) cannot be fetched", async () => {
+describe("runInstall — deployment assets come out of the image (ADR-0019, guarantees #42/#45)", () => {
+  it("extracts the bundle from the resolved image and removes the container, without ever fetching over the network", async () => {
     const targetDir = newTarget();
     writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { fetchAsset: { failFor: "config/tika-config.json" } });
+    const scenario = buildScenario(targetDir);
 
     const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("Could not fetch config/tika-config.json");
+
+    expect(outcome.status).toBe("ok");
+    const extraction = scenario.docker.calls.filter((call) =>
+      ["inspectDeploymentAssetsLabel", "createAssetContainer", "copyFromContainer", "removeAssetContainer"].includes(call.method),
+    );
+    expect(extraction.map((call) => call.method)).toEqual([
+      "inspectDeploymentAssetsLabel",
+      "createAssetContainer",
+      "copyFromContainer",
+      "removeAssetContainer",
+    ]);
+    expect(extraction[0].args[0]).toBe(RESOLVED_REFERENCE);
+    expect(extraction[1].args[0]).toBe(RESOLVED_REFERENCE);
+    // install.sh's own `<root>/.` source form — the directory's contents,
+    // not the directory itself (install.sh:1484).
+    expect(extraction[2].args[1]).toBe(`${DEPLOYMENT_ASSETS_ROOT}/.`);
+    expect(extraction[3].args[0]).toBe(FAKE_CONTAINER_ID);
+    // Every asset actually landed, nested ones included.
+    for (const asset of DEPLOYMENT_ASSETS) {
+      expect(existsSync(join(targetDir, asset)), asset).toBe(true);
+    }
+    // The private extraction directory goes with the scratch directory.
+    expect(readdirSync(targetDir).filter((name: string) => name.startsWith(".orbit-install-scratch."))).toEqual([]);
   });
 
-  it("fails closed when a fetched asset is empty", async () => {
+  it("refuses an image that carries no io.orbit.deployment-assets label, as built before ADR-0019 (install.sh:1375-1376)", async () => {
     const targetDir = newTarget();
     writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { fetchAsset: { emptyFor: "docker-compose.yml" } });
+    const scenario = buildScenario(targetDir, { docker: { deploymentAssetsLabel: "" } });
 
     const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("is empty");
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toBe(
+        "The published image was built before Orbit bundled its deployment assets and is not a supported install target (ADR-0016, ADR-0019).",
+      );
+    }
+    // Refused before anything is created, copied, or written.
+    expect(scenario.docker.calls.map((call) => call.method)).not.toContain("createAssetContainer");
+    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(false);
   });
 
-  it("fails closed when a fetched script fails `bash -n`", async () => {
+  it("refuses an image whose label names a path other than /opt/orbit/deploy (install.sh:1377-1378)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { deploymentAssetsLabel: "/somewhere/else" } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toBe(`The published image records deployment assets somewhere other than ${DEPLOYMENT_ASSETS_ROOT}.`);
+    }
+    expect(scenario.docker.calls.map((call) => call.method)).not.toContain("createAssetContainer");
+  });
+
+  it("fails closed when the label cannot be inspected at all (install.sh:1372-1374)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { deploymentAssetsLabel: null } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
+    if (outcome.status === "failed") expect(outcome.message).toContain("for its bundled deployment assets");
+  });
+
+  it("fails closed when the extraction container cannot be created (install.sh:1480-1481)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { createContainerOk: false } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
+    if (outcome.status === "failed") expect(outcome.message).toBe("Could not extract deployment assets from the published image.");
+  });
+
+  it("fails closed, without copying, when `docker create` prints something that is not a container id (install.sh:1482-1483)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { createContainerId: "Error response from daemon: no such image" } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
+    if (outcome.status === "failed") expect(outcome.message).toBe("Could not extract deployment assets from the published image.");
+    expect(scenario.docker.calls.map((call) => call.method)).not.toContain("copyFromContainer");
+  });
+
+  it("removes the extraction container even when the copy out of it fails (guarantee #42's every-path removal)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { copyFromContainerOk: false } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
+    if (outcome.status === "failed") expect(outcome.message).toBe("Could not extract deployment assets from the published image.");
+    const removal = scenario.docker.calls.find((call) => call.method === "removeAssetContainer");
+    expect(removal?.args[0]).toBe(FAKE_CONTAINER_ID);
+  });
+
+  it("refuses an image whose bundle is missing a nested asset (config/tika-config.json)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { bundle: { missing: ["config/tika-config.json"] } } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
+    if (outcome.status === "failed") expect(outcome.message).toBe("Bundled config/tika-config.json is not a regular file.");
+    // Nothing from a bundle that failed validation reaches the target.
+    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(false);
+  });
+
+  it("refuses a bundled asset that is a symlink rather than a regular file", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { bundle: { symlink: ["docker-compose.yml"] } } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
+    if (outcome.status === "failed") expect(outcome.message).toBe("Bundled docker-compose.yml is not a regular file.");
+  });
+
+  it("refuses a bundled asset that is empty", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { bundle: { empty: ["docker-compose.yml"] } } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
+    if (outcome.status === "failed") expect(outcome.message).toBe("Bundled docker-compose.yml is empty.");
+  });
+
+  it("fails closed, with a terminal failed event rather than an escaped throw, when a bundled asset cannot be staged (install.sh:1501-1502)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    // Present, non-empty and a regular file, so it passes both bundle
+    // checks — and then cannot be read to copy into the staging directory.
+    const scenario = buildScenario(targetDir, { docker: { bundle: { unreadable: ["docker-compose.yml"] } } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
+    if (outcome.status === "failed") expect(outcome.message).toBe("Could not stage docker-compose.yml from the published image.");
+    expect(scenario.events.some((event) => event.state === "failed")).toBe(true);
+  });
+
+  it("fails closed when a bundled script fails `bash -n`", async () => {
     const targetDir = newTarget();
     writePreprovisionedTarget(targetDir);
     const scenario = buildScenario(targetDir, {
-      fetchAsset: { scriptContentFor: { "scripts/configure.sh": "if not valid bash then(" } },
+      docker: { bundle: { contentFor: { "scripts/configure.sh": "if not valid bash then(" } } },
     });
 
     const outcome = await scenario.run();
@@ -711,23 +901,6 @@ describe("runInstall — asset fetch and syntax check (guarantee #45)", () => {
     }
     // The secret-bearing environment file/secrets tree are unaffected.
     expect(statSync(join(targetDir, ".env-orbit")).mode & 0o777).toBe(0o600);
-  });
-
-  it("emits a terminal failed event (not an escaped throw) when a fetched asset becomes unreadable before commit (issue #383 addon finding 1)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { fetchAsset: { unreadableFor: "docker-compose.yml" } });
-
-    // Before the fix: the readFileSync inside the DEPLOYMENT_ASSETS commit
-    // loop threw a plain EACCES Error with no try/catch anywhere above it,
-    // so it propagated straight out of runInstall as a rejected promise
-    // instead of a `{status:"failed"}` outcome — no terminal `state=failed`
-    // event, violating this module's own "never throws for an expected
-    // refusal" contract.
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "compose", component: "compose" });
-    expect(scenario.events.some((event) => event.state === "failed")).toBe(true);
   });
 });
 

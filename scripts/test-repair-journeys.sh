@@ -141,13 +141,34 @@ EOF
 set -Eeuo pipefail
 discovery_url="${issuer}.well-known/openid-configuration"
 output="" write_out="" url=""
+# Real curl refuses an option it does not know with exit 2 and this message,
+# and refuses an option given no value with exit 2 as well (curl 8.14.1;
+# scripts/tool-parity.test.mjs re-asserts both against the real binary). The
+# shim used to ignore every unrecognised flag, so install.sh could have grown
+# one curl has never had and this harness would still have gone green -- the
+# same class of blindness as the `docker exec -T` that shipped in #607.
+refuse_option() {
+  printf 'curl: option %s: is unknown\\n' "\$1" >&2
+  exit 2
+}
+require_parameter() {
+  printf 'curl: option %s: requires parameter\\n' "\$1" >&2
+  exit 2
+}
 args=("\$@")
 for ((i = 0; i < \${#args[@]}; i++)); do
   case "\${args[i]}" in
-    --output) output="\${args[i+1]}"; ((i++)) ;;
-    --write-out) write_out="\${args[i+1]}"; ((i++)) ;;
-    --header|--connect-timeout|--max-time|--max-filesize|--proto|--proto-redir) ((i++)) ;;
-    --*|-*) ;;
+    --output|-o)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      output="\${args[i+1]}"; ((i++)) ;;
+    --write-out|-w)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      write_out="\${args[i+1]}"; ((i++)) ;;
+    --header|-H|--connect-timeout|--max-time|-m|--max-filesize|--proto|--proto-redir|--retry|--resolve)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      ((i++)) ;;
+    --fail|-f|--silent|-s|--show-error|-S|--location|-L|--tlsv1.2|--tlsv1.3) ;;
+    -*) refuse_option "\${args[i]}" ;;
     *) url="\${args[i]}" ;;
   esac
 done
@@ -157,6 +178,9 @@ serve() {
 }
 case "\$url" in
   "\$discovery_url") serve "$workdir/discovery.json" ;;
+  # Real curl still writes the --write-out template when the transfer never
+  # happened; %{http_code} is 000 with no response, and a host that will not
+  # resolve exits 6 (curl 8.14.1; scripts/tool-parity.test.mjs).
   *) [[ -z "\$write_out" ]] || printf '000'; exit 6 ;;
 esac
 SHIM
@@ -443,6 +467,40 @@ journey_cancelled_repair() {
 # `exec` inside the backgrounded subshell replaces its own process image with
 # repair.sh, so $! is repair.sh's real PID and the signal lands on the process
 # that owns the trap, not on a throwaway parent shell.
+#
+# Terminating that one PID is not enough (#785). repair.sh's EXIT trap runs
+# and the process exits within milliseconds of SIGTERM -- well before a
+# foreground external command it is waiting on (here, the window-stretching
+# mkdir/mktemp shim below) gets anywhere near its own exit. Bash does not
+# forward the signal to that child, so it is orphaned: reparented off
+# repair.sh and left running on its own schedule, unrelated to `wait "$pid"`
+# returning. On an idle machine it finishes in the 0.3s the shim sleeps and
+# nobody notices; on a loaded machine the scheduler can take much longer to
+# give an orphan its remaining CPU, and the harness had already moved on to
+# credential-drift assuming signal-cleanup's process was gone. Confirmed by
+# direct reproduction: killing only the tracked PID leaves the shim's child
+# alive and running seconds after `wait` returns.
+#
+# The fix is to make the backgrounded job its own process group (job control
+# on for exactly the fork, via `set -m`/`set +m`) and signal the whole group,
+# then prove the group is actually empty before this journey hands control to
+# the next one -- not just that the one PID we were watching exited.
+terminate_process_group() {
+  local pid="$1" status=0 group_deadline
+  kill -TERM -- "-$pid" 2>/dev/null || true
+  # `wait` reports the signalled child's 128+15, and this script runs under
+  # `set -e`: an unguarded `wait` here kills the harness itself with 143
+  # instead of the journey observing the interruption it just caused.
+  wait "$pid" 2>/dev/null || status=$?
+  group_deadline=$((SECONDS + 30))
+  while kill -0 -- "-$pid" 2>/dev/null; do
+    ((SECONDS < group_deadline)) ||
+      fail "signal-cleanup: a process in the interrupted repair's group (pgid $pid) is still running 30s after SIGTERM -- it can still touch the deployment while later journeys assume it is gone"
+    sleep 0.05
+  done
+  return "$status"
+}
+
 journey_signal_cleanup() {
   local before after out infile staging pid status=0 found=0 leftover
 
@@ -485,12 +543,19 @@ exit "$rc"
 SHIM
   chmod 755 -- "$shimdir/mktemp" "$shimdir/mkdir"
 
+  # Job control on for exactly this fork: without it bash puts a background
+  # job in the harness's own process group, and a group signal later would
+  # reach everything the harness itself has started, not just this job. With
+  # it, the job becomes its own group (pgid == pid), so terminate_process_group
+  # can signal everything repair.sh forks without touching anything else.
+  set -m
   (
     cd "$target"
     exec env ORBIT_REPAIR_PROMPTS=machine PATH="$shimdir:$PATH" \
       bash "$target/scripts/repair.sh" --execute --safe-only
   ) <"$infile" >"$out" 2>&1 &
   pid=$!
+  set +m
 
   local deadline=$((SECONDS + 60))
   while :; do
@@ -501,18 +566,14 @@ SHIM
   done
 
   if [[ "$found" != 1 ]]; then
-    wait "$pid" 2>/dev/null || true
+    terminate_process_group "$pid" || true
     rm -rf -- "$staging"
     cat "$out" >&2
     fail 'signal-cleanup: never observed a private recovery directory to interrupt'
   fi
 
-  kill -TERM "$pid" 2>/dev/null || true
-  # `wait` reports the signalled child's 128+15, and this script runs under
-  # `set -e`: an unguarded `wait` here kills the harness itself with 143
-  # instead of the journey observing the interruption it just caused.
   status=0
-  wait "$pid" 2>/dev/null || status=$?
+  terminate_process_group "$pid" || status=$?
   [[ "$status" != 0 ]] || fail 'an interrupted repair exited 0'
 
   # The contract, and the assertion that now genuinely fails when the trap
@@ -570,10 +631,16 @@ journey_credential_drift() {
     printf '%s\n' "$output" >&2
     fail "the dangerous batch exited $status, expected 0"
   }
+  # Print what the batch did say: without it a miss here names the missing
+  # line and nothing else, and the run cannot be diagnosed from CI (!897).
   grep -q 'execute action=rotate-database-credential .*result=done' <<<"$output" ||
-    fail 'rotate-database-credential did not report result=done'
+    { printf '%s\n' "$output" >&2
+      docker ps -a --filter "label=com.docker.compose.project=$project" \
+        --format '{{.ID}} {{.Status}} {{.Label "com.docker.compose.service"}}' >&2 || true
+      fail 'rotate-database-credential did not report result=done'; }
   grep -q 'dangerous result=complete' <<<"$output" ||
-    fail 'the dangerous batch did not complete'
+    { printf '%s\n' "$output" >&2
+      fail 'the dangerous batch did not complete'; }
 
   # Authentication works again...
   wait_for_health
