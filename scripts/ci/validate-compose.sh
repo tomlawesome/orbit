@@ -55,9 +55,16 @@ docker compose --env-file .env-orbit --profile processing --profile ai config --
 # that an operator never needs a different compose command. This
 # proves Compose honours COMPOSE_PROFILES from the environment file:
 # without it the optional services are absent, with it they appear.
+#
+# #838: the smoke stack's own .env-orbit now sets COMPOSE_PROFILES=processing
+# so the acceptance journey has a real Tika to reach, so the "absent by
+# default" half of this proof forces the shell's COMPOSE_PROFILES empty --
+# a real environment variable outranks an --env-file value -- rather than
+# depending on .env-orbit staying profile-free, which it deliberately no
+# longer is.
 selection_env="$(mktemp)"
 cp .env-orbit "${selection_env}"
-docker compose --env-file "${selection_env}" config --format json \
+COMPOSE_PROFILES= docker compose --env-file "${selection_env}" config --format json \
   | jq --exit-status '(.services | has("orbit-ollama") or has("orbit-tika")) | not' > /dev/null
 printf 'COMPOSE_PROFILES=processing,ai\n' >> "${selection_env}"
 docker compose --env-file "${selection_env}" config --format json \
