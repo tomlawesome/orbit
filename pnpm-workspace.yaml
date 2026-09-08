@@ -8,6 +8,23 @@ packages:
   - "."
   - "web"
 
+# Never auto-install before running a script (#874, and the damage it causes is
+# #784). pnpm compares node_modules against the lockfile before any script and,
+# left at its default of `install`, silently runs an install when they
+# disagree. In a git worktree node_modules is a symlink to the main checkout's,
+# so they never agree -- and pnpm then installs with the WORKTREE as its
+# working directory, which makes the main checkout a workspace member to link,
+# fills its node_modules with symlinks into .worktrees/, and drops the `orbit`
+# link. Nothing dangles until the worktree is deleted, so the checkout looks
+# healthy in the meantime.
+#
+# `warn` rather than `false`: the mismatch is still worth being told about, it
+# is only the unattended install that is dangerous. Run `pnpm install` from the
+# MAIN checkout when it warns.
+#
+# pnpm 11 reads this key from this file, not .npmrc -- checked, not assumed.
+verifyDepsBeforeRun: warn
+
 allowBuilds:
   esbuild: true
   unrs-resolver: true
