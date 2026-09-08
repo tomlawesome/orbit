@@ -3,7 +3,7 @@
 # Finds the GitLab pipeline that built, tested and published this exact commit,
 # waits for it if it is still running, and fetches the evidence it left:
 # .orbit-supply-chain/gitlab-tested-image.json (written by
-# gitlab-record-tested-image.sh in the publish_gitlab job) and the SPDX SBOM of
+# gitlab-record-tested-image.sh in the attest_image job) and the SPDX SBOM of
 # the same image (from supply_chain_image). Both are checked before anything is
 # handed on, because the caller pushes to a public registry on the strength of
 # what this script says (#801 step 5).
@@ -17,7 +17,7 @@
 #     waits;
 #   - the newest such pipeline is canceled or skipped -- both deliberate, so
 #     it fails immediately rather than waiting out the deadline for them;
-#   - publish_gitlab or supply_chain_image did not succeed in it;
+#   - attest_image or supply_chain_image did not succeed in it;
 #   - the evidence names another commit, ref or pipeline, is malformed, points
 #     outside the project's own registry, or is older than seven days.
 #
@@ -84,7 +84,7 @@ json() {
 
 # GitLab lists pipelines newest first. Only a push pipeline for this exact
 # commit on this exact ref counts: a merge-request pipeline for the same SHA
-# tested a different ref and never ran publish_gitlab.
+# tested a different ref and never ran attest_image.
 pipeline_query="${project}/pipelines?sha=${ORBIT_COMMIT}&ref=${ORBIT_REF}&source=push&order_by=id&sort=desc&per_page=1"
 deadline=$((SECONDS + wait_minutes * 60))
 pipeline_id=""
@@ -115,16 +115,16 @@ jobs="$(api "${project}/pipelines/${pipeline_id}/jobs?per_page=100")"
 job_id() {
   json 'input.filter((job) => job.name === arg && job.status === "success").sort((a, b) => a.id - b.id).at(-1)?.id' "$1" <<< "$jobs"
 }
-publish_job="$(job_id publish_gitlab)"
+publish_job="$(job_id attest_image)"
 sbom_job="$(job_id supply_chain_image)"
-[[ -n "$publish_job" ]] || fail "pipeline ${pipeline_id} has no successful publish_gitlab job"
+[[ -n "$publish_job" ]] || fail "pipeline ${pipeline_id} has no successful attest_image job"
 [[ -n "$sbom_job" ]] || fail "pipeline ${pipeline_id} has no successful supply_chain_image job"
 
 mkdir -p "$evidence_dir"
 evidence="${evidence_dir}/gitlab-tested-image.json"
 sbom="${evidence_dir}/image.spdx.json"
 api --output "$evidence" "${project}/jobs/${publish_job}/artifacts/.orbit-supply-chain/gitlab-tested-image.json" ||
-  fail "publish_gitlab job ${publish_job} kept no gitlab-tested-image.json artifact"
+  fail "attest_image job ${publish_job} kept no gitlab-tested-image.json artifact"
 api --output "$sbom" "${project}/jobs/${sbom_job}/artifacts/.orbit-supply-chain/image.spdx.json" ||
   fail "supply_chain_image job ${sbom_job} kept no image.spdx.json artifact"
 

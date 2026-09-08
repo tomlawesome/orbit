@@ -130,7 +130,7 @@ describe("gitlab-await-tested-image.sh", () => {
     expect(recordScript).toContain('output="${output_dir}/gitlab-tested-image.json"');
     expect(awaitScript).toContain("artifacts/.orbit-supply-chain/gitlab-tested-image.json");
     expect(awaitScript).toContain("artifacts/.orbit-supply-chain/image.spdx.json");
-    expect(awaitScript).toContain("job_id publish_gitlab");
+    expect(awaitScript).toContain("job_id attest_image");
     expect(awaitScript).toContain("job_id supply_chain_image");
     for (const field of ["commit", "ref", "pipelineId", "imageDigest", "imageReference", "recordedAt"]) {
       expect(recordScript).toContain(`"${field}":`);
@@ -221,7 +221,7 @@ describe("gitlab-await-tested-image.sh", () => {
     "  exit 0",
     "fi",
     'if [[ "$url" == *"/jobs?per_page=100" ]]; then',
-    "  printf '[{\"id\":%s,\"name\":\"publish_gitlab\",\"status\":\"success\"},"
+    "  printf '[{\"id\":%s,\"name\":\"attest_image\",\"status\":\"success\"},"
       + '{"id":%s,"name":"supply_chain_image","status":"success"}]\' '
       + '"${STUB_PUBLISH_JOB_ID:?}" "${STUB_SBOM_JOB_ID:?}"',
     "  exit 0",
