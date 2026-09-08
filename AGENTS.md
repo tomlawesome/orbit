@@ -174,6 +174,12 @@ Check the list before building a test rig or handing a check to the owner.
   between compose and policy, a moved tag, and stale packages inside a current
   pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync`
   re-pins both places after a Renovate bump
+- `scripts/check-rolldown-jsdoc-trap.mjs` — flags a JSDoc comment inside a
+  `{#snippet}` parameter list, or inside a multi-line comma-separated
+  parameter/argument list, before it reaches rolldown's own opaque parse
+  crash on the production build (#782); `pnpm --filter orbit-web
+  repro:782` drives the real crash against throwaway fixtures in
+  `web/tests/rolldown-repro/` (slow, not wired into the fast suite)
 - `scripts/ci/repin-base-image.sh` — base image freshness (#708): compares
   the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact
   and, on a mismatch, re-pins every location and opens a merge request;
