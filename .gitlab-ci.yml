@@ -760,6 +760,10 @@ gitleaks:
     - when: on_success
   needs: []
   variables:
+    # Fresh clone every run: the runner's reused checkout keeps refs that no
+    # longer exist on the server, and gitleaks scans everything it can see.
+    # After the #825 history rewrite that was the entire old history (#888).
+    GIT_STRATEGY: clone
     GIT_DEPTH: 0
     GITLEAKS_VERSION: "8.30.1"
     GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
@@ -1167,11 +1171,10 @@ acceptance:
     # installer target under it holds a whole deployment's working files, which
     # the in-job daemon bind-mounts into containers.
     RUNNER_TEMP: $CI_BUILDS_DIR/orbit-runner-temp
-    # The GitHub repository, not this project's GitLab path. scripts/install.sh
-    # resolves deployment assets from
-    # raw.githubusercontent.com/$ORBIT_REPOSITORY/<image revision>, so this is
-    # what an operator's installer uses whichever CI is checking it -- and
-    # every commit GitLab sees arrived from GitHub, so the revision resolves.
+    # The GitHub repository, not this project's GitLab path: it is what an
+    # operator's installer names, whichever CI is checking it. Since ADR-0019
+    # the installer takes its deployment assets out of the image it resolved,
+    # so nothing here depends on the commit being on GitHub yet.
     IMAGE_NAME: tomlawesome/orbit
     ORBIT_RUN_ID: $CI_PIPELINE_ID
     ORBIT_RUN_ATTEMPT: $CI_JOB_ID
@@ -1238,7 +1241,6 @@ acceptance:
         ORBIT_CHANNEL="$(orbit_output channel)" \
         GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
         GIT_MARKER="$(orbit_output git_marker)" \
-        ORBIT_ASSETS_FROM_TREE="$CI_PROJECT_DIR" \
           bash "$CI_PROJECT_DIR/scripts/ci/verify-installer-refusal.sh"
       )
     - |
@@ -1253,7 +1255,6 @@ acceptance:
         ORBIT_REPOSITORY="$IMAGE_NAME" \
         ORBIT_CHANNEL="$(orbit_output channel)" \
         GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
-        ORBIT_ASSETS_FROM_TREE="$CI_PROJECT_DIR" \
           bash "$CI_PROJECT_DIR/scripts/ci/run-installer.sh"
       )
     - |
@@ -1360,7 +1361,20 @@ launcher_install_compat:
   needs:
     - job: classify
       artifacts: true
+    # The image this pipeline built: the launcher installs *it*, served from
+    # the same loopback registry the acceptance job uses, so the candidate
+    # install.sh and the image it verifies really are one generation (#736).
+    # Pairing this commit's install.sh with the published `preview` image
+    # could never pass a change to the installer/image contract: the image
+    # that satisfies the new installer does not exist until this lands
+    # (ADR-0019, #890).
+    - job: build_image
+      artifacts: true
   variables:
+    GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
+    IMAGE_NAME: tomlawesome/orbit
+    ORBIT_RUN_ID: $CI_PIPELINE_ID
+    ORBIT_RUN_ATTEMPT: $CI_JOB_ID
     # Overridable the same way the workflow's workflow_dispatch input was;
     # dev is orbit-launcher's own default branch.
     LAUNCHER_REF: dev
@@ -1381,6 +1395,17 @@ launcher_install_compat:
         exit 0
       fi
     - *docker_in_job
+    - *step_outputs
+    # The tested image, into a disposable loopback registry, exactly as the
+    # acceptance job does it: the installer must resolve it through a real
+    # registry round trip, the way an operator's does.
+    - docker load --input image.tar
+    - |
+      set -eu
+      : > "$GITHUB_OUTPUT"
+      TESTED_IMAGE_TAG="$ORBIT_CI_IMAGE" \
+      TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
+        bash scripts/ci/start-installer-registry.sh
     # git and curl for the launcher checkout and the Go download below; not
     # added to .docker_in_job itself, which every Docker-using job shares and
     # none of the others need either.
@@ -1427,10 +1452,13 @@ launcher_install_compat:
       [ -s "$CI_PROJECT_DIR/.installer-port" ] || { echo "installer server did not start"; exit 1; }
       export ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="http://127.0.0.1:$(cat "$CI_PROJECT_DIR/.installer-port")/install.sh"
       curl -fsS "$ORBIT_LAUNCHER_INSTALL_SCRIPT_URL" | cmp - "$CI_PROJECT_DIR/scripts/install.sh"
-      # install.sh and the image it verifies are one generation; see the
-      # workflow's own comment on ORBIT_CHANNEL for why this must be the
-      # pre-release channel rather than the promoted `latest` image.
-      export ORBIT_CHANNEL=preview
+      # install.sh and the image it verifies are one generation: the image
+      # built by this pipeline, from the loopback registry started above.
+      # `preview` here would be last week's image, and the launcher would
+      # fail on the contract this very commit changes (see `needs`).
+      export ORBIT_REGISTRY=127.0.0.1:5000
+      export ORBIT_REPOSITORY="$IMAGE_NAME"
+      export ORBIT_CHANNEL="$(orbit_output channel)"
       # The live suite tears its own compose stack down on its way out (see
       # the after_script comment below), so after_script never sees a running
       # Postgres or any other container the suite started -- the only window
