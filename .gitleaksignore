@@ -11,14 +11,14 @@
 # followed by "=", which is what trips the generic-api-key rule's keyword
 # match -- deliberately not quoted here in full, so this file does not
 # reproduce the same shape and get flagged itself.
-4fefed5f99ad267b3aedfba12fbf442c59939ce9:src/lib/recovery-bundle.test.ts:generic-api-key:584
-d0a49decc4a144b5ee3118d41131f844defd4b2b:scripts/export-recovery-bundle.sh:generic-api-key:50
+e79534c33a5bfcfabc0b40f3778d2321c8d4a482:src/lib/recovery-bundle.test.ts:generic-api-key:584
+925ba6d632e211aaec90f79cae1eac529993dda7:scripts/export-recovery-bundle.sh:generic-api-key:50
 
 # Test fixture: a hard-coded IMAP alias-rotation secret value used to exercise
 # alias-secret validation, not a live credential.
-28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:118
-28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:136
-28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:144
-28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:153
-28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:230
-28d808f9887dbd0ae1416f8584e8af90b77bf043:src/server/imap-characterization.test.ts:generic-api-key:374
+f29a92c2736c57170978117d5c0ba7c4653b0af5:src/server/imap-characterization.test.ts:generic-api-key:118
+f29a92c2736c57170978117d5c0ba7c4653b0af5:src/server/imap-characterization.test.ts:generic-api-key:136
+f29a92c2736c57170978117d5c0ba7c4653b0af5:src/server/imap-characterization.test.ts:generic-api-key:144
+f29a92c2736c57170978117d5c0ba7c4653b0af5:src/server/imap-characterization.test.ts:generic-api-key:153
+f29a92c2736c57170978117d5c0ba7c4653b0af5:src/server/imap-characterization.test.ts:generic-api-key:230
+f29a92c2736c57170978117d5c0ba7c4653b0af5:src/server/imap-characterization.test.ts:generic-api-key:374
