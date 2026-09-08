@@ -19,7 +19,7 @@
 #
 #   --spec PATH     Playwright spec file or glob, e.g.
 #                    tests/e2e/v19-mail-review.spec.ts
-#   --project NAME  Playwright project from playwright.config.ts:
+#   --project NAME  Playwright project from tests/e2e/playwright.config.ts:
 #                    desktop-chromium or mobile-chromium. Default: both.
 #   --keep          Leave the stack up on exit instead of tearing it down, so a
 #                    failed run can be inspected: query the database, read the
@@ -246,11 +246,11 @@ port_free() {
 
 # GreenMail's SMTP port and the disposable OIDC provider's port are fixed in
 # CI (3025 and 4443: tests/e2e/v19-mail-collection.spec.ts's SMTP_PORT,
-# compose/docker-compose.acceptance.yml's host bindings, and playwright.config.ts's
-# host-resolver-rules all default to them via TEST_SMTP_PORT/TEST_OIDC_PORT)
-# but that is exactly what a real Orbit deployment on this host already
-# holds. Pick free ports instead and export them so every one of those
-# readers agrees -- the test and the compose host-binding must always
+# compose/docker-compose.acceptance.yml's host bindings, and
+# tests/e2e/playwright.config.ts's host-resolver-rules all default to them
+# via TEST_SMTP_PORT/TEST_OIDC_PORT) but that is exactly what a real Orbit
+# deployment on this host already holds. Pick free ports instead and export
+# them so every one of those readers agrees -- the test and the compose host-binding must always
 # resolve to the SAME number, which is why this is one variable each rather
 # than two that could diverge. An explicit override from the caller's
 # environment is respected as-is. free_port() is defined above, alongside
@@ -431,7 +431,8 @@ suite_status=0
 # can abort trying to repair a node_modules it does not own (#858, same
 # reasoning as install-test-browser.sh's header comment). Same binary.
 PLAYWRIGHT_BASE_URL="$base_url" ORBIT_ACCEPTANCE_OIDC=true COMPOSE_PROJECT_NAME="$project_name" \
-  node node_modules/@playwright/test/cli.js test "${playwright_args[@]}" || suite_status=$?
+  node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts \
+  "${playwright_args[@]}" || suite_status=$?
 
 if [[ "$keep" == 1 ]]; then
   log "stack still up: ${base_url}"

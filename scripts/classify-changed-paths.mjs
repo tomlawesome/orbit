@@ -137,7 +137,6 @@ const systemPatterns = [
   /^compose\//u,
   /^config\//u,
   /^package\.json$/u,
-  /^playwright\.config\.[cm]?[jt]s$/u,
   /^drizzle\//u,
   /^tests\/e2e\//u,
   // The v19 front end IS the shipped application server since the cut (#735):
