@@ -536,23 +536,40 @@ suite when no browser target is running.
 The authenticated acceptance checks use a separate Compose overlay with a
 disposable local OIDC provider. It performs discovery, PKCE, code exchange and
 signed ID-token validation; it does not add an Orbit sign-in bypass. Run it only
-against disposable data:
+against disposable data.
 
-```sh
-docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml up --build --wait
-ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
-docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
-```
-
-`bash scripts/test-e2e-local.sh` does all of the above -- plus the mail
-overlay, an isolated Compose project so it can never collide with a real
-deployment on the same host, a health wait, and guaranteed teardown -- in one
-command, mirroring the acceptance stage of the container-validation workflow:
+`bash scripts/test-e2e-local.sh` is the safe default: it brings up this same
+overlay, plus the mail overlay, under an isolated Compose project derived from
+this worktree and process (so it can never collide with a real deployment or
+another concurrent run on the same host), waits for health, runs the browser
+suite, and guarantees teardown, all mirroring the acceptance stage of the
+container-validation workflow:
 
 ```sh
 bash scripts/test-e2e-local.sh
 bash scripts/test-e2e-local.sh --spec tests/e2e/v19-mail-review.spec.ts --project mobile-chromium
 ```
+
+Only assemble the Compose commands by hand -- as that script's own `--keep`
+output does when it prints the exact teardown line -- when you need to inspect
+a stack between steps. `docker-compose.yml`'s `name: orbit` and `.env-orbit`'s
+`COMPOSE_PROJECT_NAME` both default the project to the *same* name a real
+deployment uses, from any checkout, so a bare `--env-file .env-orbit` command
+with no `-p` can silently attach to that deployment's containers and named
+volumes instead of creating its own -- this is the trap AGENTS.md documents
+and issue #536 hit for real. Always pass an isolating `-p`:
+
+```sh
+docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml up --build --wait
+ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
+docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
+```
+
+`scripts/compose-isolation-preflight.sh` is the scripted version of the same
+check: source it and call `resolve_compose_project` and
+`compose_isolation_preflight` before an `up`, and it refuses -- naming the
+resolved project and the safe `-p` alternative -- when that project already
+has containers running.
 
 Install Playwright's local Chromium build once, then repeat browser tests
 without using an AI service:
