@@ -82,11 +82,12 @@ permissions are refused before Docker or downloads begin. These pre-provisioned
 files are preserved byte-for-byte if configuration, OIDC discovery, or Compose
 preflight fails before transaction commit.
 
-It resolves the published image to an immutable digest, reads the exact source
-revision recorded in that image, and fetches its deployment assets from that
-same revision — so a compose file cannot drift from the image it configures. The
-resolved `registry/repository@sha256:...` digest is written to `.env-orbit`, and
-that digest is what runs. A tag is only ever read to resolve it; a mutable
+It pulls the published image, resolves it to an immutable digest, and takes
+its deployment assets — the compose files, the Tika configuration and the
+operator scripts — out of that same image, which carries them. A compose file
+therefore cannot drift from the image it configures, and an install needs
+nothing but the registry. The resolved `registry/repository@sha256:...` digest
+is written to `.env-orbit`, and that digest is what runs. A tag is only ever read to resolve it; a mutable
 reference is never deployed.
 
 It then creates or revalidates the Orbit-specific `.env-orbit` configuration,

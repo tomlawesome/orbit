@@ -146,6 +146,7 @@ fi
 
 staging_dir=""
 rollback_dir=""
+deploy_container_id=""
 file_transaction_active=0
 file_transaction_committed=0
 target_was_empty=0
@@ -177,8 +178,8 @@ load_installer_ui() {
   [[ -n "$staging_dir" ]] || return 1
   candidate="$staging_dir/scripts/installer-ui.sh"
   is_regular_non_symlink_file "$candidate" || return 1
-  # The caller has fetched this helper from the resolved image's immutable
-  # revision and completed bash -n before it can be sourced. Never source an
+  # The caller has extracted this helper from the resolved image's own
+  # digest and completed bash -n before it can be sourced. Never source an
   # existing deployment copy before those checks.
   # shellcheck source=/dev/null
   source "$candidate"
@@ -323,7 +324,7 @@ rollback_transaction() {
 
   # Remove paths that did not exist before the transaction. Never operate on a
   # child through a parent symlink: configuration is untrusted input even
-  # though it was fetched from the image's recorded source revision.
+  # though it came out of the resolved image itself.
   for ((index = ${#managed_paths[@]} - 1; index >= 0; index--)); do
     path="${managed_paths[index]}"
     [[ "${managed_was_present[$path]:-0}" == 1 ]] && continue
@@ -385,8 +386,18 @@ rollback_transaction() {
   return "$rollback_status"
 }
 
+# The extraction container holds no process (`docker create` starts nothing),
+# but it must not outlive this run on any path, including every `fail`.
+remove_deploy_container() {
+  [[ -n "$deploy_container_id" ]] || return 0
+  docker rm -f "$deploy_container_id" >/dev/null 2>&1 || true
+  deploy_container_id=""
+}
+
 cleanup() {
   local exit_status=$?
+
+  remove_deploy_container
 
   if [[ "$file_transaction_active" == 1 && "$file_transaction_committed" == 0 ]]; then
     if rollback_transaction; then
@@ -410,7 +421,7 @@ trap cleanup EXIT
 # A non-empty target must already be a recognizable Orbit deployment, never an
 # arbitrary directory: the installer must not overwrite unrelated user files,
 # and a symlinked marker could redirect the install at attacker-controlled
-# paths. This runs before any pull or download.
+# paths. This runs before any pull or asset extraction.
 validate_target() {
   if target_is_empty; then
     target_was_empty=1
@@ -1270,7 +1281,7 @@ installer_ui_event host host starting host-tools check
 validate_target
 
 # Explicit modes are automation-facing and can be rejected before any image
-# pull or deployment-asset download. Interactive choices occur later, after
+# pull or deployment-asset extraction. Interactive choices occur later, after
 # the immutable presentation helper has been verified.
 case "$requested_action" in
   install)
@@ -1291,6 +1302,8 @@ esac
 
 command -v docker >/dev/null 2>&1 || fail "Docker is required."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
+# Still required, for the OIDC discovery request; deployment assets no
+# longer travel over it (ADR-0019).
 command -v curl >/dev/null 2>&1 || fail "curl is required."
 command -v timeout >/dev/null 2>&1 || fail "GNU timeout is required for bounded health checks."
 verify_database_volume_safety
@@ -1319,9 +1332,11 @@ done <<< "$inspect_output"
 [[ "$resolved_reference" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
   fail "The registry did not return an immutable digest for ${image_repository}:${channel}."
 
-# The image records the exact source revision that produced it, so deployment
-# assets are fetched from that revision rather than from a moving branch. A
-# compose file therefore cannot drift from the image it configures.
+# The image records the exact source revision that produced it. That revision
+# is identity evidence, not a download location: the deployment assets come
+# out of this same digest (ADR-0019), so a compose file cannot drift from the
+# image it configures and no commit id has to stay resolvable for an install
+# to work.
 if ! revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$resolved_reference" 2>/dev/null)"; then
   fail "Could not inspect ${resolved_reference} for its source revision."
 fi
@@ -1350,7 +1365,18 @@ if ! docker run --rm --entrypoint /opt/orbit/scripts/container-entrypoint.sh \
 fi
 installer_ui_event identity image completed image-identity verify
 
-readonly asset_base="https://raw.githubusercontent.com/${repository}/${revision}"
+# The image says where it keeps the assets it was built from. An image
+# without that label predates ADR-0019 and cannot be installed from: there is
+# nothing to extract, and the revision it names may no longer resolve.
+readonly deployment_assets_root="/opt/orbit/deploy"
+if ! bundled_assets_root="$(docker image inspect --format '{{index .Config.Labels "io.orbit.deployment-assets"}}' "$resolved_reference" 2>/dev/null)"; then
+  fail "Could not inspect ${resolved_reference} for its bundled deployment assets."
+fi
+[[ -n "$bundled_assets_root" ]] ||
+  fail "The published image was built before Orbit bundled its deployment assets and is not a supported install target (ADR-0016, ADR-0019)."
+[[ "$bundled_assets_root" == "$deployment_assets_root" ]] ||
+  fail "The published image records deployment assets somewhere other than ${deployment_assets_root}."
+readonly bundled_assets_root
 readonly deployment_assets=(
   "docker-compose.yml"
   "docker-compose.mail.yml"
@@ -1435,9 +1461,9 @@ prepare_rollback_area() {
   done
 }
 
-# Every asset is fetched into a private staging directory and fully validated
-# before anything in the target is touched, so a fetch or validation failure
-# never mutates an existing deployment's files.
+# Every asset is extracted into a private staging directory and fully
+# validated before anything in the target is touched, so an extraction or
+# validation failure never mutates an existing deployment's files.
 staging_dir="$(mktemp -d "./.orbit-install-staging.XXXXXX")" ||
   fail "Could not create a private staging directory."
 chmod 700 "$staging_dir" || fail "Could not restrict the staging directory."
@@ -1445,22 +1471,47 @@ chmod 700 "$staging_dir" || fail "Could not restrict the staging directory."
 installer_ui_phase=assets
 installer_ui_component=assets
 installer_ui_event assets assets starting assets-verified fetch
+# Copy the bundle out of the image without running anything from it: `docker
+# create` makes a container and starts no process, `docker cp` reads its
+# filesystem, and the container is removed immediately (ADR-0019).
+image_assets_dir="$staging_dir/image-assets"
+mkdir -- "$image_assets_dir" || fail "Could not create the private asset extraction directory."
+chmod 700 "$image_assets_dir" || fail "Could not restrict the private asset extraction directory."
+deploy_container_id="$(docker create "$resolved_reference" 2>/dev/null)" ||
+  fail "Could not extract deployment assets from the published image."
+[[ "$deploy_container_id" =~ ^[0-9a-f]{64}$ ]] ||
+  fail "Could not extract deployment assets from the published image."
+docker cp "${deploy_container_id}:${bundled_assets_root}/." "$image_assets_dir/" >/dev/null 2>&1 ||
+  fail "Could not extract deployment assets from the published image."
+remove_deploy_container
+
+# The image's own modes never reach the deployment: each staged file is given
+# the mode the umask would have produced, exactly as the download it replaces
+# did. Only the fixed allowlist is staged; anything else the bundle carries is
+# left behind with the extraction directory.
+staged_asset_mode="$(printf '%04o' "$(( 0666 & ~0$(umask) ))")"
+readonly staged_asset_mode
 for asset in "${deployment_assets[@]}"; do
   staged_path="$staging_dir/$asset"
+  extracted_path="$image_assets_dir/$asset"
   mkdir -p -- "$(dirname "$staged_path")"
-  curl --fail --silent --show-error --location --output "$staged_path" "${asset_base}/${asset}" 2>/dev/null ||
-    fail "Could not fetch ${asset} from the published revision."
-  is_regular_non_symlink_file "$staged_path" ||
-    fail "Fetched ${asset} is not a regular file."
-  [[ -s "$staged_path" ]] || fail "Fetched ${asset} is empty."
+  is_regular_non_symlink_file "$extracted_path" ||
+    fail "Bundled ${asset} is not a regular file."
+  [[ -s "$extracted_path" ]] || fail "Bundled ${asset} is empty."
+  cp -- "$extracted_path" "$staged_path" ||
+    fail "Could not stage ${asset} from the published image."
+  chmod "$staged_asset_mode" "$staged_path" ||
+    fail "Could not restrict the staged ${asset}."
 done
+rm -rf -- "$image_assets_dir" ||
+  fail "Could not remove the private asset extraction directory."
 
 for script in "${deployment_scripts[@]}"; do
   bash -n "$staging_dir/$script" 2>/dev/null ||
-    fail "Fetched ${script} failed a syntax check."
+    fail "Bundled ${script} failed a syntax check."
 done
 
-load_installer_ui || fail "Fetched installer UI helper is unavailable."
+load_installer_ui || fail "Bundled installer UI helper is unavailable."
 installer_ui_event assets assets completed assets-verified fetch
 
 action_status=0
@@ -1482,7 +1533,7 @@ prepare_rollback_area
 file_transaction_active=1
 
 # Validate and, for a legacy v0 file, add only the schema marker before any
-# fetched asset or configure.sh mutation. The transaction above owns rollback.
+# extracted asset or configure.sh mutation. The transaction above owns rollback.
 if [[ -e "$environment_file" ]]; then
   bash "$staging_dir/scripts/configuration.sh" --preflight --file "$environment_file" >/dev/null ||
     fail "Configuration preflight failed; restoring the previous deployment."

@@ -122,6 +122,12 @@ LABEL org.opencontainers.image.source="https://github.com/tomlawesome/orbit"
 LABEL org.opencontainers.image.version="${ORBIT_VERSION}"
 LABEL org.opencontainers.image.revision="${ORBIT_REVISION}"
 LABEL io.github.tomlawesome.orbit.release-stage="${ORBIT_CHANNEL}"
+# Where this image keeps the deployment assets it was built from (ADR-0019).
+# scripts/install.sh reads this label and extracts that directory from the
+# image it just resolved, instead of downloading the same files from the
+# commit id in image.revision: a commit id can stop resolving (a history
+# rewrite did exactly that in #890), a digest cannot.
+LABEL io.orbit.deployment-assets="/opt/orbit/deploy"
 WORKDIR /opt/orbit
 # Seed the mount point with the runtime user's ownership so a new named volume
 # is writable when Docker copies the image directory into it on first use.
@@ -176,6 +182,22 @@ RUN ORBIT_WEB_BUILD_ROOT=/opt/orbit/web node scripts/web-pdfjs-runtime-check.mjs
 COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --chown=orbit:orbit scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
 COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
+# The eleven deployment assets, at the same relative paths an install uses
+# them at (ADR-0019). They travel with the digest, so the compose file an
+# operator runs and the image it configures are the same artifact, and an
+# install needs nothing but the registry. Root-owned data: the installer
+# copies them out and sets its own modes; nothing in the container reads them.
+COPY --chown=root:root docker-compose.yml docker-compose.mail.yml .env-orbit.example ./deploy/
+COPY --chown=root:root config/tika-config.json ./deploy/config/
+COPY --chown=root:root \
+  scripts/configure.sh \
+  scripts/installer-ui.sh \
+  scripts/configuration.sh \
+  scripts/backup.sh \
+  scripts/restore.sh \
+  scripts/repair.sh \
+  scripts/engine-check.sh \
+  ./deploy/scripts/
 # The bundled engine CLI (single file, no node_modules dependency at
 # runtime — see scripts/bundle-orbit-cli.mjs). Root-owned and read-only,
 # like container-entrypoint.sh above and VERSION/REVISION/CHANNEL below;
