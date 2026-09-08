@@ -165,7 +165,7 @@ describe("exact-image publication workflow", () => {
     expect(changes).toContain("integration: ${{ steps.classify.outputs.integration }}");
     expect(changes).toContain("system: ${{ steps.classify.outputs.system }}");
     expect(changes).toContain("Set up pnpm graph reader");
-    expect(changes).toContain("run_install: false");
+    expect(changes).toContain("install: false");
     const fast = jobBlock("fast", "supply_chain_source");
     expect(fast).toContain("- changes");
     expect(fast).toContain("needs.changes.outputs.build == 'true'");
@@ -253,7 +253,7 @@ describe("exact-image publication workflow", () => {
   it("takes the pnpm version from package.json alone, on both hosts", () => {
     // Renovate bumps package.json's packageManager (234eb98 took it to
     // 11.11.0) and nothing else: a second copy of the version in either
-    // pipeline drifts, and pnpm/action-setup then refuses to start
+    // pipeline drifts, and pnpm/setup (action-setup at the time) then refuses to start
     // (GitHub run 33924807335). package.json is the one place it lives.
     const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
     const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
