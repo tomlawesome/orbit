@@ -188,8 +188,7 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Nine known ways to lose an afternoon, or worse. The second has an open issue;
-until it lands, this is the procedure.
+Nine known ways to lose an afternoon, or worse.
 
 **`pnpm db:generate` refuses to run, on purpose.** `drizzle/meta/` holds
 snapshots only up to 0004, so `drizzle-kit generate` would diff against a
@@ -198,14 +197,14 @@ schema. `scripts/db-generate-refused.mjs` is the guard; the hand-written
 procedure is in `docs/testing.md`, "Hand-writing a migration". See #535.
 
 **Compose commands attach to whatever project `.env-orbit` names.**
-`COMPOSE_PROJECT_NAME` lives in that file, so
-`docker compose --env-file .env-orbit ...` adopts that project and its named
-volumes from any checkout or worktree, and the fixed `container_name` pins in
-`docker-compose.yml` stop a second stack coexisting. Pass an explicit `-p` for
-anything disposable, confirm isolation with
-`docker inspect orbit-postgres --format '{{index .Config.Labels "com.docker.compose.project"}}'`
-before trusting it, and never run `docker compose down --volumes` against a
-project you did not create. See #536.
+`docker compose --env-file .env-orbit ...` with no `-p` silently adopts that
+project (and its named volumes) from any checkout or worktree, and the fixed
+`container_name` pins in `docker-compose.yml` then stop a second stack
+coexisting instead of failing loudly. Source
+`scripts/compose-isolation-preflight.sh` before an `up` you assemble by hand,
+and see the isolated-stack recipe in README.md's "Quality checks" section.
+Fixed in the acceptance-stack entry point by #536; still your job for a
+one-off manual command.
 
 **Never drive a pty test by closing its own stdin.** `spawnSync({ input })`
 closes stdin as soon as the string is written, which under `script` closes the
