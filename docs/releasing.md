@@ -42,6 +42,46 @@ operator, at preview time or at promotion time: stable promotion reads it
 back out of the accepted image itself and re-runs the same calculation to
 confirm the two agree.
 
+## Validation evidence and the publication split
+
+No job both judges an image and ships it
+([ADR-0020](adr/0020-validation-evidence-binds-digest-and-policy.md), #661).
+On a `preview`/`hotfix-*` push, `attest_image` pushes the tested image as
+`sha-<commit>` only and mints a cosign attestation binding the digest to the
+policy version that judged it; `publish_channel` verifies that evidence with
+the committed `cosign.pub`, re-runs the cheap identity and policy checks
+against the digest, and only then creates the channel tag.
+
+**Re-publishing:** if publication fails (or a tag needs recreating), retry
+`publish_channel` alone — it re-verifies and re-tags without re-running
+validation. Evidence is valid for seven days from `recordedAt`; after that
+the verifier refuses with an "expired" message and the commit must go through
+validation again (re-run the pipeline). That cost is intended.
+
+**Owner setup (agents cannot create these):**
+
+1. `cosign generate-key-pair` locally, with a password. Commit the public
+   half as `cosign.pub` at the repository root; the private key and password
+   never enter chat or the repository.
+2. Create the protected environment `validation-signing`
+   (Settings > CI/CD > Protected environments), allowed to deploy:
+   Maintainers.
+3. Create two CI/CD variables on `ai/orbit`, both protected, both with
+   environment scope `validation-signing`:
+   - `COSIGN_PRIVATE_KEY` — type **File** (it is multiline, so it cannot be
+     masked; the environment scope is what fences it).
+   - `COSIGN_PASSWORD` — masked.
+4. Confirm `preview` and `hotfix/*` are protected branches: protected
+   variables are simply absent otherwise, and the job's refusal will name
+   the variable, not the branch setting.
+
+Until this setup exists, `attest_image` fails closed with a message naming
+the missing variable, and nothing publishes.
+
+**Key rotation:** generate a new pair, replace both variables, commit the new
+`cosign.pub`. Attestations made under the old key stop verifying, so any
+digest not yet published must be revalidated after a rotation.
+
 ## Stable promotion (on GitLab)
 
 Promotion is a manual GitLab CI job, `promote_stable` in `.gitlab-ci.yml`. It
@@ -53,7 +93,7 @@ decision.
 The only input is `PREVIEW_DIGEST`, the accepted preview image's digest
 (`sha256:<64 hex>`). Find it either:
 
-- in the `publish_gitlab` job's log for the pipeline that tested the commit
+- in the `attest_image` job's log for the pipeline that tested the commit
   being promoted (it prints the digest it pushed, and records the same value
   in the `gitlab-tested-image.json` artifact); or
 - by resolving GHCR's `:preview` tag directly:
@@ -119,6 +159,10 @@ Neither token is ever a command-line argument or printed: the GHCR token is
 piped to `docker login` on stdin, and the GitLab token travels to `curl` as a
 header file. Rotate either by replacing the CI/CD variable; nothing else
 needs to change.
+
+The signing variables (`COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`) are separate
+and stricter — environment-scoped so only the attesting job can read them;
+see "Validation evidence and the publication split" above.
 
 ## Supported install targets
 

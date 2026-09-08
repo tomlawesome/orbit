@@ -205,8 +205,9 @@ jobs:
     # on the one event that can actually invalidate what it asserts: a
     # publish that moves ghcr.io/tomlawesome/orbit:preview to a digest the
     # documented bootstrap then fails to resolve. `publish` above is that
-    # event for this repository: GitLab's own publish_gitlab job
-    # (.gitlab-ci.yml) pushes only to registry.tomlawson.io, so GHCR's
+    # event for this repository: GitLab's own attest_image and
+    # publish_channel jobs (.gitlab-ci.yml) push only to
+    # registry.tomlawson.io, so GHCR's
     # channel tag -- the one this harness checks -- only ever moves here, in
     # the "Copy the exact tested digest" step. Running immediately after that
     # step is this repository's publication path.
