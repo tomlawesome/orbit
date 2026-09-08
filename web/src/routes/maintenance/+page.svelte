@@ -49,11 +49,11 @@
 <div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
   <defs>
     <radialGradient id="stargl" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#eef2ff" stop-opacity=".5"/>
-      <stop offset="100%" stop-color="#eef2ff" stop-opacity="0"/>
+      <stop offset="0%" stop-color="var(--star-near)" stop-opacity=".5"/>
+      <stop offset="100%" stop-color="var(--star-near)" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <g class="sky-drift-far" fill="#dfe6f7"><g id="farstars"></g><use href="#farstars" x="1600"/></g>
+  <g class="sky-drift-far" fill="var(--star-far)"><g id="farstars"></g><use href="#farstars" x="1600"/></g>
   <g class="sky-drift-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
 </svg></div>
 
