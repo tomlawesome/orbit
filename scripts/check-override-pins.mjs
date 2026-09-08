@@ -56,20 +56,28 @@ export function readOverrideKeys(text) {
 
 /**
  * Every `name@version` the lockfile actually resolved, taken from the
- * `packages:` block alone. `snapshots:` repeats them and `overrides:` is a copy
+ * `packages:` blocks alone. `snapshots:` repeats them and `overrides:` is a copy
  * of the file being checked, so neither is evidence.
+ *
+ * Every such block, not the first one: pnpm 12 writes the lockfile as two YAML
+ * documents (#882), the first recording pnpm's own platform binaries and the
+ * second the workspace's real tree. Reading only the first found nothing but
+ * `@pnpm/exe.*`, so every override key looked stale and the check failed
+ * closed on a healthy tree.
  */
 export function readLockedPackages(text) {
   const lines = text.split("\n");
-  const start = lines.indexOf("packages:");
-  if (start === -1) {
+  const starts = lines.flatMap((line, index) => (line === "packages:" ? [index] : []));
+  if (starts.length === 0) {
     throw new Error("pnpm-lock.yaml has no packages: block to read.");
   }
   const locked = new Set();
-  for (const line of lines.slice(start + 1)) {
-    if (line !== "" && !line.startsWith("  ")) break;
-    const match = /^ {2}(?<id>@?[^\s:]+):$/u.exec(line);
-    if (match) locked.add(match.groups.id);
+  for (const start of starts) {
+    for (const line of lines.slice(start + 1)) {
+      if (line !== "" && !line.startsWith("  ")) break;
+      const match = /^ {2}(?<id>@?[^\s:]+):$/u.exec(line);
+      if (match) locked.add(match.groups.id);
+    }
   }
   return locked;
 }
