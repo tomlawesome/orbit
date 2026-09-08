@@ -1,5 +1,6 @@
 import { goto } from "$app/navigation";
 import { activeHousehold, applyCommand } from "$lib/data/workspace.js";
+import { screenScope } from "$lib/teardown.js";
 
 /**
  * The new-entry form's behaviour, carried across from design/v19/create-v3.html
@@ -35,14 +36,7 @@ import { activeHousehold, applyCommand } from "$lib/data/workspace.js";
  *      scrim survived a trip to /create").
  */
 export function mountCreate() {
-  const controller = new AbortController();
-  /**
-   * @param {EventTarget | null | undefined} target
-   * @param {string} type
-   * @param {(event: any) => void} handler
-   */
-  const on = (target, type, handler) =>
-    target?.addEventListener(type, handler, { signal: controller.signal });
+  const { on, teardown } = screenScope();
 
   const card = /** @type {HTMLElement} */ (document.getElementById("card"));
   const disclose = /** @type {HTMLElement} */ (document.getElementById("disclose"));
@@ -240,7 +234,7 @@ export function mountCreate() {
   card.dataset.ready = "true";
 
   return () => {
-    controller.abort();
+    teardown();
     delete card.dataset.ready;
     document.body.classList.remove("doc");
   };

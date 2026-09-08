@@ -520,8 +520,10 @@
   body.quiet circle[fill="url(#danger4)"]{opacity:0}
   body.quiet .sky{opacity:1}
   body.quiet .sky .near{animation-duration:80s}
-  body.quiet .sky .near circle{animation:twinkle 3.6s ease-in-out infinite alternate}
-  @keyframes twinkle{from{opacity:.35}to{opacity:.95}}
+  /* the curve is $lib/atmosphere.css's (#445); quiet's range is its own —
+     these are the nearest stars on the brightest sky in the product */
+  body.quiet .sky .near circle{--tw-min:.35;--tw-max:.95;
+                               animation:twinkle 3.6s ease-in-out infinite alternate}
   .meteor{position:fixed;width:130px;height:1px;z-index:1;opacity:0;pointer-events:none;
           background:linear-gradient(90deg,transparent,#f4f0ff);transform:rotate(-32deg)}
   body.quiet .meteor{animation:meteor 7s linear infinite}

@@ -15,6 +15,7 @@
  *      Inline handlers need their functions to be globals; a module has none.
  */
 import { fillStarTiles } from "$lib/sky.js";
+import { screenScope } from "$lib/teardown.js";
 import { placeGalaxy } from "./placement.js";
 import { mountSkies } from "./skies.js";
 import { seedFromWorkspace } from "$lib/sky.js";
@@ -42,34 +43,19 @@ export const sunHref = (id) => `/household/${encodeURIComponent(id)}`;
  */
 export function mountHome({ galaxy, primary, fixtures = false, workspace = "" }) {
   /*
-   * Shadows the global so every bare addEventListener() below — the mockup's
-   * own keydown, scroll and resize handlers — is registered against this
-   * controller and torn down with the screen. The mockup's code is unchanged;
-   * it simply resolves a different binding.
+   * The binder, the timer set and the teardown are $lib/teardown.js's (#445):
+   * create and the pocket had each written their own near-copy of this, and
+   * home carried two — one for the window, one for elements. A teardown that
+   * is nearly the same in four places is one that stops being the same.
+   *
+   * `addEventListener` shadows the global, so every bare addEventListener()
+   * below — the mockup's own keydown, scroll and resize handlers — registers
+   * against this scope and is torn down with the screen; the mockup's code is
+   * unchanged, it simply resolves a different binding. `later` tracks the
+   * timers, because a flight that lands after unmount writes to nodes that
+   * are gone.
    */
-  const controller = new AbortController();
-  /** @type {(type: string, handler: (event: any) => void, options?: any) => void} */
-  const addEventListener = (type, handler, options) =>
-    window.addEventListener(type, handler, {
-      ...(typeof options === "object" ? options : null),
-      signal: controller.signal,
-    });
-
-  /*
-   * A mockup is one document per screen, so leaving it destroys everything the
-   * page wrote. Here <body> and the stylesheets outlive the screen, so
-   * anything home writes outside its own subtree has to be handed back on the
-   * way out or it follows the reader to the next screen - which is how a
-   * blurred scrim survived a trip to /create. Timers are tracked for the same
-   * reason: a flight that lands after unmount writes to nodes that are gone.
-   */
-  const timers = new Set();
-  /** @type {(fn: () => void, ms: number) => ReturnType<typeof setTimeout>} */
-  const later = (fn, ms) => {
-    const id = setTimeout(() => { timers.delete(id); fn(); }, ms);
-    timers.add(id);
-    return id;
-  };
+  const { on, onWindow: addEventListener, later, signal, teardown } = screenScope();
 
 
   /* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
@@ -525,7 +511,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
 
     doc.classList.toggle("descending", s > 0);
   }
-  still.addEventListener("change", readDescent, { signal: controller.signal });
+  still.addEventListener("change", readDescent, { signal });
   let descentQueued = false;
   addEventListener("scroll", () => {
     if (descentQueued) return;
@@ -567,11 +553,8 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     onGalaxy: subscribe(galaxyWatchers),
   });
 
-  /* ---- wiring that replaces the mockup's inline on* attributes ---- */
-  /** @type {(target: Element | null | undefined, type: string, handler: (event: any) => void) => void} */
-  const on = (target, type, handler) =>
-    target?.addEventListener(type, handler, { signal: controller.signal });
-
+  /* ---- wiring that replaces the mockup's inline on* attributes ----
+     `on` comes from the screen scope at the top of this function. */
   const star = /** @type {HTMLElement} */ (document.getElementById("nstar"));
 
   on(document.querySelector("button.orb"), "click", (/** @type {MouseEvent} */ event) =>
@@ -617,9 +600,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
    * per visit), the flight timers, and the group observer.
    */
   return () => {
-    controller.abort();
-    for (const id of timers) clearTimeout(id);
-    timers.clear();
+    teardown();
     observer.disconnect();
     callout.remove();
     /* the pack sky goes before the document is handed back, so its own teardown

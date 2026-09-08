@@ -9,9 +9,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
      transition:opacity .4s;z-index:0}
 .inbox-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
-.inbox-page .sky .far{animation:inbox-drift 400s linear infinite}
-.inbox-page .sky .near{animation:inbox-drift 195s linear infinite}
-@keyframes inbox-drift{to{transform:translateX(-1600px)}}
+.inbox-page .sky .far{animation:driftf 400s linear infinite}
+.inbox-page .sky .near{animation:driftn 195s linear infinite}
 .inbox-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
 [data-theme=atlas] .inbox-page .vignette,[data-theme=dawn] .inbox-page .vignette{background:none}
