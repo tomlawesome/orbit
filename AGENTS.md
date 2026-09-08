@@ -65,9 +65,12 @@ Pipelines: every pipeline pays for the risk its own diff carries. `classify`
 decides, and a merge request is no exception (#883) -- the image build and the
 whole acceptance stage run only when the diff can reach them. Two events run
 everything regardless: a push to `dev`, `preview`, `main` or `hotfix/*`, and
-the merge request into `main` that gates promotion. A branch pipeline leaves
-the acceptance jobs manual, so play one there to force the full gate on a
-change that warrants it. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts one. Cancelling a
+the merge request into `main` that gates promotion. Two narrow lanes go
+further and name their own job list (#889): a change touching only
+`.gitleaksignore` or the licence allow-list, and one touching only the
+pipeline's own definition. `docs/quality-strategy.md` has the lists. A branch
+pipeline leaves the acceptance jobs manual, so play one there to force the
+full gate on a change that warrants it. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts one. Cancelling a
 pipeline and playing a manual job are refused by the safety hook here, on top
 of the refusals the gitlab-first-migration skill lists.
 `dev`, `preview` and `main` all take push "No one", merge "Maintainers".
@@ -78,6 +81,14 @@ owned by `ai/orbit` and tagged `orbit-build`, that everything needing a
 Docker daemon reaches through `.privileged_runner` (#811). Its `/builds`
 persists between jobs, so a job that must start clean says so (#813, and the
 data-root wipe in `.docker_in_job`).
+
+Three facts about that host live in its `config.toml` and root cron, not here.
+`dns` is 9.9.9.9 (owner, 2026-09-05), superseding `.dind_service`'s 2026-09-04
+note. `pull_policy = ["if-not-present"]` covers a job's own image but not a
+service's, which needs its own line in `.gitlab-ci.yml`. And
+`/usr/local/sbin/runner-docker-tidy.sh` prunes containers, volumes, untagged
+images and the builder cache (3 GB reserve) at 03:15 nightly, logging to
+`/var/log/runner-docker-tidy.log`; pinned job images survive it (owner, 2026-09-08).
 
 A push starts a pipeline only on `dev`, `preview`, `main` and `hotfix/*`; a
 working branch is tested by its merge request, so open the MR straight after

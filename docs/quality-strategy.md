@@ -170,6 +170,35 @@ and for the authoritative protected push. Required higher-cost job identities
 are skipped at job level on pull requests so branch protection still receives
 terminal check results; workflow-level path filters are not used.
 
+### Narrow lanes on GitLab
+
+`scripts/classify-changed-paths.mjs` also reports a *lane*: a verdict on the
+whole change rather than on one path. It holds only while every changed file
+belongs to it, and one file outside puts the change back in the ordinary
+classified pipeline. `.gitlab-ci.yml`'s `orbit_lane_admits` holds the job list
+for each.
+
+| Lane | The change touches only | Jobs it runs |
+| --- | --- | --- |
+| documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads |
+| ignore/policy (#889) | `.gitleaksignore`, `supply-chain/licence-policy.yml` | `classify`, `gitleaks`, `licence_policy`, `supply_chain_source` |
+| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `gitleaks`, `supply_chain_source` |
+
+The documentation lane is the risk classifier's `fast` result and predates the
+other two: it shortens the pipeline by axis, so a job still runs when its own
+axis asks for it. The two lanes below it are lists, and a job the list does not
+name does not run whatever its axis says.
+
+A lane is a merge-request economy and never a relaxation of the delivery gate.
+The `classify` job forces `full` on a push to `dev`, `preview`, `main` or
+`hotfix/*` and on the merge request into `main`, so everything that promotes
+still runs the whole pipeline. Everywhere else — every ordinary merge request
+included — the classifier decides, which is what #883 restored.
+
+`scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
+those scripts are the acceptance stage's own checks, so a change to one is not
+exercised until it merges to `dev`, where every pipeline runs everything again.
+
 ### Launcher install compatibility
 
 `launcher_install_compat` (`.gitlab-ci.yml`) installs Orbit through a real
