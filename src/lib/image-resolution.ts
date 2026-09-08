@@ -28,6 +28,7 @@ export type ImageResolutionFailureReason =
   | "revision-invalid"
   | "version-inspect-failed"
   | "version-invalid"
+  | "version-mismatch"
   | "banner-failed";
 
 export interface ImageResolutionFailure {
@@ -99,10 +100,12 @@ export interface ImageIdentityAdapter {
 /**
  * resolveImageIdentity (install.sh:1264-1310): resolves the requested
  * channel to an immutable digest, reads the source revision (#42) and
- * semantic version (#43) OCI labels off the resolved image, and requires the
- * image's own entrypoint to actually render its banner (#44) before any
- * deployment asset is fetched or written — a digest that pulls but can't
- * execute its own entrypoint is rejected up front.
+ * semantic version (#43) OCI labels off the resolved image, requires a
+ * semver-pinned channel to match the image's own embedded version
+ * (ADR-0016, install.sh:1352-1358), and requires the image's own entrypoint
+ * to actually render its banner (#44) before any deployment asset is
+ * fetched or written — a digest that pulls but can't execute its own
+ * entrypoint is rejected up front.
  */
 export function resolveImageIdentity(
   imageRepository: string,
@@ -144,6 +147,18 @@ export function resolveImageIdentity(
   const imageVersion = validateVersionLabel(versionLabel);
   if (imageVersion === undefined) {
     return failure("version-invalid", "The published image does not record a valid semantic version.");
+  }
+
+  // A tag can be moved; the label baked into a digest cannot. So when the
+  // operator pinned a version tag as the channel, require the image's own
+  // embedded version to name that same release — an image merely parked at
+  // a version tag is not evidence that it *is* that version (ADR-0016,
+  // install.sh:1352-1358).
+  if (SEMVER_PATTERN.test(channel) && imageVersion !== channel) {
+    return failure(
+      "version-mismatch",
+      `The published image's embedded version (${imageVersion}) does not match the requested version tag (${channel}).`,
+    );
   }
 
   if (!adapter.runBanner(resolvedReference)) {
