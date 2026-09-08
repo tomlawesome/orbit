@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CI_LANE,
   CI_RISK,
   ciRequirements,
+  classifyCiLane,
   classifyCiRisk,
   isNonExecutablePath,
   pathRisk,
@@ -180,6 +182,9 @@ describe("changed-path CI risk classification", () => {
       productionDependencyGraphChanged: false,
     })).toEqual({
       risk: CI_RISK.FAST,
+      // A lockfile is in neither narrow lane, so the whole pipeline is on
+      // offer and the axes below decide which of it runs (#889).
+      lane: CI_LANE.FULL,
       build: true,
       integration: false,
       system: false,
@@ -196,12 +201,46 @@ describe("changed-path CI risk classification", () => {
     expect(touchesLauncherInstallCompat(["scripts/install.sh"])).toBe(true);
     expect(touchesLauncherInstallCompat([".gitlab-ci.yml"])).toBe(true);
     expect(touchesLauncherInstallCompat(["docs/architecture.md", "scripts/install.sh"])).toBe(true);
-    expect(touchesLauncherInstallCompat(["scripts/configure.sh"])).toBe(false);
+    expect(touchesLauncherInstallCompat(["src/server/documents/scanner.ts"])).toBe(false);
     expect(touchesLauncherInstallCompat(["README.md"])).toBe(false);
     expect(touchesLauncherInstallCompat([])).toBe(true);
     expect(touchesLauncherInstallCompat(undefined)).toBe(true);
     expect(ciRequirements(["scripts/install.sh"]).launcherCompat).toBe(true);
     expect(ciRequirements(["README.md"]).launcherCompat).toBe(false);
+  });
+
+  /*
+   * Since !895 (ADR-0019) the image carries the deployment assets, so
+   * install.sh takes its helpers from the digest under test rather than from a
+   * source revision, and every bundled asset is now inside what this job
+   * proves. The list is the Dockerfile's own: the two compose files, the
+   * example environment file, the Tika configuration and the seven helper
+   * scripts it copies to ./deploy/scripts/, plus the Dockerfile and
+   * .dockerignore that decide what reaches the build at all.
+   */
+  it("arms launcher_install_compat for every asset the image now bundles (ADR-0019)", () => {
+    for (const path of [
+      "Dockerfile",
+      ".dockerignore",
+      "docker-compose.yml",
+      "docker-compose.mail.yml",
+      ".env-orbit.example",
+      "config/tika-config.json",
+      "scripts/configure.sh",
+      "scripts/installer-ui.sh",
+      "scripts/configuration.sh",
+      "scripts/backup.sh",
+      "scripts/restore.sh",
+      "scripts/repair.sh",
+      "scripts/engine-check.sh",
+    ]) {
+      expect(touchesLauncherInstallCompat([path])).toBe(true);
+      expect(ciRequirements([path]).launcherCompat).toBe(true);
+    }
+    // Not bundled, so still outside this job's reach: the acceptance-only
+    // compose overlays and the container's own entrypoint.
+    expect(touchesLauncherInstallCompat(["docker-compose.acceptance.yml"])).toBe(false);
+    expect(touchesLauncherInstallCompat(["scripts/container-entrypoint.sh"])).toBe(false);
   });
 
   it("builds executable and dependency-snapshot changes but not inert fast changes", () => {
@@ -230,6 +269,61 @@ describe("changed-path CI risk classification", () => {
     expect(classifyCiRisk(undefined)).toBe(CI_RISK.SYSTEM);
     expect(classifyCiRisk(null)).toBe(CI_RISK.SYSTEM);
     expect(pathRisk("")).toBe(CI_RISK.SYSTEM);
+  });
+
+  /*
+   * The two narrow lanes (#889). A lane is a verdict on the whole change, not
+   * on a path: it holds only while every changed path belongs to it, and one
+   * file outside puts the change back in the ordinary classified pipeline.
+   * Which jobs each lane runs is `orbit_lane_admits` in .gitlab-ci.yml.
+   */
+  it("puts an ignore-file or licence-policy change in the ignore/policy lane", () => {
+    expect(classifyCiLane([".gitleaksignore"])).toBe(CI_LANE.IGNORE_POLICY);
+    expect(classifyCiLane(["supply-chain/licence-policy.yml"])).toBe(CI_LANE.IGNORE_POLICY);
+    expect(classifyCiLane([".gitleaksignore", "supply-chain/licence-policy.yml"]))
+      .toBe(CI_LANE.IGNORE_POLICY);
+    expect(ciRequirements([".gitleaksignore"]).lane).toBe(CI_LANE.IGNORE_POLICY);
+  });
+
+  it("puts a change to the pipeline's own definition in the CI lane", () => {
+    for (const path of [
+      ".gitlab-ci.yml",
+      "scripts/ci/scan-image.sh",
+      "scripts/ci/licence-policy.mjs",
+      "scripts/classify-changed-paths.mjs",
+      "scripts/classify-changed-paths.test.mjs",
+      "scripts/gitlab-ci-lanes.test.mjs",
+    ]) {
+      expect(classifyCiLane([path])).toBe(CI_LANE.CI);
+    }
+    expect(classifyCiLane([".gitlab-ci.yml", "scripts/ci/scan-image.sh"])).toBe(CI_LANE.CI);
+    expect(ciRequirements([".gitlab-ci.yml"]).lane).toBe(CI_LANE.CI);
+  });
+
+  it("sends any change with a file outside a lane down the full pipeline", () => {
+    // One file outside is enough, whichever lane the rest of the diff is in.
+    expect(classifyCiLane([".gitleaksignore", "scripts/install.sh"])).toBe(CI_LANE.FULL);
+    expect(classifyCiLane([".gitlab-ci.yml", "src/server/documents/scanner.ts"])).toBe(CI_LANE.FULL);
+    expect(classifyCiLane(["docs/x.md", "scripts/install.sh"])).toBe(CI_LANE.FULL);
+    // The two lanes do not combine: a diff spanning both is in neither.
+    expect(classifyCiLane([".gitleaksignore", ".gitlab-ci.yml"])).toBe(CI_LANE.FULL);
+    // Documentation is its own economy already -- the fast risk lane -- and
+    // is not one of these two.
+    expect(classifyCiLane(["docs/architecture.md"])).toBe(CI_LANE.FULL);
+    expect(classifyCiRisk(["docs/architecture.md"])).toBe(CI_RISK.FAST);
+  });
+
+  it("fails safe to the full pipeline without a usable comparison", () => {
+    expect(classifyCiLane([])).toBe(CI_LANE.FULL);
+    expect(classifyCiLane(undefined)).toBe(CI_LANE.FULL);
+    expect(classifyCiLane(null)).toBe(CI_LANE.FULL);
+    expect(classifyCiLane([".gitleaksignore", ""])).toBe(CI_LANE.FULL);
+    expect(classifyCiLane([".gitleaksignore", "   "])).toBe(CI_LANE.FULL);
+  });
+
+  it("normalises separators before deciding a lane", () => {
+    expect(classifyCiLane(["scripts\\ci\\scan-image.sh"])).toBe(CI_LANE.CI);
+    expect(classifyCiLane(["supply-chain\\licence-policy.yml"])).toBe(CI_LANE.IGNORE_POLICY);
   });
 
   it("retains the executable compatibility predicate", () => {

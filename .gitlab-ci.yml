@@ -172,10 +172,59 @@ variables:
 .reach_helpers: &reach_helpers |
   orbit_on_delivery_branch() {
     case "${CI_COMMIT_BRANCH:-}" in
-      dev | preview | hotfix/*) return 0 ;;
+      dev | preview | main | hotfix/*) return 0 ;;
     esac
     return 1
   }
+  # The two events that run everything whatever the diff holds: a push to a
+  # delivery branch, and the merge request into `main`, which is the
+  # preview -> main promotion gate. Everywhere else -- every ordinary merge
+  # request included -- the classifier's verdict decides (#883). A merge
+  # request is not itself a reason to pay for the whole gate: it is the
+  # ordinary way work arrives here, so paying full price for one meant the
+  # classifier never saved anything where it mattered most.
+  orbit_full_gate() {
+    orbit_on_delivery_branch && return 0
+    [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ]
+  }
+  # The narrow lanes (#889). A change confined to the ignore/policy files, or
+  # to the pipeline's own definition, runs a named handful of jobs and nothing
+  # else; every other change is `full`, which admits everything and leaves the
+  # classifier's per-job axes to decide as before. `classify` has already
+  # collapsed ORBIT_LANE to `full` for a delivery push and for the merge
+  # request into `main`, so this never re-checks the branch.
+  #
+  #   ignore_policy  .gitleaksignore, supply-chain/licence-policy.yml
+  #                  -> gitleaks, licence_policy, supply_chain_source
+  #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
+  #                  tests that read this file
+  #                  -> fast, gitleaks, supply_chain_source
+  #
+  # `gitleaks` is in both and needs no call: it starts before `classify` and so
+  # never sees ORBIT_LANE. Membership is unconditional -- a member runs whether
+  # or not its own axis would also have asked for it, which is the point of a
+  # lane naming the job.
+  orbit_lane_admits() {
+    case "${ORBIT_LANE:-full}:$1" in
+      full:*) return 0 ;;
+      ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:supply_chain_source) return 0 ;;
+      ci:fast | ci:gitleaks | ci:supply_chain_source) return 0 ;;
+    esac
+    echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
+    return 1
+  }
+
+# The system-lane reach test itself, so the jobs that share it share one copy.
+# Put it after *reach_helpers in a job's `script:`; it ends the job
+# successfully, and every later script entry with it, because the runner
+# executes all of them in one shell. It defers to a narrow lane: a job the
+# lane named runs, and one it did not has already stopped at
+# `orbit_lane_admits`.
+.system_lane_gate: &system_lane_gate |
+  if [ "${ORBIT_LANE:-full}" = "full" ] && ! orbit_full_gate && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
+    echo "skipped: no system-risk change, and this is neither a delivery push nor the promotion gate"
+    exit 0
+  fi
 
 # The scripts/ci steps were extracted from a GitHub workflow, so they hand a
 # value to a later step by appending a `key=value` line to $GITHUB_OUTPUT. A
@@ -234,14 +283,22 @@ variables:
     # 2026-09-04), so the host is the one place it is written down; a public
     # fallback in this file would send lookups off the network instead of
     # failing where the operator can see them (#810).
-    - docker:29-dind@sha256:5efed980cba3fc126cf54e21a5a6ff8849d05b6e0623d6e7612f48e9cd6cd17e
+    #
+    # Pinned by digest and pulled once, like every other image here: the
+    # runner's own `pull_policy = ["if-not-present"]` covers the job image
+    # and not a service's, so `always` was still costing about 20 seconds a
+    # job to re-fetch bytes that cannot have changed (#889).
+    - name: docker:29-dind@sha256:5efed980cba3fc126cf54e21a5a6ff8849d05b6e0623d6e7612f48e9cd6cd17e
+      pull_policy: if-not-present
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
 
 .dind:
   extends: .dind_service
-  image: docker:29-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
+  image:
+    name: docker:29-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
+    pull_policy: if-not-present
 
 # The daemon inside the job's own container, for the two jobs that stand up a
 # real deployment and then talk to it.
@@ -426,14 +483,76 @@ classify:
         node scripts/classify-changed-paths.mjs
     - |
       set -eu
+      # Runs in a command substitution, so its failure has to reach the caller
+      # as an exit status and its complaint has to go to stderr: on stdout the
+      # message would simply become the value.
+      classify_output() {
+        value="$(sed -n "s/^$1=//p" classify-output.txt | tail -1)"
+        [ -n "$value" ] || { echo "the classifier emitted no $1" >&2; exit 1; }
+        printf '%s' "$value"
+      }
+
+      # The `ci: acceptance` label on a merge request asks for the whole
+      # pipeline whatever the diff holds (#572). Everything else here reads
+      # the diff, so until now a merge request could be made cheaper and never
+      # more expensive: the lanes and the #883 skips both decide from what
+      # changed, and forcing the gate meant a branch pipeline and playing a
+      # manual job. This is the opt-in half, and the label name is the one
+      # #572 chose. GitLab joins the labels with commas and adds no spaces;
+      # commas go on both ends so a pattern matches a whole label rather than
+      # part of a longer one, and the sed tolerates a space after a comma in
+      # case that ever changes.
+      labels="$(printf ',%s,' "${CI_MERGE_REQUEST_LABELS:-}" | sed 's/, */,/g')"
+      forced=false
+      case "$labels" in
+        *",ci: acceptance,"*) forced=true ;;
+      esac
+      if [ "$forced" = true ]; then
+        echo "the merge request is labelled 'ci: acceptance': running the full pipeline whatever the diff holds (#572)"
+      fi
+
+      # The narrow lanes (#889) are a merge-request economy, never a
+      # relaxation of the delivery gate. A push to a delivery branch and the
+      # merge request into `main` both run everything, so the lane collapses
+      # to `full` there and no later job has to re-check the branch. The label
+      # collapses it the same way.
+      lane="$(classify_output lane)"
+      case "${CI_COMMIT_BRANCH:-}" in
+        dev | preview | main | hotfix/*) lane=full ;;
+      esac
+      if [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ] || [ "$forced" = true ]; then
+        lane=full
+      fi
+
       : > classify.env
-      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_LICENCE:licence ORBIT_LAUNCHER_COMPAT:launcher_compat; do
+      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_LICENCE:licence; do
         name="${pair%%:*}"
         key="${pair##*:}"
-        value="$(sed -n "s/^${key}=//p" classify-output.txt | tail -1)"
-        [ -n "$value" ] || { echo "the classifier emitted no ${key}"; exit 1; }
+        # Assigned before it is printed: `set -e` sees a failed command
+        # substitution in an assignment, and not in an argument to printf.
+        value="$(classify_output "$key")"
+        # The label overrides every axis, not just the expensive ones: asking
+        # for the full pipeline has to mean all of it, or the answer it gives
+        # back is a different pipeline again.
+        if [ "$forced" = true ]; then
+          if [ "$name" = ORBIT_RISK ]; then value=system; else value=true; fi
+        fi
         printf '%s=%s\n' "$name" "$value" >> classify.env
       done
+
+      # `launcher_install_compat` watches scripts/install.sh and its own
+      # definition in this file, which is why .gitlab-ci.yml is one of the two
+      # paths that arm it. In the CI lane that file is all that changed, and
+      # the lane does not run the job -- said here rather than in the job,
+      # which has no lane test of its own.
+      launcher_compat="$(classify_output launcher_compat)"
+      if [ "$forced" = true ]; then
+        launcher_compat=true
+      elif [ "$lane" = "ci" ]; then
+        launcher_compat=false
+      fi
+      printf 'ORBIT_LAUNCHER_COMPAT=%s\n' "$launcher_compat" >> classify.env
+      printf 'ORBIT_LANE=%s\n' "$lane" >> classify.env
       cat classify.env
   artifacts:
     reports:
@@ -481,6 +600,8 @@ fast:
     # then runs, and outside it so `eslint .` never sees it. See .drop_to_node.
     COREPACK_HOME: $CI_BUILDS_DIR/.corepack
   script:
+    - *reach_helpers
+    - orbit_lane_admits fast || exit 0
     - *docker_cli
     - pnpm install --frozen-lockfile
     # Everything from here runs unprivileged, because two of these tests assert
@@ -504,8 +625,13 @@ fast:
     when: on_success
 
 # Blocking, like the workflow's job: Orbit pins its own base image, so a stale
-# base is a fixable condition rather than one to wait out. `needs: []` because
-# the check has nothing to do with what changed -- it can start immediately.
+# base is a fixable condition rather than one to wait out.
+#
+# It waited on nothing and started immediately, because the check has nothing
+# to do with what changed. It now waits for `classify`, for the one thing that
+# is about what changed: a narrow lane (#889) does not run it, and a job with
+# no `needs` on classify never sees ORBIT_LANE. A minute behind classify buys
+# skipping a ten-minute daemon job on every ignore-file and CI-only change.
 base_image:
   stage: fast
   extends: .dind
@@ -513,8 +639,12 @@ base_image:
   rules:
     - *not_scheduled
     - when: on_success
-  needs: []
+  needs:
+    - job: classify
+      artifacts: true
   script:
+    - *reach_helpers
+    - orbit_lane_admits base_image || exit 0
     # The check reads the first FROM with sed, resolves the tag with
     # `docker manifest inspect`, parses the result with python3 and runs
     # `apk upgrade --simulate` inside the pinned image.
@@ -550,12 +680,10 @@ supply_chain_source:
       artifacts: true
   script:
     - *reach_helpers
+    - orbit_lane_admits supply_chain_source || exit 0
+    - *system_lane_gate
     - *apk_retry
     - |
-      if ! orbit_on_delivery_branch && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
-        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
-        exit 0
-      fi
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       # A pin lives in the file that uses it and in the policy that records it.
@@ -614,8 +742,12 @@ licence_policy:
       artifacts: true
   allow_failure: false
   script:
+    - *reach_helpers
+    - orbit_lane_admits licence_policy || exit 0
     - |
-      if [ "${ORBIT_LICENCE:-true}" != "true" ]; then
+      # The ignore/policy lane (#889) names this job, and a lane's word is
+      # final: only the `full` lane consults the classifier's licence axis.
+      if [ "${ORBIT_LANE:-full}" = "full" ] && [ "${ORBIT_LICENCE:-true}" != "true" ]; then
         echo "skipped: no dependency or licence-policy change"
         exit 0
       fi
@@ -625,10 +757,19 @@ licence_policy:
 # Scans every image pinned in .github/supply-chain-policy.json, not just the
 # one Orbit builds: an operator's deployment runs the sidecars too (#647).
 #
-# Reporting-only, exactly as `continue-on-error` makes it on GitHub: every
-# pinned sidecar currently has fixable HIGH findings with no clean upstream
-# digest to re-pin to. When the pins scan clean, delete `allow_failure` so a
-# newly published advisory against a pinned digest fails the job.
+# Findings are reporting-only, as `continue-on-error` makes them on GitHub:
+# every pinned sidecar currently has fixable HIGH findings with no clean
+# upstream digest to re-pin to. When the pins scan clean, delete `allow_failure`
+# so a newly published advisory against a pinned digest fails the job.
+#
+# The scanner failing to *run* is not reporting-only, and used to be treated as
+# if it were (#810). `allow_failure: true` covered every exit status, so when
+# the runner host filled up and Trivy could not download its vulnerability
+# database the job went yellow with nothing scanned, and the pipeline stayed
+# green -- pipelines 636 and 637, "no space left on device". `exit_codes: [3]`
+# narrows the permission to the one status the script uses for findings; a
+# failed database download, a failed image pull or a scan that errored exits
+# with its own status and fails the job.
 #
 # Stays on big: it peaks at ~4.9 GB, close to the 6 GB light cap.
 sidecar_images:
@@ -641,18 +782,18 @@ sidecar_images:
   rules:
     - *not_scheduled
     - when: on_success
-  allow_failure: true
+  allow_failure:
+    exit_codes:
+      - 3
   needs:
     - job: classify
       artifacts: true
   script:
     - *reach_helpers
+    - orbit_lane_admits sidecar_images || exit 0
+    - *system_lane_gate
     - *apk_retry
     - |
-      if ! orbit_on_delivery_branch && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
-        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
-        exit 0
-      fi
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       mkdir -p .orbit-supply-chain/sidecar-scans
@@ -696,6 +837,13 @@ sidecar_images:
             rm -rf "$cache"
           ' _
       trivy version --format json > .orbit-supply-chain/trivy-version.json
+      # Two different failures reach here, and only one of them is soft. The
+      # evaluation writes its evidence file and then exits 1 for blocked
+      # findings; every other way it exits non-zero -- a missing or unreadable
+      # scan report, a policy file it cannot parse -- throws before that file
+      # is written. The file's presence is what tells "ran, and found things"
+      # from "could not run". Removed first so a stale one cannot answer.
+      rm -f .orbit-supply-chain/sidecar-evidence.json
       set +e
       node scripts/sidecar-image-evidence.mjs evaluate \
         --policy .github/supply-chain-policy.json \
@@ -705,7 +853,16 @@ sidecar_images:
       policy_status=$?
       set -e
       rm -rf .orbit-supply-chain/sidecar-scans
-      exit "$policy_status"
+      if [ "$policy_status" -eq 0 ]; then
+        exit 0
+      fi
+      if [ ! -s .orbit-supply-chain/sidecar-evidence.json ]; then
+        echo "the sidecar scan could not be evaluated: this is not a findings failure"
+        exit 1
+      fi
+      # The one status `allow_failure` accepts, and nothing else in this job
+      # produces it: trivy and node exit 1 on error, xargs 1 or 123-127.
+      exit 3
   artifacts:
     name: orbit-supply-chain-sidecars
     paths:
@@ -808,6 +965,8 @@ fidelity:
       artifacts: true
     - job: fast
   script:
+    - *reach_helpers
+    - orbit_lane_admits fidelity || exit 0
     - |
       if [ "${ORBIT_WEB:-true}" != "true" ]; then
         echo "skipped: no change to the v19 front end"
@@ -869,11 +1028,9 @@ integration:
     OIDC_CLIENT_SECRET: integration-only-secret
   script:
     - *reach_helpers
+    - orbit_lane_admits integration || exit 0
+    - *system_lane_gate
     - |
-      if ! orbit_on_delivery_branch && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
-        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
-        exit 0
-      fi
       if [ "${ORBIT_INTEGRATION:-true}" != "true" ]; then
         echo "skipped: no integration-risk change"
         exit 0
@@ -907,6 +1064,9 @@ build_image:
     GIT_DEPTH: 0
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
   script:
+    - *reach_helpers
+    - orbit_lane_admits build_image || exit 0
+    - *system_lane_gate
     - *apk_retry
     - apk_add bash git nodejs
     - |
@@ -974,6 +1134,17 @@ build_image:
       printf 'ORBIT_RELEASE_STAGE=%s\n' "$publication_channel" >> build.env
       cat build.env
       docker save "$ORBIT_CI_IMAGE" -o image.tar
+  after_script:
+    # This job's declared artifacts are what `smoke`, `acceptance`,
+    # `repair_journeys` and `supply_chain_image` read, and the runner reports
+    # an upload error on an otherwise green job when a declared artifact is
+    # absent -- which is what a skip leaves behind. Nothing reads these
+    # placeholders: all four of those jobs skip on the same condition. They
+    # exist so the skip is quiet. A failed build uploads nothing at all, since
+    # the artifacts are `on_success`.
+    - |
+      [ -f image.tar ] || : > image.tar
+      [ -f build.env ] || printf 'ORBIT_IMAGE_BUILT=false\n' > build.env
   artifacts:
     paths:
       - image.tar
@@ -1025,6 +1196,9 @@ supply_chain_image:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - orbit_lane_admits supply_chain_image || exit 0
+    - *system_lane_gate
     - *docker_in_job
     - mkdir -p "$RUNNER_TEMP"
     - docker load --input image.tar
@@ -1088,6 +1262,9 @@ smoke:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - orbit_lane_admits smoke || exit 0
+    - *system_lane_gate
     - *docker_in_job
     - npm install --global "$(node -p "require('./package.json').packageManager")"
     - pnpm install --frozen-lockfile
@@ -1185,6 +1362,9 @@ acceptance:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - orbit_lane_admits acceptance || exit 0
+    - *system_lane_gate
     - *docker_in_job
     - *step_outputs
     - |
@@ -1317,6 +1497,9 @@ repair_journeys:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - orbit_lane_admits repair_journeys || exit 0
+    - *system_lane_gate
     - *docker_in_job
     - docker load --input image.tar
     - docker tag "$ORBIT_CI_IMAGE" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
