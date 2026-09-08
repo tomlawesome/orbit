@@ -177,13 +177,13 @@ orbit-launcher build against the merge request's own `scripts/install.sh`.
 Green means only that: the merge request's `install.sh` still honours its
 contract with orbit-launcher (`--plain`,
 `--install|--update|--repair`). It does not mean the launcher can drive the
-rest of a deployment, because `install.sh` fetches its helpers —
-`configure.sh`, `installer-ui.sh` and the rest of `deployment_assets` — from
-the resolved image's own source revision, not from the commit under test
-(`scripts/install.sh:1320`, `:1348`, `:1447`), so a merge request changing a
-helper is invisible to this gate. Their line grammars are enforced instead per
-merge request, against `docs/engine-events.md`, by `scripts/engine-events.test.mjs`
-(the `phase=...` event stream) and `scripts/configure.test.mjs` (`configure.sh
+rest of a deployment, because `install.sh` takes its helpers —
+`configure.sh`, `installer-ui.sh` and the rest of `deployment_assets` — out of
+the image it resolved, not from the commit under test
+(`scripts/install.sh:1368-1379`, `:1473-1486`), so what this gate proves about
+a changed helper depends on which image the job installs. Their line grammars
+are enforced instead per merge request, against `docs/engine-events.md`, by
+`scripts/engine-events.test.mjs` (the `phase=...` event stream) and `scripts/configure.test.mjs` (`configure.sh
 --check`'s readiness lines). Full pairing of changed helpers with a real image
 is proven only at the `preview` → `main` gate. Ruling: #606; follow-up
 (pairing changed helpers against the acceptance rig's candidate image):

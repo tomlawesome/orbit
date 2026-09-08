@@ -4,10 +4,11 @@
 # Runs the working tree's install.sh unmocked — real Docker, real Compose,
 # real PostgreSQL and ClamAV, real health checks — from a clean
 # pre-provisioned directory to a healthy /api/health, then asserts
-# operator-facing guarantees from docs/installer-guarantees.md. Only the two
-# network fetch paths are intercepted (a PATH curl shim serving working-tree
-# deployment assets and a fixture OIDC discovery document), so no external
-# GitHub/registry state can influence the result.
+# operator-facing guarantees from docs/installer-guarantees.md. The one
+# network path intercepted is OIDC discovery (a PATH curl shim serving a
+# fixture document); the deployment assets come out of the image the
+# installer resolved, exactly as they do for an operator (ADR-0019), so no
+# external GitHub/registry state can influence the result.
 #
 # Asserted guarantees (docs/installer-guarantees.md):
 #   Part 1 / install.sh #6      unattended pre-provisioning contract
@@ -148,10 +149,12 @@ negative_scenarios() {
   note "negative: extraneous target entry refused (install.sh #7)"
 }
 
-# --- shim: the only two intercepted network paths --------------------------
+# --- shims: the one intercepted network path, and the assets-phase gate ----
 
 write_shim() {
-  local revision="$1"
+  local real_docker
+  real_docker="$(command -v docker)" || fail "docker is required"
+  [[ "$real_docker" != "$workdir/shim/docker" ]] || fail "the docker shim resolved to itself"
   mkdir -p "$workdir/shim"
   cat > "$workdir/discovery.json" <<EOF
 {
@@ -167,11 +170,10 @@ write_shim() {
 EOF
   cat > "$workdir/shim/curl" <<SHIM
 #!/usr/bin/env bash
-# Acceptance shim: serves working-tree deployment assets and the fixture
-# OIDC discovery document; every other URL fails closed so an unexpected
-# network dependency surfaces as a test failure.
+# Acceptance shim: serves the fixture OIDC discovery document. Deployment
+# assets do not come over curl any more (ADR-0019), so every other URL fails
+# closed and an unexpected network dependency surfaces as a test failure.
 set -Eeuo pipefail
-asset_base="https://raw.githubusercontent.com/$repository/$revision"
 discovery_url="${issuer}.well-known/openid-configuration"
 output="" write_out="" url=""
 args=("\$@")
@@ -189,20 +191,6 @@ serve() {
   [[ -z "\$write_out" ]] || printf '200'
 }
 case "\$url" in
-  "\$asset_base"/*)
-    # Assets gate (issue #677). When the lifecycle interruption scenario arms
-    # it, the first asset request parks here: announce that the installer is
-    # inside the assets phase, then block until the test releases the FIFO.
-    # The installer physically cannot advance past this curl, so the kill point
-    # is fixed rather than raced against a poll interval.
-    if [[ -e "$workdir/assets-gate.armed" && ! -e "$workdir/assets-gate.reached" ]]; then
-      : > "$workdir/assets-gate.reached"
-      read -r _ < "$workdir/assets-gate.release" || true
-    fi
-    asset="\${url#"\$asset_base"/}"
-    [[ -f "$repo_root/\$asset" ]] || exit 22
-    serve "$repo_root/\$asset"
-    ;;
   "\$discovery_url")
     serve "$workdir/discovery.json"
     ;;
@@ -212,6 +200,26 @@ case "\$url" in
 esac
 SHIM
   chmod 755 "$workdir/shim/curl"
+
+  cat > "$workdir/shim/docker" <<SHIM
+#!/usr/bin/env bash
+# Everything reaches the real docker. The single interception is the assets
+# gate (issue #677): when the lifecycle interruption scenario arms it, the
+# installer's single docker-cp of the bundled deployment assets (ADR-0019)
+# parks here — it announces that the installer is inside the assets phase,
+# then blocks until the test releases the FIFO. The installer physically
+# cannot advance past this call, so the kill point is fixed rather than raced
+# against a poll interval.
+set -Eeuo pipefail
+if [[ "\${1:-}" == "cp" && "\$*" == *":/opt/orbit/deploy/."* ]]; then
+  if [[ -e "$workdir/assets-gate.armed" && ! -e "$workdir/assets-gate.reached" ]]; then
+    : > "$workdir/assets-gate.reached"
+    read -r _ < "$workdir/assets-gate.release" || true
+  fi
+fi
+exec "$real_docker" "\$@"
+SHIM
+  chmod 755 "$workdir/shim/docker"
 }
 
 # --- positive scenario -----------------------------------------------------
@@ -299,7 +307,7 @@ positive_scenario() {
     grep -m1 -oE 'sha256:[0-9a-f]{64}')"
   [[ -n "$digest" ]] || fail "could not capture the pushed digest"
 
-  write_shim "$revision"
+  write_shim
   make_preprovisioned_target
 
   if [[ "$lifecycle_mode" == 1 ]]; then
@@ -310,9 +318,9 @@ positive_scenario() {
     # The kill point is a rendezvous, not a poll (issue #677). Neither a
     # '^phase=assets' log line nor the staging directory can locate it: UI
     # events are queued (installer_ui_event) until load_installer_ui sources
-    # the just-fetched installer-ui.sh, which happens only after every asset
-    # is fetched and bash -n checked, so the assets "starting" event reaches
-    # the log already batched with "completed"; and while the staging
+    # the just-extracted installer-ui.sh, which happens only after the whole
+    # bundle is staged and bash -n checked, so the assets "starting" event
+    # reaches the log already batched with "completed"; and while the staging
     # directory is mkdir'd first thing in the phase, install.sh reaches its
     # first legitimate in-transaction mutation of .env-orbit
     # (run_configuration_migration) a few hundred milliseconds later. Both
@@ -321,8 +329,9 @@ positive_scenario() {
     # a runner whose process spawns are cheaper.
     #
     # So the shim's assets gate parks the installer inside the phase instead:
-    # the first asset request touches assets-gate.reached and then blocks
-    # reading the release FIFO. Waiting for that marker is still a poll, but
+    # the `docker cp` that extracts the bundle touches assets-gate.reached and
+    # then blocks reading the release FIFO. Waiting for that marker is still a
+    # poll, but
     # it is a poll for a state the installer holds indefinitely, so noticing
     # late costs time rather than correctness. Opening the FIFO read-write
     # here means neither side's open() can block.
