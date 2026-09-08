@@ -42,6 +42,13 @@ afterEach(() => {
 function fakeBinDir() {
   // Fails loudly if the simulation ever invokes docker, curl or timeout: the
   // simulation must never reach an external tool.
+  //
+  // These are tripwires, not fakes of the tools, so they are strictly less
+  // permissive than the real thing: every subcommand and every flag is
+  // refused, which is the one shape a real tool never has. 99 is chosen
+  // deliberately -- docker refuses with 125/1, curl with 2/6/22 and timeout
+  // with 124/125/126/127, so a status no real tool produces cannot be read as
+  // one of theirs if a caller ever swallowed it (#616).
   const binDir = scratchDir();
   for (const name of ["docker", "curl", "timeout"]) {
     const path = join(binDir, name);
