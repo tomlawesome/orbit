@@ -42,7 +42,7 @@ export function mountTotalitySky() {
     near.appendChild(g);
     const c = document.createElementNS(NS, "circle");
     c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", y.toFixed(1));
-    c.setAttribute("r", r.toFixed(2)); c.setAttribute("fill", "#eef2ff");
+    c.setAttribute("r", r.toFixed(2)); c.setAttribute("fill", "var(--star-near)");
     c.setAttribute("opacity", (0.45 + rng() * 0.4).toFixed(2));
     if (rng() < 0.3) { c.setAttribute("class", "tw"); c.style.animationDelay = (rng() * 6).toFixed(1) + "s"; }
     near.appendChild(c); made++;
