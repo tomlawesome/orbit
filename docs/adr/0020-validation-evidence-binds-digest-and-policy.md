@@ -1,6 +1,6 @@
 # ADR-0020: Validation evidence is a cosign attestation binding digest and policy version; publication only consumes it
 
-**Status:** Proposed — awaiting owner ratification (the specification it records was accepted on the #661 thread, 2026-09-08)
+**Status:** Accepted (ratified by the owner, 2026-09-08; the specification it records was accepted on the #661 thread the same day)
 **Date:** 2026-09-08
 **Relates to:** issue #661 (whose thread carries the full specification this
 records the durable part of), the #573 ruling it implements, #877 (stable
