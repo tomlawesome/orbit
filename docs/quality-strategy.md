@@ -195,6 +195,14 @@ The `classify` job forces `full` on a push to `dev`, `preview`, `main` or
 still runs the whole pipeline. Everywhere else — every ordinary merge request
 included — the classifier decides, which is what #883 restored.
 
+Nothing above can make a merge request run *more* than its diff asks for, and
+sometimes a change deserves the whole gate before it merges. The label
+`ci: acceptance` on the merge request is how to ask (#572): `classify` reads
+`CI_MERGE_REQUEST_LABELS`, turns every flag on — lane `full`, system risk,
+launcher install compatibility included — and says so in its log, so a full
+run on a small diff is never a mystery. Remove the label and the next pipeline
+is classified again.
+
 `scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
 those scripts are the acceptance stage's own checks, so a change to one is not
 exercised until it merges to `dev`, where every pipeline runs everything again.
