@@ -1,6 +1,12 @@
 # ADR-0020: Validation evidence is a cosign attestation binding digest and policy version; publication only consumes it
 
-**Status:** Accepted (ratified by the owner, 2026-09-08; the specification it records was accepted on the #661 thread the same day)
+**Status:** Accepted (ratified by the owner, 2026-09-08). §4–§5 and the
+owner setup were corrected the same day: the ratified text fenced the key
+with protected environments and environment-scoped variables, which are
+Premium features this GitLab CE instance (19.3.1, verified 2026-09-08) does
+not have — the fence as ratified would have parsed and enforced nothing.
+The correction (the dedicated signing runner below) awaits owner
+ratification.
 **Date:** 2026-09-08
 **Relates to:** issue #661 (whose thread carries the full specification this
 records the durable part of), the #573 ruling it implements, #877 (stable
@@ -51,9 +57,9 @@ rejected.
    nobody downstream may resolve. No caller re-implements any of this — that
    drift is what #877 exists to prevent.
 
-4. **The split on GitLab:** `attest_image` (was `publish_gitlab`) pushes only
-   the immutable anchor `sha-<commit>`, records and attests it; the new
-   `publish_channel` verifies, re-runs the cheap identity and policy checks
+4. **The split on GitLab:** `record_image` (was `publish_gitlab`) pushes
+   only the immutable anchor `sha-<commit>` and records it; `sign_evidence`
+   attests it; the new `publish_channel` verifies, re-runs the cheap identity and policy checks
    against the pulled digest (#573 ruling 24, belt and braces — the scan and
    acceptance suite deliberately excluded; their freshness is what the expiry
    bounds), then creates the channel tag registry-side
@@ -65,13 +71,39 @@ rejected.
    evidence window by routine disk maintenance (#832 makes that likely). The
    anchor tag is only ever consumed through digest comparison.
 
-5. **The key is unreachable from publication:** `COSIGN_PRIVATE_KEY` and
-   `COSIGN_PASSWORD` are protected CI/CD variables scoped to the
-   `validation-signing` protected environment, declared by `attest_image`
-   alone. Publishers hold only `cosign.pub`. Within GitLab, an edit adding
-   the environment to another job is stopped by review plus
-   protected-environment settings, not cryptography; the shape tests
+5. **The key is unreachable from publication — fenced by a dedicated
+   runner, not by GitLab configuration.** The key pair and its password
+   exist only as files on the CI host, mounted read-only into jobs of a
+   second project runner tagged `orbit-signing`: protected (it refuses jobs
+   from unprotected refs — a CE-enforced boundary), locked to this project,
+   and used by exactly one job, `sign_evidence`, whose surface is the pinned
+   cosign binary and this repository's scripts — not the image build or the
+   test suites. Publishers hold only `cosign.pub`.
+   Why not CI/CD variables, as first ratified: this instance is GitLab CE,
+   which has no protected environments and no environment-scoped variables
+   (both Premium; `projects/49/protected_environments` returns 404). An
+   `environment:` block is valid YAML on CE and scopes nothing, so the fence
+   would have been silently absent while appearing present; and a
+   project-level variable is readable by every job in every protected-branch
+   pipeline, handing the key to the whole acceptance suite's dependency
+   tree — a wider exposure than the theatre criterion 6 forbids. Keeping the
+   key out of GitLab's variable store entirely is the strongest fence CE
+   offers without new infrastructure.
+   What review must still stop: a protected-branch `.gitlab-ci.yml` edit
+   moving the `orbit-signing` tag to another job. That is the same
+   review-plus-settings boundary the first text accepted for environment
+   edits; the shape tests
    (`scripts/validation-evidence-split.test.mjs`) make such an edit loud.
+   Rejected for this correction: a separate signing project triggered
+   cross-project (a real CE project boundary, but it needs its own repository
+   of verification logic, cross-project tokens and a registry-write
+   credential held outside this project — disproportionate for this
+   instance, the same judgement made on private Fulcio/Rekor above); plain
+   project-level variables (the silent exposure just described); public
+   Sigstore keyless (already rejected above, and a self-hosted CE issuer
+   cannot join the public trust root). Revisit if the instance ever gains
+   environment-scoped variables or another project must share this trust
+   model.
 
 6. **cosign is pinned** (version + SHA-256) in one place,
    `scripts/ci/ensure-cosign.sh`, used by attestor and verifiers alike.
@@ -84,8 +116,11 @@ rejected.
   disjoint permissions, both running the shared verifier) and stable
   promotion (#877) adopt the same verifier in their own changes; the full
   target shape is specified on #661.
-- Owner setup is required before the split can run: key pair, protected
-  environment, variables (docs/releasing.md). `attest_image` fails closed,
-  naming the missing variable, until then.
-- Key rotation: new pair, replace variables, commit new `cosign.pub`; old
-  attestations become unverifiable, so anything unpublished revalidates.
+- Owner setup is required before the split can run: key pair, the key files
+  on the runner host, and the protected `orbit-signing` runner
+  (docs/releasing.md). Until then `sign_evidence` finds no runner or fails
+  closed naming the missing file, and nothing publishes. The committed
+  `cosign.pub` is unaffected by the CE correction.
+- Key rotation: new pair, replace the files on the runner host, commit new
+  `cosign.pub`; old attestations become unverifiable, so anything
+  unpublished revalidates.

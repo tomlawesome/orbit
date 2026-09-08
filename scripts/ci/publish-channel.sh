@@ -34,7 +34,7 @@
 #   CI_COMMIT_BRANCH      }  the commit and branch this publication is for
 #   CI_COMMIT_REF_NAME    }
 #   ORBIT_EVIDENCE_FILE   Optional; the transport record written by
-#                         attest_image, default
+#                         record_image, default
 #                         .orbit-supply-chain/gitlab-tested-image.json. Used
 #                         only to discover which digest to verify -- trust
 #                         comes from the attestation, not this file.
@@ -66,7 +66,7 @@ esac
 
 evidence_file="${ORBIT_EVIDENCE_FILE:-.orbit-supply-chain/gitlab-tested-image.json}"
 [[ -f "$evidence_file" ]] ||
-  fail "no evidence file at ${evidence_file}; attest_image writes it as an artifact, and publication has nothing to publish without it"
+  fail "no evidence file at ${evidence_file}; record_image writes it as an artifact, and publication has nothing to publish without it"
 
 # Discovery only: which digest to put in front of the verifier. Everything
 # this JSON claims is re-established cryptographically or re-measured below.
