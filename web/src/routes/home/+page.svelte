@@ -14,10 +14,13 @@
   import { markDoor } from "../household/[id]/door.js";
   import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin, signOut } from "$lib/data/workspace.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { every, longDate, money, tminus } from "$lib/format.js";
+  import { money } from "$lib/format.js";
+  import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
   import { SvelteMap } from "svelte/reactivity";
+  import { tlabel } from "./bands.js";
+  import CorridorRow from "./CorridorRow.svelte";
   import "./home.css";
 
   /**
@@ -37,9 +40,18 @@
    */
   const DESK = "(min-width: 901px)";
 
+  /* Declared before `view` because `view` starts from it; the launch below is
+     what the rest of this prop is for. */
+  let { data } = $props();
+
   /** @typedef {import('$lib/data/workspace.js').HomeView} HomeView */
+  /* Straight from the server's read (#842), so the FIRST render already has
+     the manifest, the dial and the corridor — a reader with no JavaScript gets
+     a page rather than an empty one. Null only when that read failed; onMount
+     reads again either way and replaces this with a live view. */
   /** @type {HomeView | null} */
-  let view = $state(null);
+  // svelte-ignore state_referenced_locally
+  let view = $state(data?.view ?? null);
   /* Some of the $derived expressions below build a value from `view` inside a
      single ternary, and svelte-check's control-flow narrowing does not carry
      the `view ? ... : ...` guard through into the branch in that position —
@@ -48,12 +60,6 @@
      it does nothing at runtime beyond returning its argument. */
   /** @type {(v: HomeView | null) => HomeView} */
   const asView = (v) => /** @type {HomeView} */ (v);
-  /* Directive expressions (class:x={...}) do not carry an inline `@type`
-     cast comment through to the type checker the way a plain {...}
-     interpolation does, so spots that need an escape hatch there call this
-     instead. */
-  /** @type {(v: any) => any} */
-  const asAny = (v) => v;
 
   /*
    * Coming BACK to home is not arriving at it (owner, 2026-08-15: leaving an
@@ -78,7 +84,6 @@
    * as it reads it: an ordinary navigation, a refresh, a Back or a second tab
    * never flies. See $lib/flight/arrival.js.
    */
-  let { data } = $props();
   /* The fixture harness (see +page.server.js): drives either journey to one
      millisecond and holds it there. Off unless the server says ORBIT_FIXTURES,
      so the query string is inert in the product. */
@@ -367,10 +372,6 @@
     document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
   }
 
-  /** @type {(one: any) => string} */
-  const detailDue = (one) =>
-    one.dueDate ? `${tminus(one.dueDate, one.today)} · ${longDate(one.dueDate)}` : "unscheduled";
-
   const operationIds = new SvelteMap();
   /**
    * @param {any} suggestion
@@ -440,6 +441,17 @@
   );
   /* the inbox orb's truth: arrivals awaiting the two-tap */
   const mailWaiting = $derived(view ? (asView(view).suggestions?.length ?? 0) : 0);
+  /* CorridorRow's own suggestion lookup (#624/#782): passed down as a prop
+     rather than the whole view, so the row component's type is the slice it
+     actually reads. */
+  const suggestions = $derived(view ? asView(view).suggestions : undefined);
+  /* #763: how many are overdue right now — the OS badge and the tab title
+     both read this, never the server, so both hold whatever this browser's
+     own chart just worked out. */
+  const overdueCount = $derived(corridor?.overdue?.length ?? 0);
+  $effect(() => {
+    showUrgentCount(overdueCount);
+  });
   const initials = $derived(
     (view ? (asView(view).user?.displayName ?? "") : "")
       .split(/\s+/)
@@ -463,18 +475,6 @@
       label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k) % 12],
     })),
   );
-
-  /** @type {(b: any) => string} */
-  const tlabel = (b) => (b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
-  /** @type {(iso: string) => string} */
-  const short = (iso) =>
-    new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
-  /** @type {(months: number) => string} */
-  const period = (months) => (months === 12 ? "1 year" : months === 6 ? "6 months" : `${months} months`);
-  /** @type {Record<string, string>} */
-  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok" };
-  /** @type {Record<string, string>} */
-  const T_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok" };
 
   /** @type {(deg: number, radius: number) => [number, number]} */
   const point = (deg, radius) => [
@@ -523,7 +523,16 @@
          same bearings, label only, click to ask. */
       if (view?.emptySky) {
         if (query.matches) {
-          teardown = mountEmptySky({ galaxy: view.galaxy, onAsk: (id, name, requested) => { if (!requested) askTarget = { id, name }; } });
+          /* #840: the adrift copy still says "follow the north star to start
+             your own", but there is no household yet for the drawer's quick-add
+             to write into — the create card that actually starts one only ever
+             appears at /, so the star sends a reader there instead of opening
+             the drawer while the sky is empty. */
+          const controller = new AbortController();
+          document.getElementById("nstar")?.addEventListener(
+            "click", () => location.assign("/"), { signal: controller.signal });
+          const stopSky = mountEmptySky({ galaxy: view.galaxy, onAsk: (id, name, requested) => { if (!requested) askTarget = { id, name }; } });
+          teardown = () => { controller.abort(); stopSky(); };
         } else {
           /* The pocket's labelled sky is a list; asking rides data attributes
              because the hidden dialect must never bind listeners. */
@@ -590,7 +599,7 @@
 </script>
 
 <svelte:head>
-  <title>Orbit</title>
+  <title>{overdueCount > 0 ? `(${overdueCount}) ` : ""}Orbit</title>
 </svelte:head>
 
 <!-- #424: Escape and a click outside close the expanded row. Scroll does
@@ -617,7 +626,9 @@
   <Flight bind:this={flight} name={view?.household?.name ?? ""} onfarewell={onFarewell} />
 {/if}
 
-<div class="desk" class:arrive>
+<div class="desk" class:arrive role="main">
+<!-- #843: sr-only, since the wordmark and dial carry the title visually. -->
+<h1 class="sr-only">Orbit</h1>
 <!-- ══ THE SKY WAVE (§15, the v1.3.0 roster) ═════════════════════════════════
      Three packs gained their own sky in the same batch, and every layer below
      belongs to exactly one of them. All of them live INSIDE .desk, which is
@@ -809,19 +820,9 @@
 
 <!-- CON-12: creation drawer — full width, from the top; the north star is its handle -->
 <aside class="drawer-top" id="createdrawer" role="region" aria-label="Add to your orbit">
-  <div class="inner">
-    <h4>Add to your orbit</h4>
-    <div class="ctypes">
-      <button class="ctype"><span class="dot con"></span>renewal</button>
-      <button class="ctype"><span class="dot"></span>service</button>
-      <button class="ctype"><span class="dot ter"></span>inspection</button>
-      <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
-    </div>
-    <div class="crow">
-      <div class="cdrop">drop a document here — we'll read what we can</div>
-      <a class="cfull" href={resolve("/create")}>open the full form →</a>
-    </div>
-  </div>
+  <!-- the handle comes first in the markup so that Tab from an opened
+       north star walks into the drawer's own controls next (#853); it is
+       positioned absolutely, so this changes nothing on screen. -->
   <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit">
     <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
       <defs>
@@ -921,6 +922,19 @@
     </svg>
     <span>create</span>
   </button>
+  <div class="inner">
+    <h2>Add to your orbit</h2>
+    <div class="ctypes">
+      <button class="ctype"><span class="dot con"></span>renewal</button>
+      <button class="ctype"><span class="dot"></span>service</button>
+      <button class="ctype"><span class="dot ter"></span>inspection</button>
+      <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
+    </div>
+    <div class="crow">
+      <div class="cdrop">drop a document here — we'll read what we can</div>
+      <a class="cfull" href={resolve("/create")}>open the full form →</a>
+    </div>
+  </div>
 </aside>
 
 <div class="scrim" aria-hidden="true"></div>
@@ -1125,135 +1139,35 @@
          furthest away, suggestions riding the same line in date order. -->
     <div class="manifest" id="manifest-top">
     {#if corridor && !view?.emptySky}
-      <!-- #624/#782: `row` is left untyped on purpose. A `{#snippet}`
-           parameter is one of the three spots where svelte-check accepts an
-           inline `@type` cast comment but the production rolldown build does
-           not, so annotating it here would pass this check and break the
-           real build. The two implicit-any errors this leaves are the
-           ledger's remaining count for this file. -->
-      {#snippet corridorRow(row)}
-        {#if row.suggestion}
-          {@const s = asView(view).suggestions.find((one) => one.id === row.id)}
-          <div class="item suggest" id={row.id}>
-            <span class="planet sug" aria-hidden="true"><i></i></span>
-            <div class="body"><b>{row.title}</b><span>{[
-              `Found in ${row.sourceDocument}`,
-              row.dueDate ? `renews ${short(row.dueDate)}` : null,
-              row.costMinor ? money(row.costMinor, row.currency, true) : null,
-            ].filter(Boolean).join(" · ")}</span></div>
-            <!-- #434: approval is the boundary between untrusted mail and
-                 the household, so it takes two deliberate taps — the first
-                 arms, the second fires. One operation id per receipt makes
-                 the write idempotent under any retry. -->
-            <div class="actions">
-              <button class="yes" disabled={busyReceipt === row.id}
-                onclick={() => tapReceipt(s, "approve")}>
-                {armed.id === row.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
-              </button>
-              <button disabled={busyReceipt === row.id}
-                onclick={() => tapReceipt(s, "dismiss")}>
-                {armed.id === row.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
-              </button>
-            </div>
-            {#if mailProblem && armed.id === row.id}
-              <div class="mail-problem">{mailProblem}</div>
-            {/if}
-          </div>
-        {:else}
-          <!-- #424: the row is the item. The href is the row's real address —
-               kept so a modified click can still open it in its own tab — and
-               a plain click expands the row here instead of leaving home. -->
-          <a class="item" class:open={expanded === row.id} id={row.id}
-             href={resolve(`/home?item=${encodeURIComponent(row.id)}`)} aria-expanded={expanded === row.id}
-             aria-controls="{row.id}-view" onclick={(event) => onRowClick(event, row.id)}>
-            <span class="planet" class:ter={row.kind === "inspection"} class:con={row.kind === "renewal"}
-                  style="color:var({BAND_VAR[row.band]})" aria-hidden="true"><i></i></span>
-            <div class="body"><b>{row.title}</b><span>{[
-              row.section,
-              row.recurrenceMonths ? `orbital period ${period(row.recurrenceMonths)}` : null,
-              row.provider,
-              row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
-            ].filter(Boolean).join(" · ")}</span></div>
-            {#if row.dueDate}
-              <div class="t {T_CLASS[row.band]}">{tlabel(row)}<small>{short(row.dueDate)}</small></div>
-            {:else}
-              <div class="t ok">—</div>
-            {/if}
-          </a>
-          {#if expanded === row.id}{@render itemview(row)}{/if}
-        {/if}
-      {/snippet}
-
-      <!-- #424: everything Orbit holds about the item, in the row. The field
-           set and its order are the item view's, so the two surfaces say the
-           same thing in the same words (web/src/routes/item/[id]). -->
-      <!-- #624/#782: same reason as corridorRow above — `row` stays untyped. -->
-      {#snippet itemview(row)}
-        <div class="itemview" id="{row.id}-view" role="region" aria-label="{row.title} — full detail">
-          {#if detailProblem}
-            <div class="ivproblem" role="alert">{detailProblem}</div>
-          {:else if !detail}
-            <div class="ivnote">{detailBusy ? "reading…" : ""}</div>
-          {:else}
-            <div class="kv"><span>due</span>
-              <b class:over={asAny(detail).band === "overdue" || row.band === "overdue"}>{detailDue(detail)}</b></div>
-            {#if detail.snoozedUntil}
-              <div class="kv"><span>snoozed until</span><b>{longDate(detail.snoozedUntil)}</b></div>
-            {/if}
-            {#if detail.status !== "active"}
-              <div class="kv"><span>status</span><b>{detail.status}</b></div>
-            {/if}
-            {#if detail.section}
-              <div class="kv"><span>section</span><b>{detail.section}</b></div>
-            {/if}
-            {#if detail.subtype}
-              <div class="kv"><span>type</span><b>{detail.subtype}</b></div>
-            {/if}
-            {#if detail.recurrenceMonths}
-              <div class="kv"><span>orbital period</span><b>{every(detail.recurrenceMonths)}</b></div>
-            {/if}
-            <div class="kv"><span>cost</span>
-              <b>{money(detail.costMinor, detail.currency ?? "GBP", /** @type {any} */ (detail).costIsEstimate)}</b></div>
-            {#if detail.provider}
-              <div class="kv"><span>provider</span><b>{detail.provider}</b></div>
-            {/if}
-            {#if detail.reference}
-              <div class="kv"><span>reference</span><b>{detail.reference}</b></div>
-            {/if}
-            {#if detail.reminderDays?.length}
-              <div class="kv"><span>reminders</span>
-                <b>{detail.reminderDays.map((d) => `${d}d before`).join(" · ")}</b></div>
-            {/if}
-            {#if detail.documents?.length}
-              <h4>documents</h4>
-              {#each detail.documents as document (document.name)}
-                <div class="doc">◆<span>{document.name}<small>{document.meta}</small></span></div>
-              {/each}
-            {/if}
-            {#if detail.notes}
-              <h4>notes</h4>
-              <p>{detail.notes}</p>
-            {/if}
-            <div class="ivfoot">
-              <button class="ivcopy" onclick={copyAddress}>{copied ? "link copied" : "copy link"}</button>
-              <a class="ivfull" href={resolve("/item/[id]", { id: row.id })}>manage this item →</a>
-            </div>
-          {/if}
-        </div>
-      {/snippet}
       <div class="corridor">
         {#if corridor.overdue.length}
           <div class="redzone">
-            {#each corridor.overdue as row (row.id)}{@render corridorRow(row)}{/each}
+            {#each corridor.overdue as row (row.id)}
+              <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+                onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
+                onCopyAddress={copyAddress} />
+            {/each}
           </div>
         {/if}
         <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · {todayLine}</span><div class="rule"></div></div>
-        {#each corridor.current as row (row.id)}{@render corridorRow(row)}{/each}
+        {#each corridor.current as row (row.id)}
+          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+            onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
+            onCopyAddress={copyAddress} />
+        {/each}
         {#each corridor.months as month (month.key)}
           <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
-          {#each month.rows as row (row.id)}{@render corridorRow(row)}{/each}
+          {#each month.rows as row (row.id)}
+            <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+              onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
+              onCopyAddress={copyAddress} />
+          {/each}
         {/each}
-        {#each corridor.undated as row (row.id)}{@render corridorRow(row)}{/each}
+        {#each corridor.undated as row (row.id)}
+          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+            onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
+            onCopyAddress={copyAddress} />
+        {/each}
       </div>
       {#if corridor.total === 0}
         <div class="horizon">— nothing scheduled: your sky is quiet —</div>
@@ -1264,36 +1178,36 @@
   </div>
 </div>
 
-<aside class="drawer drawer-left" id="statusdrawer" role="region" aria-label="System status">
+<aside class="drawer drawer-left" id="statusdrawer" role="region" aria-live="polite" aria-label="System status">
   <button class="handle" id="edge-health" aria-expanded="false">
     <i></i><span>degraded</span></button>
-  <h4>System status</h4>
+  <h2>System status</h2>
   <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy &middot; 40s ago</small></div>
   <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy &middot; 40s ago</small></div>
   <div class="svc"><i style="background:var(--degraded)"></i><b>orbit-clamav</b><small>unreachable &middot; 2m ago</small></div>
   <div class="svc"><i style="background:var(--ink-faint)"></i><b>orbit-tika</b><small>not enabled</small></div>
   <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running &middot; 12s ago</small></div>
-  <h4>Last health check</h4>
+  <h2>Last health check</h2>
   <div class="svc"><i style="background:var(--degraded)"></i><b>scan readiness</b><small>failed &middot; scanner-unreachable</small></div>
   <div class="svc"><i style="background:var(--ok)"></i><b>application</b><small>ready</small></div>
-  <h4>Full diagnostics</h4>
-  <div class="svc" style="color:var(--ink-faint)">container logs &middot; or the launcher repair flow</div>
+  <h2>Full diagnostics</h2>
+  <div class="svc" style="color:var(--ink-quiet)">container logs &middot; or the launcher repair flow</div>
 </aside>
 {#if !view?.emptySky}
 <aside class="drawer drawer-right" id="keydrawer" role="region" aria-label="Chart key">
   <button class="handle" aria-expanded="false">
     <i></i><span>key</span></button>
-  <h4>Urgency</h4>
+  <h2>Urgency</h2>
   <div class="keyrow"><span class="sw" style="background:var(--overdue)"></span>overdue &mdash; inside the ring</div>
   <div class="keyrow"><span class="sw" style="background:var(--warm)"></span>due soon</div>
   <div class="keyrow"><span class="sw" style="background:var(--upcoming)"></span>upcoming</div>
   <div class="keyrow"><span class="sw" style="background:var(--ok)"></span>on track &mdash; wide orbit</div>
-  <h4>Types</h4>
+  <h2>Types</h2>
   <div class="keyrow"><span class="sw" style="background:var(--ink-mid)"></span>routine service</div>
   <div class="keyrow"><span class="sw" style="background:radial-gradient(circle,var(--ink-mid) 24%,var(--panel-raised) 34%,var(--ink-mid) 52%)"></span>renewal / contract</div>
   <div class="keyrow"><span class="sw" style="background:linear-gradient(90deg,var(--ink-mid) 50%,rgba(0,0,0,.55) 50%)"></span>inspection / certification</div>
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
-  <h4>Physics</h4>
+  <h2>Physics</h2>
   <div class="keyrow">closer = sooner</div>
   <div class="keyrow">bigger = costlier</div>
   <div class="keyrow">belt = documents attached</div>
@@ -1301,7 +1215,7 @@
 </aside>
 <div class="docview" id="docview" role="dialog" aria-label="Documents">
   <button class="close">×</button>
-  <h4 id="docview-title">Car full service</h4>
+  <h2 id="docview-title">Car full service</h2>
   <div class="sub">2 documents · encrypted · scanned clean</div>
   <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
   <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>

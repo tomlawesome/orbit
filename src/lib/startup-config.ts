@@ -1,11 +1,17 @@
+import { ZodError } from "zod";
 import { getAuthConfig } from "@/lib/env";
 import { databaseConnectionString } from "@/db";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { getDocumentConfig } from "@/server/documents/config";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
-import { getImapIngestionConfig } from "@/server/imap-ingestion";
 import { setConfigurationProblems } from "@/lib/configuration-problems";
-import { logFormats, logLevels, type ConfigurationSetting } from "@/lib/logger";
+import {
+  logFormats,
+  logLevels,
+  operationalDetailFromValidatorMessage,
+  type ConfigurationSetting,
+  type OperationalDetail,
+} from "@/lib/logger";
 
 export type StartupConfigurationCode =
   | "configuration_version"
@@ -21,6 +27,14 @@ export type StartupConfigurationIssue = {
    */
   field: ConfigurationSetting;
   code: StartupConfigurationCode;
+  /*
+   * The validator's own message, when it caught one (#717): what a fresh
+   * `check_configuration` reading of the container log could not otherwise
+   * tell an operator, because until now only `field`/`code` reached it. Never
+   * set from anything other than `detailFromCaughtError` below — see its own
+   * comment for why that is the only safe source.
+   */
+  detail?: OperationalDetail;
 };
 
 export class StartupConfigurationError extends Error {
@@ -47,6 +61,30 @@ function selectedProfileConfiguration(environment: NodeJS.ProcessEnv): StartupCo
 
 function hasAny(environment: NodeJS.ProcessEnv, names: string[]): boolean {
   return names.some((name) => typeof environment[name] === "string" && environment[name] !== "");
+}
+
+/**
+ * Recovers an operator-facing remedy from a validator's own thrown error
+ * (#717), never the value it was validating. Every validator this is called
+ * on throws a fixed, developer-authored message per rule — "OIDC_SCOPES must
+ * include openid", the session secret's own rotation instructions — so its
+ * text is safe to show verbatim. A `ZodError` is unwrapped to its first
+ * issue's message rather than logged as its raw multi-issue JSON dump, which
+ * is the only part of it meant to be read by anyone.
+ *
+ * This bottleneck is the reason a validator gains a detail line simply by
+ * throwing a better message, rather than every call site needing its own
+ * translation — do not read `error.message` anywhere else for this purpose.
+ */
+function detailFromCaughtError(error: unknown): OperationalDetail | undefined {
+  if (error instanceof ZodError) {
+    const message = error.issues[0]?.message;
+    return message ? operationalDetailFromValidatorMessage(message) : undefined;
+  }
+  if (error instanceof Error && error.message) {
+    return operationalDetailFromValidatorMessage(error.message);
+  }
+  return undefined;
 }
 
 /** Validates all startup prerequisites without opening a database connection. */
@@ -82,18 +120,18 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
   }
   try {
     getAuthConfig(environment);
-  } catch {
-    issues.push({ field: "authentication", code: "configuration_core" });
+  } catch (error) {
+    issues.push({ field: "authentication", code: "configuration_core", detail: detailFromCaughtError(error) });
   }
   try {
     databaseConnectionString(environment);
-  } catch {
-    issues.push({ field: "database", code: "configuration_core" });
+  } catch (error) {
+    issues.push({ field: "database", code: "configuration_core", detail: detailFromCaughtError(error) });
   }
   try {
     getDocumentConfig(environment);
-  } catch {
-    issues.push({ field: "documents", code: "configuration_core" });
+  } catch (error) {
+    issues.push({ field: "documents", code: "configuration_core", detail: detailFromCaughtError(error) });
   }
   const notificationEnvironment = {
     ...environment,
@@ -104,15 +142,8 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
   };
   try {
     getNotificationWorkerConfig(notificationEnvironment);
-  } catch {
-    issues.push({ field: "mail", code: "configuration_optional" });
-  }
-  if (environment.IMAP_ENABLED !== "false") {
-    try {
-      getImapIngestionConfig(environment);
-    } catch {
-      issues.push({ field: "imap", code: "configuration_optional" });
-    }
+  } catch (error) {
+    issues.push({ field: "mail", code: "configuration_optional", detail: detailFromCaughtError(error) });
   }
   if (environment.ORBIT_LOG_LEVEL !== undefined && !(logLevels as readonly string[]).includes(environment.ORBIT_LOG_LEVEL)) {
     issues.push({ field: "logging", code: "configuration_optional" });
@@ -126,8 +157,8 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
       if (!environment.VAPID_SUBJECT || !environment.VAPID_PUBLIC_KEY || !privateKey) {
         throw new Error("push configuration incomplete");
       }
-    } catch {
-      issues.push({ field: "push", code: "configuration_optional" });
+    } catch (error) {
+      issues.push({ field: "push", code: "configuration_optional", detail: detailFromCaughtError(error) });
     }
   }
   issues.push(...selectedProfileConfiguration(environment));

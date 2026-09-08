@@ -27,7 +27,7 @@ readonly repo_root
 # Compose project the working directory happens to hold.
 cd "${repo_root}" || exit 1
 
-readonly default_compose_files='-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml'
+readonly default_compose_files='-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml'
 read -r -a compose_files <<< "${COMPOSE_FILES:-${default_compose_files}}"
 
 export ORBIT_IMAGE="${ORBIT_IMAGE:-orbit-local:000000000000}"

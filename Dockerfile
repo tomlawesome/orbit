@@ -11,7 +11,7 @@
 # `apk upgrade` this replaces is no longer needed here. #649 also stops
 # applying: that upgrade froze behind the layer cache, and there is no upgrade
 # layer left to freeze.
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:237aac3c9561c2e1f9febe7acd7c0f6051e13571b6c6cc1e318278df07b9bcb8 AS base
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7bc734dba7d353f2a03dba82d82c45aa017e4e215ade61426e95e5c8115066e7 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -27,6 +27,8 @@ COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 # web/ is a workspace member (#419): one root lockfile covers both packages,
 # so the frozen install below materialises web/node_modules too.
 COPY web/package.json ./web/package.json
+# package.json's preinstall hook (#784); it exits at once outside a git checkout.
+COPY scripts/guard-worktree-install.mjs ./scripts/guard-worktree-install.mjs
 RUN pnpm install --frozen-lockfile
 
 # Builds the v19 front end (web/, SvelteKit + adapter-node) into its server
@@ -77,7 +79,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:237aac3c9561c2e1f9febe7acd7c0f6051e13571b6c6cc1e318278df07b9bcb8 AS runner
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7bc734dba7d353f2a03dba82d82c45aa017e4e215ade61426e95e5c8115066e7 AS runner
 
 ARG ORBIT_VERSION
 ARG ORBIT_REVISION
@@ -122,10 +124,23 @@ LABEL org.opencontainers.image.source="https://github.com/tomlawesome/orbit"
 LABEL org.opencontainers.image.version="${ORBIT_VERSION}"
 LABEL org.opencontainers.image.revision="${ORBIT_REVISION}"
 LABEL io.github.tomlawesome.orbit.release-stage="${ORBIT_CHANNEL}"
+# Where this image keeps the deployment assets it was built from (ADR-0019).
+# scripts/install.sh reads this label and extracts that directory from the
+# image it just resolved, instead of downloading the same files from the
+# commit id in image.revision: a commit id can stop resolving (a history
+# rewrite did exactly that in #890), a digest cannot.
+LABEL io.orbit.deployment-assets="/opt/orbit/deploy"
 WORKDIR /opt/orbit
 # Seed the mount point with the runtime user's ownership so a new named volume
 # is writable when Docker copies the image directory into it on first use.
-RUN apk add --no-cache su-exec \
+# apk_retry: a transient DNS/CDN blip against the Alpine mirror must not abort
+# the whole build (#734; same shape as orbit-base-image's #9/!7) -- three
+# attempts, sleeping 5s then 10s, failing loudly if every attempt fails. Never
+# --force-missing-repositories: building against a stale index is worse than
+# the failure this fixes. Only the apk fetch is wrapped; the rm/user/mkdir
+# chain below is local and cannot fail transiently.
+RUN apk_retry() { "$@" || { sleep 5; "$@"; } || { sleep 10; "$@"; }; } \
+  && apk_retry apk add --no-cache su-exec \
   && rm -rf /usr/local/lib/node_modules /opt/yarn-v* \
   && rm -f \
     /usr/local/bin/corepack \
@@ -169,6 +184,22 @@ RUN ORBIT_WEB_BUILD_ROOT=/opt/orbit/web node scripts/web-pdfjs-runtime-check.mjs
 COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --chown=orbit:orbit scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
 COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
+# The eleven deployment assets, at the same relative paths an install uses
+# them at (ADR-0019). They travel with the digest, so the compose file an
+# operator runs and the image it configures are the same artifact, and an
+# install needs nothing but the registry. Root-owned data: the installer
+# copies them out and sets its own modes; nothing in the container reads them.
+COPY --chown=root:root docker-compose.yml docker-compose.mail.yml .env-orbit.example ./deploy/
+COPY --chown=root:root config/tika-config.json ./deploy/config/
+COPY --chown=root:root \
+  scripts/configure.sh \
+  scripts/installer-ui.sh \
+  scripts/configuration.sh \
+  scripts/backup.sh \
+  scripts/restore.sh \
+  scripts/repair.sh \
+  scripts/engine-check.sh \
+  ./deploy/scripts/
 # The bundled engine CLI (single file, no node_modules dependency at
 # runtime — see scripts/bundle-orbit-cli.mjs). Root-owned and read-only,
 # like container-entrypoint.sh above and VERSION/REVISION/CHANNEL below;

@@ -40,16 +40,18 @@ body.showdusk #dusk{opacity:1}
    sway rasters (#502) took the same measurement and came back clean (0 px),
    which is the one difference: a still picture rotating loses nothing to
    layer promotion; many 1-2px circles repainted at a new layer boundary do. */
-#dawn .sky .far{animation:appr 360s linear infinite}
-#dawn .sky .near{animation:appr 180s linear infinite}
-@keyframes appr{to{transform:translateX(-1600px)}}
+/* the approach is POL-11's ordinary drift, at the flight's own periods, so it
+   names $lib/atmosphere.css's driftf/driftn rather than a seventh copy (#445) */
+#dawn .sky .far{animation:driftf 360s linear infinite}
+#dawn .sky .near{animation:driftn 180s linear infinite}
 /* the goodbye's stars drift back the way they came — same periods, reversed
-   (§15, owner 2026-08-17; see THE GOODBYE'S SKY below) */
+   (§15, owner 2026-08-17; see THE GOODBYE'S SKY below). The one drift that is
+   genuinely not POL-11's, so it is the one that keeps its own keyframes. */
 #dusk .sky .far{animation:recede 360s linear infinite}
 #dusk .sky .near{animation:recede 180s linear infinite}
 @keyframes recede{from{transform:translateX(-1600px)}to{transform:translateX(0)}}
+/* the shared twinkle curve's default range IS this pair (atmosphere.css) */
 #dawn .sky .tw,#dusk .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
-@keyframes twinkle{from{opacity:.15}to{opacity:.8}}
 /* first light: dawn breaks once on load, exactly as the login does it */
 .dawnlayer{opacity:0;transition:opacity 3s ease}
 body.lit .dawnlayer{opacity:1}
@@ -150,6 +152,67 @@ body.lit .gate{opacity:1;transform:none}
 .gate:hover,#dusk .gate-wrap a:hover{filter:brightness(1.08)}
 .gate.flash{filter:brightness(1.25);box-shadow:0 0 0 6px rgba(216,180,90,.22),0 0 60px rgba(216,180,90,.6)}
 
+/* ══ THE THREE STATES WHERE THE DOOR CANNOT OPEN (#788) ═══════════════════
+   design/v19/signin-states/round-1/, direction C ("the held dawn"),
+   owner-ratified 2026-09-06. `SignIn.svelte` sets `data-state` on <body> —
+   `unconfigured`, `starting` or `failed` while the door cannot open, `door`
+   once (or if) it can; scoped to `#dawn` because `.dawnlayer`/`.rays`/
+   `.sunpt`/`.shimmer`/`.rim` are vocabulary #dusk's own goodbye shares. The
+   sign-in button is not merely hidden here: SignIn.svelte does not render it
+   into the DOM at all while unavailable, so no CSS rule below needs to. */
+/* While sign-in is unavailable the button is dropped from layout AND the
+   accessibility tree (unlike opacity/visibility, which would leave it
+   focusable) — the round-1 README's own accessibility bar. Guarded on the
+   attribute's presence, not merely its value, so a page that never sets
+   `data-state` at all (SignIn.svelte is `#dawn`'s only consumer, but this
+   is what keeps the rule inert if that ever changes) never hides the button
+   by accident. */
+body[data-state]:not([data-state="door"]) #dawn .gate-wrap{display:none}
+
+#dawn .state{grid-area:1/1;width:100%;height:100%;position:relative;pointer-events:none}
+#dawn .state-primary{position:absolute;left:50%;top:calc(50% + 64px);transform:translateX(-50%);
+      width:max-content;max-width:250px;text-align:center;
+      font:600 14px var(--display);letter-spacing:.01em;color:#cfd3e4;
+      opacity:0;transition:opacity 1.4s ease 3.6s}
+#dawn .state-sub{position:absolute;left:50%;top:calc(50% + 174px);transform:translateX(-50%);
+      width:340px;max-width:78vw;text-align:center;
+      font:10.5px var(--mono);color:#8791b3;line-height:1.75;letter-spacing:.04em;
+      opacity:0;transition:opacity 1.4s ease 3.9s}
+body.lit #dawn .state-primary,body.lit #dawn .state-sub{opacity:1}
+/* A state reached after the door already loaded (the ordinary path: default
+   optimistic, corrected once a check answers) fades its words in on its own
+   quick beat rather than waiting out the first-light hold meant for page
+   load. */
+body.switched #dawn .state-primary{transition-delay:.15s}
+body.switched #dawn .state-sub{transition-delay:.3s}
+/* recovery: the words exhale while the held sky releases into the real
+   first light (see `recover()` in SignIn.svelte) */
+body.returning #dawn .state-primary,body.returning #dawn .state-sub{
+      opacity:0!important;transition:opacity .7s ease!important}
+
+/* THE HELD DAWN: while the door cannot open, first light never fully
+   breaks. Only opacities the lit sequence above already animates are
+   touched, so holding and releasing the sky is always a slow change riding
+   those same transitions, never a cut. */
+body.lit[data-state="unconfigured"] #dawn .dawnlayer,
+body.lit[data-state="failed"] #dawn .dawnlayer{opacity:.32}
+body.lit[data-state="unconfigured"] #dawn .rays,
+body.lit[data-state="failed"] #dawn .rays,
+body.lit[data-state="starting"] #dawn .rays{opacity:0}
+body.lit[data-state="unconfigured"] #dawn .sunpt,
+body.lit[data-state="failed"] #dawn .sunpt{opacity:.38}
+body.lit[data-state="unconfigured"] #dawn .shimmer,
+body.lit[data-state="failed"] #dawn .shimmer{opacity:.35}
+/* waking: the pre-dawn swells and ebbs — morning visibly trying, with no
+   action from the reader */
+body.lit[data-state="starting"] #dawn .dawnlayer{opacity:.45;
+      animation:dawnswell 6s ease-in-out infinite alternate}
+body.lit[data-state="starting"] #dawn .sunpt{opacity:.6}
+@keyframes dawnswell{from{opacity:.32}to{opacity:.62}}
+/* ready: no override left standing — the sky simply continues on toward
+   `body.lit .dawnlayer{opacity:1}` etc. above, so recovery is the ordinary
+   first-light transition finishing what it started. */
+
 /* ══ THE FLIGHT ══════════════════════════════════════════════════════════ */
 #warp{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;
       transition:opacity 1.7s cubic-bezier(.45,.05,.55,.95)}
@@ -239,6 +302,13 @@ body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
      would land the button on top of the name (08-14's own note). */
   .dawnlayer,.rim,#dawn .shimmer,.sunpt,.rays,.gate{
     opacity:1!important;transform:none!important;transition:none}
+  /* The held-dawn dimming above is motion-adjacent mood, not the state's
+     accessible channel — that is the text and the button's presence, both
+     unaffected by this block — so reduced motion keeps the sky at rest
+     rather than partially dimmed with nothing left to animate it back. The
+     state text itself still changes promptly rather than on the first-light
+     hold's multi-second delay. */
+  #dawn .state-primary,#dawn .state-sub{transition-duration:.4s!important;transition-delay:0s!important}
   /* The will-change:transform promotion above (#503) exists only to serve a
      `transform` animation that reduced motion has just turned off two lines
      up (`animation:none!important`); a layer kept promoted with nothing left

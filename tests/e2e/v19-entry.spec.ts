@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 
 // #450, re-solved by #735: there is no longer anything to compose. The v19
@@ -26,13 +26,43 @@ async function seedHousehold(page: Page) {
 }
 
 test.describe("the application entry", () => {
+  /*
+   * #840 sends a session with no household of its own to the arrival at `/`
+   * rather than the returnTo it asked for. Both tests below are about that
+   * returnTo landing where it said it would, so the account needs somewhere
+   * onward to go before it signs in -- for an instance administrator
+   * hasOnwardHousehold is satisfied by ANY household on the instance, so one
+   * anchor, up for the whole file, keeps the landing assertions honest
+   * instead of dropping them.
+   */
+  let anchor: { id: string; name: string };
+
+  async function signedInPage(browser: Browser) {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    await page.goto("/api/auth/login?returnTo=/home");
+    await page.getByRole("link", { name: "Orbit Administrator" }).click();
+    return { context, page };
+  }
+
+  test.beforeAll(async ({ browser }) => {
+    const { context, page } = await signedInPage(browser);
+    anchor = await seedHousehold(page);
+    await context.close();
+  });
+
+  test.afterAll(async ({ browser }) => {
+    const { context, page } = await signedInPage(browser);
+    await cleanupHousehold(page, await sessionHeaders(page), anchor.id, anchor.name);
+    await context.close();
+  });
   test("signing in with returnTo=/home lands on the v19 home", async ({ page }) => {
     await page.goto("/api/auth/login?returnTo=/home");
     await page.getByRole("link", { name: "Orbit Administrator" }).click();
     await expect(page).toHaveURL(/\/home$/);
     const household = await seedHousehold(page);
     try {
-    await page.reload();
+    await page.goto("/home");
     // Both v19 home dialects are server-rendered and CSS chooses (CON-10):
     // the gravity-well dial on desktop, the pocket dial on mobile. Exactly
     // one hero may be visible — and neither exists in the Next markup.
@@ -70,7 +100,7 @@ test.describe("the application entry", () => {
     await expect(page).toHaveURL(/\/home$/);
     const household = await seedHousehold(page);
     try {
-      await page.reload();
+      await page.goto("/home");
       await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1);
       expect(scriptResponses.length).toBeGreaterThan(0);
       expect(scriptResponses.every((status) => status === 200)).toBe(true);

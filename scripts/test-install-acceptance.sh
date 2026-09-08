@@ -4,10 +4,11 @@
 # Runs the working tree's install.sh unmocked — real Docker, real Compose,
 # real PostgreSQL and ClamAV, real health checks — from a clean
 # pre-provisioned directory to a healthy /api/health, then asserts
-# operator-facing guarantees from docs/installer-guarantees.md. Only the two
-# network fetch paths are intercepted (a PATH curl shim serving working-tree
-# deployment assets and a fixture OIDC discovery document), so no external
-# GitHub/registry state can influence the result.
+# operator-facing guarantees from docs/installer-guarantees.md. The one
+# network path intercepted is OIDC discovery (a PATH curl shim serving a
+# fixture document); the deployment assets come out of the image the
+# installer resolved, exactly as they do for an operator (ADR-0019), so no
+# external GitHub/registry state can influence the result.
 #
 # Asserted guarantees (docs/installer-guarantees.md):
 #   Part 1 / install.sh #6      unattended pre-provisioning contract
@@ -36,6 +37,9 @@
 # Environment:
 #   ORBIT_ACCEPTANCE_IMAGE  prebuilt orbit image reference to test; when
 #                           unset, the working tree is built locally.
+#   COMPOSE_PROJECT_NAME    override the per-run Compose project name derived
+#                           below (#894); install.sh honours the same
+#                           variable, so an explicit value here reaches it.
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -50,35 +54,59 @@ for arg in "$@"; do
   esac
 done
 
+note() { printf '[acceptance] %s\n' "$*"; }
+fail() { printf '[acceptance] FAIL: %s\n' "$*" >&2; exit 1; }
+
 workdir="$(mktemp -d /tmp/orbit-acceptance.XXXXXX)"
-registry_name="orbit-acceptance-registry"
-registry_port=5300
-orbit_port=3210
+
+free_port() {
+  node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});'
+}
+
+# #894: project_name, registry_name and both ports used to be the fixed
+# literals "orbit-acceptance" / "orbit-acceptance-registry" / 5300 / 3210, so
+# two runs on one host -- two worktrees, two sessions, a local run beside a
+# CI job -- shared one Compose project and one pair of ports: either run's
+# cleanup swept the other's containers and volumes, and a second run could
+# not even bind its ports. Derive all four per run instead, the same way
+# scripts/test-e2e-local.sh does for the same reason (#875): the project
+# name from this checkout's path and this process's PID (so even two runs
+# from the same checkout cannot collide), the ports from whatever the kernel
+# hands out. An explicit COMPOSE_PROJECT_NAME in the caller's environment
+# still wins, same as install.sh itself honours it.
+repo_hash="$(printf '%s' "$repo_root" | md5sum | cut -c1-8)"
+project_name="${COMPOSE_PROJECT_NAME:-orbit-acceptance-${repo_hash}-$$}"
+readonly project_name
+registry_name="${project_name}-registry"
+registry_port="$(free_port)"
+orbit_port="$(free_port)"
+while [[ "$orbit_port" == "$registry_port" ]]; do
+  orbit_port="$(free_port)"
+done
 repository="acceptance/orbit"
 issuer="https://oidc.acceptance.invalid/application/o/orbit/"
 # The target directory name doubles as the Compose project name the
-# installer persists, so every container/volume/network this script creates
-# carries the orbit-acceptance project label and can be swept even after an
-# untrappable SIGKILL left debris behind.
-target="$workdir/orbit-acceptance"
+# installer persists (derive_compose_project_name in install.sh falls back
+# to the target directory's basename when COMPOSE_PROJECT_NAME is not set),
+# so every container/volume/network this script creates carries this run's
+# project label and can be swept even after an untrappable SIGKILL left
+# debris behind.
+target="$workdir/$project_name"
 
 sweep_debris() {
   docker rm -f "$registry_name" >/dev/null 2>&1 || true
-  docker ps -aq --filter label=com.docker.compose.project=orbit-acceptance |
+  docker ps -aq --filter label=com.docker.compose.project="$project_name" |
     xargs -r docker rm -f >/dev/null 2>&1 || true
-  docker volume ls -q --filter label=com.docker.compose.project=orbit-acceptance |
+  docker volume ls -q --filter label=com.docker.compose.project="$project_name" |
     xargs -r docker volume rm >/dev/null 2>&1 || true
-  docker network ls -q --filter label=com.docker.compose.project=orbit-acceptance |
+  docker network ls -q --filter label=com.docker.compose.project="$project_name" |
     xargs -r docker network rm >/dev/null 2>&1 || true
 }
-
-note() { printf '[acceptance] %s\n' "$*"; }
-fail() { printf '[acceptance] FAIL: %s\n' "$*" >&2; exit 1; }
 
 cleanup() {
   local status=$?
   if [[ "$keep_mode" == 1 || ( "$status" -ne 0 && -n "${ORBIT_ACCEPTANCE_KEEP_ON_FAIL:-}" ) ]]; then
-    note "keeping work directory: $workdir"
+    note "keeping work directory: $workdir (project $project_name)"
     return
   fi
   if [[ -f "$target/.env-orbit" && -f "$target/docker-compose.yml" ]]; then
@@ -148,10 +176,12 @@ negative_scenarios() {
   note "negative: extraneous target entry refused (install.sh #7)"
 }
 
-# --- shim: the only two intercepted network paths --------------------------
+# --- shims: the one intercepted network path, and the assets-phase gate ----
 
 write_shim() {
-  local revision="$1"
+  local real_docker
+  real_docker="$(command -v docker)" || fail "docker is required"
+  [[ "$real_docker" != "$workdir/shim/docker" ]] || fail "the docker shim resolved to itself"
   mkdir -p "$workdir/shim"
   cat > "$workdir/discovery.json" <<EOF
 {
@@ -167,20 +197,40 @@ write_shim() {
 EOF
   cat > "$workdir/shim/curl" <<SHIM
 #!/usr/bin/env bash
-# Acceptance shim: serves working-tree deployment assets and the fixture
-# OIDC discovery document; every other URL fails closed so an unexpected
-# network dependency surfaces as a test failure.
+# Acceptance shim: serves the fixture OIDC discovery document. Deployment
+# assets do not come over curl any more (ADR-0019), so every other URL fails
+# closed and an unexpected network dependency surfaces as a test failure.
 set -Eeuo pipefail
-asset_base="https://raw.githubusercontent.com/$repository/$revision"
 discovery_url="${issuer}.well-known/openid-configuration"
 output="" write_out="" url=""
+# Real curl refuses an option it does not know with exit 2 and this message,
+# and refuses an option given no value with exit 2 as well (curl 8.14.1;
+# scripts/tool-parity.test.mjs re-asserts both against the real binary). The
+# shim used to ignore every unrecognised flag, so install.sh could have grown
+# one curl has never had and this harness would still have gone green -- the
+# same class of blindness as the plain 'docker exec -T' that shipped in #607.
+refuse_option() {
+  printf 'curl: option %s: is unknown\\n' "\$1" >&2
+  exit 2
+}
+require_parameter() {
+  printf 'curl: option %s: requires parameter\\n' "\$1" >&2
+  exit 2
+}
 args=("\$@")
 for ((i = 0; i < \${#args[@]}; i++)); do
   case "\${args[i]}" in
-    --output) output="\${args[i+1]}"; ((i++)) ;;
-    --write-out) write_out="\${args[i+1]}"; ((i++)) ;;
-    --header|--connect-timeout|--max-time|--max-filesize|--proto|--proto-redir) ((i++)) ;;
-    --*|-*) ;;
+    --output|-o)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      output="\${args[i+1]}"; ((i++)) ;;
+    --write-out|-w)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      write_out="\${args[i+1]}"; ((i++)) ;;
+    --header|-H|--connect-timeout|--max-time|-m|--max-filesize|--proto|--proto-redir|--retry|--resolve)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      ((i++)) ;;
+    --fail|-f|--silent|-s|--show-error|-S|--location|-L|--tlsv1.2|--tlsv1.3) ;;
+    -*) refuse_option "\${args[i]}" ;;
     *) url="\${args[i]}" ;;
   esac
 done
@@ -189,29 +239,43 @@ serve() {
   [[ -z "\$write_out" ]] || printf '200'
 }
 case "\$url" in
-  "\$asset_base"/*)
-    # Assets gate (issue #677). When the lifecycle interruption scenario arms
-    # it, the first asset request parks here: announce that the installer is
-    # inside the assets phase, then block until the test releases the FIFO.
-    # The installer physically cannot advance past this curl, so the kill point
-    # is fixed rather than raced against a poll interval.
-    if [[ -e "$workdir/assets-gate.armed" && ! -e "$workdir/assets-gate.reached" ]]; then
-      : > "$workdir/assets-gate.reached"
-      read -r _ < "$workdir/assets-gate.release" || true
-    fi
-    asset="\${url#"\$asset_base"/}"
-    [[ -f "$repo_root/\$asset" ]] || exit 22
-    serve "$repo_root/\$asset"
-    ;;
   "\$discovery_url")
     serve "$workdir/discovery.json"
     ;;
   *)
+    # Real curl still writes the --write-out template when the transfer never
+    # happened; %{http_code} is 000 with no response, and a host that will not
+    # resolve exits 6 (curl 8.14.1; scripts/tool-parity.test.mjs).
+    [[ -z "\$write_out" ]] || printf '000'
     exit 6
     ;;
 esac
 SHIM
   chmod 755 "$workdir/shim/curl"
+
+  cat > "$workdir/shim/docker" <<SHIM
+#!/usr/bin/env bash
+# Everything reaches the real docker. The single interception is the assets
+# gate (issue #677): when the lifecycle interruption scenario arms it, the
+# installer's single docker-cp of the bundled deployment assets (ADR-0019)
+# parks here — it announces that the installer is inside the assets phase,
+# then blocks until the test releases the FIFO. The installer physically
+# cannot advance past this call, so the kill point is fixed rather than raced
+# against a poll interval.
+#
+# There is deliberately no argument validation here: every call, including the
+# gated one, is handed to the real docker, so this shim cannot be more
+# permissive than the tool it stands in front of (#616).
+set -Eeuo pipefail
+if [[ "\${1:-}" == "cp" && "\$*" == *":/opt/orbit/deploy/."* ]]; then
+  if [[ -e "$workdir/assets-gate.armed" && ! -e "$workdir/assets-gate.reached" ]]; then
+    : > "$workdir/assets-gate.reached"
+    read -r _ < "$workdir/assets-gate.release" || true
+  fi
+fi
+exec "$real_docker" "\$@"
+SHIM
+  chmod 755 "$workdir/shim/docker"
 }
 
 # --- positive scenario -----------------------------------------------------
@@ -229,7 +293,11 @@ assert_green() {
   grep '^phase=' "$workdir/install.log" |
     grep -vE '^phase=[a-z-]+ component=[a-z-]+ state=[a-z-]+ reason=[a-z-]+ action=[a-z-]+ elapsed=[0-9]+s( simulation=true)?$' &&
     fail "event line outside the documented engine-events format"
-  grep '^phase=' "$workdir/install.log" | grep -q '=unknown' &&
+  # One grep, not a `| grep -q` pipe: the unknown-fallback line, if any, could
+  # sit early in a long log, and under set -e pipefail a first grep killed by
+  # SIGPIPE once the second exited would turn 141 into the pipeline's status,
+  # skipping this `&&` and passing a run that should fail (issue #809).
+  grep -qE '^phase=.*=unknown' "$workdir/install.log" &&
     fail "green run emitted the unknown-vocabulary fallback"
 
   # catalogue Part 1 / configuration.sh #2: the deployment config is a
@@ -245,11 +313,22 @@ assert_green() {
   # catalogue Part 1 / install.sh #6: generated secrets stay owner-only.
   [[ "$(stat -c %a "$target/.orbit-secrets")" == 700 ]] ||
     fail ".orbit-secrets is not mode 700"
-  find "$target/.orbit-secrets" -type f ! -perm 600 | grep -q . &&
+  # Capture first, test second: `find | grep -q .` races find's continued
+  # traversal against grep's exit on the first match (issue #809). `-quit`
+  # bounds find to at most one line, so there is nothing left to write once
+  # it has printed that line -- the same guard scripts/test-backup-restore.sh
+  # already uses at its own find-for-existence check.
+  local bad_secret
+  bad_secret="$(find "$target/.orbit-secrets" -type f ! -perm 600 -print -quit)"
+  [[ -z "$bad_secret" ]] ||
     fail "a generated secret file is not mode 600"
 
-  /usr/bin/curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health" |
-    grep -q '"status":"ready"' || fail "/api/health did not report ready"
+  # Capture first, test second (issue #809): curl can still be streaming the
+  # rest of the response when grep -q matches early and exits, which would
+  # SIGPIPE curl and turn a healthy body into a 141 instead of a verdict.
+  local health_body
+  health_body="$(/usr/bin/curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health")" || true
+  [[ "$health_body" == *'"status":"ready"'* ]] || fail "/api/health did not report ready"
   note "green: fresh install healthy with $events documented events"
 }
 
@@ -276,11 +355,15 @@ positive_scenario() {
   docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
     fail "push to the local registry failed"
+  # grep -m1, not `| head -1` (issue #809): docker inspect's one line can hold
+  # more than one digest, and head -1 exiting after the first would SIGPIPE
+  # grep while it still had output queued, turning a captured digest into a
+  # 141. -m1 makes grep itself the one process that stops once it has enough.
   digest="$(docker inspect --format '{{index .RepoDigests}}' "127.0.0.1:$registry_port/$repository:latest" |
-    grep -oE 'sha256:[0-9a-f]{64}' | head -1)"
+    grep -m1 -oE 'sha256:[0-9a-f]{64}')"
   [[ -n "$digest" ]] || fail "could not capture the pushed digest"
 
-  write_shim "$revision"
+  write_shim
   make_preprovisioned_target
 
   if [[ "$lifecycle_mode" == 1 ]]; then
@@ -291,9 +374,9 @@ positive_scenario() {
     # The kill point is a rendezvous, not a poll (issue #677). Neither a
     # '^phase=assets' log line nor the staging directory can locate it: UI
     # events are queued (installer_ui_event) until load_installer_ui sources
-    # the just-fetched installer-ui.sh, which happens only after every asset
-    # is fetched and bash -n checked, so the assets "starting" event reaches
-    # the log already batched with "completed"; and while the staging
+    # the just-extracted installer-ui.sh, which happens only after the whole
+    # bundle is staged and bash -n checked, so the assets "starting" event
+    # reaches the log already batched with "completed"; and while the staging
     # directory is mkdir'd first thing in the phase, install.sh reaches its
     # first legitimate in-transaction mutation of .env-orbit
     # (run_configuration_migration) a few hundred milliseconds later. Both
@@ -302,8 +385,9 @@ positive_scenario() {
     # a runner whose process spawns are cheaper.
     #
     # So the shim's assets gate parks the installer inside the phase instead:
-    # the first asset request touches assets-gate.reached and then blocks
-    # reading the release FIFO. Waiting for that marker is still a poll, but
+    # the `docker cp` that extracts the bundle touches assets-gate.reached and
+    # then blocks reading the release FIFO. Waiting for that marker is still a
+    # poll, but
     # it is a poll for a state the installer holds indefinitely, so noticing
     # late costs time rather than correctness. Opening the FIFO read-write
     # here means neither side's open() can block.
@@ -350,11 +434,20 @@ positive_scenario() {
     # the assets phase would have exited on its own with a status of its own.
     [[ "$install_status" == 137 ]] ||
       fail "interruption: installer was not killed mid-assets-phase (status $install_status)"
-    find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -type d | grep -q . ||
+    # `-print -quit`, not a bare `| grep -q .` (issue #809): bounding find to
+    # one line of output means it never has a second line queued when grep
+    # exits, so it cannot take SIGPIPE and turn a real answer into a 141 --
+    # the same reasoning as the existing find check in
+    # scripts/test-backup-restore.sh.
+    local staging_dir
+    staging_dir="$(find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -type d -print -quit)"
+    [[ -n "$staging_dir" ]] ||
       fail "interruption: no staging directory, so the assets phase was never entered"
     cmp -s "$workdir/env-before-interrupt" "$target/.env-orbit" ||
       fail "interruption during assets phase mutated .env-orbit"
-    find "$target" -maxdepth 1 -name '.orbit-install-staging*' -type d ! -perm 700 | grep -q . &&
+    local lax_staging_dir
+    lax_staging_dir="$(find "$target" -maxdepth 1 -name '.orbit-install-staging*' -type d ! -perm 700 -print -quit)"
+    [[ -z "$lax_staging_dir" ]] ||
       fail "interruption left staging evidence that is not owner-only"
     note "lifecycle: hard interruption left the target byte-identical (install.sh #31)"
     # Recovery is the operator's documented step: staging evidence is kept
@@ -405,7 +498,20 @@ positive_scenario() {
 }
 
 note "work directory: $workdir"
+note "project: $project_name (registry $registry_name on 127.0.0.1:$registry_port, app on 127.0.0.1:$orbit_port)"
 sweep_debris
+
+# #894: scripts/test-install-acceptance.test.mjs proves the per-run
+# derivation above and the sweep filter that uses it, with a fake `docker`
+# on PATH standing in for the daemon -- no install, no network, no
+# container. This hook stops right after the one real sweep_debris call
+# above (itself a no-op against a fresh fake docker) so the test can inspect
+# what it invoked without going anywhere near install.sh.
+if [[ -n "${TEST_INSTALL_ACCEPTANCE_DRY_RUN:-}" ]]; then
+  note "dry run: exiting after sweep_debris, before any installer run"
+  exit 0
+fi
+
 negative_scenarios
 if [[ "$negative_only" == 1 ]]; then
   note "negative-only run complete"

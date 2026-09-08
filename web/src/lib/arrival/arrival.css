@@ -18,7 +18,7 @@
  * written against it. Zero-specificity, so every rule below still wins on the
  * margins it sets deliberately.
  */
-:where(#formlayer, #formlayer *, .nf, .nf *){box-sizing:border-box;margin:0}
+:where(#formlayer, #formlayer *, .nf, .nf *, .bigring, .bigring *){box-sizing:border-box;margin:0}
 
 /* ── THE LOGIN CHROME IS GONE WHILE THE CARD SHOWS ────────────────────────
    §15, fourth pass, owner verbatim: "Login button still there, but we must
@@ -77,29 +77,97 @@ body.showform.grounded #formlayer{animation:settleback .85s cubic-bezier(.2,.9,.
 @keyframes settleback{0%{transform:translateY(0)}22%{transform:translateY(-13px)}
                       58%{transform:translateY(4px)}100%{transform:translateY(0)}}
 
-/* Genuinely translucent: --panel already carries alpha, and this halves it
-   again, so on star-chart the card sits at ~0.32 opacity over the dawn. */
-.card{width:100%;max-width:404px;
-      background:color-mix(in srgb,var(--panel) 58%,transparent);
-      backdrop-filter:blur(15px) saturate(1.05);
-      border:1px solid color-mix(in srgb,var(--line) 78%,transparent);
-      border-radius:18px;padding:26px 26px 24px;
-      box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px rgba(255,255,255,.03) inset;
+/* ── THE RING HOLDS THE QUESTIONS (#862, round 3 — owner's design) ────────
+   design/v19/first-run-card/round-3/ring.html. Numbers are all the login
+   ring's own: it draws at 2.1x, so its stroke is 4.2px, its orb is 29.4px
+   across, and the circle itself is 302.4px; this ring is 500px, 1.65x that.
+
+   Drawn in CSS, not as a scaled SVG, precisely so the line weight and the
+   orb hold still while the diameter moves — a border measured in pixels
+   does not thin when its element shrinks, and the orb is its own element,
+   stationed by percentage so it keeps its place on the ring at any size.
+
+   TWO TRAPS ALREADY BITTEN, both guarded here:
+     · the v19 sheets' `.disc` is the newcomer frame's discovered count, not
+       this ring — every rule below is scoped to `.bigring`, never bare;
+     · `body.showform` stays set while the sheet runs its other journeys (the
+       newcomer arrival, the discovered count, the reclaim), so the rule that
+       shows the ring is scoped to every one of THIS app's own body classes
+       for those journeys, not to `showform` alone. */
+:where(.arrival) .bigring{position:fixed;inset:0;display:grid;place-items:center;z-index:3;
+         opacity:0;visibility:hidden;pointer-events:none;
+         transition:opacity .16s ease .46s,visibility .16s .46s}
+body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
+  :not(.bare):not(.showwarp):not(.launching):not(.belong) :where(.arrival) .bigring{
+         opacity:1;visibility:visible;
+         transition:opacity .8s ease,visibility .8s}
+:where(.arrival) .bigring>*{grid-area:1/1}
+
+/* The glass: the night sky itself, held still and quieted, inside the ring
+   and nowhere else. It is a darkening rather than a paint, so a light pack
+   cannot wash it out — the per-pack opacity exception that opened this
+   issue is deleted above, not extended here. */
+:where(.arrival) .bigring .ringglass{width:500px;height:500px;border-radius:50%;
+      border:4.2px solid #8791b3;
+      background:rgba(6,10,22,.56);
+      -webkit-backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
+      backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
+      box-shadow:0 40px 120px -50px rgba(0,0,0,.8),
+                 0 0 90px -40px rgba(216,180,90,.18) inset;
+      transition:width .5s cubic-bezier(.55,0,.2,1),
+                 height .5s cubic-bezier(.55,0,.2,1),
+                 background .5s ease,backdrop-filter .5s ease}
+/* THE HAND-OVER. On create the circle closes to exactly the login ring's
+   302.4px, in its place, and the glass clears as it goes — the ring holds
+   full strength while it closes and clears in .16s once it has arrived, and
+   the reclaimed login chrome (flight.css/arrival.css) is held back to meet
+   it there. Both land before the ascent starts at 620ms, so the ratified
+   launch runs unchanged. */
+body.reclaimed :where(.arrival) .bigring .ringglass{width:302.4px;height:302.4px;
+      background:rgba(7,11,24,0);
+      -webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px)}
+
+/* The orb keeps its 29.4px and its station: the login orb's own angle held
+   as a percentage, so it keeps its place on the ring at any size — one turn
+   per 40s, the only motion CON-19 allows the mark (@keyframes spinback is
+   flight.css's, shared rather than redeclared). */
+:where(.arrival) .bigring .ringorbit{width:500px;height:500px;position:relative;
+       animation:spinback 40s linear infinite;
+       transition:width .5s cubic-bezier(.55,0,.2,1),
+                  height .5s cubic-bezier(.55,0,.2,1)}
+body.reclaimed :where(.arrival) .bigring .ringorbit{width:302.4px;height:302.4px}
+:where(.arrival) .bigring .ringorbit i{position:absolute;left:93.26%;top:24.94%;
+         width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px;
+         border-radius:50%;background:#d8b45a}
+
+/* No card of its own any more: the ring is the card, so the panel, the
+   blur, the border and the shadow all go. Ink is the sky's and fixed, not
+   the pack's, for the reason the whole issue exists: the ground here is a
+   night sky whatever pack is chosen. */
+:where(.arrival) .card{width:300px;max-width:300px;
+      background:none;backdrop-filter:none;border:none;box-shadow:none;padding:0;
+      --ink:#f0f4fb; --ink-mid:#c0cade; --ink-faint:#9aa6bf;
+      --line:rgba(240,244,251,.26); --line-soft:rgba(240,244,251,.14);
+      --panel:rgba(6,10,22,.34);
+      color:var(--ink);
       transition:opacity .5s ease .1s,transform .8s cubic-bezier(.4,0,.2,1) .1s,
                  border-color .35s ease,box-shadow .5s ease}
 /* `reclaimed` is the create path's hand-over beat and `igniting` is the
    flight's own: the card leaves on the same curve for both, so the pre-beat
    runs straight into the ascent with nothing to see at the joint. */
-body.igniting .card,body.reclaimed .card{
+body.igniting :where(.arrival) .card,body.reclaimed :where(.arrival) .card{
       opacity:0;transform:translateY(16px) scale(.965);pointer-events:none}
-body.arming .card{border-color:var(--accent);
+body.arming :where(.arrival) .card{border-color:var(--accent);
       box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px var(--accent) inset,
                  0 0 70px -12px color-mix(in srgb,var(--accent) 55%,transparent)}
-/* the two light packs paint an ink-on-paper card onto a night sky: thinning
-   their veil the way the dark packs' is thinned washes their faint ink out
-   altogether, so they keep the body they were designed with */
-[data-theme=atlas] .card,[data-theme=dawn] .card{
-      background:color-mix(in srgb,var(--panel) 92%,transparent)}
+/* THE PER-PACK EXCEPTION IS DELETED, NOT EXTENDED (#862). This used to paint
+   an ink-on-paper card over the night sky on the light packs, because
+   thinning their veil the way the dark packs' was thinned washed their faint
+   ink out altogether. #862 was opened by that same exception on the RING —
+   the card is now the ring, the glass inside it is a darkening rather than a
+   paint (see .bigring .ringglass below), and a darkening cannot be washed out
+   by any pack, so no per-pack line is needed here at all. Atlas is gone
+   (#865); clouds never carried this rule. */
 
 /* THE CARD HAS NO MARK (owner, 2026-08-17, verbatim): "I actually want the
    ring logo removed from the card. Just fade the card out and have the bigger
@@ -107,24 +175,52 @@ body.arming .card{border-color:var(--accent);
    into the rest of the flight same size etc once flying as it currently is."
    So the create path departs from exactly the mark the login path departs
    from, at exactly the size: the login's own 420px hero, standing behind this
-   card the whole time. */
+   card the whole time.
 
-.field{margin-bottom:18px}
-.field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
+   #862 ROUND 3 (owner, 2026-09-06): "Make the Orbit logo circle on the login
+   screen much bigger, same line weight, same size of rotating orb. The
+   inside of the ring is a glassed background over the night's sky, with the
+   fields inside it." So the hero ring itself is now enlarged to 500px —
+   1.65x the login's own 302.4px, same 4.2px line weight, same 29.4px orb on
+   its own station — and the card's fields stand INSIDE it: no panel, no
+   blur, no border, no shadow of its own, because the ring is the card. */
+
+:where(.arrival) .field{margin-bottom:18px}
+:where(.arrival) .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
              text-transform:uppercase;margin:0 0 6px}
-.field input,.field select{width:100%;background:var(--panel);border:1px solid var(--line);
+:where(.arrival) .field input,:where(.arrival) .field select{width:100%;background:var(--panel);border:1px solid var(--line);
        border-radius:9px;color:var(--ink);font-size:13.5px;padding:10px 12px;font-family:var(--ui)}
-.field input::placeholder{color:var(--ink-faint)}
-.field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
-.field select{appearance:none;-webkit-appearance:none;padding-right:30px}
+:where(.arrival) .field input::placeholder{color:var(--ink-quiet)}
+:where(.arrival) .field input:focus,:where(.arrival) .field select:focus{border-color:var(--accent)}
+:where(.arrival) .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
 #hhname{font:600 16.5px var(--display);padding:10px 13px}
-.row2{display:flex;gap:14px}
-.row2>.field{flex:1;min-width:0;margin-bottom:0}
-.selwrap{position:relative}
-.selwrap::after{content:"";position:absolute;right:13px;top:calc(50% + 8px);width:6px;height:6px;
+/* ONE COLUMN (#862, owner, 2026-09-06): name, then time zone, then currency
+   — stacking narrows the block, which is what lets the circle come down: a
+   ~300px column inside a 500px ring still clears its widest point. */
+:where(.arrival) .row2{display:block}
+:where(.arrival) .row2>.field{margin-bottom:18px}
+:where(.arrival) .row2>.field:last-child{margin-bottom:0}
+:where(.arrival) .selwrap{position:relative}
+:where(.arrival) .selwrap::after{content:"";position:absolute;right:13px;top:calc(50% + 8px);width:6px;height:6px;
                 border-right:1.4px solid var(--ink-faint);border-bottom:1.4px solid var(--ink-faint);
                 transform:translateY(-50%) rotate(45deg);pointer-events:none}
 .pair{margin-bottom:18px}
+
+/* THE FIELDS, INSIDE THE RING (#862): typed text sits centred, everything in
+   the ring being centred on its axis, so a name growing out from the left
+   edge was the one thing in here still reading as a form; the labels centre
+   with it, because a left-set label over a centred value reads as a
+   mistake. Colours are literal, not pack tokens, for the same reason the
+   glass is a darkening rather than a paint — the ground is a night sky
+   whatever pack is chosen. */
+:where(.arrival) .card .field input,:where(.arrival) .card .field select,:where(.arrival) .card .field label{text-align:center}
+:where(.arrival) .card .field select{text-align-last:center;padding-right:12px}
+:where(.arrival) .card .selwrap::after{display:none}
+:where(.arrival) .card .field label{color:#9aa6bf;text-shadow:0 1px 8px rgba(2,5,14,.8)}
+:where(.arrival) .card .field input,:where(.arrival) .card .field select{
+      background:rgba(5,9,20,.42);border-color:rgba(240,244,251,.22);color:#f0f4fb}
+:where(.arrival) .card .field input::placeholder{color:rgba(240,244,251,.36)}
+:where(.arrival) .card .field input:focus,:where(.arrival) .card .field select:focus{border-color:#d8b45a}
 
 /* ── THE REJECTION, in one line ──────────────────────────────────────────
    Third pass: the three-line banner (code · sentence · footnote) is gone. The
@@ -144,14 +240,29 @@ body.rejected #hhname{border-color:var(--warm);
 
 /* the one reassurance that survives: it admits to the four sections that were
    made without being asked for, and says nothing else */
-.note{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.05em;
+:where(.arrival) .note{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.05em;
       margin:-4px 0 20px}
+:where(.arrival) .card .note{color:#8f9bb5;text-align:center}
 
 .btn{width:100%;font:600 14px var(--display);color:var(--bg);background:var(--accent);
      border:0;border-radius:11px;padding:12px 24px;cursor:pointer;
      transition:filter .3s ease,opacity .3s ease}
 .btn:hover{filter:brightness(1.06)}
 .btn:disabled{opacity:.34;cursor:not-allowed;filter:none}
+
+/* THE ACT (#862): the ratified gate rule, verbatim and at its own size — the
+   owner asked for the login button in everything but the word (§15 already
+   requires the two surfaces to carry the identical control). Overrides .btn
+   above by id, rather than growing it, so the card's own width-100% button
+   stays exactly what a caller outside the ring still gets. */
+:where(.arrival) #gobtn{display:block;margin:20px auto 0;width:auto;
+       font:600 12px var(--display);color:#04060e;background:#d8b45a;
+       border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
+       letter-spacing:.04em;line-height:normal;
+       box-shadow:0 0 28px rgba(216,180,90,.22);
+       transition:filter .35s ease,box-shadow .3s ease,opacity .4s ease}
+:where(.arrival) #gobtn:hover:not(:disabled){filter:brightness(1.08)}
+:where(.arrival) #gobtn:disabled{opacity:.34;cursor:default;box-shadow:none}
 
 /* ══ THE NEWCOMER'S LANDING (§15 second pass, ruling 4) ═══════════════════
    A reader who belongs to nothing yet flies exactly the same launch and sets
@@ -173,7 +284,7 @@ body.shownew .nf{opacity:1;pointer-events:auto}
            background:none;border:0;cursor:pointer}
 .nf .nstar .glint{animation:northpulse 5.5s ease-in-out infinite;transform-origin:0 0}
 @keyframes northpulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.18)}}
-.nf .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-faint);text-transform:uppercase}
+.nf .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-quiet);text-transform:uppercase}
 .nf .nstar:hover span{color:var(--accent-text)}
 .nf .minisys{position:absolute;transform-origin:118px 95px}
 .nf .minisys svg{display:block}
@@ -196,7 +307,9 @@ body.shownew.instrument .nf .nstar{animation:chromein .95s ease .34s both}
 .nf .disc{position:absolute;left:50%;top:50%;z-index:4;text-align:center;
           width:min(560px,86vw);opacity:0;pointer-events:none;
           transform:translate(-50%,calc(-50% + 14px));
-          transition:opacity .8s ease,transform .8s cubic-bezier(.3,.7,.3,1)}
+          /* #870: retimed 800ms -> 450ms, the beat before it (countGap,
+             flight/timeline.js) and its hold (countHold) alongside it */
+          transition:opacity .45s ease,transform .45s cubic-bezier(.3,.7,.3,1)}
 body.counting .nf .disc{opacity:1;transform:translate(-50%,-50%)}
 .nf .disc .big{font:600 clamp(72px,8.6vw,118px) var(--display);line-height:.84;
                letter-spacing:-.035em;color:var(--accent-text)}
@@ -229,7 +342,7 @@ body.belong .nf .belong{opacity:1}
 .nf .belong li .nm{flex:1;min-width:0;font:12.5px var(--ui);color:var(--ink);
      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nf .belong li .act{flex:none;font:10px var(--mono);letter-spacing:.13em;
-     color:var(--ink-faint);text-transform:uppercase}
+     color:var(--ink-quiet);text-transform:uppercase}
 .nf .belong li button:hover .act{color:var(--accent-text)}
 .nf .belong li.waiting .act{color:var(--warm)}
 .nf .belong li.waiting button{cursor:default}
@@ -237,14 +350,15 @@ body.belong .nf .belong{opacity:1}
 .nf .belong .own button{font:11.5px var(--mono);color:var(--accent-text);letter-spacing:.04em;
      background:none;border:0;padding:0;cursor:pointer}
 .nf .belong .own button:hover{text-decoration:underline}
-.nf .belong .own span{display:block;font:10px var(--mono);color:var(--ink-faint);margin-top:7px}
+.nf .belong .own span{display:block;font:10px var(--mono);color:var(--ink-quiet);margin-top:7px}
 
 /* ══ PINNED ══════════════════════════════════════════════════════════════
    A fixture asks for one millisecond of the journey and then holds it still,
    so the transitions must not play out from where they were — they are the
    journey, and the journey is already over. Fixture-only: nothing sets
    `pinned` in the product. */
-body.pinned #formlayer,body.pinned .card,body.pinned .nf,
+body.pinned #formlayer,body.pinned :where(.arrival) .card,body.pinned .nf,body.pinned :where(.arrival) .bigring,
+body.pinned :where(.arrival) .bigring .ringglass,body.pinned :where(.arrival) .bigring .ringorbit,
 body.pinned .nf .disc,body.pinned .nf .belong{transition:none!important}
 body.pinned .nf .minisys,body.pinned .nf .nstar{animation:none!important;opacity:1}
 
@@ -255,7 +369,8 @@ body.pinned .nf .minisys,body.pinned .nf .nstar{animation:none!important;opacity
    Only the movement goes. */
 @media (prefers-reduced-motion: reduce){
   .nf *{animation:none!important}
-  #formlayer,.card,.nf{transition-duration:.7s!important;transition-timing-function:ease!important}
+  #formlayer,:where(.arrival) .card,.nf,:where(.arrival) .bigring,:where(.arrival) .bigring .ringglass,:where(.arrival) .bigring .ringorbit{
+    transition-duration:.7s!important;transition-timing-function:ease!important}
   #formlayer{animation:none!important}
   .nf .minisys,.nf .nstar{opacity:1}
   .nf .belong{transform:translate(-50%,-50%)!important}

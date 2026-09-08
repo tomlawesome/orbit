@@ -38,7 +38,6 @@ describe("startup configuration", () => {
     ["processing", { COMPOSE_PROFILES: "processing" }, "processing"],
     ["ai", { COMPOSE_PROFILES: "ai" }, "ai"],
     ["mail", { SMTP_HOST: "smtp.example.invalid" }, "mail"],
-    ["imap", { IMAP_HOST: "imap.example.invalid" }, "imap"],
     ["push", { VAPID_SUBJECT: "mailto:admin@example.invalid" }, "push"],
   ])("tolerates partial %s configuration and records a bounded disabled fallback", (_label, changes, field) => {
     expect(() => validateStartupConfiguration({ ...baseEnvironment(), ...changes })).not.toThrow();
@@ -64,6 +63,26 @@ describe("startup configuration", () => {
     expect(failure).toBeInstanceOf(StartupConfigurationError);
     expect((failure as StartupConfigurationError).issues).toContainEqual(expect.objectContaining({ field }));
     expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("names the failing rule and its remedy for an invalid session secret, never the secret itself (#717)", () => {
+    const badSecret = "not-a-valid-hex-session-secret";
+    let failure: unknown;
+    try {
+      validateStartupConfiguration({ ...baseEnvironment(), SESSION_SECRET: badSecret });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(StartupConfigurationError);
+    const issue = (failure as StartupConfigurationError).issues.find((entry) => entry.field === "authentication");
+    /*
+     * Grepping the log for the validator's own wording used to return zero
+     * matches (#717) because only the coded `field`/`code` reached it. This
+     * asserts the actual remedy text -- not just that some string exists.
+     */
+    expect(issue?.detail).toContain("64 hexadecimal characters");
+    expect(issue?.detail).toContain("openssl rand -hex 32");
+    expect(issue?.detail).not.toContain(badSecret);
   });
 
   /*
@@ -105,13 +124,9 @@ describe("startup configuration", () => {
     expect(() => validateStartupConfiguration({ ...baseEnvironment(), ORBIT_FIXTURES: "1" })).not.toThrow();
   });
 
-  it("accepts preconfigured disabled IMAP and dormant VAPID key material without a push subject", () => {
+  it("accepts dormant VAPID key material without a push subject", () => {
     expect(() => validateStartupConfiguration({
       ...baseEnvironment(),
-      IMAP_ENABLED: "false",
-      IMAP_HOST: "imap.example.invalid",
-      IMAP_USER: "orbit-test-user",
-      IMAP_PASSWORD: "test-only-imap-password",
       VAPID_PUBLIC_KEY: "dormant-public-key",
       VAPID_PRIVATE_KEY_FILE: "/missing/runtime-secret",
     })).not.toThrow();
@@ -132,17 +147,6 @@ describe("startup configuration", () => {
     }));
     expect(JSON.stringify(getConfigurationProblems())).not.toContain("configured-public-key");
     expect(JSON.stringify(getConfigurationProblems())).not.toContain("missing/runtime-secret");
-  });
-
-  it("records partially configured default IMAP without opening the database", () => {
-    expect(() => validateStartupConfiguration({ ...baseEnvironment(), IMAP_HOST: "imap.example.invalid" })).not.toThrow();
-    expect(getConfigurationProblems()).toContainEqual(expect.objectContaining({
-      setting: "imap",
-      code: "configuration_optional",
-      severity: "warning",
-      fallback: "feature_disabled",
-    }));
-    expect(mocks.getDb).not.toHaveBeenCalled();
   });
 
   it("uses safe logging defaults while exposing invalid logging configuration", () => {

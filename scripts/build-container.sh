@@ -95,7 +95,7 @@ diagnose_registry_reachability() {
 
 # The build context lives in an overlay, because the base compose file
 # describes a deployment that has no source tree.
-readonly build_files=(-f docker-compose.yml -f docker-compose.build.yml)
+readonly build_files=(-f docker-compose.yml -f compose/docker-compose.build.yml)
 
 if [[ -n "$pull_option" ]]; then
   docker compose --env-file "$environment_file" "${build_files[@]}" build --pull orbit-app \

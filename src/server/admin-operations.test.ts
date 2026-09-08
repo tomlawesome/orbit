@@ -17,6 +17,10 @@ vi.mock("@/server/imap-ingestion", () => ({
   getImapIngestionConfig: vi.fn(() => ({})),
   getImapIngestionWorkerHealth: vi.fn(() => ({ started: false, running: false, lastSuccessAt: null, lastErrorAt: null, lastErrorCode: null, preflightStatus: "not_configured" })),
   getImapProviderPreflightState: vi.fn(() => ({ status: "not_configured", smtp: "not_configured", imap: "not_configured", checkedAt: null })),
+  // Real class, not a mock: admin-operations.ts uses `instanceof` on it to
+  // tell a locked mail-in credential (ADR-0017 slice 1) from any other
+  // configuration error.
+  MailInCredentialLockedError: class MailInCredentialLockedError extends Error {},
   verifyImapIngestionProviders: mocks.verify,
 }));
 

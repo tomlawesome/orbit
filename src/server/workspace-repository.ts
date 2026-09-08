@@ -223,6 +223,39 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
   });
 }
 
+/**
+ * Whether this reader would land ONWARD (web/src/lib/arrival/stage.js's
+ * `arrivalStageOf`) without paying for the rest of `readWorkspace`'s full
+ * read -- exactly the second half of the test hooks.server.js needs before
+ * sending a session with no active household to the arrival (#840).
+ *
+ * A session's `activeHouseholdId` column is only ever written by
+ * `household.create` and `household.activate`, both self-service. A member
+ * granted membership by someone ELSE -- an owner's `addHouseholdMember`, or
+ * an owner approving a join request through `decideJoinRequest` -- gets a
+ * membership row with no session of theirs touched, because the actor's
+ * session is not theirs to write. Left to `activeHouseholdId` alone, that
+ * reader's very next visit to any gated screen would be sent to `/` and
+ * bounced straight back by the arrival's own ONWARD branch -- forever.
+ * Checking membership here, the same way `arrivalStageOf` would, is what
+ * lets that reader through untouched.
+ *
+ * An administrator is never a newcomer (#453/§11: the server hands them
+ * every live household as a member would see it), so their branch asks
+ * whether the instance has one at all rather than whether they personally
+ * belong to it.
+ */
+export async function hasOnwardHousehold(userId: string, isInstanceAdmin: boolean): Promise<boolean> {
+  if (isInstanceAdmin) {
+    const [row] = await getDb().select({ id: households.id }).from(households)
+      .where(isNull(households.deletionRequestedAt)).limit(1);
+    return Boolean(row);
+  }
+  const [row] = await getDb().select({ householdId: memberships.householdId }).from(memberships)
+    .where(eq(memberships.userId, userId)).limit(1);
+  return Boolean(row);
+}
+
 function itemDates(scheduleKind: "renewal" | "service" | undefined, dueDate: string | undefined) {
   return {
     renewalDate: scheduleKind === "renewal" ? dueDate ?? null : null,

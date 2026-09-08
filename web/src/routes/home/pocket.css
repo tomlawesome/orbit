@@ -55,7 +55,11 @@
 @keyframes drift{to{transform:translateX(-40px)}}
 .pocket .mpage{position:relative;z-index:2;max-width:400px;margin:0 auto;padding:14px 12px 40px}
 .pocket .mtop{display:flex;justify-content:space-between;align-items:center;padding:4px 6px 10px}
-.pocket .morb{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
+/* #852: a <button> now (it opens the account sheet), reset to draw exactly as
+ * the plain div it replaces — same size, border, background and font, so the
+ * fidelity screenshots do not move. */
+.pocket .morb{appearance:none;padding:0;margin:0;cursor:pointer;
+      width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
       background:var(--panel);backdrop-filter:blur(8px);display:grid;place-items:center;
       font:11px var(--mono);color:var(--ink-mid)}
 .pocket .mdial{width:100%;aspect-ratio:1;position:relative}
@@ -68,7 +72,7 @@
 .pocket .msearch{margin:8px 0 18px;text-align:center}
 .pocket .msearch input{width:88%;background:none;border:0;outline:0;border-bottom:1px solid var(--line);
       text-align:center;font:12.5px var(--mono);color:var(--ink);padding:7px}
-.pocket .mgroup h3{font:10px var(--mono);letter-spacing:.16em;color:var(--ink-faint);margin:14px 4px 8px}
+.pocket .mgroup h3{font:10px var(--mono);letter-spacing:.16em;color:var(--ink-quiet);margin:14px 4px 8px}
 .pocket .mitem{display:flex;align-items:center;gap:11px;border:1px solid var(--line-soft);
        background:var(--panel);backdrop-filter:blur(8px);border-radius:12px;
        padding:11px 13px;margin-bottom:6px}
@@ -76,16 +80,45 @@
 .pocket .mitem span{font-size:11px;color:var(--ink-mid)}
 .pocket .mitem .flex{flex:1;min-width:0}
 .pocket .mt{font:500 12px var(--mono);text-align:right}
-.pocket .mt small{display:block;font-size:9.5px;color:var(--ink-faint)}
+.pocket .mt small{display:block;font-size:9.5px;color:var(--ink-quiet)}
 .pocket .dot{width:7px;height:7px;border-radius:50%;flex:none}
-.pocket .sheet{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:18px 18px 0 0;
+/* #850: a transform alone does not remove an element from the Tab order in a
+ * real browser — only display:none, visibility:hidden, inert, tabindex="-1"
+ * or disabled do. Same fix as home.css's .account/.drawer/.drawer-top
+ * (#847): visibility is delayed to match the close animation, so the
+ * closed sheet's controls stop being real Tab stops only once it is fully
+ * off-screen. `.msheet` (#852, the account menu) is the same bottom-sheet
+ * frame as `.sheet` — one rule for both rather than a second copy. */
+.pocket .sheet,.pocket .msheet{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:18px 18px 0 0;
        background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
-       padding:18px 22px 26px;transform:translateY(105%);transition:transform .3s cubic-bezier(.3,.7,.3,1)}
-.pocket .sheet.open{transform:none}
-.pocket .sheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
+       padding:18px 22px 26px;transform:translateY(105%);visibility:hidden;
+       transition:transform .3s cubic-bezier(.3,.7,.3,1),visibility 0s .3s}
+.pocket .sheet.open,.pocket .msheet.open{transform:none;visibility:visible;transition-delay:0s}
+.pocket .sheet .grab,.pocket .msheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
 .pocket .sheet b{font-size:15px;font-weight:600}
 .pocket .sheet .meta{font:12px var(--mono);color:var(--ink-mid);margin:4px 0 14px}
-.pocket .sheet .acts{display:flex;gap:9px}
+/* ---- #852: the account menu's own contents, adapted from home.css's
+ * `.account` rules (desk, 240px fixed panel) to the sheet's full width. ---- */
+.pocket .msheet .mwho b{display:block;font-size:14px;font-weight:560}
+.pocket .msheet .mwho span{font-size:12px;color:var(--ink-mid)}
+.pocket .msheet nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+             padding:12px 0;border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft)}
+.pocket .msheet nav a{font-size:14px;color:var(--ink-mid);text-decoration:none;padding:8px}
+.pocket .msheet nav a:hover{color:var(--ink);background:var(--panel)}
+.pocket .msheet .mswatches{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+.pocket .msheet .mswatches span{font:10.5px var(--mono);color:var(--ink-quiet);margin-right:2px}
+.pocket .msheet .mswatches button{width:20px;height:20px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+.pocket .msheet .mswatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+.pocket .msheet .msignout{font:13px var(--mono);color:var(--ink-quiet);background:none;
+         border:0;cursor:pointer;padding:0}
+.pocket .msheet .msignout:hover{color:var(--overdue-text)}
+.pocket .msheet .msignout-problem:not([hidden]){font:10.5px var(--mono);color:var(--overdue-text);
+                margin-top:7px;line-height:1.7}
+/* #850: :not([hidden]) so the hidden attribute on #sh-acts-sugg wins — an
+ * ordinary author rule like the old .acts{display:flex} always outranks the
+ * user-agent stylesheet's [hidden]{display:none} regardless of specificity. */
+.pocket .sheet .acts:not([hidden]){display:flex;gap:9px}
 .pocket .sheet .acts button{flex:1;font:12px var(--mono);padding:10px;border-radius:10px;cursor:pointer;
       background:none;border:1px solid var(--line);color:var(--ink-mid)}
 .pocket .sheet .acts .pri{color:var(--accent-text);border-color:var(--accent)}
@@ -110,7 +143,7 @@
 @keyframes pocket-breathe{0%,100%{opacity:1}50%{opacity:.4}}
 .pocket .mitem.failed .dot{background:var(--degraded,#fb8b24)}
 .pocket .mitem.failed span{color:var(--ink-mid)}
-.pocket .burnup{font:9.5px var(--mono);color:var(--ink-faint);text-align:center;
+.pocket .burnup{font:9.5px var(--mono);color:var(--ink-quiet);text-align:center;
                 margin:10px 0 0;letter-spacing:.06em}
 /* the suggestion sheet: the pocket's review surface */
 .pocket .sheet .fields:not(:empty){margin-bottom:8px}
@@ -118,7 +151,9 @@
                    color:var(--ink-mid);padding:6px 2px;border-bottom:1px solid var(--line-soft)}
 .pocket .sheet .kv:last-of-type{border:0}
 .pocket .sheet .kv b{font-size:11px;font-weight:500;color:var(--ink)}
-.pocket .sheet .amend{display:block;text-align:center;font:10.5px var(--mono);
+/* #850: same [hidden]-wins fix as .acts above — .amend is hidden/shown via
+ * the hidden attribute in pocket.behaviour.js. */
+.pocket .sheet .amend:not([hidden]){display:block;text-align:center;font:10.5px var(--mono);
                       color:var(--ink-mid);text-decoration:none;margin-top:12px}
 .pocket .sheet .amend:hover{color:var(--accent-text)}
 @media (prefers-reduced-motion: reduce){ .pocket .mitem.reading .dot{animation:none} }
@@ -126,7 +161,7 @@
 /* ---- #453: the pocket's labelled sky ----------------------------------- */
 .pocket .adrift{margin-top:18px}
 .pocket .askrow{cursor:pointer}
-.pocket .askrow span{color:var(--ink-faint)}
+.pocket .askrow span{color:var(--ink-quiet)}
 .pocket .askrow[data-ask-requested="true"]{border-style:dashed;cursor:default}
 .pocket .askrow[data-ask-requested="true"] span{color:var(--accent-text)}
 .pocket .adrift .burnup a{color:var(--ink-mid);text-decoration:none}

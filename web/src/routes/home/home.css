@@ -145,12 +145,12 @@
   .hero-foot{position:absolute;top:calc(75vh + 160px);left:50%;
              transform:translate(-50%,-50%);
              display:flex;flex-direction:column;align-items:center;gap:13px}
-  .scrollcue{font:11px var(--mono);color:var(--ink-faint);text-align:center;letter-spacing:.14em}
+  .scrollcue{font:11px var(--mono);color:var(--ink-quiet);text-align:center;letter-spacing:.14em}
   .splash-search input{background:none;border:0;outline:0;
              border-bottom:1px solid var(--line);width:320px;text-align:center;
              font:12.5px var(--mono);color:var(--ink);padding:6px 4px;
              transition:border-color .25s}
-  .splash-search input::placeholder{color:var(--ink-faint)}
+  .splash-search input::placeholder{color:var(--ink-quiet)}
   /* The field is a hairline under centred type, which reads as a caption
      rather than an input. At rest the line was --line, measuring 1.14-1.56
      against the sky across the four packs - a rumour rather than a line - and
@@ -163,6 +163,10 @@
   .splash-search input{border-bottom-color:var(--ink-faint)}
   .splash-search input:hover{border-color:var(--ink-mid)}
   .splash-search input:focus{border-color:var(--accent)}
+  /* #847: the hairline's own colour shift is not enough for keyboard users to
+     find the field, so it earns the same ring every other focusable control
+     on this screen gives (.body-link:focus-visible above). */
+  .splash-search input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   /* CON-7: the word IS the handle — attached to the drawer edge, riding the
      slide. v17: key is quiet ink, degraded is unmistakably orange, and the
@@ -235,8 +239,15 @@
            background:var(--panel-raised);backdrop-filter:blur(14px);
            border:1px solid var(--line);border-radius:16px;padding:18px 20px;
            opacity:0;transform:translateY(-6px);pointer-events:none;
-           transition:opacity .25s,transform .25s}
-  .account.open{opacity:1;transform:none;pointer-events:auto}
+           /* #847: closed, this must leave the tab order entirely — opacity
+              and pointer-events alone still let Tab land on the links and
+              swatch buttons inside. visibility is delayed to match the close
+              animation's own .25s so it still plays; opening clears the delay
+              so the panel is reachable the instant it appears. */
+           visibility:hidden;
+           transition:opacity .25s,transform .25s,visibility 0s .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto;
+                visibility:visible;transition-delay:0s}
   .account .who b{display:block;font-size:14px;font-weight:560}
   .account .who span{font-size:12px;color:var(--ink-mid)}
   .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
@@ -246,11 +257,11 @@
                  padding:6px 8px;border-radius:8px}
   .account nav a:hover{color:var(--ink);background:var(--panel)}
   .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
-  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-quiet);margin-right:2px}
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
                    border:1px solid var(--line);padding:0}
   .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
-  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;
+  .signout{font:12px var(--mono);color:var(--ink-quiet);background:none;
            border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue-text)}
   .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
@@ -258,7 +269,7 @@
   .manifest{max-width:820px;margin:34px auto 0}
   .group{margin-bottom:30px}
   .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
-            color:var(--ink-faint);margin-bottom:10px;padding-left:4px}
+            color:var(--ink-quiet);margin-bottom:10px;padding-left:4px}
   .group h3 .closest{color:var(--warm);text-transform:none;letter-spacing:.04em}
   /* The manifest rows are links to the item view now (#424). CON-5 is
      unchanged - a click on a dial body still anchors to its row; the row is
@@ -278,7 +289,7 @@
   .item .body b{display:block;font-size:14.5px;font-weight:520}
   .item .body span{font-size:12.5px;color:var(--ink-mid)}
   .t{font:500 13.5px var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
-  .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-faint)}
+  .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-quiet)}
   .t.over{color:var(--overdue-text)} .t.soon{color:var(--warm)}
   .t.up{color:var(--upcoming)} .t.ok{color:var(--ok-text)}
   .suggest{border-style:dashed}
@@ -325,18 +336,18 @@
   .itemview .kv b{color:var(--ink);font-weight:500;text-align:right}
   .itemview .kv b.over{color:var(--overdue-text)}
   .itemview h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-               color:var(--ink-faint);margin:18px 0 8px}
+               color:var(--ink-quiet);margin:18px 0 8px}
   .itemview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
                  border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
   .itemview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
   .itemview p{font-size:13px;color:var(--ink-mid);line-height:1.65}
-  .itemview .ivnote{font:10.5px var(--mono);color:var(--ink-faint);padding:12px 2px;line-height:1.8}
+  .itemview .ivnote{font:10.5px var(--mono);color:var(--ink-quiet);padding:12px 2px;line-height:1.8}
   .itemview .ivproblem{font:10.5px var(--mono);color:var(--overdue-text);padding:12px 2px;line-height:1.6}
   .itemview .ivfoot{display:flex;align-items:center;gap:18px;margin-top:18px}
   /* The copy-link affordance the owner allowed. It is the ONLY place the
      address is offered, and it is still never printed: the button says what
      it does, the URL stays in the clipboard and the browser bar. */
-  .itemview .ivcopy{font:11px var(--mono);color:var(--ink-faint);background:none;border:0;
+  .itemview .ivcopy{font:11px var(--mono);color:var(--ink-quiet);background:none;border:0;
                     padding:0;cursor:pointer;letter-spacing:.04em}
   .itemview .ivcopy:hover{color:var(--accent-text)}
   .itemview .ivfull{font:11.5px var(--mono);color:var(--ink-mid);text-decoration:none;
@@ -352,15 +363,32 @@
            max-height:76vh;overflow:auto;overscroll-behavior:contain;
            width:300px;background:var(--panel-raised);backdrop-filter:blur(16px);
            border:1px solid var(--line);border-radius:16px;padding:20px 22px;
-           opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
-  .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%)}
+           opacity:0;pointer-events:none;
+           /* #847: closed, the viewer's close button must leave the tab
+              order, on the same delayed-visibility rule as .account above. */
+           visibility:hidden;
+           transition:opacity .25s,transform .25s,visibility 0s .25s}
+  .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%);
+                visibility:visible;transition-delay:0s}
   .drawer{position:fixed;top:0;bottom:0;z-index:10;width:290px;
           background:var(--panel-raised);backdrop-filter:blur(16px);
-          padding:26px;transition:transform .35s cubic-bezier(.3,.7,.3,1)}
-  .drawer h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-             color:var(--ink-faint);margin:18px 0 10px}
+          padding:26px;
+          /* #847: closed, the drawer is only off-screen via transform — Tab
+             still walks into it. visibility follows the same rule as .account
+             above: delayed on close to let the slide finish, immediate on
+             open. */
+          visibility:hidden;
+          transition:transform .35s cubic-bezier(.3,.7,.3,1),visibility 0s .35s}
+  .drawer.open{visibility:visible;transition-delay:0s}
+  /* the handle rides the drawer's own edge and is meant to stay reachable
+     (and visible) while its drawer is closed — CON-7 — so it opts back in. */
+  .drawer>button.handle{visibility:visible}
+  /* #843: h2, not h4 -- these are the first headings after the page's own
+     (sr-only) h1, so the level must not skip. The look is unchanged. */
+  .drawer h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+             color:var(--ink-quiet);margin:18px 0 10px}
   .drawer .close{position:absolute;top:12px;background:none;border:0;
-                 color:var(--ink-faint);font:14px var(--mono);cursor:pointer}
+                 color:var(--ink-quiet);font:14px var(--mono);cursor:pointer}
   .drawer-left{left:0;border-right:1px solid var(--line);transform:translateX(-102%)}
   .drawer-left.open{transform:none}
   .drawer-left .close{right:14px}
@@ -370,17 +398,17 @@
   .svc{display:flex;align-items:center;gap:9px;font:12.5px var(--mono);color:var(--ink-mid);padding:7px 2px}
   .svc i{width:7px;height:7px;border-radius:50%;flex:none}
   .svc b{color:var(--ink);font-weight:500;flex:1}
-  .svc small{color:var(--ink-faint);font-size:10.5px}
+  .svc small{color:var(--ink-quiet);font-size:10.5px}
   .keyrow{display:flex;align-items:center;gap:10px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
   .keyrow .sw{width:12px;height:12px;border-radius:50%;flex:none}
-  .docview h4{font-size:14.5px;font-weight:600}
-  .docview .sub{font:11px var(--mono);color:var(--ink-faint);margin:2px 0 14px}
+  .docview h2{font-size:14.5px;font-weight:600}
+  .docview .sub{font:11px var(--mono);color:var(--ink-quiet);margin:2px 0 14px}
   .docview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
                 border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
   .docview .doc:hover{border-color:var(--accent)}
   .docview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
   .docview .close{position:absolute;top:12px;right:14px;background:none;border:0;
-                  color:var(--ink-faint);font:14px var(--mono);cursor:pointer}
+                  color:var(--ink-quiet);font:14px var(--mono);cursor:pointer}
 
   /* CON-12 (new): the north star — creation lives in the sky. The star is
      the handle of a full-width top drawer; like every edge word, it rides
@@ -388,13 +416,20 @@
   .drawer-top{position:fixed;top:0;left:0;right:0;z-index:11;
               background:var(--panel-raised);backdrop-filter:blur(16px);
               border-bottom:1px solid var(--line);
-              transform:translateY(-102%);transition:transform .4s cubic-bezier(.3,.7,.3,1)}
-  .drawer-top.open{transform:none}
+              transform:translateY(-102%);
+              /* #847: same fix as .account/.drawer above — closed, this must
+                 leave the tab order, delayed to let the slide finish. */
+              visibility:hidden;
+              transition:transform .4s cubic-bezier(.3,.7,.3,1),visibility 0s .4s}
+  .drawer-top.open{transform:none;visibility:visible;transition-delay:0s}
+  /* the north star is this drawer's own handle (CON-12) and rides the same
+     slide as .drawer's handle above — it must stay reachable while closed. */
+  .drawer-top .nstar{visibility:visible}
   .drawer-top .inner{max-width:880px;margin:0 auto;padding:30px 24px 26px;
                      display:flex;flex-direction:column;gap:18px;align-items:center}
   .drawer-top .crow{align-self:stretch}
-  .drawer-top h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-                 color:var(--ink-faint)}
+  .drawer-top h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+                 color:var(--ink-quiet)}
   .ctypes{display:flex;gap:10px;flex-wrap:wrap}
   .ctype{display:flex;align-items:center;gap:9px;font:12.5px var(--mono);color:var(--ink-mid);
          border:1px solid var(--line);border-radius:99px;padding:8px 16px;cursor:pointer;
@@ -403,7 +438,7 @@
   .ctype .dot{color:var(--ink-mid);background:var(--ink-mid)}
   .crow{display:flex;gap:14px;align-items:stretch}
   .cdrop{flex:1;border:1.5px dashed var(--line);border-radius:14px;padding:16px 18px;
-         font:12.5px var(--mono);color:var(--ink-faint);text-align:center;cursor:pointer}
+         font:12.5px var(--mono);color:var(--ink-quiet);text-align:center;cursor:pointer}
   .cdrop:hover{border-color:var(--accent);color:var(--ink-mid)}
   .cfull{display:flex;align-items:center;font:12.5px var(--mono);color:var(--accent-text);
          text-decoration:none;border:1px solid var(--line);border-radius:14px;padding:0 18px}
@@ -414,7 +449,7 @@
   .nstar svg{overflow:visible}
   .nstar .glint{animation:northpulse 5.5s ease-in-out infinite}
   @keyframes northpulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.18)}}
-  .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-faint);
+  .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-quiet);
               text-transform:uppercase;opacity:0;transition:opacity .3s}
   .nstar:hover span,.drawer-top.open .nstar span{opacity:1;color:var(--accent-text)}
   /* v18: while open, the star-handle earns a chip so the way back up is
@@ -485,8 +520,10 @@
   body.quiet circle[fill="url(#danger4)"]{opacity:0}
   body.quiet .sky{opacity:1}
   body.quiet .sky .near{animation-duration:80s}
-  body.quiet .sky .near circle{animation:twinkle 3.6s ease-in-out infinite alternate}
-  @keyframes twinkle{from{opacity:.35}to{opacity:.95}}
+  /* the curve is $lib/atmosphere.css's (#445); quiet's range is its own —
+     these are the nearest stars on the brightest sky in the product */
+  body.quiet .sky .near circle{--tw-min:.35;--tw-max:.95;
+                               animation:twinkle 3.6s ease-in-out infinite alternate}
   .meteor{position:fixed;width:130px;height:1px;z-index:1;opacity:0;pointer-events:none;
           background:linear-gradient(90deg,transparent,#f4f0ff);transform:rotate(-32deg)}
   body.quiet .meteor{animation:meteor 7s linear infinite}
@@ -593,7 +630,10 @@
   @keyframes settle{from{opacity:0}to{opacity:1}}
 
   @media (prefers-reduced-motion: reduce){
-    .sky .far,.sky .near,.nstar .glint,.rotor{animation:none!important}
+    /* #841: the health dot's breathe, the waiting inbox orb's, and the
+       overdue/amber bodies' `.breathe` on the dial were the continuous
+       animations this block missed. */
+    .sky .far,.sky .near,.nstar .glint,.rotor,.handle i,.inbox-orb.waiting svg,.breathe{animation:none!important}
   }
 
 /* ---- #453: the labelled sky's quiet centre and the one question -------- */
@@ -638,7 +678,7 @@
                border:1px solid var(--chart-ink);background:var(--bg)}
 .manifest .corridor .month span{font:10.5px var(--mono);letter-spacing:.22em;color:var(--chart-ink)}
 .manifest .corridor .month .rule{flex:1;height:1px;background:var(--chart-line-soft)}
-.manifest .corridor .month small{font:10.5px var(--mono);color:var(--ink-faint)}
+.manifest .corridor .month small{font:10.5px var(--mono);color:var(--ink-quiet)}
 .manifest .corridor .item{position:relative}
 /* the entry's planet sits ON the spine — the same body it is on the dial */
 .manifest .corridor .planet{position:absolute;left:-37px;width:13px;height:13px;display:grid;place-items:center}
@@ -647,7 +687,7 @@
 .manifest .corridor .planet.ter i{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)}
 .manifest .corridor .planet.con i{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)}
 .manifest .corridor .planet.sug i{background:none;border:1.6px solid var(--accent)}
-.manifest .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}
+.manifest .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-quiet);letter-spacing:.08em}
 
 /* ---- §14/#472 (owner-approved): the inbox orb -------------------------- */
 .inbox-orb{right:76px;display:grid;place-items:center;color:var(--ink-mid);text-decoration:none}
@@ -1108,8 +1148,7 @@
    it) applied to the descent. Legibility goes UP: the faint ink ends the page
    with more contrast on the warm surface than it began with on the pale one. */
 [data-theme=dawn].descending body{
-  --ink-faint:color-mix(in srgb,#78849b,#5e3c3a calc(var(--depth) * 100%));
-  --deep-knockout:#e4ecf5}
+  --ink-faint:color-mix(in srgb,#78849b,#5e3c3a calc(var(--depth) * 100%))}
 /* Reduced motion. The gradient still tracks the scrollbar — it is a POSITION,
    not an animation, and freezing it would hide the page under a sky it has
    already left. What goes is the parallax flourish: the sky gives way where it
@@ -1191,41 +1230,41 @@ html:not(.descending) .desk :is(.mist,.underlight,.underdeep){display:none}
   --ink-faint:color-mix(in srgb,#2f3f5e calc(var(--deep) * 100%),
        color-mix(in srgb,#5c6c8e calc(var(--below) * 100%),#78849b));
   --chart-ink:color-mix(in srgb,#22314f calc(var(--deep) * 100%),#40506e);
-  --ink-mid:color-mix(in srgb,#333f59 calc(var(--deep) * 100%),#46536d);
-  --deep-knockout:#e4ecf5}
+  --ink-mid:color-mix(in srgb,#333f59 calc(var(--deep) * 100%),#46536d)}
 /*
- * THE DEEP MARKS, KNOCKED OUT (#500, owner ruling 2026-08-17: accessibility
- * wins in all cases). Three marks ride straight on this descent's own ground
- * with no panel behind them — the month heading, the TODAY line and an
- * overdue time — and the ground they ride on is the whole point of 4f above:
- * it keeps deepening as you go, and these three never move to answer it.
- * Measured at full descent (--deep:1 / --depth:1, the worst case each pack
- * reaches):
+ * THE DEEP MARKS, DEEPENED (#500, owner ruling 2026-08-17: accessibility
+ * wins in all cases; owner 2026-09-05: the earlier knockout halo read as a
+ * cheap glow and was worked back). Three marks ride straight on this
+ * descent's own ground with no panel behind them — the month heading, the
+ * TODAY line and an overdue time — and the ground they ride on is the whole
+ * point of 4f above: it keeps deepening as you go. Unfixed, at full descent
+ * (--deep:1 / --depth:1, the worst case each pack reaches):
  *   clouds  month 2.81:1 · TODAY 1.80:1 · overdue 2.68:1
  *   dawn    month 5.43:1 · TODAY 6.62:1 · overdue 4.32:1
- * — clouds' TODAY in particular is nowhere near the law, and dawn's is not
- * safe either once its own chart-ink (static, not part of 4f's lift) is
- * weighed against the pinky-orange floor.
  *
- * The fix is the '← SETTINGS on sky' hazard's own construction (#491, see
- * Chrome.svelte): not a new ink — the sky itself is untouched, and the
- * colours these three marks already carry keep their job — but a BACKING,
- * three soft radii of one knockout colour standing in for the plate a panel
- * would have given them. --deep-knockout is a literal rather than --bg
- * because the two packs' actual grounds diverge (clouds runs to under-cloud
- * blue, dawn to warm pinky-orange) while the marks need ONE plate light
- * enough to read against either. Measured against the knockout itself, which
- * is what a reader's eye meets in the pixels immediately around each glyph:
- *   clouds  month 10.87:1 · TODAY 7.83:1 · overdue 4.63:1
- *   dawn    month  6.80:1 · TODAY 7.83:1 · overdue 4.63:1
+ * So the three inks follow the ground down, exactly as --ink-faint already
+ * does in the same blocks: each mark keeps its pack colour at the top of the
+ * descent and mixes toward a deep ink by the same variable that deepens the
+ * ground, so the mark and its ground never disagree. No backing, no shadow.
+ * Against the darkest ground each pack reaches (clouds #6b88ae, dawn
+ * #e5827e — harsher than the blended pixels a reader actually meets):
+ *   clouds  month 5.05:1 · TODAY 5.05:1 · overdue 4.55:1
+ *   dawn    month 6.42:1 · TODAY 6.42:1 · overdue 6.18:1
  * Scoped to exactly these two packs' descent, because it is their own ground
- * that goes deep enough to need it — the other packs' equivalents already
- * clear the law without a plate.
+ * that goes deep enough to need it.
  */
-:is([data-theme=clouds],[data-theme=dawn]).descending
-  :is(.manifest .corridor .month span,.manifest .corridor .today span,.t.over){
-  text-shadow:0 0 2px var(--deep-knockout),0 0 5px var(--deep-knockout),
-              0 0 11px var(--deep-knockout)}
+[data-theme=clouds].descending .manifest .corridor .month span{
+  color:color-mix(in srgb,#0b1424 calc(var(--deep) * 100%),#40506e)}
+[data-theme=clouds].descending .manifest .corridor .today span{
+  color:color-mix(in srgb,#0b1424 calc(var(--deep) * 100%),#134a72)}
+[data-theme=clouds].descending .t.over{
+  color:color-mix(in srgb,#3d0b1f calc(var(--deep) * 100%),var(--overdue-text))}
+[data-theme=dawn].descending .manifest .corridor .month span{
+  color:color-mix(in srgb,#2b1512 calc(var(--depth) * 100%),#40506e)}
+[data-theme=dawn].descending .manifest .corridor .today span{
+  color:color-mix(in srgb,#2b1512 calc(var(--depth) * 100%),#134a72)}
+[data-theme=dawn].descending .t.over{
+  color:color-mix(in srgb,#3d0b1f calc(var(--depth) * 100%),var(--overdue-text))}
 @media (prefers-reduced-motion: reduce){
   /* position kept, flourish dropped: the deck still rises and still goes, but
      it does not swell at you and you are not put inside it. */

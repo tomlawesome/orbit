@@ -124,7 +124,14 @@ async function anEmptySky(page: Page) {
  */
 async function signInAwayFromHome(page: Page) {
   await signInAs(page, READER, "/inbox");
-  await expect(page).toHaveURL(/\/inbox$/, { timeout: 30_000 });
+  /* Not always /inbox: #840 sends a session with no household of its own to
+     the arrival at `/` instead of returnTo, and this is often this
+     administrator's very first sign-in on what may still be a genuinely
+     empty database. Either landing keeps the one thing this needs -- away
+     from /home, so the tour's own trigger has not run yet -- and anEmptySky
+     below creates the household from here regardless of which page is
+     showing. */
+  await expect(page).not.toHaveURL(/\/home$/, { timeout: 30_000 });
 }
 
 /** Signed in away from home, on a sky this journey made and owns. */

@@ -182,6 +182,26 @@ function dockerShimScript({
   // string Step 12's stale-container check reads).
   imageInspect = { present: false, id: "" },
   appImageId = "sha256:" + "9".repeat(64),
+  // #822: the app_secret_readable retry loop (repair.sh ~2485) probes
+  // `docker inspect --format '{{.State.Status}}'` between failed readability
+  // checks, and gives up immediately unless it sees "running" or
+  // "restarting". `appState` sets what that probe answers, so a test can
+  // reproduce a container that is momentarily "exited" mid-crash-loop under
+  // `restart: unless-stopped` (docker-compose.yml) — a state that WILL come
+  // back on its own, unlike a container with no restart policy.
+  appState = "running",
+  // Gates the readability check (`[ -r "$POSTGRES_PASSWORD_FILE" ]`, the
+  // un-suffixed POSTGRES_PASSWORD_FILE branch below, distinct from the
+  // `exec cat` content read) so it fails for the first
+  // `appSecretDelayAttempts - 1` calls and only then succeeds — modelling a
+  // container whose secret becomes readable after a few crash/restart
+  // cycles rather than on the very first probe. Requires
+  // `appSecretDelayCounterPath` (a scratch file this shim uses to persist
+  // the attempt count across separate `docker exec` invocations, each its
+  // own process). 0 (default) leaves the existing immediate
+  // `appSecretReadable` behaviour untouched.
+  appSecretDelayAttempts = 0,
+  appSecretDelayCounterPath = "",
 } = {}) {
   if (unavailable) {
     return "#!/usr/bin/env bash\nexit 1\n";
@@ -420,7 +440,15 @@ function dockerShimScript({
     appSecretReadable ? "      exit 0" : "",
     "    fi",
     '    if [[ "$joined" == *"POSTGRES_PASSWORD_FILE"* ]]; then',
-    appSecretReadable ? "      exit 0" : "      exit 1",
+    appSecretDelayAttempts > 0
+      ? [
+          `      attempt_so_far=0`,
+          `      [[ -f '${appSecretDelayCounterPath}' ]] && attempt_so_far="$(cat '${appSecretDelayCounterPath}')"`,
+          `      attempt_so_far=$((attempt_so_far + 1))`,
+          `      printf '%s' "$attempt_so_far" > '${appSecretDelayCounterPath}'`,
+          `      if (( attempt_so_far < ${appSecretDelayAttempts} )); then exit 1; else exit 0; fi`,
+        ].join("\n")
+      : appSecretReadable ? "      exit 0" : "      exit 1",
     "    fi",
     '    if [[ "$joined" == *"pg_isready"* ]]; then',
     `      exit ${dbReadyExit}`,
@@ -560,6 +588,13 @@ function dockerShimScript({
     "    fi",
     '    if [[ "$inspect_format" == "{{.Image}}" ]]; then',
     `      printf '%s\\n' '${appImageId}'`,
+    "      exit 0",
+    "    fi",
+    // #822: the app_secret_readable retry loop's own state probe, answered
+    // independently of the combined Config.Image/Health/StartedAt format
+    // below (which a real docker inspect would never combine with this one).
+    '    if [[ "$inspect_format" == "{{.State.Status}}" ]]; then',
+    `      printf '%s\\n' '${appState}'`,
     "      exit 0",
     "    fi",
     `    app_health="$(${appHealthExpr})"`,
@@ -1382,6 +1417,33 @@ describe("scripts/repair.sh --check", () => {
   // which pass `db`/`app` docker options — stays healthy/unaffected by
   // these new checks. The tests below override just `db`/`app` to exercise
   // each new reason class in isolation.
+
+  // #822 (credential-drift flake, variant "healthy exit 0 when 4 expected"):
+  // a credential-mismatched app crash-loops under `restart: unless-stopped`
+  // (docker-compose.yml), so the container this check reads from is not
+  // always "running" or "restarting" at the instant it is probed — it also
+  // passes through "exited" on its way back up on its own. The retry loop
+  // (repair.sh ~2485) used to treat any state other than running/restarting
+  // as final and gave up on the spot, discarding the rest of its 20s budget
+  // the moment it caught the container mid-cycle, and silently fell back to
+  // the database's own copy of the credential — which always "authenticates"
+  // against itself — so the real mismatch was never classified.
+  it("does not give up on a crash-looping app container caught mid-restart (\"exited\") before its secret becomes readable — #822", () => {
+    const targetDir = makeFixture();
+    const attemptCounterPath = join(scratchDir(), "app-secret-attempts");
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+      app: { present: true, health: "healthy" },
+      appState: "exited",
+      appSecretDelayAttempts: 3,
+      appSecretDelayCounterPath: attemptCounterPath,
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-credential-mismatch target=database severity=fail");
+    expect(result.stdout).not.toContain("diagnosis result=healthy");
+  });
 
   it("reports database-unreachable (fail) when the orbit-db container is absent", () => {
     const targetDir = makeFixture();

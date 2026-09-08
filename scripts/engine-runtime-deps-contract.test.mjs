@@ -17,11 +17,9 @@ import { describe, expect, it } from "vitest";
 const root = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const web = JSON.parse(readFileSync(new URL("../web/package.json", import.meta.url), "utf8"));
 
-/* Deleted with `src/app/` in the final commit of #735; until then they are
-   the only root dependencies that are NOT the engine's. */
-const NEXT_ONLY = new Set(["next", "react", "react-dom"]);
-
-const engineDeps = Object.entries(root.dependencies).filter(([name]) => !NEXT_ONLY.has(name));
+/* Since #735 deleted `src/app/`, every root runtime dependency is the
+   engine's: the root package *is* the engine library (ADR-0018). */
+const engineDeps = Object.entries(root.dependencies);
 
 describe("engine runtime dependencies reach the SvelteKit build", () => {
   it("web declares every engine runtime dependency", () => {

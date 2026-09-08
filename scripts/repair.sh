@@ -1412,7 +1412,6 @@ readonly -a rotate_database_credential_steps=(checkpoint rotate-credential updat
 readonly -a restore_transaction_paths=(
   docker-compose.yml
   docker-compose.mail.yml
-  docker-compose.mail-alias-rotation.yml
   .env-orbit.example
   config/tika-config.json
   scripts/configure.sh
@@ -2474,14 +2473,22 @@ check_database_reachability() {
   local reader_id="$app_probe_id" reader_script="$app_credential_reader"
   local classify_credentials=1
   # An application that cannot authenticate crash-loops under
-  # `restart: unless-stopped`, so the container this check most needs to read
-  # from is `restarting` for most of every cycle and exec fails. Falling back
+  # `restart: unless-stopped` (docker-compose.yml), so the container this
+  # check most needs to read from spends most of every cycle unreachable —
+  # not only `restarting`, but also `exited` for the instant between the old
+  # process dying and the restart policy relaunching it. Falling back
   # straight to the database's copy then drops the very finding the drift
   # should raise (#806): a deployment whose credential is wrong diagnosed as
-  # anything but. Wait, bounded, while the container is alive or coming back
-  # (running/restarting) and try again on each pass; a container that is
-  # exited, created or dead is not coming back on its own and is not waited
-  # for. A healthy container passes first time and pays nothing.
+  # anything but. Wait, bounded, while the container is alive or could still
+  # come back on its own and try again on each pass. `restart: unless-stopped`
+  # is exactly what makes `exited` a passing-through state rather than a
+  # final one here, so treating it the same as `created` or `dead` — which
+  # really do mean "nothing is bringing this back" — was itself the bug
+  # (#822): a probe that happened to land in that instant gave up with the
+  # rest of its 20s budget unused, and silently fell back to the database's
+  # own copy of the credential, which always "authenticates" against itself
+  # and so raised no finding at all. A healthy container passes first time
+  # and pays nothing.
   local app_secret_deadline=$((SECONDS + 20)) app_secret_readable=0 app_state
   while [[ -n "$app_probe_id" ]]; do
     # shellcheck disable=SC2016  # expanded by the container's shell, not this one
@@ -2492,7 +2499,7 @@ check_database_reachability() {
     fi
     app_state="$(timeout "$docker_probe_timeout" docker inspect \
       --format '{{.State.Status}}' "$app_probe_id" 2>/dev/null || true)"
-    [[ "$app_state" == running || "$app_state" == restarting ]] || break
+    [[ "$app_state" == running || "$app_state" == restarting || "$app_state" == exited ]] || break
     ((SECONDS < app_secret_deadline)) || break
     sleep 0.25
   done
@@ -2738,6 +2745,8 @@ check_application_container() {
     else
       app_log="$(timeout "$docker_probe_timeout" docker logs --tail 50 "$app_id" 2>&1 || true)"
     fi
+    # These reason= literals are pinned to src/lib/logger.ts's operationalReasons
+    # by scripts/repair-log-contract.test.mjs (#447) — do not rename one without the other.
     if [[ "$app_log" == *"reason=database_mismatch"* ]]; then
       add_finding database-schema-mismatch application fail
     elif [[ "$app_log" == *"reason=database_below_floor"* ]]; then

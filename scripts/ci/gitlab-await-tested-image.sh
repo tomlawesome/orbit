@@ -3,15 +3,21 @@
 # Finds the GitLab pipeline that built, tested and published this exact commit,
 # waits for it if it is still running, and fetches the evidence it left:
 # .orbit-supply-chain/gitlab-tested-image.json (written by
-# gitlab-record-tested-image.sh in the publish_gitlab job) and the SPDX SBOM of
+# gitlab-record-tested-image.sh in the record_image job) and the SPDX SBOM of
 # the same image (from supply_chain_image). Both are checked before anything is
 # handed on, because the caller pushes to a public registry on the strength of
 # what this script says (#801 step 5).
 #
 # It refuses, rather than guessing, when:
-#   - no push pipeline exists for the commit and ref within the wait budget;
-#   - the newest such pipeline finished with anything other than success;
-#   - publish_gitlab or supply_chain_image did not succeed in it;
+#   - no push pipeline exists for the commit and ref within the wait budget,
+#     or one exists but is still failed when the budget runs out. A failed
+#     pipeline is retried in place on GitLab (same id, new status), so this
+#     script keeps polling a failed pipeline until the deadline instead of
+#     giving up on the first failure, printing a line each poll while it
+#     waits;
+#   - the newest such pipeline is canceled or skipped -- both deliberate, so
+#     it fails immediately rather than waiting out the deadline for them;
+#   - record_image, sign_evidence or supply_chain_image did not succeed in it;
 #   - the evidence names another commit, ref or pipeline, is malformed, points
 #     outside the project's own registry, or is older than seven days.
 #
@@ -22,7 +28,9 @@
 #   GITLAB_REGISTRY     registry host the evidence must point into
 #   ORBIT_COMMIT        the commit being published (GITHUB_SHA)
 #   ORBIT_REF           the branch it was pushed to (GITHUB_REF_NAME)
-#   ORBIT_WAIT_MINUTES  optional; how long to wait for GitLab, default 120
+#   ORBIT_WAIT_MINUTES  optional; how long to wait for GitLab, default 120,
+#                       including waiting out a failed pipeline for a retry
+#   ORBIT_POLL_SECONDS  optional; seconds between polls, default 60
 #   ORBIT_EVIDENCE_DIR  optional; where to write the fetched files,
 #                       default .orbit-supply-chain
 #
@@ -44,6 +52,8 @@ fail() { printf 'gitlab-await-tested-image: %s\n' "$1" >&2; exit 1; }
 
 wait_minutes="${ORBIT_WAIT_MINUTES:-120}"
 [[ "$wait_minutes" =~ ^[0-9]+$ ]] || fail "ORBIT_WAIT_MINUTES is not a whole number: ${wait_minutes}"
+poll_seconds="${ORBIT_POLL_SECONDS:-60}"
+[[ "$poll_seconds" =~ ^[0-9]+$ ]] || fail "ORBIT_POLL_SECONDS is not a whole number: ${poll_seconds}"
 evidence_dir="${ORBIT_EVIDENCE_DIR:-.orbit-supply-chain}"
 project="${GITLAB_API_URL%/}/projects/${GITLAB_PROJECT_ID}"
 
@@ -54,58 +64,85 @@ trap 'rm -f "$header_file"' EXIT
 printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_READ_TOKEN" > "$header_file"
 api() { curl --silent --show-error --fail --location --max-time 60 --header @"$header_file" "$@"; }
 
+# Reads one value out of the JSON on stdin with node: jq is not on the fast
+# job's image, where this script's tests run, and node is on every image and
+# on GitHub's runners (the same reason sidecar-freshness-issue.sh reads with
+# node). $1 is a JavaScript expression over `input`, the parsed document, and
+# `arg`, the optional $2; a missing value prints nothing, like jq's `// empty`,
+# and a document that is not JSON exits 3.
+json() {
+  node -e '
+    let raw = "";
+    process.stdin.on("data", (chunk) => { raw += chunk; }).on("end", () => {
+      let input;
+      try { input = JSON.parse(raw); } catch { process.exit(3); }
+      const value = new Function("input", "arg", "return (" + process.argv[1] + ");")(input, process.argv[2]);
+      process.stdout.write(value === undefined || value === null ? "" : String(value));
+    });
+  ' -- "$1" "${2:-}"
+}
+
 # GitLab lists pipelines newest first. Only a push pipeline for this exact
 # commit on this exact ref counts: a merge-request pipeline for the same SHA
-# tested a different ref and never ran publish_gitlab.
+# tested a different ref and never ran record_image.
 pipeline_query="${project}/pipelines?sha=${ORBIT_COMMIT}&ref=${ORBIT_REF}&source=push&order_by=id&sort=desc&per_page=1"
 deadline=$((SECONDS + wait_minutes * 60))
 pipeline_id=""
 while :; do
   listing="$(api "$pipeline_query")"
-  pipeline_id="$(jq -r '.[0].id // empty' <<< "$listing")"
-  status="$(jq -r '.[0].status // empty' <<< "$listing")"
+  pipeline_id="$(json 'input[0]?.id' <<< "$listing")"
+  status="$(json 'input[0]?.status' <<< "$listing")"
   case "$status" in
     success) break ;;
-    failed|canceled|skipped)
+    canceled|skipped)
       fail "GitLab pipeline ${pipeline_id} for ${ORBIT_COMMIT} on ${ORBIT_REF} ended ${status}; nothing to publish" ;;
+    failed)
+      printf 'GitLab pipeline %s is failed; waiting until the deadline for a retry.\n' "$pipeline_id" ;;
     "")
       printf 'No push pipeline for %s on %s yet; waiting.\n' "$ORBIT_COMMIT" "$ORBIT_REF" ;;
     *)
       printf 'GitLab pipeline %s is %s; waiting.\n' "$pipeline_id" "$status" ;;
   esac
-  ((SECONDS < deadline)) || fail "gave up after ${wait_minutes} minutes waiting for a successful GitLab pipeline for ${ORBIT_COMMIT} on ${ORBIT_REF}"
-  sleep 60
+  ((SECONDS < deadline)) || fail "gave up after ${wait_minutes} minutes waiting for a successful GitLab pipeline for ${ORBIT_COMMIT} on ${ORBIT_REF}; a failed pipeline can be retried on GitLab, and the GitHub run re-run with \`gh run rerun <id> --failed\`"
+  sleep "$poll_seconds"
 done
-pipeline_url="$(jq -r '.[0].web_url' <<< "$listing")"
+pipeline_url="$(json 'input[0].web_url' <<< "$listing")"
 printf 'GitLab pipeline %s succeeded: %s\n' "$pipeline_id" "$pipeline_url"
 
 # The job that wrote each piece of evidence. include_retried is off, so a job
 # retried into success is listed once, by its successful run.
 jobs="$(api "${project}/pipelines/${pipeline_id}/jobs?per_page=100")"
 job_id() {
-  jq -r --arg name "$1" '[.[] | select(.name == $name and .status == "success")] | sort_by(.id) | last | .id // empty' <<< "$jobs"
+  json 'input.filter((job) => job.name === arg && job.status === "success").sort((a, b) => a.id - b.id).at(-1)?.id' "$1" <<< "$jobs"
 }
-publish_job="$(job_id publish_gitlab)"
+publish_job="$(job_id record_image)"
+sign_job="$(job_id sign_evidence)"
 sbom_job="$(job_id supply_chain_image)"
-[[ -n "$publish_job" ]] || fail "pipeline ${pipeline_id} has no successful publish_gitlab job"
+[[ -n "$publish_job" ]] || fail "pipeline ${pipeline_id} has no successful record_image job"
+# Transport-level only -- the attestation itself is verified cryptographically
+# by whichever publishing hop runs verify-validation-evidence.sh -- but a
+# pipeline that never signed should be refused here, by name, rather than
+# turn up later as a bare "missing evidence".
+[[ -n "$sign_job" ]] || fail "pipeline ${pipeline_id} has no successful sign_evidence job"
 [[ -n "$sbom_job" ]] || fail "pipeline ${pipeline_id} has no successful supply_chain_image job"
 
 mkdir -p "$evidence_dir"
 evidence="${evidence_dir}/gitlab-tested-image.json"
 sbom="${evidence_dir}/image.spdx.json"
 api --output "$evidence" "${project}/jobs/${publish_job}/artifacts/.orbit-supply-chain/gitlab-tested-image.json" ||
-  fail "publish_gitlab job ${publish_job} kept no gitlab-tested-image.json artifact"
+  fail "record_image job ${publish_job} kept no gitlab-tested-image.json artifact"
 api --output "$sbom" "${project}/jobs/${sbom_job}/artifacts/.orbit-supply-chain/image.spdx.json" ||
   fail "supply_chain_image job ${sbom_job} kept no image.spdx.json artifact"
 
 # Every field the publisher will act on, checked against what this run knows
 # independently. A record for the right commit but another pipeline means two
 # pipelines ran for one push; refuse rather than pick.
-jq -e 'type == "object"' "$evidence" > /dev/null || fail 'gitlab-tested-image.json is not a JSON object'
-field() { jq -r --arg key "$1" '.[$key] // empty' "$evidence"; }
+[[ "$(json 'typeof input === "object" && input !== null && !Array.isArray(input)' < "$evidence" || :)" == true ]] ||
+  fail 'gitlab-tested-image.json is not a JSON object'
+field() { json 'input[arg]' "$1" < "$evidence"; }
 recorded_commit="$(field commit)"
 recorded_ref="$(field ref)"
-recorded_pipeline="$(jq -r '.pipelineId // empty' "$evidence")"
+recorded_pipeline="$(field pipelineId)"
 digest="$(field imageDigest)"
 source_reference="$(field imageReference)"
 recorded_at="$(field recordedAt)"
@@ -123,7 +160,7 @@ now_epoch="$(date -u +%s)"
 (( now_epoch - recorded_epoch <= 7 * 24 * 3600 )) || fail "evidence recorded at ${recorded_at} is older than seven days"
 (( recorded_epoch <= now_epoch + 300 )) || fail "evidence recorded at ${recorded_at} is in the future"
 
-jq -e '.spdxVersion? // .SPDXID? // empty' "$sbom" > /dev/null || fail 'image.spdx.json is not an SPDX document'
+[[ -n "$(json 'input.spdxVersion ?? input.SPDXID' < "$sbom" || :)" ]] || fail 'image.spdx.json is not an SPDX document'
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {

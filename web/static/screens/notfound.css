@@ -1,9 +1,55 @@
 
 body{background:#04070f}
-.sky-far{animation:driftf 370s linear infinite}
-.sky-near{animation:driftn 180s linear infinite}
-.tw{animation:twinkle 5s ease-in-out infinite alternate}
-@keyframes twinkle{from{opacity:.2}to{opacity:.8}}
+/* the sky falls in (#790, see +error.svelte): three <canvas> copies of a band
+   of stars, each spiralling in toward the hole and handing over to the next.
+   Each copy is a 2200-unit square centred on the hole — the same 1600×1000
+   slice mapping the well uses, taken from the host's own size (cq units), so
+   the bitmap's centre sits exactly on the horizon. The scale steps are one
+   geometric series (2 → .25, halving every quarter), so a star's speed is
+   proportional to its distance from the hole and the field looks the same at
+   any moment; the turn is steady, with the disc; the copy fades only at the
+   ends, arriving beyond the frame and gone as it meets the horizon. With
+   animation off the copies sit at their spread scales, so the still is still
+   a full sky. `.first` is the same sky as the HTML arrives with, still, in
+   the same box (see +error.svelte). */
+.infall{position:fixed;inset:0;overflow:hidden;pointer-events:none;container-type:size}
+.fall,.first{--k:max(.0625cqw,.1cqh);--band:calc(2200 * var(--k));
+      position:absolute;width:var(--band);height:var(--band);
+      left:calc(50% - var(--band) / 2);top:calc(50% - 50 * var(--k) - var(--band) / 2)}
+.fall{transform:scale(var(--s0));
+      animation:infall var(--T) linear infinite;animation-delay:calc(var(--i) * var(--T) / -3)}
+.fall-far{--T:160s}
+.fall-near{--T:80s}
+/* Until every copy is painted the still sky in the HTML is what shows; the
+   copies wait hidden, their fall not yet begun, so all six start together
+   from where the still sky left them (+error.svelte, live). */
+.infall:not(.live) .fall{visibility:hidden;animation:none}
+
+/* The arrival (owner, 2026-09-04: parts landing one after another read as
+   a delay, so each arrival on this page is a fade, never a pop). The HTML
+   shows what costs nothing at once — still stars, the hole's disc and glow,
+   the 4s, the copy. Then two beats: the stars start to fall (the still sky
+   fades out under the copies as they begin to move), and the disc lights up
+   (every rasterised layer waits hidden in its `.arrive` group, painting no
+   live filter, until all six have landed, then they fade in as one). The
+   groups fade on a wrapper because the layers' own opacity is animated. */
+.falling{position:absolute;inset:0;opacity:0}
+.infall.live .falling{opacity:1;transition:opacity .7s ease-out}
+.infall.live .first{opacity:0;transition:opacity .7s ease-out}
+.world:not(.lit) .arrive{visibility:hidden;opacity:0}
+.world.lit .arrive{opacity:1;transition:opacity .9s ease-out}
+@keyframes infall{
+  0%{transform:rotate(0deg) scale(2);opacity:0}
+  6%{opacity:1}
+  12.5%{transform:rotate(-6.25deg) scale(1.542)}
+  25%{transform:rotate(-12.5deg) scale(1.189)}
+  37.5%{transform:rotate(-18.75deg) scale(.917)}
+  50%{transform:rotate(-25deg) scale(.707)}
+  62.5%{transform:rotate(-31.25deg) scale(.545)}
+  75%{transform:rotate(-37.5deg) scale(.42)}
+  84%{opacity:1}
+  87.5%{transform:rotate(-43.75deg) scale(.324)}
+  100%{transform:rotate(-50deg) scale(.25);opacity:0}}
 
 /* the well never sits still */
 .disc-precess{transform-origin:800px 450px;animation:precess 56s ease-in-out infinite alternate}

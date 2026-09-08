@@ -12,6 +12,7 @@ import {
   emphasisModeOf,
   packOf,
 } from "../../web/src/lib/tour/emphasis.js";
+import { DEFAULT_THEME, THEME_PACKS } from "../../web/src/lib/theme.js";
 
 /*
  * #752, and the owner's ruling of 2026-09-03: the walk emphasises its subject
@@ -37,13 +38,17 @@ describe("emphasis mode, per pack", () => {
     for (const pack of ["starchart", "afterdark", "retrograde"]) {
       expect(emphasisModeOf(pack), pack).toBe("dim");
     }
-    for (const pack of ["atlas", "dawn", "clouds"]) {
+    for (const pack of ["dawn", "clouds"]) {
       expect(emphasisModeOf(pack), pack).toBe("forward");
     }
   });
 
   it("classifies every pack that exists, and nothing else", () => {
     expect(new Set([...DIMMING_PACKS, ...FORWARD_PACKS])).toEqual(packsIn(PACKS_CSS));
+  });
+
+  it("classifies exactly the roster theme.js names (#865)", () => {
+    expect(new Set([...DIMMING_PACKS, ...FORWARD_PACKS])).toEqual(new Set(THEME_PACKS));
   });
 
   it("dims an unknown pack rather than leaving a stop unemphasised", () => {
@@ -57,11 +62,11 @@ describe("emphasis mode, per pack", () => {
     expect(packsIn(TOUR_CSS)).toEqual(new Set(FORWARD_PACKS));
   });
 
-  it("reads the pack where every screen writes it", () => {
+  it("reads the pack where every screen writes it, defaulting to after dark", () => {
     document.documentElement.dataset.theme = "dawn";
     expect(packOf(document)).toBe("dawn");
     delete document.documentElement.dataset.theme;
-    expect(packOf(document)).toBe("starchart");
+    expect(packOf(document)).toBe(DEFAULT_THEME);
   });
 });
 

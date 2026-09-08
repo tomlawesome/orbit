@@ -1,0 +1,22 @@
+/*
+ * Global, cross-screen utilities that do not belong to any one design
+ * family's own stylesheet (#843).
+ */
+
+/* Visually hidden but still read by a screen reader: for headings and other
+   structure a screen needs to announce its shape even where the mockups
+   carry the equivalent text as art rather than as an element. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Keyboard focus is visible on every text-like field (#848); the per-screen
+   :focus border shifts are too faint on their own. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

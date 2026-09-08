@@ -13,7 +13,6 @@ import {
   externalIdentities,
   households,
   imapIngestionMessages,
-  imapRecipientRotationState,
   instanceAuthority,
   items,
   memberships,
@@ -94,8 +93,8 @@ export async function cleanupIntegrationEnvironment(): Promise<void> {
   await db.delete(auditLog);
   await db.delete(imapIngestionMessages);
   await db.delete(households);
+  // mail_in_relays cascades from users, so deleting users clears it.
   await db.delete(users);
-  await db.delete(imapRecipientRotationState);
   await closeDatabase();
   await Promise.all([
     rm(storageRoot, { recursive: true, force: true }),

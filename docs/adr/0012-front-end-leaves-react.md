@@ -1,6 +1,6 @@
 # ADR-0012: The front end leaves React for SvelteKit
 
-**Status:** Accepted
+**Status:** Accepted; packaging and API-surface positions superseded by ADR-0018
 **Date:** 2026-08-15
 **Relates to:** [ADR-0011](0011-operator-experience-as-product.md) (operator
 experience as product), issues #408, #411

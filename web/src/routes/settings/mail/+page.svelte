@@ -2,6 +2,7 @@
   import "./relay.css";
   import { onMount } from "svelte";
   import { mountSatellites } from "$lib/backdrops/satellites.js";
+  import { rotateRelay } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
 
   /**
@@ -15,9 +16,13 @@
    * Built from design/family/settings-mail.html and owned here from that point
    * on. The four values read through the seam (readRelay in
    * $lib/data/workspace.js) and are live since #432; the gate still renders the
-   * mockup's own via the ORBIT_FIXTURES stand-in route. "rotate address" and
-   * "pause ingest" are still inert — the machinery exists, the user-facing
-   * commands do not, and #432 put both out of scope.
+   * mockup's own via the ORBIT_FIXTURES stand-in route. "rotate address" is
+   * live since ADR-0017 slice 3 (#744): it asks for a new address, keeping the
+   * old one collecting for fourteen days so mail already on its way still
+   * arrives. "pause ingest" is live since slice 5 (#746): paused, mail
+   * addressed to this member is recorded and held — nothing fetched, staged or
+   * announced — and resuming stages all of it exactly once. Both act on the
+   * signed-in member alone; neither can touch anybody else's relay.
    *
    * The living backdrop (#475, §14) is $lib/backdrops/satellites.js, ported
    * from design/v19/relay-satellites.html — this file only mounts it and
@@ -27,7 +32,11 @@
    * otherwise, because backdrops are alive and never the same twice.
    */
   let { data } = $props();
-  const relay = $derived(data.relay);
+  /* The rotated relay replaces the loaded one for the rest of this visit: the
+     member has to be able to read and save the address they just asked for. */
+  let rotated = $state(/** @type {typeof data.relay | null} */ (null));
+  let working = $state(false);
+  const relay = $derived(rotated ?? data.relay);
   const failures = $derived(data.failures ?? []);
   /** @type {(value: string | number | Date) => string} */
   const shortDate = (value) =>
@@ -37,6 +46,21 @@
     if (history.length > 1) history.back();
     else location.href = "/home";
   };
+
+  /* Nothing here can name another member: the endpoint takes the session's
+     own user and this sends no user, no generation and no address. */
+  /** @param {"rotate" | "pause" | "resume"} action */
+  const act = async (action) => {
+    if (working) return;
+    working = true;
+    try {
+      rotated = await rotateRelay(action);
+    } finally {
+      working = false;
+    }
+  };
+  const rotate = () => act("rotate");
+  const toggleIngest = () => act(relay.ingest === "paused" ? "resume" : "pause");
 
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
@@ -54,19 +78,19 @@
 <div class="satellites" bind:this={backdropRoot} aria-hidden="true"></div>
 <!-- §14 (#471): clicking off the card returns to wherever the reader came
      from — the inbox, settings, or home as the deep-link fallback. -->
-<div class="stage" onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
+<div class="stage" role="main" onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
   <div class="dish" id="relaydish"><span></span><span></span><span></span><i></i></div>
-  <h2 style="text-align:center">Your relay</h2>
+  <h1 style="text-align:center">Your relay</h1>
   <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
   <div class="alias">{relay.address}</div>
   <div class="kv"><span>status</span><b>{relay.status}</b></div>
   <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>
   <div class="kv"><span>ingest</span><b>{relay.ingest}</b></div>
-  <div class="btns"><button class="pri">rotate address</button><button>pause ingest</button></div>
+  <div class="btns"><button class="pri" disabled={working} onclick={rotate}>rotate address</button><button disabled={working} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
   {#if failures.length}
     <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
     <div class="failures">
-      <h4>arrived, but could not be read</h4>
+      <h2>arrived, but could not be read</h2>
       {#each failures as failure (failure.id)}
         <div class="kv"><span>{shortDate(failure.receivedAt)}</span><span>{failure.message}</span></div>
       {/each}

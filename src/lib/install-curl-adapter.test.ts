@@ -3,13 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { checkCurlAvailable, createInstallAssetFetchAdapter, createInstallOidcFetchAdapter } from "./install-curl-adapter";
+import { checkCurlAvailable, createInstallOidcFetchAdapter } from "./install-curl-adapter";
 
 // PATH-shim coverage for issue #295 slice 5's shipped `curl` adapter — the
 // production implementation the plan deferred from slice 3
-// (OidcDiscoveryFetchAdapter) plus this slice's own asset-fetch adapter. A
-// fake `curl` bash script logs its exact argv (mirroring
-// recovery-bundle.docker-adapter.test.ts's fakeDockerScript technique) so
+// (OidcDiscoveryFetchAdapter), and the host-tool check. There is no
+// asset-fetch adapter to cover any more: ADR-0019 moved the deployment
+// assets inside the image. A fake `curl` bash script logs its exact argv
+// (mirroring recovery-bundle.docker-adapter.test.ts's fakeDockerScript
+// technique) so
 // each method's flag set can be asserted precisely against install.sh's own
 // cited call sites, with no real network access.
 
@@ -29,9 +31,39 @@ function readArgvLog(logPath: string): string[] {
   return readFileSync(logPath, "utf8").split("\n").filter((line) => line.length > 0);
 }
 
+// Real curl's refusals, spliced into every fake below so none of them can be
+// more permissive than the tool the adapter really drives. Verified against
+// curl 8.14.1 on 2026-09-08 and re-asserted against the real binary by
+// scripts/tool-parity.test.mjs: an option curl does not know exits 2 with
+// "curl: option --x: is unknown", and an option given no value exits 2 too.
+// The adapter's own argv is asserted call-by-call below; this is the other
+// half — that no argv it could grow would be silently swallowed.
+const CURL_REFUSAL_PREAMBLE = [
+  "refuse_option() {",
+  "  printf 'curl: option %s: is unknown\\n' \"$1\" >&2",
+  "  exit 2",
+  "}",
+  "require_parameter() {",
+  "  printf 'curl: option %s: requires parameter\\n' \"$1\" >&2",
+  "  exit 2",
+  "}",
+  'curl_args=("$@")',
+  "for (( curl_i = 0; curl_i < ${#curl_args[@]}; curl_i++ )); do",
+  '  case "${curl_args[curl_i]}" in',
+  "    --output|-o|--write-out|-w|--header|-H|--connect-timeout|--max-time|-m|--max-filesize|--proto|--proto-redir|--retry|--resolve)",
+  '      (( curl_i + 1 < ${#curl_args[@]} )) || require_parameter "${curl_args[curl_i]}"',
+  "      (( curl_i++ ))",
+  "      ;;",
+  "    --fail|-f|--silent|-s|--show-error|-S|--location|-L|--tlsv1.2|--tlsv1.3|--version|-V) ;;",
+  '    -*) refuse_option "${curl_args[curl_i]}" ;;',
+  "  esac",
+  "done",
+].join("\n");
+
 function makeFakeCurlBin(script: string): string {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-curl-adapter-fakebin-"));
-  writeFileSync(join(binDir, "curl"), script);
+  const [shebang, ...body] = script.split("\n");
+  writeFileSync(join(binDir, "curl"), [shebang, CURL_REFUSAL_PREAMBLE, ...body].join("\n"));
   chmodSync(join(binDir, "curl"), 0o755);
   return binDir;
 }
@@ -40,7 +72,7 @@ function shimEnv(binDir: string, extra: Record<string, string> = {}): NodeJS.Pro
   return { ...process.env, PATH: `${binDir}:${process.env.PATH}`, ...extra };
 }
 
-describe("checkCurlAvailable (install.sh:1262, guarantee #40)", () => {
+describe("checkCurlAvailable (install.sh:1305, guarantee #40)", () => {
   it("returns true when curl --version succeeds", () => {
     const binDir = makeFakeCurlBin(["#!/usr/bin/env bash", "exit 0", ""].join("\n"));
     expect(checkCurlAvailable({ env: shimEnv(binDir) })).toBe(true);
@@ -48,49 +80,6 @@ describe("checkCurlAvailable (install.sh:1262, guarantee #40)", () => {
 
   it("returns false when curl is not on PATH", () => {
     expect(checkCurlAvailable({ curlBinary: "orbit-definitely-not-a-real-binary" })).toBe(false);
-  });
-});
-
-describe("createInstallAssetFetchAdapter (install.sh:1400-1404)", () => {
-  it("spawns the exact fetch argv and writes the shim's output to destinationPath", () => {
-    const sandbox = newSandbox("orbit-asset-fetch-");
-    const logPath = join(sandbox, "argv.log");
-    const script = [
-      "#!/usr/bin/env bash",
-      'for arg in "$@"; do printf \'%s\\n\' "$arg"; done >> "$ORBIT_ARGV_LOG"',
-      'output=""',
-      'while [[ $# -gt 0 ]]; do',
-      '  if [[ "$1" == "--output" ]]; then output="$2"; fi',
-      "  shift",
-      "done",
-      'printf \'fetched-content\' > "$output"',
-      "exit 0",
-      "",
-    ].join("\n");
-    const binDir = makeFakeCurlBin(script);
-    const adapter = createInstallAssetFetchAdapter({ env: shimEnv(binDir, { ORBIT_ARGV_LOG: logPath }) });
-    const destination = join(sandbox, "asset.txt");
-
-    const result = adapter.fetchAsset("https://raw.githubusercontent.com/tomlawesome/orbit/deadbeef/docker-compose.yml", destination);
-
-    expect(result.ok).toBe(true);
-    expect(readFileSync(destination, "utf8")).toBe("fetched-content");
-    expect(readArgvLog(logPath)).toEqual([
-      "--fail",
-      "--silent",
-      "--show-error",
-      "--location",
-      "--output",
-      destination,
-      "https://raw.githubusercontent.com/tomlawesome/orbit/deadbeef/docker-compose.yml",
-    ]);
-  });
-
-  it("reports ok=false on a nonzero curl exit", () => {
-    const binDir = makeFakeCurlBin(["#!/usr/bin/env bash", "exit 22", ""].join("\n"));
-    const adapter = createInstallAssetFetchAdapter({ env: shimEnv(binDir) });
-    const result = adapter.fetchAsset("https://example.invalid/missing", "/dev/null");
-    expect(result.ok).toBe(false);
   });
 });
 

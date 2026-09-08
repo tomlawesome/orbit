@@ -107,3 +107,92 @@ test("notfound keeps its six animations live after rasterising the filtered grou
   expect(lensarcs.pathCount, "#lensarcs should still hold gravity-well.js's generated paths").toBeGreaterThan(0);
   expect(lensarcs.rendered, "#lensarcs should be hidden once its raster lands").toBe(false);
 });
+
+/*
+ * #790: the starfield falls into the hole. Its saving grace under #764's
+ * measured lesson — animated elements under a live filter are what costs
+ * frames — is that each star copy is one unfiltered <canvas>, painted once
+ * and moved only by its own transform (a scaled SVG group is what hung the
+ * owner's laptop; +error.svelte has why). This holds all three halves: the
+ * copies really are painted canvases, the infall is actually running, and
+ * nothing that animates has a filter.
+ */
+test("notfound's starfield falls in, and nothing that moves is filtered", async ({ page }) => {
+  /* The stars are in the HTML itself — the server-drawn still sky the
+     first paint shows, before any script runs — with enough of them to be
+     a sky (two copies each of 150 far and 36 near stars, the near ones
+     with a glow circle each: 444 circles). */
+  const html = await (await page.request.get(`${APP}/some-missing-path`)).text();
+  expect(html, "the HTML should arrive with the still sky").toContain('<svg class="first"');
+  expect(html.match(/<circle /g)?.length ?? 0, "the still sky should hold the stars").toBeGreaterThanOrEqual(444);
+  /* And the copies arrive hidden and still: `live` is only set once all
+     six are painted (#798), so the HTML must not carry it. */
+  expect(html, "the copies must not be live before they are painted").not.toMatch(/class="infall live"/);
+  /* Nor the well lit: its lensing layers wait hidden until every raster has
+     landed, so the first paint never runs a live filter. */
+  expect(html, "the well must not be lit before its rasters land").not.toMatch(/class="world lit"/);
+
+  await page.goto(`${APP}/some-missing-path`, { waitUntil: "load" });
+  /* The sky is painted before the well's rasters even start; "ready" is
+     the surest sign the build has run. Asked for as a real match, not
+     every-of-nothing, because before hydration there is no
+     .world[data-rasterised] at all. The still sky leaves once its
+     cross-fade under the copies has finished, so wait for that event
+     rather than assume the order. */
+  await page.waitForFunction(() => document.querySelector('.world[data-rasterised="ready"]') !== null);
+  await page.waitForFunction(() => document.querySelector(".infall .first") === null);
+
+  const sample = () =>
+    page.evaluate(() => {
+      const falls = [...document.querySelectorAll(".infall .fall")];
+      return {
+        /* Every copy is a canvas with stars actually painted on it: some
+           pixel, somewhere, is not transparent. */
+        painted: falls.filter((el) => {
+          if (!(el instanceof HTMLCanvasElement) || !el.width) return false;
+          const px = el.getContext("2d")?.getImageData(0, 0, el.width, el.height).data;
+          if (!px) return false;
+          for (let i = 3; i < px.length; i += 4) if (px[i] > 0) return true;
+          return false;
+        }).length,
+        falls: falls.map((g) => ({
+          animationName: getComputedStyle(g).animationName,
+          transform: getComputedStyle(g).transform,
+        })),
+        /* The still sky has handed over: once the canvases are painted it
+           is gone, so nothing static is left under the moving copies. */
+        still: document.querySelectorAll(".infall .first").length,
+        live: document.querySelector(".infall.live") !== null,
+        lit: document.querySelector(".world.lit") !== null,
+        /* Anything in the star layers that is, or sits under, a filter. */
+        skyFiltered: document.querySelectorAll(".infall filter, .infall [filter], .sky filter, .sky [filter]").length,
+        /* Every painted, animated element on the screen that also carries a
+           filter, by attribute or by computed style. Painted, because #764
+           keeps its rasterised sources in the DOM under display:none — they
+           still carry their filters, and are exactly what does not paint. */
+        animatedFiltered: [...document.querySelectorAll("*")]
+          .filter((el) => el.getClientRects().length > 0)
+          .filter((el) => getComputedStyle(el).animationName !== "none")
+          .filter((el) => el.hasAttribute("filter") || getComputedStyle(el).filter !== "none")
+          .map((el) => `${el.tagName}.${el.getAttribute("class") ?? ""}`),
+      };
+    });
+
+  const before = await sample();
+  expect(before.falls.length, "expected the falling star copies").toBe(6);
+  expect(before.painted, "every falling copy should be a painted canvas").toBe(6);
+  expect(before.still, "the still sky should be gone once the canvases are painted").toBe(0);
+  expect(before.live, "the copies should be live once the still sky is gone").toBe(true);
+  expect(before.lit, "the well should be lit once its rasters have landed").toBe(true);
+  for (const g of before.falls) expect(g.animationName, "a star group lost its infall").toMatch(/^infall/);
+  expect(before.skyFiltered, "the sky must stay unfiltered").toBe(0);
+  expect(before.animatedFiltered, "an animated element carries a live filter").toEqual([]);
+
+  /* "Running" means the transform is changing, not just that a name is set:
+     a paused or zero-duration animation would satisfy the name check. */
+  await page.waitForTimeout(400);
+  const after = await sample();
+  for (let i = 0; i < before.falls.length; i++) {
+    expect(after.falls[i].transform, `star group ${i} is not moving`).not.toBe(before.falls[i].transform);
+  }
+});

@@ -12,8 +12,14 @@ import { redirect } from "@sveltejs/kit";
  * `/login` and `/logout` are the ratified dawn and dusk (§15); `/maintenance`
  * has to be reachable precisely when the instance cannot serve anything else.
  * None of them reads a session.
+ *
+ * `/invite/[token]` is open because a signed-out stranger is exactly who the
+ * address is written for (#481). It is the one open route that DOES read a
+ * session — its own load asks, so that the same screen serves the person
+ * arriving from the mail and the person coming back from the identity
+ * provider — but it is never gated on having one.
  */
-const OPEN_ROUTES = new Set(["/", "/login", "/logout", "/maintenance"]);
+const OPEN_ROUTES = new Set(["/", "/login", "/logout", "/maintenance", "/invite/[token]"]);
 
 /**
  * The screens maintenance never closes (#526; ADR-0013 decision 3): the door
@@ -44,13 +50,30 @@ const DOORS = new Set(["/login", "/logout"]);
  * so booting there would either fail the build or, worse, migrate whatever
  * database happened to be configured at build time.
  *
+ * A `registerNode` rejection exits the process (#717): SvelteKit's own
+ * handling of a failed `init` leaves the HTTP server bound and answering
+ * `/` at 200 while every dynamic route 500s, which no orchestrator or
+ * restart policy reacts to.
+ *
  * @type {import("@sveltejs/kit").ServerInit}
  */
 export async function init() {
   if (building) return;
 
   const { registerNode } = await import("orbit/server/boot");
-  await registerNode();
+  try {
+    await registerNode();
+  } catch {
+    /* registerNode has already logged exactly what is wrong and its remedy
+       (#717); this only has to make the process stop. Left running, the
+       Node process kept serving `/` at 200 while every dynamic route
+       answered 500 -- indistinguishable from a slow boot to anything that
+       did not run `docker compose up --wait`, and `restart: unless-stopped`
+       does not act on the healthcheck. Exiting non-zero is what makes the
+       container actually stop, so the orchestrator and repair.sh's own
+       diagnosis (scripts/repair.sh) have something to see. */
+    process.exit(1);
+  }
 }
 
 /**
@@ -200,6 +223,41 @@ export async function handle({ event, resolve }) {
      redirect. */
   if (!session) {
     redirect(303, `/login?returnTo=${encodeURIComponent(event.url.pathname + event.url.search)}`);
+  }
+
+  /*
+   * THE FIRST-RUN DOOR, EVERYWHERE (#840). `/` is the only screen that reads
+   * GET /api/workspace and decides create vs. newcomer vs. onward
+   * (web/src/lib/arrival/stage.js's arrivalStageOf) -- every other gated
+   * screen up to now only ever asked "is there a session", so a reader who
+   * first signed in at, say, /home (every "start your own system" pointer
+   * sent them straight to the item form) never met that decision at all.
+   *
+   * activeHouseholdId is the same field Arrival.svelte's own decide() trusts
+   * as its fast path: a session already pointed at a household is a member,
+   * handed on without a workspace read. A session that has never pointed at
+   * one -- a brand new sign-up, or a newcomer whose join request is still
+   * pending -- is sent to `/` so the arrival makes the same decision
+   * regardless of which URL they typed or were returned to.
+   *
+   * `hasOnwardHousehold` is the loop guard: a reader can be a genuine member
+   * with no activeHouseholdId of their own doing (an owner's
+   * addHouseholdMember, or an owner approving their join request, both grant
+   * membership without ever touching the new member's session), and sending
+   * that reader to `/` would only be handed straight back to /home by the
+   * arrival's own ONWARD branch -- forever. Checking membership here first is
+   * what tells the two apart without a redirect round trip.
+   *
+   * A member whose household was later hard-deleted keeps this field set to
+   * the household's old id (hardDeleteHousehold clears no session), so they
+   * never reach this branch at all and land on /home's own adrift surface --
+   * the arrival would hand them on immediately too, on the same stale field.
+   */
+  if (!session.activeHouseholdId) {
+    const { hasOnwardHousehold } = await import("orbit/server/workspace-repository");
+    if (!(await hasOnwardHousehold(session.user.id, session.user.isInstanceAdmin))) {
+      redirect(303, "/");
+    }
   }
 
   /* Carried on locals so a server load never has to ask a second time. */

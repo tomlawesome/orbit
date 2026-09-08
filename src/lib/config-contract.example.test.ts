@@ -20,20 +20,6 @@ function keysInExample(): Set<string> {
   return keys;
 }
 
-// Alias-compatibility names are accepted by the parser for pre-rotation
-// installations but are deliberately undocumented (configuration.sh calls
-// them "not documented defaults").
-const UNDOCUMENTED_COMPAT_KEYS = new Set([
-  "IMAP_ALIAS_GENERATION",
-  "IMAP_ALIAS_CURRENT_KEY",
-  "IMAP_ALIAS_CURRENT_KEY_FILE",
-  "IMAP_ALIAS_SECRET",
-  "IMAP_ALIAS_SECRET_FILE",
-  "IMAP_ALIAS_PREVIOUS_KEY",
-  "IMAP_ALIAS_PREVIOUS_KEY_FILE",
-  "IMAP_ALIAS_PREVIOUS_EXPIRY",
-]);
-
 describe(".env-orbit.example agrees with the configuration contract", () => {
   const documented = keysInExample();
 
@@ -44,10 +30,8 @@ describe(".env-orbit.example agrees with the configuration contract", () => {
     expect(unsupported).toEqual([]);
   });
 
-  it("supports no undocumented keys beyond the compatibility aliases", () => {
-    const undocumented = ALLOWED_KEYS.filter(
-      (key) => !documented.has(key) && !UNDOCUMENTED_COMPAT_KEYS.has(key),
-    );
+  it("supports no undocumented keys", () => {
+    const undocumented = ALLOWED_KEYS.filter((key) => !documented.has(key));
     expect(undocumented).toEqual([]);
   });
 });

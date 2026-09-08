@@ -8,7 +8,7 @@
  */
 
 .relay-card{width:430px;padding:30px 32px}
-.relay-card h2{font:600 19px var(--display)}
+.relay-card h1{font:600 19px var(--display)}
 .relay-card .sub{font:11px var(--mono);color:var(--ink-mid);margin:6px 0 22px;line-height:1.8}
 .dish{position:relative;width:54px;height:54px;margin:0 auto 6px}
 .dish i{position:absolute;inset:22px;border-radius:50%;background:var(--ok)}
@@ -22,7 +22,7 @@
     color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
 .kv:last-of-type{border:0}
 .kv b{color:var(--ok-text);font-weight:500}
-.note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:16px;line-height:1.8}
+.note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:16px;line-height:1.8}
 .btns{display:flex;gap:10px;margin-top:16px}
 .btns button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
              background:none;border:1px solid var(--line);color:var(--ink-mid)}
@@ -32,8 +32,8 @@
    where the user looks for "did my forward make it", so its failures live
    here, in the card's own kv grammar, toned as small print not alarm. */
 .failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
-.failures h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-  color:var(--ink-faint);margin:0 0 8px}
+.failures h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-quiet);margin:0 0 8px}
 .failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
 .failures .kv span:last-child{color:var(--overdue-text);text-align:right}
 

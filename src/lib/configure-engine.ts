@@ -241,7 +241,7 @@ const MINIMAL_ENVIRONMENT_SECTIONS: MinimalEnvironmentSection[] = [
   },
   {
     heading: "Optional services",
-    entries: [{ key: "TIKA_URL" }, { key: "OLLAMA_MODEL" }, { key: "IMAP_ENABLED" }],
+    entries: [{ key: "TIKA_URL" }, { key: "OLLAMA_MODEL" }],
   },
   {
     heading: "Observability",

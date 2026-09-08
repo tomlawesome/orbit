@@ -13,7 +13,9 @@ import { describe, expect, it } from "vitest";
 //
 // configure.sh's own run_check() calls are the source of truth for what is
 // implemented: report_required_bool() is called once per required field,
-// report_optional() once per optional group.
+// report_optional() once per optional group, report_app_managed() once per
+// app-managed group (ADR-0017 slice 2, #743: a group whose credential lives
+// in the database, set from the administration screen, never in .env-orbit).
 
 const configureSource = readFileSync(
   fileURLToPath(new URL("./configure.sh", import.meta.url)),
@@ -31,11 +33,15 @@ function implementedFields() {
   const optional = [
     ...configureSource.matchAll(/report_optional\s+([a-z][a-z]*)\s/gu),
   ].map((match) => match[1]);
+  const appManaged = [
+    ...configureSource.matchAll(/report_app_managed\s+([a-z][a-z]*)\s*$/gmu),
+  ].map((match) => match[1]);
 
   expect(required.length, "found no report_required_bool calls in configure.sh").toBeGreaterThan(0);
   expect(optional.length, "found no report_optional calls in configure.sh").toBeGreaterThan(0);
+  expect(appManaged.length, "found no report_app_managed calls in configure.sh").toBeGreaterThan(0);
 
-  return { required: new Set(required), optional: new Set(optional) };
+  return { required: new Set(required), optional: new Set(optional), appManaged: new Set(appManaged) };
 }
 
 // The readiness report's own section, so a field documented for the prompt
@@ -68,6 +74,7 @@ function documentedFields() {
   return {
     required: new Set(fencedBlockAfter("Required fields")),
     optional: new Set(fencedBlockAfter("Optional groups")),
+    appManaged: new Set(fencedBlockAfter("App-managed groups")),
   };
 }
 
@@ -94,9 +101,21 @@ describe("configuration readiness report v0 contract", () => {
     expect(phantom, "documented in engine-events.md but never reported").toEqual([]);
   });
 
-  it("keeps required and optional fields disjoint", () => {
-    const { required, optional } = implementedFields();
-    const overlap = [...required].filter((value) => optional.has(value));
-    expect(overlap, "fields reported both as required and optional").toEqual([]);
+  it("documents exactly the app-managed groups configure.sh --check can report", () => {
+    const implemented = implementedFields().appManaged;
+    const documented = documentedFields().appManaged;
+
+    const undocumented = [...implemented].filter((value) => !documented.has(value)).sort();
+    const phantom = [...documented].filter((value) => !implemented.has(value)).sort();
+
+    expect(undocumented, "reported by configure.sh but absent from engine-events.md").toEqual([]);
+    expect(phantom, "documented in engine-events.md but never reported").toEqual([]);
+  });
+
+  it("keeps required, optional and app-managed fields disjoint", () => {
+    const { required, optional, appManaged } = implementedFields();
+    const overlap = [...required].filter((value) => optional.has(value) || appManaged.has(value))
+      .concat([...optional].filter((value) => appManaged.has(value)));
+    expect(overlap, "fields reported in more than one category").toEqual([]);
   });
 });

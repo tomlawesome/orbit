@@ -1,8 +1,8 @@
-import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { createTransport } from "nodemailer";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
+import { settleArrival } from "./support/arrival";
+import { waitForSenderVerificationToken } from "./support/mail";
 
 /**
  * #459: the mail proving ground — no interception anywhere. A real message
@@ -11,15 +11,43 @@ import { householdRegister } from "./support/households";
  * through the v19 row. A malformed claim travels the same pipe into its
  * bounded failure state, visible on the relay.
  *
- * The alias derivation mirrors src/server/mail-in/core/imap-recipient.ts
- * exactly, keyed by the DISPOSABLE alias secret this stack runs with.
+ * Since ADR-0017 slice 2 (#743) the mailbox is not container configuration:
+ * an instance administrator sets it through /api/admin/mailbox and Orbit
+ * stores it encrypted, generating the alias key itself. So this spec now
+ * configures the mailbox as the administrator before sending anything, and
+ * asks the app for the member's own relay address rather than deriving it
+ * from a secret it used to be handed. Nothing here knows a mailbox password
+ * beyond the throwaway one it sets, and nothing knows the alias key at all.
+ *
+ * Since ADR-0017 slice 4 (#745), landing on the alias is not enough either:
+ * THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES. A message from an address
+ * nobody has verified is unattributed, deleted, and never reaches the review
+ * lane -- so this spec claims a sending address as the member, proves it
+ * through the real one-use-link Orbit mails back (read out of GreenMail, not
+ * trusted in-process), and writes the `Authentication-Results` header the
+ * instance's own receiving provider would have prepended. GreenMail is a bare
+ * relay with no such provider in front of it, so the test plays that part --
+ * exactly the reasoning `sendMail` below already applies to the trusted
+ * recipient header.
  */
-const RECIPIENT_DOMAIN = "in.orbit.test";
-const ALIAS_GENERATION = 1;
-// Must match docker-compose.acceptance.yml's GreenMail host-port binding
+const MAILBOX_ACCOUNT = "orbit-intake@in.orbit.test";
+/* GreenMail runs with -Dgreenmail.auth.disabled, so this is accepted as-is
+   and is not a credential to anything. */
+const MAILBOX_PASSWORD = "greenmail-proving-ground-only";
+// Must match compose/docker-compose.acceptance.yml's GreenMail host-port binding
 // exactly -- both read TEST_SMTP_PORT so the test and the compose
 // host-binding can never diverge. Defaults to 3025 (CI's fixed value).
 const SMTP_PORT = Number(process.env.TEST_SMTP_PORT ?? 3025);
+
+/* #745: the address the member claims and proves they send from. Any address
+   works with GreenMail's auth disabled -- see support/mail.ts -- so this one
+   only has to be distinct from MAILBOX_ACCOUNT, which is the intake box, not
+   a sender's own mailbox. */
+const SENDER_ADDRESS = "member-forwarding@out.orbit.test";
+/* The authserv-id this spec's mailbox configuration says it trusts, and the
+   one it then writes into the `Authentication-Results` header it prepares --
+   standing in for the real receiving provider GreenMail does not have. */
+const TRUSTED_AUTHSERV_ID = "mx.orbit-proving-ground.test";
 
 /* #730: the proving ground this file seeds (only when the member has none) is
    removed once both journeys are done — the second one still needs it. The
@@ -29,10 +57,18 @@ const HOUSEHOLD = "Collection Proving Ground";
 const households = householdRegister();
 let seeded = false;
 
-function deriveAlias(userId: string, secret: string): string {
-  const input = `orbit:imap-recipient-alias:v1\0${RECIPIENT_DOMAIN}\0${ALIAS_GENERATION}\0${userId}`;
-  const token = createHmac("sha256", secret).update(input, "utf8").digest("base64url");
-  return `orbit+${token}@${RECIPIENT_DOMAIN}`;
+/**
+ * The member's own relay address, from the app rather than from a secret.
+ *
+ * There is no other way to get it now, and that is the point: the alias key
+ * lives encrypted in the database and no read path returns it, so the only
+ * holder of an address is the member whose address it is.
+ */
+async function relayAddress(page: Page): Promise<string> {
+  const response = await page.request.get("/api/settings/mail-relay");
+  const body = (await response.json()) as { relay?: { address?: string } };
+  if (!body.relay?.address) throw new Error("the member has no relay address");
+  return body.relay.address;
 }
 
 const TINY_PDF = Buffer.from(
@@ -47,7 +83,7 @@ const TINY_PDF = Buffer.from(
 async function signInAsMember(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Member" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await settleArrival(page);
 }
 
 // A fresh instance promotes its first sign-in to instance admin, and admins
@@ -59,10 +95,97 @@ async function establishInstanceAdmin(browser: Browser) {
   const page = await context.newPage();
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  /* Not a fixed destination (#840): this only needs the promotion claimed,
+     not a landing on /home -- see signInAsMember above. */
+  const session = await page.request.get("/api/auth/session");
+  expect(session.ok()).toBe(true);
+  await settleArrival(page);
+  await configureMailbox(page);
   await context.close();
 }
 
+/**
+ * Points the instance at the GreenMail sidecar through the real
+ * administrator API (#743), which verifies the credential against the
+ * provider before committing it. Idempotent: it reads the current version
+ * first, so re-running the suite against a live stack re-sets the same
+ * mailbox rather than failing on a version conflict.
+ */
+async function configureMailbox(page: Page) {
+  /* Everything this callback needs is passed in, because it is serialised and
+     run inside the browser: a constant from this module's scope is simply not
+     defined there. #745 added `trustedAuthservId` reading TRUSTED_AUTHSERV_ID
+     directly and pipeline 577's `smoke` died on
+     `ReferenceError: TRUSTED_AUTHSERV_ID is not defined`. */
+  const outcome = await page.evaluate(async ([account, password, authservId]) => {
+    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const current = (await (await fetch("/api/admin/mailbox", { credentials: "same-origin" })).json()) as { mailbox?: { version?: number | null } | null };
+    const response = await fetch("/api/admin/mailbox", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+      body: JSON.stringify({
+        action: "set",
+        expectedVersion: current.mailbox?.version ?? null,
+        host: "orbit-greenmail",
+        port: 3993,
+        accountUser: account,
+        mailbox: "INBOX",
+        tlsServerName: "orbit-greenmail",
+        providerProfile: "other",
+        trustedRecipientHeader: "X-Orbit-Delivered-To",
+        // #745: the provider identity `sendMail` above writes into
+        // Authentication-Results -- GreenMail never adds this header itself.
+        trustedAuthservId: authservId,
+        /* The floor the settings schema allows; the poll loop follows it, so
+           a receipt appears within seconds rather than a minute. */
+        pollSeconds: 30,
+        password,
+      }),
+    });
+    if (!response.ok) throw new Error(`mailbox set failed: ${response.status}`);
+    return ((await response.json()) as { outcome?: string }).outcome ?? "";
+  }, [MAILBOX_ACCOUNT, MAILBOX_PASSWORD, TRUSTED_AUTHSERV_ID]);
+  /* A refusal here is the provider check doing its job, and every assertion
+     below would fail for a reason that named the wrong thing. */
+  expect(outcome, "the administrator API must verify the GreenMail mailbox before committing it").toBe("verified");
+}
+
+/**
+ * Claims SENDER_ADDRESS as the signed-in member's own and proves it through
+ * the real one-use link (ADR-0017 slice 4, #745) -- not a database shortcut,
+ * because the point of this spec is the real pipe. Idempotent: a re-run
+ * against a live stack finds the address already verified and does nothing
+ * further, the same accommodation `configureMailbox` above makes.
+ */
+async function verifySenderAddress(page: Page) {
+  const outcome = await page.evaluate(async (address) => {
+    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const request = async (body: unknown) => {
+      const response = await fetch("/api/settings/mail-relay/senders", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(`sender address request failed: ${response.status}`);
+      return (await response.json()) as { addresses: Array<{ id: string; address: string; verified: boolean }> };
+    };
+    const added = await request({ action: "add", address });
+    const row = added.addresses.find((entry) => entry.address === address);
+    if (!row) throw new Error("sender address did not round-trip");
+    if (row.verified) return "already-verified";
+    await request({ action: "verify", id: row.id });
+    return "verification-sent";
+  }, SENDER_ADDRESS);
+  if (outcome === "already-verified") return;
+
+  const token = await waitForSenderVerificationToken(SENDER_ADDRESS);
+  const verified = await page.request.get(`/api/settings/mail-relay/verify?token=${encodeURIComponent(token)}`);
+  if (!verified.ok() || !verified.url().includes("sender=verified")) {
+    throw new Error(`sender verification link did not confirm: ${verified.status()} ${verified.url()}`);
+  }
+}
 
 async function seedHousehold(page: Page) {
   const created = await page.evaluate(async (householdName) => {
@@ -95,36 +218,37 @@ async function seedHousehold(page: Page) {
   }
 }
 
-async function sessionUserId(page: Page): Promise<string> {
-  const response = await page.request.get("/api/auth/session");
-  const body = (await response.json()) as { user?: { id?: string } };
-  if (!body.user?.id) throw new Error("no session user");
-  return body.user.id;
-}
-
 async function sendMail(alias: string, subject: string, attachment: { filename: string; content: Buffer; contentType: string } | null) {
   const transport = createTransport({ host: "127.0.0.1", port: SMTP_PORT, secure: false, tls: { rejectUnauthorized: false } });
   await transport.sendMail({
-    envelope: { from: "spoofer@outside.example", to: "orbit-intake@in.orbit.test" },
-    from: "Spoofed Sender <spoofer@outside.example>",
+    envelope: { from: SENDER_ADDRESS, to: MAILBOX_ACCOUNT },
+    from: `Forwarding Member <${SENDER_ADDRESS}>`,
     to: alias,
     subject,
     text: "A forwarded document for the proving ground.",
     // prepared: nodemailer folds lines over 78 chars and Orbit (rightly)
     // quarantines a folded trusted-recipient header; real MTAs write it unfolded.
-    headers: { "X-Orbit-Delivered-To": { prepared: true, value: alias } },
+    // Both headers here are ones a real receiving provider would have written
+    // itself -- GreenMail is a bare relay with nothing in front of it, so the
+    // test writes them, exactly as it always has for the recipient header.
+    headers: {
+      "X-Orbit-Delivered-To": { prepared: true, value: alias },
+      "Authentication-Results": { prepared: true, value: `${TRUSTED_AUTHSERV_ID}; dmarc=pass header.from=${SENDER_ADDRESS.slice(SENDER_ADDRESS.indexOf("@") + 1)}` },
+    },
     attachments: attachment ? [attachment] : [],
   });
   transport.close();
 }
 
-async function waitForReceipts(page: Page, count: number, timeoutMs = 120_000) {
+type Receipt = { canApprove: boolean; classification: string; message: string };
+
+async function waitForReceipts(page: Page, count: number, timeoutMs = 120_000, of: (receipt: Receipt) => boolean = () => true) {
   await expect
     .poll(
       async () => {
         const response = await page.request.get("/api/imap-inbox");
-        const body = (await response.json()) as { receipts?: unknown[] };
-        return body.receipts?.length ?? 0;
+        const body = (await response.json()) as { receipts?: Receipt[] };
+        return (body.receipts ?? []).filter(of).length;
       },
       { timeout: timeoutMs, intervals: [5_000] },
     )
@@ -153,10 +277,9 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
 
   await establishInstanceAdmin(browser);
   await signInAsMember(page);
+  await verifySenderAddress(page);
   await seedHousehold(page);
-  const userId = await sessionUserId(page);
-  const secret = readFileSync(".orbit-secrets/imap-alias-current-secret", "utf8").trim();
-  const alias = deriveAlias(userId, secret);
+  const alias = await relayAddress(page);
 
   await sendMail(alias, "Boiler cover renewal", {
     filename: "spoofed-policy.pdf",
@@ -165,10 +288,21 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   });
 
   // Orbit polls every 30s: the receipt appears without any interception.
-  await waitForReceipts(page, 1);
+  // Home reads the inbox once on arrival and only an approvable receipt is a
+  // suggestion row, so wait until the server has finished reading the mail —
+  // a receipt still "waiting" renders nothing on home (seen locally, 2026-09-06).
+  await waitForReceipts(page, 1, 120_000, (receipt) => receipt.canApprove);
 
   // The suggestion is on home, from the real pipe.
   await page.goto("/home");
+  /* The member's first landing on a fresh stack gets the first-run tour,
+     and the dimmed page behind it is inert (#844) — a reader has to skip
+     the walk before tapping anything, so this test does too. */
+  const tour = page.locator(".tourcard");
+  if (await tour.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) {
+    await page.locator("#tour-skip").click();
+    await expect(tour).toHaveCount(0);
+  }
   const row = page.locator(".item.suggest").first();
   await expect(row).toBeVisible({ timeout: 30_000 });
 
@@ -203,9 +337,8 @@ test("a message with no readable document lands in a bounded state on the relay"
   test.setTimeout(240_000);
 
   await signInAsMember(page);
-  const userId = await sessionUserId(page);
-  const secret = readFileSync(".orbit-secrets/imap-alias-current-secret", "utf8").trim();
-  const alias = deriveAlias(userId, secret);
+  await verifySenderAddress(page);
+  const alias = await relayAddress(page);
 
   // A hostile claim: says PDF, is not one.
   await sendMail(alias, "Definitely a real invoice", {
@@ -219,9 +352,7 @@ test("a message with no readable document lands in a bounded state on the relay"
   // Whatever bounded state it reached, the user can SEE that mail arrived:
   // either it is reviewable (a suggestion) or its failure is dated on the
   // relay in the server's own words — never silence.
-  const inbox = (await (await page.request.get("/api/imap-inbox")).json()) as {
-    receipts: Array<{ canApprove: boolean; classification: string; message: string }>;
-  };
+  const inbox = (await (await page.request.get("/api/imap-inbox")).json()) as { receipts: Receipt[] };
   const receipt = inbox.receipts[0];
   expect(receipt.message.length).toBeGreaterThan(0);
   if (!receipt.canApprove && receipt.classification !== "waiting") {

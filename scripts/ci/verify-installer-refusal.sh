@@ -18,7 +18,6 @@
 #   GIT_MARKER         file the guard touches if it is ever invoked
 #   ORBIT_RUN_ID, ORBIT_RUN_ATTEMPT  used to name the captured output
 #   RUNNER_TEMP        optional; defaults to $TMPDIR or /tmp
-#   ORBIT_ASSETS_FROM_TREE  optional; see scripts/ci/assets-from-tree.sh
 #
 # Outputs: refusal_output is appended to $GITHUB_OUTPUT when it is set.
 set -Eeuo pipefail
@@ -39,10 +38,23 @@ refusal_output="${runner_temp}/orbit-installer-refusal-${ORBIT_RUN_ID}-${ORBIT_R
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   printf 'refusal_output=%s\n' "${refusal_output}" >> "${GITHUB_OUTPUT}"
 fi
-# shellcheck source=scripts/ci/assets-from-tree.sh
-source "${repo_root}/scripts/ci/assets-from-tree.sh"
-PATH="$(assets_from_tree_path)${PATH}"
-
+# install.sh's own database-volume-safety check refuses a fresh install into
+# an empty target for real if any volume on this Docker host already looks
+# like a recognized deployment's database (any name ending "orbit-db-data"),
+# so it cannot silently orphan that deployment. That refusal is correct and
+# deliberate (docs/installer-guarantees.md install.sh #13/#21) but it fires
+# before the field check this step asserts, and it is not this job's own
+# concern to leave lying around: a volume the acceptance stage or an earlier
+# job on this runner failed to tear down would make this step misreport as
+# the field-check assertion failing. Name that leak here, distinctly, before
+# running the installer at all (#770).
+stray_volumes="$(docker volume ls --filter 'name=orbit-db-data' --format '{{.Name}}' 2>/dev/null)" || stray_volumes=""
+if [[ -n "${stray_volumes}" ]]; then
+  printf 'A database volume from an earlier deployment already exists on this Docker host, before the installer even ran. install.sh would correctly refuse this fresh install because of it, not because of the field check this step means to prove -- that is a leaked-state defect in the environment, not the installer (#770).\n' >&2
+  printf -- '--- pre-existing volumes matching "orbit-db-data" ---\n' >&2
+  printf '%s\n' "${stray_volumes}" >&2
+  exit 1
+fi
 set +e
 exec < /dev/null
 [[ ! -t 0 ]] || {
@@ -52,12 +64,17 @@ exec < /dev/null
 PATH="${GIT_GUARD_DIR}:${PATH}" bash "${workspace}/scripts/install.sh" > "${refusal_output}" 2>&1
 installer_status=$?
 set -e
-# Every check below names what it expected; the file holds what it got. Show
-# that whenever the script fails, or a failure on another runner is a guess.
+# Every check below names what it expected; the file holds what it got, the
+# exit code says how far the installer ran, and the directory listing says
+# what it left behind. Show all three whenever the script fails, or a
+# failure on another runner is a guess (#770).
 show_output_on_failure() {
   [[ "$1" -eq 0 ]] || {
+    printf -- '--- installer exit status: %s ---\n' "${installer_status}" >&2
     printf -- '--- installer output (%s) ---\n' "${refusal_output}" >&2
     cat "${refusal_output}" >&2
+    printf -- '--- target directory contents (%s) ---\n' "$(pwd -P)" >&2
+    ls -la >&2
   }
 }
 trap 'show_output_on_failure $?' EXIT
@@ -65,12 +82,27 @@ trap 'show_output_on_failure $?' EXIT
   printf 'An empty non-interactive target unexpectedly accepted installation.\n' >&2
   exit 1
 }
-grep --fixed-strings --line-regexp --quiet \
-  'Orbit installer: configuration fields requiring attention: APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL.' \
-  "${refusal_output}" || {
-  printf 'The empty-target refusal did not report the fixed required fields.\n' >&2
+# The field-check line and the Compose-refusal line below are printed
+# together by the same prepare_configuration() call in install.sh, but a
+# failure that never reaches that call (a registry hiccup during the
+# earlier image pull, for instance) and a failure that reaches it with a
+# wrong field list used to report as the same "did not report the fixed
+# required fields" line, with nothing to tell them apart. Check the line's
+# fixed prefix on its own first, and show whatever it actually said when it
+# is present but wrong (#770).
+required_fields_prefix='Orbit installer: configuration fields requiring attention:'
+required_fields_line='Orbit installer: configuration fields requiring attention: APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL.'
+if ! grep --fixed-strings --line-regexp --quiet "${required_fields_line}" "${refusal_output}"; then
+  if actual_fields_line="$(grep --fixed-strings -m1 -- "${required_fields_prefix}" "${refusal_output}")"; then
+    printf 'The empty-target refusal reported the wrong required fields.\n' >&2
+    printf 'Expected: %s\n' "${required_fields_line}" >&2
+    printf 'Actual:   %s\n' "${actual_fields_line}" >&2
+  else
+    printf 'The installer exited (status %s) without ever reaching the field check; it never printed a "%s" line.\n' \
+      "${installer_status}" "${required_fields_prefix}" >&2
+  fi
   exit 1
-}
+fi
 grep --fixed-strings --line-regexp --quiet \
   'Orbit installer: Required configuration fields require attention; refusing to start Compose.' \
   "${refusal_output}" || {
@@ -89,6 +121,6 @@ shopt -s nullglob dotglob
 entries=(*)
 shopt -u nullglob dotglob
 [[ "${#entries[@]}" -eq 0 ]] || {
-  printf 'The empty-target refusal did not restore the target to empty.\n' >&2
+  printf 'The empty-target refusal did not restore the target to empty: %s\n' "${entries[*]}" >&2
   exit 1
 }

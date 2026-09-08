@@ -82,11 +82,12 @@ permissions are refused before Docker or downloads begin. These pre-provisioned
 files are preserved byte-for-byte if configuration, OIDC discovery, or Compose
 preflight fails before transaction commit.
 
-It resolves the published image to an immutable digest, reads the exact source
-revision recorded in that image, and fetches its deployment assets from that
-same revision — so a compose file cannot drift from the image it configures. The
-resolved `registry/repository@sha256:...` digest is written to `.env-orbit`, and
-that digest is what runs. A tag is only ever read to resolve it; a mutable
+It pulls the published image, resolves it to an immutable digest, and takes
+its deployment assets — the compose files, the Tika configuration and the
+operator scripts — out of that same image, which carries them. A compose file
+therefore cannot drift from the image it configures, and an install needs
+nothing but the registry. The resolved `registry/repository@sha256:...` digest
+is written to `.env-orbit`, and that digest is what runs. A tag is only ever read to resolve it; a mutable
 reference is never deployed.
 
 It then creates or revalidates the Orbit-specific `.env-orbit` configuration,
@@ -162,17 +163,10 @@ provider settings or infrastructure details.
   <img src="docs/assets/product-tour/inbox.png" alt="Orbit incoming-documents view showing one synthetic mailbox review" width="100%" />
 </p>
 
-The captures are reproducible with the repository's disposable OIDC browser
-fixture. Start the acceptance Compose stack, then run:
-
-```sh
-ORBIT_ACCEPTANCE_OIDC=true ORBIT_CAPTURE_PRODUCT_TOUR=true \
-  pnpm test:e2e tests/e2e/product-tour.spec.ts --project=desktop-chromium
-```
-
-The opt-in capture freezes the browser clock, creates synthetic data, removes
-PNG metadata, and deletes the fixture after capture. Ordinary browser tests do
-not write documentation assets.
+The captures show synthetic data only. They are static assets under
+`docs/assets/product-tour/`: the browser test that used to regenerate them
+went with the Next application (#735), and ordinary browser tests do not
+write documentation assets.
 
 <table>
   <tr>
@@ -280,10 +274,10 @@ and secret file are already complete and safe.
 ```sh
 ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)" \
   docker compose --env-file .env-orbit \
-  -f docker-compose.yml -f docker-compose.build.yml up --build
+  -f docker-compose.yml -f compose/docker-compose.build.yml up --build
 ```
 
-Building from source needs the `docker-compose.build.yml` overlay. The base
+Building from source needs the `compose/docker-compose.build.yml` overlay. The base
 compose file describes a deployment, which has a published image but no source
 tree, so the build context lives in the overlay rather than the base file.
 
@@ -535,23 +529,40 @@ suite when no browser target is running.
 The authenticated acceptance checks use a separate Compose overlay with a
 disposable local OIDC provider. It performs discovery, PKCE, code exchange and
 signed ID-token validation; it does not add an Orbit sign-in bypass. Run it only
-against disposable data:
+against disposable data.
 
-```sh
-docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml up --build --wait
-ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
-docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
-```
-
-`bash scripts/test-e2e-local.sh` does all of the above -- plus the mail
-overlay, an isolated Compose project so it can never collide with a real
-deployment on the same host, a health wait, and guaranteed teardown -- in one
-command, mirroring the acceptance stage of the container-validation workflow:
+`bash scripts/test-e2e-local.sh` is the safe default: it brings up this same
+overlay, plus the mail overlay, under an isolated Compose project derived from
+this worktree and process (so it can never collide with a real deployment or
+another concurrent run on the same host), waits for health, runs the browser
+suite, and guarantees teardown, all mirroring the acceptance stage of the
+container-validation workflow:
 
 ```sh
 bash scripts/test-e2e-local.sh
 bash scripts/test-e2e-local.sh --spec tests/e2e/v19-mail-review.spec.ts --project mobile-chromium
 ```
+
+Only assemble the Compose commands by hand -- as that script's own `--keep`
+output does when it prints the exact teardown line -- when you need to inspect
+a stack between steps. `docker-compose.yml`'s `name: orbit` and `.env-orbit`'s
+`COMPOSE_PROJECT_NAME` both default the project to the *same* name a real
+deployment uses, from any checkout, so a bare `--env-file .env-orbit` command
+with no `-p` can silently attach to that deployment's containers and named
+volumes instead of creating its own -- this is the trap AGENTS.md documents
+and issue #536 hit for real. Always pass an isolating `-p`:
+
+```sh
+docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml up --build --wait
+ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
+docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml down --volumes --remove-orphans
+```
+
+`scripts/compose-isolation-preflight.sh` is the scripted version of the same
+check: source it and call `resolve_compose_project` and
+`compose_isolation_preflight` before an `up`, and it refuses -- naming the
+resolved project and the safe `-p` alternative -- when that project already
+has containers running.
 
 Install Playwright's local Chromium build once, then repeat browser tests
 without using an AI service:
@@ -641,13 +652,6 @@ and add a matching read-only secret mount to the Compose service.
 | `SMTP_USER` / `SMTP_PASSWORD_FILE` | Worker | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
 | `SMTP_URL` | Worker | Deprecated compatibility form; do not set it with the individual SMTP settings. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
 | `SMTP_FROM` | Worker | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
-| `IMAP_HOST` / `IMAP_PORT` | Worker | Dedicated inbound mailbox host and implicit-TLS port. The port is configurable; verified TLS is mandatory. | `imap.example.com` / `993` |
-| `IMAP_USER` / `IMAP_PASSWORD_FILE` | Worker | Dedicated least-privilege mailbox login and mounted password file. | `orbit@example.com` / `/run/orbit-secrets/orbit-imap-password` |
-| `IMAP_ALIAS_CURRENT_GENERATION` | Orbit | Positive current HMAC alias generation. | `2` |
-| `IMAP_ALIAS_CURRENT_SECRET_FILE` | Orbit | Runtime secret file for the current alias key; use a distinct file from the previous key. | `/run/orbit-secrets/orbit-imap-alias-current-secret` |
-| `IMAP_ALIAS_PREVIOUS_GENERATION` | Orbit | Optional previous HMAC alias generation during an explicit bounded rotation. | `1` |
-| `IMAP_ALIAS_PREVIOUS_SECRET_FILE` | Orbit | Runtime secret file for the previous alias key. | `/run/orbit-secrets/orbit-imap-alias-previous-secret` |
-| `IMAP_ALIAS_PREVIOUS_EXPIRES_AT` | Orbit | Explicit UTC expiry for the previous generation; omit all previous-generation settings for emergency invalidation. | `2026-08-15T00:00:00.000Z` |
 | `VAPID_SUBJECT` | Worker | Contact URI included in Web Push VAPID claims. VAPID enables browser/PWA native notifications; it is not Pushover. | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` | Browser and worker | Public VAPID key generated for this deployment. | `<base64url-public-key>` |
 | `VAPID_PRIVATE_KEY` | Worker | Direct private VAPID key. Leave empty when the file form is used. | `<base64url-private-key>` |
@@ -660,21 +664,14 @@ and add a matching read-only secret mount to the Compose service.
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
 | `ORBIT_SECRETS_DIR` | Compose | Host directory containing files mounted as Compose secrets. | `./.orbit-secrets` |
 
-### IMAP alias rotation
+Inbound mail (the mailbox Orbit polls for incoming statements and documents)
+is no longer environment configuration: an instance administrator sets it
+from the administration screen, and Orbit stores the credential encrypted in
+the database (ADR-0017). No `IMAP_*` environment key is accepted any more.
 
-For a key rotation within the same recipient domain, increment the generation,
-deploy the new key as current and the exact old current tuple as previous, and
-set an explicit UTC expiry no more than 90 days away. Replicas with stale or
-mismatched generation, key, domain, or trusted-header configuration fail
-closed. At expiry, current ingestion continues and the previous tuple is
-retired; omit all previous settings for immediate emergency invalidation. A
-recipient-domain change cannot preserve old-domain aliases in v1: use a new
-generation/current-only deployment, which invalidates the old domain at once.
-
-Use `docker-compose.mail.yml` only after the SMTP, IMAP, and current alias
-secret files exist. Add `docker-compose.mail-alias-rotation.yml` only for the
-bounded previous-key transition. The complete operator procedure and
-production-like acceptance boundary are documented in
+Use `docker-compose.mail.yml` once the SMTP password file exists. The
+complete operator procedure and production-like acceptance boundary are
+documented in
 [Orbit administrator operations](docs/administrator-operations.md).
 
 For production, use HTTPS, file-backed secrets, a private PostgreSQL connection,

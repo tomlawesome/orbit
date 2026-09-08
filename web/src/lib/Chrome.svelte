@@ -1,6 +1,7 @@
 <script>
   import { resolve } from "$app/paths";
   import { signOut } from "$lib/data/workspace.js";
+  import { DEFAULT_THEME, THEME_PACKS } from "$lib/theme.js";
 
   /**
    * The sub-screens' shared chrome (#461): the "← YOUR SKY" way back, the
@@ -31,34 +32,48 @@
   /*
    * THE v1.3.0 ROSTER, FINAL (§15, owner: "the release theme list is star
    * chart, after dark, CLOUDS, dawn terminator, and retrograde"). Five packs,
-   * five swatches. Atlas, hanami, porcelain, miami and solarium are on the
-   * records shelf — their code stays and a stored preference still renders,
-   * but they are offered nowhere a reader can choose, and this row is one of
-   * those places (the precedent is atlas leaving at #480/f9261c6).
+   * five swatches, in the order and membership theme.js names (#865) — atlas,
+   * hanami, porcelain, miami and solarium are on the records shelf, offered
+   * nowhere a reader can choose, and this row is one of those places (atlas
+   * left at #480/f9261c6 and its code followed at #865).
    *
    * The dot is the pack's most telling colour rather than strictly its --bg:
    * clouds shows the cool white of a cloud crest, which is the lighter end of
    * the range it was admitted to carry, and dawn shows the temperature story's
    * own ground now that the terminator has moved it off #c3ccdb.
    */
-  const PACKS = [
-    ["starchart", "star-chart", "#060b1c", ""],
-    ["afterdark", "after dark", "#05070d", ""],
-    ["clouds", "clouds", "#eef2f9", ""],
-    ["dawn", "dawn", "#d2d3d4", ""],
-    ["retrograde", "retrograde", "#080a14", "inset 0 0 0 1px #ff4fd8"],
-  ];
+  /** @type {Record<string, [string, string, string]>} */
+  const SWATCH = {
+    starchart: ["star-chart", "#060b1c", ""],
+    afterdark: ["after dark", "#05070d", ""],
+    clouds: ["clouds", "#eef2f9", ""],
+    dawn: ["dawn", "#d2d3d4", ""],
+    retrograde: ["retrograde", "#080a14", "inset 0 0 0 1px #ff4fd8"],
+  };
+  const PACKS = THEME_PACKS.map((id) => [id, ...SWATCH[id]]);
 
   let open = $state(false);
-  let active = $state("starchart");
+  let active = $state(DEFAULT_THEME);
 
   $effect(() => {
-    active = document.documentElement.dataset.theme || "afterdark";
+    active = document.documentElement.dataset.theme || DEFAULT_THEME;
     const close = (/** @type {Event} */ event) => {
       if (!(event.target instanceof Element) || !event.target.closest(".account,.orb")) open = false;
     };
+    /** @param {KeyboardEvent} event */
+    const onKeydown = (event) => {
+      if (event.key !== "Escape" || !open) return;
+      const account = document.getElementById("account");
+      const hadFocus = account?.contains(document.activeElement);
+      open = false;
+      if (hadFocus) /** @type {HTMLElement | null} */ (document.querySelector(".orb"))?.focus();
+    };
     addEventListener("click", close);
-    return () => removeEventListener("click", close);
+    addEventListener("keydown", onKeydown);
+    return () => {
+      removeEventListener("click", close);
+      removeEventListener("keydown", onKeydown);
+    };
   });
 
   /** @param {string} name */
@@ -172,8 +187,15 @@
            background:var(--panel-raised);backdrop-filter:blur(14px);
            border:1px solid var(--line);border-radius:16px;padding:18px 20px;
            opacity:0;transform:translateY(-6px);pointer-events:none;
-           transition:opacity .25s,transform .25s}
-  .account.open{opacity:1;transform:none;pointer-events:auto}
+           /* #847: closed, this must leave the tab order entirely — opacity
+              and pointer-events alone still let Tab land on the links and
+              swatch buttons inside. visibility is delayed to match the close
+              animation's own .25s so it still plays; opening clears the delay
+              so the panel is reachable the instant it appears. */
+           visibility:hidden;
+           transition:opacity .25s,transform .25s,visibility 0s .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto;
+                visibility:visible;transition-delay:0s}
   .account .who b{display:block;font-size:14px;font-weight:560}
   .account .who span{font-size:12px;color:var(--ink-mid)}
   .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
@@ -184,11 +206,11 @@
   .account nav a:hover{color:var(--ink);background:var(--panel)}
   .account nav a[aria-current]{color:var(--accent-text)}
   .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
-  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-quiet);margin-right:2px}
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
                    border:1px solid var(--line);padding:0}
   .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
-  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
+  .signout{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue-text)}
   .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
 </style>

@@ -1,0 +1,70 @@
+# This overlay is deliberately test-only. It runs a disposable OIDC provider in
+# the Orbit network namespace so both the browser and Orbit can reach the same
+# loopback HTTPS issuer. Production deployments must not include this file.
+services:
+  orbit-app:
+    environment:
+      APP_URL: http://127.0.0.1:3000
+      OIDC_ISSUER: https://orbit-oidc:4443/
+      OIDC_CLIENT_ID: orbit-browser-tests
+      OIDC_CLIENT_SECRET: orbit-browser-tests-only-secret
+      OIDC_CALLBACK_URL: http://127.0.0.1:3000/api/auth/callback
+      # The disposable provider generates a new self-signed certificate every
+      # start. This override exists only in the acceptance overlay.
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      # The mail proving ground (#459): real IMAP collection from the
+      # disposable GreenMail sidecar below. The inbound mailbox credential
+      # is no longer environment configuration (ADR-0017) — it is set
+      # through the administration screen and stored encrypted in the
+      # database, so this overlay only points outbound SMTP at the same
+      # sidecar; ingestion requires it configured.
+      SMTP_HOST: orbit-greenmail
+      SMTP_PORT: "3465"
+      SMTP_USER: orbit-notify@in.orbit.test
+      SMTP_SECURITY: implicit_tls
+      # Orbit verifies provider certificates unconditionally (by design);
+      # the sidecar's generated cert is trusted explicitly instead of
+      # weakening that. scripts/dev-greenmail-cert.sh writes it.
+      NODE_EXTRA_CA_CERTS: /etc/orbit/greenmail-ca.pem
+    volumes:
+      - ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/greenmail-ca.pem:/etc/orbit/greenmail-ca.pem:ro
+  orbit-oidc:
+    build:
+      context: ./tests/oidc
+    environment:
+      TEST_OIDC_ISSUER: https://orbit-oidc:4443/
+    ports:
+      # Host-side only; the container always listens on 4443 and the
+      # in-container TEST_OIDC_ISSUER/OIDC_ISSUER URLs above are fixed to
+      # that port. TEST_OIDC_PORT (scripts/test-e2e-local.sh) lets the host
+      # binding move when a real deployment already holds 4443; the browser
+      # is redirected to the new host port via tests/e2e/playwright.config.ts's
+      # host-resolver-rules, not by changing this URL.
+      - "127.0.0.1:${TEST_OIDC_PORT:-4443}:4443"
+
+  # The mail proving ground (#459): SMTP + IMAPS in one disposable container,
+  # so real messages with real attachments travel the real collection pipe.
+  # Test-only, like the OIDC provider above; auth disabled because every
+  # credential in this overlay is throwaway.
+  orbit-greenmail:
+    image: greenmail/standalone:2.1.13@sha256:3df66b7edd01c8a301343ca5e3601d8674760d4708655573560c24745e624fb2
+    environment:
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.smtps
+        -Dgreenmail.setup.test.imaps
+        -Dgreenmail.auth.disabled -Dgreenmail.hostname=0.0.0.0
+        -Dgreenmail.tls.keystore.file=/certs/greenmail.p12
+        -Dgreenmail.tls.keystore.password=orbit-proving-ground
+    volumes:
+      - ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/greenmail.p12:/certs/greenmail.p12:ro
+    ports:
+      # SMTP for the seeding spec, loopback only. TEST_SMTP_PORT
+      # (scripts/test-e2e-local.sh) must match tests/e2e/v19-mail-collection.spec.ts's
+      # SMTP_PORT exactly -- both read the same variable so they can never
+      # diverge.
+      - "127.0.0.1:${TEST_SMTP_PORT:-3025}:3025"
+      # IMAPS, loopback only: the invitation journey (#481) reads Orbit's own
+      # outbound mail back out of this sidecar instead of intercepting it --
+      # tests/e2e/support/mail.ts's TEST_IMAPS_PORT must match this binding
+      # exactly, for the same reason as TEST_SMTP_PORT above.
+      - "127.0.0.1:${TEST_IMAPS_PORT:-3993}:3993"

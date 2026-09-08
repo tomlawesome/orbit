@@ -47,7 +47,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
       border-radius:16px;padding:20px 22px}
 .mission-page .card .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
-.mission-page .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+.mission-page .card h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-quiet)}
 .mission-page .card .cardhead button,.mission-page .card .cardhead a{margin-left:auto;font:11px var(--mono);
       color:var(--ink-mid);background:none;border:1px solid var(--line);
       border-radius:9px;padding:6px 12px;cursor:pointer;text-decoration:none}
@@ -61,12 +61,12 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
                 display:grid;place-items:center;font:11px var(--mono);color:var(--ink-mid)}
 .mission-page .person .who{flex:1;min-width:0}
 .mission-page .person .who b{display:block;font-size:13.5px;font-weight:530}
-.mission-page .person .who span{display:block;font:10.5px var(--mono);color:var(--ink-faint);
+.mission-page .person .who span{display:block;font:10.5px var(--mono);color:var(--ink-quiet);
                   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mission-page .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
       border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid);flex:none}
 .mission-page .role.admin{color:var(--accent-text);border-color:var(--accent)}
-.mission-page .person .place{font:10.5px var(--mono);color:var(--ink-faint);background:none;
+.mission-page .person .place{font:10.5px var(--mono);color:var(--ink-quiet);background:none;
                border:0;cursor:pointer;padding:4px;flex:none}
 .mission-page .person .place:hover{color:var(--accent-text)}
 
@@ -76,7 +76,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .system svg{flex:none}
 .mission-page .system .who{flex:1;min-width:0}
 .mission-page .system .who b{display:block;font-size:13.5px;font-weight:530}
-.mission-page .system .who span{font:10.5px var(--mono);color:var(--ink-faint)}
+.mission-page .system .who span{font:10.5px var(--mono);color:var(--ink-quiet)}
 /* §15-2g removed the joinbadge and the dashed join-request row from this
    panel. Nothing replaces them and no spacing is patched in: the roster closes
    on its last system (which loses its rule to :last-child), so the card ends on
@@ -108,10 +108,10 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .svc{display:flex;align-items:center;gap:9px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
 .mission-page .svc i{width:7px;height:7px;border-radius:50%;flex:none}
 .mission-page .svc b{color:var(--ink);font-weight:500;flex:1}
-.mission-page .svc small{color:var(--ink-faint);font-size:10.5px}
+.mission-page .svc small{color:var(--ink-quiet);font-size:10.5px}
 
 .mission-page .strip{margin-top:22px;text-align:center;font:10.5px var(--mono);
-       color:var(--ink-faint);letter-spacing:.1em}
+       color:var(--ink-quiet);letter-spacing:.1em}
 /* stillness: the drift clock station.js runs is stopped in script, the way
    satellites.js and constellations.js stop theirs — a requestAnimationFrame
    loop cannot be turned off by a media query, so there is no CSS rule here. */
@@ -123,3 +123,19 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
         border:1px solid var(--line);border-radius:99px;padding:4px 11px;cursor:pointer}
 .mission-page .placerow button:hover{border-color:var(--accent);color:var(--accent-text)}
 .mission-page .adminproblem{margin-top:10px;font:11px var(--mono);color:var(--warm)}
+
+/* Mail machinery, live (#743, ADR-0017 slice 2). The controls borrow the
+   panel's existing furniture — .kv rows, .placerow buttons, .adminproblem —
+   so this reads as the same card rather than a second design; only the form
+   itself is new, because the sheet had no form to borrow from. */
+.mission-page .mailboxrow{padding:10px 2px 4px}
+.mission-page .mailboxform{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;padding:12px 2px 2px}
+.mission-page .mailboxform label{display:flex;flex-direction:column;gap:4px;
+  font:10.5px var(--mono);letter-spacing:.06em;color:var(--ink-quiet)}
+.mission-page .mailboxform :is(input,select){font:12px var(--mono);color:var(--ink);
+  background:none;border:1px solid var(--line-soft);border-radius:6px;padding:5px 7px}
+.mission-page .mailboxform :is(input,select):focus-visible{outline:none;border-color:var(--accent)}
+.mission-page .mailboxform .mailboxnote,
+.mission-page .mailboxform .mailboxrow{grid-column:1 / -1}
+.mission-page .mailboxform .mailboxnote{font:10.5px var(--mono);line-height:1.5;color:var(--ink-quiet);margin-top:2px}
+.mission-page .adminproblem.ok{color:var(--ok-text)}

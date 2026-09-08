@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 /**
  * #735: the route-set contract for the Next.js -> SvelteKit API port.
  *
- * `src/app/` (the old Next.js routes) is slated for deletion once the port is
- * verified. Nothing enumerates the SvelteKit side against a fixed list, so a
+ * `src/app/` (the old Next.js routes) is gone (merge 2de45bc, ADR-0018).
+ * Nothing else enumerates the SvelteKit side against a fixed list, so a
  * route that gets missed, renamed or left as an empty stub during the port
  * would only surface once its caller broke in production -- and for the
  * routes below, "its caller" is not `web/`, so a scan of what the front end
@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
  *    them yet (the subscribe control is #763), but the back end works and the
  *    routes are not to be dropped for being unreferenced today.
  *
- * The list is all 45 families, not the 24 ported first. ADR-0012's amendment
+ * The list is all 46 families, not the 24 ported first. ADR-0012's amendment
  * was clarified by the owner on 2026-09-03: the cut keeps what the new front
  * end NEEDS, not what it currently calls, and a working back end whose screen
  * is merely undrawn is needed -- #410 defers sixteen such surfaces to M9
@@ -41,7 +41,9 @@ const routesRoot = new URL("../../web/src/routes/api/", import.meta.url).pathnam
 const HANDLER_NAMES = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 const EXPECTED_ROUTES = [
+  "/api/admin/contact",
   "/api/admin/documents/health",
+  "/api/admin/mailbox",
   "/api/admin/maintenance",
   "/api/admin/operations",
   "/api/admin/operations/deliveries/[deliveryId]",
@@ -51,11 +53,14 @@ const EXPECTED_ROUTES = [
   "/api/admin/operations/smtp-test",
   "/api/admin/primary",
   "/api/admin/users",
+  "/api/auth/availability",
   "/api/auth/callback",
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/session",
   "/api/auth/session/refresh",
+  "/api/auth/sessions",
+  "/api/auth/sessions/[sessionId]/revoke",
   "/api/auth/sessions/revoke",
   "/api/document-drafts/[draftId]/approve",
   "/api/documents/[documentId]",
@@ -64,6 +69,7 @@ const EXPECTED_ROUTES = [
   "/api/documents/[documentId]/preview",
   "/api/documents/[documentId]/restore",
   "/api/health",
+  "/api/households/[householdId]/invitations",
   "/api/households/[householdId]/item-document-inspection",
   "/api/households/[householdId]/items/[itemId]/documents",
   "/api/households/[householdId]/join-requests",
@@ -82,6 +88,8 @@ const EXPECTED_ROUTES = [
   "/api/push/subscriptions",
   "/api/reviewed-intake/approve",
   "/api/settings/mail-relay",
+  "/api/settings/mail-relay/senders",
+  "/api/settings/mail-relay/verify",
   "/api/settings/reminders",
   "/api/settings/tour",
   "/api/workspace",
@@ -124,7 +132,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 45 route families -- no fewer, no more", () => {
+  it("has exactly the expected 52 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

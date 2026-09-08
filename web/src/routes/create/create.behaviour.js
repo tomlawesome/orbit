@@ -1,5 +1,6 @@
 import { goto } from "$app/navigation";
 import { activeHousehold, applyCommand } from "$lib/data/workspace.js";
+import { screenScope } from "$lib/teardown.js";
 
 /**
  * The new-entry form's behaviour, carried across from design/v19/create-v3.html
@@ -35,14 +36,7 @@ import { activeHousehold, applyCommand } from "$lib/data/workspace.js";
  *      scrim survived a trip to /create").
  */
 export function mountCreate() {
-  const controller = new AbortController();
-  /**
-   * @param {EventTarget | null | undefined} target
-   * @param {string} type
-   * @param {(event: any) => void} handler
-   */
-  const on = (target, type, handler) =>
-    target?.addEventListener(type, handler, { signal: controller.signal });
+  const { on, teardown } = screenScope();
 
   const card = /** @type {HTMLElement} */ (document.getElementById("card"));
   const disclose = /** @type {HTMLElement} */ (document.getElementById("disclose"));
@@ -219,8 +213,29 @@ export function mountCreate() {
     }
   });
 
+  /* #856: the panel opens from the `input` listener above, and `input` is
+     one-shot — nothing replays it. So anything that writes to the name field
+     before this module has mounted leaves the form stuck shut with no second
+     chance: a reader typing fast on a slow device, or a test driving the
+     keyboard as soon as the page loads. Two things follow.
+
+     First, catch up on what was typed while nobody was listening. The `value`
+     ATTRIBUTE is the default the markup ships ("New Entry"); `.value` is what
+     is in the field now. They differ only once something has written to it, so
+     this reveals for a real edit and never for the untouched default —
+     progressive disclosure is unchanged. */
+  if (nameInput.value.trim().length >= 3 && nameInput.value !== nameInput.getAttribute("value")) reveal();
+
+  /* Second, say so out loud. `#card[data-ready]` is the observable moment the
+     listeners exist, so a test can wait for the page to be ABLE to answer
+     rather than wait for `load` and hope — `load` fired ~122ms into the runs
+     that failed, while mount had not landed yet. Set last, after every
+     listener above is attached. */
+  card.dataset.ready = "true";
+
   return () => {
-    controller.abort();
+    teardown();
+    delete card.dataset.ready;
     document.body.classList.remove("doc");
   };
 }

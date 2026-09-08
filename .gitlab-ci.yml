@@ -19,9 +19,13 @@
 #      and `scripts/test-backup-restore.sh`. Each is a long-running suite of
 #      its own rather than a validation step, and each wants a lane here
 #      instead of a line in an existing job.
-#   2. Provenance and SBOM attestation. GitLab CE has no equivalent of
-#      actions/attest, so `publish_gitlab` records the tested digest and the
-#      GitHub lane still owns attestation.
+#   2. Provenance and SBOM attestation for operators. GitLab CE has no
+#      equivalent of actions/attest, so the GitHub lane still owns the
+#      operator-facing provenance/SBOM attestations over the GHCR digest.
+#      The evidence *publication* consumes -- "this digest passed the full
+#      bar under policy P" -- is different, and does live here: a cosign
+#      key-based attestation minted by `sign_evidence` and verified by every
+#      publishing hop (#661, ADR-0020).
 #   3. The workflow's second concurrent integration run. See `integration`.
 #
 # Every job that touches Docker asks for the `orbit-build` runner by tag. A
@@ -30,8 +34,8 @@
 # group runner is not privileged, which is what failed pipeline 163.
 # `orbit-build` is the project's own docker-executor runner, registered with
 # `privileged = true` for exactly this. Jobs that need no daemon deliberately
-# stay untagged and keep running on the shared runner, so the one privileged
-# runner is not the queue for the whole pipeline.
+# stay on the shared runner's `big` or `light` lane (#830), so the one
+# privileged runner is not the queue for the whole pipeline.
 
 stages:
   - classify
@@ -47,13 +51,16 @@ workflow:
     - if: $CI_COMMIT_TAG
       when: never
     # A scheduled pipeline is the Renovate lane, the sidecar-pin-freshness
-    # lane, or nothing (#801 step 6, #820). `renovate` and
-    # `sidecar_pin_freshness` are the only jobs that opt in, so a schedule
-    # that forgot its variable would produce a pipeline with no jobs, which
-    # GitLab rejects with a message that names neither the schedule nor the
-    # variable. Refusing it here says why.
+    # lane, the install-bootstrap lane, the base-image-repin lane, or nothing
+    # (#801 step 6, #820, #724, #708). `renovate`, `sidecar_pin_freshness`,
+    # `install_bootstrap` and `base_image_repin` are the only jobs that opt
+    # in, so a schedule that forgot its variable would produce a pipeline
+    # with no jobs, which GitLab rejects with a message that names neither
+    # the schedule nor the variable. Refusing it here says why.
     - if: $CI_PIPELINE_SOURCE == "schedule" && $RENOVATE == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $BASE_IMAGE_REPIN == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -64,6 +71,13 @@ workflow:
     # The standard duplicate guard: once a branch has an open merge request,
     # the merge-request pipeline is the one that matters.
     - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    # That guard cannot see a merge request opened seconds after the push, so
+    # a working branch's first push ran a second full pipeline every time
+    # (#829). Pushes start a pipeline on the long-lived branches only; a
+    # working branch is tested by its merge request, and a pipeline started by
+    # hand (`gl-pipeline-run`, source `api`) still runs on any branch.
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != "dev" && $CI_COMMIT_BRANCH != "preview" && $CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /^hotfix\//
       when: never
     - if: $CI_COMMIT_BRANCH
 
@@ -79,6 +93,12 @@ workflow:
 
 default:
   interruptible: true
+  # Runner lanes (#830). `big` is the 8 CPU / 18 GB runner (two jobs at a
+  # time); `light` is the 4 CPU / 6 GB runner (four jobs at a time). The big
+  # runner is moving to reject untagged jobs, so every job needs one of the
+  # two -- this covers everything that does not already ask for the
+  # dedicated `orbit-build` runner by tag (see .privileged_runner below).
+  tags: [big]
   # Infrastructure only: a job that failed on its own merits is never retried.
   # These three are what this GitLab still accepts without a deprecation
   # warning for the stuck-or-timed-out case; `stuck_or_timeout_failure` and
@@ -97,7 +117,7 @@ variables:
   # The image the v19 baselines were proven against, byte for byte the pin the
   # GitHub fidelity job uses. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
-  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.0-noble@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07
+  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
   # Same scanner build as the workflow, so a finding here and a finding there
   # mean the same thing.
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
@@ -156,13 +176,59 @@ variables:
 .reach_helpers: &reach_helpers |
   orbit_on_delivery_branch() {
     case "${CI_COMMIT_BRANCH:-}" in
-      dev | preview | hotfix/*) return 0 ;;
+      dev | preview | main | hotfix/*) return 0 ;;
     esac
     return 1
   }
-  orbit_in_merge_request() {
-    [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ]
+  # The two events that run everything whatever the diff holds: a push to a
+  # delivery branch, and the merge request into `main`, which is the
+  # preview -> main promotion gate. Everywhere else -- every ordinary merge
+  # request included -- the classifier's verdict decides (#883). A merge
+  # request is not itself a reason to pay for the whole gate: it is the
+  # ordinary way work arrives here, so paying full price for one meant the
+  # classifier never saved anything where it mattered most.
+  orbit_full_gate() {
+    orbit_on_delivery_branch && return 0
+    [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ]
   }
+  # The narrow lanes (#889). A change confined to the ignore/policy files, or
+  # to the pipeline's own definition, runs a named handful of jobs and nothing
+  # else; every other change is `full`, which admits everything and leaves the
+  # classifier's per-job axes to decide as before. `classify` has already
+  # collapsed ORBIT_LANE to `full` for a delivery push and for the merge
+  # request into `main`, so this never re-checks the branch.
+  #
+  #   ignore_policy  .gitleaksignore, supply-chain/licence-policy.yml
+  #                  -> gitleaks, licence_policy, supply_chain_source
+  #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
+  #                  tests that read this file
+  #                  -> fast, gitleaks, supply_chain_source
+  #
+  # `gitleaks` is in both and needs no call: it starts before `classify` and so
+  # never sees ORBIT_LANE. Membership is unconditional -- a member runs whether
+  # or not its own axis would also have asked for it, which is the point of a
+  # lane naming the job.
+  orbit_lane_admits() {
+    case "${ORBIT_LANE:-full}:$1" in
+      full:*) return 0 ;;
+      ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:supply_chain_source) return 0 ;;
+      ci:fast | ci:gitleaks | ci:supply_chain_source) return 0 ;;
+    esac
+    echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
+    return 1
+  }
+
+# The system-lane reach test itself, so the jobs that share it share one copy.
+# Put it after *reach_helpers in a job's `script:`; it ends the job
+# successfully, and every later script entry with it, because the runner
+# executes all of them in one shell. It defers to a narrow lane: a job the
+# lane named runs, and one it did not has already stopped at
+# `orbit_lane_admits`.
+.system_lane_gate: &system_lane_gate |
+  if [ "${ORBIT_LANE:-full}" = "full" ] && ! orbit_full_gate && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
+    echo "skipped: no system-risk change, and this is neither a delivery push nor the promotion gate"
+    exit 0
+  fi
 
 # The scripts/ci steps were extracted from a GitHub workflow, so they hand a
 # value to a later step by appending a `key=value` line to $GITHUB_OUTPUT. A
@@ -182,7 +248,9 @@ variables:
   }
 
 .node:
-  image: $NODE_IMAGE
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
   variables:
     COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
   cache:
@@ -219,20 +287,28 @@ variables:
     # 2026-09-04), so the host is the one place it is written down; a public
     # fallback in this file would send lookups off the network instead of
     # failing where the operator can see them (#810).
-    - docker:29-dind
+    #
+    # Pinned by digest and pulled once, like every other image here: the
+    # runner's own `pull_policy = ["if-not-present"]` covers the job image
+    # and not a service's, so `always` was still costing about 20 seconds a
+    # job to re-fetch bytes that cannot have changed (#889).
+    - name: docker:29-dind@sha256:5efed980cba3fc126cf54e21a5a6ff8849d05b6e0623d6e7612f48e9cd6cd17e
+      pull_policy: if-not-present
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
 
 .dind:
   extends: .dind_service
-  image: docker:29-cli
+  image:
+    name: docker:29-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
+    pull_policy: if-not-present
 
 # The daemon inside the job's own container, for the two jobs that stand up a
 # real deployment and then talk to it.
 #
 # This is the one place the dind *service* pattern above cannot be used. The
-# acceptance stack publishes on 127.0.0.1 -- docker-compose.acceptance.yml
+# acceptance stack publishes on 127.0.0.1 -- compose/docker-compose.acceptance.yml
 # binds the OIDC and GreenMail sidecars there, the application hands the
 # browser a 127.0.0.1 callback URL, and scripts/test-repair-journeys.sh both
 # pushes to and health-checks a loopback address. A dind service puts those
@@ -274,6 +350,24 @@ variables:
   done
   docker info > /dev/null 2>&1 || { echo "the in-job Docker daemon did not start"; cat /tmp/dockerd.log; exit 1; }
 
+# The last step of every after_script that started the daemon above. /builds
+# outlives the job, so the daemon's image store -- a whole Orbit stack, 3 to
+# 4 GB -- would otherwise sit in the slot's cache volume until the next such
+# job replaces it, once per slot; on 2026-09-05 the runner host ran out of disk
+# (#823). Stop the daemon before removing its store, or containerd's metadata
+# is left pointing at nothing. Every line tolerates failure: after_script
+# reports its own status, and a cleanup error must not stand in for the job's.
+.docker_in_job_teardown: &docker_in_job_teardown |
+  if [ -f /var/run/docker.pid ]; then
+    kill "$(cat /var/run/docker.pid)" 2>/dev/null || :
+    for _ in $(seq 1 60); do
+      kill -0 "$(cat /var/run/docker.pid 2>/dev/null)" 2>/dev/null || break
+      sleep 1
+    done
+  fi
+  rm -rf "${CI_BUILDS_DIR:-/builds}/.orbit-docker-data" || :
+  if [ -n "${RUNNER_TEMP:-}" ]; then rm -rf "$RUNNER_TEMP" || :; fi
+
 # The client half only, for a job that keeps its own image and takes the daemon
 # from the dind service instead of starting one. Not the `docker.io
 # docker-compose-v2` pair above: those are Ubuntu package names, and $NODE_IMAGE
@@ -293,10 +387,14 @@ variables:
   printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian %s stable\n' \
     "$VERSION_CODENAME" > /etc/apt/sources.list.d/docker.list
   apt-get update -qq
-  apt-get install -y -qq --no-install-recommends docker-ce-cli docker-compose-plugin
-  # Proves the plugin is installed without contacting a daemon, which is the
-  # exact check scripts/backup.sh makes before it does anything else.
+  # buildx too: sidecar_pin_freshness resolves tags with `docker buildx
+  # imagetools inspect --format`, which without the plugin fails as
+  # "unknown flag: --format" (pipeline 321, #820).
+  apt-get install -y -qq --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin
+  # Proves both plugins are installed without contacting a daemon; the compose
+  # line is the exact check scripts/backup.sh makes before it does anything else.
   docker compose version
+  docker buildx version
   for _ in $(seq 1 60); do
     docker info > /dev/null 2>&1 && break
     sleep 1
@@ -345,7 +443,20 @@ variables:
 # artifact every later job reads.
 classify:
   stage: classify
-  extends: .node
+  # A git/node script over history and lockfile snapshots -- no pnpm install,
+  # no build -- but twelve jobs wait on it, so where it queues is where the
+  # pipeline queues. It started on `light` (#830) and waited up to 42 minutes
+  # there for a slot behind another project's shards (#878). `orbit-build` is
+  # orbit's own runner, idle when the pipeline starts; the privilege it grants
+  # is unused here and no wider than `fast` already has. When a shared gate
+  # lane exists (short timeout, no Docker socket) this job belongs on it.
+  extends:
+    - .node
+    - .privileged_runner
+  # No install here, so restoring the pnpm store and uploading it back at the
+  # end is pure cost, and so is activating pnpm.
+  cache: []
+  before_script: []
   timeout: 10m
   rules:
     - *not_scheduled
@@ -376,18 +487,81 @@ classify:
         node scripts/classify-changed-paths.mjs
     - |
       set -eu
+      # Runs in a command substitution, so its failure has to reach the caller
+      # as an exit status and its complaint has to go to stderr: on stdout the
+      # message would simply become the value.
+      classify_output() {
+        value="$(sed -n "s/^$1=//p" classify-output.txt | tail -1)"
+        [ -n "$value" ] || { echo "the classifier emitted no $1" >&2; exit 1; }
+        printf '%s' "$value"
+      }
+
+      # The `ci: acceptance` label on a merge request asks for the whole
+      # pipeline whatever the diff holds (#572). Everything else here reads
+      # the diff, so until now a merge request could be made cheaper and never
+      # more expensive: the lanes and the #883 skips both decide from what
+      # changed, and forcing the gate meant a branch pipeline and playing a
+      # manual job. This is the opt-in half, and the label name is the one
+      # #572 chose. GitLab joins the labels with commas and adds no spaces;
+      # commas go on both ends so a pattern matches a whole label rather than
+      # part of a longer one, and the sed tolerates a space after a comma in
+      # case that ever changes.
+      labels="$(printf ',%s,' "${CI_MERGE_REQUEST_LABELS:-}" | sed 's/, */,/g')"
+      forced=false
+      case "$labels" in
+        *",ci: acceptance,"*) forced=true ;;
+      esac
+      if [ "$forced" = true ]; then
+        echo "the merge request is labelled 'ci: acceptance': running the full pipeline whatever the diff holds (#572)"
+      fi
+
+      # The narrow lanes (#889) are a merge-request economy, never a
+      # relaxation of the delivery gate. A push to a delivery branch and the
+      # merge request into `main` both run everything, so the lane collapses
+      # to `full` there and no later job has to re-check the branch. The label
+      # collapses it the same way.
+      lane="$(classify_output lane)"
+      case "${CI_COMMIT_BRANCH:-}" in
+        dev | preview | main | hotfix/*) lane=full ;;
+      esac
+      if [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ] || [ "$forced" = true ]; then
+        lane=full
+      fi
+
       : > classify.env
       for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_LICENCE:licence; do
         name="${pair%%:*}"
         key="${pair##*:}"
-        value="$(sed -n "s/^${key}=//p" classify-output.txt | tail -1)"
-        [ -n "$value" ] || { echo "the classifier emitted no ${key}"; exit 1; }
+        # Assigned before it is printed: `set -e` sees a failed command
+        # substitution in an assignment, and not in an argument to printf.
+        value="$(classify_output "$key")"
+        # The label overrides every axis, not just the expensive ones: asking
+        # for the full pipeline has to mean all of it, or the answer it gives
+        # back is a different pipeline again.
+        if [ "$forced" = true ]; then
+          if [ "$name" = ORBIT_RISK ]; then value=system; else value=true; fi
+        fi
         printf '%s=%s\n' "$name" "$value" >> classify.env
       done
+
+      # `launcher_install_compat` watches scripts/install.sh and its own
+      # definition in this file, which is why .gitlab-ci.yml is one of the two
+      # paths that arm it. In the CI lane that file is all that changed, and
+      # the lane does not run the job -- said here rather than in the job,
+      # which has no lane test of its own.
+      launcher_compat="$(classify_output launcher_compat)"
+      if [ "$forced" = true ]; then
+        launcher_compat=true
+      elif [ "$lane" = "ci" ]; then
+        launcher_compat=false
+      fi
+      printf 'ORBIT_LAUNCHER_COMPAT=%s\n' "$launcher_compat" >> classify.env
+      printf 'ORBIT_LANE=%s\n' "$lane" >> classify.env
       cat classify.env
   artifacts:
     reports:
       dotenv: classify.env
+    expire_in: 1 week
 
 # --- fast --------------------------------------------------------------------
 
@@ -430,6 +604,8 @@ fast:
     # then runs, and outside it so `eslint .` never sees it. See .drop_to_node.
     COREPACK_HOME: $CI_BUILDS_DIR/.corepack
   script:
+    - *reach_helpers
+    - orbit_lane_admits fast || exit 0
     - *docker_cli
     - pnpm install --frozen-lockfile
     # Everything from here runs unprivileged, because two of these tests assert
@@ -453,8 +629,13 @@ fast:
     when: on_success
 
 # Blocking, like the workflow's job: Orbit pins its own base image, so a stale
-# base is a fixable condition rather than one to wait out. `needs: []` because
-# the check has nothing to do with what changed -- it can start immediately.
+# base is a fixable condition rather than one to wait out.
+#
+# It waited on nothing and started immediately, because the check has nothing
+# to do with what changed. It now waits for `classify`, for the one thing that
+# is about what changed: a narrow lane (#889) does not run it, and a job with
+# no `needs` on classify never sees ORBIT_LANE. A minute behind classify buys
+# skipping a ten-minute daemon job on every ignore-file and CI-only change.
 base_image:
   stage: fast
   extends: .dind
@@ -462,8 +643,12 @@ base_image:
   rules:
     - *not_scheduled
     - when: on_success
-  needs: []
+  needs:
+    - job: classify
+      artifacts: true
   script:
+    - *reach_helpers
+    - orbit_lane_admits base_image || exit 0
     # The check reads the first FROM with sed, resolves the tag with
     # `docker manifest inspect`, parses the result with python3 and runs
     # `apk upgrade --simulate` inside the pinned image.
@@ -479,11 +664,17 @@ base_image:
 # not share it. Node comes from the image's own Alpine repository -- the three
 # policy scripts are Node standard library only, which is why the GitHub job
 # installs no dependencies either.
+#
+# Short scanners run on the light lane (4 CPU / 6 GB, four at a time) so they
+# stop holding a big-lane slot. If one is ever killed for memory, move it back
+# to big -- owner decision, ai/agent-infra#3 (2026-09-05).
 supply_chain_source:
   stage: policy
+  tags: [light]
   image:
     name: $TRIVY_IMAGE
     entrypoint: [""]
+    pull_policy: if-not-present
   timeout: 10m
   rules:
     - *not_scheduled
@@ -493,12 +684,10 @@ supply_chain_source:
       artifacts: true
   script:
     - *reach_helpers
+    - orbit_lane_admits supply_chain_source || exit 0
+    - *system_lane_gate
     - *apk_retry
     - |
-      if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
-        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
-        exit 0
-      fi
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       # A pin lives in the file that uses it and in the policy that records it.
@@ -507,6 +696,13 @@ supply_chain_source:
       # comparison alone: no registry call, so it runs on everything that gets
       # here. Remedy is one command: node scripts/sidecar-pins.mjs sync (#771).
       node scripts/sidecar-pins.mjs check --offline
+      # The same failure shape one file over: pnpm override keys can name the
+      # version they apply through, and a bump elsewhere leaves the key
+      # selecting nothing. pnpm does not treat that as an error, so a security
+      # floor can stop applying in silence (#881). --red first, because a check
+      # nobody has watched fail is a check nobody should trust.
+      node scripts/check-override-pins.mjs --red
+      node scripts/check-override-pins.mjs
       mkdir -p .orbit-supply-chain
       trivy fs \
         --scanners vuln,secret \
@@ -539,6 +735,7 @@ supply_chain_source:
 # replacement: that has been `supply_chain_source` above all along.
 licence_policy:
   stage: policy
+  tags: [light]
   extends: .node
   timeout: 10m
   rules:
@@ -549,8 +746,12 @@ licence_policy:
       artifacts: true
   allow_failure: false
   script:
+    - *reach_helpers
+    - orbit_lane_admits licence_policy || exit 0
     - |
-      if [ "${ORBIT_LICENCE:-true}" != "true" ]; then
+      # The ignore/policy lane (#889) names this job, and a lane's word is
+      # final: only the `full` lane consults the classifier's licence axis.
+      if [ "${ORBIT_LANE:-full}" = "full" ] && [ "${ORBIT_LICENCE:-true}" != "true" ]; then
         echo "skipped: no dependency or licence-policy change"
         exit 0
       fi
@@ -560,48 +761,93 @@ licence_policy:
 # Scans every image pinned in .github/supply-chain-policy.json, not just the
 # one Orbit builds: an operator's deployment runs the sidecars too (#647).
 #
-# Reporting-only, exactly as `continue-on-error` makes it on GitHub: every
-# pinned sidecar currently has fixable HIGH findings with no clean upstream
-# digest to re-pin to. When the pins scan clean, delete `allow_failure` so a
-# newly published advisory against a pinned digest fails the job.
+# Findings are reporting-only, as `continue-on-error` makes them on GitHub:
+# every pinned sidecar currently has fixable HIGH findings with no clean
+# upstream digest to re-pin to. When the pins scan clean, delete `allow_failure`
+# so a newly published advisory against a pinned digest fails the job.
+#
+# The scanner failing to *run* is not reporting-only, and used to be treated as
+# if it were (#810). `allow_failure: true` covered every exit status, so when
+# the runner host filled up and Trivy could not download its vulnerability
+# database the job went yellow with nothing scanned, and the pipeline stayed
+# green -- pipelines 636 and 637, "no space left on device". `exit_codes: [3]`
+# narrows the permission to the one status the script uses for findings; a
+# failed database download, a failed image pull or a scan that errored exits
+# with its own status and fails the job.
+#
+# Stays on big: it peaks at ~4.9 GB, close to the 6 GB light cap.
 sidecar_images:
   stage: policy
   image:
     name: $TRIVY_IMAGE
     entrypoint: [""]
+    pull_policy: if-not-present
   timeout: 15m
   rules:
     - *not_scheduled
     - when: on_success
-  allow_failure: true
+  allow_failure:
+    exit_codes:
+      - 3
   needs:
     - job: classify
       artifacts: true
   script:
     - *reach_helpers
+    - orbit_lane_admits sidecar_images || exit 0
+    - *system_lane_gate
     - *apk_retry
     - |
-      if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
-        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
-        exit 0
-      fi
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       mkdir -p .orbit-supply-chain/sidecar-scans
+      # Fan the scans out, four at a time: this loop is almost all network
+      # wait, not CPU, because it pulls each image before scanning it. The lane
+      # is capped at 8 CPUs, so four concurrent pulls cannot swamp it (#879).
+      #
+      # Two things have to be true for that to work, and the first attempt got
+      # only one of them. Trivy takes an exclusive lock on its cache directory
+      # for the whole of a scan, so parallel workers sharing one cache do not
+      # queue politely -- they time out, and the job dies with "cache may be in
+      # use by another process". And a worker starting with an empty cache
+      # downloads the 111 MB vulnerability database for itself.
+      #
+      # So warm one cache, then hand each worker its own copy of it and tell it
+      # the database is already current. The copy is local and costs about a
+      # second; the download it replaces costs nine, and four of them would
+      # race for the same file.
+      export TRIVY_CACHE_DIR=/tmp/trivy-warm
+      trivy image --download-db-only
+      # -n 2 hands each worker one `slug reference` pair. xargs still exits
+      # non-zero if any scan fails, so the job fails the way it did before.
       # --ignore-unfixed because these are images Orbit pulls rather than
       # builds: a fixable HIGH is actionable (re-pin), an unfixable one is not.
       node scripts/sidecar-image-evidence.mjs --list-references \
         --policy .github/supply-chain-policy.json \
-        | while read -r slug reference; do
-            echo "scanning ${reference}"
+        | xargs -P 4 -n 2 sh -c '
+            set -e
+            cache="/tmp/trivy-cache-$1"
+            rm -rf "$cache"
+            cp -a "$TRIVY_CACHE_DIR" "$cache"
+            echo "scanning $2"
             trivy image \
+              --cache-dir "$cache" \
+              --skip-db-update \
               --scanners vuln \
               --ignore-unfixed \
               --format json \
-              --output ".orbit-supply-chain/sidecar-scans/${slug}.json" \
-              "${reference}"
-          done
+              --output ".orbit-supply-chain/sidecar-scans/$1.json" \
+              "$2"
+            rm -rf "$cache"
+          ' _
       trivy version --format json > .orbit-supply-chain/trivy-version.json
+      # Two different failures reach here, and only one of them is soft. The
+      # evaluation writes its evidence file and then exits 1 for blocked
+      # findings; every other way it exits non-zero -- a missing or unreadable
+      # scan report, a policy file it cannot parse -- throws before that file
+      # is written. The file's presence is what tells "ran, and found things"
+      # from "could not run". Removed first so a stale one cannot answer.
+      rm -f .orbit-supply-chain/sidecar-evidence.json
       set +e
       node scripts/sidecar-image-evidence.mjs evaluate \
         --policy .github/supply-chain-policy.json \
@@ -611,12 +857,96 @@ sidecar_images:
       policy_status=$?
       set -e
       rm -rf .orbit-supply-chain/sidecar-scans
-      exit "$policy_status"
+      if [ "$policy_status" -eq 0 ]; then
+        exit 0
+      fi
+      if [ ! -s .orbit-supply-chain/sidecar-evidence.json ]; then
+        echo "the sidecar scan could not be evaluated: this is not a findings failure"
+        exit 1
+      fi
+      # The one status `allow_failure` accepts, and nothing else in this job
+      # produces it: trivy and node exit 1 on error, xargs 1 or 123-127.
+      exit 3
   artifacts:
     name: orbit-supply-chain-sidecars
     paths:
       - .orbit-supply-chain/sidecar-evidence.json
       - .orbit-supply-chain/trivy-version.json
+    expire_in: 14 days
+    when: always
+
+# Generic-secret detection over full git history (#707). GitHub's free tier
+# gives this public repository push protection for provider-registered
+# patterns only; the paid add-on that would cover bespoke tokens and private
+# keys cannot be turned on (confirmed by the owner, two repositories). This is
+# the only check that ever looks at commits older than the current diff, so it
+# is not gated on the classifier and does not scope to the branches touched --
+# a secret can sit in a commit no diff ever revisits.
+#
+# `gitleaks detect`, not `--no-git`: the working tree is already covered by
+# supply_chain_source's `trivy fs --scanners vuln,secret` above; this job's
+# job is the history that job cannot see. Cheap -- the issue that asked for
+# this measured 163 commits in 1.5s -- so there is no reason to shallow-clone.
+#
+# Detects rather than prevents: push protection is still the only control that
+# stops a secret landing. A failure here means "rotate the credential", not
+# "amend the commit".
+#
+# The binary, not `gitleaks/gitleaks-action`: that action is commercially
+# licensed for organisations (`NOASSERTION` on the GitHub API) and would be a
+# third-party action to pin and review besides. gitleaks itself is MIT.
+# Version and checksum come from the release's own `_checksums.txt`, verified
+# before the tarball is trusted; bump both together on upgrade.
+#
+# --redact covers both the console log and --report-path: this repository is
+# public, and an unredacted finding would republish the secret it just found.
+# The report artifact keeps `when: always` so a finding is still visible on a
+# failed run, exactly as redacted as the log.
+#
+# .gitleaksignore at the repo root carries 8 fingerprints found and reviewed
+# at adoption (2026-09-06): test fixture strings and a recovery-bundle
+# manifest's `key_encryption=` cipher-spec line, none a real credential. Each
+# entry is one exact commit/file/line, not a pattern, so it exempts nothing
+# new -- this is the "real false positive" the issue's non-goal reserves an
+# allowlist for, not a preemptive one.
+gitleaks:
+  stage: policy
+  tags: [light]
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 10m
+  rules:
+    - *not_scheduled
+    - when: on_success
+  needs: []
+  variables:
+    # Fresh clone every run: the runner's reused checkout keeps refs that no
+    # longer exist on the server, and gitleaks scans everything it can see.
+    # After the #825 history rewrite that was the entire old history (#888).
+    GIT_STRATEGY: clone
+    GIT_DEPTH: 0
+    GITLEAKS_VERSION: "8.30.1"
+    GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  script:
+    - |
+      set -eu
+      curl -fsSL -o /tmp/gitleaks.tar.gz \
+        "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+      echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+      tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+      install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+      rm -f /tmp/gitleaks.tar.gz /tmp/gitleaks
+      gitleaks version
+    - |
+      set -eu
+      mkdir -p .orbit-gitleaks
+      gitleaks detect --source . --redact --no-banner \
+        --report-format json --report-path .orbit-gitleaks/report.json
+  artifacts:
+    name: orbit-gitleaks
+    paths:
+      - .orbit-gitleaks/report.json
     expire_in: 14 days
     when: always
 
@@ -626,7 +956,10 @@ sidecar_images:
 # moves web/ pays for this; one that does not never sees it.
 fidelity:
   stage: acceptance
-  image: $PLAYWRIGHT_IMAGE
+  tags: [light]
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
   timeout: 20m
   rules:
     - *not_scheduled
@@ -636,6 +969,8 @@ fidelity:
       artifacts: true
     - job: fast
   script:
+    - *reach_helpers
+    - orbit_lane_admits fidelity || exit 0
     - |
       if [ "${ORBIT_WEB:-true}" != "true" ]; then
         echo "skipped: no change to the v19 front end"
@@ -672,6 +1007,7 @@ fidelity:
 # databases of its own.
 integration:
   stage: acceptance
+  tags: [light]
   extends: .node
   timeout: 10m
   rules:
@@ -684,6 +1020,7 @@ integration:
   services:
     - name: $POSTGRES_IMAGE
       alias: postgres
+      pull_policy: if-not-present
   variables:
     POSTGRES_DB: orbit_integration
     POSTGRES_USER: orbit_test
@@ -695,11 +1032,9 @@ integration:
     OIDC_CLIENT_SECRET: integration-only-secret
   script:
     - *reach_helpers
+    - orbit_lane_admits integration || exit 0
+    - *system_lane_gate
     - |
-      if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
-        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
-        exit 0
-      fi
       if [ "${ORBIT_INTEGRATION:-true}" != "true" ]; then
         echo "skipped: no integration-risk change"
         exit 0
@@ -712,10 +1047,10 @@ integration:
       export ORBIT_INTEGRATION_RUN_ID="$CI_JOB_ID"
       unset DATABASE_URL_FILE SESSION_SECRET_FILE OIDC_CLIENT_SECRET_FILE
       pnpm exec tsx src/db/migrate.ts
-      pnpm exec vitest run --config vitest.integration.config.ts
+      pnpm exec vitest run --project integration
 
 # Builds the image once and hands it on as a tarball, so `smoke`,
-# `repair_journeys` and `publish_gitlab` all exercise and publish the same
+# `repair_journeys` and `record_image` all exercise and publish the same
 # bytes rather than three builds of the same source. The workflow rebuilds
 # instead, because its smoke and publish jobs share one steps anchor.
 build_image:
@@ -733,6 +1068,9 @@ build_image:
     GIT_DEPTH: 0
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
   script:
+    - *reach_helpers
+    - orbit_lane_admits build_image || exit 0
+    - *system_lane_gate
     - *apk_retry
     - apk_add bash git nodejs
     - |
@@ -800,12 +1138,28 @@ build_image:
       printf 'ORBIT_RELEASE_STAGE=%s\n' "$publication_channel" >> build.env
       cat build.env
       docker save "$ORBIT_CI_IMAGE" -o image.tar
+  after_script:
+    # This job's declared artifacts are what `smoke`, `acceptance`,
+    # `repair_journeys` and `supply_chain_image` read, and the runner reports
+    # an upload error on an otherwise green job when a declared artifact is
+    # absent -- which is what a skip leaves behind. Nothing reads these
+    # placeholders: all four of those jobs skip on the same condition. They
+    # exist so the skip is quiet. A failed build uploads nothing at all, since
+    # the artifacts are `on_success`.
+    - |
+      [ -f image.tar ] || : > image.tar
+      [ -f build.env ] || printf 'ORBIT_IMAGE_BUILT=false\n' > build.env
   artifacts:
     paths:
       - image.tar
     reports:
       dotenv: build.env
-    expire_in: 1 day
+    # Only the later stages of this same pipeline `docker load` it, so it need
+    # not outlive them: at ~100 MB a run, a day's worth filled the GitLab host's
+    # disk on 2026-09-05 (#832). Four hours covers a pipeline that queues for a
+    # while behind the two build slots; GitLab keeps each branch's latest
+    # successful pipeline's artifacts regardless of this.
+    expire_in: 4 hours
 
 # The workflow's "Scan exact local image" step: Trivy against the image that
 # was built and tested rather than a rebuild of the same source, an SPDX SBOM
@@ -825,7 +1179,9 @@ supply_chain_image:
   extends: .privileged_runner
   # For its Node, which the policy script needs, and its Ubuntu Noble base,
   # which .docker_in_job's package list requires. Its browsers go unused.
-  image: $PLAYWRIGHT_IMAGE
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
   timeout: 20m
   needs:
     - job: classify
@@ -844,6 +1200,9 @@ supply_chain_image:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - orbit_lane_admits supply_chain_image || exit 0
+    - *system_lane_gate
     - *docker_in_job
     - mkdir -p "$RUNNER_TEMP"
     - docker load --input image.tar
@@ -856,6 +1215,8 @@ supply_chain_image:
       TESTED_IMAGE_TAG="$ORBIT_CI_IMAGE" \
       ORBIT_REVISION="$CI_COMMIT_SHA" \
         bash scripts/ci/scan-image.sh
+  after_script:
+    - *docker_in_job_teardown
   artifacts:
     name: orbit-supply-chain-image
     paths:
@@ -874,7 +1235,7 @@ supply_chain_image:
 # it. The anchor's compose, hostile-document and installer steps are the
 # `acceptance` job below.
 #
-# docker-compose.ci-cap.yml is the extra overlay: the same file set the
+# compose/docker-compose.ci-cap.yml is the extra overlay: the same file set the
 # workflow uses, capped to the standard CI profile from #801 step 1.
 #
 # scripts/test-e2e-local.sh is deliberately not called. It is the local
@@ -884,7 +1245,9 @@ supply_chain_image:
 smoke:
   stage: acceptance
   extends: .privileged_runner
-  image: $PLAYWRIGHT_IMAGE
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
   timeout: 30m
   needs:
     - job: classify
@@ -895,7 +1258,7 @@ smoke:
     ORBIT_IMAGE: $ORBIT_CI_IMAGE
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
-    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml -f docker-compose.ci-cap.yml
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   rules:
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -903,6 +1266,9 @@ smoke:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - orbit_lane_admits smoke || exit 0
+    - *system_lane_gate
     - *docker_in_job
     - npm install --global "$(node -p "require('./package.json').packageManager")"
     - pnpm install --frozen-lockfile
@@ -936,6 +1302,7 @@ smoke:
         bash scripts/ci/show-stack-diagnostics.sh || true
       fi
       bash scripts/ci/stop-acceptance-stack.sh || true
+    - *docker_in_job_teardown
   artifacts:
     name: orbit-playwright-report
     paths:
@@ -965,7 +1332,9 @@ acceptance:
   extends: .privileged_runner
   # For its Ubuntu Noble base, which packages the Compose v2 plugin that every
   # script below needs, and its Node, which the processor corpus runs under.
-  image: $PLAYWRIGHT_IMAGE
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
   timeout: 45m
   needs:
     - job: classify
@@ -983,11 +1352,10 @@ acceptance:
     # installer target under it holds a whole deployment's working files, which
     # the in-job daemon bind-mounts into containers.
     RUNNER_TEMP: $CI_BUILDS_DIR/orbit-runner-temp
-    # The GitHub repository, not this project's GitLab path. scripts/install.sh
-    # resolves deployment assets from
-    # raw.githubusercontent.com/$ORBIT_REPOSITORY/<image revision>, so this is
-    # what an operator's installer uses whichever CI is checking it -- and
-    # every commit GitLab sees arrived from GitHub, so the revision resolves.
+    # The GitHub repository, not this project's GitLab path: it is what an
+    # operator's installer names, whichever CI is checking it. Since ADR-0019
+    # the installer takes its deployment assets out of the image it resolved,
+    # so nothing here depends on the commit being on GitHub yet.
     IMAGE_NAME: tomlawesome/orbit
     ORBIT_RUN_ID: $CI_PIPELINE_ID
     ORBIT_RUN_ATTEMPT: $CI_JOB_ID
@@ -998,6 +1366,9 @@ acceptance:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - orbit_lane_admits acceptance || exit 0
+    - *system_lane_gate
     - *docker_in_job
     - *step_outputs
     - |
@@ -1054,7 +1425,6 @@ acceptance:
         ORBIT_CHANNEL="$(orbit_output channel)" \
         GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
         GIT_MARKER="$(orbit_output git_marker)" \
-        ORBIT_ASSETS_FROM_TREE="$CI_PROJECT_DIR" \
           bash "$CI_PROJECT_DIR/scripts/ci/verify-installer-refusal.sh"
       )
     - |
@@ -1069,7 +1439,6 @@ acceptance:
         ORBIT_REPOSITORY="$IMAGE_NAME" \
         ORBIT_CHANNEL="$(orbit_output channel)" \
         GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
-        ORBIT_ASSETS_FROM_TREE="$CI_PROJECT_DIR" \
           bash "$CI_PROJECT_DIR/scripts/ci/run-installer.sh"
       )
     - |
@@ -1096,6 +1465,7 @@ acceptance:
       GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
       REFUSAL_OUTPUT="$(orbit_output refusal_output)" \
         bash scripts/ci/clean-up-installer.sh || true
+    - *docker_in_job_teardown
 
 # Live evidence for the repair journeys (#532): a real stack, broken for real,
 # recovered by scripts/repair.sh. Same daemon placement as `smoke`, and for the
@@ -1113,7 +1483,9 @@ repair_journeys:
   # needs `docker compose`, and Ubuntu Noble packages the v2 plugin
   # (docker-compose-v2) where Debian Bookworm, which $NODE_IMAGE is built on,
   # still ships only the retired v1.
-  image: $PLAYWRIGHT_IMAGE
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
   timeout: 30m
   needs:
     - job: classify
@@ -1129,25 +1501,279 @@ repair_journeys:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - orbit_lane_admits repair_journeys || exit 0
+    - *system_lane_gate
     - *docker_in_job
     - docker load --input image.tar
     - docker tag "$ORBIT_CI_IMAGE" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
     - bash scripts/test-repair-journeys.sh
+  after_script:
+    - *docker_in_job_teardown
+
+# Ports .github/workflows/launcher-install-compat.yml (#819), retired because
+# GitHub receives no merge requests since the mirror flip (#801) and so never
+# ran the check that watches this repository's *production API*: orbit-launcher
+# fetches scripts/install.sh live from `main` at runtime rather than vendoring
+# a copy, so this job installs Orbit through a real orbit-launcher build,
+# against this commit's own install.sh, before that pairing is ever untested in
+# the wild. See #596, orbit-launcher#119, the owner ruling in #606 and the
+# follow-up in #736 for what a green run here does and does not prove; the same
+# scope note lives in docs/quality-strategy.md's "Launcher install
+# compatibility" section.
+#
+# The in-job daemon (.docker_in_job), not the dind service: like `smoke` and
+# `repair_journeys`, orbit-launcher drives Docker to stand up a real
+# deployment and then talks to it on a published loopback port, and a dind
+# service would put that port in the service container's own network
+# namespace where nothing here could reach it. Ubuntu Noble base for the same
+# reason those two jobs use it: docker-compose-v2 has no Debian Bookworm
+# package, and $NODE_IMAGE is Bookworm.
+#
+# Scope is the workflow's, narrowed the GitLab way: `classify` already treats
+# both scripts/install.sh (explicitly) and .gitlab-ci.yml (via its unmatched-
+# path catch-all) as system risk, but that bucket is far wider than what this
+# job actually watches itself for, so it gets its own classifier output
+# (ORBIT_LAUNCHER_COMPAT, scripts/classify-changed-paths.mjs) rather than
+# reusing ORBIT_SYSTEM. A merge request targeting `main` is always checked --
+# that is the preview -> main promotion this job exists to gate -- exactly as
+# the workflow always ran on a pull request into `main`.
+launcher_install_compat:
+  stage: acceptance
+  extends: .privileged_runner
+  image: $PLAYWRIGHT_IMAGE
+  # The live suite's own -timeout is 30m; the job must outlive it so a slow
+  # run fails with the suite's report rather than GitLab's.
+  timeout: 35m
+  needs:
+    - job: classify
+      artifacts: true
+    # The image this pipeline built: the launcher installs *it*, served from
+    # the same loopback registry the acceptance job uses, so the candidate
+    # install.sh and the image it verifies really are one generation (#736).
+    # Pairing this commit's install.sh with the published `preview` image
+    # could never pass a change to the installer/image contract: the image
+    # that satisfies the new installer does not exist until this lands
+    # (ADR-0019, #890).
+    - job: build_image
+      artifacts: true
+  variables:
+    GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
+    IMAGE_NAME: tomlawesome/orbit
+    ORBIT_RUN_ID: $CI_PIPELINE_ID
+    ORBIT_RUN_ATTEMPT: $CI_JOB_ID
+    # Overridable the same way the workflow's workflow_dispatch input was;
+    # dev is orbit-launcher's own default branch.
+    LAUNCHER_REF: dev
+  rules:
+    - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: manual
+      allow_failure: true
+  allow_failure: false
+  script:
+    - |
+      set -eu
+      if [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ]; then
+        echo "Merge request into main — this is the promotion gate."
+      elif [ "${ORBIT_LAUNCHER_COMPAT:-true}" != "true" ]; then
+        echo "skipped: neither scripts/install.sh nor this job's own definition (.gitlab-ci.yml) changed"
+        exit 0
+      fi
+    - *docker_in_job
+    - *step_outputs
+    # The tested image, into a disposable loopback registry, exactly as the
+    # acceptance job does it: the installer must resolve it through a real
+    # registry round trip, the way an operator's does.
+    - docker load --input image.tar
+    - |
+      set -eu
+      : > "$GITHUB_OUTPUT"
+      TESTED_IMAGE_TAG="$ORBIT_CI_IMAGE" \
+      TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
+        bash scripts/ci/start-installer-registry.sh
+    # git and curl for the launcher checkout and the Go download below; not
+    # added to .docker_in_job itself, which every Docker-using job shares and
+    # none of the others need either.
+    - apt-get install -y -qq --no-install-recommends git
+    - |
+      set -eu
+      git clone --quiet https://github.com/tomlawesome/orbit-launcher.git launcher
+      git -C launcher checkout --quiet "$LAUNCHER_REF"
+    # go-version-file equivalent: read the toolchain orbit-launcher's own
+    # go.mod asks for rather than pinning a copy of it here, so a launcher
+    # bump cannot drift silently out of step with what this job builds with.
+    - |
+      set -eu
+      go_version="$(sed -n 's/^toolchain go//p' launcher/go.mod | head -1)"
+      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' launcher/go.mod | head -1)"
+      [ -n "$go_version" ] || { echo "launcher/go.mod names no go version"; exit 1; }
+      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+      tar -C /usr/local -xzf /tmp/go.tar.gz
+    - export PATH="/usr/local/go/bin:$PATH"
+    - go version
+    - mkdir -p "$CI_PROJECT_DIR/.orbit-launcher-bin"
+    - (cd launcher && go build -o "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher" ./cmd/orbit-launcher)
+    # The candidate installer is this commit's own scripts/install.sh. The
+    # GitHub workflow pointed the launcher at raw.githubusercontent.com; this
+    # project is private and an MR commit is never mirrored, so the checkout
+    # itself is served instead (see below).
+    - |
+      set -eu
+      export ORBIT_LAUNCHER_LIVE_BINARY="$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
+      export ORBIT_LAUNCHER_LIVE_RAW_LOG="$CI_PROJECT_DIR/.orbit-launcher-live-raw.log"
+      # The candidate installer is this commit's own scripts/install.sh, served
+      # from the checkout on loopback. Fetching it from the repository-files API
+      # would need a job token in the URL, and the launcher's raw pty log --
+      # kept as an artifact below -- may echo the URL it was given.
+      node -e '
+        const http = require("node:http"), fs = require("node:fs");
+        const script = fs.readFileSync(process.argv[1]);
+        http.createServer((req, res) => {
+          if (req.url !== "/install.sh") { res.writeHead(404); return res.end(); }
+          res.writeHead(200, { "content-type": "text/x-shellscript" }); res.end(script);
+        }).listen(0, "127.0.0.1", function () { fs.writeFileSync(process.argv[2], String(this.address().port)); });
+      ' "$CI_PROJECT_DIR/scripts/install.sh" "$CI_PROJECT_DIR/.installer-port" &
+      for _ in $(seq 1 50); do [ -s "$CI_PROJECT_DIR/.installer-port" ] && break; sleep 0.1; done
+      [ -s "$CI_PROJECT_DIR/.installer-port" ] || { echo "installer server did not start"; exit 1; }
+      export ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="http://127.0.0.1:$(cat "$CI_PROJECT_DIR/.installer-port")/install.sh"
+      curl -fsS "$ORBIT_LAUNCHER_INSTALL_SCRIPT_URL" | cmp - "$CI_PROJECT_DIR/scripts/install.sh"
+      # install.sh and the image it verifies are one generation: the image
+      # built by this pipeline, from the loopback registry started above.
+      # `preview` here would be last week's image, and the launcher would
+      # fail on the contract this very commit changes (see `needs`).
+      export ORBIT_REGISTRY=127.0.0.1:5000
+      export ORBIT_REPOSITORY="$IMAGE_NAME"
+      export ORBIT_CHANNEL="$(orbit_output channel)"
+      # The live suite tears its own compose stack down on its way out (see
+      # the after_script comment below), so after_script never sees a running
+      # Postgres or any other container the suite started -- the only window
+      # to capture their logs is while go test is still running. Poll in the
+      # background and stop the poller once go test exits, without letting
+      # the poller's own exit status stand in for the suite's.
+      mkdir -p "$CI_PROJECT_DIR/.orbit-launcher-diagnostics"
+      (
+        while :; do
+          stamp="$(date -u +%H%M%S)"
+          docker ps -a --format '{{.Names}} {{.Status}} {{.Image}}' > "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/ps.txt" 2>&1 || :
+          { printf '%s ' "$stamp"; tr '\n' '|' < "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/ps.txt" 2>/dev/null; printf '\n'; } >> "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/ps-history.txt" 2>&1 || :
+          for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null); do
+            docker logs --timestamps "$c" > "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/container-$c.log" 2>&1 || :
+            docker inspect --format '{{json .State}}' "$c" > "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/state-$c.json" 2>&1 || :
+          done
+          # How long a probe takes here. install.sh bounds each
+          # `docker compose exec` health probe at 5 s, and every run so far
+          # waited in 8 s steps -- that bound plus its 2 s poll -- against a
+          # Postgres whose own log and Docker health said it was ready. Time
+          # the two halves separately: the daemon round trip, and the compose
+          # CLI's own start-up.
+          if docker inspect orbit-postgres > /dev/null 2>&1; then
+            started="$(date +%s.%N)"; docker exec orbit-postgres pg_isready > /dev/null 2>&1; probe_status=$?
+            printf '%s docker-exec-pg_isready status=%s seconds=%s\n' "$stamp" "$probe_status" \
+              "$(awk -v a="$started" -v b="$(date +%s.%N)" 'BEGIN { printf "%.2f", b - a }')" \
+              >> "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/probe-timing.txt" 2>&1 || :
+            started="$(date +%s.%N)"; docker compose ls > /dev/null 2>&1; probe_status=$?
+            printf '%s docker-compose-ls status=%s seconds=%s\n' "$stamp" "$probe_status" \
+              "$(awk -v a="$started" -v b="$(date +%s.%N)" 'BEGIN { printf "%.2f", b - a }')" \
+              >> "$CI_PROJECT_DIR/.orbit-launcher-diagnostics/probe-timing.txt" 2>&1 || :
+          fi
+          sleep 15
+        done
+      ) &
+      collector=$!
+      status=0
+      (cd launcher && go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
+      kill "$collector" 2>/dev/null || :
+      wait "$collector" 2>/dev/null || :
+      exit "$status"
+  after_script:
+    # Never fails the job: this only gathers evidence for the next person to
+    # read, win or lose. The live suite tears its own compose stack down on
+    # the way out (see the comment above `repair_journeys`), so a project may
+    # already be gone by the time this runs — hence both the compose-logs
+    # pass (which needs the project to still exist) and the plain
+    # container-logs pass (which does not).
+    - |
+      mkdir -p .orbit-launcher-diagnostics
+      if command -v docker > /dev/null 2>&1; then
+        # Always captured, unlike the old /dev/null guard: a daemon that is
+        # gone by the time after_script runs is itself the finding, and a
+        # guard that only tests exit status silently produced none of the
+        # df-h.txt/dockerd.log pair this after_script used to be limited to.
+        docker info > .orbit-launcher-diagnostics/docker-info.txt 2>&1 || echo "docker info failed with $?" >> .orbit-launcher-diagnostics/docker-info.txt
+        if docker info > /dev/null 2>&1; then
+          docker ps -a > .orbit-launcher-diagnostics/docker-ps.txt 2>&1 || :
+          docker volume ls > .orbit-launcher-diagnostics/docker-volumes.txt 2>&1 || :
+          for project in $(docker ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sort -u); do
+            [ -n "$project" ] || continue
+            docker compose -p "$project" logs --no-color --timestamps \
+              > ".orbit-launcher-diagnostics/compose-${project}.log" 2>&1 || :
+          done
+          for container in $(docker ps -a --format '{{.Names}}' 2>/dev/null); do
+            docker logs --timestamps "$container" \
+              > ".orbit-launcher-diagnostics/container-${container}.log" 2>&1 || :
+          done
+        fi
+      fi
+      df -h > .orbit-launcher-diagnostics/df-h.txt 2>&1 || :
+      cp /tmp/dockerd.log .orbit-launcher-diagnostics/dockerd.log 2>/dev/null || :
+      # install.sh itself keeps no persistent log of its own under the install
+      # directory -- everything it prints goes to stdout/stderr, which the
+      # live suite already captures as $ORBIT_LAUNCHER_LIVE_RAW_LOG (below).
+      # Nothing further to collect for that half.
+    - *docker_in_job_teardown
+  artifacts:
+    name: orbit-launcher-compat-live-raw-log
+    paths:
+      - .orbit-launcher-live-raw.log*
+      - .orbit-launcher-diagnostics/
+    expire_in: 7 days
+    when: always
 
 # --- publish -----------------------------------------------------------------
 
-# Pushes the exact image the acceptance stage tested, rather than rebuilding
-# it. That is the whole reason build_image hands on a tarball.
+# Validation and publication are separate jobs, deliberately (#661,
+# implementing the #573 ruling; ADR-0020): no job both judges an image and
+# ships it.
 #
-# Credentials are the job's own $CI_REGISTRY_USER/$CI_REGISTRY_PASSWORD, which
-# GitLab issues per job and revokes when it ends. No other secret is referenced
-# here, and none should be added: this job publishes to the project's own
-# registry and nowhere else.
+#   record_image     pushes the exact tested image as the immutable anchor
+#                    `sha-<commit>` -- never a channel tag -- and records the
+#                    transport evidence with the policy version.
+#   sign_evidence    mints the cosign validation attestation over that
+#                    digest. The only job on either host that can sign: it
+#                    alone carries the `orbit-signing` runner tag, and the
+#                    key pair exists only on that runner's host, mounted
+#                    read-only into its jobs (docs/releasing.md).
+#   publish_channel  consumes the evidence: verifies it with the committed
+#                    public key, re-runs the cheap checks against the digest,
+#                    and only then creates the consumer-visible channel tag,
+#                    registry-side. Retrying it alone re-publishes without
+#                    re-running validation -- a failed publication costs a
+#                    re-publish, not the full bar (v1.3.0 took three
+#                    promotions in an afternoon the other way).
 #
-# No attestation step. GitLab CE has no equivalent of actions/attest, so the
-# tested digest is recorded as evidence instead and the GitHub lane keeps
-# ownership of provenance and SBOM attestation until #801 says otherwise.
-publish_gitlab:
+# Why a runner mount and not CI/CD variables: this instance is GitLab CE
+# (19.3.1, verified 2026-09-08), which has no protected environments and no
+# environment-scoped variables -- both are Premium. A project-level variable
+# is readable by every job in every protected-branch pipeline, which would
+# hand the signing key to the whole acceptance suite's dependency tree; an
+# `environment:` block would parse and enforce nothing. The runner mount
+# keeps the key out of GitLab's variable store entirely, and the runner is
+# protected and locked to this project, so a job on an unprotected ref that
+# gives itself the tag gets no runner, not the key (#661 criterion 6;
+# ADR-0020 records the correction).
+#
+# Credentials in all three jobs are the job's own $CI_REGISTRY_USER/
+# $CI_REGISTRY_PASSWORD, which GitLab issues per job and revokes when it
+# ends; nothing else should ever be added, and no other job may take the
+# `orbit-signing` tag (scripts/validation-evidence-split.test.mjs makes such
+# an edit loud).
+#
+# The GitHub lane keeps operator-facing provenance/SBOM attestation over the
+# GHCR digest (GitLab CE has no actions/attest equivalent); the cosign
+# attestation minted here is the internal trust plumbing publication runs on.
+record_image:
   stage: publish
   extends: .dind
   timeout: 20m
@@ -1177,35 +1803,33 @@ publish_gitlab:
     - apk_add bash
     - *step_outputs
     - docker load --input image.tar
+    # Only the immutable anchor `sha-<commit>` is pushed here -- the channel
+    # tag belongs to publish_channel. The ruling's "digest-only, no tag" is
+    # realised as "no channel tag" because GitLab's registry garbage
+    # collection deletes untagged manifests, so a literally untagged
+    # validated image could be destroyed inside its own seven-day evidence
+    # window by routine disk maintenance (#832). The anchor is never consumed
+    # except through digest comparison, so a moved tag is detected.
     - |
       set -eu
       : > "$GITHUB_OUTPUT"
-      channel_tag=preview
-      case "$CI_COMMIT_BRANCH" in
-        hotfix/*) channel_tag="hotfix-$(printf '%s' "${CI_COMMIT_BRANCH#hotfix/}" | tr -c 'A-Za-z0-9._-' '-')" ;;
-      esac
       sha_reference="${CI_REGISTRY_IMAGE}:sha-${CI_COMMIT_SHA}"
-      channel_reference="${CI_REGISTRY_IMAGE}:${channel_tag}"
       docker tag "$ORBIT_CI_IMAGE" "$sha_reference"
-      docker tag "$ORBIT_CI_IMAGE" "$channel_reference"
       echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
-    # The workflow's push-and-verify: each tag is pushed, the digest the
+    # The workflow's push-and-verify: the tag is pushed, the digest the
     # registry returns is pulled back, and its configuration identity compared
-    # with the tested one. Once per tag, because a tag that resolves to
-    # something else is exactly what this is looking for.
+    # with the tested one. Then the transport record, the moment the push it
+    # describes has succeeded; the attestation binding the digest to the
+    # policy version that judged it (#573 ruling 24) is sign_evidence's,
+    # because this job must never hold signing capability.
     - |
       set -eu
       IMAGE_TAG="$sha_reference" TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
         bash scripts/ci/publish-image.sh
-      IMAGE_TAG="$channel_reference" TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
-        bash scripts/ci/publish-image.sh
-      # Both tags name one image in one repository, so the registry must have
-      # returned one digest. Two would mean the tags diverged between pushes.
-      distinct_digests="$(sed -n 's/^digest=//p' "$GITHUB_OUTPUT" | sort -u | wc -l | tr -d '[:space:]')"
-      [ "$distinct_digests" = "1" ] ||
-        { echo "the two published tags do not resolve to one digest"; exit 1; }
       published_digest="$(orbit_output digest)"
-      bash scripts/ci/gitlab-record-tested-image.sh "${CI_REGISTRY_IMAGE}@${published_digest}" "$published_digest"
+      policy_version="$(bash scripts/ci/policy-version.sh)"
+      bash scripts/ci/gitlab-record-tested-image.sh \
+        "${CI_REGISTRY_IMAGE}@${published_digest}" "$published_digest" "$policy_version"
       cat .orbit-supply-chain/gitlab-tested-image.json
   artifacts:
     name: orbit-gitlab-tested-image
@@ -1214,6 +1838,161 @@ publish_gitlab:
     expire_in: 90 days
     when: on_success
 
+# Mints the validation attestation over the digest record_image pushed,
+# saying "this digest passed the full bar under policy version P at time T".
+# The only job that may sign, and the fence is the runner, not this file:
+# the `orbit-signing` runner is protected (it refuses jobs from unprotected
+# refs), locked to this project, and its host config mounts the owner-held
+# key material read-only at /etc/orbit-signing -- so a job without this tag
+# never sees the key, and a job with it on an unprotected ref never runs.
+# Kept apart from record_image so the job that can sign runs the smallest
+# possible surface: the pinned cosign binary and this repository's scripts,
+# not the image build or the test suites.
+#
+# No .dind and no daemon: `docker login` writes the registry credential
+# without one, and cosign talks to the registry over HTTPS itself. The image
+# is the same digest-pinned docker:29-cli the .dind jobs use.
+sign_evidence:
+  stage: publish
+  image: docker:29-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
+  timeout: 10m
+  # Same reasoning as record_image: a cancelled signing run leaves a pushed
+  # digest with no evidence and nothing to show why.
+  interruptible: false
+  tags:
+    - orbit-signing
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+  needs:
+    # The digest to attest comes from the transport record; the attestation
+    # itself re-states nothing from it without validating the shape first
+    # (attest-tested-image.sh), and the policy version is recomputed from
+    # this job's own checkout rather than read from the artifact.
+    - job: record_image
+      artifacts: true
+  script:
+    - *apk_retry
+    # bash for the scripts, curl for ensure-cosign's pinned download, node
+    # to read the digest out of the transport record.
+    - apk_add bash curl nodejs
+    - |
+      set -eu
+      digest="$(node -e '
+        const doc = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+        process.stdout.write(typeof doc.imageDigest === "string" ? doc.imageDigest : "");
+      ' -- .orbit-supply-chain/gitlab-tested-image.json)"
+      echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+      ORBIT_SIGNING_DIR="${ORBIT_SIGNING_DIR:-/etc/orbit-signing}" \
+        bash scripts/ci/attest-tested-image.sh \
+        "${CI_REGISTRY_IMAGE}@${digest}" "$digest"
+
+# The publication half of the split: everything it does lives in
+# scripts/ci/publish-channel.sh so the refusal paths are unit tested
+# (scripts/publish-channel.test.mjs); this job only installs what the script
+# needs, logs in and calls it. The script runs the shared verifier
+# (scripts/ci/verify-validation-evidence.sh) -- refusing on mismatched,
+# missing, ambiguous or expired evidence -- re-runs the cheap identity and
+# policy checks against the pulled digest, then creates the channel tag with
+# `docker buildx imagetools create`: registry-side, no bytes move, no
+# image.tar, so the digest cannot change between validation and publication.
+publish_channel:
+  stage: publish
+  extends: .dind
+  timeout: 20m
+  # Same reasoning as record_image: a cancelled publication leaves a
+  # validated digest with no consumable name and nothing to show why.
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+  needs:
+    # The evidence producer's artifact carries the digest to verify (the full
+    # bar already gates record_image itself), and the attestation must exist
+    # before the verifier can find it.
+    - job: record_image
+      artifacts: true
+    - job: sign_evidence
+  script:
+    - *apk_retry
+    # node for the verifier's judgement and the policy validation; curl for
+    # the pinned cosign download.
+    - apk_add bash curl nodejs
+    - |
+      set -eu
+      echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+      bash scripts/ci/publish-channel.sh
+
+# Promotes a tested `preview` digest to a stable release (#821), the same
+# thing .github/workflows/promote-container.yml did before GitLab was the
+# source of truth: an operator supplies the accepted PREVIEW_DIGEST (not a
+# typed version -- the version comes from the image itself, verified the same
+# way that workflow always verified it) and this job does the rest. Manual
+# only, and only reachable from a pipeline on `main` or a pipeline you start
+# yourself (`web`/`api`) carrying a `PREVIEW_DIGEST` variable -- there is no
+# automatic trigger, because accepting a release is a human decision this
+# pipeline cannot infer from a push.
+#
+# GHCR stays the public image source; the GitLab registry keeps only
+# `:sha-*`/`:preview` (see record_image/publish_channel above). So this
+# job never touches registry.tomlawson.io -- it retags ghcr.io/tomlawesome/orbit by
+# digest with plain `docker`/`docker buildx imagetools` (GHCR is the only
+# registry involved, so there is nothing crane does here that docker does
+# not), then creates the matching annotated tag here on GitLab. The push
+# mirror carries that tag to GitHub, where release-on-tag.yml turns it into a
+# GitHub release; nothing on GitHub judges the promotion itself.
+#
+# All the logic lives in scripts/ci/promote-stable.sh so it can be unit
+# tested (scripts/promote-stable.test.mjs) against stub docker/git/curl --
+# this job only installs what the script needs and calls it. `.dind` for the
+# same reason `build_image` and `record_image` need it: talking to a Docker
+# daemon (`docker buildx imagetools`, `docker login`) needs one, and its
+# image (docker:29-cli) carries no package manager entries for git or node.
+#
+# Two masked, protected CI/CD variables the owner creates (docs/releasing.md
+# has the exact scopes):
+#
+#   GHCR_PUBLISH_TOKEN     A GHCR token scoped only to write:packages.
+#   GITLAB_RELEASE_TOKEN   A project access token, Maintainer role, `api`
+#                          scope, named `release-tagging`.
+#
+# Neither is ever a command-line argument: promote-stable.sh pipes the GHCR
+# token to `docker login` on stdin and sends the GitLab token to curl as a
+# header file. No CI_JOB_TOKEN either -- that token is scoped to this
+# pipeline and cannot be trusted with a release action the same way a
+# purpose-made, ownable credential can.
+#
+# Before any of that, promote-stable.sh runs an evidence gate (#877):
+# gitlab-await-tested-image.sh, unchanged, fetches and checks GitLab's
+# validation record for the commit being promoted -- the same script and
+# evidence that already gate the GHCR copy -- reusing GITLAB_RELEASE_TOKEN as
+# the read token rather than minting a new one. It is an interim measure:
+# the shared cryptographic verifier #661 defined now exists
+# (scripts/ci/verify-validation-evidence.sh) and #877 is the issue that
+# wires promotion to it; see the comment at the gate in promote-stable.sh
+# for exactly what the interim gate does and does not check.
+promote_stable:
+  stage: publish
+  extends: .dind
+  interruptible: false
+  variables:
+    # Stable Git tags are the version calculator's durable baseline, and
+    # merge-base/tree-diff evidence needs main, preview and hotfix/* history
+    # -- the same reason build_image sets this for calculate-version.mjs.
+    GIT_DEPTH: 0
+  rules:
+    - *not_scheduled
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+      allow_failure: false
+    - if: ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $PREVIEW_DIGEST
+      when: manual
+      allow_failure: false
+  script:
+    - *apk_retry
+    - apk_add bash git nodejs curl
+    - bash scripts/ci/promote-stable.sh
+
 # --- maintenance -------------------------------------------------------------
 
 # Renovate, taking over from Dependabot for this host (#801 step 6). It runs
@@ -1221,8 +2000,10 @@ publish_gitlab:
 # schedule, one place to look when an expected merge request does not appear.
 # What it watches, how it groups and why is in renovate.json at the repo root.
 #
-# No `tags:`. Nothing in this job talks to a Docker daemon, so it stays on the
-# shared untagged runner and never queues behind `orbit-build`.
+# Big lane (#830). Nothing in this job talks to a Docker daemon, so it never
+# queues behind `orbit-build`. It stays off the light lane because an npm
+# lockfile update runs pnpm over the whole monorepo inside the job, which
+# is unmeasured on the light lane. Same choice as mikroview and orbit-launcher.
 #
 # Two CI/CD variables the owner creates under Settings > CI/CD > Variables.
 # Mask both. Leave both unprotected unless the schedule's branch is itself
@@ -1278,7 +2059,9 @@ renovate:
   # the tools a run needs as it goes (binarySource=install), which is where the
   # pnpm that rewrites pnpm-lock.yaml comes from. `-full` preinstalls them and
   # costs several gigabytes of pull on a shared runner every week.
-  image: renovate/renovate:44.62.2@sha256:757c6c3b8b63dc5b2600855f277aaababf56344c507cc9636a3b3aece5752645
+  image:
+    name: renovate/renovate:44.65.5@sha256:4e10f76a79f1c597f427f83c788a9f5b14a6295784c4cb68307b89b0a954abce
+    pull_policy: if-not-present
   timeout: 1h
   # A weekly maintenance run has nothing that could supersede it, and being
   # cancelled part-way leaves half-written branches behind.
@@ -1335,9 +2118,8 @@ renovate:
 #       report that never fires red teaches nothing when it is finally asked
 #       to.
 #
-# No Docker daemon and no registry credentials: `sidecar-pins.mjs check` only
-# reads manifests over the network, so this stays on the shared untagged
-# runner like `renovate`.
+# Both axes go through Docker (see the job), so this runs on `orbit-build`
+# via `.dind_service`, not on the shared runner.
 #
 # One CI/CD variable the owner creates under Settings > CI/CD > Variables,
 # masked, unprotected unless the schedule's branch is itself protected (same
@@ -1348,7 +2130,16 @@ renovate:
 #                         which fails clearly if it is unset. Never printed.
 sidecar_pin_freshness:
   stage: maintenance
-  image: $NODE_IMAGE
+  # Both axes go through Docker: the moved-tag check is `docker buildx
+  # imagetools inspect`, and the package axis runs each pinned image. The
+  # first scheduled run (pipeline 278) had neither daemon nor client and every
+  # lookup came back "unreachable", so the self-test rightly failed it. Same
+  # shape as `fast`: the node image keeps the script's runtime, the dind
+  # service supplies the daemon, .docker_cli the client.
+  extends: .dind_service
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
   # The package axis pulls every pinned image, and ollama and tika are large
   # (same budget as the GitHub job's timeout-minutes: 30).
   timeout: 30m
@@ -1356,6 +2147,7 @@ sidecar_pin_freshness:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
   script:
+    - *docker_cli
     - |
       set -eu
       # Proves the check can fail before believing it when it passes. It
@@ -1387,3 +2179,156 @@ sidecar_pin_freshness:
         echo "sidecar pins: the check exited ${check_status}." >&2
         exit 1
       fi
+
+# Runs the strongest install evidence Orbit owns, which until now nothing
+# invoked (#724): scripts/test-install-bootstrap.sh fetches install.sh over
+# the real network from a branch, pipes it to bash, and asserts the channel
+# tag resolved to the digest ghcr.io serves right now. This is the schedule
+# half of #724's "at minimum on a schedule, and on the publication path"
+# criterion; the publication-path half is `verify_bootstrap` in
+# .github/workflows/publish-from-gitlab.yml, which runs the same harness
+# (green only) right after that workflow's `publish` job moves GHCR's
+# `preview` tag -- the event this job's own schedule cannot substitute for,
+# since a broken publish should fail visibly at publish time, not wait for
+# the next weekly run. This job also carries the `--red` self-test (see
+# below), which is a property of the harness, not of any one publish, so it
+# has no place in the publish-triggered job.
+#
+# Maintenance stage, schedule-gated, same as `renovate` and
+# `sidecar_pin_freshness`: this is deliberately not a required check on
+# ordinary merge requests (#724 non-goals) because it costs a real image pull
+# from the real registry every run.
+#
+# The in-job daemon (.docker_in_job), not the dind service, and $PLAYWRIGHT_IMAGE
+# rather than $NODE_IMAGE -- the same pairing `repair_journeys` and
+# `launcher_install_compat` use and for the same two reasons: the harness
+# publishes the disposable OIDC sidecar and the installed stack on 127.0.0.1
+# and then talks to them there, which a dind service's own network namespace
+# would put out of the job's reach; and the harness's `docker compose version`
+# preflight needs the v2 plugin, which Ubuntu Noble packages
+# (docker-compose-v2) and Debian Bookworm ($NODE_IMAGE) does not.
+#
+# No CI/CD variable to create beyond the schedule's own gate. The registry
+# pull is anonymous (the script requests its own short-lived token from
+# ghcr.io), and OIDC discovery is redirected to the disposable tests/oidc
+# sidecar the script builds itself -- both already true of the harness before
+# this issue, per its own header and #724's security considerations.
+#
+# One job, two invocations, rather than a second job for --red: both need the
+# same daemon, the same OIDC sidecar image build and the same registry pull,
+# so splitting them would double the runner claim and the network cost for
+# what is one harness proving itself before it reports. `--red` runs first,
+# the same order `sidecar_pin_freshness` uses for its own self-test, so a red
+# run that stopped firing fails the job before the green run's result could be
+# mistaken for a pass. Neither invocation's exit status is caught: `set -eu`
+# and the lack of any `|| true` mean either one failing fails this job, which
+# is #724's own requirement -- a failure here must be a failed job, not a line
+# in a log nobody opens.
+install_bootstrap:
+  stage: maintenance
+  extends: .privileged_runner
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  # The harness bounds its own install at 30m; two full runs (red, then
+  # green) plus the OIDC sidecar's one-time image build leave headroom above
+  # that without inflating it to cover a hang -- a genuinely stuck run is
+  # still caught by the harness's own internal timeout.
+  timeout: 45m
+  # A weekly maintenance run has nothing that could supersede it, same as
+  # `renovate` and `sidecar_pin_freshness`.
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
+  allow_failure: false
+  script:
+    - *docker_in_job
+    - |
+      set -eu
+      echo "install_bootstrap: red self-test — the digest comparison must fire"
+      bash scripts/test-install-bootstrap.sh --red
+      echo "install_bootstrap: green run — the published bootstrap against the live registry"
+      bash scripts/test-install-bootstrap.sh
+  after_script:
+    - *docker_in_job_teardown
+
+# Detects the pinned Orbit base image being behind and proposes the fix as a
+# merge request, rather than leaving the freshness gate red from the moment a
+# condition arises until a person happens to be working on Orbit (#708). Two
+# owner rulings bound this job and are not revisited here: nothing is
+# rebuilt or committed straight to a branch history someone else owns
+# (2026-08-29), and a bot-opened merge request is an acceptable way to
+# propose a fix, since the required checks on it are what actually carry the
+# safety (2026-09-01). So this job never pushes to `dev`, `preview` or
+# `main` directly, and it never merges anything -- it pushes its own branch
+# and asks the API to open or refresh a merge request against `dev`. See
+# scripts/ci/repin-base-image.sh for the two axes and why the digest comes
+# from ai/orbit-base-image's own `publish` job artifact rather than an
+# independently resolved tag.
+#
+# Both axes go through Docker -- `docker buildx imagetools inspect` to
+# corroborate the artifact's digest against the live index, and an `apk
+# upgrade --simulate` inside the image to catch a still-current tag with
+# stale packages -- so this runs on `orbit-build` via `.dind_service`, the
+# same shape as `sidecar_pin_freshness`.
+#
+# The self-test is `--red` (proves the digest comparison fires both ways)
+# before the real run, same convention as `sidecar_pin_freshness` and
+# `install_bootstrap`: a report that never fires red teaches nothing when it
+# is finally asked to. Unlike those two, `--red` here touches no docker, no
+# network and no file -- it only proves the comparison function, because the
+# real run's own side effects (a branch push, a merge-request call) are not
+# something to rehearse against the real repository on a schedule.
+#
+# Two credential sources, narrowed as far as they go (#708, 2026-09-06;
+# investigated rather than assumed -- see the commit for what was ruled out
+# and why):
+#
+#   Reading ai/orbit-base-image's artifact needs no stored credential at
+#   all. This job's own CI_JOB_TOKEN does it: GitLab issues one to every job
+#   automatically, scopes it to that job, and expires it when the job ends.
+#   It works because job-token cross-project access is both a project grant
+#   and a user grant -- ai/orbit-base-image's CI/CD job token allowlist
+#   (Settings > CI/CD > Job token permissions > CI/CD job token allowlist)
+#   must name ai/orbit, AND the user this schedule runs as must already have
+#   at least Reporter access to ai/orbit-base-image. The other three
+#   schedules on this project all run as the same user, who already holds
+#   Maintainer there, so create this one the same way and the second half
+#   is already satisfied.
+#
+#   Pushing the branch and opening the merge request cannot go through
+#   CI_JOB_TOKEN: its Merge Requests API access is read-only, and letting it
+#   push at all needs a separate, project-wide "allow push" setting this job
+#   does not ask for. That half needs one CI/CD variable the owner creates
+#   under Settings > CI/CD > Variables, masked, unprotected unless the
+#   schedule's branch is itself protected (same reasoning as RENOVATE_TOKEN
+#   above):
+#
+#   BASE_REPIN_TOKEN   A project access token on ai/orbit ONLY -- never
+#                       ai/orbit-base-image, and never a group token -- with
+#                       the `api` scope and the Developer role. It must
+#                       never hold registry push credentials: nothing here
+#                       publishes an image, only proposes a pin. Never
+#                       printed; read by scripts/ci/repin-base-image.sh,
+#                       which fails clearly if it is unset.
+base_image_repin:
+  stage: maintenance
+  extends: .dind_service
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  # One image pull, one apk simulate, one small artifact fetch and a handful
+  # of API calls -- a fraction of sidecar_pin_freshness's budget, which pulls
+  # every sidecar.
+  timeout: 15m
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $BASE_IMAGE_REPIN == "true"
+  script:
+    - *docker_cli
+    - |
+      set -eu
+      echo "base_image_repin: red self-test — the digest comparison must fire"
+      bash scripts/ci/repin-base-image.sh --red
+      echo "base_image_repin: real run — compares the artifact digest to the pin"
+      bash scripts/ci/repin-base-image.sh

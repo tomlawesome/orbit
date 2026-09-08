@@ -34,10 +34,15 @@ checks on its mirror as a second opinion that blocks nothing.
 6. Merge requests stop with read-only evidence. Only a push to `preview` or a
    hotfix branch reaches a registry, and only after every preceding gate
    passes.
-7. GitLab's `publish_gitlab` job pushes that exact tested image to
-   `registry.tomlawson.io` without rebuilding, resolves the registry digest,
-   pulls it back, verifies its configuration identity and records the digest
-   as `gitlab-tested-image.json`.
+7. GitLab's `record_image` job pushes that exact tested image to
+   `registry.tomlawson.io` as `sha-<commit>` without rebuilding, resolves the
+   registry digest, pulls it back, verifies its configuration identity and
+   records the digest as `gitlab-tested-image.json`. The `sign_evidence` job
+   — alone on the runner that holds the signing key — mints a cosign
+   attestation binding the digest to the policy version that judged it. The
+   separate `publish_channel` job verifies that attestation, re-runs the
+   cheap checks, and only then adds the channel tag
+   ([ADR-0020](adr/0020-validation-evidence-binds-digest-and-policy.md)).
 8. When the mirror delivers the same commit to GitHub,
    `publish-from-gitlab.yml` waits for that pipeline, checks the record names
    this commit, copies the digest to GHCR with `crane copy` and refuses if the
@@ -61,14 +66,17 @@ Dependency licences are governed separately from the full source and image
 scans. `supply-chain/licence-policy.yml` allows only the listed
 SPDX-compatible permissive or file-level reciprocal licences, and
 `scripts/ci/licence-policy.mjs` (the `licence_policy` job) checks every
-package's declared licence against it across the whole installed tree, not
-just newly introduced ones. A licence outside the allow-list blocks
-automatically. Missing or ambiguous licence metadata blocks the same way:
-there is no manual-review pass-through. There are no advisory or package
-licence exemptions for source dependencies. Any exemption must be narrow,
-justified, owned, time-bounded and linked to a tracking issue. Vulnerabilities
-are unaffected by this job; they remain governed by `supply_chain_source`
-below.
+shipped package's declared licence against it, not just newly introduced ones.
+The gate covers only what reaches the runtime image -- the Dockerfile's
+`web-deps` production dependencies and the `@fontsource*` typefaces inlined
+into the client bundle -- not build or test tooling (owner decision,
+2026-09-05): a GPL build tool does not affect the licence of what it
+produces. A licence outside the allow-list blocks automatically. Missing or
+ambiguous licence metadata blocks the same way: there is no manual-review
+pass-through. There are no advisory or package licence exemptions for shipped
+dependencies. Any exemption must be narrow, justified, owned, time-bounded and
+linked to a tracking issue. Vulnerabilities are unaffected by this job; they
+remain governed by `supply_chain_source` below.
 
 A vulnerability exception is valid only when it identifies the finding,
 package and scope, names an owner, gives a rationale, links a tracking issue
@@ -86,7 +94,15 @@ vulnerable is blocked afresh, and every entry expires on the same date. #794
 tracks retiring them; when they expire the scan goes red until they are
 removed or renewed with a reason recorded there.
 
-### Sharp/libvips v1 licence decision
+### Sharp/libvips v1 licence decision (historical; exception removed)
+
+The exception this section describes was removed from
+`supply-chain/licence-policy.yml` on 2026-09-05, alongside the scope change
+above: `sharp` and every `@img/sharp-*` platform package it names are absent
+from the installed tree entirely (no `sharp` resolves anywhere in
+`pnpm-lock.yaml`, shipped or not), so the exception matched nothing and the
+2026-10-31 review it was pending is moot. The record below is kept for
+history; nothing here is still in force.
 
 The v1 release comparison against the older `main` branch reports the
 platform packages introduced by the `sharp` 0.35.0 update because their
@@ -116,15 +132,16 @@ maintained in the
 static linking, the packaged binaries, or their licence metadata requires a
 new review rather than relying on this decision.
 
-The same release comparison could not infer licences for four updated direct
-package declarations. Their installed, versioned package manifests were
-manually checked on 2026-07-31:
+The same release comparison could not infer licences for a set of updated
+direct package declarations. Their installed, versioned package manifests were
+manually checked on 2026-07-31; `next` and `eslint-config-next` have since left
+the dependency tree entirely (neither is in any `package.json` or in
+`pnpm-lock.yaml`) and are dropped from the table below rather than kept as a
+record of a package that is no longer here:
 
 | Package | Version | Declared licence |
 | --- | --- | --- |
 | `drizzle-orm` | 0.45.2 | Apache-2.0 |
-| `eslint-config-next` | 16.2.11 | MIT |
-| `next` | 16.2.11 | MIT |
 | `nodemailer` | 9.0.3 | MIT-0 |
 
 These declarations are already inside the global allow-list and require no

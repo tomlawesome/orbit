@@ -110,15 +110,15 @@ command -v curl >/dev/null 2>&1 || fail 'curl is required.'
 
 # --- the deployment under test -------------------------------------------
 
-# install.sh fetches its assets over the network and pulls its image from a
-# registry, so a live journey needs both served locally: a curl shim for the
-# working-tree assets and the fixture OIDC discovery document, and a throwaway
-# registry for the image. This mirrors scripts/test-install-acceptance.sh
-# rather than sharing code with it -- the two harnesses set up opposite states
-# (that one a good deployment, this one a broken one) and coupling them would
-# make each harder to read.
+# install.sh validates OIDC discovery over the network and pulls its image
+# from a registry, so a live journey needs both served locally: a curl shim
+# for the fixture discovery document, and a throwaway registry for the image.
+# The deployment assets need no shim -- they come out of the image itself
+# (ADR-0019). This mirrors scripts/test-install-acceptance.sh rather than
+# sharing code with it -- the two harnesses set up opposite states (that one a
+# good deployment, this one a broken one) and coupling them would make each
+# harder to read.
 write_shim() {
-  local revision="$1"
   mkdir -p "$workdir/shim"
   cat > "$workdir/discovery.json" <<EOF
 {
@@ -134,23 +134,41 @@ write_shim() {
 EOF
   cat > "$workdir/shim/curl" <<SHIM
 #!/usr/bin/env bash
-# Serves working-tree assets and the fixture discovery document; every other
-# URL fails closed, so an unexpected network dependency surfaces as a failure
-# rather than as a silent fetch from the internet.
+# Serves the fixture discovery document; every other URL fails closed, so an
+# unexpected network dependency surfaces as a failure rather than as a silent
+# fetch from the internet. Deployment assets are not fetched at all any more:
+# install.sh takes them out of the image it resolved (ADR-0019).
 set -Eeuo pipefail
-# Any revision, not just this checkout's HEAD: install.sh fetches the
-# revision stamped into the image it pulled, which differs from HEAD whenever
-# a prebuilt image is supplied. The working tree is the answer either way.
-asset_prefix="https://raw.githubusercontent.com/$repository/"
 discovery_url="${issuer}.well-known/openid-configuration"
 output="" write_out="" url=""
+# Real curl refuses an option it does not know with exit 2 and this message,
+# and refuses an option given no value with exit 2 as well (curl 8.14.1;
+# scripts/tool-parity.test.mjs re-asserts both against the real binary). The
+# shim used to ignore every unrecognised flag, so install.sh could have grown
+# one curl has never had and this harness would still have gone green -- the
+# same class of blindness as the plain 'docker exec -T' that shipped in #607.
+refuse_option() {
+  printf 'curl: option %s: is unknown\\n' "\$1" >&2
+  exit 2
+}
+require_parameter() {
+  printf 'curl: option %s: requires parameter\\n' "\$1" >&2
+  exit 2
+}
 args=("\$@")
 for ((i = 0; i < \${#args[@]}; i++)); do
   case "\${args[i]}" in
-    --output) output="\${args[i+1]}"; ((i++)) ;;
-    --write-out) write_out="\${args[i+1]}"; ((i++)) ;;
-    --header|--connect-timeout|--max-time|--max-filesize|--proto|--proto-redir) ((i++)) ;;
-    --*|-*) ;;
+    --output|-o)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      output="\${args[i+1]}"; ((i++)) ;;
+    --write-out|-w)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      write_out="\${args[i+1]}"; ((i++)) ;;
+    --header|-H|--connect-timeout|--max-time|-m|--max-filesize|--proto|--proto-redir|--retry|--resolve)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      ((i++)) ;;
+    --fail|-f|--silent|-s|--show-error|-S|--location|-L|--tlsv1.2|--tlsv1.3) ;;
+    -*) refuse_option "\${args[i]}" ;;
     *) url="\${args[i]}" ;;
   esac
 done
@@ -159,13 +177,10 @@ serve() {
   [[ -z "\$write_out" ]] || printf '200'
 }
 case "\$url" in
-  "\$asset_prefix"*)
-    asset="\${url#"\$asset_prefix"}"
-    asset="\${asset#*/}"
-    [[ -f "$repo_root/\$asset" ]] || { [[ -z "\$write_out" ]] || printf '404'; exit 0; }
-    serve "$repo_root/\$asset"
-    ;;
   "\$discovery_url") serve "$workdir/discovery.json" ;;
+  # Real curl still writes the --write-out template when the transfer never
+  # happened; %{http_code} is 000 with no response, and a host that will not
+  # resolve exits 6 (curl 8.14.1; scripts/tool-parity.test.mjs).
   *) [[ -z "\$write_out" ]] || printf '000'; exit 6 ;;
 esac
 SHIM
@@ -212,7 +227,7 @@ install_deployment() {
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
     fail 'push to the local registry failed'
 
-  write_shim "$revision"
+  write_shim
   make_target
 
   note 'installing the deployment under test'
@@ -250,7 +265,15 @@ refuse_foreign_stack() {
 
 compose() { (cd "$target" && docker compose --env-file .env-orbit "$@"); }
 
-health_check() { curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health" | grep -q '"status":"ready"'; }
+# Capture first, test second (issue #809): `curl | grep -q` can still be
+# streaming the rest of the body when grep matches early and exits, which
+# would SIGPIPE curl and turn a healthy response into a 141 instead of an
+# answer.
+health_check() {
+  local body
+  body="$(curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health")" || true
+  [[ "$body" == *'"status":"ready"'* ]]
+}
 
 wait_for_health() {
   local deadline=$((SECONDS + 90))
@@ -273,7 +296,8 @@ wait_for_unhealthy() {
 # location (scripts/repair.sh:1263), not from the working directory, so the
 # repo's copy would diagnose the developer's own checkout and report findings
 # that have nothing to do with the target. It is the same code either way --
-# the shim serves the target its assets from this working tree.
+# the image under test is built from this working tree and carries these
+# assets (ADR-0019).
 repair() { (cd "$target" && env ORBIT_REPAIR_PROMPTS=machine bash "$target/scripts/repair.sh" "$@"); }
 
 # A freshly installed deployment must be healthy by repair's own diagnosis
@@ -443,6 +467,40 @@ journey_cancelled_repair() {
 # `exec` inside the backgrounded subshell replaces its own process image with
 # repair.sh, so $! is repair.sh's real PID and the signal lands on the process
 # that owns the trap, not on a throwaway parent shell.
+#
+# Terminating that one PID is not enough (#785). repair.sh's EXIT trap runs
+# and the process exits within milliseconds of SIGTERM -- well before a
+# foreground external command it is waiting on (here, the window-stretching
+# mkdir/mktemp shim below) gets anywhere near its own exit. Bash does not
+# forward the signal to that child, so it is orphaned: reparented off
+# repair.sh and left running on its own schedule, unrelated to `wait "$pid"`
+# returning. On an idle machine it finishes in the 0.3s the shim sleeps and
+# nobody notices; on a loaded machine the scheduler can take much longer to
+# give an orphan its remaining CPU, and the harness had already moved on to
+# credential-drift assuming signal-cleanup's process was gone. Confirmed by
+# direct reproduction: killing only the tracked PID leaves the shim's child
+# alive and running seconds after `wait` returns.
+#
+# The fix is to make the backgrounded job its own process group (job control
+# on for exactly the fork, via `set -m`/`set +m`) and signal the whole group,
+# then prove the group is actually empty before this journey hands control to
+# the next one -- not just that the one PID we were watching exited.
+terminate_process_group() {
+  local pid="$1" status=0 group_deadline
+  kill -TERM -- "-$pid" 2>/dev/null || true
+  # `wait` reports the signalled child's 128+15, and this script runs under
+  # `set -e`: an unguarded `wait` here kills the harness itself with 143
+  # instead of the journey observing the interruption it just caused.
+  wait "$pid" 2>/dev/null || status=$?
+  group_deadline=$((SECONDS + 30))
+  while kill -0 -- "-$pid" 2>/dev/null; do
+    ((SECONDS < group_deadline)) ||
+      fail "signal-cleanup: a process in the interrupted repair's group (pgid $pid) is still running 30s after SIGTERM -- it can still touch the deployment while later journeys assume it is gone"
+    sleep 0.05
+  done
+  return "$status"
+}
+
 journey_signal_cleanup() {
   local before after out infile staging pid status=0 found=0 leftover
 
@@ -485,12 +543,19 @@ exit "$rc"
 SHIM
   chmod 755 -- "$shimdir/mktemp" "$shimdir/mkdir"
 
+  # Job control on for exactly this fork: without it bash puts a background
+  # job in the harness's own process group, and a group signal later would
+  # reach everything the harness itself has started, not just this job. With
+  # it, the job becomes its own group (pgid == pid), so terminate_process_group
+  # can signal everything repair.sh forks without touching anything else.
+  set -m
   (
     cd "$target"
     exec env ORBIT_REPAIR_PROMPTS=machine PATH="$shimdir:$PATH" \
       bash "$target/scripts/repair.sh" --execute --safe-only
   ) <"$infile" >"$out" 2>&1 &
   pid=$!
+  set +m
 
   local deadline=$((SECONDS + 60))
   while :; do
@@ -501,18 +566,14 @@ SHIM
   done
 
   if [[ "$found" != 1 ]]; then
-    wait "$pid" 2>/dev/null || true
+    terminate_process_group "$pid" || true
     rm -rf -- "$staging"
     cat "$out" >&2
     fail 'signal-cleanup: never observed a private recovery directory to interrupt'
   fi
 
-  kill -TERM "$pid" 2>/dev/null || true
-  # `wait` reports the signalled child's 128+15, and this script runs under
-  # `set -e`: an unguarded `wait` here kills the harness itself with 143
-  # instead of the journey observing the interruption it just caused.
   status=0
-  wait "$pid" 2>/dev/null || status=$?
+  terminate_process_group "$pid" || status=$?
   [[ "$status" != 0 ]] || fail 'an interrupted repair exited 0'
 
   # The contract, and the assertion that now genuinely fails when the trap
@@ -570,10 +631,16 @@ journey_credential_drift() {
     printf '%s\n' "$output" >&2
     fail "the dangerous batch exited $status, expected 0"
   }
+  # Print what the batch did say: without it a miss here names the missing
+  # line and nothing else, and the run cannot be diagnosed from CI (!897).
   grep -q 'execute action=rotate-database-credential .*result=done' <<<"$output" ||
-    fail 'rotate-database-credential did not report result=done'
+    { printf '%s\n' "$output" >&2
+      docker ps -a --filter "label=com.docker.compose.project=$project" \
+        --format '{{.ID}} {{.Status}} {{.Label "com.docker.compose.service"}}' >&2 || true
+      fail 'rotate-database-credential did not report result=done'; }
   grep -q 'dangerous result=complete' <<<"$output" ||
-    fail 'the dangerous batch did not complete'
+    { printf '%s\n' "$output" >&2
+      fail 'the dangerous batch did not complete'; }
 
   # Authentication works again...
   wait_for_health
@@ -1148,7 +1215,7 @@ journey_successful_rollback() {
   # migration's whole-directory copy already leans on it.
   local managed
   for managed in docker-compose.yml docker-compose.mail.yml \
-      docker-compose.mail-alias-rotation.yml .env-orbit.example \
+      .env-orbit.example \
       config/tika-config.json scripts/configure.sh scripts/installer-ui.sh \
       scripts/configuration.sh scripts/backup.sh scripts/restore.sh \
       scripts/repair.sh scripts/engine-check.sh .env-orbit .orbit-secrets; do

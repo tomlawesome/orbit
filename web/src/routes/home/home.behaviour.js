@@ -15,9 +15,11 @@
  *      Inline handlers need their functions to be globals; a module has none.
  */
 import { fillStarTiles } from "$lib/sky.js";
+import { screenScope } from "$lib/teardown.js";
 import { placeGalaxy } from "./placement.js";
 import { mountSkies } from "./skies.js";
 import { seedFromWorkspace } from "$lib/sky.js";
+import { packOf, setSwatch, syncSwatches } from "./swatches.js";
 
 /**
  * The sun's address (§15, the 08-17 morning batch): the centre body of the
@@ -41,34 +43,19 @@ export const sunHref = (id) => `/household/${encodeURIComponent(id)}`;
  */
 export function mountHome({ galaxy, primary, fixtures = false, workspace = "" }) {
   /*
-   * Shadows the global so every bare addEventListener() below — the mockup's
-   * own keydown, scroll and resize handlers — is registered against this
-   * controller and torn down with the screen. The mockup's code is unchanged;
-   * it simply resolves a different binding.
+   * The binder, the timer set and the teardown are $lib/teardown.js's (#445):
+   * create and the pocket had each written their own near-copy of this, and
+   * home carried two — one for the window, one for elements. A teardown that
+   * is nearly the same in four places is one that stops being the same.
+   *
+   * `addEventListener` shadows the global, so every bare addEventListener()
+   * below — the mockup's own keydown, scroll and resize handlers — registers
+   * against this scope and is torn down with the screen; the mockup's code is
+   * unchanged, it simply resolves a different binding. `later` tracks the
+   * timers, because a flight that lands after unmount writes to nodes that
+   * are gone.
    */
-  const controller = new AbortController();
-  /** @type {(type: string, handler: (event: any) => void, options?: any) => void} */
-  const addEventListener = (type, handler, options) =>
-    window.addEventListener(type, handler, {
-      ...(typeof options === "object" ? options : null),
-      signal: controller.signal,
-    });
-
-  /*
-   * A mockup is one document per screen, so leaving it destroys everything the
-   * page wrote. Here <body> and the stylesheets outlive the screen, so
-   * anything home writes outside its own subtree has to be handed back on the
-   * way out or it follows the reader to the next screen - which is how a
-   * blurred scrim survived a trip to /create. Timers are tracked for the same
-   * reason: a flight that lands after unmount writes to nodes that are gone.
-   */
-  const timers = new Set();
-  /** @type {(fn: () => void, ms: number) => ReturnType<typeof setTimeout>} */
-  const later = (fn, ms) => {
-    const id = setTimeout(() => { timers.delete(id); fn(); }, ms);
-    timers.add(id);
-    return id;
-  };
+  const { on, onWindow: addEventListener, later, signal, teardown } = screenScope();
 
 
   /* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
@@ -348,35 +335,13 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     const open = card.classList.toggle("open");
     button.setAttribute("aria-expanded", String(open));
   }
-  /* title -> pack name, the mapping the swatch buttons encode:
-     "star-chart" is starchart, "after dark" is afterdark. */
-  /** @type {(button: HTMLElement) => string} */
-  const packOf = (button) => button.title.replace(/[\s-]/g, "");
-
-  /**
-   * @param {string} name
-   * @param {HTMLElement} button
-   */
-  function setSwatch(name, button){
-    document.documentElement.dataset.theme = name;
-    for (const other of /** @type {HTMLElement} */ (button.parentElement).querySelectorAll("button"))
-      other.setAttribute("aria-pressed", String(other === button));
-    /* Survive a refresh. See the note in app.html: the server holds the real
-       preference once the shell is wired; this is the pre-paint cache. */
-    try { localStorage.setItem("orbit-theme", name); } catch {}
-    /* The constellation leaders are measured from the rendered label, and
-       the engraved packs size that label differently, so re-measure. */
-    if (!flying) renderGalaxy(false);
-  }
-
-  /* The markup ships with star-chart pressed, because that is what the mockup
-     draws. If the reader restored a different pack before paint, the pressed
-     swatch and the live theme disagree until they click - so reconcile once. */
-  (function syncSwatches(){
-    const active = document.documentElement.dataset.theme;
-    for (const button of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".swatches button")))
-      button.setAttribute("aria-pressed", String(packOf(button) === active));
-  })();
+  /* packOf, setSwatch and syncSwatches moved to ./swatches.js (#852) so the
+     pocket dialect's own sheet could import the same wiring rather than
+     copy it. The desk's own follow-up — re-measuring the constellation
+     leaders, since the engraved packs size that label differently — is
+     passed in as setSwatch's onChange, which the pocket sheet has no
+     equivalent of and simply omits. */
+  syncSwatches();
   /** @param {HTMLElement} button */
   function toggleCreate(button){
     const drawer = /** @type {HTMLElement} */ (document.getElementById("createdrawer"));
@@ -438,8 +403,21 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     closeOverlays(hit ? hit[1] : null);
   });
 
+  /* Escape from inside an overlay hands focus back to whatever opened it
+     (#853), the way Chrome.svelte's account panel already does: once the
+     panel goes visibility:hidden (#847) a focus left inside it falls to
+     <body>, and a keyboard reader is stranded at the top of the page. */
+  const OVERLAY_OPENER = [
+    ["#account", "button.orb"],
+    ["#createdrawer", "#nstar"],
+    ["#statusdrawer", "#edge-health"],
+    ["#keydrawer", "#keydrawer .handle"],
+  ];
   addEventListener("keydown", (/** @type {KeyboardEvent} */ event) => {
-    if (event.key === "Escape") closeOverlays(null);
+    if (event.key !== "Escape") return;
+    const within = OVERLAY_OPENER.find(([panel]) => document.getElementById(panel.slice(1))?.contains(document.activeElement));
+    closeOverlays(null);
+    if (within) /** @type {HTMLElement | null} */ (document.querySelector(within[1]))?.focus();
   });
   /* v17, amended §14: any scroll movement sends every drawer home */
   let lastY = scrollY;
@@ -533,7 +511,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
 
     doc.classList.toggle("descending", s > 0);
   }
-  still.addEventListener("change", readDescent, { signal: controller.signal });
+  still.addEventListener("change", readDescent, { signal });
   let descentQueued = false;
   addEventListener("scroll", () => {
     if (descentQueued) return;
@@ -575,11 +553,8 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     onGalaxy: subscribe(galaxyWatchers),
   });
 
-  /* ---- wiring that replaces the mockup's inline on* attributes ---- */
-  /** @type {(target: Element | null | undefined, type: string, handler: (event: any) => void) => void} */
-  const on = (target, type, handler) =>
-    target?.addEventListener(type, handler, { signal: controller.signal });
-
+  /* ---- wiring that replaces the mockup's inline on* attributes ----
+     `on` comes from the screen scope at the top of this function. */
   const star = /** @type {HTMLElement} */ (document.getElementById("nstar"));
 
   on(document.querySelector("button.orb"), "click", (/** @type {MouseEvent} */ event) =>
@@ -590,7 +565,14 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
   /* title -> theme name: "star-chart" is the starchart pack, "after dark" afterdark */
   for (const swatch of document.querySelectorAll(".swatches button")) {
     on(swatch, "click", (/** @type {MouseEvent} */ event) =>
-      setSwatch(packOf(/** @type {HTMLElement} */ (event.currentTarget)), /** @type {HTMLElement} */ (event.currentTarget)));
+      setSwatch(
+        packOf(/** @type {HTMLElement} */ (event.currentTarget)),
+        /** @type {HTMLElement} */ (event.currentTarget),
+        /* The constellation leaders are measured from the rendered label,
+           and the engraved packs size that label differently, so re-measure
+           on a theme change. */
+        () => { if (!flying) renderGalaxy(false); },
+      ));
   }
 
   const explore = /** @type {HTMLElement} */ (document.getElementById("explore"));
@@ -618,9 +600,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
    * per visit), the flight timers, and the group observer.
    */
   return () => {
-    controller.abort();
-    for (const id of timers) clearTimeout(id);
-    timers.clear();
+    teardown();
     observer.disconnect();
     callout.remove();
     /* the pack sky goes before the document is handed back, so its own teardown
