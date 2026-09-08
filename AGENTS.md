@@ -189,6 +189,12 @@ Check the list before building a test rig or handing a check to the owner.
   between compose and policy, a moved tag, and stale packages inside a current
   pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync`
   re-pins both places after a Renovate bump
+- `scripts/check-rolldown-jsdoc-trap.mjs` — flags a JSDoc comment inside a
+  `{#snippet}` parameter list, or inside a multi-line comma-separated
+  parameter/argument list, before it reaches rolldown's own opaque parse
+  crash on the production build (#782); `pnpm --filter orbit-web
+  repro:782` drives the real crash against throwaway fixtures in
+  `web/tests/rolldown-repro/` (slow, not wired into the fast suite)
 - `scripts/ci/repin-base-image.sh` — base image freshness (#708): compares
   the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact
   and, on a mismatch, re-pins every location and opens a merge request;
@@ -197,26 +203,23 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Ten known ways to lose an afternoon, or worse. The first two have open issues;
-until those land, this is the procedure.
+Ten known ways to lose an afternoon, or worse.
 
-**Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
-0004 while the journal has 28 entries, so `drizzle-kit generate` diffs against
-a stale snapshot and emits a migration that recreates almost the whole schema.
-It looks like success. Hand-write the migration in the style of
-`drizzle/0027_instance_authority.sql`, add the journal entry by hand, and
-update both `tests/integration/support/migration-fixture.ts` and
-`tests/integration/migrations.test.ts`. See #535.
+**`pnpm db:generate` refuses to run, on purpose.** `drizzle/meta/` holds
+snapshots only up to 0004, so `drizzle-kit generate` would diff against a
+stale snapshot and silently emit a migration that recreates almost the whole
+schema. `scripts/db-generate-refused.mjs` is the guard; the hand-written
+procedure is in `docs/testing.md`, "Hand-writing a migration". See #535.
 
 **Compose commands attach to whatever project `.env-orbit` names.**
-`COMPOSE_PROJECT_NAME` lives in that file, so
-`docker compose --env-file .env-orbit ...` adopts that project and its named
-volumes from any checkout or worktree, and the fixed `container_name` pins in
-`docker-compose.yml` stop a second stack coexisting. Pass an explicit `-p` for
-anything disposable, confirm isolation with
-`docker inspect orbit-postgres --format '{{index .Config.Labels "com.docker.compose.project"}}'`
-before trusting it, and never run `docker compose down --volumes` against a
-project you did not create. See #536.
+`docker compose --env-file .env-orbit ...` with no `-p` silently adopts that
+project (and its named volumes) from any checkout or worktree, and the fixed
+`container_name` pins in `docker-compose.yml` then stop a second stack
+coexisting instead of failing loudly. Source
+`scripts/compose-isolation-preflight.sh` before an `up` you assemble by hand,
+and see the isolated-stack recipe in README.md's "Quality checks" section.
+Fixed in the acceptance-stack entry point by #536; still your job for a
+one-off manual command.
 
 **Never drive a pty test by closing its own stdin.** `spawnSync({ input })`
 closes stdin as soon as the string is written, which under `script` closes the

@@ -2,10 +2,9 @@
 body{background:#060a18}
 .sky-drift-far{animation:driftf 380s linear infinite}
 .sky-drift-near{animation:driftn 185s linear infinite}
-@keyframes driftf{to{transform:translateX(-1600px)}}
-@keyframes driftn{to{transform:translateX(-1600px)}}
-.tw{animation:twinkle 5s ease-in-out infinite alternate}
-@keyframes twinkle{from{opacity:.2}to{opacity:.85}}
+/* driftf/driftn and the twinkle curve come from $lib/atmosphere.css (#445);
+   totality's own range — the day stars are brighter than any night screen's. */
+.tw{--tw-min:.2;--tw-max:.85;animation:twinkle 5s ease-in-out infinite alternate}
 
 /* corona layers — every group breathes on its own period, nothing in sync */
 .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}

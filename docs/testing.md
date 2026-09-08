@@ -43,6 +43,46 @@ restore denial; portable archive ownership and non-disclosure; and administrator
 operations. Denied requests assert bounded error contracts, `no-store` responses,
 unchanged target state and unchanged audit state where mutation is applicable.
 
+## Hand-writing a migration
+
+`pnpm db:generate` is refused (`scripts/db-generate-refused.mjs`, #535):
+`drizzle/meta/` only has snapshots through 0004, so `drizzle-kit generate`
+would diff against that stale snapshot and silently emit a migration that
+recreates almost the whole schema. Write migrations by hand instead:
+
+1. Create `drizzle/NNNN_name.sql`, where `NNNN` is the next number after the
+   last journal entry, in the style of `drizzle/0027_instance_authority.sql`:
+   plain DDL, `--> statement-breakpoint` between statements, and a `DO $$ ...
+   END $$` block only where existing data needs a deliberate, auditable
+   transformation (0027 seats a primary administrator; failing closed on an
+   ambiguous case beats guessing).
+2. Add the matching entry to `drizzle/meta/_journal.json` by hand: `idx` one
+   past the last entry, `version` copied from the file's own top-level
+   `version`, `tag` equal to the migration's filename without `.sql`, `when` a
+   later millisecond timestamp than the previous entry's, and
+   `breakpoints: true`.
+3. Update `tests/integration/support/migration-fixture.ts` for whatever the
+   migration changes:
+   - New or changed columns go in `EXPECTED_TABLE_COLUMNS` (kept sorted; the
+     module sorts every entry once at load).
+   - New indexes go in `EXPECTED_INDEXES`, constraints (primary key, unique,
+     foreign key) in `EXPECTED_CONSTRAINTS`, and new enum labels in
+     `EXPECTED_ENUMS`.
+   - Everything here is asserted verbatim against `readSchemaContract` in
+     `tests/integration/migrations.test.ts`, so a mismatch (in either
+     direction) fails that test rather than passing silently.
+4. Update `tests/integration/migrations.test.ts` if the migration has
+   behaviour beyond the schema diff: a migration that seeds or transforms data
+   unconditionally (as 0028 and 0033 do for their singleton tables) needs an
+   assertion on that seeded state in the "migrates every current migration
+   into a fresh PostgreSQL 18 database" test, and a migration that can fail on
+   existing data (as 0022 does) needs its own scenario, following the
+   `document_openable_scan_status_valid` test below it.
+
+`tests/integration/fixtures/migration-baseline.json` freezes the supported
+upgrade starting point (`migrationPrefix`, currently through 0017) and is not
+touched by an ordinary new migration.
+
 ## CI relationship
 
 Pull requests run planning governance, lint, type checking and the complete unit

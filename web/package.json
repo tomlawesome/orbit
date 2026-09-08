@@ -13,7 +13,8 @@
     "fidelity": "playwright test",
     "preview:build": "vite build && rm -rf .preview && cp -r build .preview",
     "preview:serve": "PORT=4180 node .preview/index.js",
-    "licences": "node scripts/collect-font-licences.mjs"
+    "licences": "node scripts/collect-font-licences.mjs",
+    "repro:782": "node tests/rolldown-repro/run.mjs"
   },
   "dependencies": {
     "@napi-rs/canvas": "1.0.8",
