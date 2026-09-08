@@ -729,10 +729,19 @@ licence_policy:
 # Scans every image pinned in .github/supply-chain-policy.json, not just the
 # one Orbit builds: an operator's deployment runs the sidecars too (#647).
 #
-# Reporting-only, exactly as `continue-on-error` makes it on GitHub: every
-# pinned sidecar currently has fixable HIGH findings with no clean upstream
-# digest to re-pin to. When the pins scan clean, delete `allow_failure` so a
-# newly published advisory against a pinned digest fails the job.
+# Findings are reporting-only, as `continue-on-error` makes them on GitHub:
+# every pinned sidecar currently has fixable HIGH findings with no clean
+# upstream digest to re-pin to. When the pins scan clean, delete `allow_failure`
+# so a newly published advisory against a pinned digest fails the job.
+#
+# The scanner failing to *run* is not reporting-only, and used to be treated as
+# if it were (#810). `allow_failure: true` covered every exit status, so when
+# the runner host filled up and Trivy could not download its vulnerability
+# database the job went yellow with nothing scanned, and the pipeline stayed
+# green -- pipelines 636 and 637, "no space left on device". `exit_codes: [3]`
+# narrows the permission to the one status the script uses for findings; a
+# failed database download, a failed image pull or a scan that errored exits
+# with its own status and fails the job.
 #
 # Stays on big: it peaks at ~4.9 GB, close to the 6 GB light cap.
 sidecar_images:
@@ -745,7 +754,9 @@ sidecar_images:
   rules:
     - *not_scheduled
     - when: on_success
-  allow_failure: true
+  allow_failure:
+    exit_codes:
+      - 3
   needs:
     - job: classify
       artifacts: true
@@ -798,6 +809,13 @@ sidecar_images:
             rm -rf "$cache"
           ' _
       trivy version --format json > .orbit-supply-chain/trivy-version.json
+      # Two different failures reach here, and only one of them is soft. The
+      # evaluation writes its evidence file and then exits 1 for blocked
+      # findings; every other way it exits non-zero -- a missing or unreadable
+      # scan report, a policy file it cannot parse -- throws before that file
+      # is written. The file's presence is what tells "ran, and found things"
+      # from "could not run". Removed first so a stale one cannot answer.
+      rm -f .orbit-supply-chain/sidecar-evidence.json
       set +e
       node scripts/sidecar-image-evidence.mjs evaluate \
         --policy .github/supply-chain-policy.json \
@@ -807,7 +825,16 @@ sidecar_images:
       policy_status=$?
       set -e
       rm -rf .orbit-supply-chain/sidecar-scans
-      exit "$policy_status"
+      if [ "$policy_status" -eq 0 ]; then
+        exit 0
+      fi
+      if [ ! -s .orbit-supply-chain/sidecar-evidence.json ]; then
+        echo "the sidecar scan could not be evaluated: this is not a findings failure"
+        exit 1
+      fi
+      # The one status `allow_failure` accepts, and nothing else in this job
+      # produces it: trivy and node exit 1 on error, xargs 1 or 123-127.
+      exit 3
   artifacts:
     name: orbit-supply-chain-sidecars
     paths:
