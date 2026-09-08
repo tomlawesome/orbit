@@ -130,7 +130,8 @@ describe("gitlab-await-tested-image.sh", () => {
     expect(recordScript).toContain('output="${output_dir}/gitlab-tested-image.json"');
     expect(awaitScript).toContain("artifacts/.orbit-supply-chain/gitlab-tested-image.json");
     expect(awaitScript).toContain("artifacts/.orbit-supply-chain/image.spdx.json");
-    expect(awaitScript).toContain("job_id publish_gitlab");
+    expect(awaitScript).toContain("job_id record_image");
+    expect(awaitScript).toContain("job_id sign_evidence");
     expect(awaitScript).toContain("job_id supply_chain_image");
     for (const field of ["commit", "ref", "pipelineId", "imageDigest", "imageReference", "recordedAt"]) {
       expect(recordScript).toContain(`"${field}":`);
@@ -166,6 +167,7 @@ describe("gitlab-await-tested-image.sh", () => {
   const PIPELINE_ID = "284";
   const PIPELINE_URL = "https://gitlab.example/ai/orbit/-/pipelines/284";
   const PUBLISH_JOB_ID = "1501";
+  const SIGN_JOB_ID = "1503";
   const SBOM_JOB_ID = "1502";
   const DIGEST = `sha256:${"1".repeat(64)}`;
   const IMAGE_REFERENCE = `${REGISTRY}/ai/orbit@${DIGEST}`;
@@ -221,9 +223,14 @@ describe("gitlab-await-tested-image.sh", () => {
     "  exit 0",
     "fi",
     'if [[ "$url" == *"/jobs?per_page=100" ]]; then',
-    "  printf '[{\"id\":%s,\"name\":\"publish_gitlab\",\"status\":\"success\"},"
+    '  if [ -n "${STUB_JOBS_JSON:-}" ]; then',
+    "    printf '%s' \"$STUB_JOBS_JSON\"",
+    "    exit 0",
+    "  fi",
+    "  printf '[{\"id\":%s,\"name\":\"record_image\",\"status\":\"success\"},"
+      + '{"id":%s,"name":"sign_evidence","status":"success"},'
       + '{"id":%s,"name":"supply_chain_image","status":"success"}]\' '
-      + '"${STUB_PUBLISH_JOB_ID:?}" "${STUB_SBOM_JOB_ID:?}"',
+      + '"${STUB_PUBLISH_JOB_ID:?}" "${STUB_SIGN_JOB_ID:?}" "${STUB_SBOM_JOB_ID:?}"',
     "  exit 0",
     "fi",
     'if [[ "$url" == *"/gitlab-tested-image.json" ]]; then',
@@ -256,6 +263,7 @@ describe("gitlab-await-tested-image.sh", () => {
       recordedAt: freshTimestamp(),
     },
     sbom = { spdxVersion: "SPDX-2.3" },
+    jobs = "",
   } = {}) {
     const stubDir = mkdtempSync(join(tmpdir(), "gitlab-await-stub-"));
     const stateDir = join(stubDir, "state");
@@ -291,7 +299,9 @@ describe("gitlab-await-tested-image.sh", () => {
           STUB_PIPELINE_ID: PIPELINE_ID,
           STUB_PIPELINE_URL: PIPELINE_URL,
           STUB_PUBLISH_JOB_ID: PUBLISH_JOB_ID,
+          STUB_SIGN_JOB_ID: SIGN_JOB_ID,
           STUB_SBOM_JOB_ID: SBOM_JOB_ID,
+          STUB_JOBS_JSON: jobs,
           STUB_EVIDENCE_FILE: evidenceFile,
           STUB_SBOM_FILE: sbomFile,
         },
@@ -309,6 +319,20 @@ describe("gitlab-await-tested-image.sh", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(polls).toBe(2);
     expect(result.stdout).toContain(`tested as ${IMAGE_REFERENCE}`);
+  });
+
+  it("refuses, by name, a pipeline whose sign_evidence job did not succeed", () => {
+    // The attestation is verified cryptographically downstream; this check
+    // exists so a pipeline that never signed is named here instead of
+    // surfacing later as a bare "missing evidence" (#661).
+    const { result } = runAwaitScript({
+      jobs:
+        `[{"id":${PUBLISH_JOB_ID},"name":"record_image","status":"success"},`
+        + `{"id":${SIGN_JOB_ID},"name":"sign_evidence","status":"failed"},`
+        + `{"id":${SBOM_JOB_ID},"name":"supply_chain_image","status":"success"}]`,
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`pipeline ${PIPELINE_ID} has no successful sign_evidence job`);
   });
 
   it("still fails immediately on a canceled pipeline, without waiting for a retry", () => {

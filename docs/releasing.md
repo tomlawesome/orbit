@@ -42,6 +42,78 @@ operator, at preview time or at promotion time: stable promotion reads it
 back out of the accepted image itself and re-runs the same calculation to
 confirm the two agree.
 
+## Validation evidence and the publication split
+
+No job both judges an image and ships it
+([ADR-0020](adr/0020-validation-evidence-binds-digest-and-policy.md), #661).
+On a `preview`/`hotfix-*` push, `record_image` pushes the tested image as
+`sha-<commit>` only and records the digest and the policy version that judged
+it; `sign_evidence` — the one job on the dedicated `orbit-signing` runner,
+whose host holds the key pair and mounts it read-only into its jobs — mints
+the cosign attestation binding those together; `publish_channel` verifies
+that evidence with the committed `cosign.pub`, re-runs the cheap identity and
+policy checks against the digest, and only then creates the channel tag.
+
+The runner is the key fence. This GitLab is CE, which has no protected
+environments and no environment-scoped variables, so a CI/CD variable would
+be readable by every job in a protected-branch pipeline. The key therefore
+never enters GitLab at all: it lives on the runner host, and only the job
+tagged `orbit-signing` can reach it. The runner is registered protected
+(it refuses jobs from unprotected refs) and locked to this project.
+
+**Re-publishing:** if publication fails (or a tag needs recreating), retry
+`publish_channel` alone — it re-verifies and re-tags without re-running
+validation. Evidence is valid for seven days from `recordedAt`; after that
+the verifier refuses with an "expired" message and the commit must go through
+validation again (re-run the pipeline). That cost is intended.
+
+**Owner setup (agents cannot create these — do not create any `COSIGN_*`
+CI/CD variables; if any exist from the earlier draft of this section, delete
+them):**
+
+1. `cosign generate-key-pair` locally, with a password. Commit the public
+   half as `cosign.pub` at the repository root; the private key and password
+   never enter chat or the repository. (Already done: the committed
+   `cosign.pub` stays valid under this design.)
+2. On the `gitlab-runners` host, as root, place the key material where the
+   signing runner will mount it:
+
+   ```sh
+   install -d -m 0755 /etc/orbit-signing
+   install -m 0600 /path/to/cosign.key /etc/orbit-signing/cosign.key
+   ( umask 077 && IFS= read -r -s -p 'key password: ' p && \
+     printf '%s' "$p" > /etc/orbit-signing/password ); echo
+   ```
+
+   The `read -s` keeps the password off the command line and out of shell
+   history. The directory is mounted read-only into the signing job's
+   container, which runs as root inside that container, so root-owned 0600
+   files are readable there; nothing else on the host needs to read them,
+   and no other runner mounts the directory.
+3. Register a second project runner on that host (the first is `orbit-build`),
+   docker executor, tag `orbit-signing`, **protected** (Settings > CI/CD >
+   Runners: "Protected" ticked, so it refuses jobs from unprotected refs),
+   **locked to this project**, "run untagged jobs" off. In its
+   `config.toml` entry add the mount:
+
+   ```toml
+   [runners.docker]
+     volumes = ["/etc/orbit-signing:/etc/orbit-signing:ro", "/cache"]
+   ```
+
+4. Confirm `preview` and `hotfix/*` are protected branches: the protected
+   runner will not pick up the `sign_evidence` job otherwise, and the
+   pipeline will sit with the job stuck rather than name the cause.
+
+Until this setup exists, `sign_evidence` either finds no runner (no
+`orbit-signing` runner registered) or fails closed naming the missing file
+in `/etc/orbit-signing`, and nothing publishes.
+
+**Key rotation:** generate a new pair, replace the two files on the runner
+host, commit the new `cosign.pub`. Attestations made under the old key stop
+verifying, so any digest not yet published must be revalidated after a
+rotation.
+
 ## Stable promotion (on GitLab)
 
 Promotion is a manual GitLab CI job, `promote_stable` in `.gitlab-ci.yml`. It
@@ -53,7 +125,7 @@ decision.
 The only input is `PREVIEW_DIGEST`, the accepted preview image's digest
 (`sha256:<64 hex>`). Find it either:
 
-- in the `publish_gitlab` job's log for the pipeline that tested the commit
+- in the `record_image` job's log for the pipeline that tested the commit
   being promoted (it prints the digest it pushed, and records the same value
   in the `gitlab-tested-image.json` artifact); or
 - by resolving GHCR's `:preview` tag directly:
@@ -119,6 +191,11 @@ Neither token is ever a command-line argument or printed: the GHCR token is
 piped to `docker login` on stdin, and the GitLab token travels to `curl` as a
 header file. Rotate either by replacing the CI/CD variable; nothing else
 needs to change.
+
+The signing key material is stricter still — it is not a CI/CD variable at
+all, but files on the `orbit-signing` runner's host that only the signing
+job's runner mounts; see "Validation evidence and the publication split"
+above.
 
 ## Supported install targets
 

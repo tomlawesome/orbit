@@ -8,11 +8,14 @@
 # it with the committed public key (scripts/ci/verify-validation-evidence.sh)
 # before doing so.
 #
-# Only the attesting job may run this: the private key lives in CI/CD
-# variables scoped to the `validation-signing` protected environment, which
-# exactly one job declares (attest_image in .gitlab-ci.yml). If the
+# Only the signing job may run this: the key pair exists solely on the
+# `orbit-signing` runner's host, mounted read-only into its jobs, and exactly
+# one job carries that runner tag (sign_evidence in .gitlab-ci.yml). GitLab
+# CE has no protected environments or environment-scoped variables, so a
+# CI/CD variable would be readable by every protected-branch job; the runner
+# mount is what keeps the key away from the jobs that publish. If the
 # publishing job could reach the key, the split would be theatre -- #661
-# criterion 6.
+# criterion 6; ADR-0020 records the CE correction.
 #
 # Usage:
 #   scripts/ci/attest-tested-image.sh <image-reference@digest> <image-digest>
@@ -22,11 +25,16 @@
 # digest, validated the same way.
 #
 # Inputs (environment):
-#   COSIGN_PRIVATE_KEY     Path to the cosign private key. A GitLab CI/CD
-#                          *file* variable, protected, scoped to the
-#                          validation-signing environment. Never printed.
+#   ORBIT_SIGNING_DIR      The signing runner's read-only key mount
+#                          (docs/releasing.md): must hold `cosign.key` and
+#                          `password`. When set it supplies both values
+#                          below, which is how CI runs this script.
+#   COSIGN_PRIVATE_KEY     Path to the cosign private key. Derived from
+#                          ORBIT_SIGNING_DIR when that is set; settable
+#                          directly for tests. Never printed.
 #   COSIGN_PASSWORD        The key's password; cosign reads it from the
-#                          environment itself. Masked, same scoping.
+#                          environment itself. Read from
+#                          ORBIT_SIGNING_DIR/password when that is set.
 #   CI_COMMIT_SHA          }
 #   CI_COMMIT_REF_NAME     }  the predicate's provenance fields, from the
 #   CI_PIPELINE_ID         }  predefined GitLab job environment
@@ -60,16 +68,25 @@ image_digest="${2:-}"
 [[ "$image_reference" == *"@${image_digest}" ]] ||
   fail "image reference ${image_reference} does not name digest ${image_digest}"
 
-# The preflight names the missing variable and where it comes from, because
-# the likeliest failure is configuration: a protected variable is silently
-# absent on an unprotected branch, and an environment-scoped one is silently
-# absent from a job that does not declare the environment.
+# The preflight names the missing piece and where it comes from, because the
+# likeliest failure is configuration: the key mount only exists on the
+# orbit-signing runner, and only after the owner setup in docs/releasing.md
+# has placed the files on its host.
+if [[ -n "${ORBIT_SIGNING_DIR:-}" ]]; then
+  [[ -d "$ORBIT_SIGNING_DIR" ]] ||
+    fail "ORBIT_SIGNING_DIR is not a directory: ${ORBIT_SIGNING_DIR}. It is the orbit-signing runner's read-only key mount (docs/releasing.md); either this job is not running on that runner, or the owner setup has not created the host directory yet."
+  COSIGN_PRIVATE_KEY="${ORBIT_SIGNING_DIR}/cosign.key"
+  [[ -f "${ORBIT_SIGNING_DIR}/password" ]] ||
+    fail "ORBIT_SIGNING_DIR has no password file: ${ORBIT_SIGNING_DIR}/password. The owner setup in docs/releasing.md places the key password there."
+  COSIGN_PASSWORD="$(< "${ORBIT_SIGNING_DIR}/password")"
+  export COSIGN_PASSWORD
+fi
 [[ -n "${COSIGN_PRIVATE_KEY:-}" ]] ||
-  fail 'COSIGN_PRIVATE_KEY is not set. It is a protected CI/CD file variable scoped to the validation-signing environment (docs/releasing.md); either this job does not declare `environment: validation-signing`, or the branch is not protected, or the owner setup has not run yet.'
+  fail 'COSIGN_PRIVATE_KEY is not set and ORBIT_SIGNING_DIR is not set either. CI supplies ORBIT_SIGNING_DIR (the signing runner mount, docs/releasing.md); tests may set COSIGN_PRIVATE_KEY directly.'
 [[ -f "$COSIGN_PRIVATE_KEY" ]] ||
-  fail "COSIGN_PRIVATE_KEY does not point at a readable file (is it a Variable rather than a File variable?): ${COSIGN_PRIVATE_KEY}"
+  fail "COSIGN_PRIVATE_KEY does not point at a readable file: ${COSIGN_PRIVATE_KEY}. On the signing runner this is ORBIT_SIGNING_DIR/cosign.key; the owner setup in docs/releasing.md places it there."
 [[ -n "${COSIGN_PASSWORD:-}" ]] ||
-  fail 'COSIGN_PASSWORD is not set. It is the masked, protected CI/CD variable holding the signing key password, scoped to the validation-signing environment (docs/releasing.md).'
+  fail 'COSIGN_PASSWORD is not set. It comes from ORBIT_SIGNING_DIR/password on the signing runner (docs/releasing.md); tests may set it directly.'
 
 commit="${CI_COMMIT_SHA:-}"
 ref="${CI_COMMIT_REF_NAME:-}"

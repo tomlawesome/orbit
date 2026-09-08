@@ -9,10 +9,10 @@ import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./
 
 /*
  * scripts/ci/attest-tested-image.sh mints the validation attestation (#661).
- * Its likeliest failures are configuration -- the signing key material is
- * scoped to the validation-signing protected environment and silently absent
- * anywhere else -- so the preflight refusals must name the missing variable
- * and where it comes from, not just fail. cosign is stubbed on PATH; the
+ * Its likeliest failures are configuration -- the signing key material
+ * exists only on the orbit-signing runner's host mount and is silently
+ * absent anywhere else -- so the preflight refusals must name the missing
+ * piece and where it comes from, not just fail. cosign is stubbed on PATH; the
  * stub copies the --predicate file before the script's cleanup trap removes
  * it, so the test can judge exactly what would have been signed.
  */
@@ -143,25 +143,64 @@ describe("attest-tested-image.sh", () => {
     expect(written.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u);
   });
 
-  it("refuses without COSIGN_PRIVATE_KEY, naming the variable and its protected environment", () => {
+  it("takes both key and password from ORBIT_SIGNING_DIR, the runner mount, when set", () => {
+    // How CI actually runs it: sign_evidence passes only the mount path, so
+    // no COSIGN_ value ever appears in the pipeline configuration.
+    const signingDir = mkdtempSync(join(tmpdir(), "orbit-signing-"));
+    writeFileSync(join(signingDir, "cosign.key"), "TEST-PRIVATE-KEY-NOT-REAL\n");
+    writeFileSync(join(signingDir, "password"), "TEST-PASSWORD-NOT-REAL\n");
+    const { result, calls } = run({
+      env: { ORBIT_SIGNING_DIR: signingDir },
+      dropEnv: ["COSIGN_PRIVATE_KEY", "COSIGN_PASSWORD"],
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    const [cosignCall] = calls();
+    expect(cosignCall[1]).toContain(`--key ${join(signingDir, "cosign.key")}`);
+  });
+
+  it("refuses an ORBIT_SIGNING_DIR that is not a directory, naming the runner and the mount", () => {
+    const { result } = run({
+      env: { ORBIT_SIGNING_DIR: "/nonexistent/orbit-signing" },
+      dropEnv: ["COSIGN_PRIVATE_KEY", "COSIGN_PASSWORD"],
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("ORBIT_SIGNING_DIR is not a directory");
+    expect(result.stderr).toContain("orbit-signing runner");
+    expect(result.stderr).toContain("owner setup");
+  });
+
+  it("refuses an ORBIT_SIGNING_DIR with no password file, naming the missing file", () => {
+    const signingDir = mkdtempSync(join(tmpdir(), "orbit-signing-"));
+    writeFileSync(join(signingDir, "cosign.key"), "TEST-PRIVATE-KEY-NOT-REAL\n");
+    const { result } = run({
+      env: { ORBIT_SIGNING_DIR: signingDir },
+      dropEnv: ["COSIGN_PRIVATE_KEY", "COSIGN_PASSWORD"],
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("ORBIT_SIGNING_DIR has no password file");
+    expect(result.stderr).toContain(`${signingDir}/password`);
+  });
+
+  it("refuses without COSIGN_PRIVATE_KEY, naming both ways the key can arrive", () => {
     const { result } = run({ dropEnv: ["COSIGN_PRIVATE_KEY"] });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("COSIGN_PRIVATE_KEY is not set");
-    expect(result.stderr).toContain("validation-signing");
-    expect(result.stderr).toContain("owner setup");
+    expect(result.stderr).toContain("COSIGN_PRIVATE_KEY is not set and ORBIT_SIGNING_DIR is not set either");
+    expect(result.stderr).toContain("signing runner mount");
   });
 
   it("refuses a COSIGN_PRIVATE_KEY that is not a readable file", () => {
     const { result } = run({ env: { COSIGN_PRIVATE_KEY: "/nonexistent/cosign.key" } });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("COSIGN_PRIVATE_KEY does not point at a readable file");
-    expect(result.stderr).toContain("File variable");
+    expect(result.stderr).toContain("ORBIT_SIGNING_DIR/cosign.key");
   });
 
-  it("refuses without COSIGN_PASSWORD, naming the variable", () => {
+  it("refuses without COSIGN_PASSWORD, naming where it comes from", () => {
     const { result } = run({ dropEnv: ["COSIGN_PASSWORD"] });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("COSIGN_PASSWORD is not set");
+    expect(result.stderr).toContain("ORBIT_SIGNING_DIR/password");
   });
 
   it("refuses a malformed digest and a reference naming a different digest", () => {

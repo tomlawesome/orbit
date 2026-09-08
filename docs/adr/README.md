@@ -34,3 +34,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0017: Mail-in credential ownership and per-user relays](0017-mail-in-credential-ownership-and-per-user-relay.md)
 - [ADR-0018: The engine is a library, `orbit-web` links it, adapter-node ships it](0018-engine-library-and-adapter-node-packaging.md)
 - [ADR-0019: Deployment assets ship inside the image](0019-deployment-assets-ship-inside-the-image.md)
+- [ADR-0020: Validation evidence is a cosign attestation binding digest and policy version; publication only consumes it](0020-validation-evidence-binds-digest-and-policy.md)

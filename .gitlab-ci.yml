@@ -19,9 +19,13 @@
 #      and `scripts/test-backup-restore.sh`. Each is a long-running suite of
 #      its own rather than a validation step, and each wants a lane here
 #      instead of a line in an existing job.
-#   2. Provenance and SBOM attestation. GitLab CE has no equivalent of
-#      actions/attest, so `publish_gitlab` records the tested digest and the
-#      GitHub lane still owns attestation.
+#   2. Provenance and SBOM attestation for operators. GitLab CE has no
+#      equivalent of actions/attest, so the GitHub lane still owns the
+#      operator-facing provenance/SBOM attestations over the GHCR digest.
+#      The evidence *publication* consumes -- "this digest passed the full
+#      bar under policy P" -- is different, and does live here: a cosign
+#      key-based attestation minted by `sign_evidence` and verified by every
+#      publishing hop (#661, ADR-0020).
 #   3. The workflow's second concurrent integration run. See `integration`.
 #
 # Every job that touches Docker asks for the `orbit-build` runner by tag. A
@@ -113,7 +117,7 @@ variables:
   # The image the v19 baselines were proven against, byte for byte the pin the
   # GitHub fidelity job uses. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
-  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.0-noble@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07
+  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
   # Same scanner build as the workflow, so a finding here and a finding there
   # mean the same thing.
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
@@ -1046,7 +1050,7 @@ integration:
       pnpm exec vitest run --project integration
 
 # Builds the image once and hands it on as a tarball, so `smoke`,
-# `repair_journeys` and `publish_gitlab` all exercise and publish the same
+# `repair_journeys` and `record_image` all exercise and publish the same
 # bytes rather than three builds of the same source. The workflow rebuilds
 # instead, because its smoke and publish jobs share one steps anchor.
 build_image:
@@ -1729,18 +1733,47 @@ launcher_install_compat:
 
 # --- publish -----------------------------------------------------------------
 
-# Pushes the exact image the acceptance stage tested, rather than rebuilding
-# it. That is the whole reason build_image hands on a tarball.
+# Validation and publication are separate jobs, deliberately (#661,
+# implementing the #573 ruling; ADR-0020): no job both judges an image and
+# ships it.
 #
-# Credentials are the job's own $CI_REGISTRY_USER/$CI_REGISTRY_PASSWORD, which
-# GitLab issues per job and revokes when it ends. No other secret is referenced
-# here, and none should be added: this job publishes to the project's own
-# registry and nowhere else.
+#   record_image     pushes the exact tested image as the immutable anchor
+#                    `sha-<commit>` -- never a channel tag -- and records the
+#                    transport evidence with the policy version.
+#   sign_evidence    mints the cosign validation attestation over that
+#                    digest. The only job on either host that can sign: it
+#                    alone carries the `orbit-signing` runner tag, and the
+#                    key pair exists only on that runner's host, mounted
+#                    read-only into its jobs (docs/releasing.md).
+#   publish_channel  consumes the evidence: verifies it with the committed
+#                    public key, re-runs the cheap checks against the digest,
+#                    and only then creates the consumer-visible channel tag,
+#                    registry-side. Retrying it alone re-publishes without
+#                    re-running validation -- a failed publication costs a
+#                    re-publish, not the full bar (v1.3.0 took three
+#                    promotions in an afternoon the other way).
 #
-# No attestation step. GitLab CE has no equivalent of actions/attest, so the
-# tested digest is recorded as evidence instead and the GitHub lane keeps
-# ownership of provenance and SBOM attestation until #801 says otherwise.
-publish_gitlab:
+# Why a runner mount and not CI/CD variables: this instance is GitLab CE
+# (19.3.1, verified 2026-09-08), which has no protected environments and no
+# environment-scoped variables -- both are Premium. A project-level variable
+# is readable by every job in every protected-branch pipeline, which would
+# hand the signing key to the whole acceptance suite's dependency tree; an
+# `environment:` block would parse and enforce nothing. The runner mount
+# keeps the key out of GitLab's variable store entirely, and the runner is
+# protected and locked to this project, so a job on an unprotected ref that
+# gives itself the tag gets no runner, not the key (#661 criterion 6;
+# ADR-0020 records the correction).
+#
+# Credentials in all three jobs are the job's own $CI_REGISTRY_USER/
+# $CI_REGISTRY_PASSWORD, which GitLab issues per job and revokes when it
+# ends; nothing else should ever be added, and no other job may take the
+# `orbit-signing` tag (scripts/validation-evidence-split.test.mjs makes such
+# an edit loud).
+#
+# The GitHub lane keeps operator-facing provenance/SBOM attestation over the
+# GHCR digest (GitLab CE has no actions/attest equivalent); the cosign
+# attestation minted here is the internal trust plumbing publication runs on.
+record_image:
   stage: publish
   extends: .dind
   timeout: 20m
@@ -1770,35 +1803,33 @@ publish_gitlab:
     - apk_add bash
     - *step_outputs
     - docker load --input image.tar
+    # Only the immutable anchor `sha-<commit>` is pushed here -- the channel
+    # tag belongs to publish_channel. The ruling's "digest-only, no tag" is
+    # realised as "no channel tag" because GitLab's registry garbage
+    # collection deletes untagged manifests, so a literally untagged
+    # validated image could be destroyed inside its own seven-day evidence
+    # window by routine disk maintenance (#832). The anchor is never consumed
+    # except through digest comparison, so a moved tag is detected.
     - |
       set -eu
       : > "$GITHUB_OUTPUT"
-      channel_tag=preview
-      case "$CI_COMMIT_BRANCH" in
-        hotfix/*) channel_tag="hotfix-$(printf '%s' "${CI_COMMIT_BRANCH#hotfix/}" | tr -c 'A-Za-z0-9._-' '-')" ;;
-      esac
       sha_reference="${CI_REGISTRY_IMAGE}:sha-${CI_COMMIT_SHA}"
-      channel_reference="${CI_REGISTRY_IMAGE}:${channel_tag}"
       docker tag "$ORBIT_CI_IMAGE" "$sha_reference"
-      docker tag "$ORBIT_CI_IMAGE" "$channel_reference"
       echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
-    # The workflow's push-and-verify: each tag is pushed, the digest the
+    # The workflow's push-and-verify: the tag is pushed, the digest the
     # registry returns is pulled back, and its configuration identity compared
-    # with the tested one. Once per tag, because a tag that resolves to
-    # something else is exactly what this is looking for.
+    # with the tested one. Then the transport record, the moment the push it
+    # describes has succeeded; the attestation binding the digest to the
+    # policy version that judged it (#573 ruling 24) is sign_evidence's,
+    # because this job must never hold signing capability.
     - |
       set -eu
       IMAGE_TAG="$sha_reference" TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
         bash scripts/ci/publish-image.sh
-      IMAGE_TAG="$channel_reference" TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
-        bash scripts/ci/publish-image.sh
-      # Both tags name one image in one repository, so the registry must have
-      # returned one digest. Two would mean the tags diverged between pushes.
-      distinct_digests="$(sed -n 's/^digest=//p' "$GITHUB_OUTPUT" | sort -u | wc -l | tr -d '[:space:]')"
-      [ "$distinct_digests" = "1" ] ||
-        { echo "the two published tags do not resolve to one digest"; exit 1; }
       published_digest="$(orbit_output digest)"
-      bash scripts/ci/gitlab-record-tested-image.sh "${CI_REGISTRY_IMAGE}@${published_digest}" "$published_digest"
+      policy_version="$(bash scripts/ci/policy-version.sh)"
+      bash scripts/ci/gitlab-record-tested-image.sh \
+        "${CI_REGISTRY_IMAGE}@${published_digest}" "$published_digest" "$policy_version"
       cat .orbit-supply-chain/gitlab-tested-image.json
   artifacts:
     name: orbit-gitlab-tested-image
@@ -1806,6 +1837,91 @@ publish_gitlab:
       - .orbit-supply-chain/gitlab-tested-image.json
     expire_in: 90 days
     when: on_success
+
+# Mints the validation attestation over the digest record_image pushed,
+# saying "this digest passed the full bar under policy version P at time T".
+# The only job that may sign, and the fence is the runner, not this file:
+# the `orbit-signing` runner is protected (it refuses jobs from unprotected
+# refs), locked to this project, and its host config mounts the owner-held
+# key material read-only at /etc/orbit-signing -- so a job without this tag
+# never sees the key, and a job with it on an unprotected ref never runs.
+# Kept apart from record_image so the job that can sign runs the smallest
+# possible surface: the pinned cosign binary and this repository's scripts,
+# not the image build or the test suites.
+#
+# No .dind and no daemon: `docker login` writes the registry credential
+# without one, and cosign talks to the registry over HTTPS itself. The image
+# is the same digest-pinned docker:29-cli the .dind jobs use.
+sign_evidence:
+  stage: publish
+  image: docker:29-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
+  timeout: 10m
+  # Same reasoning as record_image: a cancelled signing run leaves a pushed
+  # digest with no evidence and nothing to show why.
+  interruptible: false
+  tags:
+    - orbit-signing
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+  needs:
+    # The digest to attest comes from the transport record; the attestation
+    # itself re-states nothing from it without validating the shape first
+    # (attest-tested-image.sh), and the policy version is recomputed from
+    # this job's own checkout rather than read from the artifact.
+    - job: record_image
+      artifacts: true
+  script:
+    - *apk_retry
+    # bash for the scripts, curl for ensure-cosign's pinned download, node
+    # to read the digest out of the transport record.
+    - apk_add bash curl nodejs
+    - |
+      set -eu
+      digest="$(node -e '
+        const doc = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+        process.stdout.write(typeof doc.imageDigest === "string" ? doc.imageDigest : "");
+      ' -- .orbit-supply-chain/gitlab-tested-image.json)"
+      echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+      ORBIT_SIGNING_DIR="${ORBIT_SIGNING_DIR:-/etc/orbit-signing}" \
+        bash scripts/ci/attest-tested-image.sh \
+        "${CI_REGISTRY_IMAGE}@${digest}" "$digest"
+
+# The publication half of the split: everything it does lives in
+# scripts/ci/publish-channel.sh so the refusal paths are unit tested
+# (scripts/publish-channel.test.mjs); this job only installs what the script
+# needs, logs in and calls it. The script runs the shared verifier
+# (scripts/ci/verify-validation-evidence.sh) -- refusing on mismatched,
+# missing, ambiguous or expired evidence -- re-runs the cheap identity and
+# policy checks against the pulled digest, then creates the channel tag with
+# `docker buildx imagetools create`: registry-side, no bytes move, no
+# image.tar, so the digest cannot change between validation and publication.
+publish_channel:
+  stage: publish
+  extends: .dind
+  timeout: 20m
+  # Same reasoning as record_image: a cancelled publication leaves a
+  # validated digest with no consumable name and nothing to show why.
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+  needs:
+    # The evidence producer's artifact carries the digest to verify (the full
+    # bar already gates record_image itself), and the attestation must exist
+    # before the verifier can find it.
+    - job: record_image
+      artifacts: true
+    - job: sign_evidence
+  script:
+    - *apk_retry
+    # node for the verifier's judgement and the policy validation; curl for
+    # the pinned cosign download.
+    - apk_add bash curl nodejs
+    - |
+      set -eu
+      echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+      bash scripts/ci/publish-channel.sh
 
 # Promotes a tested `preview` digest to a stable release (#821), the same
 # thing .github/workflows/promote-container.yml did before GitLab was the
@@ -1818,8 +1934,8 @@ publish_gitlab:
 # pipeline cannot infer from a push.
 #
 # GHCR stays the public image source; the GitLab registry keeps only
-# `:sha-*`/`:preview` (see publish_gitlab above). So this job never touches
-# registry.tomlawson.io -- it reads and retags ghcr.io/tomlawesome/orbit by
+# `:sha-*`/`:preview` (see record_image/publish_channel above). So this
+# job never touches registry.tomlawson.io -- it retags ghcr.io/tomlawesome/orbit by
 # digest with plain `docker`/`docker buildx imagetools` (GHCR is the only
 # registry involved, so there is nothing crane does here that docker does
 # not), then creates the matching annotated tag here on GitLab. The push
@@ -1829,7 +1945,7 @@ publish_gitlab:
 # All the logic lives in scripts/ci/promote-stable.sh so it can be unit
 # tested (scripts/promote-stable.test.mjs) against stub docker/git/curl --
 # this job only installs what the script needs and calls it. `.dind` for the
-# same reason `build_image` and `publish_gitlab` need it: talking to a Docker
+# same reason `build_image` and `record_image` need it: talking to a Docker
 # daemon (`docker buildx imagetools`, `docker login`) needs one, and its
 # image (docker:29-cli) carries no package manager entries for git or node.
 #
@@ -1851,9 +1967,10 @@ publish_gitlab:
 # validation record for the commit being promoted -- the same script and
 # evidence that already gate the GHCR copy -- reusing GITLAB_RELEASE_TOKEN as
 # the read token rather than minting a new one. It is an interim measure:
-# #661 defines the shared cryptographic verifier that will eventually take
-# its place project-wide; see the comment at the gate in promote-stable.sh
-# for exactly what it does and does not check.
+# the shared cryptographic verifier #661 defined now exists
+# (scripts/ci/verify-validation-evidence.sh) and #877 is the issue that
+# wires promotion to it; see the comment at the gate in promote-stable.sh
+# for exactly what the interim gate does and does not check.
 promote_stable:
   stage: publish
   extends: .dind
