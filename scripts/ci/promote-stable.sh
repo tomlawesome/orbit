@@ -165,19 +165,19 @@ fi
 # the digest, refusing on four grounds -- mismatch, missing, ambiguous,
 # expired -- before creating the tag. #661's own spec (section 7) lists
 # promote_stable staying unguarded as a real gap and names it as this
-# issue's follow-up, deliberately out of #661's own scope. The verifier does
-# not exist yet: it needs a cosign key pair and a protected GitLab
-# environment only the owner can create, and #661's whole design is to have
-# exactly one verifier, so this must not grow a second one while waiting.
+# issue's follow-up, deliberately out of #661's own scope. That verifier now
+# exists; wiring promotion to it is #877's own change (it needs the owner's
+# cosign key setup live first), and #661's whole design is to have exactly
+# one verifier, so this gate must not grow a second copy while waiting.
 #
 # What ships here instead reuses gitlab-await-tested-image.sh unchanged --
 # the same script, and the same
 # .orbit-supply-chain/gitlab-tested-image.json evidence written by
-# publish_gitlab -- that already gates the GHCR copy in
+# record_image -- that already gates the GHCR copy in
 # .github/workflows/publish-from-gitlab.yml. It answers three of the four
 # grounds without any new credential:
 #   - missing:  no successful push pipeline for this commit/ref, or no
-#     successful publish_gitlab/supply_chain_image job in it, or no evidence
+#     successful record_image/sign_evidence/supply_chain_image job in it, or no
 #     artifact -- the script's own refusals, unchanged.
 #   - expired:  evidence recordedAt older than seven days, or implausibly in
 #     the future -- the script's own check, unchanged. Promotion gets no
