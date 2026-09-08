@@ -30,14 +30,24 @@
 #                          GitLab pipeline variable set by whoever runs the
 #                          job -- the same input promote-container.yml's
 #                          workflow_dispatch took.
-#   CI_API_V4_URL          GitLab's predefined API base URL. Also the base
-#                          URL the evidence gate (#877, below) polls for the
-#                          commit's validation record.
-#   CI_PROJECT_ID          GitLab's predefined numeric project id. Also read
-#                          by the evidence gate.
-#   CI_REGISTRY            GitLab's predefined registry hostname. The
-#                          evidence gate refuses a record that points
-#                          anywhere else.
+#   CI_API_V4_URL          GitLab's predefined API base URL, for the release
+#                          tag created at the end.
+#   CI_PROJECT_ID          GitLab's predefined numeric project id, for that
+#                          same release-tag call.
+#   CI_REGISTRY            GitLab's predefined registry hostname. Logged into
+#                          with CI_REGISTRY_USER/CI_REGISTRY_PASSWORD (both
+#                          predefined) so the evidence gate below can read the
+#                          attestation cosign attached there.
+#   CI_REGISTRY_USER,
+#   CI_REGISTRY_PASSWORD   GitLab's predefined registry credentials, for the
+#                          same login.
+#   CI_REGISTRY_IMAGE      GitLab's predefined repository reference
+#                          (CI_REGISTRY plus this project's path). The
+#                          evidence gate verifies against this image, never
+#                          against GHCR_IMAGE: sign_evidence attests beside
+#                          the image here, and GHCR never receives that
+#                          attestation -- the GitHub publish lane mints its
+#                          own, differently-shaped one instead.
 #   GHCR_PUBLISH_TOKEN     A masked CI/CD variable: a GHCR token scoped only
 #                          to write:packages. Never printed or passed as a
 #                          command-line argument -- piped to `docker login`
@@ -45,10 +55,7 @@
 #   GITLAB_RELEASE_TOKEN   A masked CI/CD variable: a project access token,
 #                          Maintainer role, `api` scope, named
 #                          `release-tagging`. Sent to curl as a header file,
-#                          never a command-line argument or logged. Its `api`
-#                          scope also covers the read-only pipeline/job/
-#                          artifact lookups the evidence gate makes, so it is
-#                          reused there rather than minting a second token.
+#                          never a command-line argument or logged.
 #   GHCR_IMAGE             Optional; default ghcr.io/tomlawesome/orbit.
 #   GIT_REMOTE             Optional; default origin. The remote to read
 #                          main/preview HEADs, existing tags and branch
@@ -58,12 +65,12 @@
 #                          scripts/stable-promotion-policy.mjs, overridable
 #                          only so a test can point it at a wrapper; real use
 #                          always takes the default.
-#   PROMOTE_AWAIT_SCRIPT   Optional; default
-#                          scripts/ci/gitlab-await-tested-image.sh. The
-#                          evidence-gate script this runs to fetch and check
-#                          GitLab's validation record (#877), overridable
-#                          only so a test can point it at a stub; real use
-#                          always takes the default.
+#   PROMOTE_VERIFY_SCRIPT  Optional; default
+#                          scripts/ci/verify-validation-evidence.sh. The
+#                          shared verifier this runs against the digest
+#                          before promoting (#877), overridable only so a
+#                          test can point it at a stub; real use always takes
+#                          the default.
 set -Eeuo pipefail
 
 # scripts/calculate-version.mjs and scripts/stable-promotion-policy.mjs are
@@ -79,6 +86,9 @@ fail() { printf 'promote-stable: %s\n' "$1" >&2; exit 1; }
 : "${CI_API_V4_URL:?CI_API_V4_URL is not set; this script must run inside a GitLab CI job}"
 : "${CI_PROJECT_ID:?CI_PROJECT_ID is not set; this script must run inside a GitLab CI job}"
 : "${CI_REGISTRY:?CI_REGISTRY is not set; this script must run inside a GitLab CI job}"
+: "${CI_REGISTRY_USER:?CI_REGISTRY_USER is not set; this script must run inside a GitLab CI job}"
+: "${CI_REGISTRY_PASSWORD:?CI_REGISTRY_PASSWORD is not set; this script must run inside a GitLab CI job}"
+: "${CI_REGISTRY_IMAGE:?CI_REGISTRY_IMAGE is not set; this script must run inside a GitLab CI job}"
 : "${GHCR_PUBLISH_TOKEN:?GHCR_PUBLISH_TOKEN is not set. Create a GHCR token scoped only to write:packages and set it as a masked CI/CD variable (docs/releasing.md).}"
 : "${GITLAB_RELEASE_TOKEN:?GITLAB_RELEASE_TOKEN is not set. Create a project access token (Maintainer, scope: api) named release-tagging and set it as a masked CI/CD variable (docs/releasing.md).}"
 
@@ -159,68 +169,44 @@ fi
 # --- Evidence gate: refuse to promote a digest whose validation evidence
 # does not check out (#877) ---
 #
-# #661 defines the target this is an interim step toward: a shared
-# cryptographic verifier (scripts/ci/verify-validation-evidence.sh,
-# cosign-based) that every hop adding a consumer-visible name runs against
-# the digest, refusing on four grounds -- mismatch, missing, ambiguous,
-# expired -- before creating the tag. #661's own spec (section 7) lists
-# promote_stable staying unguarded as a real gap and names it as this
-# issue's follow-up, deliberately out of #661's own scope. That verifier now
-# exists; wiring promotion to it is #877's own change (it needs the owner's
-# cosign key setup live first), and #661's whole design is to have exactly
-# one verifier, so this gate must not grow a second copy while waiting.
+# The shared cryptographic verifier #661 specified now exists
+# (scripts/ci/verify-validation-evidence.sh), and every hop that gives a
+# validated digest a consumer-visible name runs it before doing so --
+# publish_channel (scripts/ci/publish-channel.sh) was first; this closes the
+# gap #661's own spec (section 7) named as this issue's own follow-up
+# (promote_stable staying unguarded). It refuses on all four grounds --
+# mismatch, missing, ambiguous, expired -- against the committed cosign key
+# (cosign.pub).
 #
-# What ships here instead reuses gitlab-await-tested-image.sh unchanged --
-# the same script, and the same
-# .orbit-supply-chain/gitlab-tested-image.json evidence written by
-# record_image -- that already gates the GHCR copy in
-# .github/workflows/publish-from-gitlab.yml. It answers three of the four
-# grounds without any new credential:
-#   - missing:  no successful push pipeline for this commit/ref, or no
-#     successful record_image/sign_evidence/supply_chain_image job in it, or no
-#     artifact -- the script's own refusals, unchanged.
-#   - expired:  evidence recordedAt older than seven days, or implausibly in
-#     the future -- the script's own check, unchanged. Promotion gets no
-#     longer a window than the GHCR copy does; nothing here argues for
-#     letting promotion consume older evidence.
-#   - mismatch: the script already refuses evidence recorded for another
-#     commit, ref, pipeline or registry; the one comparison it cannot make
-#     itself -- evidence digest vs. the digest actually being promoted -- is
-#     added just below, since PREVIEW_DIGEST is never visible to the script.
-# It does NOT answer "ambiguous": telling two independently produced,
-# disagreeing evidence records for the same commit/ref apart -- as opposed
-# to one record simply not matching -- needs #661's cryptographic binding.
-# Nothing here signs or verifies a signature, so two colliding or forged
-# JSON records would look identical to this gate. Do not approximate that
-# check with more JSON comparisons; #661's verifier is what closes it.
+# This replaces the interim gate that ran here until now: gitlab-await-
+# tested-image.sh plus a hand-written digest comparison. That gate's
+# missing/expired checks and its partial mismatch check (commit, ref,
+# pipeline, registry) are exactly what the verifier now proves
+# cryptographically over the same four grounds, so running both would be two
+# copies of one judgement. Removed entirely rather than kept alongside --
+# #661's whole point is exactly one verifier, and this was the last caller
+# still running a paraphrase of it. (The GitHub publish lane's own call to
+# gitlab-await-tested-image.sh is unrelated and untouched: it fetches
+# GitLab's transport record to learn *which* digest to copy, before any
+# evidence exists to verify.)
 #
-# GITLAB_RELEASE_TOKEN (api scope, required above for the release tag) is
-# reused as the read token below: its scope already covers this project's
-# own pipelines, jobs and artifacts, so no new credential is created for
-# this gate. The wait is capped short (unlike the GHCR copy's 120-minute
-# default): by the time an operator promotes, the evidence was recorded days
-# or weeks ago by a pipeline that already finished, not one this job should
-# sit around waiting to start.
-evidence_dir="$(mktemp -d)"
-GITLAB_API_URL="$CI_API_V4_URL" \
-GITLAB_PROJECT_ID="$CI_PROJECT_ID" \
-GITLAB_READ_TOKEN="$GITLAB_RELEASE_TOKEN" \
-GITLAB_REGISTRY="$CI_REGISTRY" \
+# The attestation lives on registry.tomlawson.io, next to the image
+# sign_evidence attested (CI_REGISTRY_IMAGE) -- never on GHCR, since the
+# GitHub publish lane mints its own GitHub-native attestation instead of
+# copying this one. So the verifier runs against CI_REGISTRY_IMAGE, not the
+# GHCR_IMAGE this job otherwise promotes; the two are assumed to carry the
+# exact same digest, which the :sha-<commit> and :preview identity checks
+# above already rely on. CI_REGISTRY_USER/CI_REGISTRY_PASSWORD are
+# predefined GitLab CI variables -- read access already implied by
+# CI_REGISTRY, not a new credential -- so no CI/CD variable is added for
+# this gate, and GITLAB_RELEASE_TOKEN is no longer read here at all.
+echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+
+ORBIT_IMAGE="$CI_REGISTRY_IMAGE" \
+ORBIT_DIGEST="$PREVIEW_DIGEST" \
 ORBIT_COMMIT="$main_head" \
 ORBIT_REF="$source_branch" \
-ORBIT_WAIT_MINUTES=2 \
-ORBIT_EVIDENCE_DIR="$evidence_dir" \
-  bash "${PROMOTE_AWAIT_SCRIPT:-${repo_root}/scripts/ci/gitlab-await-tested-image.sh}"
-
-evidence_digest="$(run_node -e '
-  const fs = require("fs");
-  const doc = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-  process.stdout.write(doc.imageDigest || "");
-' "${evidence_dir}/gitlab-tested-image.json")"
-rm -rf "$evidence_dir"
-
-[[ "$evidence_digest" == "$PREVIEW_DIGEST" ]] ||
-  fail "GitLab's validation evidence for ${main_head} on ${source_branch} recorded digest ${evidence_digest:-<missing>}, not the digest being promoted (${PREVIEW_DIGEST})"
+  bash "${PROMOTE_VERIFY_SCRIPT:-${repo_root}/scripts/ci/verify-validation-evidence.sh}"
 
 # The calculator reads stable Git tags, so tags must be fetched -- not just
 # the branches merge-base needs below. `git fetch --no-tags` here would be
