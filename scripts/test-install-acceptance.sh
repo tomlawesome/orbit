@@ -37,6 +37,9 @@
 # Environment:
 #   ORBIT_ACCEPTANCE_IMAGE  prebuilt orbit image reference to test; when
 #                           unset, the working tree is built locally.
+#   COMPOSE_PROJECT_NAME    override the per-run Compose project name derived
+#                           below (#894); install.sh honours the same
+#                           variable, so an explicit value here reaches it.
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -52,24 +55,48 @@ for arg in "$@"; do
 done
 
 workdir="$(mktemp -d /tmp/orbit-acceptance.XXXXXX)"
-registry_name="orbit-acceptance-registry"
-registry_port=5300
-orbit_port=3210
+
+free_port() {
+  node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});'
+}
+
+# #894: project_name, registry_name and both ports used to be the fixed
+# literals "orbit-acceptance" / "orbit-acceptance-registry" / 5300 / 3210, so
+# two runs on one host -- two worktrees, two sessions, a local run beside a
+# CI job -- shared one Compose project and one pair of ports: either run's
+# cleanup swept the other's containers and volumes, and a second run could
+# not even bind its ports. Derive all four per run instead, the same way
+# scripts/test-e2e-local.sh does for the same reason (#875): the project
+# name from this checkout's path and this process's PID (so even two runs
+# from the same checkout cannot collide), the ports from whatever the kernel
+# hands out. An explicit COMPOSE_PROJECT_NAME in the caller's environment
+# still wins, same as install.sh itself honours it.
+repo_hash="$(printf '%s' "$repo_root" | md5sum | cut -c1-8)"
+project_name="${COMPOSE_PROJECT_NAME:-orbit-acceptance-${repo_hash}-$$}"
+readonly project_name
+registry_name="${project_name}-registry"
+registry_port="$(free_port)"
+orbit_port="$(free_port)"
+while [[ "$orbit_port" == "$registry_port" ]]; do
+  orbit_port="$(free_port)"
+done
 repository="acceptance/orbit"
 issuer="https://oidc.acceptance.invalid/application/o/orbit/"
 # The target directory name doubles as the Compose project name the
-# installer persists, so every container/volume/network this script creates
-# carries the orbit-acceptance project label and can be swept even after an
-# untrappable SIGKILL left debris behind.
-target="$workdir/orbit-acceptance"
+# installer persists (derive_compose_project_name in install.sh falls back
+# to the target directory's basename when COMPOSE_PROJECT_NAME is not set),
+# so every container/volume/network this script creates carries this run's
+# project label and can be swept even after an untrappable SIGKILL left
+# debris behind.
+target="$workdir/$project_name"
 
 sweep_debris() {
   docker rm -f "$registry_name" >/dev/null 2>&1 || true
-  docker ps -aq --filter label=com.docker.compose.project=orbit-acceptance |
+  docker ps -aq --filter label=com.docker.compose.project="$project_name" |
     xargs -r docker rm -f >/dev/null 2>&1 || true
-  docker volume ls -q --filter label=com.docker.compose.project=orbit-acceptance |
+  docker volume ls -q --filter label=com.docker.compose.project="$project_name" |
     xargs -r docker volume rm >/dev/null 2>&1 || true
-  docker network ls -q --filter label=com.docker.compose.project=orbit-acceptance |
+  docker network ls -q --filter label=com.docker.compose.project="$project_name" |
     xargs -r docker network rm >/dev/null 2>&1 || true
 }
 
@@ -79,7 +106,7 @@ fail() { printf '[acceptance] FAIL: %s\n' "$*" >&2; exit 1; }
 cleanup() {
   local status=$?
   if [[ "$keep_mode" == 1 || ( "$status" -ne 0 && -n "${ORBIT_ACCEPTANCE_KEEP_ON_FAIL:-}" ) ]]; then
-    note "keeping work directory: $workdir"
+    note "keeping work directory: $workdir (project $project_name)"
     return
   fi
   if [[ -f "$target/.env-orbit" && -f "$target/docker-compose.yml" ]]; then
@@ -442,7 +469,20 @@ positive_scenario() {
 }
 
 note "work directory: $workdir"
+note "project: $project_name (registry $registry_name on 127.0.0.1:$registry_port, app on 127.0.0.1:$orbit_port)"
 sweep_debris
+
+# #894: scripts/test-install-acceptance.test.mjs proves the per-run
+# derivation above and the sweep filter that uses it, with a fake `docker`
+# on PATH standing in for the daemon -- no install, no network, no
+# container. This hook stops right after the one real sweep_debris call
+# above (itself a no-op against a fresh fake docker) so the test can inspect
+# what it invoked without going anywhere near install.sh.
+if [[ -n "${TEST_INSTALL_ACCEPTANCE_DRY_RUN:-}" ]]; then
+  note "dry run: exiting after sweep_debris, before any installer run"
+  exit 0
+fi
+
 negative_scenarios
 if [[ "$negative_only" == 1 ]]; then
   note "negative-only run complete"
