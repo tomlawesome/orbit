@@ -116,7 +116,7 @@ try {
   delete integrationEnvironment.OIDC_CLIENT_SECRET_FILE;
 
   run(packageManager, ["exec", "tsx", "src/db/migrate.ts"], integrationEnvironment, "Database migrations");
-  run(packageManager, ["exec", "vitest", "run", "--config", "vitest.integration.config.ts"], integrationEnvironment, "Integration tests");
+  run(packageManager, ["exec", "vitest", "run", "--project", "integration"], integrationEnvironment, "Integration tests");
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Integration tests failed");
   process.exitCode = 1;

@@ -1043,7 +1043,7 @@ integration:
       export ORBIT_INTEGRATION_RUN_ID="$CI_JOB_ID"
       unset DATABASE_URL_FILE SESSION_SECRET_FILE OIDC_CLIENT_SECRET_FILE
       pnpm exec tsx src/db/migrate.ts
-      pnpm exec vitest run --config vitest.integration.config.ts
+      pnpm exec vitest run --project integration
 
 # Builds the image once and hands it on as a tarball, so `smoke`,
 # `repair_journeys` and `publish_gitlab` all exercise and publish the same
