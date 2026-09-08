@@ -60,6 +60,10 @@ describe("changed-path CI risk classification", () => {
       ".github/workflows/publish-container.yml",
       "Dockerfile",
       "docker-compose.yml",
+      // The test/CI-only overlays moved under compose/ in #442 and must keep
+      // the same lane they had at the root.
+      "compose/docker-compose.acceptance.yml",
+      "compose/docker-compose.ci-cap.yml",
       "config/tika-config.json",
       "package.json",
       "playwright.config.ts",
@@ -239,7 +243,7 @@ describe("changed-path CI risk classification", () => {
     }
     // Not bundled, so still outside this job's reach: the acceptance-only
     // compose overlays and the container's own entrypoint.
-    expect(touchesLauncherInstallCompat(["docker-compose.acceptance.yml"])).toBe(false);
+    expect(touchesLauncherInstallCompat(["compose/docker-compose.acceptance.yml"])).toBe(false);
     expect(touchesLauncherInstallCompat(["scripts/container-entrypoint.sh"])).toBe(false);
   });
 

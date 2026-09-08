@@ -26,7 +26,7 @@ export default defineConfig({
     // configured application URL.
     ignoreHTTPSErrors: process.env.ORBIT_ACCEPTANCE_OIDC === "true",
     // The container-side OIDC_ISSUER/TEST_OIDC_ISSUER URLs are fixed to
-    // https://orbit-oidc:4443/ (docker-compose.acceptance.yml) and must stay
+    // https://orbit-oidc:4443/ (compose/docker-compose.acceptance.yml) and must stay
     // that way -- orbit-app and orbit-oidc talk to each other over the
     // docker network using that literal URL. The browser follows the same
     // URL for the authorize redirect, so it must be sent to wherever the

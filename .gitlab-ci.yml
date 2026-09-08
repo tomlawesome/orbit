@@ -304,7 +304,7 @@ variables:
 # real deployment and then talk to it.
 #
 # This is the one place the dind *service* pattern above cannot be used. The
-# acceptance stack publishes on 127.0.0.1 -- docker-compose.acceptance.yml
+# acceptance stack publishes on 127.0.0.1 -- compose/docker-compose.acceptance.yml
 # binds the OIDC and GreenMail sidecars there, the application hands the
 # browser a 127.0.0.1 callback URL, and scripts/test-repair-journeys.sh both
 # pushes to and health-checks a loopback address. A dind service puts those
@@ -1231,7 +1231,7 @@ supply_chain_image:
 # it. The anchor's compose, hostile-document and installer steps are the
 # `acceptance` job below.
 #
-# docker-compose.ci-cap.yml is the extra overlay: the same file set the
+# compose/docker-compose.ci-cap.yml is the extra overlay: the same file set the
 # workflow uses, capped to the standard CI profile from #801 step 1.
 #
 # scripts/test-e2e-local.sh is deliberately not called. It is the local
@@ -1254,7 +1254,7 @@ smoke:
     ORBIT_IMAGE: $ORBIT_CI_IMAGE
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
-    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml -f docker-compose.ci-cap.yml
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   rules:
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

@@ -34,7 +34,7 @@ const MAILBOX_ACCOUNT = "orbit-intake@in.orbit.test";
 /* GreenMail runs with -Dgreenmail.auth.disabled, so this is accepted as-is
    and is not a credential to anything. */
 const MAILBOX_PASSWORD = "greenmail-proving-ground-only";
-// Must match docker-compose.acceptance.yml's GreenMail host-port binding
+// Must match compose/docker-compose.acceptance.yml's GreenMail host-port binding
 // exactly -- both read TEST_SMTP_PORT so the test and the compose
 // host-binding can never diverge. Defaults to 3025 (CI's fixed value).
 const SMTP_PORT = Number(process.env.TEST_SMTP_PORT ?? 3025);

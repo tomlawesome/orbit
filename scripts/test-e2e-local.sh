@@ -29,8 +29,8 @@
 #                    project down afterwards with:
 #                      docker compose -p <project> --env-file .env-orbit \
 #                        -f docker-compose.yml -f docker-compose.mail.yml \
-#                        -f docker-compose.acceptance.yml \
-#                        -f docker-compose.local-e2e.yml down --volumes
+#                        -f compose/docker-compose.acceptance.yml \
+#                        -f compose/docker-compose.local-e2e.yml down --volumes
 #
 # #875: the Compose project name and app port used to be fixed
 # ("orbit-e2e-local" on 13777), so two concurrent runs -- two worktrees, two
@@ -56,7 +56,7 @@
 # only ever tears down that same project. docker-compose.yml also pins
 # container_name for orbit-app/orbit-db/orbit-clamav, which would block a
 # second stack under those names regardless of project;
-# docker-compose.local-e2e.yml renames them to `${COMPOSE_PROJECT_NAME}-*`
+# compose/docker-compose.local-e2e.yml renames them to `${COMPOSE_PROJECT_NAME}-*`
 # for this script only, so a per-run project name also gives per-run
 # container names. Never runs `pnpm db:generate` (also an AGENTS.md trap) and
 # never writes to .env-orbit or an existing file under .orbit-secrets/ --
@@ -172,7 +172,7 @@ project_name="${COMPOSE_PROJECT_NAME:-orbit-e2e-local-${worktree_hash}-$$}"
 readonly project_name
 app_port="${ORBIT_PORT:-$(free_port)}"
 readonly app_port
-# Exported rather than set per-invocation: docker-compose.local-e2e.yml reads
+# Exported rather than set per-invocation: compose/docker-compose.local-e2e.yml reads
 # it to build the application's own APP_URL and OIDC callback URL, so every
 # compose call in this script has to agree about the published port. The
 # "port already in use" bind-test below (the "${app_port}:the Orbit
@@ -180,7 +180,7 @@ readonly app_port
 # is still free -- and rejects a bad override -- before anything starts.
 export ORBIT_PORT="$app_port"
 readonly base_url="http://127.0.0.1:${app_port}"
-readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml -f docker-compose.local-e2e.yml)
+readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.local-e2e.yml)
 
 compose() {
   env ORBIT_IMAGE="$orbit_image" COMPOSE_PROJECT_NAME="$project_name" \
@@ -246,7 +246,7 @@ port_free() {
 
 # GreenMail's SMTP port and the disposable OIDC provider's port are fixed in
 # CI (3025 and 4443: tests/e2e/v19-mail-collection.spec.ts's SMTP_PORT,
-# docker-compose.acceptance.yml's host bindings, and playwright.config.ts's
+# compose/docker-compose.acceptance.yml's host bindings, and playwright.config.ts's
 # host-resolver-rules all default to them via TEST_SMTP_PORT/TEST_OIDC_PORT)
 # but that is exactly what a real Orbit deployment on this host already
 # holds. Pick free ports instead and export them so every one of those
@@ -287,7 +287,7 @@ for port_check in "${TEST_SMTP_PORT}:GreenMail SMTP (TEST_SMTP_PORT)" \
 done
 log "using TEST_SMTP_PORT=${TEST_SMTP_PORT} TEST_OIDC_PORT=${TEST_OIDC_PORT} TEST_IMAPS_PORT=${TEST_IMAPS_PORT}"
 
-# The renamed containers (docker-compose.local-e2e.yml) must not already
+# The renamed containers (compose/docker-compose.local-e2e.yml) must not already
 # exist under a different project; a name collision there would mean this
 # script is about to touch something it did not create.
 for fixed_name in "${project_name}-app" "${project_name}-db" "${project_name}-clamav"; do
@@ -377,7 +377,7 @@ readonly orbit_channel="dev"
 
 log "building ${orbit_image} (version ${orbit_version})"
 env ORBIT_IMAGE="$orbit_image" ORBIT_VERSION="$orbit_version" ORBIT_REVISION="$orbit_revision" ORBIT_CHANNEL="$orbit_channel" \
-  docker compose -p "$project_name" --env-file .env-orbit -f docker-compose.yml -f docker-compose.build.yml \
+  docker compose -p "$project_name" --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.build.yml \
   build orbit-app
 
 log "building the disposable OIDC acceptance provider"

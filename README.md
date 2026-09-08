@@ -281,10 +281,10 @@ and secret file are already complete and safe.
 ```sh
 ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)" \
   docker compose --env-file .env-orbit \
-  -f docker-compose.yml -f docker-compose.build.yml up --build
+  -f docker-compose.yml -f compose/docker-compose.build.yml up --build
 ```
 
-Building from source needs the `docker-compose.build.yml` overlay. The base
+Building from source needs the `compose/docker-compose.build.yml` overlay. The base
 compose file describes a deployment, which has a published image but no source
 tree, so the build context lives in the overlay rather than the base file.
 
@@ -539,9 +539,9 @@ signed ID-token validation; it does not add an Orbit sign-in bypass. Run it only
 against disposable data:
 
 ```sh
-docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml up --build --wait
+docker compose --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml up --build --wait
 ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
-docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
+docker compose --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml down --volumes --remove-orphans
 ```
 
 `bash scripts/test-e2e-local.sh` does all of the above -- plus the mail
