@@ -135,6 +135,73 @@ describe("createInstallDockerAdapter — image identity (install.sh:1264-1310)",
   });
 });
 
+describe("createInstallDockerAdapter — deployment-asset extraction (ADR-0019, install.sh:1372,1480-1486)", () => {
+  const ref = "ghcr.io/tomlawesome/orbit@sha256:" + "a".repeat(64);
+
+  it("inspectDeploymentAssetsLabel reads the io.orbit.deployment-assets label off the resolved reference", () => {
+    const sandbox = newSandbox("orbit-docker-adapter-assets-label-");
+    const logPath = join(sandbox, "argv.log");
+    const binDir = makeFakeDockerBin();
+    const adapter = adapterFor(binDir, { ORBIT_ARGV_LOG: logPath, ORBIT_STDOUT: "/opt/orbit/deploy" });
+
+    expect(adapter.inspectDeploymentAssetsLabel(ref)).toBe("/opt/orbit/deploy");
+    expect(readArgvLog(logPath)).toEqual([
+      ["image", "inspect", "--format", '{{index .Config.Labels "io.orbit.deployment-assets"}}', ref],
+    ]);
+  });
+
+  it("inspectDeploymentAssetsLabel returns the empty string for an image built before ADR-0019, and null when the inspect itself fails", () => {
+    const binDir = makeFakeDockerBin();
+    // Docker prints an empty line for a label the image does not carry, and
+    // still exits 0 — the caller, not this adapter, decides what that means.
+    expect(adapterFor(binDir).inspectDeploymentAssetsLabel(ref)).toBe("");
+    expect(adapterFor(binDir, { ORBIT_EXIT: "1" }).inspectDeploymentAssetsLabel(ref)).toBeNull();
+  });
+
+  it("createAssetContainer spawns docker create and returns the printed container id", () => {
+    const sandbox = newSandbox("orbit-docker-adapter-create-");
+    const logPath = join(sandbox, "argv.log");
+    const binDir = makeFakeDockerBin();
+    const containerId = "c".repeat(64);
+    const adapter = adapterFor(binDir, { ORBIT_ARGV_LOG: logPath, ORBIT_STDOUT: containerId });
+
+    expect(adapter.createAssetContainer(ref)).toBe(containerId);
+    expect(readArgvLog(logPath)).toEqual([["create", ref]]);
+  });
+
+  it("createAssetContainer returns null when docker create fails", () => {
+    const binDir = makeFakeDockerBin();
+    expect(adapterFor(binDir, { ORBIT_EXIT: "1" }).createAssetContainer(ref)).toBeNull();
+  });
+
+  it("copyFromContainer spawns docker cp <container>:<source> <destination>", () => {
+    const sandbox = newSandbox("orbit-docker-adapter-cp-");
+    const logPath = join(sandbox, "argv.log");
+    const binDir = makeFakeDockerBin();
+    const containerId = "c".repeat(64);
+    const adapter = adapterFor(binDir, { ORBIT_ARGV_LOG: logPath });
+
+    expect(adapter.copyFromContainer(containerId, "/opt/orbit/deploy/.", `${sandbox}/`)).toBe(true);
+    expect(readArgvLog(logPath)).toEqual([["cp", `${containerId}:/opt/orbit/deploy/.`, `${sandbox}/`]]);
+  });
+
+  it("copyFromContainer reports failure when docker cp fails", () => {
+    const binDir = makeFakeDockerBin();
+    expect(adapterFor(binDir, { ORBIT_EXIT: "1" }).copyFromContainer("c".repeat(64), "/opt/orbit/deploy/.", "/tmp")).toBe(false);
+  });
+
+  it("removeAssetContainer spawns docker rm -f and never reports failure (install.sh's own `|| true`)", () => {
+    const sandbox = newSandbox("orbit-docker-adapter-rm-");
+    const logPath = join(sandbox, "argv.log");
+    const binDir = makeFakeDockerBin();
+    const containerId = "c".repeat(64);
+    const adapter = adapterFor(binDir, { ORBIT_ARGV_LOG: logPath, ORBIT_EXIT: "1" });
+
+    expect(() => adapter.removeAssetContainer(containerId)).not.toThrow();
+    expect(readArgvLog(logPath)).toEqual([["rm", "-f", containerId]]);
+  });
+});
+
 describe("createInstallDockerAdapter — OIDC sandbox validate (install.sh:927-944, guarantee #27)", () => {
   it("spawns the exact sandboxed docker run argv and feeds issuer+document on stdin", () => {
     const sandbox = newSandbox("orbit-docker-adapter-oidc-sandbox-");

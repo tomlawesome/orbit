@@ -1,6 +1,7 @@
 import { type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+import { DEPLOYMENT_ASSETS_LABEL } from "./deployment-assets";
 import type { ImageIdentityAdapter } from "./image-resolution";
 import type { DatabaseVolumeSafetyAdapter } from "./database-volume-safety";
 
@@ -8,7 +9,8 @@ import type { DatabaseVolumeSafetyAdapter } from "./database-volume-safety";
 // shipped production implementation the plan deferred from slice 2
 // (VolumeOwnershipAdapter/DatabaseVolumeSafetyAdapter), slice 3
 // (OidcDiscoverySandboxAdapter's sandboxed-container half), and this slice's
-// own image-identity resolution (ImageIdentityAdapter) and service
+// own image-identity resolution (ImageIdentityAdapter), deployment-asset
+// extraction out of the resolved image (ADR-0019) and service
 // pull/start/health-probe/compose-validate calls
 // (install.sh:1079-1310,1539-1541,1543,1546). Every method below spawns a
 // fixed `docker`/`docker compose` argv array via `spawnSync` — never a shell
@@ -105,6 +107,34 @@ for (const field of ["authorization_endpoint", "token_endpoint", "jwks_uri"]) {
 export interface InstallDockerAdapter extends DatabaseVolumeSafetyAdapter, ImageIdentityAdapter {
   /** docker run --rm --entrypoint /opt/orbit/scripts/container-entrypoint.sh <resolvedReference> --banner (install.sh:1306-1310, guarantee #44). */
   runBanner(resolvedReference: string): boolean;
+  /**
+   * docker image inspect --format '{{index .Config.Labels "io.orbit.deployment-assets"}}' <resolvedReference>
+   * (install.sh:1372, guarantee #42). Null on any inspect failure; the empty
+   * string when the image carries no such label (Go's `index` on a label map
+   * without the key), which is how an image built before ADR-0019 shows up.
+   */
+  inspectDeploymentAssetsLabel(resolvedReference: string): string | null;
+  /**
+   * docker create <resolvedReference> (install.sh:1480, guarantee #42):
+   * makes a container without starting any process in it, purely so its
+   * filesystem can be read. Returns the new container id, or null if the
+   * create failed. Whether the id is well-formed is the caller's decision
+   * (install-orchestrator.ts), not this adapter's.
+   */
+  createAssetContainer(resolvedReference: string): string | null;
+  /**
+   * docker cp <containerId>:<sourcePath> <destinationPath> (install.sh:1484,
+   * guarantee #42). The caller passes install.sh's own `<root>/.` source
+   * form, which copies the directory's contents rather than the directory
+   * itself.
+   */
+  copyFromContainer(containerId: string, sourcePath: string, destinationPath: string): boolean;
+  /**
+   * docker rm -f <containerId> (remove_deploy_container, install.sh:391-395,
+   * guarantee #42's "removed on every path including failure"). Never
+   * reports failure, exactly as install.sh's own `|| true` does.
+   */
+  removeAssetContainer(containerId: string): void;
   /**
    * docker run --rm --interactive --entrypoint node --network none --read-only
    *   --cap-drop ALL --security-opt no-new-privileges --user 1001:1001
@@ -248,6 +278,16 @@ export function createInstallDockerAdapter(options: InstallDockerAdapterOptions)
       runCaptured(["image", "inspect", "--format", '{{index .Config.Labels "org.opencontainers.image.version"}}', resolvedReference]),
     runBanner: (resolvedReference) =>
       statusOk(run(["run", "--rm", "--entrypoint", "/opt/orbit/scripts/container-entrypoint.sh", resolvedReference, "--banner"])),
+
+    // --- Deployment-asset extraction (ADR-0019, install.sh:1372,1480-1486) ---
+    inspectDeploymentAssetsLabel: (resolvedReference) =>
+      runCaptured(["image", "inspect", "--format", `{{index .Config.Labels "${DEPLOYMENT_ASSETS_LABEL}"}}`, resolvedReference]),
+    createAssetContainer: (resolvedReference) => runCaptured(["create", resolvedReference]),
+    copyFromContainer: (containerId, sourcePath, destinationPath) =>
+      statusOk(run(["cp", `${containerId}:${sourcePath}`, destinationPath], { stdio: ["ignore", "ignore", "ignore"] })),
+    removeAssetContainer: (containerId) => {
+      run(["rm", "-f", containerId], { stdio: ["ignore", "ignore", "ignore"] });
+    },
 
     // --- OidcDiscoverySandboxAdapter's sandboxed-container half (slice 3 deferral) ---
     validateOidcDiscoverySandbox(resolvedReference, issuer, documentPath) {

@@ -3,13 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { checkCurlAvailable, createInstallAssetFetchAdapter, createInstallOidcFetchAdapter } from "./install-curl-adapter";
+import { checkCurlAvailable, createInstallOidcFetchAdapter } from "./install-curl-adapter";
 
 // PATH-shim coverage for issue #295 slice 5's shipped `curl` adapter — the
 // production implementation the plan deferred from slice 3
-// (OidcDiscoveryFetchAdapter) plus this slice's own asset-fetch adapter. A
-// fake `curl` bash script logs its exact argv (mirroring
-// recovery-bundle.docker-adapter.test.ts's fakeDockerScript technique) so
+// (OidcDiscoveryFetchAdapter), and the host-tool check. There is no
+// asset-fetch adapter to cover any more: ADR-0019 moved the deployment
+// assets inside the image. A fake `curl` bash script logs its exact argv
+// (mirroring recovery-bundle.docker-adapter.test.ts's fakeDockerScript
+// technique) so
 // each method's flag set can be asserted precisely against install.sh's own
 // cited call sites, with no real network access.
 
@@ -40,7 +42,7 @@ function shimEnv(binDir: string, extra: Record<string, string> = {}): NodeJS.Pro
   return { ...process.env, PATH: `${binDir}:${process.env.PATH}`, ...extra };
 }
 
-describe("checkCurlAvailable (install.sh:1262, guarantee #40)", () => {
+describe("checkCurlAvailable (install.sh:1305, guarantee #40)", () => {
   it("returns true when curl --version succeeds", () => {
     const binDir = makeFakeCurlBin(["#!/usr/bin/env bash", "exit 0", ""].join("\n"));
     expect(checkCurlAvailable({ env: shimEnv(binDir) })).toBe(true);
@@ -48,49 +50,6 @@ describe("checkCurlAvailable (install.sh:1262, guarantee #40)", () => {
 
   it("returns false when curl is not on PATH", () => {
     expect(checkCurlAvailable({ curlBinary: "orbit-definitely-not-a-real-binary" })).toBe(false);
-  });
-});
-
-describe("createInstallAssetFetchAdapter (install.sh:1400-1404)", () => {
-  it("spawns the exact fetch argv and writes the shim's output to destinationPath", () => {
-    const sandbox = newSandbox("orbit-asset-fetch-");
-    const logPath = join(sandbox, "argv.log");
-    const script = [
-      "#!/usr/bin/env bash",
-      'for arg in "$@"; do printf \'%s\\n\' "$arg"; done >> "$ORBIT_ARGV_LOG"',
-      'output=""',
-      'while [[ $# -gt 0 ]]; do',
-      '  if [[ "$1" == "--output" ]]; then output="$2"; fi',
-      "  shift",
-      "done",
-      'printf \'fetched-content\' > "$output"',
-      "exit 0",
-      "",
-    ].join("\n");
-    const binDir = makeFakeCurlBin(script);
-    const adapter = createInstallAssetFetchAdapter({ env: shimEnv(binDir, { ORBIT_ARGV_LOG: logPath }) });
-    const destination = join(sandbox, "asset.txt");
-
-    const result = adapter.fetchAsset("https://raw.githubusercontent.com/tomlawesome/orbit/deadbeef/docker-compose.yml", destination);
-
-    expect(result.ok).toBe(true);
-    expect(readFileSync(destination, "utf8")).toBe("fetched-content");
-    expect(readArgvLog(logPath)).toEqual([
-      "--fail",
-      "--silent",
-      "--show-error",
-      "--location",
-      "--output",
-      destination,
-      "https://raw.githubusercontent.com/tomlawesome/orbit/deadbeef/docker-compose.yml",
-    ]);
-  });
-
-  it("reports ok=false on a nonzero curl exit", () => {
-    const binDir = makeFakeCurlBin(["#!/usr/bin/env bash", "exit 22", ""].join("\n"));
-    const adapter = createInstallAssetFetchAdapter({ env: shimEnv(binDir) });
-    const result = adapter.fetchAsset("https://example.invalid/missing", "/dev/null");
-    expect(result.ok).toBe(false);
   });
 });
 
