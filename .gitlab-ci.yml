@@ -492,15 +492,35 @@ classify:
         printf '%s' "$value"
       }
 
+      # The `ci: acceptance` label on a merge request asks for the whole
+      # pipeline whatever the diff holds (#572). Everything else here reads
+      # the diff, so until now a merge request could be made cheaper and never
+      # more expensive: the lanes and the #883 skips both decide from what
+      # changed, and forcing the gate meant a branch pipeline and playing a
+      # manual job. This is the opt-in half, and the label name is the one
+      # #572 chose. GitLab joins the labels with commas and adds no spaces;
+      # commas go on both ends so a pattern matches a whole label rather than
+      # part of a longer one, and the sed tolerates a space after a comma in
+      # case that ever changes.
+      labels="$(printf ',%s,' "${CI_MERGE_REQUEST_LABELS:-}" | sed 's/, */,/g')"
+      forced=false
+      case "$labels" in
+        *",ci: acceptance,"*) forced=true ;;
+      esac
+      if [ "$forced" = true ]; then
+        echo "the merge request is labelled 'ci: acceptance': running the full pipeline whatever the diff holds (#572)"
+      fi
+
       # The narrow lanes (#889) are a merge-request economy, never a
       # relaxation of the delivery gate. A push to a delivery branch and the
       # merge request into `main` both run everything, so the lane collapses
-      # to `full` there and no later job has to re-check the branch.
+      # to `full` there and no later job has to re-check the branch. The label
+      # collapses it the same way.
       lane="$(classify_output lane)"
       case "${CI_COMMIT_BRANCH:-}" in
         dev | preview | main | hotfix/*) lane=full ;;
       esac
-      if [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ]; then
+      if [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ] || [ "$forced" = true ]; then
         lane=full
       fi
 
@@ -511,6 +531,12 @@ classify:
         # Assigned before it is printed: `set -e` sees a failed command
         # substitution in an assignment, and not in an argument to printf.
         value="$(classify_output "$key")"
+        # The label overrides every axis, not just the expensive ones: asking
+        # for the full pipeline has to mean all of it, or the answer it gives
+        # back is a different pipeline again.
+        if [ "$forced" = true ]; then
+          if [ "$name" = ORBIT_RISK ]; then value=system; else value=true; fi
+        fi
         printf '%s=%s\n' "$name" "$value" >> classify.env
       done
 
@@ -520,7 +546,9 @@ classify:
       # the lane does not run the job -- said here rather than in the job,
       # which has no lane test of its own.
       launcher_compat="$(classify_output launcher_compat)"
-      if [ "$lane" = "ci" ]; then
+      if [ "$forced" = true ]; then
+        launcher_compat=true
+      elif [ "$lane" = "ci" ]; then
         launcher_compat=false
       fi
       printf 'ORBIT_LAUNCHER_COMPAT=%s\n' "$launcher_compat" >> classify.env
