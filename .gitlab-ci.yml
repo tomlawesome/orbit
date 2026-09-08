@@ -113,7 +113,7 @@ variables:
   # The image the v19 baselines were proven against, byte for byte the pin the
   # GitHub fidelity job uses. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
-  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.0-noble@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07
+  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
   # Same scanner build as the workflow, so a finding here and a finding there
   # mean the same thing.
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
