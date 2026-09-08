@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, closeSync, constants, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -10,6 +10,7 @@ import {
 import {
   DEPLOYMENT_ASSET_FILE_MODE,
   DEPLOYMENT_ASSETS,
+  DEPLOYMENT_ASSETS_ROOT,
   DEPLOYMENT_SCRIPTS,
   ENVIRONMENT_FILE,
   SECRETS_DIRECTORY,
@@ -86,8 +87,20 @@ export interface InstallOrchestratorAdapters {
     pullOllamaModel(model: string): boolean;
     /** See InstallDockerAdapter.setComposeProjectName's own doc (install-docker-adapter.ts) for why this must be callable after construction. */
     setComposeProjectName(name: string): void;
+    /** docker image inspect for the io.orbit.deployment-assets label (install.sh:1372, guarantee #42). */
+    inspectDeploymentAssetsLabel(resolvedReference: string): string | null;
+    /** docker create (install.sh:1480, guarantee #42). */
+    createAssetContainer(resolvedReference: string): string | null;
+    /** docker cp <container>:<source> <destination> (install.sh:1484, guarantee #42). */
+    copyFromContainer(containerId: string, sourcePath: string, destinationPath: string): boolean;
+    /** docker rm -f (install.sh:391-395, guarantee #42). */
+    removeAssetContainer(containerId: string): void;
   };
-  fetchAsset(url: string, destinationPath: string): { ok: boolean };
+  /**
+   * install.sh still requires `curl` on the host (install.sh:1305) for the
+   * OIDC discovery request alone; deployment assets no longer travel over it
+   * (ADR-0019), so there is no asset-fetch adapter here any more.
+   */
   checkCurlAvailable(): boolean;
   oidcFetch: OidcDiscoveryFetchAdapter;
   configurationScript: ConfigurationScriptAdapter;
@@ -163,6 +176,17 @@ export interface InstallOutcomeFailed {
 }
 
 export type InstallOutcome = InstallOutcomeOk | InstallOutcomeCancelled | InstallOutcomeFailed;
+
+/** ^[0-9a-f]{64}$ — the container id `docker create` prints (install.sh:1482). */
+const CONTAINER_ID_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * install.sh:1481-1485's single message for every step of the extraction:
+ * create, the id check, and the copy all fail the same way, because from an
+ * operator's point of view they are one action — getting the bundle out of
+ * the image they just resolved.
+ */
+const EXTRACTION_FAILURE_MESSAGE = "Could not extract deployment assets from the published image.";
 
 function isRegularNonSymlinkFile(path: string): boolean {
   try {
@@ -361,11 +385,33 @@ export async function runInstall(
   onEvent({ phase: "identity", component: "image", state: "running", reason: "image-identity", action: "inspect" });
   onEvent({ phase: "identity", component: "image", state: "completed", reason: "image-identity", action: "verify" });
 
-  const assetBase = `https://raw.githubusercontent.com/${context.repository}/${identity.revision}`;
+  // The image says where it keeps the assets it was built from
+  // (install.sh:1368-1379, guarantee #42). An image without that label was
+  // built before ADR-0019: it carries nothing to extract, and the revision
+  // it names may no longer resolve — so it is refused, with no download to
+  // fall back to (ADR-0019 removed the second source deliberately). These
+  // checks run while install.sh is still in its `identity`/`image` phase,
+  // before the staging directory exists, so their failed events carry that
+  // phase rather than `assets`.
+  const bundledAssetsRoot = adapters.docker.inspectDeploymentAssetsLabel(identity.resolvedReference);
+  if (bundledAssetsRoot === null) {
+    return fail("identity", "image", `Could not inspect ${identity.resolvedReference} for its bundled deployment assets.`);
+  }
+  if (bundledAssetsRoot === "") {
+    return fail(
+      "identity",
+      "image",
+      "The published image was built before Orbit bundled its deployment assets and is not a supported install target (ADR-0016, ADR-0019).",
+    );
+  }
+  if (bundledAssetsRoot !== DEPLOYMENT_ASSETS_ROOT) {
+    return fail("identity", "image", `The published image records deployment assets somewhere other than ${DEPLOYMENT_ASSETS_ROOT}.`);
+  }
+
   const assetDirectories = deriveAssetDirectories(DEPLOYMENT_ASSETS);
   const managedPaths: ManagedPath[] = buildManagedPaths(DEPLOYMENT_ASSETS);
 
-  // A private scratch directory for asset download/validation and any
+  // A private scratch directory for asset extraction/validation and any
   // guided-configuration staging, created and always removed here —
   // distinct from InstallTransaction's own staging directory (created only
   // once preflight_final_paths/prepare_rollback_area's equivalent begins,
@@ -377,27 +423,70 @@ export async function runInstall(
 
   try {
     onEvent({ phase: "assets", component: "assets", state: "starting", reason: "assets-verified", action: "fetch" });
-    for (const asset of DEPLOYMENT_ASSETS) {
-      const destination = join(scratchDir, asset);
-      // install.sh:1406-1407's own per-asset `mkdir -p -- "$(dirname
-      // "$staged_path")"`, run unconditionally before every fetch (a no-op
-      // for a top-level asset whose dirname is already the staging root) —
-      // without this, fetchAsset's own destination parent
-      // (scratchDir/config, scratchDir/scripts) would not exist yet for any
-      // nested asset, and a real curl invocation fails to write there.
-      mkdirSync(dirname(destination), { recursive: true });
-      const fetchResult = adapters.fetchAsset(`${assetBase}/${asset}`, destination);
-      if (!fetchResult.ok || !isRegularNonSymlinkFile(destination)) {
-        return fail("assets", "assets", `Could not fetch ${asset} from the published revision.`);
+    // Copy the bundle out of the image without running anything from it:
+    // `docker create` makes a container and starts no process, `docker cp`
+    // reads its filesystem, and the container is removed immediately, on
+    // every path including failure (install.sh:1473-1486, guarantee #42).
+    const imageAssetsDir = join(scratchDir, "image-assets");
+    mkdirSync(imageAssetsDir);
+    chmodSync(imageAssetsDir, 0o700);
+    const containerId = adapters.docker.createAssetContainer(identity.resolvedReference);
+    if (containerId === null) {
+      return fail("assets", "assets", EXTRACTION_FAILURE_MESSAGE);
+    }
+    try {
+      // install.sh:1482 checks the id it got back before using it, so a
+      // `docker create` that exits 0 while printing something other than a
+      // container id can never become part of a `docker cp` argument.
+      if (!CONTAINER_ID_PATTERN.test(containerId)) {
+        return fail("assets", "assets", EXTRACTION_FAILURE_MESSAGE);
       }
-      if (lstatSync(destination).size === 0) {
-        return fail("assets", "assets", `Fetched ${asset} is empty.`);
+      if (!adapters.docker.copyFromContainer(containerId, `${bundledAssetsRoot}/.`, `${imageAssetsDir}/`)) {
+        return fail("assets", "assets", EXTRACTION_FAILURE_MESSAGE);
+      }
+    } finally {
+      adapters.docker.removeAssetContainer(containerId);
+    }
+
+    // Only the fixed allowlist is staged; whatever else the bundle carries
+    // is left behind with the extraction directory. The image's own modes
+    // never reach the deployment either — each staged file is given
+    // DEPLOYMENT_ASSET_FILE_MODE (install.sh:1488-1512, guarantee #45).
+    for (const asset of DEPLOYMENT_ASSETS) {
+      const extractedPath = join(imageAssetsDir, asset);
+      const stagedPath = join(scratchDir, asset);
+      // install.sh:1497's own per-asset `mkdir -p -- "$(dirname
+      // "$staged_path")"`, run unconditionally (a no-op for a top-level
+      // asset whose dirname is already the staging root) — without it the
+      // nested assets' parents (scratchDir/config, scratchDir/scripts)
+      // would not exist to copy into.
+      mkdirSync(dirname(stagedPath), { recursive: true });
+      if (!isRegularNonSymlinkFile(extractedPath)) {
+        return fail("assets", "assets", `Bundled ${asset} is not a regular file.`);
+      }
+      if (lstatSync(extractedPath).size === 0) {
+        return fail("assets", "assets", `Bundled ${asset} is empty.`);
+      }
+      try {
+        copyFileSync(extractedPath, stagedPath);
+        chmodSync(stagedPath, DEPLOYMENT_ASSET_FILE_MODE);
+      } catch {
+        // install.sh's own `|| fail` on each cp/chmod (install.sh:1501-1504):
+        // an unreadable or unwritable staging copy is a refusal, never an
+        // escaped throw (issue #383's contract).
+        return fail("assets", "assets", `Could not stage ${asset} from the published image.`);
       }
     }
+    try {
+      rmSync(imageAssetsDir, { recursive: true });
+    } catch {
+      return fail("assets", "assets", "Could not remove the private asset extraction directory.");
+    }
+
     for (const script of DEPLOYMENT_SCRIPTS) {
       const check = spawnSync("bash", ["-n", join(scratchDir, script)]);
       if (check.status !== 0) {
-        return fail("assets", "assets", `Fetched ${script} failed a syntax check.`);
+        return fail("assets", "assets", `Bundled ${script} failed a syntax check.`);
       }
     }
     onEvent({ phase: "assets", component: "assets", state: "completed", reason: "assets-verified", action: "fetch" });

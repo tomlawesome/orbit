@@ -797,6 +797,19 @@ point.
 
 ### Slice 5
 
+**Superseded by ADR-0019 (#891).** Slice 5 shipped the deployment-asset
+half of this port as a `curl` download from
+`raw.githubusercontent.com/<repository>/<revision>`, mirroring the
+`install.sh` of the time. ADR-0019 moved the assets inside the image, so the
+port now reads the `io.orbit.deployment-assets` label, `docker create`s a
+container from the image it just resolved, `docker cp`s the bundle out and
+removes the container — `install-docker-adapter.ts`'s
+`inspectDeploymentAssetsLabel`/`createAssetContainer`/`copyFromContainer`/
+`removeAssetContainer`. The `AssetFetchAdapter` and its `curl` factory are
+gone, with no fallback; `curl` is still a required host tool, for the OIDC
+discovery request alone. Everything below that talks about fetching assets
+over the network is history, not current behaviour.
+
 **Deferral accounting** (every "no production adapter ships" / "reasonable
 template, not exported" note from slices 2-4, resolved by name):
 
