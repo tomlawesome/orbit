@@ -163,17 +163,10 @@ provider settings or infrastructure details.
   <img src="docs/assets/product-tour/inbox.png" alt="Orbit incoming-documents view showing one synthetic mailbox review" width="100%" />
 </p>
 
-The captures are reproducible with the repository's disposable OIDC browser
-fixture. Start the acceptance Compose stack, then run:
-
-```sh
-ORBIT_ACCEPTANCE_OIDC=true ORBIT_CAPTURE_PRODUCT_TOUR=true \
-  pnpm test:e2e tests/e2e/product-tour.spec.ts --project=desktop-chromium
-```
-
-The opt-in capture freezes the browser clock, creates synthetic data, removes
-PNG metadata, and deletes the fixture after capture. Ordinary browser tests do
-not write documentation assets.
+The captures show synthetic data only. They are static assets under
+`docs/assets/product-tour/`: the browser test that used to regenerate them
+went with the Next application (#735), and ordinary browser tests do not
+write documentation assets.
 
 <table>
   <tr>
