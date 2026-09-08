@@ -146,7 +146,7 @@ output="" write_out="" url=""
 # scripts/tool-parity.test.mjs re-asserts both against the real binary). The
 # shim used to ignore every unrecognised flag, so install.sh could have grown
 # one curl has never had and this harness would still have gone green -- the
-# same class of blindness as the `docker exec -T` that shipped in #607.
+# same class of blindness as the plain 'docker exec -T' that shipped in #607.
 refuse_option() {
   printf 'curl: option %s: is unknown\\n' "\$1" >&2
   exit 2
