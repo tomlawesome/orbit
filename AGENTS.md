@@ -197,7 +197,7 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Nine known ways to lose an afternoon, or worse. The first two have open issues;
+Ten known ways to lose an afternoon, or worse. The first two have open issues;
 until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
@@ -275,6 +275,12 @@ reverse, and no test notices unless it covers the boundary. Scan the string
 explicitly instead, as `isApplicationRelative` in
 `web/src/routes/login/+page.svelte` does, and give it cases for the empty
 string, a protocol-relative `//` and a backslash.
+
+**A lockfile diff adding an `@pnpm/exe` block is pnpm 11 talking, not your
+change.** The host's PATH `pnpm` is 11.9.0 and writes that block while
+handing over to the pinned 12.3.4, which no longer pins it (the `pnpm`
+package is the native executable from v12). Discard the diff; never commit
+it. CI activates 12.3.4 through corepack, so it never sees this (#884).
 
 ## The demo stack is disposable
 
