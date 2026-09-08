@@ -19,8 +19,9 @@ Orbit moved to the owner's own GitLab on 2026-09-04 (#801). **`ai/orbit` on
 merge requests and the CI that merges wait on. GitHub is a push mirror
 (GitLab Settings → Repository → Mirroring, owner-managed) kept for CodeQL,
 secret scanning and a second CI opinion; a red GitHub run never blocks a
-GitLab merge. GHCR stays where operators pull from: `attest_image` pushes
-the tested image to `registry.tomlawson.io`, records and attests its digest,
+GitLab merge. GHCR stays where operators pull from: `record_image` pushes
+the tested image to `registry.tomlawson.io` and records its digest,
+`sign_evidence` attests it from the dedicated signing runner,
 `publish_channel` adds the channel tag (#661, ADR-0020), and
 `.github/workflows/publish-from-gitlab.yml` copies that digest to GHCR when
 the mirror delivers the `preview` push -- nothing built on GitHub reaches a

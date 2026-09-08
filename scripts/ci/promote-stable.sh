@@ -173,11 +173,11 @@ fi
 # What ships here instead reuses gitlab-await-tested-image.sh unchanged --
 # the same script, and the same
 # .orbit-supply-chain/gitlab-tested-image.json evidence written by
-# attest_image -- that already gates the GHCR copy in
+# record_image -- that already gates the GHCR copy in
 # .github/workflows/publish-from-gitlab.yml. It answers three of the four
 # grounds without any new credential:
 #   - missing:  no successful push pipeline for this commit/ref, or no
-#     successful attest_image/supply_chain_image job in it, or no evidence
+#     successful record_image/sign_evidence/supply_chain_image job in it, or no
 #     artifact -- the script's own refusals, unchanged.
 #   - expired:  evidence recordedAt older than seven days, or implausibly in
 #     the future -- the script's own check, unchanged. Promotion gets no

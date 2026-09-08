@@ -490,10 +490,10 @@ describe("scripts/ci/promote-stable.sh", () => {
 
   it("refuses, without promoting, when the evidence gate finds no evidence for the commit", () => {
     const { result, calls } = run({
-      evidenceFail: "pipeline 12345 has no successful attest_image job",
+      evidenceFail: "pipeline 12345 has no successful record_image job",
     });
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("has no successful attest_image job");
+    expect(result.stderr).toContain("has no successful record_image job");
     expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login"))).toBe(false);
     expect(
       calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),

@@ -34,10 +34,11 @@ checks on its mirror as a second opinion that blocks nothing.
 6. Merge requests stop with read-only evidence. Only a push to `preview` or a
    hotfix branch reaches a registry, and only after every preceding gate
    passes.
-7. GitLab's `attest_image` job pushes that exact tested image to
+7. GitLab's `record_image` job pushes that exact tested image to
    `registry.tomlawson.io` as `sha-<commit>` without rebuilding, resolves the
-   registry digest, pulls it back, verifies its configuration identity,
-   records the digest as `gitlab-tested-image.json`, and mints a cosign
+   registry digest, pulls it back, verifies its configuration identity and
+   records the digest as `gitlab-tested-image.json`. The `sign_evidence` job
+   — alone on the runner that holds the signing key — mints a cosign
    attestation binding the digest to the policy version that judged it. The
    separate `publish_channel` job verifies that attestation, re-runs the
    cheap checks, and only then adds the channel tag
