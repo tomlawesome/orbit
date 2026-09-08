@@ -473,4 +473,51 @@ describe("item document inspection", () => {
     })).rejects.toMatchObject({ code: "household_not_found", status: 404 });
     expect(mocks.receive).not.toHaveBeenCalled();
   });
+
+  // #838: every other test in this file mocks "@/server/documents/tika"
+  // outright, so none of them would notice a regression that stopped
+  // inspectItemDocument calling extractTextWithTika at all -- only that a
+  // mocked stand-in returned whatever it was told to. This one test leaves
+  // that module real and fakes only the network `fetch` beneath it (the
+  // same seam src/server/documents/tika.test.ts uses), so the assertion
+  // below fails unless the real adapter is reached and it really sends a
+  // request to the configured Tika URL. The smoke journey
+  // (tests/e2e/v19-document-extraction.spec.ts) is what proves the sidecar
+  // itself; this is the code-level pin behind it.
+  it("#838: reaches the real Tika adapter, not just a mock, when Tika is configured", async () => {
+    // The previous test leaves mocks.access rejecting -- beforeEach clears
+    // call history, not implementations -- so restore the household-access
+    // success this test needs.
+    mocks.access.mockResolvedValue(undefined);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "text/plain; charset=utf-8" }),
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("Orbit Chromium PDF fixture"));
+          controller.close();
+        },
+      }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.config.mockReturnValue({ ...config, tika: { url: new URL("http://orbit-tika:9998"), timeoutMs: 45_000 } });
+
+    vi.doUnmock("@/server/documents/tika");
+    vi.resetModules();
+    const { inspectItemDocument: realInspectItemDocument } = await import("./item-document-inspection");
+
+    const result = await realInspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "chromium-synthetic.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(new URL("http://orbit-tika:9998/tika"), expect.objectContaining({ method: "PUT" }));
+    expect(result.extracted).toBe(true);
+
+    vi.doMock("@/server/documents/tika", () => ({ extractTextWithTika: mocks.extract }));
+    vi.unstubAllGlobals();
+  });
 });
