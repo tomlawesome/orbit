@@ -110,15 +110,15 @@ command -v curl >/dev/null 2>&1 || fail 'curl is required.'
 
 # --- the deployment under test -------------------------------------------
 
-# install.sh fetches its assets over the network and pulls its image from a
-# registry, so a live journey needs both served locally: a curl shim for the
-# working-tree assets and the fixture OIDC discovery document, and a throwaway
-# registry for the image. This mirrors scripts/test-install-acceptance.sh
-# rather than sharing code with it -- the two harnesses set up opposite states
-# (that one a good deployment, this one a broken one) and coupling them would
-# make each harder to read.
+# install.sh validates OIDC discovery over the network and pulls its image
+# from a registry, so a live journey needs both served locally: a curl shim
+# for the fixture discovery document, and a throwaway registry for the image.
+# The deployment assets need no shim -- they come out of the image itself
+# (ADR-0019). This mirrors scripts/test-install-acceptance.sh rather than
+# sharing code with it -- the two harnesses set up opposite states (that one a
+# good deployment, this one a broken one) and coupling them would make each
+# harder to read.
 write_shim() {
-  local revision="$1"
   mkdir -p "$workdir/shim"
   cat > "$workdir/discovery.json" <<EOF
 {
@@ -134,14 +134,11 @@ write_shim() {
 EOF
   cat > "$workdir/shim/curl" <<SHIM
 #!/usr/bin/env bash
-# Serves working-tree assets and the fixture discovery document; every other
-# URL fails closed, so an unexpected network dependency surfaces as a failure
-# rather than as a silent fetch from the internet.
+# Serves the fixture discovery document; every other URL fails closed, so an
+# unexpected network dependency surfaces as a failure rather than as a silent
+# fetch from the internet. Deployment assets are not fetched at all any more:
+# install.sh takes them out of the image it resolved (ADR-0019).
 set -Eeuo pipefail
-# Any revision, not just this checkout's HEAD: install.sh fetches the
-# revision stamped into the image it pulled, which differs from HEAD whenever
-# a prebuilt image is supplied. The working tree is the answer either way.
-asset_prefix="https://raw.githubusercontent.com/$repository/"
 discovery_url="${issuer}.well-known/openid-configuration"
 output="" write_out="" url=""
 args=("\$@")
@@ -159,12 +156,6 @@ serve() {
   [[ -z "\$write_out" ]] || printf '200'
 }
 case "\$url" in
-  "\$asset_prefix"*)
-    asset="\${url#"\$asset_prefix"}"
-    asset="\${asset#*/}"
-    [[ -f "$repo_root/\$asset" ]] || { [[ -z "\$write_out" ]] || printf '404'; exit 0; }
-    serve "$repo_root/\$asset"
-    ;;
   "\$discovery_url") serve "$workdir/discovery.json" ;;
   *) [[ -z "\$write_out" ]] || printf '000'; exit 6 ;;
 esac
@@ -212,7 +203,7 @@ install_deployment() {
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
     fail 'push to the local registry failed'
 
-  write_shim "$revision"
+  write_shim
   make_target
 
   note 'installing the deployment under test'
@@ -281,7 +272,8 @@ wait_for_unhealthy() {
 # location (scripts/repair.sh:1263), not from the working directory, so the
 # repo's copy would diagnose the developer's own checkout and report findings
 # that have nothing to do with the target. It is the same code either way --
-# the shim serves the target its assets from this working tree.
+# the image under test is built from this working tree and carries these
+# assets (ADR-0019).
 repair() { (cd "$target" && env ORBIT_REPAIR_PROMPTS=machine bash "$target/scripts/repair.sh" "$@"); }
 
 # A freshly installed deployment must be healthy by repair's own diagnosis

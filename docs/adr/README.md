@@ -33,3 +33,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0016: The supported-install floor is v1.3.0](0016-release-identity-and-installer-era-boundary.md)
 - [ADR-0017: Mail-in credential ownership and per-user relays](0017-mail-in-credential-ownership-and-per-user-relay.md)
 - [ADR-0018: The engine is a library, `orbit-web` links it, adapter-node ships it](0018-engine-library-and-adapter-node-packaging.md)
+- [ADR-0019: Deployment assets ship inside the image](0019-deployment-assets-ship-inside-the-image.md)

@@ -45,7 +45,6 @@ const imageRepository = `${registry}/${repository}`;
 const digest = "a".repeat(64);
 const revision = "b".repeat(40);
 const resolvedReference = `${imageRepository}@sha256:${digest}`;
-const assetBase = `https://raw.githubusercontent.com/${repository}/${revision}`;
 const preflightSuccessLine =
   "Orbit installer: configuration, OIDC discovery, and Docker Compose preflight passed; starting services.";
 const deploymentAssets = [
@@ -61,6 +60,183 @@ const deploymentAssets = [
   "scripts/repair.sh",
   "scripts/engine-check.sh",
 ];
+
+// Not on the installer's fixed allowlist; the bundle carries them so every run
+// proves an unnamed file is left behind in the image.
+const unmanagedBundleScript = "scripts/not-a-deployment-asset.sh";
+const unmanagedBundleFile = "bundle-extra.txt";
+const installerUiPath = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
+const deployContainerId = "9".repeat(64);
+
+// The deployment assets the image bundles (ADR-0019), written to a fixture
+// directory the fake `docker cp` copies out of the "image". A negative case
+// is therefore a mutation of the bundle, not of a download.
+const fakeConfigureScript =
+  [
+    "#!/usr/bin/env bash",
+    "set -Eeuo pipefail",
+    'repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"',
+    'cd "$repo_dir"',
+    "printf 'CONFIGURE_INVOKED ORBIT_IMAGE=%s\\n' \"${ORBIT_IMAGE:-}\"",
+    "case \"${1:-}\" in",
+    "  --check)",
+    '    if [[ -f .env-orbit && -s .orbit-secrets/oidc-client-secret ]]; then',
+    "      printf '%s\\n' 'ready APP_URL' 'ready ORBIT_IMAGE' 'ready OIDC_ISSUER' 'ready OIDC_CLIENT_ID' 'ready OIDC_CLIENT_SECRET' 'ready OIDC_CALLBACK_URL'",
+    "      exit 0",
+    "    fi",
+    "    printf '%s\\n' 'missing APP_URL' 'missing ORBIT_IMAGE' 'missing OIDC_ISSUER' 'missing OIDC_CLIENT_ID' 'missing OIDC_CLIENT_SECRET' 'missing OIDC_CALLBACK_URL'",
+    "    exit 1",
+    "    ;;",
+    "  --init)",
+    '    [[ "${FAKE_CONFIGURE_INIT_FAIL:-}" != "1" ]] || exit 42',
+    '    profile_lines="$(grep -E "^(COMPOSE_PROFILES|TIKA_URL|OLLAMA_MODEL)=" .env-orbit 2>/dev/null || true)"',
+    '    if [[ "${FAKE_CONFIGURE_INIT_PROMPT:-}" == "1" ]]; then',
+    "      exec {fake_tty_fd}<>/dev/tty",
+    '      IFS= read -r -u "$fake_tty_fd" app_url || exit 1',
+    '      IFS= read -r -u "$fake_tty_fd" issuer || exit 1',
+    '      IFS= read -r -u "$fake_tty_fd" client_id || exit 1',
+    "      exec {fake_tty_fd}>&-",
+    "    else",
+    '      app_url="https://orbit.install-test.internal"',
+    '      issuer="https://auth.install-test.internal/application/o/orbit/"',
+    '      client_id="install-test-client"',
+    "    fi",
+    "    cat > .env-orbit <<ENV",
+    "APP_URL=${app_url}",
+    "ORBIT_IMAGE=${ORBIT_IMAGE:-fake-registry.example/example/orbit-fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
+    "OIDC_ISSUER=${issuer}",
+    "OIDC_CLIENT_ID=${client_id}",
+    "OIDC_CLIENT_SECRET=",
+    "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
+    "OIDC_CALLBACK_URL=${app_url}/api/auth/callback",
+    "ENV",
+    '    [[ -z "$profile_lines" ]] || printf "%s\\n" "$profile_lines" >> .env-orbit',
+    "    mkdir -p .orbit-secrets",
+    "    chmod 700 .orbit-secrets",
+    "    : > .orbit-secrets/oidc-client-secret",
+    "    chmod 600 .env-orbit .orbit-secrets/oidc-client-secret",
+    "    exit 0",
+    "    ;;",
+    "  --set-oidc-secret)",
+    '    if [[ "${ORBIT_CONFIGURE_TTY_INPUT:-}" == "1" ]]; then',
+    "      exec {fake_tty_fd}<>/dev/tty",
+    '      IFS= read -r -s -u "$fake_tty_fd" secret || exit 1',
+    '      printf "\\n" >&"$fake_tty_fd"',
+    "      exec {fake_tty_fd}>&-",
+    "    else",
+    "      IFS= read -r -s secret || exit 1",
+    "    fi",
+    "    [[ -n \"$secret\" ]] || exit 1",
+    "    mkdir -p .orbit-secrets",
+    "    printf '%s' \"$secret\" > .orbit-secrets/oidc-client-secret",
+    "    chmod 700 .orbit-secrets",
+    "    chmod 600 .orbit-secrets/oidc-client-secret",
+    "    sed -i 's/^OIDC_CLIENT_SECRET=.*/OIDC_CLIENT_SECRET=/' .env-orbit",
+    "    printf '%s\\n' 'OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret' >> .env-orbit",
+    "    exit 0",
+    "    ;;",
+    "  --set-deployment-profile)",
+    '    preset="${2:-}"',
+    '    model="${3:-}"',
+    '    profiles=""',
+    '    tika_url=""',
+    '    case "$preset" in',
+    "      standard) ;;",
+    '      processing) profiles="processing"; tika_url="http://orbit-tika:9998" ;;',
+    '      ai) profiles="ai" ;;',
+    '      full) profiles="processing,ai"; tika_url="http://orbit-tika:9998" ;;',
+    "      *) exit 2 ;;",
+    "    esac",
+    '    for assignment in "COMPOSE_PROFILES=$profiles" "TIKA_URL=$tika_url" "OLLAMA_MODEL=$model"; do',
+    '      key="${assignment%%=*}"',
+    '      if grep -q "^${key}=" .env-orbit; then',
+    '        sed -i "s|^${key}=.*|${assignment}|" .env-orbit',
+    "      else",
+    '        printf "%s\\n" "$assignment" >> .env-orbit',
+    "      fi",
+    "    done",
+    "    exit 0",
+    "    ;;",
+    "esac",
+    'if [[ "${FAKE_CONFIGURE_SKIP_ENV:-}" != "1" ]]; then',
+    "  if [[ ! -e .env-orbit ]]; then",
+    "    cat > .env-orbit <<ENV",
+    "APP_URL=https://orbit.install-test.internal",
+    "ORBIT_IMAGE=${ORBIT_IMAGE:-fake-registry.example/example/orbit-fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
+    "OIDC_ISSUER=https://auth.install-test.internal/application/o/orbit/",
+    "OIDC_CLIENT_ID=install-test-client",
+    "OIDC_CLIENT_SECRET=",
+    "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
+    "OIDC_CALLBACK_URL=https://orbit.install-test.internal/api/auth/callback",
+    "ENV",
+    "  fi",
+    "fi",
+    'if [[ "${FAKE_CONFIGURE_SKIP_SECRETS:-}" != "1" ]]; then',
+    "  mkdir -p .orbit-secrets",
+    "  chmod 700 .orbit-secrets",
+    "  if [[ ! -e .orbit-secrets/oidc-client-secret ]]; then if [[ \"${FAKE_CONFIGURE_READY:-}\" == \"1\" ]]; then printf 'fake-oidc-secret' > .orbit-secrets/oidc-client-secret; else : > .orbit-secrets/oidc-client-secret; fi; fi",
+    "  chmod 600 .orbit-secrets/oidc-client-secret",
+    "fi",
+    'if [[ "${FAKE_CONFIGURE_MUTATE_POSTGRES_PASSWORD:-}" == "1" ]]; then',
+    "  printf 'mutated-postgres-password' > .orbit-secrets/postgres-password",
+    "  chmod 600 .orbit-secrets/postgres-password",
+    "fi",
+    '[[ ! -e .env-orbit ]] || chmod 600 .env-orbit',
+    'if [[ "${FAKE_CONFIGURE_FAIL:-}" == "1" ]]; then',
+    '  [[ ! -f .env-orbit ]] || printf "CONFIGURE_MUTATION=1\\n" >> .env-orbit',
+    '  [[ ! -d .orbit-secrets ]] || printf "configure-secret\\n" > .orbit-secrets/configure-secret',
+    '  [[ ! -f .orbit-secrets/configure-secret ]] || chmod 600 .orbit-secrets/configure-secret',
+    "  exit 42",
+    "fi",
+  ].join("\n") + "\n";
+
+const fakeConfigurationScript =
+  [
+    "#!/usr/bin/env bash",
+    "set -Eeuo pipefail",
+    "printf 'Orbit configuration: already current schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n'",
+  ].join("\n") + "\n";
+
+function fakeAnnouncingScript(announcement) {
+  return ["#!/usr/bin/env bash", "set -Eeuo pipefail", `printf '${announcement}\\n'`].join("\n") + "\n";
+}
+
+// Every bundled file is read-only here, so a run that let the image decide the
+// deployment's modes would show up as a 0444 asset in the target.
+const bundledAssetMode = 0o444;
+// What the installer must set instead: the mode the umask would have given a
+// downloaded file, which is what the fetch it replaces produced.
+const stagedAssetMode =
+  0o666 & ~Number.parseInt(spawnSync("bash", ["-c", "umask"], { encoding: "utf8" }).stdout.trim(), 8);
+
+function makeImageDeployFixture(environment) {
+  const contents = new Map(deploymentAssets.map((asset) => [asset, `fake content for ${asset}\n`]));
+  contents.set("scripts/configure.sh", fakeConfigureScript);
+  contents.set("scripts/backup.sh", fakeAnnouncingScript("BACKUP_INVOKED"));
+  contents.set("scripts/restore.sh", fakeAnnouncingScript("RESTORE_INVOKED"));
+  contents.set("scripts/repair.sh", fakeAnnouncingScript("REPAIR_INVOKED"));
+  contents.set("scripts/engine-check.sh", fakeAnnouncingScript("ENGINE_CHECK_INVOKED"));
+  contents.set("scripts/installer-ui.sh", readFileSync(environment.FAKE_INSTALLER_UI_PATH ?? installerUiPath));
+  contents.set(
+    "scripts/configuration.sh",
+    environment.FAKE_USE_REAL_CONFIGURATION === "1"
+      ? readFileSync(environment.FAKE_CONFIGURATION_SCRIPT_PATH ?? configurationScriptPath)
+      : fakeConfigurationScript,
+  );
+  // Two files the allowlist does not name. Neither may ever be installed, and
+  // the script must never reach `bash -n` either: it could not pass.
+  contents.set(unmanagedBundleScript, "this is not valid shell syntax (\n");
+  contents.set(unmanagedBundleFile, "never installed\n");
+
+  const deployDir = mkdtempSync(join(tmpdir(), "orbit-image-deploy-"));
+  for (const [relative, content] of contents) {
+    const path = join(deployDir, relative);
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, content);
+    chmodSync(path, bundledAssetMode);
+  }
+  return deployDir;
+}
 
 const fakeDockerScript = [
   "#!/usr/bin/env bash",
@@ -191,6 +367,53 @@ const fakeDockerScript = [
   "    fi",
   '    if printf "%s" "$payload" | node --input-type=commonjs -e "${args[${#args[@]} - 1]}"; then parser_status=0; else parser_status=$?; fi; exit "$parser_status"',
   "    ;;",
+  "  create)",
+  "    # ADR-0019 extraction: a container is created and never started, so the",
+  "    # fake prints an id and records the call; nothing runs from the image.",
+  '    if [[ "${FAKE_DOCKER_CREATE_FAIL:-0}" == "1" ]]; then',
+  "      printf 'fake docker create failure\\n' >&2",
+  "      exit 125",
+  "    fi",
+  '    printf "%s\\n" "${FAKE_DOCKER_CONTAINER_ID:-' + deployContainerId + '}"',
+  "    exit 0",
+  "    ;;",
+  "  cp)",
+  '    destination="${3:-}"',
+  '    if [[ "${FAKE_DOCKER_NO_DEPLOY_BUNDLE:-0}" == "1" ]]; then',
+  "      printf 'Error: No such container:path: %s\\n' \"${2:-}\" >&2",
+  "      exit 1",
+  "    fi",
+  '    if [[ "${FAKE_DOCKER_CP_FAIL:-0}" == "1" ]]; then',
+  "      printf 'fake docker cp failure\\n' >&2",
+  "      exit 1",
+  "    fi",
+  '    mkdir -p -- "$destination"',
+  '    cp -R -- "${FAKE_IMAGE_DEPLOY_DIR:?}/." "$destination"',
+  "    # The bundle fixture is read-only; make the copy writable so the",
+  "    # mutations below can stand in for a malformed bundle.",
+  '    chmod -R u+rwX -- "$destination"',
+  '    if [[ -n "${FAKE_ASSET_MISSING:-}" ]]; then',
+  '      rm -f -- "$destination/${FAKE_ASSET_MISSING}"',
+  "    fi",
+  '    if [[ -n "${FAKE_INVALID_ASSET:-}" ]]; then',
+  "      printf 'this is not valid shell syntax (\\n' > \"$destination/${FAKE_INVALID_ASSET}\"",
+  "    fi",
+  '    if [[ -n "${FAKE_EMPTY_ASSET:-}" ]]; then',
+  '      : > "$destination/${FAKE_EMPTY_ASSET}"',
+  "    fi",
+  '    if [[ -n "${FAKE_DIRECTORY_ASSET:-}" ]]; then',
+  '      rm -f -- "$destination/${FAKE_DIRECTORY_ASSET}"',
+  '      mkdir -p -- "$destination/${FAKE_DIRECTORY_ASSET}"',
+  "    fi",
+  '    if [[ -n "${FAKE_SYMLINK_ASSET:-}" ]]; then',
+  '      rm -f -- "$destination/${FAKE_SYMLINK_ASSET}"',
+  '      ln -s "$destination/docker-compose.yml" "$destination/${FAKE_SYMLINK_ASSET}"',
+  "    fi",
+  "    exit 0",
+  "    ;;",
+  "  rm)",
+  "    exit 0",
+  "    ;;",
   "  image)",
   '    args="$*"',
   '    case "$args" in',
@@ -219,6 +442,20 @@ const fakeDockerScript = [
   "        ;;",
   "      *image.version*)",
   '        printf "%s\\n" "${FAKE_DOCKER_VERSION:-v1.2.0}"',
+  "        exit 0",
+  "        ;;",
+  "      *deployment-assets*)",
+  '        if [[ "${FAKE_DOCKER_DEPLOY_LABEL_INSPECT_FAIL:-}" == "1" ]]; then',
+  "          printf 'fake deployment-assets inspect failure\\n' >&2",
+  "          exit 19",
+  "        fi",
+  "        # An image built before ADR-0019 carries no such label, and the",
+  "        # template prints an empty line for it.",
+  '        if [[ "${FAKE_DOCKER_NO_DEPLOY_LABEL:-}" == "1" ]]; then',
+  "          printf '\\n'",
+  "          exit 0",
+  "        fi",
+  '        printf "%s\\n" "${FAKE_DOCKER_DEPLOY_LABEL:-/opt/orbit/deploy}"',
   "        exit 0",
   "        ;;",
   "    esac",
@@ -260,8 +497,6 @@ const fakeCurlScript = [
   "      ;;",
   "  esac",
   "done",
-  'prefix="${FAKE_ASSET_BASE:?}/"',
-  'asset="${url#"$prefix"}"',
   'if [[ "$url" == https://*"/.well-known/openid-configuration" ]]; then',
   '  if [[ "${FAKE_OIDC_NETWORK_FAIL:-}" == "1" ]]; then exit 7; fi',
   '  discovery_issuer="${url%/.well-known/openid-configuration}"',
@@ -275,182 +510,13 @@ const fakeCurlScript = [
   '  printf "%s" "${FAKE_OIDC_HTTP_STATUS:-200}"',
   "  exit 0",
   "fi",
+  "# Deployment assets no longer travel over curl (ADR-0019); only the OIDC",
+  "# discovery document does. Every other URL fails closed, so an asset fetch",
+  "# that came back would surface as a test failure rather than as a download.",
   'if [[ -n "${FAKE_CALL_LOG:-}" ]]; then',
-  "  printf 'curl %s\\n' \"$asset\" >> \"$FAKE_CALL_LOG\"",
+  "  printf 'curl %s\\n' \"$url\" >> \"$FAKE_CALL_LOG\"",
   "fi",
-  'if [[ -n "${FAKE_CURL_FAIL_ASSET:-}" && "$asset" == "${FAKE_CURL_FAIL_ASSET}" ]]; then',
-  "  exit 22",
-  "fi",
-  'if [[ -n "${FAKE_INVALID_ASSET:-}" && "$asset" == "${FAKE_INVALID_ASSET}" ]]; then',
-  "  printf 'this is not valid shell syntax (\\n' > \"$output\"",
-  "  exit 0",
-  "fi",
-  'case "$asset" in',
-  "  scripts/configure.sh)",
-  "    cat <<'SCRIPT' > \"$output\"",
-  "#!/usr/bin/env bash",
-  "set -Eeuo pipefail",
-  'repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"',
-  'cd "$repo_dir"',
-  "printf 'CONFIGURE_INVOKED ORBIT_IMAGE=%s\\n' \"${ORBIT_IMAGE:-}\"",
-  "case \"${1:-}\" in",
-  "  --check)",
-  '    if [[ -f .env-orbit && -s .orbit-secrets/oidc-client-secret ]]; then',
-  "      printf '%s\\n' 'ready APP_URL' 'ready ORBIT_IMAGE' 'ready OIDC_ISSUER' 'ready OIDC_CLIENT_ID' 'ready OIDC_CLIENT_SECRET' 'ready OIDC_CALLBACK_URL'",
-  "      exit 0",
-  "    fi",
-  "    printf '%s\\n' 'missing APP_URL' 'missing ORBIT_IMAGE' 'missing OIDC_ISSUER' 'missing OIDC_CLIENT_ID' 'missing OIDC_CLIENT_SECRET' 'missing OIDC_CALLBACK_URL'",
-  "    exit 1",
-  "    ;;",
-  "  --init)",
-  '    [[ "${FAKE_CONFIGURE_INIT_FAIL:-}" != "1" ]] || exit 42',
-  '    profile_lines="$(grep -E "^(COMPOSE_PROFILES|TIKA_URL|OLLAMA_MODEL)=" .env-orbit 2>/dev/null || true)"',
-  '    if [[ "${FAKE_CONFIGURE_INIT_PROMPT:-}" == "1" ]]; then',
-  "      exec {fake_tty_fd}<>/dev/tty",
-  '      IFS= read -r -u "$fake_tty_fd" app_url || exit 1',
-  '      IFS= read -r -u "$fake_tty_fd" issuer || exit 1',
-  '      IFS= read -r -u "$fake_tty_fd" client_id || exit 1',
-  "      exec {fake_tty_fd}>&-",
-  "    else",
-  '      app_url="https://orbit.install-test.internal"',
-  '      issuer="https://auth.install-test.internal/application/o/orbit/"',
-  '      client_id="install-test-client"',
-  "    fi",
-  "    cat > .env-orbit <<ENV",
-  "APP_URL=${app_url}",
-  "ORBIT_IMAGE=${ORBIT_IMAGE:-fake-registry.example/example/orbit-fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
-  "OIDC_ISSUER=${issuer}",
-  "OIDC_CLIENT_ID=${client_id}",
-  "OIDC_CLIENT_SECRET=",
-  "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
-  "OIDC_CALLBACK_URL=${app_url}/api/auth/callback",
-  "ENV",
-  '    [[ -z "$profile_lines" ]] || printf "%s\\n" "$profile_lines" >> .env-orbit',
-  "    mkdir -p .orbit-secrets",
-  "    chmod 700 .orbit-secrets",
-  "    : > .orbit-secrets/oidc-client-secret",
-  "    chmod 600 .env-orbit .orbit-secrets/oidc-client-secret",
-  "    exit 0",
-  "    ;;",
-  "  --set-oidc-secret)",
-  '    if [[ "${ORBIT_CONFIGURE_TTY_INPUT:-}" == "1" ]]; then',
-  "      exec {fake_tty_fd}<>/dev/tty",
-  '      IFS= read -r -s -u "$fake_tty_fd" secret || exit 1',
-  '      printf "\\n" >&"$fake_tty_fd"',
-  "      exec {fake_tty_fd}>&-",
-  "    else",
-  "      IFS= read -r -s secret || exit 1",
-  "    fi",
-  "    [[ -n \"$secret\" ]] || exit 1",
-  "    mkdir -p .orbit-secrets",
-  "    printf '%s' \"$secret\" > .orbit-secrets/oidc-client-secret",
-  "    chmod 700 .orbit-secrets",
-  "    chmod 600 .orbit-secrets/oidc-client-secret",
-  "    sed -i 's/^OIDC_CLIENT_SECRET=.*/OIDC_CLIENT_SECRET=/' .env-orbit",
-  "    printf '%s\\n' 'OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret' >> .env-orbit",
-  "    exit 0",
-  "    ;;",
-  "  --set-deployment-profile)",
-  '    preset="${2:-}"',
-  '    model="${3:-}"',
-  '    profiles=""',
-  '    tika_url=""',
-  '    case "$preset" in',
-  "      standard) ;;",
-  '      processing) profiles="processing"; tika_url="http://orbit-tika:9998" ;;',
-  '      ai) profiles="ai" ;;',
-  '      full) profiles="processing,ai"; tika_url="http://orbit-tika:9998" ;;',
-  "      *) exit 2 ;;",
-  "    esac",
-  '    for assignment in "COMPOSE_PROFILES=$profiles" "TIKA_URL=$tika_url" "OLLAMA_MODEL=$model"; do',
-  '      key="${assignment%%=*}"',
-  '      if grep -q "^${key}=" .env-orbit; then',
-  '        sed -i "s|^${key}=.*|${assignment}|" .env-orbit',
-  "      else",
-  '        printf "%s\\n" "$assignment" >> .env-orbit',
-  "      fi",
-  "    done",
-  "    exit 0",
-  "    ;;",
-  "esac",
-  'if [[ "${FAKE_CONFIGURE_SKIP_ENV:-}" != "1" ]]; then',
-  "  if [[ ! -e .env-orbit ]]; then",
-  "    cat > .env-orbit <<ENV",
-  "APP_URL=https://orbit.install-test.internal",
-  "ORBIT_IMAGE=${ORBIT_IMAGE:-fake-registry.example/example/orbit-fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
-  "OIDC_ISSUER=https://auth.install-test.internal/application/o/orbit/",
-  "OIDC_CLIENT_ID=install-test-client",
-  "OIDC_CLIENT_SECRET=",
-  "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
-  "OIDC_CALLBACK_URL=https://orbit.install-test.internal/api/auth/callback",
-  "ENV",
-  "  fi",
-  "fi",
-  'if [[ "${FAKE_CONFIGURE_SKIP_SECRETS:-}" != "1" ]]; then',
-  "  mkdir -p .orbit-secrets",
-  "  chmod 700 .orbit-secrets",
-  "  if [[ ! -e .orbit-secrets/oidc-client-secret ]]; then if [[ \"${FAKE_CONFIGURE_READY:-}\" == \"1\" ]]; then printf 'fake-oidc-secret' > .orbit-secrets/oidc-client-secret; else : > .orbit-secrets/oidc-client-secret; fi; fi",
-  "  chmod 600 .orbit-secrets/oidc-client-secret",
-  "fi",
-  'if [[ "${FAKE_CONFIGURE_MUTATE_POSTGRES_PASSWORD:-}" == "1" ]]; then',
-  "  printf 'mutated-postgres-password' > .orbit-secrets/postgres-password",
-  "  chmod 600 .orbit-secrets/postgres-password",
-  "fi",
-  '[[ ! -e .env-orbit ]] || chmod 600 .env-orbit',
-  'if [[ "${FAKE_CONFIGURE_FAIL:-}" == "1" ]]; then',
-  '  [[ ! -f .env-orbit ]] || printf "CONFIGURE_MUTATION=1\\n" >> .env-orbit',
-  '  [[ ! -d .orbit-secrets ]] || printf "configure-secret\\n" > .orbit-secrets/configure-secret',
-  '  [[ ! -f .orbit-secrets/configure-secret ]] || chmod 600 .orbit-secrets/configure-secret',
-  "  exit 42",
-  "fi",
-  "SCRIPT",
-  "    ;;",
-  "  scripts/backup.sh)",
-  "    cat <<'SCRIPT' > \"$output\"",
-  "#!/usr/bin/env bash",
-  "set -Eeuo pipefail",
-  "printf 'BACKUP_INVOKED\\n'",
-  "SCRIPT",
-  "    ;;",
-  "  scripts/installer-ui.sh)",
-  '    cp -- "${FAKE_INSTALLER_UI_PATH:?}" "$output"',
-  "    ;;",
-  "  scripts/configuration.sh)",
-  '    if [[ "${FAKE_USE_REAL_CONFIGURATION:-0}" == "1" ]]; then',
-  '      cp -- "${FAKE_CONFIGURATION_SCRIPT_PATH:?}" "$output"',
-  "    else",
-  "      cat <<'SCRIPT' > \"$output\"",
-  "#!/usr/bin/env bash",
-  "set -Eeuo pipefail",
-  "printf 'Orbit configuration: already current schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n'",
-  "SCRIPT",
-  "    fi",
-  "    ;;",
-  "  scripts/restore.sh)",
-  "    cat <<'SCRIPT' > \"$output\"",
-  "#!/usr/bin/env bash",
-  "set -Eeuo pipefail",
-  "printf 'RESTORE_INVOKED\\n'",
-  "SCRIPT",
-  "    ;;",
-  "  scripts/repair.sh)",
-  "    cat <<'SCRIPT' > \"$output\"",
-  "#!/usr/bin/env bash",
-  "set -Eeuo pipefail",
-  "printf 'REPAIR_INVOKED\\n'",
-  "SCRIPT",
-  "    ;;",
-  "  scripts/engine-check.sh)",
-  "    cat <<'SCRIPT' > \"$output\"",
-  "#!/usr/bin/env bash",
-  "set -Eeuo pipefail",
-  "printf 'ENGINE_CHECK_INVOKED\\n'",
-  "SCRIPT",
-  "    ;;",
-  "  *)",
-  "    printf 'fake content for %s\\n' \"$asset\" > \"$output\"",
-  "    ;;",
-  "esac",
+  "exit 6",
   "",
 ].join("\n");
 
@@ -621,6 +687,20 @@ function managedSnapshot(targetDir) {
   ]);
 }
 
+// Every `docker create` is answered by a `docker rm`, on the success path and
+// on every failure path: the installer's cleanup trap owns the container it
+// made to read the bundle out of (ADR-0019).
+function expectContainersRemoved(calls) {
+  const lines = calls.split("\n").filter(Boolean);
+  const created = lines.filter((line) => line.startsWith("docker create "));
+  const removed = lines.filter((line) => line.startsWith("docker rm "));
+  expect(created.length).toBeGreaterThan(0);
+  expect(removed.length).toBe(created.length);
+  expect(lines.findLastIndex((line) => line.startsWith("docker rm "))).toBeGreaterThan(
+    lines.findLastIndex((line) => line.startsWith("docker create ")),
+  );
+}
+
 function targetEntries(targetDir) {
   return readdirSync(targetDir).sort();
 }
@@ -638,6 +718,13 @@ function readOptionalFile(path) {
   }
 }
 
+// The bundle the fake `docker cp` serves depends on what the run asked for
+// (a real configuration.sh, a different installer UI), so it is built from
+// the environment the installer will actually see.
+function withImageDeployFixture(environment) {
+  return { ...environment, FAKE_IMAGE_DEPLOY_DIR: makeImageDeployFixture(environment) };
+}
+
 function runInstall(targetDir, envOverrides = {}, args = []) {
   const binDir = makeFakeBin();
   const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
@@ -647,7 +734,7 @@ function runInstall(targetDir, envOverrides = {}, args = []) {
   const result = failOnProcessDeadline(spawnSync("bash", [installScript, ...args], {
     cwd: targetDir,
     encoding: "utf8",
-    env: {
+    env: withImageDeployFixture({
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: process.env.HOME ?? tmpdir(),
       TERM: "xterm",
@@ -660,15 +747,14 @@ function runInstall(targetDir, envOverrides = {}, args = []) {
       FAKE_DOCKER_APP_IMAGE: priorImage,
       FAKE_DOCKER_CONFIG_HASH: "f".repeat(64),
       FAKE_DOCKER_RUNNING_CONFIG_HASH: "f".repeat(64),
-      FAKE_ASSET_BASE: assetBase,
       FAKE_CALL_LOG: logPath,
       FAKE_PROBE_COUNTER_DIR: logDir,
       FAKE_CONFIGURATION_SCRIPT_PATH: configurationScriptPath,
-      FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
+      FAKE_INSTALLER_UI_PATH: installerUiPath,
       FAKE_USE_REAL_CONFIGURATION: "0",
       FAKE_CONFIGURE_READY: "1",
       ...envOverrides,
-    },
+    }),
     ...processGuard(),
   }), { label: "runInstall" });
   const calls = readOptionalFile(logPath);
@@ -686,7 +772,7 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
     // Deadline and its justification: pty-deadline.mjs (#595).
     timeout: PTY_DEADLINE_MS,
     killSignal: "SIGKILL",
-    env: {
+    env: withImageDeployFixture({
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: process.env.HOME ?? tmpdir(),
       TERM: "xterm",
@@ -696,13 +782,12 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
       FAKE_DOCKER_DIGEST: digest,
       FAKE_DOCKER_REVISION: revision,
       FAKE_DOCKER_VERSION: "v1.2.0",
-      FAKE_ASSET_BASE: assetBase,
       FAKE_CALL_LOG: logPath,
       FAKE_PROBE_COUNTER_DIR: logDir,
-      FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
+      FAKE_INSTALLER_UI_PATH: installerUiPath,
       FAKE_CONFIGURE_READY: "0",
       ...envOverrides,
-    },
+    }),
   });
   const calls = readOptionalFile(logPath);
   return failOnPtyDeadline(
@@ -726,7 +811,7 @@ function runInstallWithPromptedTerminalInput(
       ["-qeE", "never", "-c", `exec </dev/null; bash ${installScript} ${args.join(" ")}`, "/dev/null"],
       {
         cwd: targetDir,
-        env: {
+        env: withImageDeployFixture({
           PATH: `${binDir}:${process.env.PATH}`,
           HOME: process.env.HOME ?? tmpdir(),
           TERM: "xterm",
@@ -736,13 +821,12 @@ function runInstallWithPromptedTerminalInput(
           FAKE_DOCKER_DIGEST: digest,
           FAKE_DOCKER_REVISION: revision,
           FAKE_DOCKER_VERSION: "v1.2.0",
-          FAKE_ASSET_BASE: assetBase,
           FAKE_CALL_LOG: logPath,
           FAKE_PROBE_COUNTER_DIR: logDir,
-          FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
+          FAKE_INSTALLER_UI_PATH: installerUiPath,
           FAKE_CONFIGURE_READY: "0",
           ...envOverrides,
-        },
+        }),
       },
     );
     let stdout = "";
@@ -1377,10 +1461,13 @@ describe("install.sh", () => {
     expect(lstatSync(join(targetDir, "scripts", "restore.sh")).isFile()).toBe(true);
     expect(lstatSync(join(targetDir, "scripts", "repair.sh")).isFile()).toBe(true);
     expect(lstatSync(join(targetDir, "scripts", "engine-check.sh")).isFile()).toBe(true);
-    expect(result.calls).toContain(`scripts/backup.sh`);
-    expect(result.calls).toContain(`scripts/restore.sh`);
-    expect(result.calls).toContain(`scripts/repair.sh`);
-    expect(result.calls).toContain(`scripts/engine-check.sh`);
+    // The scripts are no longer downloaded one by one: the whole bundle comes
+    // out of the digest just resolved, in one extraction whose container is
+    // removed again (ADR-0019).
+    expect(result.calls).toContain(`docker create ${resolvedReference}`);
+    expect(result.calls).toContain(`docker cp ${deployContainerId}:/opt/orbit/deploy/.`);
+    expect(result.calls).not.toContain("raw.githubusercontent.com");
+    expectContainersRemoved(result.calls);
     expect(result.stdout).not.toContain("BACKUP_INVOKED");
     expect(result.stdout).not.toContain("RESTORE_INVOKED");
     expect(result.stdout).not.toContain("REPAIR_INVOKED");
@@ -1461,14 +1548,14 @@ describe("install.sh", () => {
     expect(result.calls).toBe("");
   });
 
-  it("leaves existing files unchanged when an asset fetch fails", () => {
+  it("leaves existing files unchanged when the bundle omits an asset", () => {
     const targetDir = makeTarget();
     makeExistingDeployment(targetDir);
 
-    const result = runInstall(targetDir, { FAKE_CURL_FAIL_ASSET: "config/tika-config.json" });
+    const result = runInstall(targetDir, { FAKE_ASSET_MISSING: "config/tika-config.json" });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Could not fetch config/tika-config.json");
+    expect(result.stderr).toContain("Bundled config/tika-config.json is not a regular file");
     expect(readFileSync(join(targetDir, "docker-compose.yml"), "utf8")).toBe(
       "PRIOR-COMPOSE-CONTENT\n",
     );
@@ -1478,17 +1565,160 @@ describe("install.sh", () => {
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
-  it("leaves a recognised deployment unchanged when backup fetch fails", () => {
+  it("leaves a recognised deployment unchanged when the bundle omits backup.sh", () => {
     const targetDir = makeTarget();
     makeFullExistingDeployment(targetDir);
     const before = managedSnapshot(targetDir);
 
-    const result = runInstall(targetDir, { FAKE_CURL_FAIL_ASSET: "scripts/backup.sh" });
+    const result = runInstall(targetDir, { FAKE_ASSET_MISSING: "scripts/backup.sh" });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Could not fetch scripts/backup.sh");
+    expect(result.stderr).toContain("Bundled scripts/backup.sh is not a regular file");
     expect(managedSnapshot(targetDir)).toEqual(before);
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses an image built before the deployment assets were bundled", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_DOCKER_NO_DEPLOY_LABEL: "1" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "The published image was built before Orbit bundled its deployment assets and is not a supported install target (ADR-0016, ADR-0019).",
+    );
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    // Refused on the label alone: no container is ever made from an image
+    // that has nothing to extract.
+    expect(result.calls).not.toContain("docker create");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses an image that records its assets somewhere unexpected", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_DOCKER_DEPLOY_LABEL: "/opt/somewhere-else" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("records deployment assets somewhere other than /opt/orbit/deploy");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(result.calls).not.toContain("docker create");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("leaves a recognised deployment unchanged when the bundle cannot be copied out", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_DOCKER_CP_FAIL: "1" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Could not extract deployment assets from the published image.");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+    expectContainersRemoved(result.calls);
+  });
+
+  it("refuses an image whose bundle directory is not there at all", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_DOCKER_NO_DEPLOY_BUNDLE: "1" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Could not extract deployment assets from the published image.");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expectContainersRemoved(result.calls);
+  });
+
+  it("refuses an extraction container that is not identified by a container id", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_DOCKER_CONTAINER_ID: "not-a-container-id" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Could not extract deployment assets from the published image.");
+    expect(result.calls).not.toContain("docker cp");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expectContainersRemoved(result.calls);
+  });
+
+  it("refuses an empty bundled asset", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_EMPTY_ASSET: "docker-compose.yml" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Bundled docker-compose.yml is empty");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses a bundled asset that arrives as a symlink", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_SYMLINK_ASSET: "scripts/repair.sh" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Bundled scripts/repair.sh is not a regular file");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses a bundled asset that arrives as a directory", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_DIRECTORY_ASSET: "config/tika-config.json" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Bundled config/tika-config.json is not a regular file");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("installs only the allowlisted bundle entries, with its own modes", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir);
+
+    expect(result.status).toBe(0);
+    // Two files the bundle carries that the allowlist does not name. Neither
+    // is installed, and the unparseable script never reached `bash -n`.
+    expect(existsSync(join(targetDir, unmanagedBundleFile))).toBe(false);
+    expect(existsSync(join(targetDir, unmanagedBundleScript))).toBe(false);
+    expect(result.stderr).not.toContain("syntax check");
+    // The image's own modes are not the deployment's: every bundled file is
+    // read-only in the image and every installed one is not.
+    expect(stagedAssetMode).not.toBe(bundledAssetMode);
+    for (const asset of deploymentAssets) {
+      expect(statSync(join(targetDir, asset)).mode & 0o7777).toBe(stagedAssetMode);
+    }
+  });
+
+  it("never asks curl for a deployment asset", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir);
+
+    expect(result.status).toBe(0);
+    expect(result.calls.split("\n").filter((line) => line.startsWith("curl "))).toEqual([
+      "curl oidc-discovery",
+    ]);
+    expect(result.calls).not.toContain("raw.githubusercontent.com");
   });
 
   it("refuses to overwrite an existing backup script symlink", () => {
@@ -1859,7 +2089,7 @@ describe("install.sh", () => {
     const result = runInstall(targetDir, { FAKE_INVALID_ASSET: "scripts/restore.sh" });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Fetched scripts/restore.sh failed a syntax check");
+    expect(result.stderr).toContain("Bundled scripts/restore.sh failed a syntax check");
     expect(managedSnapshot(targetDir)).toEqual(before);
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
