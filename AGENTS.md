@@ -61,10 +61,17 @@ is not the merge request's author. Five branches went out as Codex on
 `glab issue create` has no `-F`: pass a body with `-d "$(cat file)"`. Notes go
 through `glab api -X POST projects/49/issues/<iid>/notes -f body=…`.
 
-Pipelines: an MR pipeline runs the acceptance stage when `classify` says the
-diff needs it, and skips it when the diff cannot affect it (#883); a branch
-pipeline leaves those jobs manual, so an MR is still the way to see the full
-gate on a change that warrants one. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts one. Cancelling a
+Pipelines: every pipeline pays for the risk its own diff carries. `classify`
+decides, and a merge request is no exception (#883) -- the image build and the
+whole acceptance stage run only when the diff can reach them. Two events run
+everything regardless: a push to `dev`, `preview`, `main` or `hotfix/*`, and
+the merge request into `main` that gates promotion. Two narrow lanes go
+further and name their own job list (#889): a change touching only
+`.gitleaksignore` or the licence allow-list, and one touching only the
+pipeline's own definition. `docs/quality-strategy.md` has the lists. To force
+the full gate on a merge request instead, label it `ci: acceptance` (#572);
+a branch pipeline leaves the acceptance jobs manual, so playing one there
+does the same. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts one. Cancelling a
 pipeline and playing a manual job are refused by the safety hook here, on top
 of the refusals the gitlab-first-migration skill lists.
 `dev`, `preview` and `main` all take push "No one", merge "Maintainers".
@@ -75,6 +82,14 @@ owned by `ai/orbit` and tagged `orbit-build`, that everything needing a
 Docker daemon reaches through `.privileged_runner` (#811). Its `/builds`
 persists between jobs, so a job that must start clean says so (#813, and the
 data-root wipe in `.docker_in_job`).
+
+Three facts about that host live in its `config.toml` and root cron, not here.
+`dns` is 9.9.9.9 (owner, 2026-09-05), superseding `.dind_service`'s 2026-09-04
+note. `pull_policy = ["if-not-present"]` covers a job's own image but not a
+service's, which needs its own line in `.gitlab-ci.yml`. And
+`/usr/local/sbin/runner-docker-tidy.sh` prunes containers, volumes, untagged
+images and the builder cache (3 GB reserve) at 03:15 nightly, logging to
+`/var/log/runner-docker-tidy.log`; pinned job images survive it (owner, 2026-09-08).
 
 A push starts a pipeline only on `dev`, `preview`, `main` and `hotfix/*`; a
 working branch is tested by its merge request, so open the MR straight after
@@ -188,7 +203,7 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Nine known ways to lose an afternoon, or worse.
+Ten known ways to lose an afternoon, or worse.
 
 **`pnpm db:generate` refuses to run, on purpose.** `drizzle/meta/` holds
 snapshots only up to 0004, so `drizzle-kit generate` would diff against a
@@ -263,6 +278,12 @@ reverse, and no test notices unless it covers the boundary. Scan the string
 explicitly instead, as `isApplicationRelative` in
 `web/src/routes/login/+page.svelte` does, and give it cases for the empty
 string, a protocol-relative `//` and a backslash.
+
+**A lockfile diff adding an `@pnpm/exe` block is pnpm 11 talking, not your
+change.** The host's PATH `pnpm` is 11.9.0 and writes that block while
+handing over to the pinned 12.3.4, which no longer pins it (the `pnpm`
+package is the native executable from v12). Discard the diff; never commit
+it. CI activates 12.3.4 through corepack, so it never sees this (#884).
 
 ## The demo stack is disposable
 
