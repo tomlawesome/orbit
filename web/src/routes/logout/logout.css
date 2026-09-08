@@ -13,8 +13,9 @@
 /* seamless starfield drift — near layer reads clearly within a few seconds */
 .drift.far{animation:driftf 640s linear infinite}
 .drift.near{animation:driftn 205s linear infinite}
+/* driftf/driftn and the twinkle curve are $lib/atmosphere.css's (#445); this
+   screen's range is the shared default, so it declares no --tw-min/--tw-max */
 .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
-@keyframes twinkle{from{opacity:.15}to{opacity:.8}}
 .world{position:fixed;inset:0;z-index:1}
 .world svg{width:100%;height:100%}
 .sky{opacity:0;transition:opacity 4s ease-in 2.4s}

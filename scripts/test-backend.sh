@@ -16,6 +16,7 @@ cd "$repo_dir"
 if command -v pnpm >/dev/null 2>&1; then
   pnpm typecheck
   pnpm lint
+  node scripts/check-rolldown-jsdoc-trap.mjs
   pnpm --filter orbit-web build
   node scripts/check-v19-types.mjs
   if [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
@@ -28,6 +29,7 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
   # a package-manager shim; CI continues to use the locked pnpm workflow.
   node node_modules/typescript/bin/tsc --noEmit
   node node_modules/eslint/bin/eslint.js . --concurrency auto
+  node scripts/check-rolldown-jsdoc-trap.mjs
   # Mirrors web/package.json's own `build`: the licence collector writes
   # static/licenses, which the SvelteKit build then bundles.
   (cd web && node scripts/collect-font-licences.mjs \

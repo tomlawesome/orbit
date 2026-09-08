@@ -1,88 +1,139 @@
-import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 
-// #894: the Compose project name and registry container name used to be the
-// fixed literal "orbit-acceptance", so two runs on one host shared one
-// Compose project label and one registry container name -- the second run's
-// own cleanup sweep deleted the first run's still-live containers, volumes
-// and networks outright, and its `docker run --name` for the registry tore
-// the first run's registry down to reuse the name. The script now derives a
-// per-run name the same way scripts/test-e2e-local.sh derives its own
-// Compose project name (#875), and exits under
-// TEST_INSTALL_ACCEPTANCE_DRY_RUN before any Docker or network call is made
-// -- the same dry-run hook scripts/test-e2e-local.test.mjs already drives
-// for that script -- so the derivation is provable without a Docker daemon.
+// #894: project_name, registry_name and both ports used to be the fixed
+// literals "orbit-acceptance" / "orbit-acceptance-registry" / 5300 / 3210,
+// so two runs of scripts/test-install-acceptance.sh on one host shared a
+// Compose project and a pair of ports -- either run's cleanup sweep removed
+// the other's containers and volumes. This drives the real script (not a
+// text match on its source) with TEST_INSTALL_ACCEPTANCE_DRY_RUN=1, a hook
+// that prints the derived names and ports and exits right after the one
+// real sweep_debris call, before any install, network or long-lived
+// container work runs. A fake `docker` on PATH stands in for the daemon
+// during that one sweep, logging every invocation so the test can prove the
+// sweep filters use the derived project name rather than the old literal.
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const script = fileURLToPath(new URL("./test-install-acceptance.sh", import.meta.url));
-const scriptSource = readFileSync(script, "utf8");
 
-function dryRun() {
+let workdir;
+
+beforeEach(() => {
+  workdir = mkdtempSync(join(tmpdir(), "orbit-test-install-acceptance-"));
+});
+
+afterEach(() => {
+  rmSync(workdir, { recursive: true, force: true });
+});
+
+/** A `docker` stub that logs every invocation's argv and answers every
+ * subcommand as if nothing is running: `ps`/`volume ls`/`network ls`
+ * `--filter` queries print nothing (so the `xargs -r` pipelines they feed
+ * are no-ops), and `rm -f` on the registry name exits 0 as it would against
+ * a container that never existed. */
+function stubDockerOnPath() {
+  const binDir = join(workdir, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const log = join(workdir, "docker-calls.log");
+  writeFileSync(log, "");
+
+  const stub = join(binDir, "docker");
+  writeFileSync(
+    stub,
+    `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${log}"
+exit 0
+`,
+  );
+  // 0o755
+  spawnSync("chmod", ["755", stub]);
+  return { log, env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } };
+}
+
+function dryRun(extraEnv = {}) {
+  const { log, env } = stubDockerOnPath();
   const result = failOnProcessDeadline(
     spawnSync("bash", [script], {
       encoding: "utf8",
-      env: { ...process.env, TEST_INSTALL_ACCEPTANCE_DRY_RUN: "1" },
+      env: { ...env, TEST_INSTALL_ACCEPTANCE_DRY_RUN: "1", ...extraEnv },
       ...processGuard(),
     }),
     { label: "dryRun" },
   );
   expect(result.status, `stderr: ${result.stderr}`).toBe(0);
-  const names = Object.fromEntries(
-    result.stdout
-      .split("\n")
-      .filter((line) => line.includes("="))
-      .map((line) => {
-        const at = line.indexOf("=");
-        return [line.slice(0, at), line.slice(at + 1)];
-      }),
-  );
-  return names;
+  const dockerCalls = readFileSync(log, "utf8")
+    .split("\n")
+    .filter((line) => line.length > 0);
+  return { stdout: result.stdout, dockerCalls };
 }
 
-describe("test-install-acceptance.sh per-run Compose project name", () => {
-  it("derives a run_name and registry_name of the documented shape", () => {
-    const { run_name: runName, registry_name: registryName, target } = dryRun();
-    expect(runName).toMatch(/^orbit-acceptance-[0-9a-f]{8}-\d+$/);
-    // Must also be a valid Compose project name (configure.sh's own check,
-    // engine_configure_project_name): lowercase alphanumeric, dash or
-    // underscore, not starting with a dash or underscore.
-    expect(runName).toMatch(/^[a-z0-9][a-z0-9_-]*$/);
-    expect(registryName).toBe(`${runName}-registry`);
-    // The target directory's basename is what configure.sh's basename-of-pwd
-    // fallback turns into the Compose project name (docs comment above
-    // run_name in the script), so it has to be run_name, not a fixed
-    // "orbit-acceptance" subdirectory.
-    expect(target.endsWith(`/${runName}`)).toBe(true);
+function projectLine(stdout) {
+  const line = stdout.split("\n").find((l) => l.startsWith("[acceptance] project: "));
+  expect(line, `no project line in:\n${stdout}`).toBeTruthy();
+  // "[acceptance] project: <name> (registry <name>-registry on 127.0.0.1:<port>, app on 127.0.0.1:<port>)"
+  const match = line.match(
+    /^\[acceptance\] project: (\S+) \(registry (\S+) on 127\.0\.0\.1:(\d+), app on 127\.0\.0\.1:(\d+)\)$/,
+  );
+  expect(match, `unparseable project line: ${line}`).toBeTruthy();
+  const [, projectName, registryName, registryPort, appPort] = match;
+  return { projectName, registryName, registryPort, appPort };
+}
+
+describe("scripts/test-install-acceptance.sh per-run isolation (#894)", () => {
+  it("derives a project name distinct from the old fixed literal", () => {
+    const { stdout } = dryRun();
+    const { projectName, registryName } = projectLine(stdout);
+    expect(projectName).not.toBe("orbit-acceptance");
+    expect(projectName).toMatch(/^orbit-acceptance-[0-9a-f]{8}-\d+$/);
+    expect(registryName).toBe(`${projectName}-registry`);
   });
 
-  it("derives a different run_name and registry_name on a second invocation", () => {
-    const first = dryRun();
-    const second = dryRun();
-    expect(second.run_name).not.toBe(first.run_name);
-    expect(second.registry_name).not.toBe(first.registry_name);
-    expect(second.target).not.toBe(first.target);
+  it("derives different project names and ports across two invocations", () => {
+    const first = projectLine(dryRun().stdout);
+    const second = projectLine(dryRun().stdout);
+
+    // Different PID each spawn, so the project name (which embeds $$)
+    // cannot collide even for two runs from the same checkout.
+    expect(second.projectName).not.toBe(first.projectName);
+    expect(second.registryName).not.toBe(first.registryName);
+    // Ports are picked by the kernel independently each run; asserting they
+    // differ would be flaky if the kernel ever reused one, so this only
+    // checks both are present and numeric -- the isolation guarantee is the
+    // project/registry name, proven above.
+    expect(Number(first.registryPort)).toBeGreaterThan(0);
+    expect(Number(second.registryPort)).toBeGreaterThan(0);
   });
 
-  it("filters every cleanup sweep on the derived run_name, not a fixed literal", () => {
-    const sweepDebris = scriptSource.match(/sweep_debris\(\) \{[\s\S]*?\n\}/);
-    expect(sweepDebris, "sweep_debris() body not found").not.toBeNull();
-    const body = sweepDebris[0];
-    // Every filter must reference the run_name variable ...
-    const filters = [...body.matchAll(/--filter label=com\.docker\.compose\.project=(\S+)/g)];
-    expect(filters.length).toBeGreaterThan(0);
-    for (const [, value] of filters) {
-      expect(value).toBe('"$run_name"');
+  it("honours an explicit COMPOSE_PROJECT_NAME override, same as install.sh", () => {
+    const { stdout } = dryRun({ COMPOSE_PROJECT_NAME: "orbit-acceptance-ci-override" });
+    const { projectName, registryName } = projectLine(stdout);
+    expect(projectName).toBe("orbit-acceptance-ci-override");
+    expect(registryName).toBe("orbit-acceptance-ci-override-registry");
+  });
+
+  it("sweeps debris filtered on the derived project name, not the old literal", () => {
+    const { stdout, dockerCalls } = dryRun();
+    const { projectName, registryName } = projectLine(stdout);
+
+    const filterCalls = dockerCalls.filter((call) => call.includes("--filter"));
+    expect(filterCalls.length).toBeGreaterThan(0);
+    for (const call of filterCalls) {
+      expect(call).toContain(`--filter label=com.docker.compose.project=${projectName}`);
+      // The old fixed literal was a prefix of every derived name, so this
+      // has to check the whole filter value, not just absence of the
+      // substring "orbit-acceptance".
+      expect(call).not.toMatch(/--filter label=com\.docker\.compose\.project=orbit-acceptance($| )/);
     }
-    // ... and the registry container removed by name must be this run's own.
-    expect(body).toMatch(/docker rm -f "\$registry_name"/);
-    // Neither the old fixed literal nor a bare unquoted/unqualified project
-    // string should reappear here.
-    expect(body).not.toMatch(/orbit-acceptance-registry/);
-    expect(body).not.toMatch(/project=orbit-acceptance"/);
+
+    const rmCalls = dockerCalls.filter((call) => call.startsWith("rm -f"));
+    expect(rmCalls.some((call) => call.includes(registryName))).toBe(true);
+    expect(rmCalls.some((call) => call.includes("orbit-acceptance-registry"))).toBe(false);
   });
 });

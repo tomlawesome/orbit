@@ -26,6 +26,7 @@
  * Imperative DOM by design — it builds SVG nodes directly. Svelte renders the
  * markup and stands back.
  */
+import { seededRng } from "$lib/sky.js";
 
 /** @typedef {{ x: number, y: number, r: number, o: number }} Star — hole-relative units. */
 /**
@@ -46,7 +47,9 @@
  * @returns {Sky}
  */
 export function createSky() {
-  const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(4040404);
+  /* The well's shape is its own; its randomness is not (#445). Same
+     Park–Miller stream as before, from the one place it now lives. */
+  const rng = seededRng(4040404);
   const NS = "http://www.w3.org/2000/svg";
 
   /** @param {number} n @param {(x: number, y: number) => void} place */

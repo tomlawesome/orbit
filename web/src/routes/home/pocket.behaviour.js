@@ -1,4 +1,5 @@
 import { signOut } from "$lib/data/workspace.js";
+import { screenScope } from "$lib/teardown.js";
 import { packOf, setSwatch, syncSwatches } from "./swatches.js";
 
 /**
@@ -28,10 +29,7 @@ import { packOf, setSwatch, syncSwatches } from "./swatches.js";
  * @param {{ approve?: (id: string) => void, dismiss?: (id: string) => void }} [handlers]
  */
 export function mountPocket({ approve, dismiss } = {}) {
-  const controller = new AbortController();
-  /** @type {(target: EventTarget | null | undefined, type: string, handler: (event: Event) => void) => void} */
-  const on = (target, type, handler) =>
-    target?.addEventListener(type, handler, { signal: controller.signal });
+  const { on, teardown } = screenScope();
 
   /* #851: the dial bodies and suggestion markers are SVG <circle>/<g>
      elements carrying tabindex="0" and role="button" (pocket.svelte) so Tab
@@ -217,5 +215,5 @@ export function mountPocket({ approve, dismiss } = {}) {
     });
   }
 
-  return () => controller.abort();
+  return teardown;
 }
