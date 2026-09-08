@@ -172,10 +172,31 @@ variables:
 .reach_helpers: &reach_helpers |
   orbit_on_delivery_branch() {
     case "${CI_COMMIT_BRANCH:-}" in
-      dev | preview | hotfix/*) return 0 ;;
+      dev | preview | main | hotfix/*) return 0 ;;
     esac
     return 1
   }
+  # The two events that run everything whatever the diff holds: a push to a
+  # delivery branch, and the merge request into `main`, which is the
+  # preview -> main promotion gate. Everywhere else -- every ordinary merge
+  # request included -- the classifier's verdict decides (#883). A merge
+  # request is not itself a reason to pay for the whole gate: it is the
+  # ordinary way work arrives here, so paying full price for one meant the
+  # classifier never saved anything where it mattered most.
+  orbit_full_gate() {
+    orbit_on_delivery_branch && return 0
+    [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ]
+  }
+
+# The system-lane reach test itself, so the eight jobs that share it share one
+# copy. Put it after *reach_helpers in a job's `script:`; it ends the job
+# successfully, and every later script entry with it, because the runner
+# executes all of them in one shell.
+.system_lane_gate: &system_lane_gate |
+  if ! orbit_full_gate && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
+    echo "skipped: no system-risk change, and this is neither a delivery push nor the promotion gate"
+    exit 0
+  fi
 
 # The scripts/ci steps were extracted from a GitHub workflow, so they hand a
 # value to a later step by appending a `key=value` line to $GITHUB_OUTPUT. A
@@ -550,12 +571,9 @@ supply_chain_source:
       artifacts: true
   script:
     - *reach_helpers
+    - *system_lane_gate
     - *apk_retry
     - |
-      if ! orbit_on_delivery_branch && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
-        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
-        exit 0
-      fi
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       # A pin lives in the file that uses it and in the policy that records it.
@@ -647,12 +665,9 @@ sidecar_images:
       artifacts: true
   script:
     - *reach_helpers
+    - *system_lane_gate
     - *apk_retry
     - |
-      if ! orbit_on_delivery_branch && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
-        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
-        exit 0
-      fi
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       mkdir -p .orbit-supply-chain/sidecar-scans
@@ -869,11 +884,8 @@ integration:
     OIDC_CLIENT_SECRET: integration-only-secret
   script:
     - *reach_helpers
+    - *system_lane_gate
     - |
-      if ! orbit_on_delivery_branch && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
-        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
-        exit 0
-      fi
       if [ "${ORBIT_INTEGRATION:-true}" != "true" ]; then
         echo "skipped: no integration-risk change"
         exit 0
@@ -907,6 +919,19 @@ build_image:
     GIT_DEPTH: 0
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
   script:
+    - *reach_helpers
+    # Not *system_lane_gate: this job's declared artifacts are what `smoke`,
+    # `acceptance`, `repair_journeys` and `supply_chain_image` read, and the
+    # runner reports an upload error on an otherwise green job when a declared
+    # artifact is absent. Nothing reads these placeholders -- all four of those
+    # jobs skip on the same condition -- they exist so the skip is quiet.
+    - |
+      if ! orbit_full_gate && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
+        echo "skipped: no system-risk change, and this is neither a delivery push nor the promotion gate"
+        printf 'ORBIT_IMAGE_BUILT=false\n' > build.env
+        : > image.tar
+        exit 0
+      fi
     - *apk_retry
     - apk_add bash git nodejs
     - |
@@ -1025,6 +1050,8 @@ supply_chain_image:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - *system_lane_gate
     - *docker_in_job
     - mkdir -p "$RUNNER_TEMP"
     - docker load --input image.tar
@@ -1088,6 +1115,8 @@ smoke:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - *system_lane_gate
     - *docker_in_job
     - npm install --global "$(node -p "require('./package.json').packageManager")"
     - pnpm install --frozen-lockfile
@@ -1185,6 +1214,8 @@ acceptance:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - *system_lane_gate
     - *docker_in_job
     - *step_outputs
     - |
@@ -1317,6 +1348,8 @@ repair_journeys:
     - when: manual
       allow_failure: true
   script:
+    - *reach_helpers
+    - *system_lane_gate
     - *docker_in_job
     - docker load --input image.tar
     - docker tag "$ORBIT_CI_IMAGE" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
