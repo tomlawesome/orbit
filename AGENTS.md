@@ -249,18 +249,16 @@ once at initdb and authenticates from its own catalogue afterwards. See #629.
 else drives it.** A dropped column passes every unit and integration check and
 fails only the compose smoke test — grep it before changing a schema.
 
-**An install run from inside a worktree rewires the main checkout.** pnpm
-treats the main checkout as a workspace member to link, so its `node_modules`
-fills with symlinks into `.claude/worktrees/<name>/`, and the `orbit` workspace
-link disappears. Nothing dangles while that worktree exists, so the checkout
-looks healthy until someone removes it. Never run `pnpm install` with a
-worktree as the working directory. To check:
-`find node_modules web/node_modules -type l -lname '*worktrees*'` must be
-empty. Repair is `CI=true pnpm install` from the main checkout root, which
-breaks every other session's builds while it runs — agree a window first. See
-#784. `verifyDepsBeforeRun: warn` in `pnpm-workspace.yaml` now stops pnpm
-starting that install by itself (#874); the warning it prints instead means run
-`pnpm install` from the main checkout, not from where you are.
+**An install run from inside a worktree used to rewire the main checkout —
+closed (#784, #858).** `scripts/guard-worktree-install.mjs`, wired as pnpm's
+`preinstall`, refuses `pnpm install` from a worktree whose `node_modules`
+resolves outside itself; a worktree with its own `node_modules` installs
+safely through pnpm's shared content-addressable store. `test-e2e-local.sh`'s
+two pnpm calls no longer reach through the trap either. If it ever
+reoccurs: `find node_modules web/node_modules -type l -lname '*worktrees*'`
+must be empty in the main checkout; repair with `CI=true pnpm install` from
+the main checkout root (breaks other sessions' builds while it runs — agree a
+window first).
 
 **A red compose smoke job can be hiding the next failure.** Its steps run in
 one job and it stops at the first, so fixing that step reveals what was behind
