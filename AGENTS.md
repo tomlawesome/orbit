@@ -285,7 +285,7 @@ it. CI activates 12.3.4 through corepack, so it never sees this (#884).
 
 ## The demo stack is disposable
 
-The demo deployment (`docker-compose.demo.yml`) carries only test data, so
+The demo deployment (`compose/docker-compose.demo.yml`) carries only test data, so
 nothing in it is worth preserving. Do not spend time or tokens keeping an old
 demo image or its database alive: if it will not start, rebuild it from current
 `dev` and current versions of everything it depends on, rather than repairing
@@ -298,8 +298,8 @@ The owner cannot open files on this VM. A mockup is served from an
 `docker run -d --name orbit-<issue>-review -p <port>:80 -v <dir>:/usr/share/nginx/html:ro nginx:alpine`),
 and a built screen is the demo stack (`bash scripts/build-container.sh`, then
 `docker compose -p orbit-demo --env-file .env-orbit -f docker-compose.yml
--f docker-compose.mail.yml -f docker-compose.acceptance.yml
--f docker-compose.demo.yml up -d` with `DEMO_HOST`, `ORBIT_IMAGE`,
+-f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml
+-f compose/docker-compose.demo.yml up -d` with `DEMO_HOST`, `ORBIT_IMAGE`,
 `ORBIT_BIND_ADDRESS=127.0.0.1`, `ORBIT_PORT=3001` set). Hand over clickable
 `https://<DEMO_HOST>:3443/<route>` links plus the one-time self-signed cert
 warning on `:3443` and `:4443`. A screenshot or fidelity baseline is

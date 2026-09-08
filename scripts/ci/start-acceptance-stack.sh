@@ -12,7 +12,7 @@
 # Inputs (environment):
 #   COMPOSE_FILES  overlay set to bring up. Defaults to the set the workflow
 #                  uses, which passes nothing; the GitLab lane appends its own
-#                  docker-compose.ci-cap.yml to it.
+#                  compose/docker-compose.ci-cap.yml to it.
 #   ORBIT_IMAGE    the image under test, plus the .env-orbit written by
 #                  scripts/ci/create-test-configuration.sh
 #
@@ -33,7 +33,7 @@ cd "${repo_root}"
 # shellcheck source=../compose-isolation-preflight.sh
 source "${repo_root}/scripts/compose-isolation-preflight.sh"
 
-readonly default_compose_files='-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml'
+readonly default_compose_files='-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml'
 read -r -a compose_files <<< "${COMPOSE_FILES:-${default_compose_files}}"
 
 project="$(resolve_compose_project .env-orbit "${compose_files[@]}")" ||

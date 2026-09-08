@@ -1,7 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// Every path below is resolved relative to THIS file's directory, which is
+// tests/e2e/ since #442. The suite is this directory, and both output trees
+// stay at the repository root, where .gitignore lists them and CI collects
+// playwright-report/ as the job's artifact.
 export default defineConfig({
-  testDir: "./tests/e2e",
+  testDir: ".",
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
@@ -17,7 +21,9 @@ export default defineConfig({
   // than queue around it -- stub the workspace read per spec, the way
   // v19-hit-routing.spec.ts already does, which is why that spec is immune.
   workers: 1,
-  reporter: process.env.CI ? [["html", { open: "never" }], ["list"]] : "list",
+  reporter: process.env.CI
+    ? [["html", { open: "never", outputFolder: "../../playwright-report" }], ["list"]]
+    : "list",
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
     trace: "on-first-retry",
@@ -26,7 +32,7 @@ export default defineConfig({
     // configured application URL.
     ignoreHTTPSErrors: process.env.ORBIT_ACCEPTANCE_OIDC === "true",
     // The container-side OIDC_ISSUER/TEST_OIDC_ISSUER URLs are fixed to
-    // https://orbit-oidc:4443/ (docker-compose.acceptance.yml) and must stay
+    // https://orbit-oidc:4443/ (compose/docker-compose.acceptance.yml) and must stay
     // that way -- orbit-app and orbit-oidc talk to each other over the
     // docker network using that literal URL. The browser follows the same
     // URL for the authorize redirect, so it must be sent to wherever the
@@ -42,5 +48,5 @@ export default defineConfig({
     { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "mobile-chromium", use: { ...devices["Pixel 7"] } },
   ],
-  outputDir: "test-results",
+  outputDir: "../../test-results",
 });

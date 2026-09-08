@@ -130,10 +130,13 @@ const fastPatterns = [
 const systemPatterns = [
   /^\.github\/workflows\//u,
   /^Dockerfile$/u,
+  // The two deployment compose files stay at the root (installer contract,
+  // ADR-0019); the test/CI-only overlays live in compose/ since #442. Both
+  // carry system risk, so both are pinned here.
   /^docker-compose(?:\.[^/]+)?\.ya?ml$/u,
+  /^compose\//u,
   /^config\//u,
   /^package\.json$/u,
-  /^playwright\.config\.[cm]?[jt]s$/u,
   /^drizzle\//u,
   /^tests\/e2e\//u,
   // The v19 front end IS the shipped application server since the cut (#735):
