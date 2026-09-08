@@ -61,7 +61,7 @@ import {
 import { formatEngineEventLine } from "../lib/engine-event";
 import { type InstallOrchestratorAdapters, type InstallOrchestratorContext, runInstall } from "../lib/install-orchestrator";
 import { createInstallDockerAdapter } from "../lib/install-docker-adapter";
-import { checkCurlAvailable, createInstallAssetFetchAdapter, createInstallOidcFetchAdapter } from "../lib/install-curl-adapter";
+import { checkCurlAvailable, createInstallOidcFetchAdapter } from "../lib/install-curl-adapter";
 import { createInstallConfigurationScriptAdapter, createInstallGuidedConfigurationAdapter } from "../lib/install-script-adapters";
 import { ComposeProjectNameRefusal, deriveComposeProjectName } from "../lib/target-identity";
 import type { MachinePromptAnswerProvider } from "../lib/guided-configuration";
@@ -1127,11 +1127,11 @@ function commandInstallOrUpdate(action: "install" | "update", deployDirArg: stri
     envFile: ".env-orbit",
     composeProjectName: initialComposeProjectName,
   });
-  const assetFetchAdapter = createInstallAssetFetchAdapter({ cwd: targetDir });
 
   const adapters: InstallOrchestratorAdapters = {
     docker,
-    fetchAsset: (url, destinationPath) => assetFetchAdapter.fetchAsset(url, destinationPath),
+    // Deployment assets come out of the resolved image itself (ADR-0019);
+    // `curl` is still required on the host, for the OIDC discovery request.
     checkCurlAvailable: () => checkCurlAvailable({ cwd: targetDir }),
     oidcFetch: createInstallOidcFetchAdapter({ cwd: targetDir }),
     configurationScript: createInstallConfigurationScriptAdapter({ cwd: targetDir }),

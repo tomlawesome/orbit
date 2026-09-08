@@ -176,13 +176,34 @@ EOF
 set -Eeuo pipefail
 discovery_url="${issuer}.well-known/openid-configuration"
 output="" write_out="" url=""
+# Real curl refuses an option it does not know with exit 2 and this message,
+# and refuses an option given no value with exit 2 as well (curl 8.14.1;
+# scripts/tool-parity.test.mjs re-asserts both against the real binary). The
+# shim used to ignore every unrecognised flag, so install.sh could have grown
+# one curl has never had and this harness would still have gone green -- the
+# same class of blindness as the `docker exec -T` that shipped in #607.
+refuse_option() {
+  printf 'curl: option %s: is unknown\\n' "\$1" >&2
+  exit 2
+}
+require_parameter() {
+  printf 'curl: option %s: requires parameter\\n' "\$1" >&2
+  exit 2
+}
 args=("\$@")
 for ((i = 0; i < \${#args[@]}; i++)); do
   case "\${args[i]}" in
-    --output) output="\${args[i+1]}"; ((i++)) ;;
-    --write-out) write_out="\${args[i+1]}"; ((i++)) ;;
-    --header|--connect-timeout|--max-time|--max-filesize|--proto|--proto-redir) ((i++)) ;;
-    --*|-*) ;;
+    --output|-o)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      output="\${args[i+1]}"; ((i++)) ;;
+    --write-out|-w)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      write_out="\${args[i+1]}"; ((i++)) ;;
+    --header|-H|--connect-timeout|--max-time|-m|--max-filesize|--proto|--proto-redir|--retry|--resolve)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      ((i++)) ;;
+    --fail|-f|--silent|-s|--show-error|-S|--location|-L|--tlsv1.2|--tlsv1.3) ;;
+    -*) refuse_option "\${args[i]}" ;;
     *) url="\${args[i]}" ;;
   esac
 done
@@ -195,6 +216,10 @@ case "\$url" in
     serve "$workdir/discovery.json"
     ;;
   *)
+    # Real curl still writes the --write-out template when the transfer never
+    # happened; %{http_code} is 000 with no response, and a host that will not
+    # resolve exits 6 (curl 8.14.1; scripts/tool-parity.test.mjs).
+    [[ -z "\$write_out" ]] || printf '000'
     exit 6
     ;;
 esac
@@ -210,6 +235,10 @@ SHIM
 # then blocks until the test releases the FIFO. The installer physically
 # cannot advance past this call, so the kill point is fixed rather than raced
 # against a poll interval.
+#
+# There is deliberately no argument validation here: every call, including the
+# gated one, is handed to the real docker, so this shim cannot be more
+# permissive than the tool it stands in front of (#616).
 set -Eeuo pipefail
 if [[ "\${1:-}" == "cp" && "\$*" == *":/opt/orbit/deploy/."* ]]; then
   if [[ -e "$workdir/assets-gate.armed" && ! -e "$workdir/assets-gate.reached" ]]; then

@@ -86,6 +86,14 @@
 #   3. Worktree, no shared node_modules to check, or dependencies differ:
 #      refuse, naming the trap, rather than install here or trust an
 #      unverified workaround.
+#
+# #858: the two remaining pnpm calls -- install-test-browser.sh's browser
+# download and the Playwright suite run below -- go through `pnpm exec`,
+# which re-verifies node_modules against the lockfile before running and, in
+# a worktree, can try to repair a node_modules it does not own
+# (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY outside a TTY). Both now call
+# node_modules/@playwright/test/cli.js directly with `node` -- the same binary
+# `pnpm exec playwright` would have run.
 set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -418,8 +426,12 @@ suite_status=0
 # commands attach to whatever project .env-orbit names") -- a different stack,
 # or none. CI needs no equivalent: it runs compose without `-p`, so the
 # environment there already agrees with .env-orbit.
+# node_modules/@playwright/test/cli.js directly, not `pnpm exec playwright`:
+# in a worktree `pnpm exec` re-verifies node_modules against the lockfile and
+# can abort trying to repair a node_modules it does not own (#858, same
+# reasoning as install-test-browser.sh's header comment). Same binary.
 PLAYWRIGHT_BASE_URL="$base_url" ORBIT_ACCEPTANCE_OIDC=true COMPOSE_PROJECT_NAME="$project_name" \
-  pnpm exec playwright test "${playwright_args[@]}" || suite_status=$?
+  node node_modules/@playwright/test/cli.js test "${playwright_args[@]}" || suite_status=$?
 
 if [[ "$keep" == 1 ]]; then
   log "stack still up: ${base_url}"

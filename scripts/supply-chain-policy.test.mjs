@@ -187,6 +187,34 @@ describe("supply-chain policy", () => {
     expect(configure).toContain('[[ -n "$orbit_image" ]] || return 0');
   });
 
+  it("records the cosign pin the installer actually downloads (#661)", () => {
+    // The pin lives twice: in the script that downloads the binary and in the
+    // policy the owner reviews. Drift between them is how a reviewed version
+    // and an installed version stop being the same thing.
+    const policyDocument = JSON.parse(
+      readFileSync(
+        new URL("../.github/supply-chain-policy.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    const installer = readFileSync(
+      new URL("./ci/ensure-cosign.sh", import.meta.url),
+      "utf8",
+    );
+    const cosign = policyDocument.signingTools?.find((tool) => tool.name === "cosign");
+    expect(cosign).toBeDefined();
+    expect(cosign.license).toBe("Apache-2.0");
+    expect(installer).toContain(`COSIGN_VERSION="${cosign.version}"`);
+    expect(installer).toContain(`COSIGN_SHA256="${cosign.sha256}"`);
+    // The URL interpolates the pinned version, so match the literal shape.
+    expect(installer).toContain(
+      "releases/download/v${COSIGN_VERSION}/" + cosign.asset,
+    );
+    expect(cosign.source).toBe(
+      `https://github.com/sigstore/cosign/releases/tag/v${cosign.version}`,
+    );
+  });
+
   it("accepts a pinned reviewed scanner and live bounded exceptions", () => {
     expect(validateSupplyChainPolicy(policy(), "2026-07-30")).toMatchObject({
       scannerVersion: "0.72.0",

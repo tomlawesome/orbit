@@ -44,6 +44,15 @@ function readArgvLog(logPath: string): string[][] {
     .map((record) => record.split("\0").filter((_, index, all) => index < all.length - 1));
 }
 
+// Real Docker's refusals, so this fake cannot be more permissive than the tool
+// the adapter really drives. Verified against docker 29.7.2 on 2026-09-08 and
+// re-asserted against the real binary by scripts/tool-parity.test.mjs:
+// an unknown flag on a `docker` subcommand exits 125 ("unknown flag: --x", or
+// "unknown shorthand flag: 'T' in -T"); a flag given no value exits 125; an
+// unknown subcommand exits 1; and `docker compose`, being a plugin rather than
+// the CLI, uses exit 1 for both, never 125. `-T` is a real `compose exec` flag
+// and has never been a plain `docker exec` one — which is exactly how #607
+// shipped `docker exec -T` past 66 green tests against the bash shim.
 const fakeDockerScript = [
   "#!/usr/bin/env bash",
   'if [[ -n "${ORBIT_ARGV_LOG:-}" ]]; then',
@@ -52,6 +61,94 @@ const fakeDockerScript = [
   "    printf '\\x1e'",
   '  } >> "$ORBIT_ARGV_LOG"',
   "fi",
+  "refuse_flag() {",
+  '  printf "unknown flag: %s\\n" "$1" >&2',
+  '  exit "${2:-125}"',
+  "}",
+  "refuse_shorthand() {",
+  "  printf \"unknown shorthand flag: '%s' in -%s\\n\" \"$1\" \"$1\" >&2",
+  '  exit "${2:-125}"',
+  "}",
+  "# parse_flags VALUE_FLAGS BOOL_FLAGS STOP_AT_POSITIONAL STATUS -- \"$@\"",
+  "# STOP_AT_POSITIONAL=1 mirrors run/create/exec, which stop parsing at the",
+  "# image or container name and pass the rest to the container untouched.",
+  "parse_flags() {",
+  '  local value_flags=" $1 " bool_flags=" $2 " stop_early="$3" status="$4" flag',
+  "  shift 4",
+  "  positionals=()",
+  "  while (( $# > 0 )); do",
+  '    case "$1" in',
+  '      --) shift; positionals+=("$@"); return 0 ;;',
+  "      -*)",
+  '        flag="${1%%=*}"',
+  '        if [[ "$value_flags" == *" $flag "* ]]; then',
+  '          if [[ "$1" == *=* ]]; then',
+  "            shift",
+  "          elif (( $# >= 2 )); then",
+  "            shift 2",
+  "          else",
+  '            printf "flag needs an argument: %s\\n" "$flag" >&2',
+  '            exit "$status"',
+  "          fi",
+  '        elif [[ "$bool_flags" == *" $flag "* ]]; then',
+  "          shift",
+  '        elif [[ "$flag" == --* ]]; then',
+  '          refuse_flag "$flag" "$status"',
+  "        else",
+  '          refuse_shorthand "${flag:1:1}" "$status"',
+  "        fi",
+  "        ;;",
+  "      *)",
+  '        positionals+=("$1")',
+  "        shift",
+  '        if [[ "$stop_early" == "1" ]]; then positionals+=("$@"); return 0; fi',
+  "        ;;",
+  "    esac",
+  "  done",
+  "}",
+  'case "${1:-}" in',
+  '  pull) parse_flags "--platform" "-a --all-tags --disable-content-trust -q --quiet" 1 125 "${@:2}" ;;',
+  '  ps) parse_flags "-f --filter --format -n --last" "-a --all -l --latest --no-trunc -q --quiet -s --size" 0 125 "${@:2}" ;;',
+  '  inspect) parse_flags "-f --format --type" "-s --size" 0 125 "${@:2}" ;;',
+  '  cp) parse_flags "" "-a --archive -L --follow-link -q --quiet" 0 125 "${@:2}" ;;',
+  '  rm) parse_flags "" "-f --force -l --link -v --volumes" 0 125 "${@:2}" ;;',
+  '  create) parse_flags "--entrypoint --network --name -e --env --env-file -v --volume -w --workdir -u --user --platform -l --label --pull" "--rm -i --interactive -t --tty --read-only --init --privileged" 1 125 "${@:2}" ;;',
+  '  run) parse_flags "--entrypoint --network --cap-drop --security-opt -u --user --pids-limit -m --memory --cpus --name -e --env --env-file -v --volume -w --workdir --platform -l --label --pull" "--rm -i --interactive -t --tty --read-only --init --privileged --no-healthcheck" 1 125 "${@:2}" ;;',
+  "  volume)",
+  '    case "${2:-}" in',
+  '      ls) parse_flags "-f --filter --format" "-q --quiet" 0 125 "${@:3}" ;;',
+  '      inspect) parse_flags "-f --format" "" 0 125 "${@:3}" ;;',
+  '      *) printf \'docker: unknown command: docker volume %s\\n\' "${2:-}" >&2; exit 1 ;;',
+  "    esac",
+  "    ;;",
+  "  image)",
+  '    case "${2:-}" in',
+  '      inspect) parse_flags "-f --format" "" 0 125 "${@:3}" ;;',
+  '      *) printf \'docker: unknown command: docker image %s\\n\' "${2:-}" >&2; exit 1 ;;',
+  "    esac",
+  "    ;;",
+  "  compose)",
+  '    parse_flags "-p --project-name --env-file -f --file --project-directory --profile --progress --ansi --parallel" "--dry-run --compatibility --all-resources" 1 1 "${@:2}"',
+  '    compose_subcommand="${positionals[0]:-}"',
+  '    compose_rest=("${positionals[@]:1}")',
+  '    case "$compose_subcommand" in',
+  '      version) parse_flags "-f --format" "--short" 0 1 "${compose_rest[@]}" ;;',
+  '      config) parse_flags "--hash -o --output --format" "-q --quiet --no-interpolate --resolve-image-digests --services --volumes --images --profiles --no-normalize --no-path-resolution --variables --environment --no-consistency" 0 1 "${compose_rest[@]}" ;;',
+  '      up) parse_flags "-t --timeout --scale --pull --exit-code-from --attach --no-attach --wait-timeout" "-d --detach --no-build --build --remove-orphans --force-recreate --no-recreate --no-deps --no-start --wait --abort-on-container-exit --quiet-pull -y --yes --menu" 0 1 "${compose_rest[@]}" ;;',
+  '      down) parse_flags "-t --timeout --rmi" "--remove-orphans -v --volumes" 0 1 "${compose_rest[@]}" ;;',
+  '      pull) parse_flags "--policy" "--ignore-pull-failures --include-deps --ignore-buildable -q --quiet" 1 1 "${compose_rest[@]}" ;;',
+  '      ps) parse_flags "--filter --format --status" "-a --all -q --quiet --services --no-trunc --orphans" 0 1 "${compose_rest[@]}" ;;',
+  '      logs) parse_flags "--tail --since --until --index" "-f --follow --no-color --no-log-prefix -t --timestamps" 1 1 "${compose_rest[@]}" ;;',
+  '      exec) parse_flags "-e --env -u --user -w --workdir --index" "-d --detach --privileged -T --no-TTY -i --interactive -t --tty" 1 1 "${compose_rest[@]}" ;;',
+  '      run) parse_flags "-e --env -l --label -u --user -w --workdir -v --volume -p --publish --name --entrypoint --scale" "--rm --no-deps -T --no-TTY -d --detach -i --interactive -t --tty --build --quiet-pull --use-aliases --remove-orphans --service-ports" 1 1 "${compose_rest[@]}" ;;',
+  '      *) printf \'unknown docker command: "compose %s"\\n\' "$compose_subcommand" >&2; exit 1 ;;',
+  "    esac",
+  "    ;;",
+  "  *)",
+  '    printf \'docker: unknown command: docker %s\\n\' "${1:-}" >&2',
+  "    exit 1",
+  "    ;;",
+  "esac",
   'if [[ -n "${ORBIT_STDOUT:-}" ]]; then printf \'%s\\n\' "$ORBIT_STDOUT"; fi',
   'exit "${ORBIT_EXIT:-0}"',
   "",
@@ -132,6 +229,73 @@ describe("createInstallDockerAdapter — image identity (install.sh:1264-1310)",
     const binDir = makeFakeDockerBin();
     const adapter = adapterFor(binDir, { ORBIT_EXIT: "1" });
     expect(adapter.inspectRepoDigests("ghcr.io/tomlawesome/orbit", "latest")).toBeNull();
+  });
+});
+
+describe("createInstallDockerAdapter — deployment-asset extraction (ADR-0019, install.sh:1372,1480-1486)", () => {
+  const ref = "ghcr.io/tomlawesome/orbit@sha256:" + "a".repeat(64);
+
+  it("inspectDeploymentAssetsLabel reads the io.orbit.deployment-assets label off the resolved reference", () => {
+    const sandbox = newSandbox("orbit-docker-adapter-assets-label-");
+    const logPath = join(sandbox, "argv.log");
+    const binDir = makeFakeDockerBin();
+    const adapter = adapterFor(binDir, { ORBIT_ARGV_LOG: logPath, ORBIT_STDOUT: "/opt/orbit/deploy" });
+
+    expect(adapter.inspectDeploymentAssetsLabel(ref)).toBe("/opt/orbit/deploy");
+    expect(readArgvLog(logPath)).toEqual([
+      ["image", "inspect", "--format", '{{index .Config.Labels "io.orbit.deployment-assets"}}', ref],
+    ]);
+  });
+
+  it("inspectDeploymentAssetsLabel returns the empty string for an image built before ADR-0019, and null when the inspect itself fails", () => {
+    const binDir = makeFakeDockerBin();
+    // Docker prints an empty line for a label the image does not carry, and
+    // still exits 0 — the caller, not this adapter, decides what that means.
+    expect(adapterFor(binDir).inspectDeploymentAssetsLabel(ref)).toBe("");
+    expect(adapterFor(binDir, { ORBIT_EXIT: "1" }).inspectDeploymentAssetsLabel(ref)).toBeNull();
+  });
+
+  it("createAssetContainer spawns docker create and returns the printed container id", () => {
+    const sandbox = newSandbox("orbit-docker-adapter-create-");
+    const logPath = join(sandbox, "argv.log");
+    const binDir = makeFakeDockerBin();
+    const containerId = "c".repeat(64);
+    const adapter = adapterFor(binDir, { ORBIT_ARGV_LOG: logPath, ORBIT_STDOUT: containerId });
+
+    expect(adapter.createAssetContainer(ref)).toBe(containerId);
+    expect(readArgvLog(logPath)).toEqual([["create", ref]]);
+  });
+
+  it("createAssetContainer returns null when docker create fails", () => {
+    const binDir = makeFakeDockerBin();
+    expect(adapterFor(binDir, { ORBIT_EXIT: "1" }).createAssetContainer(ref)).toBeNull();
+  });
+
+  it("copyFromContainer spawns docker cp <container>:<source> <destination>", () => {
+    const sandbox = newSandbox("orbit-docker-adapter-cp-");
+    const logPath = join(sandbox, "argv.log");
+    const binDir = makeFakeDockerBin();
+    const containerId = "c".repeat(64);
+    const adapter = adapterFor(binDir, { ORBIT_ARGV_LOG: logPath });
+
+    expect(adapter.copyFromContainer(containerId, "/opt/orbit/deploy/.", `${sandbox}/`)).toBe(true);
+    expect(readArgvLog(logPath)).toEqual([["cp", `${containerId}:/opt/orbit/deploy/.`, `${sandbox}/`]]);
+  });
+
+  it("copyFromContainer reports failure when docker cp fails", () => {
+    const binDir = makeFakeDockerBin();
+    expect(adapterFor(binDir, { ORBIT_EXIT: "1" }).copyFromContainer("c".repeat(64), "/opt/orbit/deploy/.", "/tmp")).toBe(false);
+  });
+
+  it("removeAssetContainer spawns docker rm -f and never reports failure (install.sh's own `|| true`)", () => {
+    const sandbox = newSandbox("orbit-docker-adapter-rm-");
+    const logPath = join(sandbox, "argv.log");
+    const binDir = makeFakeDockerBin();
+    const containerId = "c".repeat(64);
+    const adapter = adapterFor(binDir, { ORBIT_ARGV_LOG: logPath, ORBIT_EXIT: "1" });
+
+    expect(() => adapter.removeAssetContainer(containerId)).not.toThrow();
+    expect(readArgvLog(logPath)).toEqual([["rm", "-f", containerId]]);
   });
 });
 
