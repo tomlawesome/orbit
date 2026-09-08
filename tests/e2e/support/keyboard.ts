@@ -253,7 +253,24 @@ export const SETTLE_TIMEOUT = 60_000;
  *  `#card[data-ready]` is set as the last step of that mount, so waiting for
  *  it waits for the listeners themselves. This is the same shape as home's
  *  `settled()`, which waits on `body.launching` clearing — that wait is why
- *  /home never showed this flake. */
+ *  /home never showed this flake.
+ *
+ *  #859 is the same flake, filed separately before the above landed, and it
+ *  asked for the repeat-run evidence #856 deferred. Ten consecutive local
+ *  runs of v19-keyboard.spec.ts: both create tests green in all ten (the two
+ *  in v19-keyboard-pocket.spec.ts too, three runs).
+ *
+ *  Do not read that as "the race stopped happening": on an idle host nothing
+ *  beats mount, which is why 10 clean runs prove less than they look. Under
+ *  Chromium CPU throttling (CDP `Emulation.setCPUThrottlingRate`, rate 20)
+ *  the pre-#856 sequence — goto, tab, type, no wait — landed EVERY keystroke
+ *  before mount in 4 attempts out of 10, and `#disclose` then opened at the
+ *  exact millisecond `data-ready` appeared, i.e. from create.behaviour.js's
+ *  catch-up and not from the `input` listener, which is what the pre-#856
+ *  page had nothing to fall back on. With this wait in front of the same
+ *  throttle: 0 out of 10, and the panel opens mid-typing every time. So the
+ *  wait is load-bearing, and the product half of #856 is what stops a real
+ *  reader on a slow device losing that first keystroke. */
 export async function gotoCreate(p: Page) {
   await p.goto("/create");
   await p.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE_TIMEOUT });

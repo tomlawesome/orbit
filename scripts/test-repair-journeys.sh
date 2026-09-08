@@ -631,10 +631,16 @@ journey_credential_drift() {
     printf '%s\n' "$output" >&2
     fail "the dangerous batch exited $status, expected 0"
   }
+  # Print what the batch did say: without it a miss here names the missing
+  # line and nothing else, and the run cannot be diagnosed from CI (!897).
   grep -q 'execute action=rotate-database-credential .*result=done' <<<"$output" ||
-    fail 'rotate-database-credential did not report result=done'
+    { printf '%s\n' "$output" >&2
+      docker ps -a --filter "label=com.docker.compose.project=$project" \
+        --format '{{.ID}} {{.Status}} {{.Label "com.docker.compose.service"}}' >&2 || true
+      fail 'rotate-database-credential did not report result=done'; }
   grep -q 'dangerous result=complete' <<<"$output" ||
-    fail 'the dangerous batch did not complete'
+    { printf '%s\n' "$output" >&2
+      fail 'the dangerous batch did not complete'; }
 
   # Authentication works again...
   wait_for_health

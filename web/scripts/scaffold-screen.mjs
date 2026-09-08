@@ -18,6 +18,42 @@
  * and depend on `body.lit .rays`-style state selectors that no component can
  * see, so scoping would silently drop them. Plain imported CSS is global and
  * untouched.
+ *
+ * ---- AFTER PROMOTION: DELETE THE ATMOSPHERE THE MOCKUP CARRIED (#445) ----
+ *
+ * Every mockup is a standalone document, so every mockup carries its own copy
+ * of the drift, the twinkle, the grain and the seeded RNG. That is correct in
+ * a mockup and wrong in the app: the copies drifted apart screen by screen
+ * (grain slope 0.08 against 0.09; five different @keyframes sharing the ONE
+ * global name `twinkle`, which route stylesheets accumulating across a
+ * client-side navigation turn into a collision). The primitives live in
+ * web/src/lib now, and a promoted screen throws its copies away and uses them:
+ *
+ *   $lib/atmosphere.css    driftf / driftn (POL-11's transform), the twinkle
+ *                          curve, and the .grain rule. Imported once by the
+ *                          root +layout.svelte, so it is already loaded.
+ *                          Keep your own durations in the animation
+ *                          shorthand; set --tw-min/--tw-max for your own
+ *                          twinkle range. Never write another @keyframes
+ *                          whose body is translateX(-1600px).
+ *   $lib/Grain.svelte      POL-13's film grain, rasterised once. <Grain
+ *                          slope={0.08} /> — do not paste the <svg> filter.
+ *   $lib/sky.js            seededRng (the ONE Park–Miller stream — never
+ *                          retype `(s * 48271) % 2147483647`), rollSeed,
+ *                          seedFromWorkspace, streamFactory, and the tiled
+ *                          two-layer field: fillStarTiles into your own
+ *                          markup, or mountTiledSky to build the whole thing.
+ *   $lib/teardown.js       screenScope() — the AbortController binder, the
+ *                          tracked timers and the teardown a mounted screen
+ *                          returns.
+ *   $lib/format.js         dates, T−nn d, money, "4m ago". A screen never
+ *                          reimplements a formatter.
+ *   $lib/packs.css         star fills come from --star-far / --star-near, so
+ *                          the light packs invert them to ink on paper.
+ *                          Never bake #e9edf8 / #f4f0ff into a fill (#444).
+ *
+ * The check that catches a regression is the fidelity gate, not review:
+ * `pnpm --filter orbit-web fidelity`.
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -182,4 +218,20 @@ if (stale.length) {
 }
 
 if (check) console.log(`mockup output up to date (${TARGETS.length * 2} files)`);
-else console.log(`${written} file(s) written from ${TARGETS.length} mockup(s)`);
+else {
+  console.log(`${written} file(s) written from ${TARGETS.length} mockup(s)`);
+  /* Printed rather than left in this file's header, because the header is
+     read once and this step is skipped every time (#445). */
+  console.log(
+    "\nBefore promoting: delete the atmosphere this mockup carries its own copy of,\n" +
+      "and use the shared primitives instead (see this script's header):\n" +
+      "  drift keyframes -> driftf / driftn        ($lib/atmosphere.css)\n" +
+      "  twinkle         -> --tw-min / --tw-max    ($lib/atmosphere.css)\n" +
+      "  grain <svg>     -> <Grain slope={…} />    ($lib/Grain.svelte)\n" +
+      "  seeded RNG      -> seededRng(seed)        ($lib/sky.js)\n" +
+      "  starfield       -> fillStarTiles / mountTiledSky   ($lib/sky.js)\n" +
+      "  listeners       -> screenScope()          ($lib/teardown.js)\n" +
+      "  dates / money   -> $lib/format.js\n" +
+      "  star fills      -> var(--star-far) / var(--star-near), never a hex\n",
+  );
+}

@@ -40,9 +40,14 @@ html body{overflow-y:auto;overflow-x:hidden;line-height:1.55}
 .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
      transition:opacity .4s;z-index:0}
 .sky svg{position:absolute;inset:0;width:100%;height:100%}
-/* a handful of nearer stars breathe, so the field is alive rather than printed */
-.spark{opacity:var(--o,.7);animation:twinkle 9s ease-in-out infinite}
-@keyframes twinkle{0%,100%{opacity:var(--o)}50%{opacity:calc(var(--o) * .34)}}
+/* a handful of nearer stars breathe, so the field is alive rather than printed.
+   The one twinkle that is not the shared curve: it dips to a FRACTION of each
+   star's own opacity and returns, rather than crossing a fixed pair, so it
+   keeps its own keyframes — under its own name, because five screens sharing
+   the name `twinkle` for five different curves was a collision, not sharing
+   (#445; route stylesheets accumulate across a client-side navigation). */
+.spark{opacity:var(--o,.7);animation:spark-breathe 9s ease-in-out infinite}
+@keyframes spark-breathe{0%,100%{opacity:var(--o)}50%{opacity:calc(var(--o) * .34)}}
 .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 50%, transparent 52%, rgba(0,0,0,.30) 100%)}
 [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}

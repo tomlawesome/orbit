@@ -21,7 +21,7 @@
     "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
     "orbit": "node_modules/tsx/dist/cli.mjs src/cli/orbit.ts",
     "build:cli": "node scripts/bundle-orbit-cli.mjs",
-    "db:generate": "node scripts/run-with-orbit-env.mjs node_modules/drizzle-kit/bin.cjs generate",
+    "db:generate": "node scripts/db-generate-refused.mjs",
     "db:migrate": "node scripts/run-with-orbit-env.mjs node_modules/tsx/dist/cli.mjs src/db/migrate.ts"
   },
   "dependencies": {

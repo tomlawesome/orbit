@@ -11,8 +11,12 @@
  * placement.js precedent, which is why home's sky can be proved at all.
  *
  * The painter that consumes it is belt.behaviour.js; the screen is
- * +page.svelte. The data it eats comes from $lib/data/belt.js.
- *
+ * +page.svelte. The data it eats comes from $lib/data/belt.js. The one thing
+ * it reaches outside itself for is the seeded RNG (#445), which is still pure.
+ */
+import { seededRng } from "$lib/sky.js";
+
+/**
  * ==================================================================== *
  * THE GEOMETRY — a ring seen at an angle, not a rainbow.
  *
@@ -275,9 +279,14 @@ export const JUMBLE_SEED = 1013, JUMBLE_STEP = 7919;
    silhouettes and their jumble (so a rock is the same rock, in the same
    place, every load — fixture truth), and one that runs for the ambient band,
    never rewound between respawns, which is exactly why the band can never
-   repeat itself. */
-/** @type {(s: number) => () => number} */
-export const lehmer = (s) => () => (s = (s * 48271) % 2147483647) / 2147483647;
+   repeat itself.
+
+   It IS $lib/sky.js's seededRng — same Park–Miller constants, and every seed
+   in this screen is a small positive integer, so the shared one's guard on a
+   zero or out-of-range seed never fires and the streams are identical (#445).
+   Aliased to the belt's own name because the whole screen reads `lehmer`,
+   and renaming every call site is not what this issue is. */
+export const lehmer = seededRng;
 /** @type {(x: number) => number} */
 export const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
