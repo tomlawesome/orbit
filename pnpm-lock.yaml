@@ -152,8 +152,8 @@ importers:
         specifier: ^6.0.0
         version: 6.2.4
       nodemailer:
-        specifier: ^9.0.3
-        version: 9.0.3
+        specifier: ^10.0.1
+        version: 10.0.1
       pdfjs-dist:
         specifier: 6.3.289
         version: 6.3.289
@@ -177,8 +177,8 @@ importers:
         specifier: ^24.0.0
         version: 24.13.3
       '@types/nodemailer':
-        specifier: ^7.0.0
-        version: 7.0.12
+        specifier: ^8.0.1
+        version: 8.0.1
       '@types/web-push':
         specifier: ^3.6.4
         version: 3.6.4
@@ -234,8 +234,8 @@ importers:
         specifier: ^6.0.0
         version: 6.2.4
       nodemailer:
-        specifier: ^9.0.3
-        version: 9.0.3
+        specifier: ^10.0.1
+        version: 10.0.1
       pdfjs-dist:
         specifier: 6.3.289
         version: 6.3.289
@@ -1239,8 +1239,8 @@ packages:
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
 
-  '@types/nodemailer@7.0.12':
-    resolution: {integrity: sha512-80vKwiIsVSyFA1rRovH59jNPLBOuc6dRZIHEu40gXTkBkZnQv8vog1xSGEb9j5q/tdMAs5ivvDR2pLTU0hGHXA==}
+  '@types/nodemailer@8.0.1':
+    resolution: {integrity: sha512-PxpaInm8V1JQDd4j0ds5HfvWQk8JupS1C0Picb96QJsrrRDjBH+DlK7L4ZdNSqNULhiZRQHc40nLVShaGxXAMw==}
 
   '@types/resolve@1.20.2':
     resolution: {integrity: sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q==}
@@ -2010,9 +2010,9 @@ packages:
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
 
-  nodemailer@9.0.3:
-    resolution: {integrity: sha512-n+YP+NKwR5zRWa60k3GiQ6Q3B4KXCoAw40dAKeCtYn020iNN74aWK2liXIC3ZEATeGql7we3tE3t8QwhY0eskw==}
-    engines: {node: '>=6.0.0'}
+  nodemailer@10.0.1:
+    resolution: {integrity: sha512-c+gU9cL9HLDax3vjxL88kW+6NOgdtEUWaZ+AUtxdJR6LLhf0kGdCLExof7yiKW7zdO9EfXCSIgmhGyFmUM0mYQ==}
+    engines: {node: '>=20.0.0'}
 
   obug@2.1.4:
     resolution: {integrity: sha512-4a+OsYv9UktOJKE+l1A4OufDgdRF9PifWj+tJnHURo/P+WOxpG4GzUFL9qCalmWauao6ogiG+QvnCovwPoyAWA==}
@@ -3086,7 +3086,7 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
-  '@types/nodemailer@7.0.12':
+  '@types/nodemailer@8.0.1':
     dependencies:
       '@types/node': 24.13.3
 
@@ -3835,7 +3835,7 @@ snapshots:
 
   natural-compare@1.4.0: {}
 
-  nodemailer@9.0.3: {}
+  nodemailer@10.0.1: {}
 
   obug@2.1.4: {}
 
