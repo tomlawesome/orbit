@@ -45,6 +45,17 @@ function guardedJobs() {
     .map(([name, block]) => ({ name, block }));
 }
 
+// A job's `needs:` as text, following the shared anchors #898 introduced: the
+// gating waits are written once and taken by name, so the list a job really
+// has is the anchor's, not the one line that references it.
+function needsOf(block) {
+  const reference = block.match(/^ {2}needs: \*(\S+)$/mu);
+  if (!reference) return block;
+  const anchor = allBlocks.get(`.${reference[1]}`);
+  expect(anchor, `no hidden key defines *${reference[1]}`).toBeDefined();
+  return anchor;
+}
+
 // Every `<lane>:<job>)` pattern the shell function matches, as pairs. The
 // function is a `case` over "$ORBIT_LANE:$jobname", so its patterns are the
 // membership lists themselves.
@@ -162,7 +173,7 @@ describe("pipeline lanes", () => {
       expect(block.indexOf("*reach_helpers"), name).toBeLessThan(block.indexOf("orbit_lane_admits"));
       // ORBIT_LANE arrives as a dotenv artifact, so a job that reads it must
       // need `classify` and take its artifacts.
-      expect(/needs:\n(?:.*\n)*?\s+- job: classify\n\s+artifacts: true\n/u.test(block), name).toBe(true);
+      expect(/- job: classify\n\s+artifacts: true\n/u.test(needsOf(block)), name).toBe(true);
     }
   });
 
