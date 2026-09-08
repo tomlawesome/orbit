@@ -188,16 +188,14 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Nine known ways to lose an afternoon, or worse. The first two have open issues;
-until those land, this is the procedure.
+Nine known ways to lose an afternoon, or worse. The second has an open issue;
+until it lands, this is the procedure.
 
-**Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
-0004 while the journal has 28 entries, so `drizzle-kit generate` diffs against
-a stale snapshot and emits a migration that recreates almost the whole schema.
-It looks like success. Hand-write the migration in the style of
-`drizzle/0027_instance_authority.sql`, add the journal entry by hand, and
-update both `tests/integration/support/migration-fixture.ts` and
-`tests/integration/migrations.test.ts`. See #535.
+**`pnpm db:generate` refuses to run, on purpose.** `drizzle/meta/` holds
+snapshots only up to 0004, so `drizzle-kit generate` would diff against a
+stale snapshot and silently emit a migration that recreates almost the whole
+schema. `scripts/db-generate-refused.mjs` is the guard; the hand-written
+procedure is in `docs/testing.md`, "Hand-writing a migration". See #535.
 
 **Compose commands attach to whatever project `.env-orbit` names.**
 `COMPOSE_PROJECT_NAME` lives in that file, so
