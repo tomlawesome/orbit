@@ -27,6 +27,8 @@ COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 # web/ is a workspace member (#419): one root lockfile covers both packages,
 # so the frozen install below materialises web/node_modules too.
 COPY web/package.json ./web/package.json
+# package.json's preinstall hook (#784); it exits at once outside a git checkout.
+COPY scripts/guard-worktree-install.mjs ./scripts/guard-worktree-install.mjs
 RUN pnpm install --frozen-lockfile
 
 # Builds the v19 front end (web/, SvelteKit + adapter-node) into its server
