@@ -50,8 +50,8 @@ describe("preview-lane local preflight", () => {
 
   it("validates every supported Compose combination and processing boundary", () => {
     const expectedOverlays = [
-      "docker-compose.build.yml",
-      "docker-compose.acceptance.yml",
+      "compose/docker-compose.build.yml",
+      "compose/docker-compose.acceptance.yml",
       "docker-compose.mail.yml",
     ];
     for (const overlay of expectedOverlays) {

@@ -713,6 +713,67 @@ describe("runInstall — image identity resolution (guarantees #41-44)", () => {
     expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
     if (outcome.status === "failed") expect(outcome.message).toContain("canonical banner");
   });
+
+  it("fails closed when the image carries no version label at all (install.sh:1346-1348)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { versionLabel: null } });
+
+    const outcome = await scenario.run();
+    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
+    if (outcome.status === "failed") expect(outcome.message).toBe("Could not inspect the published image for its semantic version.");
+  });
+
+  it("fails closed when the version label is not valid semver (install.sh:1349-1351)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { versionLabel: "not-semver" } });
+
+    const outcome = await scenario.run();
+    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
+    if (outcome.status === "failed") expect(outcome.message).toBe("The published image does not record a valid semantic version.");
+  });
+
+  it("fails closed, with install.sh's exact wording, when a pinned semver channel does not match the image's embedded version (ADR-0016, install.sh:1352-1358)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, {
+      docker: { versionLabel: "v1.2.3" },
+      context: { channel: "v1.2.4" },
+    });
+
+    const outcome = await scenario.run();
+    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toBe(
+        "The published image's embedded version (v1.2.3) does not match the requested version tag (v1.2.4).",
+      );
+    }
+  });
+
+  it("proceeds when the pinned semver channel matches the image's embedded version exactly", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, {
+      docker: { versionLabel: "v1.2.3" },
+      context: { channel: "v1.2.3" },
+    });
+
+    const outcome = await scenario.run();
+    expect(outcome.status).toBe("ok");
+  });
+
+  it("proceeds for a non-semver channel (e.g. a moving tag) regardless of the image's embedded version", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, {
+      docker: { versionLabel: "v9.9.9" },
+      context: { channel: "preview" },
+    });
+
+    const outcome = await scenario.run();
+    expect(outcome.status).toBe("ok");
+  });
 });
 
 describe("runInstall — deployment assets come out of the image (ADR-0019, guarantees #42/#45)", () => {

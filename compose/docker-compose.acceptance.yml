@@ -38,7 +38,7 @@ services:
       # in-container TEST_OIDC_ISSUER/OIDC_ISSUER URLs above are fixed to
       # that port. TEST_OIDC_PORT (scripts/test-e2e-local.sh) lets the host
       # binding move when a real deployment already holds 4443; the browser
-      # is redirected to the new host port via playwright.config.ts's
+      # is redirected to the new host port via tests/e2e/playwright.config.ts's
       # host-resolver-rules, not by changing this URL.
       - "127.0.0.1:${TEST_OIDC_PORT:-4443}:4443"
 

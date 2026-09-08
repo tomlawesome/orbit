@@ -46,8 +46,8 @@ cleanup() {
 trap cleanup EXIT
 
 docker compose --env-file .env-orbit config --quiet
-docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.build.yml config --quiet
-docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml config --quiet
+docker compose --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.build.yml config --quiet
+docker compose --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml config --quiet
 docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml config --quiet
 docker compose --env-file .env-orbit --profile processing --profile ai config --quiet
 

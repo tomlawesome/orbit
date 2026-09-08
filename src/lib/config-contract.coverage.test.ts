@@ -23,7 +23,6 @@ const PLATFORM_KEYS = new Set([
   "ORBIT_TEST_COVERAGE",
   "PLAYWRIGHT_BASE_URL",
   "ORBIT_ACCEPTANCE_OIDC",
-  "ORBIT_CAPTURE_PRODUCT_TOUR",
   "ORBIT_SKIP_E2E",
   // The fixture harness (#451, #410 §15). Deliberately NOT in the deployment
   // contract: it is a harness toggle for the fidelity gate and `vite dev`, and

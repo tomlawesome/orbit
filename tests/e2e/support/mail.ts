@@ -14,7 +14,7 @@ import { ImapFlow, type MessageStructureObject } from "imapflow";
  * GreenMail auth is disabled in this overlay (`-Dgreenmail.auth.disabled`),
  * so any password logs in as any mailbox; the address is the only credential
  * that matters. IMAPS (3993) is published to the host the same way GreenMail's
- * SMTP already is -- see docker-compose.acceptance.yml and TEST_IMAPS_PORT in
+ * SMTP already is -- see compose/docker-compose.acceptance.yml and TEST_IMAPS_PORT in
  * scripts/test-e2e-local.sh.
  */
 

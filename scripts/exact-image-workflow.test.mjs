@@ -490,7 +490,7 @@ describe("exact-image publication workflow", () => {
      */
     const stack = ciScript("start-acceptance-stack.sh");
     expect(stack).toContain(
-      "-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml",
+      "-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml",
     );
     expect(stack).toContain("COMPOSE_FILES:-${default_compose_files}");
     expect(stack).toContain("up --detach --no-build --wait");

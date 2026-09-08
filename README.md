@@ -163,17 +163,10 @@ provider settings or infrastructure details.
   <img src="docs/assets/product-tour/inbox.png" alt="Orbit incoming-documents view showing one synthetic mailbox review" width="100%" />
 </p>
 
-The captures are reproducible with the repository's disposable OIDC browser
-fixture. Start the acceptance Compose stack, then run:
-
-```sh
-ORBIT_ACCEPTANCE_OIDC=true ORBIT_CAPTURE_PRODUCT_TOUR=true \
-  pnpm test:e2e tests/e2e/product-tour.spec.ts --project=desktop-chromium
-```
-
-The opt-in capture freezes the browser clock, creates synthetic data, removes
-PNG metadata, and deletes the fixture after capture. Ordinary browser tests do
-not write documentation assets.
+The captures show synthetic data only. They are static assets under
+`docs/assets/product-tour/`: the browser test that used to regenerate them
+went with the Next application (#735), and ordinary browser tests do not
+write documentation assets.
 
 <table>
   <tr>
@@ -281,10 +274,10 @@ and secret file are already complete and safe.
 ```sh
 ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)" \
   docker compose --env-file .env-orbit \
-  -f docker-compose.yml -f docker-compose.build.yml up --build
+  -f docker-compose.yml -f compose/docker-compose.build.yml up --build
 ```
 
-Building from source needs the `docker-compose.build.yml` overlay. The base
+Building from source needs the `compose/docker-compose.build.yml` overlay. The base
 compose file describes a deployment, which has a published image but no source
 tree, so the build context lives in the overlay rather than the base file.
 
@@ -560,9 +553,9 @@ volumes instead of creating its own -- this is the trap AGENTS.md documents
 and issue #536 hit for real. Always pass an isolating `-p`:
 
 ```sh
-docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml up --build --wait
+docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml up --build --wait
 ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
-docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
+docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml down --volumes --remove-orphans
 ```
 
 `scripts/compose-isolation-preflight.sh` is the scripted version of the same
