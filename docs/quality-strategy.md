@@ -173,21 +173,20 @@ terminal check results; workflow-level path filters are not used.
 ### Launcher install compatibility
 
 `launcher_install_compat` (`.gitlab-ci.yml`) installs Orbit through a real
-orbit-launcher build against the merge request's own `scripts/install.sh`.
-Green means only that: the merge request's `install.sh` still honours its
-contract with orbit-launcher (`--plain`,
-`--install|--update|--repair`). It does not mean the launcher can drive the
-rest of a deployment, because `install.sh` takes its helpers —
-`configure.sh`, `installer-ui.sh` and the rest of `deployment_assets` — out of
-the image it resolved, not from the commit under test
-(`scripts/install.sh:1368-1379`, `:1473-1486`), so what this gate proves about
-a changed helper depends on which image the job installs. Their line grammars
-are enforced instead per merge request, against `docs/engine-events.md`, by
-`scripts/engine-events.test.mjs` (the `phase=...` event stream) and `scripts/configure.test.mjs` (`configure.sh
---check`'s readiness lines). Full pairing of changed helpers with a real image
-is proven only at the `preview` → `main` gate. Ruling: #606; follow-up
-(pairing changed helpers against the acceptance rig's candidate image):
-#736.
+orbit-launcher build against the merge request's own `scripts/install.sh`
+and the image the same pipeline built, served from a loopback registry the
+way the `acceptance` job serves it. Because the image carries its own
+helpers — `configure.sh`, `installer-ui.sh` and the rest of
+`deployment_assets` (ADR-0019) — the pairing under test is the commit's
+installer with the commit's helpers, so a changed helper that breaks the
+launcher journey turns this job red before it reaches `preview`. Green means
+the launcher contract (`--plain`, `--install|--update|--repair`) and the
+journey it drives both hold for this commit. Line grammars are still enforced
+per merge request, against `docs/engine-events.md`, by
+`scripts/engine-events.test.mjs` (the `phase=...` event stream) and
+`scripts/configure.test.mjs` (`configure.sh --check`'s readiness lines).
+Ruling: #606; pairing against the pipeline's own image: #736, delivered with
+#890.
 
 Merge requests run static and unit checks without a production application or
 container build. Every accepted push to protected `preview` or `hotfix/**`
