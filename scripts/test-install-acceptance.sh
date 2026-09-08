@@ -51,30 +51,76 @@ for arg in "$@"; do
   esac
 done
 
+note() { printf '[acceptance] %s\n' "$*"; }
+fail() { printf '[acceptance] FAIL: %s\n' "$*" >&2; exit 1; }
+
 workdir="$(mktemp -d /tmp/orbit-acceptance.XXXXXX)"
-registry_name="orbit-acceptance-registry"
 registry_port=5300
 orbit_port=3210
 repository="acceptance/orbit"
 issuer="https://oidc.acceptance.invalid/application/o/orbit/"
+# --- Per-run isolation: unique Compose project name ------------------------
+#
+# #894: the target directory's basename doubled as the Compose project name
+# (configure.sh's engine_configure_project_name falls back to the basename
+# of pwd), and that basename -- and the registry container name next to it
+# -- used to be the fixed literal "orbit-acceptance". Two concurrent runs
+# then shared one Compose project label and one registry container name, so
+# the second run's sweep_debris (below) deleted the first run's still-live
+# containers, volumes and networks outright, and its `docker run --name`
+# for the registry tore down the first run's registry to reuse the name.
+# Derive a per-run name instead, the same way scripts/test-e2e-local.sh does
+# for its own Compose project name (#875): a hash of this checkout's path so
+# two different worktrees never collide, plus this process's PID so two runs
+# from the same worktree cannot collide either.
+#
+# This does not make two concurrent runs fully independent: install.sh
+# itself pins container_name values (orbit, orbit-db, orbit-clamav) rather
+# than deriving them from the project name, so a second run's install.sh
+# still refuses outright once it reaches Compose, same as before. The point
+# of a per-run name is only that the refusal is clean -- the second run
+# fails on its own containers/target, not on the first run's -- and that
+# neither run's cleanup sweep touches the other's resources.
+#
+# registry_port and orbit_port stay fixed: a bind conflict on either is a
+# plain, non-destructive Docker/Compose error (the second run's `docker run`
+# or `docker compose up` refuses to start), not a name-keyed deletion like
+# sweep_debris or a same-name `docker run` used to cause. Nothing else in
+# this script names a host-level resource (container, volume, network,
+# port) from a literal other than the ones above.
+worktree_hash="$(printf '%s' "$repo_root" | md5sum | cut -c1-8)"
+run_name="orbit-acceptance-${worktree_hash}-$$"
+readonly run_name
+note "run: $run_name"
+registry_name="${run_name}-registry"
 # The target directory name doubles as the Compose project name the
-# installer persists, so every container/volume/network this script creates
-# carries the orbit-acceptance project label and can be swept even after an
-# untrappable SIGKILL left debris behind.
-target="$workdir/orbit-acceptance"
+# installer persists (via configure.sh's basename-of-pwd fallback), so every
+# container/volume/network this script creates carries the run_name project
+# label and can be swept even after an untrappable SIGKILL left debris
+# behind.
+target="$workdir/$run_name"
+
+# scripts/test-install-acceptance.test.mjs (#894): proves run_name/registry_name
+# are unique per run and that the sweep filter uses run_name, without a
+# Docker daemon. Mirrors TEST_E2E_LOCAL_DRY_RUN in scripts/test-e2e-local.sh
+# -- exit before any Docker or network call is made.
+if [[ -n "${TEST_INSTALL_ACCEPTANCE_DRY_RUN:-}" ]]; then
+  printf 'run_name=%s\n' "$run_name"
+  printf 'registry_name=%s\n' "$registry_name"
+  printf 'target=%s\n' "$target"
+  rm -rf -- "$workdir"
+  exit 0
+fi
 
 sweep_debris() {
   docker rm -f "$registry_name" >/dev/null 2>&1 || true
-  docker ps -aq --filter label=com.docker.compose.project=orbit-acceptance |
+  docker ps -aq --filter label=com.docker.compose.project="$run_name" |
     xargs -r docker rm -f >/dev/null 2>&1 || true
-  docker volume ls -q --filter label=com.docker.compose.project=orbit-acceptance |
+  docker volume ls -q --filter label=com.docker.compose.project="$run_name" |
     xargs -r docker volume rm >/dev/null 2>&1 || true
-  docker network ls -q --filter label=com.docker.compose.project=orbit-acceptance |
+  docker network ls -q --filter label=com.docker.compose.project="$run_name" |
     xargs -r docker network rm >/dev/null 2>&1 || true
 }
-
-note() { printf '[acceptance] %s\n' "$*"; }
-fail() { printf '[acceptance] FAIL: %s\n' "$*" >&2; exit 1; }
 
 cleanup() {
   local status=$?
