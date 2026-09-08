@@ -34,10 +34,20 @@ chmod 600 .orbit-secrets/smtp-password
 # Ephemeral fixture overrides are appended deliberately: dotenv uses
 # the final assignment, so this remains valid whether an operator
 # setting is active, commented, or omitted from the example file.
+#
+# #838: the smoke stack turns the document parser on too, so the journey
+# that uploads a real PDF through the product (tests/e2e/v19-document-
+# extraction.spec.ts) has a real orbit-tika to reach, not an absent one.
+# TIKA_URL is docker-compose.yml's fixed in-network address for the
+# orbit-tika service (README.md:392); scripts/ci/validate-compose.sh forces
+# COMPOSE_PROFILES empty for its own "off by default" assertion rather than
+# relying on this file staying profile-free.
 {
   printf '%s\n' \
     'SMTP_HOST=smtp.example.invalid' \
     'SMTP_USER=orbit@example.invalid' \
     'OIDC_CLIENT_ID=orbit-smoke' \
-    'OIDC_CLIENT_SECRET=orbit-smoke-only-secret'
+    'OIDC_CLIENT_SECRET=orbit-smoke-only-secret' \
+    'COMPOSE_PROFILES=processing' \
+    'TIKA_URL=http://orbit-tika:9998'
 } >> .env-orbit
