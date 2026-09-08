@@ -41,7 +41,7 @@ function requireTrackingIssue(value, label) {
   }
 }
 
-function validateTool(tool, label, now, { image = false } = {}) {
+function validateTool(tool, label, now, { image = false, checksum = false } = {}) {
   requiredString(tool?.name, `${label} name`);
   requiredString(tool?.version, `${label} version`);
   requiredString(tool?.license, `${label} licence`);
@@ -51,6 +51,14 @@ function validateTool(tool, label, now, { image = false } = {}) {
   }
   requiredString(tool?.updateOwner, `${label} update owner`);
   requireLiveDate(tool?.reviewBy, `${label} review`, now);
+  // A released binary is pinned by the checksum of the asset, not by an image
+  // digest or a commit: that is the only thing a downloading job can check.
+  if (checksum) {
+    if (!/^[0-9a-f]{64}$/u.test(tool?.sha256 ?? "")) {
+      throw new Error(`${label} binary must be pinned to a full sha256 checksum.`);
+    }
+    return;
+  }
   if (image && !/^[^@\s]+@sha256:[0-9a-f]{64}$/u.test(tool?.image ?? "")) {
     throw new Error(`${label} image must be pinned to a full sha256 digest.`);
   }
@@ -149,6 +157,17 @@ export function validateSupplyChainPolicy(policy, now = new Date().toISOString()
   policy.attestationActions.forEach((tool, index) =>
     validateTool(tool, `Attestation action ${index + 1}`, currentDate),
   );
+  // Signing tools are downloaded release binaries (cosign, #661). Optional so
+  // a policy without one is still valid; validated like every other pin when
+  // present, so the review date is real rather than decoration.
+  if (policy.signingTools !== undefined) {
+    if (!Array.isArray(policy.signingTools)) {
+      throw new Error("Supply-chain signing tools must be an array.");
+    }
+    policy.signingTools.forEach((tool, index) =>
+      validateTool(tool, `Signing tool ${index + 1}`, currentDate, { checksum: true }),
+    );
+  }
   validateThresholds(policy.thresholds);
   if (!Array.isArray(policy.exceptions)) {
     throw new Error("Supply-chain exceptions must be an array.");

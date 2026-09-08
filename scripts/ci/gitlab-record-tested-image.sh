@@ -9,7 +9,14 @@
 # publishes nothing when that step fails, and the digest is lost with the job.
 #
 # Usage:
-#   scripts/ci/gitlab-record-tested-image.sh <image-reference> <image-digest>
+#   scripts/ci/gitlab-record-tested-image.sh <image-reference> <image-digest> [policy-version]
+#
+# The optional third argument is the policy version from
+# scripts/ci/policy-version.sh (#661). It travels here for discovery only:
+# the copy publishers trust is the one bound inside the cosign attestation
+# (scripts/ci/attest-tested-image.sh) and re-checked by
+# scripts/ci/verify-validation-evidence.sh -- this JSON is transport, not
+# trust.
 #
 # Everything else comes from the predefined GitLab job environment. Every value
 # is validated before it is written: this file is read by a job that pushes to
@@ -22,9 +29,12 @@ fail() { printf 'gitlab-record-tested-image: %s\n' "$1" >&2; exit 1; }
 
 image_reference="${1:-}"
 image_digest="${2:-}"
+policy_version="${3:-}"
 
 [[ -n "$image_reference" ]] || fail 'an image reference is required as the first argument'
 [[ -n "$image_digest" ]] || fail 'an image digest is required as the second argument'
+[[ -z "$policy_version" || "$policy_version" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+  fail "policy version is not a sha256 value: ${policy_version}"
 
 # Deliberately narrow: the reference is "<registry>/<path>@<digest>" -- the
 # same shape gitlab-await-tested-image.sh insists on before copying -- and the
@@ -51,13 +61,17 @@ recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 output_dir="${repo_root}/.orbit-supply-chain"
 output="${output_dir}/gitlab-tested-image.json"
 
+policy_version_line=""
+[[ -z "$policy_version" ]] || policy_version_line="
+  \"policyVersion\": \"${policy_version}\","
+
 mkdir -p "$output_dir"
 cat > "$output" <<JSON
 {
   "commit": "${commit}",
   "ref": "${ref}",
   "pipelineId": ${pipeline_id},
-  "pipelineUrl": "${pipeline_url}",
+  "pipelineUrl": "${pipeline_url}",${policy_version_line}
   "imageDigest": "${image_digest}",
   "imageReference": "${image_reference}",
   "recordedAt": "${recorded_at}"

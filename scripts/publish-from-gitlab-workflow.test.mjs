@@ -362,6 +362,24 @@ describe("gitlab-record-tested-image.sh", () => {
     expect(written.imageDigest).toBe(digest);
   });
 
+  it("records the policy version when the caller binds one (#661), and omits it otherwise", () => {
+    const policyVersion = `sha256:${"ef".repeat(32)}`;
+    const withPolicy = run(reference, digest, policyVersion);
+    expect(withPolicy.stderr).toBe("");
+    expect(withPolicy.status).toBe(0);
+    expect(JSON.parse(readFileSync(withPolicy.output, "utf8")).policyVersion).toBe(policyVersion);
+
+    const withoutPolicy = run(reference, digest);
+    expect(withoutPolicy.status).toBe(0);
+    expect("policyVersion" in JSON.parse(readFileSync(withoutPolicy.output, "utf8"))).toBe(false);
+  });
+
+  it("refuses a malformed policy version rather than recording it", () => {
+    const result = run(reference, digest, "v7-of-the-policy");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("policy version is not a sha256 value");
+  });
+
   it("refuses a reference that names another digest, a tag, or nothing immutable", () => {
     for (const bad of [
       `registry.example/ai/orbit@sha256:${"cd".repeat(32)}`,
