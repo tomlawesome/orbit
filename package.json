@@ -18,7 +18,7 @@
     "test:web-pdfjs": "node scripts/web-pdfjs-runtime-check.mjs",
     "acceptance:mailbox": "node scripts/acceptance-mailbox.mjs",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
     "orbit": "node_modules/tsx/dist/cli.mjs src/cli/orbit.ts",
     "build:cli": "node scripts/bundle-orbit-cli.mjs",
     "db:generate": "node scripts/run-with-orbit-env.mjs node_modules/drizzle-kit/bin.cjs generate",

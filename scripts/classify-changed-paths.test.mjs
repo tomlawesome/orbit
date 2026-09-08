@@ -66,7 +66,9 @@ describe("changed-path CI risk classification", () => {
       "compose/docker-compose.ci-cap.yml",
       "config/tika-config.json",
       "package.json",
-      "playwright.config.ts",
+      // The root e2e harness moved under the suite it drives in #442; it
+      // reaches this lane through tests/e2e/ now rather than a root pattern.
+      "tests/e2e/playwright.config.ts",
       "public/favicon.svg",
       "src/app/page.tsx",
       "src/app/globals.css",
