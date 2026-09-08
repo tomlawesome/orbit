@@ -5,8 +5,8 @@ owner setup were corrected the same day: the ratified text fenced the key
 with protected environments and environment-scoped variables, which are
 Premium features this GitLab CE instance (19.3.1, verified 2026-09-08) does
 not have — the fence as ratified would have parsed and enforced nothing.
-The correction (the dedicated signing runner below) awaits owner
-ratification.
+The correction — the dedicated signing runner below — was ratified by the
+owner on 2026-09-08, after the original ratification and on the same day.
 **Date:** 2026-09-08
 **Relates to:** issue #661 (whose thread carries the full specification this
 records the durable part of), the #573 ruling it implements, #877 (stable
