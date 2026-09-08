@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
@@ -17,7 +18,7 @@ import { settleArrival } from "./support/arrival";
  * does not itself wait for it; this polls the real event instead of a guess.
  */
 const HOUSEHOLD = "Extraction Proving Ground";
-const FIXTURE_PATH = new URL("../support/fixtures/chromium-synthetic.pdf", import.meta.url);
+const FIXTURE_PATH = resolve(__dirname, "../support/fixtures/chromium-synthetic.pdf");
 
 async function seedHousehold(page: Page, name: string): Promise<{ id: string; name: string }> {
   return await page.evaluate(async (householdName) => {
