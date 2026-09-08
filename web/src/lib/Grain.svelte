@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { rasteriseSvg } from "$lib/raster.js";
+  import { decodeSvg } from "$lib/raster.js";
 
   /**
    * POL-13's film grain, once (#445) — and now rasterised once too (#499).
@@ -33,28 +33,50 @@
    * exact SVG, at the exact CSS pixel dimensions this element occupies (so
    * the filter region and the stitch math see the same numbers a live filter
    * would have seen) and at devicePixelRatio-native resolution (so retina
-   * stays crisp), into a canvas; hand the canvas's data URL to a plain
-   * background-image on THIS element. From then on this element costs
-   * nothing per repaint — it is an ordinary raster layer — and only rebuilds
-   * on resize, debounced, same as every other "paint once, blit" surface in
-   * this app (the item belt's haze canvas, POL-11's drift).
+   * stays crisp), onto the <canvas> inside this element. From then on this
+   * element costs nothing per repaint — it is an ordinary raster layer — and
+   * only rebuilds on resize, debounced, same as every other "paint once,
+   * blit" surface in this app (the item belt's haze canvas, POL-11's drift).
+   *
+   * The canvas is shown as it is, not encoded (#797). This used to go on via
+   * rasteriseSvg's PNG data URL to a background-image, and noise does not
+   * compress: at 1440×900 on a retina screen that URL was 11 MB, and
+   * building, parsing and decoding it froze the main thread for over two
+   * seconds on every first load. The blit is the same 1:1 drawImage; only
+   * the round trip is gone.
+   *
+   * The noise is generated as one TILE_PX-square tile and repeated (#798).
+   * Generating it over the whole viewport was the largest single cost of
+   * every first load — 450 ms in Chromium and 850 ms in WebKit at 1440×900
+   * on a retina screen, on the main thread, before anything could move —
+   * and feTurbulence's cost is simply its area. stitchTiles="stitch" fits a
+   * whole number of noise periods into the tile (about 230 at the default
+   * frequency), so the repeat is seamless, and grain this fine has no
+   * feature the eye could catch coming round every 256 CSS px. The tile is
+   * decoded once onto its own small canvas and repeated from there with a
+   * canvas pattern: repeating the SVG image directly would re-run the filter
+   * on every draw, and WebKit taints a canvas patterned from an SVG image.
+   * Measured 34 ms Chromium / 62 ms WebKit for the same screen. The tile is
+   * in CSS px, so retina still gets device-resolution noise.
    *
    * feTurbulence is deterministic for a fixed seed (the default, 0 — never
-   * set here, on either side) and a fixed region size, so the raster this
-   * produces is byte-for-byte what the live filter would have painted at
-   * that exact size. That is why the fidelity gate still reads the same 0 px
-   * it always has: this is not an approximation of the grain, it is the same
-   * grain, computed once instead of every frame.
+   * set here) and a fixed region size, so the tile is the same on every
+   * load and every screen. The noise lattice is re-fitted to the tile, so
+   * individual pixels differ from the full-viewport render, but by less
+   * than the fidelity gate's colour threshold: every screen passed its
+   * existing baseline and its mockup unchanged when the tile landed.
    *
-   * The decode/draw/cache mechanics live in $lib/raster.js (#501): this file
-   * only builds the filter-graph SVG and the cache key, since #501 needed
-   * the identical mechanism for the dawn/dusk glows and a second copy of the
-   * canvas dance would have drifted from this one the way the grain drifted
-   * across screens before #445.
+   * The SVG decode lives in $lib/raster.js (#501): this file only builds the
+   * filter-graph SVG, since #501 needed the identical mechanism for the
+   * dawn/dusk glows and a second copy would have drifted from this one the
+   * way the grain drifted across screens before #445.
    */
   let { slope = 0.08 } = $props();
+  const TILE_PX = 256;
   /** @type {HTMLDivElement} */
   let host;
+  /** @type {HTMLCanvasElement} */
+  let canvas;
 
   /**
    * The exact filter graph, verbatim, wrapped in an SVG sized so its own
@@ -75,17 +97,6 @@
       `<feComposite operator="in" in2="SourceGraphic"/>` +
       `</filter><rect width="${w}" height="${h}" filter="url(#gr)"/></svg>`
     );
-  }
-
-  /**
-   * @param {string} freq @param {string} slope
-   * @param {number} w @param {number} h @param {number} dpr
-   */
-  async function rasterise(freq, slope, w, h, dpr) {
-    const rw = Math.max(1, Math.round(w * dpr));
-    const rh = Math.max(1, Math.round(h * dpr));
-    const key = `grain|${freq}|${slope}|${rw}|${rh}`;
-    return rasteriseSvg(key, svgFor(freq, slope, w, h, dpr), rw, rh);
   }
 
   onMount(() => {
@@ -111,16 +122,26 @@
          never race a capture. Mockups' own inline grain SVG carries no such
          attribute, so that wait is a no-op there. */
       host.dataset.rasterised = "pending";
-      const url = await rasterise(freq, effectiveSlope, w, h, dpr);
+      const img = await decodeSvg(svgFor(freq, effectiveSlope, TILE_PX, TILE_PX, dpr));
       if (cancelled) return;
 
-      /* Imperative, not a bound style: this and the readiness flag below
-         must land in the same tick, with nothing async between them, so a
-         poller can never observe "ready" before the background is actually
-         painted. */
-      host.style.backgroundImage = `url(${url})`;
-      host.style.backgroundSize = "100% 100%";
-      host.style.backgroundRepeat = "no-repeat";
+      /* The draw and the readiness flag land in the same tick, with nothing
+         async between them, so a poller can never observe "ready" before
+         the grain is actually painted. The tile is blitted 1:1 onto its own
+         canvas — the image's intrinsic size is the canvas's — and the
+         pattern repeats it in device pixels, so every TILE_PX CSS px. */
+      const tw = Math.max(1, Math.round(TILE_PX * dpr));
+      const tile = document.createElement("canvas");
+      tile.width = tw;
+      tile.height = tw;
+      /** @type {CanvasRenderingContext2D} */ (tile.getContext("2d")).drawImage(img, 0, 0, tw, tw);
+      const rw = Math.max(1, Math.round(w * dpr));
+      const rh = Math.max(1, Math.round(h * dpr));
+      canvas.width = rw;
+      canvas.height = rh;
+      const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
+      ctx.fillStyle = /** @type {CanvasPattern} */ (ctx.createPattern(tile, "repeat"));
+      ctx.fillRect(0, 0, rw, rh);
       host.dataset.rasterised = "ready";
     }
 
@@ -139,4 +160,4 @@
   });
 </script>
 
-<div class="grain" bind:this={host} aria-hidden="true"></div>
+<div class="grain" bind:this={host} aria-hidden="true"><canvas bind:this={canvas}></canvas></div>

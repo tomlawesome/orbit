@@ -7,6 +7,7 @@ dist
 .env.*
 .env-orbit
 .orbit-secrets/
+.orbit-cosign/
 .agents/handoffs/
 .agents/orchestration-state.json
 .agents/worktrees/

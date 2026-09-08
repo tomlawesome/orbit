@@ -107,9 +107,9 @@ jobs:
       # The classifier uses pnpm's lockfile-only graph reader. It never installs
       # dependencies or executes package lifecycle scripts.
       - name: Set up pnpm graph reader
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
         with:
-          run_install: false
+          install: false
 
       - name: Classify changed paths
         id: classify
@@ -155,9 +155,9 @@ jobs:
           fetch-depth: 0
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
         with:
-          run_install: false
+          install: false
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -392,7 +392,7 @@ jobs:
     # 0.1%. Any other browser build is a different rasteriser, and then the
     # comparison stops measuring the design and starts measuring the runner.
     container:
-      image: mcr.microsoft.com/playwright:v1.62.0-noble@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
 
     steps:
       - name: Check out repository
@@ -461,9 +461,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
         with:
-          run_install: false
+          install: false
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -527,9 +527,9 @@ jobs:
           fetch-depth: 0
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
         with:
-          run_install: false
+          install: false
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -636,6 +636,12 @@ jobs:
 
       - name: Validate Compose configuration
         env:
+          # docker-compose.yml requires ORBIT_IMAGE and the generated
+          # .env-orbit carries it empty, so every `docker compose config` here
+          # failed on a missing value (#837). The GitLab job passes the tested
+          # image the same way; this is the image built and identified a few
+          # steps above, which is what the compose file is meant to describe.
+          ORBIT_IMAGE: ${{ steps.image.outputs.tag }}
           ORBIT_VERSION: ${{ steps.version.outputs.version }}
           ORBIT_REVISION: ${{ steps.version.outputs.revision }}
           ORBIT_CHANNEL: ${{ env.PUBLICATION_CHANNEL }}
@@ -652,7 +658,7 @@ jobs:
         run: bash scripts/ci/verify-tika-processor.sh
 
       - name: Build disposable OIDC acceptance provider
-        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml build orbit-oidc
+        run: docker compose --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml build orbit-oidc
 
       - name: Start application and database
         run: bash scripts/ci/start-acceptance-stack.sh

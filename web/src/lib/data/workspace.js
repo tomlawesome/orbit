@@ -424,10 +424,30 @@ async function json(response) {
 let sessionPromise = null;
 
 /**
+ * `fetch` is a parameter throughout this seam so a SvelteKit server `load` can
+ * hand over its own (#842): that one resolves a relative URL against the app
+ * and forwards the incoming request's cookies, which is what lets the same
+ * read run on the server for the first render. Everywhere else it is the
+ * browser's, exactly as before.
+ *
+ * @typedef {typeof globalThis.fetch} Fetch
+ */
+
+/**
  * @param {{ refresh?: boolean }} [options]
+ * @param {Fetch} [fetchImpl]
  * @returns {Promise<Session>}
  */
-export function readSession({ refresh = false } = {}) {
+export function readSession({ refresh = false } = {}, fetchImpl) {
+  /* A caller that brings its own fetch is one request on a shared server
+     process, and the cache below lives as long as that process — so it is
+     neither read nor written here. Caching a session there would hand the
+     next reader the previous reader's identity and CSRF token. */
+  if (fetchImpl) {
+    return /** @type {Promise<Session>} */ (
+      fetchImpl("/api/auth/session", { credentials: "same-origin" }).then(json)
+    );
+  }
   if (refresh || !sessionPromise) {
     /* The route this chain asks is the one that answers a Session; `json` is
        generic and has nothing to infer that from when it is handed over
@@ -447,12 +467,13 @@ export function readSession({ refresh = false } = {}) {
 /**
  * The whole workspace: households, their sections, items and activity.
  *
+ * @param {Fetch} [fetchImpl]
  * @returns {Promise<Workspace>}
  */
-export async function readWorkspace() {
+export async function readWorkspace(fetchImpl = globalThis.fetch) {
   /** @type {{ workspace: Workspace }} */
   const body = await json(
-    await fetch("/api/workspace", { credentials: "same-origin" }),
+    await fetchImpl("/api/workspace", { credentials: "same-origin" }),
   );
   return body.workspace;
 }
@@ -546,11 +567,12 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
  * private mailbox (the route answers empty for them), and a broken inbox must
  * never take home down with it — the caller treats this as additive.
  *
+ * @param {Fetch} [fetchImpl]
  * @returns {Promise<Inbox>}
  */
-export async function readInbox() {
+export async function readInbox(fetchImpl = globalThis.fetch) {
   /** @type {Partial<Inbox>} */
-  const body = await json(await fetch("/api/imap-inbox", { credentials: "same-origin" }));
+  const body = await json(await fetchImpl("/api/imap-inbox", { credentials: "same-origin" }));
   return { receipts: body.receipts ?? [], households: body.households ?? [], filed: body.filed ?? [] };
 }
 
@@ -691,14 +713,15 @@ function todayOf(workspace) {
  */
 
 /**
+ * @param {Fetch} [fetchImpl]  a server `load`'s fetch, for the first render (#842)
  * @returns {Promise<HomeView>}
  */
-export async function readHome() {
+export async function readHome(fetchImpl) {
   const [workspace, session, inbox] = await Promise.all([
-    readWorkspace(),
-    readSession(),
+    readWorkspace(fetchImpl),
+    readSession({}, fetchImpl),
     /* Additive: mail-in suggestions enrich home, they must never sink it. */
-    readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
+    readInbox(fetchImpl).catch(() => /** @type {Inbox} */ ({ receipts: [] })),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const today = todayOf(workspace);
@@ -888,15 +911,104 @@ export async function readSettingsScreen() {
 }
 
 /**
+ * The instance's one mailbox, as an administrator sees it (#743).
+ *
+ * `null` means the route could not answer — under fixtures, or for a signed-in
+ * user who is not an instance administrator. The screen falls back to the
+ * mockup's relay rows in that case rather than showing an empty panel.
+ *
+ * Nothing in this object is a secret: the password and the alias key have no
+ * read path at all, and `aliasPattern` is the SHAPE addresses take, never a
+ * member's actual address.
+ *
+ * @typedef {object} MailboxSettings
+ * @property {boolean} configured
+ * @property {boolean} enabled
+ * @property {string} host
+ * @property {number} port
+ * @property {string} accountUser
+ * @property {string} mailbox
+ * @property {string} tlsServerName
+ * @property {string} providerProfile
+ * @property {string} trustedRecipientHeader
+ * @property {number} pollSeconds
+ * @property {string} verificationState
+ * @property {?string} verifiedAt
+ * @property {?string} aliasPattern
+ * @property {?string} credentialSetAt
+ * @property {?string} credentialSetBy
+ * @property {boolean} hasPassword
+ * @property {?number} version
+ * @property {{ status: string, smtp: string, imap: string, checkedAt: ?string, credentialLocked: boolean }} health
+ *
+ * @returns {Promise<?MailboxSettings>}
+ */
+export async function readMailboxSettings() {
+  try {
+    /** @type {{ mailbox?: ?MailboxSettings }} */
+    const body = await json(await fetch("/api/admin/mailbox", { credentials: "same-origin" }));
+    return body.mailbox ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Runs one mailbox action and answers with the settings as they now stand.
+ *
+ * `set` and `rotate` carry the password. It is write-only in both directions:
+ * it goes out once in this body and never comes back in any answer, so a
+ * caller that wants to show "set" shows `hasPassword`, not a value.
+ *
+ * @param {object} command  `{ action, ... }` — see the route's schema
+ * @returns {Promise<{ mailbox: ?MailboxSettings, outcome?: string }>}
+ */
+export async function commandMailbox(command) {
+  return json(await csrfFetch("/api/admin/mailbox", { body: command }));
+}
+
+/**
+ * The instance's one public contact address, as an administrator sees it
+ * (#860). `null` means the route could not answer — under fixtures, or for a
+ * signed-in user who is not an instance administrator.
+ *
+ * @typedef {object} ContactSettings
+ * @property {?string} address
+ * @property {number} version
+ * @property {string} updatedAt
+ *
+ * @returns {Promise<?ContactSettings>}
+ */
+export async function readContactSettings() {
+  try {
+    /** @type {{ contact?: ?ContactSettings }} */
+    const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
+    return body.contact ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sets, changes or clears the address, and answers with it as it now stands.
+ *
+ * @param {{ action: "set", expectedVersion: number, address: string } | { action: "clear", expectedVersion: number }} command
+ * @returns {Promise<{ contact: ContactSettings }>}
+ */
+export async function commandContact(command) {
+  return json(await csrfFetch("/api/admin/contact", { body: command }));
+}
+
+/**
  * Everything mission control renders (#465): the instance's people (real
- * route), its systems from the workspace (admins see everything, §11), and
- * the parts no route can answer yet — ownership, membership counts, the
- * relay's levers — from the admin fixture until #453/#432 make them real.
- * Live data omits what it cannot know. No join requests: §15-2g moved them
- * to household management, so this screen never asks for them.
+ * route), its systems from the workspace (admins see everything, §11), the
+ * live mailbox settings (#743), and the parts no route can answer yet —
+ * ownership, membership counts — from the admin fixture until #453 makes
+ * them real. Live data omits what it cannot know. No join requests: §15-2g
+ * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users] = await Promise.all([
+  const [workspace, session, users, mailbox, contact] = await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
@@ -905,6 +1017,8 @@ export async function readAdminScreen() {
           body.users ?? [],
       )
       .catch(() => []),
+    readMailboxSettings(),
+    readContactSettings(),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   /* Real owner names where the members route answers (#453); the fixture's
@@ -931,8 +1045,38 @@ export async function readAdminScreen() {
     users,
     households: workspace.households,
     ...adminFixture,
+    /* Live where the route answers, and the mockup's rows where it does not,
+       so the fixture-mode screen the fidelity gate photographs is unchanged
+       (#465, §15) while a real deployment shows its real mailbox. */
+    relay: mailbox ? relayRowsOf(mailbox) : adminFixture.relay,
+    mailbox,
+    contact,
     owners,
   };
+}
+
+/**
+ * The mail-machinery rows, as words rather than fields. Deliberately bounded:
+ * the collection domain is the account's own domain, not any member's
+ * address, and nothing here can carry a credential.
+ *
+ * @param {MailboxSettings} mailbox
+ * @returns {[string, string, string | null][]}
+ */
+function relayRowsOf(mailbox) {
+  const domain = mailbox.accountUser.split("@")[1] ?? "";
+  const pollWords = `polling every ${mailbox.pollSeconds}s`;
+  return [
+    ["collection domain", domain || "not set", null],
+    [
+      "ingest",
+      mailbox.enabled ? `enabled · ${pollWords}` : mailbox.configured ? "disabled" : "not set up",
+      mailbox.enabled ? "on" : null,
+    ],
+    ["mailbox", mailbox.configured ? `${mailbox.accountUser} · ${mailbox.mailbox}` : "no mailbox set", null],
+    ["credential", mailbox.hasPassword ? "stored, encrypted" : "not set", null],
+    ["last check", mailbox.health.status.replaceAll("_", " "), null],
+  ];
 }
 
 /** @param {string} iso */
@@ -1038,6 +1182,38 @@ export async function readRelay() {
   };
 }
 
+/**
+ * Rotates the signed-in member's own relay address (ADR-0017 slice 3, #744).
+ *
+ * The body carries an action and NOTHING ELSE — no user, no generation, no
+ * address. The endpoint acts on the session's own member and cannot be asked
+ * to act on anyone else, and the seam must not be the place that changes that.
+ *
+ * `rotate` keeps the old address collecting for fourteen days so mail already
+ * on its way still arrives; `cutOff` stops it immediately, which is what a
+ * leaked address needs. The answer is the same shape `readRelay` returns,
+ * carrying the NEW address for the member to save.
+ *
+ * `pause` and `resume` (ADR-0017 slice 5, #746) go through the same endpoint
+ * and the same rule: the session names the member, the body names only what to
+ * do. Paused, mail addressed to them is recorded and held; resuming stages all
+ * of it exactly once.
+ *
+ * @param {"rotate" | "cut_off" | "pause" | "resume"} action
+ * @returns {Promise<Relay>}
+ */
+export async function rotateRelay(action) {
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string } }} */
+  const body = await json(await csrfFetch("/api/settings/mail-relay", { method: "PUT", body: { action } }));
+  const relay = body.relay ?? {};
+  return {
+    address: relay.address ?? NO_ADDRESS,
+    status: relay.listening ?? UNAVAILABLE_RELAY.status,
+    lastReceived: relay.lastReceived ? ago(relay.lastReceived, new Date().toISOString()) : "nothing yet",
+    ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
+  };
+}
+
 const NO_ADDRESS = "no address yet";
 
 /**
@@ -1108,6 +1284,48 @@ export async function writeReminders({ emailEnabled, firstWarningDays, finalWarn
     }),
   );
   return remindersOf(body.reminders);
+}
+
+/**
+ * The server's VAPID public key for browser push (#763), live from
+ * `GET /api/push/config`. No CSRF token — a read, and the key alone grants
+ * nothing; a browser still has to choose to subscribe with it.
+ *
+ * @returns {Promise<{ publicKey: ?string }>}
+ */
+export async function readPushConfig() {
+  /** @type {{ publicKey?: string }} */
+  const body = await json(await fetch("/api/push/config", { credentials: "same-origin" }));
+  return { publicKey: body.publicKey ?? null };
+}
+
+/**
+ * Registers this browser's push subscription (#763), through
+ * `POST /api/push/subscriptions`. The whole `PushSubscription#toJSON()`
+ * shape goes over unchanged — endpoint, expirationTime, the two keys the
+ * push service handed out — because that is exactly what
+ * src/server/notification-worker.ts needs to address a later delivery back
+ * to this browser. 409 `subscription_conflict` (the endpoint belongs to
+ * another user) surfaces as a WorkspaceError like any other failure here.
+ *
+ * @param {{ endpoint: string, expirationTime: ?number, keys: { p256dh: string, auth: string } }} subscription
+ * @returns {Promise<{ subscribed: boolean }>}
+ */
+export async function writePushSubscription(subscription) {
+  return json(await csrfFetch("/api/push/subscriptions", { body: subscription }));
+}
+
+/**
+ * Removes this browser's push subscription (#763), through
+ * `DELETE /api/push/subscriptions`. The endpoint alone identifies it;
+ * unsubscribing on the browser side (`PushSubscription#unsubscribe()`) is
+ * the caller's job and already happened by the time this is called.
+ *
+ * @param {string} endpoint
+ * @returns {Promise<{ subscribed: boolean }>}
+ */
+export async function deletePushSubscription(endpoint) {
+  return json(await csrfFetch("/api/push/subscriptions", { method: "DELETE", body: { endpoint } }));
 }
 
 /**
@@ -1204,6 +1422,43 @@ const UNAVAILABLE_REMINDERS = {
 };
 
 /**
+ * One row of "where you're signed in" (#482) — GET /api/auth/sessions.
+ *
+ * @typedef {object} SessionSummary
+ * @property {string} id
+ * @property {boolean} current
+ * @property {string} createdAt   ISO-8601
+ * @property {?string} lastSeenAt ISO-8601, or null if the session has never validated since #482 shipped
+ * @property {string} device      a coarse two-word description ("Chrome · Linux"); never the raw user agent
+ */
+
+/**
+ * Every session the caller holds, current session first and then most
+ * recently seen first — exactly the order the settings screen draws them in.
+ *
+ * @returns {Promise<SessionSummary[]>}
+ */
+export async function readSessions() {
+  /** @type {{ sessions?: SessionSummary[] }} */
+  const body = await json(await fetch("/api/auth/sessions", { credentials: "same-origin" }));
+  return body.sessions ?? [];
+}
+
+/**
+ * Signs out of exactly one device (#482) — the single-session counterpart to
+ * `signOutEverywhere`. If the ended session is this browser's own, the
+ * server has already cleared the cookie by the time this resolves, so a
+ * caller ending its own session should treat that the same way `signOut`
+ * does: there is nothing left to be signed into on this page.
+ *
+ * @param {string} sessionId
+ * @returns {Promise<void>}
+ */
+export async function revokeSession(sessionId) {
+  await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
+}
+
+/**
  * "Sign out of every device" (#468): ends every session this user holds and
  * answers how many that was.
  *
@@ -1285,7 +1540,7 @@ export async function signOut() {
  */
 export async function readHouseholdScreen(householdId) {
   const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
-  const [roster, joinRequests] = await Promise.all([
+  const [roster, joinRequests, invitations] = await Promise.all([
     /** @type {Promise<Partial<Roster>>} */ (
       json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
     ).catch(() => ({ members: [], candidates: [] })),
@@ -1294,6 +1549,9 @@ export async function readHouseholdScreen(householdId) {
     json(await fetch("/api/join-requests", { credentials: "same-origin" }))
       .then((/** @type {{ requests?: JoinRequest[] }} */ body) => body.requests ?? [])
       .catch(() => []),
+    /* #481: additive, like the roster — an invitations route that cannot be
+       reached must not take the household screen down with it. */
+    readInvitations(householdId).catch(() => []),
   ]);
   /* household.js's householdScreenOf infers its parameter shape from its own
      defaults (e.g. `members = []` reads as `never[]`), so this call is cast
@@ -1306,6 +1564,7 @@ export async function readHouseholdScreen(householdId) {
     members: roster.members ?? [],
     candidates: roster.candidates ?? [],
     joinRequests,
+    invitations,
     today: todayOf(workspace),
     /* Pinned "now" so "2d ago" on a waiting joiner holds still under the gate
        and stays live in production — readHome's rule. */
@@ -1405,6 +1664,69 @@ export async function decideJoinRequest(requestId, action) {
 export async function requestHouseholdDeletion(householdId, confirmation) {
   return json(await csrfFetch(`/api/households/${householdId}/lifecycle`, {
     body: { action: "delete", confirmation },
+  }));
+}
+
+/* ---------------------------------------------------------------------------
+ * EMAIL INVITATIONS (#481) — the same block, for somebody with no account.
+ */
+
+/**
+ * One open invitation, as its route reports it. There is no token in this
+ * shape, and there never will be: the link exists in the mail and nowhere
+ * else, and a screen that could show it could also leak it.
+ *
+ * @typedef {object} Invitation
+ * @property {string} id
+ * @property {string} householdId
+ * @property {string} email
+ * @property {string} createdAt
+ * @property {?string} sentAt      null while a send has failed
+ * @property {?string} sendError   a bounded class, never a provider message
+ * @property {string} expiresAt
+ */
+
+/**
+ * The household's open invitations. Every member may read them.
+ *
+ * @param {string} householdId
+ * @returns {Promise<Invitation[]>}
+ */
+export async function readInvitations(householdId) {
+  /** @type {{ invitations?: Invitation[] }} */
+  const body = await json(await fetch(`/api/households/${householdId}/invitations`, {
+    credentials: "same-origin",
+  }));
+  return body.invitations ?? [];
+}
+
+/**
+ * Send — or resend, which is the same act to the protocol.
+ *
+ * There is one open invitation per address, so sending to an address that
+ * already has one replaces it: new token, new expiry, and the earlier link
+ * stops working. The screen offers the two under different words because they
+ * are different intentions; the route has one.
+ *
+ * @param {string} householdId
+ * @param {string} email
+ * @returns {Promise<{ invitation: Invitation, invitations: Invitation[] }>}
+ */
+export async function sendInvitation(householdId, email) {
+  return json(await csrfFetch(`/api/households/${householdId}/invitations`, { body: { email } }));
+}
+
+/**
+ * Withdraw an open invitation; its link then fails as "withdrawn".
+ *
+ * @param {string} householdId
+ * @param {string} invitationId
+ * @returns {Promise<{ invitations: Invitation[] }>}
+ */
+export async function withdrawInvitation(householdId, invitationId) {
+  return json(await csrfFetch(`/api/households/${householdId}/invitations`, {
+    method: "DELETE",
+    body: { invitationId },
   }));
 }
 

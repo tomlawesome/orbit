@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  compareToLedger,
-  describeResult,
-  parseMachineOutput,
-} from "./check-v19-types.mjs";
+import { parseMachineOutput, summarize } from "./check-v19-types.mjs";
 
 const MACHINE_OUTPUT = [
   '1787607088256 START "/home/codex/projects/orbit/web"',
@@ -15,7 +11,7 @@ const MACHINE_OUTPUT = [
   "1787607088276 COMPLETED 494 FILES 3 ERRORS 1 WARNINGS 2 FILES_WITH_PROBLEMS",
 ].join("\n");
 
-describe("v19 type ledger", () => {
+describe("v19 type check", () => {
   it("counts errors per file and ignores warnings and progress lines", () => {
     expect(parseMachineOutput(MACHINE_OUTPUT)).toEqual(
       new Map([
@@ -31,45 +27,20 @@ describe("v19 type ledger", () => {
     expect(parseMachineOutput("ERROR without a timestamp")).toEqual(new Map());
   });
 
-  it("passes only when every count matches its entry exactly", () => {
-    const counts = new Map([["a.js", 3]]);
-    expect(compareToLedger(counts, { "a.js": 3 })).toEqual({
-      worse: [], unledgered: [], improved: [], stale: [],
+  /* #624: no per-file tolerance is left, so any error at all is a failure --
+     there is no ledger left to consult. */
+  it("passes only when there are no errors anywhere", () => {
+    expect(summarize(new Map())).toEqual({ total: 0, lines: [] });
+  });
+
+  it("fails on a single error, naming the file and the count", () => {
+    expect(summarize(new Map([["a.js", 1]]))).toEqual({ total: 1, lines: ["a.js: 1 error"] });
+  });
+
+  it("sums errors across every file", () => {
+    expect(summarize(new Map([["a.js", 2], ["b.svelte", 3]]))).toEqual({
+      total: 5,
+      lines: ["a.js: 2 errors", "b.svelte: 3 errors"],
     });
-    expect(describeResult(compareToLedger(counts, { "a.js": 3 }))).toEqual([]);
-  });
-
-  it("fails a file that got worse", () => {
-    const result = compareToLedger(new Map([["a.js", 4]]), { "a.js": 3 });
-    expect(result.worse).toEqual([{ file: "a.js", count: 4, allowed: 3 }]);
-    expect(describeResult(result)[0]).toContain("ledger allows 3");
-  });
-
-  /*
-   * The rule that walks the ledger to zero (#624). Slack left in an entry is
-   * slack nobody ever reclaims, so an improvement has to be banked before the
-   * gate goes green again.
-   */
-  it("fails a file that got better, asking for its number to be lowered", () => {
-    const result = compareToLedger(new Map([["a.js", 1]]), { "a.js": 3 });
-    expect(result.improved).toEqual([{ file: "a.js", count: 1, allowed: 3 }]);
-    expect(describeResult(result)[0]).toContain("Lower it to 1");
-  });
-
-  /* Every screen M2 rebuilds arrives this way, and has to arrive clean. */
-  it("refuses errors in a file with no entry", () => {
-    const result = compareToLedger(new Map([["new.svelte", 2]]), {});
-    expect(result.unledgered).toEqual([{ file: "new.svelte", count: 2 }]);
-    expect(describeResult(result)[0]).toContain("do not add an entry");
-  });
-
-  it("reports an entry whose file is clean or gone as stale", () => {
-    const result = compareToLedger(new Map(), { "deleted.js": 5 });
-    expect(result.stale).toEqual(["deleted.js"]);
-    expect(describeResult(result)[0]).toContain("Delete its ledger entry");
-  });
-
-  it("says error in the singular", () => {
-    expect(describeResult(compareToLedger(new Map([["a.js", 1]]), {}))[0]).toContain("1 error and");
   });
 });

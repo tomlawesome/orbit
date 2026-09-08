@@ -247,6 +247,25 @@ export function operationalDetail(literals: TemplateStringsArray, ...values: unk
   return boundedDetailText(text) as OperationalDetail;
 }
 
+/**
+ * The second, narrower way to build an `OperationalDetail` (#717): a startup
+ * configuration validator's own message, when that message is a fixed string
+ * the validator's author wrote to name the rule it enforces ("OIDC_SCOPES
+ * must include openid", the session secret's own remedy) rather than data
+ * derived from the value under test. Bounded and sanitised exactly like
+ * `operationalDetail`'s output, so the safety property (one printable line,
+ * no control characters, 256 characters) is identical either way.
+ *
+ * This is deliberately NOT a general escape hatch: `operationalDetail`
+ * still refuses to interpolate free text because most callers cannot promise
+ * their string is safe. A caller reaching for this one is promising it — do
+ * not pass it a message that might carry a secret, a raw exception dump from
+ * an untrusted source, or provider text.
+ */
+export function operationalDetailFromValidatorMessage(message: string): OperationalDetail {
+  return boundedDetailText(message) as OperationalDetail;
+}
+
 export type OperationalEvent = {
   event: OperationalEventName;
   state: OperationalState;

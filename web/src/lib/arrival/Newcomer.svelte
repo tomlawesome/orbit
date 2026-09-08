@@ -32,6 +32,7 @@
    *   visibleHouseholds?: Array<{ id: string, name: string, requested?: boolean }>,
    *   onask?: (row: { id: string, name: string, requested?: boolean }) => void,
    *   oncreate?: import('svelte/elements').MouseEventHandler<HTMLButtonElement>,
+   *   showChooser?: boolean,
    * }}
    */
   let {
@@ -41,6 +42,15 @@
     visibleHouseholds = [],
     onask = () => {},
     oncreate = () => {},
+    /*
+     * #871: false for an invited reader's landing, whose household is the
+     * invitation's and not theirs to pick. The panel is left OUT of the DOM
+     * entirely rather than hidden by CSS — "no chooser drawn at any frame"
+     * means no frame, not an invisible one — so the host's own `body.belong`
+     * class, which the invited landing's flight never adds anyway, has
+     * nothing here to reveal even if it did.
+     */
+    showChooser = true,
   } = $props();
 
   /** @type {HTMLDivElement | null} */
@@ -179,7 +189,7 @@
                 text-anchor={c.away ? "end" : undefined}>{c.label}</text>
           {#if c.requested}
             <text x={c.nameX} y="30" font-size="8.5" letter-spacing=".14em"
-                  style="fill:var(--ink-faint)"
+                  style="fill:var(--ink-quiet)"
                   text-anchor={c.away ? "end" : undefined}>ASKED TO JOIN · WAITING</text>
           {/if}
           <path d={c.veer} fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55" />
@@ -199,6 +209,7 @@
     <div class="big">{discovered.count}</div>
     <p><b>{discovered.word}</b> discovered in this universe</p>
   </div>
+  {#if showChooser}
   <div class="belong" role="group" aria-label="Where do you belong?">
     <div class="top">
       <h2>where do you belong?</h2>
@@ -221,4 +232,5 @@
       <span>a name, a time zone, a currency — same three questions</span>
     </div>
   </div>
+  {/if}
 </div>

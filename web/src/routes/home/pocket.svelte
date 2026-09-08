@@ -75,6 +75,14 @@
       .slice(0, 2)
       .toUpperCase(),
   );
+  /* #852: the same "household · role" line the desk account panel derives
+     inline (+page.svelte, the `#who-role` span) — copied rather than shared
+     because that one is a plain template expression, not a function. */
+  const roleLine = $derived(
+    view
+      ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}`
+      : "",
+  );
   const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   const QUARTER_POS = [[190, 26], [356, 196], [190, 364], [24, 196]];
   const quarters = $derived(
@@ -186,7 +194,41 @@
 <div class="mpage">
   <div class="mtop">
     <div class="mark-row" style="font-size:15px"><svg width="22" height="22" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg> orbit</div>
-    <div class="morb">{initials}</div>
+    <!-- #852: the avatar opens the same account panel the desk orb does
+         (+page.svelte's `.account`/`#account`), laid out as a bottom sheet
+         here — see `.msheet` below and pocket.behaviour.js for the wiring. -->
+    <button class="morb" id="morb" aria-expanded="false" aria-controls="maccount" title="Menu">{initials}</button>
+    <!-- #852: the account menu as a bottom sheet — same contents as the desk
+         `.account` (+page.svelte lines ~779-810), same wiring (pocket.behaviour.js
+         imports setSwatch/packOf from ./swatches.js, the same functions
+         home.behaviour.js's swatches use, and drives sign-out the way
+         Chrome.svelte's sub-screen orb does: two taps, the second one revoking
+         the session before it navigates). Only one of `#sheet`/`#maccount` is
+         ever open at a time — pocket.behaviour.js enforces that. It sits here,
+         straight after `#morb`, for the same reason the desk `.account` follows
+         its orb: one Tab from the open toggle must land inside the sheet
+         (tests/e2e/support/keyboard.ts auditLightDismiss). It is position:fixed,
+         so its place in the DOM changes nothing visually. -->
+    <div class="msheet" id="maccount" role="region" aria-label="Account and menu">
+      <div class="grab"></div>
+      <div class="mwho"><b>{view?.user?.displayName ?? ""}</b><span>{roleLine}</span></div>
+      <nav>
+        <a href={resolve("/inbox")}>Inbox</a>
+        <a href={resolve("/settings")}>Settings</a>
+        <a href={resolve("/administration")}>Administration</a>
+      </nav>
+      <div class="mswatches" role="group" aria-label="Theme">
+        <span>THEME</span>
+        <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
+        <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
+        <button style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
+        <button style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
+        <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
+                aria-pressed="false"></button>
+      </div>
+      <button class="msignout" id="msignout">sign out →</button>
+      <div class="msignout-problem" id="msignout-problem" hidden></div>
+    </div>
   </div>
   {#if view?.emptySky}
   <!-- §11 (#453): the pocket's labelled sky is a list — each system a ring
@@ -199,7 +241,10 @@
         <div class="flex"><b>{hh.name}</b><span>{hh.requested ? "asked to join · waiting" : "tap to ask to join"}</span></div>
       </div>
     {/each}
-    <div class="burnup">the systems around you are labels until someone lets you in<br><a href={resolve("/create")}>— or start your own system →</a></div>
+    <!-- #840: the create card this leads to only ever appears at / (the
+         arrival), not on /create's full form -- there is no household yet
+         for that form to write into while the sky is empty. -->
+    <div class="burnup">the systems around you are labels until someone lets you in<br><a href={resolve("/")}>— or start your own system →</a></div>
   </div>
   {:else}
   <div class="mdial">
@@ -207,7 +252,7 @@
       <circle cx="190" cy="190" r="150" fill="none" stroke="var(--line)" stroke-width="1.5"/>
       <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3"
               stroke-width="1" stroke-dasharray="3 5"/>
-      <g font-size="11" fill="var(--ink-faint)" text-anchor="middle" font-family="JetBrains Mono,monospace">
+      <g font-size="11" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
         {#each quarters as q, k (k)}<text x={q.x} y={q.y}>{q.label}</text>{/each}</g>
       <path d="M190 34 l6 10 h-12 Z" style="fill:var(--accent)"/>
       <circle cx="190" cy="190" r="8" style="fill:#fff6e6"/>
@@ -215,13 +260,15 @@
         {#if b.suggestion}
           <!-- #466: the relay's catch is ON the dial at its law position —
                the same hollow accent body the desk shows (§12). -->
-          <g data-sheet-sugg={b.id} style="cursor:pointer">
+          <g data-sheet-sugg={b.id} style="cursor:pointer" tabindex="0" role="button"
+             aria-label={`caught receipt: ${b.title}`}>
             <circle cx={b.placement.x} cy={b.placement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
             <circle cx={b.placement.x} cy={b.placement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
           </g>
         {:else}
           <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}"
-                  data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}/>
+                  data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}
+                  tabindex="0" role="button" aria-label={b.title}/>
           {#if b.documentCount > 0 && b.paint === "jade"}
             <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
                      transform="rotate(-24 {b.placement.x} {b.placement.y})"
@@ -231,7 +278,8 @@
       {/each}
     </svg>
   </div>
-  <div class="skies">
+  <!-- #845: the strip scrolls sideways, so it must be reachable to scroll by keyboard. -->
+  <div class="skies" tabindex="0" role="region" aria-label="Other skies">
     {#each others as hh (hh.id)}
       <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx={hh.dx} cy={hh.dy} r="2" style="fill:var({hh.tone === "--warm" ? "--warm" : hh.tone === "--upcoming" ? "--upcoming" : "--ok"})" opacity=".6"/></svg>{hh.name}</div>
     {/each}

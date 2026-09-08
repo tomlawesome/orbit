@@ -245,6 +245,51 @@ describe("moving through the walk", () => {
 });
 
 /*
+ * #844: the walk is non-modal by design (`aria-modal="false"`, kept below),
+ * but the dimmed 76%-faded regions were still reachable by tab and by a
+ * screen reader, which is how axe caught a colour-contrast failure on text
+ * nobody could read anyway. `inert` takes the dimmed regions out of both
+ * without touching the modality — the reader can still reach the real screen
+ * THROUGH the lit region, just not through the parts drawn at .24 opacity.
+ */
+describe("keeping dimmed regions out of reach (#844)", () => {
+  it("makes every dimmed region inert, and never the lit one or the card", async () => {
+    const { tour } = walk();
+    await tour.start();
+    expect(document.querySelector(".dial .chrome").hasAttribute("inert")).toBe(false);
+    expect(document.querySelector(".sun-link").hasAttribute("inert")).toBe(false);
+    expect(document.querySelector(".minisys").hasAttribute("inert")).toBe(true);
+    expect(document.querySelector(".hero-foot").hasAttribute("inert")).toBe(true);
+    expect(document.querySelector("#manifest-top").hasAttribute("inert")).toBe(true);
+    expect(document.querySelector("#nstar").hasAttribute("inert")).toBe(true);
+    expect(document.querySelector(".orb").hasAttribute("inert")).toBe(true);
+    expect(document.querySelector(".tourcard").hasAttribute("inert")).toBe(false);
+  });
+
+  it("moves inert along with the lit region as the walk advances", async () => {
+    const { tour } = walk();
+    await tour.start();
+    await stepTo(tour, 1); // "sun": .sun-link, .minisys
+    expect(document.querySelector(".dial .chrome").hasAttribute("inert")).toBe(true);
+    expect(document.querySelector(".sun-link").hasAttribute("inert")).toBe(false);
+    expect(document.querySelector(".minisys").hasAttribute("inert")).toBe(false);
+  });
+
+  it("leaves nothing inert once the walk ends, by either door", async () => {
+    const skipped = walk();
+    await skipped.tour.start();
+    await skipped.tour.skip();
+    expect(document.querySelectorAll("[inert]")).toHaveLength(0);
+
+    const finished = walk();
+    await finished.tour.start();
+    await stepTo(finished.tour, stopsFor().length - 1);
+    await finished.tour.go(1); // past the last stop IS finish
+    expect(document.querySelectorAll("[inert]")).toHaveLength(0);
+  });
+});
+
+/*
  * The card's own contract (#752's acceptance criterion 4). It is a dialog
  * that deliberately does NOT trap the page — the reader is looking at the
  * real screen behind it — and its two copy lines are what the lit element is

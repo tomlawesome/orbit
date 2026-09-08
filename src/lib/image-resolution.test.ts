@@ -123,3 +123,24 @@ describe("resolveImageIdentity orchestration (install.sh:1264-1310)", () => {
     expect((result as { reason: string }).reason).toBe("banner-failed");
   });
 });
+
+describe("resolveImageIdentity — pinned-version channel check (ADR-0016, install.sh:1352-1358)", () => {
+  it("fails closed with install.sh's exact wording when the channel is a semver tag and the embedded version differs", () => {
+    const result = resolveImageIdentity(REPOSITORY, "v1.2.4", fixedAdapter({ inspectVersionLabel: () => "v1.2.3" }));
+    expect(result).toEqual({
+      status: "failed",
+      reason: "version-mismatch",
+      message: "The published image's embedded version (v1.2.3) does not match the requested version tag (v1.2.4).",
+    });
+  });
+
+  it("proceeds when the channel is a semver tag that matches the embedded version exactly", () => {
+    const result = resolveImageIdentity(REPOSITORY, "v1.2.3", fixedAdapter({ inspectVersionLabel: () => "v1.2.3" }));
+    expect(result.status).toBe("ok");
+  });
+
+  it("never compares the embedded version against a non-semver channel, whatever the label says", () => {
+    const result = resolveImageIdentity(REPOSITORY, "preview", fixedAdapter({ inspectVersionLabel: () => "v9.9.9" }));
+    expect(result.status).toBe("ok");
+  });
+});

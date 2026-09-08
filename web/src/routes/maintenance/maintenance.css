@@ -2,10 +2,9 @@
 body{background:#060a18}
 .sky-drift-far{animation:driftf 380s linear infinite}
 .sky-drift-near{animation:driftn 185s linear infinite}
-@keyframes driftf{to{transform:translateX(-1600px)}}
-@keyframes driftn{to{transform:translateX(-1600px)}}
-.tw{animation:twinkle 5s ease-in-out infinite alternate}
-@keyframes twinkle{from{opacity:.2}to{opacity:.85}}
+/* driftf/driftn and the twinkle curve come from $lib/atmosphere.css (#445);
+   totality's own range — the day stars are brighter than any night screen's. */
+.tw{--tw-min:.2;--tw-max:.85;animation:twinkle 5s ease-in-out infinite alternate}
 
 /* corona layers — every group breathes on its own period, nothing in sync */
 .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
@@ -74,7 +73,7 @@ body{background:#060a18}
 .msg{margin:0;font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
      text-transform:uppercase}
 .latest{display:flex;flex-direction:column;gap:6px;max-width:44ch}
-.when{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-faint);
+.when{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-quiet);
       text-transform:uppercase}
 .body{font:400 15px/1.5 var(--ui);color:var(--ink)}
 .back{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
@@ -86,7 +85,7 @@ body{background:#060a18}
 .earlier{display:flex;flex-direction:column;align-items:center;
          flex:1 1 auto;min-height:0;max-width:44ch;width:100%;
          overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--ink-faint) transparent}
-.earlier summary{list-style:none;cursor:pointer;color:var(--ink-faint);
+.earlier summary{list-style:none;cursor:pointer;color:var(--ink-quiet);
                  padding:6px 12px;border-radius:999px;display:inline-flex;
                  position:sticky;top:0;transition:color .18s ease}
 .earlier[open]{mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent)}

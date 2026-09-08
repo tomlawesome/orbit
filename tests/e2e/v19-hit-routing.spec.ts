@@ -1,4 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { expect, test, type Browser, type Page } from "@playwright/test";
+import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #641: the household hit-area fix, proved by a real hit-test.
@@ -62,7 +65,52 @@ type Overlap = {
 async function signIn(page: Page, account: string) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await settleArrival(page);
+}
+
+/**
+ * THE VIEWER'S OWN ARRIVAL ON /home, ADRIFT (#840).
+ *
+ * Before #840 a fresh sign-in with no household anywhere landed on /home
+ * directly, which is the whole precondition this file's sky needs: a viewer
+ * who belongs to nothing. Now hooks.server.js sends that reader to the
+ * arrival at `/` instead. The one road still open is the carve-out
+ * hooks.server.js's own comment names: a session whose OWN
+ * activeHouseholdId is set -- even to a household since hard-deleted --
+ * skips the redirect outright, because household.create only ever writes
+ * that field on the session that called it, and a hard delete never clears
+ * it back off.
+ *
+ * So this reader is given a household of their own, the administrator
+ * removes it again from underneath them, and only then is `/home` asked
+ * for. Their real membership set is empty either way, which is what
+ * "adrift" is a picture of -- stubSky only ever substitutes the LIST of
+ * visible households, never this reader's own, so the throwaway household
+ * never appears in the sky this file measures.
+ */
+async function arriveAdrift(page: Page, browser: Browser, account: string) {
+  await signIn(page, account);
+  const headers = { ...(await sessionHeaders(page)), "content-type": "application/json" };
+  const household = { id: randomUUID(), name: `${account} throwaway ${Date.now()}` };
+  const created = await page.request.post("/api/workspace/commands", {
+    headers,
+    data: {
+      type: "household.create",
+      household: { ...household, timezone: "Europe/London", currency: "GBP", onboardingComplete: true },
+    },
+  });
+  if (!created.ok()) throw new Error(`could not seed a throwaway household for ${account} (${created.status()})`);
+
+  const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const adminPage = await adminContext.newPage();
+  try {
+    await signIn(adminPage, "Orbit Administrator");
+    await cleanupHousehold(adminPage, await sessionHeaders(adminPage), household.id, household.name);
+  } finally {
+    await adminContext.close();
+  }
+
+  await page.goto("/home");
 }
 
 /* The viewer stays adrift — no household of their own — and sees exactly the
@@ -138,10 +186,10 @@ async function packUntilOverlapping(page: Page) {
 
 test.describe.configure({ mode: "serial" });
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the labelled sky is the desk dialect; the pocket draws no constellations");
   await stubSky(page, FULL_SKY);
-  await signIn(page, "Orbit Outsider");
+  await arriveAdrift(page, browser, "Orbit Outsider");
   await expect(page.getByRole("heading", { name: "you’re adrift" })).toBeVisible();
 });
 
@@ -200,9 +248,20 @@ test("reverting the pointer-events rule gives the click to the neighbour, as #63
   await expect(page.getByRole("heading", { name: `Request to join ${overlap.neighbour} system?` })).toBeVisible();
 });
 
-test("a household the packed sky cannot draw is still reachable by name", async ({ page }) => {
+test("a household the packed sky cannot draw is still reachable by name", async ({ page, browser }) => {
   test.setTimeout(120_000);
-  await page.unroute("**/api/workspace");
+  /* The sky this test needs is not the one beforeEach installed, so the
+     first stub has to come off first. `unroute` on its own is not enough:
+     beforeEach's own navigation may still have a workspace request in
+     flight, and dropping its handler mid-request orphans it -- the handler
+     resolves against a route Playwright has already discarded and throws
+     "Route is already handled!", which fails this test from outside its own
+     assertions. `unrouteAll` with `ignoreErrors` waits for those handlers
+     and swallows exactly that. It shows up only when the whole suite runs
+     serially against one instance, which is CI's shape, not the default
+     local one. */
+  await page.waitForLoadState("networkidle").catch(() => {});
+  await page.unrouteAll({ behavior: "ignoreErrors" });
   await stubSky(page, OVERFULL_SKY);
   await page.setViewportSize(DESK_VIEWPORTS[0]);
   await page.goto("/home");
@@ -216,10 +275,27 @@ test("a household the packed sky cannot draw is still reachable by name", async 
   const undrawn = OVERFULL_SKY.map((household) => household.name).filter((name) => !drawn.includes(name));
   expect(undrawn.length).toBeGreaterThan(0);
 
-  await page.goto("/");
-  const belong = page.getByRole("group", { name: "Where do you belong?" });
-  await expect(belong).toBeVisible();
-  for (const name of undrawn) {
-    await expect(belong.getByRole("button", { name: `Request to join ${name}` })).toBeVisible();
+  /* The join list is read in a SECOND session, deliberately.
+     `arriveAdrift` leaves this page's session pointing at a household that
+     has since been hard-deleted -- the carve-out that keeps /home reachable
+     while adrift (#840) -- and the arrival takes that same field as its fast
+     path, handing the reader straight on to /home. So `/` can never show its
+     newcomer stage to THIS session, and asserting it here would be asserting
+     against the product's own rule. A fresh sign-in as the same reader has no
+     such field, meets the door as a newcomer does, and is the honest place to
+     read the list. */
+  const newcomerContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  try {
+    const newcomer = await newcomerContext.newPage();
+    await stubSky(newcomer, OVERFULL_SKY);
+    await signIn(newcomer, "Orbit Outsider");
+    await newcomer.goto("/");
+    const belong = newcomer.getByRole("group", { name: "Where do you belong?" });
+    await expect(belong).toBeVisible();
+    for (const name of undrawn) {
+      await expect(belong.getByRole("button", { name: `Request to join ${name}` })).toBeVisible();
+    }
+  } finally {
+    await newcomerContext.close();
   }
 });

@@ -926,3 +926,27 @@ The full open-questions list, walked in order and ruled:
   #308 closed as overtaken/spent; #235 re-scoped to the server half; #365
   scheduled (v1.3, Phase-4 family); #261 stays open until its live
   break-and-repair drill runs — deferred, not v1.3 critical path.
+
+## 16. The 404's sky falls in (owner, 2026-09-04)
+
+Rulings on #790 (starfield infall) and #798 (first-load cost), taken over
+the day's rounds on Windows/Firefox; the phone's Safari is not required
+("I'll ask again if need be").
+
+- **The spiral is the choice.** Stars fall in toward the hole from every
+  direction, turning as they go, never drifting past it. Three canvas
+  copies per band, a third of a cycle apart, each renewed with fresh stars
+  as it wraps unseen: the field never empties, nothing spawns in view, and
+  it must never read as a loop ("should look like it's continuous").
+- **Nothing hangs, nothing pops.** The first cut hung a laptop (scaled SVG
+  groups; Safari bitmaps the whole extent) — canvases from then on. A
+  white box, an empty sky before the stars appear, and a visible loop were
+  each rejected in turn; stars are there from the first frame.
+- **The whole arrival in 1–1.5 s, without tanking quality.** Parts landing
+  one after another read as a delay, so every arrival on this page is a
+  fade: a filter-free backdrop at once, the still sky cross-fading into
+  the falling one, the halo's blurred layers waiting hidden and fading in
+  as one. Grain fades in on every screen. The halo lights before the stars
+  start to fall — it was the one thing still arriving late.
+- **Accepted** on the build at `1dd44bc` ("good"); the 404 baseline was
+  re-captured on that acceptance.

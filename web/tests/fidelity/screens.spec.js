@@ -746,6 +746,38 @@ async function capture(
     );
   }
 
+  /*
+   * AND THE DOOR IS OPEN. The sign-in door asks two more questions on mount
+   * (#788, #869): has boot finished, and is sign-in configured at all. The
+   * fixture harness runs no identity provider and no boot sequence, so left
+   * to itself it answers neither and every screen carrying the door
+   * photographs its held-dawn state instead of the ratified button — 12%
+   * adrift from mockup and baseline alike. The sheets these screens are
+   * measured against draw a healthy, configured, fully-booted instance, so
+   * the harness states that too, for every screen rather than only the
+   * signed-out one: the door rides on `/login`, on first-run and on its
+   * error state, none of which are `signedOut`.
+   *
+   * `phase: "running"` matters as much as `configured: true` here (#869): an
+   * absent `phase` reads as unreadable, same as an absent `configured`
+   * would, and `nextDoorState` fails that closed to FAILED rather than
+   * guessing — which is also why leaving it out dimmed the dawn itself
+   * (flight.css's `body[data-state="failed"] #dawn .dawnlayer` rule) on
+   * every screen the door rides, not only the ones showing its text.
+   * The three cannot-open states have their own coverage in
+   * tests/unit/door-state.test.mjs and the e2e suite, not here.
+   */
+  await page.route("**/api/health", (/** @type {import("@playwright/test").Route} */ route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"ready"}' }),
+  );
+  await page.route("**/api/auth/availability", (/** @type {import("@playwright/test").Route} */ route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: '{"configured":true,"phase":"running","contactAddress":null}',
+    }),
+  );
+
   /* Most of the family is drawn for a desk. The mobile dialect is drawn for a
      phone, and comparing it at 1600 wide would measure the wrong thing. */
   if (viewport) await page.setViewportSize(viewport);

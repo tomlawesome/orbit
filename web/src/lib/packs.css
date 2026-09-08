@@ -2,9 +2,10 @@
  * The theme packs, and the font stacks they share (#433).
  *
  * These lived in home.css, which meant they applied to home and nowhere else:
- * picking atlas and walking to /create put you back in a fixed dark palette,
- * because family.css hardcoded one. Measured before this move — atlas on
- * /home gave body rgb(162,155,139); every other screen gave rgb(7,13,31).
+ * picking a light pack and walking to /create put you back in a fixed dark
+ * palette, because family.css hardcoded one. Measured before this move — the
+ * light pack on /home gave a warm body colour; every other screen gave
+ * rgb(7,13,31).
  *
  * Imported by the root layout so every screen sees them. family.css keeps what
  * is genuinely family-specific — the stage, the glass surface, the sky — and
@@ -39,20 +40,17 @@
  *
  *   --ink-quiet    starchart  #8b95b6  6.59:1 on #060b1c
  *                  after dark #717c8e  4.77:1 on #05070d  (= its lifted faint)
- *                  atlas      #434f60  4.55:1 on #c9bfa6
  *                  dawn       #414d62  4.55:1 on #b0bed6  (= its lifted faint)
  *                  clouds     #414d62  4.55:1 on #b0bed6  (= its lifted faint)
  *                  retrograde #74a4b4  7.25:1 on #080a14
  *   --accent-text  dark packs = --accent, which already passes as text:
  *                  9.88 / 12.08 / 6.92:1 (star-chart, after dark, retrograde)
- *                  atlas      #684808  4.56:1   (--accent itself: 1.83:1)
  *                  dawn       #134a72  4.86:1   (--accent itself: 2.42:1)
  *                  clouds     #134a72  4.86:1
  *                  — set against the ground the on-sky labels MEASURE on,
  *                    rgb(174,188,211), not against the token #b0bed6, where
  *                    they read 4.97:1
  *   --ok-text      dark packs = --ok: 11.24 / 11.56 / 13.55:1
- *                  atlas      #115531  4.85:1   (--ok itself: 2.93:1)
  *                  dawn       #0d4e30  5.09:1   (--ok itself: 2.34:1)
  *                  clouds     #0d4e30  5.09:1
  *
@@ -95,6 +93,12 @@
      (7.08:1 / 8.23:1 on this pack's ground), so their companions are the
      originals — no pixel moves on the dark packs or retrograde. */
   --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: --warm already clears the law as words here (10.51:1 on --bg,
+     10.12:1 on --panel), so its companion is the original — no pixel move. */
+  --warm-text:var(--warm);
+  /* #855: --upcoming clears the law as words here too, so its companion
+     is the original — no pixel move. */
+  --upcoming-text:var(--upcoming);
 }
 [data-theme=afterdark]{
   --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -135,12 +139,21 @@
   --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
   --star-far:#e9edf8; --star-near:#f4f0ff;
   --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#717c8e;
-  /* #491: the faint tier now clears the law on its own, so this pack's quiet
-     ink IS its faint ink — stated rather than left to be inferred. */
-  --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 said this pack's quiet ink IS its faint ink, because the faint tier
+     cleared the law on its own. It cleared it against --bg. On this pack's
+     own --panel-raised the same value measures 4.42:1, so the words carried
+     the failure onto every raised surface (#861). Lifted just far enough to
+     clear the law on the worst ground this pack paints text on: #768295 is
+     4.80:1 on --panel-raised and 5.18:1 on --bg. --ink-faint keeps the old
+     value, because a hairline is not a letterform. */
+  --ink-quiet:#768295; --accent-text:var(--accent); --ok-text:var(--ok);
   /* #491 item 3: 7.28:1 / 8.46:1 as words on this ground — the companions are
      the originals, same reason as star-chart above. */
   --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: 10.80:1 / 10.50:1 as words here — the companion is the original. */
+  --warm-text:var(--warm);
+  /* #855: --upcoming clears the law as words here too — no pixel move. */
+  --upcoming-text:var(--upcoming);
   /*
    * THE GALACTIC PLANE — after dark's own sky (§15, "after dark adopts the
    * happy accident"; approved with the bottom glow in the deep). The pack owns
@@ -162,38 +175,6 @@
   --plane-star:#cfd9ee;
   --plane-star-warm:#ffdca6;
   --plane-dust:#01020a;
-}
-/* Dialled back from the ratified #efe9db (owner, 2026-08-14): a sky this
-   bright fights the whole conceit, so atlas is now aged paper at dusk rather
-   than fresh paper at noon. Only the ground and its surfaces moved - ink,
-   accent and status tokens are untouched, so every relationship the design
-   set still holds, against a quieter field. */
-[data-theme=atlas]{
-  --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
-  --line:#a89c80; --line-soft:#b8ae95;
-  --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
-  --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
-  --degraded:#c2570e;
-  --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
-  /* A daylit sky still drifts (owner, 2026-08-14). The design switched the
-     starfield off on the light packs; instead it inverts - ink on paper,
-     taken from the pack's own ink family rather than a new tone. Lower
-     opacity than the dark packs because dark-on-light reads heavier. */
-  --star-far:var(--ink); --star-near:var(--ink);
-  --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
-  /* #491: atlas is a daylight pack, so the gold accent and the green both fail
-     as words on it — 1.83:1 and 2.93:1 on its own ground. The companions are
-     the same hues taken down to where a letterform can live: 4.56:1 and
-     4.85:1. Retired from the roster, still measured, because a stored
-     preference still renders this pack. */
-  --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
-  /* #491 item 3: overdue and degraded fail as words here too — 3.55:1 and
-     2.46:1 raw. Darkened from the ratified recipe (color-mix toward black);
-     degraded needed more black than the 70/30 starting point to clear the
-     law with margin. Measured against --bg: overdue-text 5.59:1,
-     degraded-text 5.11:1. */
-  --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
-  --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
 }
 /*
  * dawn — AND DAWN IS THE TERMINATOR (owner, §15: "'dawn' the pack means the
@@ -284,11 +265,17 @@
      pack's quiet ink IS its faint ink — stated rather than inferred. */
   --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
   /* #491 item 3, same ground (--sky-1): overdue and degraded raw are 2.94:1
-     and 2.40:1, both under the law. Same recipe as atlas — overdue-text
-     clears at the ratified 70/30 mix (4.84:1); degraded-text needed 60/40 to
-     clear with margin (4.98:1). */
+     and 2.40:1, both under the law. The same darken-toward-black recipe used
+     elsewhere in this file — overdue-text clears at the ratified 70/30 mix
+     (4.84:1); degraded-text needed 60/40 to clear with margin (4.98:1). */
   --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
   --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+  /* #854: --warm as words is 2.64:1 on --bg, 3.08:1 on --panel — both under
+     the law. The same 70/30 darken-toward-black split used above clears
+     4.65:1 on --bg (5.43:1 on --panel). */
+  --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
+  /* #855: --upcoming is --accent here, so its text grade is --accent's. */
+  --upcoming-text:var(--accent-text);
 }
 /*
  * clouds — THE CLOUD SEA, and one of Orbit's MAIN LIGHTER THEMES (owner, §15:
@@ -341,6 +328,11 @@
      overdue-text 4.84:1, degraded-text 4.98:1. */
   --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
   --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+  /* #854: identical --warm, --bg and --panel to dawn, so the same 70/30
+     recipe lands the same ratios — 4.65:1 on --bg, 5.43:1 on --panel. */
+  --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
+  /* #855: --upcoming is --accent here, so its text grade is --accent's. */
+  --upcoming-text:var(--accent-text);
 }
 /*
  * retrograde — the fifth pack (owner, 2026-08-14). A planet in retrograde is
@@ -413,5 +405,10 @@
   /* #491 item 3: overdue and degraded clear the law as words too (5.64:1 and
      9.61:1), so their companions are the originals — no pixel moves. */
   --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: --warm clears the law as words too (13.67:1 on --bg, 13.17:1 on
+     --panel), so its companion is the original — no pixel move. */
+  --warm-text:var(--warm);
+  /* #855: --upcoming clears the law as words here too — no pixel move. */
+  --upcoming-text:var(--upcoming);
 }
 

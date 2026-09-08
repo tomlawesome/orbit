@@ -18,7 +18,7 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly repo_root
 cd "${repo_root}"
 
-readonly default_compose_files='-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml'
+readonly default_compose_files='-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml'
 read -r -a compose_files <<< "${COMPOSE_FILES:-${default_compose_files}}"
 
 export ORBIT_IMAGE="${ORBIT_IMAGE:-orbit-local:000000000000}"

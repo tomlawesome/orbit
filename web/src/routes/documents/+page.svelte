@@ -87,7 +87,7 @@
 <Chrome user={view?.user} current="documents"
         role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
 
-<div class="page">
+<div class="page" role="main">
   <header class="screen">
     <h1>Documents</h1>
     <div class="sub">the belt, unrolled · every file, its origin, and the body it circles</div>
@@ -118,7 +118,7 @@
   {#if shown}
     {#each shown.groups as group (group.label)}
       <div class="group">
-        <h3>{group.label}</h3>
+        <h2>{group.label}</h2>
         {#each group.rows as row (row.id)}
           <a class="doc" href={resolve("/item/[id]", { id: row.loose ? looseId(row.receiptId) : attached(row.item).id })}>
             <span class="thumb" aria-hidden="true"><small>PDF</small></span>

@@ -1,5 +1,12 @@
-import { bigint, boolean, check, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, customType, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+/** Raw encrypted bytes; postgres.js already maps `bytea` to/from `Buffer`. */
+const bytea = customType<{ data: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 export const membershipRole = pgEnum("membership_role", ["owner", "member"]);
 export const itemStatus = pgEnum("item_status", ["active", "expired", "cancelled", "archived"]);
@@ -39,6 +46,15 @@ export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
   "expired",
   "quarantined",
   "failed",
+  /* ADR-0017 slice 4 (orbit#745): matched no verified sender, so nothing was
+     downloaded, staged or notified — the message was answered once, where the
+     reply conditions allowed it, and deleted from the provider mailbox. */
+  "unattributed",
+  /* ADR-0017 slice 5 (orbit#746): the member it belongs to has collection
+     paused, so the receipt records that it arrived and nothing else —
+     content-free, nothing downloaded, nothing staged, nobody notified. Resume
+     turns it back into `processing` and the ordinary retry pass fetches it. */
+  "held",
 ]);
 export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
 export const imapRecipientAliasStatus = pgEnum("imap_recipient_alias_status", ["active", "legacy_inactive"]);
@@ -46,6 +62,10 @@ export const imapNotificationKind = pgEnum("imap_notification_kind", ["receipt",
 export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
 export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
+export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token"]);
+export const mailInProviderProfile = pgEnum("mail_in_provider_profile", ["mailcow", "gmail", "outlook", "other"]);
+export const mailInSenderSource = pgEnum("mail_in_sender_source", ["account", "sso", "manual"]);
+export const mailInAuthMethod = pgEnum("mail_in_auth_method", ["password", "xoauth2"]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -202,6 +222,27 @@ export const instanceMaintenance = pgTable("instance_maintenance", {
   check("instance_maintenance_singleton", sql`${table.singleton}`),
 ]);
 
+/**
+ * The instance's one public contact address (#860): an address an
+ * administrator deliberately sets for the signed-out sign-in door's "could
+ * not open safely" state (#788). Follows `instance_maintenance`'s shape
+ * (singleton PK, `id` for `audit_log.entity_id`, `version`) and — like that
+ * table, unlike `mail_in_mailbox` — its migration seeds the row
+ * unconditionally, so an upgrade always finds a working row with no address
+ * rather than an absent one. Never populated from any user account's own
+ * email; `public_address` is nullable, and null is the normal, supported
+ * "not set" state, not an error.
+ */
+export const instanceContact = pgTable("instance_contact", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  publicAddress: text("public_address"),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_contact_singleton", sql`${table.singleton}`),
+]);
+
 export const externalIdentities = pgTable("external_identities", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -219,6 +260,12 @@ export const sessions = pgTable("sessions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   rotatedAt: timestamp("rotated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // #482: bounded per-session facts for "where you're signed in" — a coarse
+  // user-agent string (never shown raw; see lib/auth/device.ts) and when the
+  // session was last validated, so the reader can tell a live device from a
+  // stale one.
+  userAgent: text("user_agent"),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
 });
 
 export const households = pgTable("households", {
@@ -530,6 +577,12 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   discardedAt: timestamp("discarded_at", { withTimezone: true }),
   expiredAt: timestamp("expired_at", { withTimezone: true }),
   status: imapIngestionStatus("status").notNull(),
+  /**
+   * How the message reached its owner (ADR-0017 decision 3, slice 4): the
+   * verified sender alone, or the sender with the member's own alias
+   * corroborating it. Null for everything that was never attributed.
+   */
+  attributedBy: text("attributed_by"),
   attempts: integer("attempts").notNull().default(1),
   failureCode: text("failure_code"),
   attachmentProcessingAttempts: integer("attachment_processing_attempts").notNull().default(0),
@@ -557,6 +610,7 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
   index("imap_message_recipient_content_idx").on(table.userId, table.contentSha256),
   index("imap_attachment_processing_claim_idx").on(table.status, table.attachmentProcessingLockedAt, table.createdAt),
+  check("imap_message_attributed_by_valid", sql`${table.attributedBy} IS NULL OR ${table.attributedBy} IN ('sender', 'sender_and_alias')`),
 ]);
 
 /** Content-free, leased notification operations for private mailbox receipts. */
@@ -579,12 +633,19 @@ export const imapNotificationDeliveries = pgTable("imap_notification_deliveries"
 ]);
 
 /** Generation-aware per-user aliases. Legacy prototype digests are retained
- * only as explicitly inactive rows and are never eligible for lookup. */
+ * only as explicitly inactive rows and are never eligible for lookup.
+ *
+ * Since ADR-0017 slice 3 (orbit#744) `generation` is the owning user's own
+ * counter, not the instance's, and this table is the whole lookup authority:
+ * `alias_key_secret_id` records which `mail_in_secrets` row of kind
+ * `alias_key` derived the digest, so a row still verifies after the
+ * administrator's emergency key rotation replaces the instance key. */
 export const imapRecipientAliases = pgTable("imap_recipient_aliases", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   generation: integer("generation").notNull(),
   aliasSha256: text("alias_sha256").notNull(),
+  aliasKeySecretId: uuid("alias_key_secret_id").references(() => mailInSecrets.id, { onDelete: "set null" }),
   status: imapRecipientAliasStatus("status").notNull().default("active"),
   activeUntil: timestamp("active_until", { withTimezone: true }),
   ...auditColumns,
@@ -595,21 +656,74 @@ export const imapRecipientAliases = pgTable("imap_recipient_aliases", {
   check("imap_recipient_alias_generation_valid", sql`${table.generation} > 0 OR ${table.status} = 'legacy_inactive'`),
 ]);
 
-/** Database-authoritative singleton for monotonic alias rotation handover. */
-export const imapRecipientRotationState = pgTable("imap_recipient_rotation_state", {
-  id: integer("id").primaryKey().default(1),
-  currentGeneration: integer("current_generation").notNull(),
-  currentCommitment: text("current_commitment").notNull(),
+/**
+ * One relay per user (ADR-0017 decision 2, slice 3, orbit#744), replacing the
+ * instance-wide `imap_recipient_rotation_state` singleton it retires.
+ *
+ * Generations are this user's own monotonic counter: exactly one current, at
+ * most one previous with an explicit expiry, never lowered and never reused.
+ * `version` carries the same optimistic-concurrency discipline as
+ * `instance_maintenance`, and every user-initiated transition is an UPDATE
+ * predicated on `user_id = $self AND version = $expected` — the sibling
+ * invariant is that no statement on that path has a wider predicate.
+ */
+export const mailInRelays = pgTable("mail_in_relays", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  currentGeneration: integer("current_generation").notNull().default(1),
   previousGeneration: integer("previous_generation"),
   previousExpiresAt: timestamp("previous_expires_at", { withTimezone: true }),
-  previousCommitment: text("previous_commitment"),
+  /** Set here in slice 3, given its receipt-time behaviour in slice 5 (#746). */
+  ingestPausedAt: timestamp("ingest_paused_at", { withTimezone: true }),
+  rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
   ...auditColumns,
 }, (table) => [
-  check("imap_recipient_rotation_state_singleton", sql`${table.id} = 1`),
-  check("imap_recipient_rotation_state_current_valid", sql`${table.currentGeneration} > 0`),
-  check("imap_recipient_rotation_state_previous_valid", sql`${table.previousGeneration} IS NULL OR (${table.previousGeneration} > 0 AND ${table.previousGeneration} <> ${table.currentGeneration})`),
-  check("imap_recipient_rotation_state_previous_pair", sql`(${table.previousGeneration} IS NULL) = (${table.previousExpiresAt} IS NULL) AND (${table.previousGeneration} IS NULL) = (${table.previousCommitment} IS NULL)`),
+  check("mail_in_relay_current_valid", sql`${table.currentGeneration} > 0`),
+  check("mail_in_relay_previous_valid", sql`${table.previousGeneration} IS NULL OR (${table.previousGeneration} > 0 AND ${table.previousGeneration} < ${table.currentGeneration})`),
+  check("mail_in_relay_previous_pair", sql`(${table.previousGeneration} IS NULL) = (${table.previousExpiresAt} IS NULL)`),
 ]);
+
+/**
+ * The addresses a member may send from (ADR-0017 decision 3, slice 4,
+ * orbit#745).
+ *
+ * A sender address is a CLAIM, not a credential: no row here attributes
+ * anything until `verified_at` is set, because one member claiming another's
+ * address would otherwise be enough to receive their forwarded documents. The
+ * address is unique across the instance for the same reason — one address
+ * attributes to exactly one member, so attribution is never a guess.
+ */
+export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** Normalised on the way in: trimmed, unwrapped, case-folded. */
+  address: text("address").notNull(),
+  source: mailInSenderSource("source").notNull().default("manual"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  /** The one-use link's token, digested. The token itself is never stored. */
+  verificationTokenDigest: text("verification_token_digest"),
+  verificationExpiresAt: timestamp("verification_expires_at", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("mail_in_sender_address_unique").on(table.address),
+  index("mail_in_sender_address_user_idx").on(table.userId, table.verifiedAt),
+  check("mail_in_sender_address_verification_pair", sql`(${table.verificationTokenDigest} IS NULL) = (${table.verificationExpiresAt} IS NULL)`),
+]);
+
+/**
+ * When each unknown sender was last answered (ADR-0017 decision 3, slice 4).
+ *
+ * At most one reply per sender address per day, so the reply cannot be turned
+ * into a flood against the household mailbox or a stranger's. The address is
+ * held as a DIGEST: an unattributed sender is not a member and Orbit keeps
+ * nothing readable about them, which is the same rule
+ * `imap_recipient_aliases` follows for relay addresses.
+ */
+export const mailInUnattributedReplies = pgTable("mail_in_unattributed_replies", {
+  addressSha256: text("address_sha256").primaryKey(),
+  lastRepliedAt: timestamp("last_replied_at", { withTimezone: true }).notNull(),
+  ...auditColumns,
+});
 
 /** Durable idempotency/result state for an explicit reviewed approval. This is
  * an operation ledger, not a private mailbox draft aggregate. */
@@ -692,4 +806,115 @@ export const imapIngestionStagingObjects = pgTable("imap_ingestion_staging_objec
   index("imap_staging_object_message_status_idx").on(table.messageId, table.status),
   index("imap_staging_object_created_idx").on(table.status, table.createdAt),
   check("imap_staging_object_status_valid", sql`${table.status} IN ('pending', 'committed', 'purge_pending')`),
+]);
+
+/**
+ * One row per app-managed mail-in secret (ADR-0017 decision 1, slice 1):
+ * the mailbox password and the instance's alias-derivation key, envelope-
+ * encrypted under the document KEK exactly as `documentCrypto` is. A
+ * superseded secret is deleted, not kept — rotation and removal both take
+ * the old row out in the same transaction that stops referencing it.
+ */
+export const mailInSecrets = pgTable("mail_in_secrets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: mailInSecretKind("kind").notNull(),
+  ciphertext: bytea("ciphertext").notNull(),
+  envelopeVersion: integer("envelope_version").notNull(),
+  contentIv: text("content_iv").notNull(),
+  contentAuthTag: text("content_auth_tag").notNull(),
+  wrappedDek: text("wrapped_dek").notNull(),
+  wrapIv: text("wrap_iv").notNull(),
+  wrapAuthTag: text("wrap_auth_tag").notNull(),
+  keyId: text("key_id").notNull(),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  ...auditColumns,
+});
+
+/**
+ * The instance's one admin-managed mailbox (ADR-0017 decision 1, slice 1):
+ * non-secret provider configuration only, following the `instance_maintenance`
+ * shape (singleton PK, `id` for `audit_log.entity_id`, `version`). The
+ * recipient domain and alias base local part are derived from `accountUser`,
+ * not configured separately. No row means mail-in has never been set up —
+ * there is no environment fallback (decision 6, as rescoped: no upgrade path,
+ * nothing to import).
+ */
+export const mailInMailbox = pgTable("mail_in_mailbox", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  host: text("host").notNull().default(""),
+  port: integer("port").notNull().default(993),
+  accountUser: text("account_user").notNull().default(""),
+  mailbox: text("mailbox").notNull().default("INBOX"),
+  tlsServerName: text("tls_server_name").notNull().default(""),
+  providerProfile: mailInProviderProfile("provider_profile").notNull().default("other"),
+  authMethod: mailInAuthMethod("auth_method").notNull().default("password"),
+  trustedRecipientHeader: text("trusted_recipient_header").notNull().default(""),
+  /**
+   * Whose `Authentication-Results` verdict this instance believes (ADR-0017
+   * decision 3, slice 4). It belongs to the provider profile: Gmail and
+   * Outlook have known values, and a Mailcow or other provider is the
+   * operator's own hostname, which only they can supply. Empty means the
+   * instance has not said, and nothing is believed — no sender is
+   * authenticated, so no mail is attributed and no reply is ever sent.
+   */
+  trustedAuthservId: text("trusted_authserv_id").notNull().default(""),
+  pollSeconds: integer("poll_seconds").notNull().default(300),
+  enabled: boolean("enabled").notNull().default(false),
+  verificationState: text("verification_state").notNull().default("unverified"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  passwordSecretId: uuid("password_secret_id").references(() => mailInSecrets.id, { onDelete: "set null" }),
+  aliasKeySecretId: uuid("alias_key_secret_id").references(() => mailInSecrets.id, { onDelete: "set null" }),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  ...auditColumns,
+}, (table) => [
+  check("mail_in_mailbox_singleton", sql`${table.singleton}`),
+  check("mail_in_mailbox_verification_state_valid", sql`${table.verificationState} IN ('unverified', 'verified', 'failed')`),
+]);
+
+/* ── EMAIL INVITATIONS (#481) ─────────────────────────────────────────────
+   Appended as its own block rather than filed beside `householdJoinRequests`
+   so parallel schema work on the same file does not collide.
+
+   A join request is somebody who already has an account asking to come in; an
+   invitation is an owner asking somebody who may have no account at all. The
+   token itself is never stored — only its SHA-256 digest — so the row can
+   confirm a link without being able to reconstruct one, and the link exists in
+   exactly two places: the mail, and the browser's own short-lived cookie.
+
+   "Open" means neither redeemed nor withdrawn; expiry is a date, not a state,
+   so a lapsed invitation still blocks a second open one for the same address
+   until it is replaced by a resend. That is deliberate: resend REPLACES the
+   row (new digest, new expiry), which is what makes the earlier link stop
+   working with no second row to reason about. */
+export const householdInvitations = pgTable("household_invitations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  /* Normalised at the seam (trimmed, lower-cased): the address the signed-in
+     identity must match, so the comparison is made on stored bytes. */
+  email: text("email").notNull(),
+  role: membershipRole("role").notNull().default("member"),
+  invitedByUserId: uuid("invited_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  tokenDigest: text("token_digest").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  /* A bounded class from the notification worker's own vocabulary, never a
+     provider message: those carry addresses, hosts and credentials. */
+  sendError: text("send_error"),
+  redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
+  redeemedByUserId: uuid("redeemed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedByUserId: uuid("revoked_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("household_invitation_open_once").on(table.householdId, table.email)
+    .where(sql`${table.redeemedAt} IS NULL AND ${table.revokedAt} IS NULL`),
+  /* Not partial: a spent token must still find its row, or a second visit to
+     a used link would read as "no such invitation" instead of "already used". */
+  uniqueIndex("household_invitation_token_digest_unique").on(table.tokenDigest),
+  index("household_invitation_household_idx").on(table.householdId, table.createdAt),
+  check(
+    "household_invitation_send_error_valid",
+    sql`${table.sendError} IS NULL OR ${table.sendError} IN ('smtp_unconfigured', 'smtp_unavailable', 'smtp_rejected', 'unknown')`,
+  ),
 ]);

@@ -12,6 +12,7 @@ import { completeAuthorization, discoverProvider } from "orbit/lib/auth/oidc";
 import { provisionIdentity } from "orbit/lib/auth/provision";
 import { createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
+import { readInvitationCookie } from "orbit/server/invitations/cookie";
 
 /**
  * Where the identity provider sends the browser back (#735 port).
@@ -83,15 +84,26 @@ export async function GET(event) {
 
     // A successful login always replaces the browser's previous session.
     await deleteSessionToken(event.cookies.get(sessionCookieName(config)));
-    const session = await createSession(user.id, config);
+    const session = await createSession(user.id, config, event.request.headers.get("user-agent"));
 
     clearTransactionCookie(event.cookies, config);
     setSessionCookie(event.cookies, session.token, config);
 
+    /* #481: a sign-in that STARTED from an invitation goes back to the
+       invitation, which is the one place redemption is written. The token is
+       read from Orbit's own HTTP-only cookie rather than from `returnTo`,
+       because returnTo comes off a query string a stranger can write and this
+       cookie is only ever set after the invitation was found and found open.
+       The invite screen clears it, whatever the outcome. */
+    const pendingInvitation = readInvitationCookie(event.cookies, config);
+    const destination = pendingInvitation
+      ? new URL(`/invite/${encodeURIComponent(pendingInvitation)}`, config.appUrl)
+      : new URL(transaction.returnTo, config.appUrl);
+
     return new Response(null, {
       status: 303,
       headers: {
-        location: new URL(transaction.returnTo, config.appUrl).href,
+        location: destination.href,
         "cache-control": "no-store",
       },
     });

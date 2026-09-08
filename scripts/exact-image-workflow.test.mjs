@@ -165,7 +165,7 @@ describe("exact-image publication workflow", () => {
     expect(changes).toContain("integration: ${{ steps.classify.outputs.integration }}");
     expect(changes).toContain("system: ${{ steps.classify.outputs.system }}");
     expect(changes).toContain("Set up pnpm graph reader");
-    expect(changes).toContain("run_install: false");
+    expect(changes).toContain("install: false");
     const fast = jobBlock("fast", "supply_chain_source");
     expect(fast).toContain("- changes");
     expect(fast).toContain("needs.changes.outputs.build == 'true'");
@@ -253,7 +253,7 @@ describe("exact-image publication workflow", () => {
   it("takes the pnpm version from package.json alone, on both hosts", () => {
     // Renovate bumps package.json's packageManager (234eb98 took it to
     // 11.11.0) and nothing else: a second copy of the version in either
-    // pipeline drifts, and pnpm/action-setup then refuses to start
+    // pipeline drifts, and pnpm/setup (action-setup at the time) then refuses to start
     // (GitHub run 33924807335). package.json is the one place it lives.
     const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
     const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -465,7 +465,7 @@ describe("exact-image publication workflow", () => {
     }
   });
 
-  it("validates both supported mail secret overlays", () => {
+  it("validates the supported mail secret overlay", () => {
     const configuration = ciScript("create-test-configuration.sh");
     expect(configuration).toContain(
       "openssl rand -hex 32 > .orbit-secrets/smtp-password",
@@ -473,20 +473,13 @@ describe("exact-image publication workflow", () => {
     expect(configuration).toContain(
       "SMTP_HOST=smtp.example.invalid",
     );
-    expect(configuration).toContain(
-      "IMAP_HOST=imap.example.invalid",
-    );
-    expect(configuration).toContain(
-      "IMAP_ENABLED=false",
-    );
+    expect(configuration).not.toContain("IMAP_");
 
     const composeValidation = ciScript("validate-compose.sh");
     expect(composeValidation).toContain(
       "-f docker-compose.yml -f docker-compose.mail.yml config --quiet",
     );
-    expect(composeValidation).toContain(
-      "-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.mail-alias-rotation.yml config --quiet",
-    );
+    expect(composeValidation).not.toContain("docker-compose.mail-alias-rotation.yml");
 
     /*
      * The acceptance stack runs the mail overlay too. Its file set became an
@@ -497,7 +490,7 @@ describe("exact-image publication workflow", () => {
      */
     const stack = ciScript("start-acceptance-stack.sh");
     expect(stack).toContain(
-      "-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml",
+      "-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml",
     );
     expect(stack).toContain("COMPOSE_FILES:-${default_compose_files}");
     expect(stack).toContain("up --detach --no-build --wait");
@@ -580,6 +573,31 @@ describe("exact-image publication workflow", () => {
     expect(refusalStep).toContain("docker inspect orbit");
     expect(refusalStep).toContain('[[ ! -e "${GIT_MARKER}" ]]');
     expect(refusalStep).toContain('[[ "${#entries[@]}" -eq 0 ]]');
+
+    // #770: a wrong field list and an installer that never reached the field
+    // check used to both report as "did not report the fixed required
+    // fields", with no way to tell which happened. The prefix is checked
+    // separately so the two report differently, and the offending line (or
+    // its absence) is shown rather than just the fixed expectation.
+    expect(refusalStep).toContain("required_fields_prefix=");
+    expect(refusalStep).toContain("without ever reaching the field check");
+    expect(refusalStep).toContain("reported the wrong required fields");
+    expect(refusalStep).toContain("actual_fields_line=");
+    // #770: on any failure, show the installer's exit code and what the
+    // target directory actually held, alongside the output already dumped.
+    expect(refusalStep).toContain("installer exit status: %s");
+    expect(refusalStep).toContain("target directory contents");
+    expect(refusalStep).toMatch(/did not restore the target to empty.*\$\{entries\[\*\]\}/);
+
+    // #770: install.sh's own database-volume-safety refusal is a legitimate,
+    // deliberate reason to fail closed (docs/installer-guarantees.md
+    // install.sh #13/#21), but it fires before the field check this step
+    // means to assert. A volume some earlier stage on this runner failed to
+    // tear down would otherwise make this step misreport as the field-check
+    // assertion failing, so it is named as a leaked-state defect and the
+    // step fails before the installer even runs.
+    expect(refusalStep).toContain("docker volume ls --filter 'name=orbit-db-data'");
+    expect(refusalStep).toContain("leaked-state defect in the environment, not the installer");
 
     // The unattended bootstrap uses only the documented example plus fixed
     // non-secret inputs and an owner-only generated secret file.

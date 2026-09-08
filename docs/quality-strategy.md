@@ -83,7 +83,7 @@ fail on a global percentage.
 Coverage cannot prove authorization, concurrency, provider behaviour,
 accessibility, or recoverability. Those require the appropriate layer above.
 
-## The v19 type ledger
+## The v19 type check
 
 The SvelteKit front end in `web/` is outside `pnpm typecheck`: the root
 `tsconfig.json` sets `"allowJs": false` and includes only `**/*.ts` and
@@ -91,27 +91,34 @@ The SvelteKit front end in `web/` is outside `pnpm typecheck`: the root
 had no caller in CI until #620, so 1,644 errors accumulated across 52 files --
 overwhelmingly implicit `any` and DOM narrowing rather than defects.
 
-Gating on zero would fail every pull request from day one; leaving it off lets
-the pile grow unseen. So `web/svelte-check-ceiling.json` records what each file
-is allowed today and `scripts/check-v19-types.mjs` enforces it from the fast
-job, on the same ratchet principle as the coverage floors above and with one
-addition:
+Gating on zero would have failed every pull request on day one, so from #620
+until #624 `web/svelte-check-ceiling.json` recorded exactly how many errors
+each file was still allowed, on the same ratchet principle as the coverage
+floors above: a file that got worse failed, a file that got better also
+failed (asking for its number to be lowered), and a file with no entry had to
+be clean already. That was a holding position for the duration of the v19
+rebuild (M2), not a standard, and M2 did not close while the ledger had
+entries in it.
 
-1. A file that gets worse fails.
-2. A file that gets **better** also fails, asking for its number to be lowered.
-   Exact match is what walks the ledger down to nothing rather than leaving
-   slack nobody reclaims. `svelte-check` is deterministic against a frozen
-   lockfile, so this cannot flap.
-3. A file with no entry may have no errors, so everything M2 writes fresh is
-   held at zero automatically.
-4. Entries are never added and never raised. Lowering one and deleting one are
-   the only edits that move this forward.
+**#624 closed that out.** `scripts/check-v19-types.mjs` is now a plain
+zero-error check: it runs `svelte-check` across `web/` and fails on any error,
+anywhere, with no per-file exemption. `web/svelte-check-ceiling.json` is kept
+only as the empty historical record of the ledger; nothing reads it anymore.
 
-This is a holding position for the duration of the v19 rebuild, not a standard.
-**M2 does not close while the ledger has entries in it** (#624): the rebuild is
-what makes the tolerance removable, so each screen it rewrites should land
-clean and drop its entry in the same pull request. When the ledger is empty the
-gate becomes a plain zero-error check and both files go.
+`due-next/+page.svelte` and `home/+page.svelte` were the two files still
+carrying tolerated errors, both for the same reason: a `{#snippet}` parameter
+is one of the positions where `svelte-check` accepts an inline `@type` cast
+comment but the production rolldown build does not (#782), so the type
+couldn't be written inline in the route's own `<script>`. Both reached zero by
+turning the snippet into a real child component, whose `$props()`
+destructuring is a plain `<script>` statement and takes the annotation
+without issue: `due-next/EntryRow.svelte`, and `home/CorridorRow.svelte` and
+`home/ItemView.svelte` (home's two snippets closed over a large slice of the
+screen's own reactive state and handlers, so those became typed props and
+callback props instead). Both routes' reactive `view` state and lookup
+objects also moved into small companion modules (`due-next-view.svelte.js`,
+`bands.js`) for the same reason. #782 stays open to carry the upstream
+constraint and the workaround, but no file needs it worked around today.
 
 The same job compiles `web/` (`pnpm --filter orbit-web build`, about ten
 seconds). Before that, a `.svelte` file that did not compile could merge green
@@ -163,29 +170,65 @@ and for the authoritative protected push. Required higher-cost job identities
 are skipped at job level on pull requests so branch protection still receives
 terminal check results; workflow-level path filters are not used.
 
+### Narrow lanes on GitLab
+
+`scripts/classify-changed-paths.mjs` also reports a *lane*: a verdict on the
+whole change rather than on one path. It holds only while every changed file
+belongs to it, and one file outside puts the change back in the ordinary
+classified pipeline. `.gitlab-ci.yml`'s `orbit_lane_admits` holds the job list
+for each.
+
+| Lane | The change touches only | Jobs it runs |
+| --- | --- | --- |
+| documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads |
+| ignore/policy (#889) | `.gitleaksignore`, `supply-chain/licence-policy.yml` | `classify`, `gitleaks`, `licence_policy`, `supply_chain_source` |
+| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `gitleaks`, `supply_chain_source` |
+
+The documentation lane is the risk classifier's `fast` result and predates the
+other two: it shortens the pipeline by axis, so a job still runs when its own
+axis asks for it. The two lanes below it are lists, and a job the list does not
+name does not run whatever its axis says.
+
+A lane is a merge-request economy and never a relaxation of the delivery gate.
+The `classify` job forces `full` on a push to `dev`, `preview`, `main` or
+`hotfix/*` and on the merge request into `main`, so everything that promotes
+still runs the whole pipeline. Everywhere else — every ordinary merge request
+included — the classifier decides, which is what #883 restored.
+
+Nothing above can make a merge request run *more* than its diff asks for, and
+sometimes a change deserves the whole gate before it merges. The label
+`ci: acceptance` on the merge request is how to ask (#572): `classify` reads
+`CI_MERGE_REQUEST_LABELS`, turns every flag on — lane `full`, system risk,
+launcher install compatibility included — and says so in its log, so a full
+run on a small diff is never a mystery. Remove the label and the next pipeline
+is classified again.
+
+`scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
+those scripts are the acceptance stage's own checks, so a change to one is not
+exercised until it merges to `dev`, where every pipeline runs everything again.
+
 ### Launcher install compatibility
 
-`Launcher install compatibility` (`.github/workflows/launcher-install-compat.yml`)
-installs Orbit through a real orbit-launcher build against the pull request's
-own `scripts/install.sh`. Green means only that: the pull request's
-`install.sh` still honours its contract with orbit-launcher (`--plain`,
-`--install|--update|--repair`). It does not mean the launcher can drive the
-rest of a deployment, because `install.sh` fetches its helpers —
-`configure.sh`, `installer-ui.sh` and the rest of `deployment_assets` — from
-the resolved image's own source revision, not from the commit under test
-(`scripts/install.sh:1320`, `:1348`, `:1447`), so a pull request changing a
-helper is invisible to this gate. Their line grammars are enforced instead per
-pull request, against `docs/engine-events.md`, by `scripts/engine-events.test.mjs`
-(the `phase=...` event stream) and `scripts/configure.test.mjs` (`configure.sh
---check`'s readiness lines). Full pairing of changed helpers with a real image
-is proven only at the `preview` → `main` gate. Ruling: #606; follow-up
-(pairing changed helpers against the acceptance rig's candidate image):
-#736.
+`launcher_install_compat` (`.gitlab-ci.yml`) installs Orbit through a real
+orbit-launcher build against the merge request's own `scripts/install.sh`
+and the image the same pipeline built, served from a loopback registry the
+way the `acceptance` job serves it. Because the image carries its own
+helpers — `configure.sh`, `installer-ui.sh` and the rest of
+`deployment_assets` (ADR-0019) — the pairing under test is the commit's
+installer with the commit's helpers, so a changed helper that breaks the
+launcher journey turns this job red before it reaches `preview`. Green means
+the launcher contract (`--plain`, `--install|--update|--repair`) and the
+journey it drives both hold for this commit. Line grammars are still enforced
+per merge request, against `docs/engine-events.md`, by
+`scripts/engine-events.test.mjs` (the `phase=...` event stream) and
+`scripts/configure.test.mjs` (`configure.sh --check`'s readiness lines).
+Ruling: #606; pairing against the pipeline's own image: #736, delivered with
+#890.
 
-Pull requests run static and unit checks without a production application or
+Merge requests run static and unit checks without a production application or
 container build. Every accepted push to protected `preview` or `hotfix/**`
 runs the complete exact-image system and publication path, so integration and
-release evidence is never inferred from a cheaper pull-request lane. Until a
+release evidence is never inferred from a cheaper merge-request lane. Until a
 forge-native combined-state queue is available, only one release train is
 admitted to protected CI at a time while
 independent implementation and local validation continue concurrently.

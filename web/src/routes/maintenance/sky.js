@@ -5,10 +5,15 @@
  * stars come out (CON-15).
  *
  * Imperative DOM by design. Svelte renders the markup and stands back.
+ *
+ * The shape is totality's own, but the randomness is the shared generator's
+ * (#445): this file used to carry its own retyped Park–Miller.
  */
+import { seededRng } from "$lib/sky.js";
+
 export function mountTotalitySky() {
   // deterministic starfield — bright stars only; totality lets the day stars out
-  const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(20260812);
+  const rng = seededRng(20260812);
   // Both ids are in the static markup this mounts into, so they always resolve.
   const far = /** @type {Element} */ (document.getElementById("farstars"));
   const near = /** @type {Element} */ (document.getElementById("nearstars"));

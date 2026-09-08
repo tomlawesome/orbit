@@ -38,6 +38,11 @@ export const CREATE = "create";
 export const NEWCOMER = "newcomer";
 /** A member. Home is theirs; the door hands them on to it. */
 export const ONWARD = "onward";
+/** An invited reader's first landing (#871): the newcomer's own climb, sky
+ *  and count, and then the household the invitation named rather than a
+ *  choice among any. See `isInvitedLanding` for how this is told apart from
+ *  ONWARD, which the same session answers the same way ever after. */
+export const INVITED = "invited";
 
 /**
  * Which stage a signed-in reader's workspace puts them on.
@@ -54,6 +59,33 @@ export function arrivalStageOf(workspace) {
   if (!workspace) return ASKING;
   if ((workspace.households ?? []).length > 0) return ONWARD;
   return (workspace.visibleHouseholds ?? []).length > 0 ? NEWCOMER : CREATE;
+}
+
+/**
+ * INVITED, told apart from ONWARD (#871).
+ *
+ * Both carry `session.activeHouseholdId` — a member of ten years and a reader
+ * who redeemed an invitation ninety seconds ago answer that question
+ * identically, because #481's redemption sets it the same way ONWARD already
+ * reads. The one-shot `justJoined` is the whole of the difference:
+ * `GET /api/auth/session` sets it only immediately after
+ * `readAndClearInvitedLandingCookie` finds the cookie
+ * `/invite/[token]/+page.server.js` set in the same response as its redirect
+ * — present on the very next read, gone on the one after that. So this can
+ * never fire for an ordinary returning member, who was never issued that
+ * cookie in the first place, and it cannot fire twice for the reader who was:
+ * a refresh, a bookmark, a Back all find it already spent, and land ONWARD
+ * like anyone else who belongs there.
+ *
+ * Deliberately not folded into `arrivalStageOf`: that function decides off
+ * `GET /api/workspace` alone, and a reader who is INVITED already has a
+ * household there too (redemption grants the membership before the arrival
+ * ever asks) — so the workspace read cannot tell this apart from ONWARD
+ * either. The session is the only place the answer still exists to be read.
+ * @param {{ activeHouseholdId?: string | null, justJoined?: boolean } | null} [session]
+ */
+export function isInvitedLanding(session) {
+  return Boolean(session?.activeHouseholdId) && Boolean(session?.justJoined);
 }
 
 /**
@@ -173,16 +205,6 @@ export function createSystemCommand({ name, timezone, currency }, ids = { uuid: 
       onboardingComplete: true,
     },
   };
-}
-
-/**
- * What the button says. The sheet writes the system's name into it as it is
- * typed — "create Lawson Home →" — and falls back to the unnamed word.
- * @param {string} [name]
- */
-export function createButtonLabel(name) {
-  const trimmed = String(name ?? "").trim();
-  return trimmed ? `create ${trimmed} →` : "create this system →";
 }
 
 /**

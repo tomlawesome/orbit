@@ -89,15 +89,26 @@ describe("supply-chain policy", () => {
       "tests/oidc/Dockerfile",
       "docker-compose.yml",
       "scripts/test-integration.mjs",
+      ".gitlab-ci.yml",
     ];
     const discovered = new Map();
     for (const file of files) {
       const content = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
       for (const line of content.split(/\r?\n/u)) {
         const from = line.match(/^FROM\s+(\S+)/u)?.[1];
-        const compose = line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1];
+        const compose =
+          file === "docker-compose.yml"
+            ? line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1]
+            : undefined;
         const integration = line.match(/^\s+"(postgres:[^"]+)",?$/u)?.[1];
-        const reference = from ?? compose ?? integration;
+        // The pipeline pins the same PostgreSQL sidecar for its integration
+        // job; other `*_IMAGE:` pins here (node, playwright) are unrelated
+        // images with no policy entry, so this only picks out postgres.
+        const pipelinePostgres =
+          file === ".gitlab-ci.yml"
+            ? line.match(/^\s*POSTGRES_IMAGE:\s+(postgres:\S+)\s*$/u)?.[1]
+            : undefined;
+        const reference = from ?? compose ?? integration ?? pipelinePostgres;
         if (!reference || reference === "base") continue;
         if (reference.startsWith("${ORBIT_IMAGE:")) {
           expect(reference).toBe(
@@ -174,6 +185,34 @@ describe("supply-chain policy", () => {
     expect(deploy.includes(digestGuard)).toBe(true);
 
     expect(configure).toContain('[[ -n "$orbit_image" ]] || return 0');
+  });
+
+  it("records the cosign pin the installer actually downloads (#661)", () => {
+    // The pin lives twice: in the script that downloads the binary and in the
+    // policy the owner reviews. Drift between them is how a reviewed version
+    // and an installed version stop being the same thing.
+    const policyDocument = JSON.parse(
+      readFileSync(
+        new URL("../.github/supply-chain-policy.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    const installer = readFileSync(
+      new URL("./ci/ensure-cosign.sh", import.meta.url),
+      "utf8",
+    );
+    const cosign = policyDocument.signingTools?.find((tool) => tool.name === "cosign");
+    expect(cosign).toBeDefined();
+    expect(cosign.license).toBe("Apache-2.0");
+    expect(installer).toContain(`COSIGN_VERSION="${cosign.version}"`);
+    expect(installer).toContain(`COSIGN_SHA256="${cosign.sha256}"`);
+    // The URL interpolates the pinned version, so match the literal shape.
+    expect(installer).toContain(
+      "releases/download/v${COSIGN_VERSION}/" + cosign.asset,
+    );
+    expect(cosign.source).toBe(
+      `https://github.com/sigstore/cosign/releases/tag/v${cosign.version}`,
+    );
   });
 
   it("accepts a pinned reviewed scanner and live bounded exceptions", () => {

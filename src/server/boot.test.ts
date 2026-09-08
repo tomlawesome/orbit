@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
 const mocks = vi.hoisted(() => ({
@@ -27,6 +27,19 @@ const mocks = vi.hoisted(() => ({
     remediation: "repair_configuration";
   }>),
   validateStartupConfiguration: vi.fn(),
+  /* Mirrors the real class's constructor (an issues array), not the trivial
+     `extends Error {}` this replaced: a test that needs a real `.issues`
+     entry -- carrying a `.detail`, in particular (#717) -- has to be able to
+     construct one. */
+  StartupConfigurationError: class StartupConfigurationError extends Error {
+    issues: Array<{ field: string; code: string; detail?: string }>;
+
+    constructor(issues: Array<{ field: string; code: string; detail?: string }>) {
+      super("Orbit startup configuration is invalid");
+      this.name = "StartupConfigurationError";
+      this.issues = issues;
+    }
+  },
   getDatabaseClient: vi.fn(() => ({ unsafe: vi.fn() })),
   getDb: vi.fn(),
   verifyMigrationIntegrity: vi.fn(),
@@ -80,7 +93,7 @@ vi.mock("@/lib/configuration-problems", () => ({
 }));
 vi.mock("@/lib/startup-config", () => ({
   validateStartupConfiguration: mocks.validateStartupConfiguration,
-  StartupConfigurationError: class StartupConfigurationError extends Error {},
+  StartupConfigurationError: mocks.StartupConfigurationError,
 }));
 vi.mock("@/db", () => ({
   getDatabaseClient: mocks.getDatabaseClient,
@@ -117,6 +130,22 @@ describe("boot module boundary", () => {
 });
 
 describe("strict startup ordering", () => {
+  /* registerNode() lazily imports the real logger, auth observability and
+     maintenance worker — the modules this file does not mock — so the first
+     test paid for transforming that graph inside its own 5 s budget: 1.1 s
+     here, over 5 s when the runner shares its lane (#839). Warm the transform
+     cache once, outside any test's clock; vi.resetModules() only drops the
+     evaluated instances, which cost ~20 ms to rebuild. The hook gets its own
+     budget because the transform itself passed 10 s on the runner (pipeline
+     483, job 3880) — a starved lane is slow, not stuck. */
+  beforeAll(async () => {
+    await Promise.all([
+      import("./boot"),
+      import("@/lib/logger"),
+      import("@/lib/auth/observability"),
+      import("@/server/maintenance-worker"),
+    ]);
+  }, 60_000);
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
@@ -189,6 +218,32 @@ describe("strict startup ordering", () => {
     expect(mocks.getDatabaseClient).not.toHaveBeenCalled();
     expect(mocks.workerCalls).toEqual([]);
     expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("private configuration value");
+  });
+
+  it("carries the validator's own remedy into the rendered log line, alongside the unchanged coded fields (#717)", async () => {
+    mocks.validateStartupConfiguration.mockImplementation(() => {
+      throw new mocks.StartupConfigurationError([{
+        field: "authentication",
+        code: "configuration_core",
+        detail: operationalDetail`SESSION_SECRET must be 64 hexadecimal characters, as produced by openssl rand -hex 32`,
+      }]);
+    });
+    const { registerNode } = await import("./boot");
+
+    await expect(registerNode()).rejects.toThrow("configuration_invalid");
+
+    /* Asserted on the rendered line, not the mock's call arguments, for the
+       same reason as the migration test below (#718): the argument can be
+       right while the renderer silently drops it. */
+    const line = mocks.renderedText.at(-1) ?? "";
+    expect(line).toContain("reason=configuration_invalid");
+    expect(line).toContain("setting=authentication");
+    expect(line).toContain('detail="SESSION_SECRET must be 64 hexadecimal characters, as produced by openssl rand -hex 32"');
+    expect(JSON.parse(mocks.renderedJson.at(-1) ?? "{}")).toMatchObject({
+      reason: "configuration_invalid",
+      setting: "authentication",
+      detail: "SESSION_SECRET must be 64 hexadecimal characters, as produced by openssl rand -hex 32",
+    });
   });
 
   it("does not start workers when the migration precheck, migrate, or postcheck fails", async () => {
@@ -349,6 +404,32 @@ describe("strict startup ordering", () => {
     expect(mocks.workerCalls).toContain("document");
     expect(JSON.stringify(mocks.log.error.mock.calls) + JSON.stringify(mocks.log.warn.mock.calls))
       .not.toContain("connection refused at 10.0.0.5");
+  });
+
+  /*
+   * The boot phase (#869): `GET /api/auth/availability`'s `phase` field is
+   * this flag read straight through, which is what lets the sign-in door
+   * stop inferring boot from a content-free `degraded` readiness answer.
+   * `vi.resetModules()` in the outer `beforeEach` gives every test in this
+   * file a fresh module instance, so `getBootPhase()` starting at
+   * "starting" here is the same fresh-process guarantee a real server gets.
+   */
+  it("starts at \"starting\" and flips to \"running\" only once registerNode's full sequence completes", async () => {
+    const { registerNode, getBootPhase } = await import("./boot");
+    expect(getBootPhase()).toBe("starting");
+
+    await registerNode();
+
+    expect(getBootPhase()).toBe("running");
+  });
+
+  it("leaves the boot phase at \"starting\" when registerNode fails closed (the process exits instead, #717)", async () => {
+    mocks.validateStartupConfiguration.mockImplementation(() => { throw new Error("private configuration value"); });
+    const { registerNode, getBootPhase } = await import("./boot");
+
+    await expect(registerNode()).rejects.toThrow("configuration_invalid");
+
+    expect(getBootPhase()).toBe("starting");
   });
 });
 

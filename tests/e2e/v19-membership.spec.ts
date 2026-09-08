@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { householdRegister } from "./support/households";
+import { cleanupHousehold, householdRegister, sessionHeaders } from "./support/households";
+import { settleArrival } from "./support/arrival";
 
 /**
  * #453: membership and the empty sky (§11). A newcomer with no household
@@ -28,7 +29,7 @@ let seeded = false;
 async function signInAs(page: Page, account: string) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await settleArrival(page);
 }
 
 /* A fresh instance promotes its first sign-in to instance admin — and an
@@ -64,6 +65,42 @@ async function createHousehold(page: Page, name: string) {
   }, name);
   households.track(created);
   seeded = true;
+  return created;
+}
+
+/**
+ * THE NEWCOMER'S OWN ARRIVAL ON /home, ADRIFT (#840).
+ *
+ * Before #840 a fresh sign-in with no household anywhere landed on /home
+ * directly and drew its own "adrift" labelled sky (home.behaviour.js's own
+ * copy of the same sky the arrival draws). Now hooks.server.js sends that
+ * exact reader to the arrival at `/` instead. The one road hooks.server.js
+ * still leaves open is the carve-out its own comment names: a session whose
+ * OWN activeHouseholdId is set -- even to a household since hard-deleted --
+ * skips the redirect outright, because household.create only ever writes
+ * that field on the session that called it, and a hard delete never clears
+ * it back off.
+ *
+ * So this reader is given a household of their own, the administrator
+ * removes it again from underneath them, and only then is `/home` asked
+ * for. Their real membership set is empty either way, which is what
+ * "adrift" is a picture of -- the throwaway household never survives long
+ * enough to appear in anyone's sky.
+ */
+async function arriveAdrift(page: Page, browser: Browser, account: string) {
+  await signInAs(page, account);
+  const household = await createHousehold(page, `${account} throwaway ${Date.now()}`);
+
+  const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const adminPage = await adminContext.newPage();
+  try {
+    await signInAs(adminPage, "Orbit Administrator");
+    await cleanupHousehold(adminPage, await sessionHeaders(adminPage), household.id, household.name);
+  } finally {
+    await adminContext.close();
+  }
+
+  await page.goto("/home");
 }
 
 /* The owner's decision, as household management will make it (§15-2g): the
@@ -119,7 +156,7 @@ test("a newcomer sees the labelled sky, asks, is approved, and enters the system
   await createHousehold(ownerPage, HOUSEHOLD);
 
   /* The newcomer: no membership, so the sky is labels — no dial, no manifest. */
-  await signInAs(page, "Orbit Outsider");
+  await arriveAdrift(page, browser, "Orbit Outsider");
   await expect(page.getByRole("heading", { name: "you’re adrift" })).toBeVisible();
   await expect(page.locator(".dialwrap")).toHaveCount(0);
   const target = page.locator(".minisys", { hasText: HOUSEHOLD.toUpperCase() });

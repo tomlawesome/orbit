@@ -18,6 +18,17 @@ export const CI_RISK = Object.freeze({
   SYSTEM: "system",
 });
 
+// A lane is a whole-diff verdict, not a per-path one: it applies only when
+// *every* changed path belongs to it, and one file outside it puts the change
+// back in the ordinary classified pipeline. Where `CI_RISK` says how deep to
+// go, a lane says which jobs exist at all -- see the lists in `.gitlab-ci.yml`'s
+// `orbit_lane_admits` (#889).
+export const CI_LANE = Object.freeze({
+  FULL: "full",
+  IGNORE_POLICY: "ignore_policy",
+  CI: "ci",
+});
+
 const riskRank = new Map([
   [CI_RISK.FAST, 0],
   [CI_RISK.INTEGRATION, 1],
@@ -46,6 +57,62 @@ const licencePolicyPaths = new Set([
   "supply-chain/licence-policy.yml",
 ]);
 
+// What decides whether an ordinary merge request needs the launcher install
+// check at all. It began as the two paths the retired
+// `.github/workflows/launcher-install-compat.yml` watched: the installer's own
+// contract with orbit-launcher, and the gate's own definition. `.gitlab-ci.yml` is that definition's new home on GitLab (see
+// the `launcher_install_compat` job, #819) — it also already falls into the
+// default system lane below through the unmatched-path catch-all, so this
+// list exists to narrow *this one job's* reach, not to change classifyCiRisk.
+//
+// Since !895 (ADR-0019) the image also carries the eleven deployment assets an
+// install uses, so `install.sh` fetches its helpers out of the digest rather
+// than from a source revision. That makes every bundled asset part of what
+// this job proves, and a change to one visible to it: the Dockerfile lines
+// that copy them, what .dockerignore lets into that build context, the two
+// compose files, the example environment file, the Tika configuration and the
+// seven helper scripts under ./deploy/scripts/.
+const launcherCompatPatterns = [
+  /^scripts\/install\.sh$/u,
+  /^\.gitlab-ci\.yml$/u,
+  /^Dockerfile$/u,
+  /^\.dockerignore$/u,
+  /^docker-compose\.yml$/u,
+  /^docker-compose\.mail\.yml$/u,
+  /^\.env-orbit\.example$/u,
+  /^config\/tika-config\.json$/u,
+  /^scripts\/(?:configure|installer-ui|configuration|backup|restore|repair|engine-check)\.sh$/u,
+];
+
+// The ignore/policy lane (#889). Both files record what a scanner is allowed
+// to pass over: .gitleaksignore is a list of exact commit/file/line
+// fingerprints the secret scan has already been shown, and
+// supply-chain/licence-policy.yml is the SPDX allow-list
+// scripts/ci/licence-policy.mjs reads. A change confined to the two can move
+// what `gitleaks`, `licence_policy` and `supply_chain_source` conclude and
+// nothing else, so those are the only jobs the lane runs.
+const ignorePolicyLanePaths = new Set([".gitleaksignore", "supply-chain/licence-policy.yml"]);
+
+// The CI-definition lane (#889): the pipeline's own definition, the scripts
+// its jobs call, and the classifier that decides which of them run. A change
+// confined to these builds no image and stands up no stack, so the lane runs
+// `fast` -- where the unit suites that read .gitlab-ci.yml live -- plus
+// `gitleaks` and `supply_chain_source`.
+//
+// scripts/ci/ is in scope by the owner's decision on #889, and it is the wide
+// part of it: several of those scripts are the acceptance stage's own checks
+// (verify-privacy-boundary.sh, verify-installed-image.sh and the rest), so a
+// change to one is not exercised until the merge into `dev`, where every
+// pipeline runs everything again. That is a later red, not an unrun check.
+const ciLanePatterns = [
+  /^\.gitlab-ci\.yml$/u,
+  /^scripts\/ci\//u,
+  /^scripts\/classify-changed-paths(?:\.test)?\.mjs$/u,
+  // The unit test that pins the lane lists themselves. It runs in `fast`,
+  // which this lane runs, so the lane still checks its own definition.
+  /^scripts\/gitlab-ci-lanes\.test\.mjs$/u,
+];
+
 const fastPatterns = [
   /^docs\//u,
   /^\.github\/ISSUE_TEMPLATE\//u,
@@ -63,10 +130,13 @@ const fastPatterns = [
 const systemPatterns = [
   /^\.github\/workflows\//u,
   /^Dockerfile$/u,
+  // The two deployment compose files stay at the root (installer contract,
+  // ADR-0019); the test/CI-only overlays live in compose/ since #442. Both
+  // carry system risk, so both are pinned here.
   /^docker-compose(?:\.[^/]+)?\.ya?ml$/u,
+  /^compose\//u,
   /^config\//u,
   /^package\.json$/u,
-  /^playwright\.config\.[cm]?[jt]s$/u,
   /^drizzle\//u,
   /^tests\/e2e\//u,
   // The v19 front end IS the shipped application server since the cut (#735):
@@ -146,17 +216,45 @@ export function touchesLicencePolicy(changedPaths) {
   return changedPaths.some((path) => licencePolicyPaths.has(normalizePath(path)));
 }
 
+/**
+ * True when a change can move whether `launcher_install_compat` has anything
+ * new to prove. Fails safe: no usable list of changed paths means run it.
+ */
+export function touchesLauncherInstallCompat(changedPaths) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return true;
+  return changedPaths.some((path) => matchesAny(normalizePath(path), launcherCompatPatterns));
+}
+
+/**
+ * The narrow lane a whole change falls in, or `full` for everything else
+ * (#889). Fails safe the same way the risk classifier does: no usable list of
+ * changed paths, or a path that normalises to nothing, means the full
+ * pipeline. A lane never relaxes a delivery gate -- `.gitlab-ci.yml`'s
+ * `classify` job forces `full` on a push to a delivery branch and on the
+ * merge request into `main`, both of which run everything.
+ */
+export function classifyCiLane(changedPaths) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return CI_LANE.FULL;
+  const paths = changedPaths.map((path) => normalizePath(path));
+  if (paths.some((path) => path.length === 0)) return CI_LANE.FULL;
+  if (paths.every((path) => ignorePolicyLanePaths.has(path))) return CI_LANE.IGNORE_POLICY;
+  if (paths.every((path) => matchesAny(path, ciLanePatterns))) return CI_LANE.CI;
+  return CI_LANE.FULL;
+}
+
 export function ciRequirements(changedPaths, options = {}) {
   const risk = classifyCiRisk(changedPaths, options);
   const dependencySnapshotChanged = Array.isArray(changedPaths)
     && changedPaths.some((path) => dependencySnapshotPaths.has(normalizePath(path)));
   return {
     risk,
+    lane: classifyCiLane(changedPaths),
     build: risk !== CI_RISK.FAST || dependencySnapshotChanged,
     integration: risk === CI_RISK.INTEGRATION || risk === CI_RISK.SYSTEM,
     system: risk === CI_RISK.SYSTEM,
     web: touchesWeb(changedPaths),
     licence: touchesLicencePolicy(changedPaths),
+    launcherCompat: touchesLauncherInstallCompat(changedPaths),
   };
 }
 
@@ -250,6 +348,7 @@ function main() {
   let reason = "no pull-request comparison available";
   let changedPaths = [];
   let graphChanged;
+  let comparisonProven = false;
 
   if (base && head) {
     try {
@@ -261,6 +360,7 @@ function main() {
       }
       risk = classifyCiRisk(changedPaths, { productionDependencyGraphChanged: graphChanged });
       reason = `${changedPaths.length} changed path(s)`;
+      comparisonProven = true;
       for (const path of changedPaths) {
         console.log(`${pathRisk(path, { productionDependencyGraphChanged: graphChanged }).padEnd(11)} ${path}`);
       }
@@ -281,8 +381,12 @@ function main() {
   const system = risk === CI_RISK.SYSTEM || requirements.system;
   const web = requirements.web;
   const licence = requirements.licence;
+  const launcherCompat = requirements.launcherCompat;
+  // A lane is a claim about the whole diff, so a diff that could not be proven
+  // has no lane at all -- the same fail-safe the three axes above apply.
+  const lane = comparisonProven ? requirements.lane : CI_LANE.FULL;
   console.log(
-    `CI risk classification: risk=${risk} build=${build} integration=${integration} system=${system} web=${web} licence=${licence} (${reason}).`,
+    `CI risk classification: risk=${risk} lane=${lane} build=${build} integration=${integration} system=${system} web=${web} licence=${licence} launcher_compat=${launcherCompat} (${reason}).`,
   );
   if (graphChanged !== undefined) {
     console.log(`Production dependency graph changed: ${graphChanged}.`);
@@ -290,11 +394,13 @@ function main() {
 
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(process.env.GITHUB_OUTPUT, `risk=${risk}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `lane=${lane}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `build=${build}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `integration=${integration}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `system=${system}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `web=${web}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `licence=${licence}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `launcher_compat=${launcherCompat}\n`);
   }
 }
 

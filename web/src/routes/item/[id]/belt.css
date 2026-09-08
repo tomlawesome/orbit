@@ -178,9 +178,8 @@
   .belt-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
        transition:opacity .4s;z-index:0}
   .belt-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
-  .belt-page .sky .far{animation:belt-drift 400s linear infinite}
-  .belt-page .sky .near{animation:belt-drift 195s linear infinite}
-  @keyframes belt-drift{to{transform:translateX(-1600px)}}
+  .belt-page .sky .far{animation:driftf 400s linear infinite}
+  .belt-page .sky .near{animation:driftn 195s linear infinite}
   .belt-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
   [data-theme=atlas] .belt-page .vignette,[data-theme=dawn] .belt-page .vignette{background:none}
@@ -208,7 +207,7 @@
      far corners of the sky on the search field's own baseline, because that
      is the one line across this screen the band never reaches — anywhere on
      the band itself, a jumbled body would eventually sit on top of them. */
-  .belt-page .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-faint);
+  .belt-page .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-quiet);
           text-transform:uppercase}
 
   /* ---- THE DOCUMENTS' MARK -------------------------------------------
@@ -267,12 +266,16 @@
   .belt-page .kv b.clean{color:var(--ok-text)}
   .belt-page .kv b.over{color:var(--overdue-text)} .belt-page .kv b.soon{color:var(--warm)}
   .belt-page .kv b.up{color:var(--upcoming)} .belt-page .kv b.ok{color:var(--ok-text)}
-  .belt-page .item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-                color:var(--ink-faint);margin:16px 0 8px}
-  .belt-page .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:13px;line-height:1.75}
+  /* #843: h3, not h4 -- these follow the card's own h2 and must not skip a
+     level. The look is unchanged. */
+  .belt-page .item-card h3{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+                color:var(--ink-quiet);margin:16px 0 8px}
+  .belt-page .note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:13px;line-height:1.75}
   .belt-page .note b{color:var(--paper);font-weight:500}
   .belt-page .acts{display:flex;flex-wrap:wrap;gap:7px}
-  .belt-page .acts button{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+  /* #854: see item.css's .acts button — --act-text is the letterform's own
+     colour, set beside --act; --act itself still rings and fills unchanged. */
+  .belt-page .acts button{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
     border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
     border-radius:999px;padding:6px 13px;cursor:pointer}
   .belt-page .acts button:hover{border-color:var(--act,var(--ink))}
@@ -298,7 +301,7 @@
      box-shadow:0 10px 0 var(--line),0 20px 0 var(--line-soft),0 30px 0 var(--line-soft),
                 0 40px 0 var(--line-soft),0 50px 0 var(--line-soft)}
   .belt-page .docbody{flex:1;min-width:0}
-  .belt-page .docbody h3{font:520 14px var(--mono);line-height:1.35;word-break:break-all}
+  .belt-page .docbody h2{font:520 14px var(--mono);line-height:1.35;word-break:break-all}
   .belt-page .docbody .sub{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
                 margin:5px 0 12px}
   .belt-page .getrow{display:flex;align-items:center;gap:18px;margin-top:16px}
@@ -319,10 +322,10 @@
   .belt-page .find input{background:none;border:0;outline:0;border-bottom:1px solid var(--line);
     width:100%;text-align:center;font:12.5px var(--mono);color:var(--ink);
     padding:6px 4px;transition:border-color .25s;-webkit-appearance:none;appearance:none}
-  .belt-page .find input::placeholder{color:var(--ink-faint)}
+  .belt-page .find input::placeholder{color:var(--ink-quiet)}
   .belt-page .find input:focus{border-color:var(--accent)}
   .belt-page .find input::-webkit-search-cancel-button{display:none}
-  .belt-page .findnote{font:9.5px var(--mono);letter-spacing:.14em;color:var(--ink-faint);
+  .belt-page .findnote{font:9.5px var(--mono);letter-spacing:.14em;color:var(--ink-quiet);
             margin-top:7px;text-transform:uppercase}
   /* The hit list drops BESIDE the field, not beneath it: beneath it is where
      the card is, and the search must never cover the thing you are looking
@@ -341,7 +344,7 @@
                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .belt-page .hits button small{font-size:10px;font-variant-numeric:tabular-nums}
   .belt-page .hits button:hover,.belt-page .hits button.pick{background:var(--panel);color:var(--ink)}
-  .belt-page .hits .none{padding:8px 9px;font:11.5px var(--mono);color:var(--ink-faint)}
+  .belt-page .hits .none{padding:8px 9px;font:11.5px var(--mono);color:var(--ink-quiet)}
   @media (max-width:1140px){ .belt-page .hits{position:static;width:auto;margin-top:9px} }
 
   /* ---- chrome ----------------------------------------------------------
@@ -377,20 +380,20 @@
 .belt-page .panel{margin-top:16px;padding-top:4px}
 .belt-page .panel .field{margin-bottom:13px}
 .belt-page .panel .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;
-  color:var(--ink-faint);text-transform:uppercase;margin:0 0 6px}
+  color:var(--ink-quiet);text-transform:uppercase;margin:0 0 6px}
 .belt-page .panel .field input,.belt-page .panel .field textarea{width:100%;background:var(--panel);
   border:1px solid var(--line);border-radius:9px;color:var(--ink);font-size:13.5px;
   padding:9px 12px;font-family:var(--ui)}
-.belt-page .panel .field input:focus,.belt-page .panel .field textarea:focus{outline:none;border-color:var(--accent)}
+.belt-page .panel .field input:focus,.belt-page .panel .field textarea:focus{border-color:var(--accent)}
 .belt-page .panel .field textarea{resize:vertical;line-height:1.5}
 .belt-page .panel .field.mono input{font-family:var(--mono)}
 .belt-page .panel .row2{display:flex;gap:14px}
 .belt-page .panel .row2>.field{flex:1;min-width:0}
 .belt-page .save-row{display:flex;align-items:center;gap:18px;margin-top:6px}
-.belt-page .cancel-link{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
+.belt-page .cancel-link{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;
   cursor:pointer;padding:0}
 .belt-page .cancel-link:hover{color:var(--ink-mid)}
-.belt-page .btn-quiet{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+.belt-page .btn-quiet{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
   border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
   border-radius:999px;padding:8px 16px;cursor:pointer}
 .belt-page .btn-quiet:hover{border-color:var(--act,var(--ink))}

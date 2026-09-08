@@ -26,5 +26,5 @@ curl --fail --silent --show-error --max-time 10 "$base_url/api/health" >/dev/nul
 if command -v pnpm >/dev/null 2>&1; then
   pnpm test:e2e
 else
-  node node_modules/@playwright/test/cli.js test
+  node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts
 fi

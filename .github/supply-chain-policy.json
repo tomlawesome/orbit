@@ -20,6 +20,18 @@
       "reviewBy": "2026-10-30"
     }
   ],
+  "signingTools": [
+    {
+      "name": "cosign",
+      "version": "3.1.3",
+      "sha256": "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71",
+      "asset": "cosign-linux-amd64",
+      "license": "Apache-2.0",
+      "source": "https://github.com/sigstore/cosign/releases/tag/v3.1.3",
+      "updateOwner": "Orbit maintainers",
+      "reviewBy": "2026-10-30"
+    }
+  ],
   "thresholds": {
     "sourceVulnerabilities": [
       "HIGH",
@@ -321,6 +333,83 @@
       "installedVersion": "3.5.7-r0",
       "owner": "Orbit maintainers",
       "rationale": "OpenSSL 3.5.7-r0 in the image; Alpine ships 3.5.8-r0 but the tag has not been rebuilt (node built 2026-08-27, postgres 2026-08-13), so there is nothing newer to pin to.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-53612",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-53613",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-53614",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-76642",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78408",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78409",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78410",
+      "package": "libuuid",
+      "installedVersion": "2.42.1-r0",
+      "owner": "Orbit maintainers",
+      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
       "expiresOn": "2026-10-05",
       "trackingIssue": 794
     },
@@ -912,8 +1001,8 @@
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:237aac3c9561c2e1f9febe7acd7c0f6051e13571b6c6cc1e318278df07b9bcb8",
-      "indexDigest": "sha256:d3675331cae309dd45bd3625b4e3212f599b3180cd89f486d30749277954f7ce",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7bc734dba7d353f2a03dba82d82c45aa017e4e215ade61426e95e5c8115066e7",
+      "indexDigest": "sha256:8015d77c0469d0df2b8a258bc375e79976d55bf18b523d6c84bba0f76771cb6e",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -923,7 +1012,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-08-30",
+      "resolvedOn": "2026-09-07",
       "reviewBy": "2026-11-30"
     },
     {
@@ -951,7 +1040,8 @@
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
-        "scripts/test-integration.mjs"
+        "scripts/test-integration.mjs",
+        ".gitlab-ci.yml"
       ],
       "source": "https://github.com/docker-library/postgres",
       "registry": "https://hub.docker.com/_/postgres",
@@ -964,8 +1054,8 @@
     {
       "name": "ClamAV malware scanner",
       "tag": "clamav/clamav:1.5.4-debian",
-      "reference": "clamav/clamav:1.5.4-debian@sha256:6c92171e6ab52529cd44452f6443dd05b2fc4d580c190ffc70f45f955cb9f4b9",
-      "indexDigest": "sha256:be3cb41d9833ce9ffb98f3d3e1483c35c0d87060c2bda3624d75fd28bbf0b3bd",
+      "reference": "clamav/clamav:1.5.4-debian@sha256:5037bae34bf7566052d18f30be1e351155bfce845a583f0c08027f9fcaa44b5d",
+      "indexDigest": "sha256:4c975c439fcb7ab9cbdd72162c2802f5efcb4a11dcf5b0b37da1d746474ef20e",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -975,7 +1065,7 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-09-02",
+      "resolvedOn": "2026-09-07",
       "reviewBy": "2026-10-30"
     },
     {
@@ -997,9 +1087,9 @@
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.33.2",
-      "reference": "ollama/ollama:0.33.2@sha256:9e7d782e99880c70f9563c51633da875ca605518a8f8d95c2532bda70a027b7a",
-      "indexDigest": "sha256:020e4134285e2ef4d8fd801234176de3b4faadc992a3eb06c8e66a2f9d4c4ba2",
+      "tag": "ollama/ollama:0.33.3",
+      "reference": "ollama/ollama:0.33.3@sha256:57a73f11f75b32b97b59b003f351445c9c2a8af4b9d586ecdc928dee6150ef26",
+      "indexDigest": "sha256:32931b46719f673c05fdbaa81ccb26da18ea4a1c57590a754874ab28ba269eb2",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -1009,7 +1099,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-08-30",
+      "resolvedOn": "2026-09-07",
       "reviewBy": "2026-10-30"
     }
   ],

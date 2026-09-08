@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { resolve } from "$app/paths";
-  import { addMember, readAdminScreen } from "$lib/data/workspace.js";
+  import { addMember, commandContact, commandMailbox, readAdminScreen } from "$lib/data/workspace.js";
   import { constellationPlanetsOf, galaxyOf } from "$lib/data/chart.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
@@ -76,6 +76,127 @@
       busy = null;
     }
   }
+  /* §15 mail machinery, made real (#743, ADR-0017 slice 2). The instance has
+     ONE admin-owned mailbox; this is where it is set, checked, rotated,
+     removed and switched on or off.
+
+     Two rules the markup below has to keep. The password is WRITE-ONLY: it is
+     typed into a field that is never populated from the server, sent once,
+     and cleared — nothing that comes back carries it, so "is a credential
+     stored?" is answered by `hasPassword`, never by a value. And an
+     administrator never sees a member's relay address: `aliasPattern` is the
+     SHAPE addresses take, with a placeholder where the member's own code
+     goes.
+
+     Where the route cannot answer — under fixtures, or for a non-admin — the
+     screen keeps the mockup's relay rows, so the ratified §13 sheet is what
+     the fidelity gate still photographs. */
+  /** @type {string | null} */
+  let mailboxOutcome = $state(null);
+  /** @type {string | null} */
+  let mailboxProblem = $state(null);
+  /** @type {string | null} */
+  let mailboxBusy = $state(null);
+  let editing = $state(false);
+  let rotating = $state(false);
+  let password = $state("");
+  /** @type {{ host: string, port: number, accountUser: string, mailbox: string, tlsServerName: string, providerProfile: string, trustedRecipientHeader: string, pollSeconds: number }} */
+  let draft = $state({
+    host: "", port: 993, accountUser: "", mailbox: "INBOX", tlsServerName: "",
+    providerProfile: "other", trustedRecipientHeader: "X-Original-To", pollSeconds: 300,
+  });
+
+  const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
+  /** @param {string} word */
+  const plainly = (word) => word.replaceAll("_", " ");
+  /** @param {?string} iso */
+  const stamp = (iso) => (iso ? new Date(iso).toLocaleString("en-GB", { timeZone: "UTC" }) : "never");
+
+  function openMailboxEditor() {
+    const current = need().mailbox;
+    if (current) {
+      draft = {
+        host: current.host, port: current.port, accountUser: current.accountUser,
+        mailbox: current.mailbox, tlsServerName: current.tlsServerName,
+        providerProfile: current.providerProfile,
+        trustedRecipientHeader: current.trustedRecipientHeader || "X-Original-To",
+        pollSeconds: current.pollSeconds,
+      };
+    }
+    password = "";
+    mailboxOutcome = null;
+    mailboxProblem = null;
+    editing = true;
+  }
+
+  /**
+   * Runs one mailbox action and folds the answer straight back into the
+   * screen, so what is shown is always the server's own account of the state
+   * rather than an optimistic guess.
+   *
+   * @param {string} label  which button is busy
+   * @param {object} command
+   */
+  async function mailboxAction(label, command) {
+    mailboxBusy = label;
+    mailboxProblem = null;
+    mailboxOutcome = null;
+    try {
+      const answer = await commandMailbox(command);
+      /* The whole screen is re-read rather than patched, the same way placing
+         a person does: the machinery rows are derived from the mailbox, so a
+         patch would leave them describing the previous state. */
+      view = await readAdminScreen();
+      mailboxOutcome = answer.outcome ?? null;
+      /* Only a verified credential closes the form; a refused one leaves it
+         open with what was typed, minus the password, so the administrator
+         can correct a host or a port without retyping everything. */
+      if (!answer.outcome || answer.outcome === "verified") {
+        editing = false;
+        rotating = false;
+      }
+      password = "";
+    } catch (error) {
+      mailboxProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+    } finally {
+      mailboxBusy = null;
+    }
+  }
+
+  /* The public contact address (#860): one field an administrator sets,
+     changes or clears, never defaulted from any account's own email. Named
+     plainly on the door's third state (#788) when it cannot open safely — so
+     unlike the mailbox above, there is no "verify" step: it is a published
+     string, not a credential, and Orbit never talks to it. */
+  let editingContact = $state(false);
+  let contactDraft = $state("");
+  /** @type {string | null} */
+  let contactProblem = $state(null);
+  let contactBusy = $state(false);
+
+  function openContactEditor() {
+    contactDraft = need().contact?.address ?? "";
+    contactProblem = null;
+    editingContact = true;
+  }
+
+  /** @param {{ action: "set", address: string } | { action: "clear" }} partial */
+  async function contactAction(partial) {
+    const current = need().contact;
+    if (!current) return;
+    contactBusy = true;
+    contactProblem = null;
+    try {
+      await commandContact({ ...partial, expectedVersion: current.version });
+      view = await readAdminScreen();
+      editingContact = false;
+    } catch (error) {
+      contactProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+    } finally {
+      contactBusy = false;
+    }
+  }
+
   /** @type {Record<string, string>} */
   const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
   /* The sheet's five hand-placed rings (design/v19/administration-iss.html,
@@ -131,7 +252,7 @@
 <Chrome user={view?.user} current="administration"
         role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
 
-<div class="page">
+<div class="page" role="main">
   <header class="screen">
     <h1>Administration</h1>
     <div class="sub">{view
@@ -143,7 +264,7 @@
     <div class="grid">
 
       <div class="card">
-        <div class="cardhead"><h3>People</h3><button>invite someone</button></div>
+        <div class="cardhead"><h2>People</h2><button>invite someone</button></div>
         {#each view.users as person (person.id)}
           <div class="person">
             <span class="avatar">{initialsOf(person.displayName)}</span>
@@ -169,7 +290,7 @@
       </div>
 
       <div class="card">
-        <div class="cardhead"><h3>Systems</h3><button>new system</button></div>
+        <div class="cardhead"><h2>Systems</h2><button>new system</button></div>
         {#each view.households as household (household.id)}
           <div class="system">
             <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
@@ -191,10 +312,47 @@
         {/each}
       </div>
 
+      <!-- #860: one published address, never a real administrator's own
+           mailbox. Read by the sign-in door's third state (#788) with no
+           session at all, so this card is the only place it is ever set. -->
+      <div class="card">
+        <div class="cardhead"><h2>Public contact</h2>
+          {#if view.contact && !editingContact}
+            <button onclick={openContactEditor}>{view.contact.address ? "change…" : "set…"}</button>
+          {/if}
+        </div>
+        <div class="kv"><span>address</span><b>{view.contact?.address ?? "not set"}</b></div>
+        {#if view.contact}
+          {#if editingContact}
+            <form class="mailboxform" onsubmit={(event) => {
+              event.preventDefault();
+              contactAction({ action: "set", address: contactDraft });
+            }}>
+              <label>address <input type="email" bind:value={contactDraft} placeholder="ops@example.com" required /></label>
+              <p class="mailboxnote">Shown on the sign-in door if it ever cannot open safely — never
+                a real administrator's own mailbox. Anyone can read it, signed in or not.</p>
+              <div class="placerow mailboxrow">
+                <button type="submit" disabled={contactBusy}>save</button>
+                {#if view.contact.address}
+                  <button type="button" disabled={contactBusy} onclick={() => contactAction({ action: "clear" })}>clear</button>
+                {/if}
+                <button type="button" onclick={() => (editingContact = false)}>cancel</button>
+              </div>
+            </form>
+          {/if}
+          {#if contactProblem}<div class="adminproblem">{contactProblem}</div>{/if}
+        {/if}
+      </div>
+
       <!-- §15: mail machinery sits WITH operations — one panel, two halves. -->
       <div class="card wide machinery">
         <div class="half">
-          <div class="cardhead"><h3>Mail machinery</h3></div>
+          <div class="cardhead">
+            <h2>Mail machinery</h2>
+            {#if view.mailbox && !editing}
+              <button onclick={openMailboxEditor}>{view.mailbox.configured ? "change mailbox…" : "set up mailbox…"}</button>
+            {/if}
+          </div>
           {#each view.relay as [label, value, extra] (label)}
             <div class="kv"><span>{label}</span>
               {#if extra === "on"}<b class="on">{value}</b>
@@ -202,10 +360,92 @@
               {:else}<b>{value}</b>{/if}
             </div>
           {/each}
+
+          {#if view.mailbox}
+            {@const mailbox = view.mailbox}
+            <div class="kv"><span>verification</span><b>{plainly(mailbox.verificationState)} · {stamp(mailbox.verifiedAt)}</b></div>
+            {#if mailbox.configured}
+              <div class="kv"><span>credential set</span>
+                <b>{stamp(mailbox.credentialSetAt)}{mailbox.credentialSetBy ? ` · ${mailbox.credentialSetBy}` : ""}</b></div>
+              <!-- The pattern, never a member's address: the database holds
+                   alias digests only, and an administrator is not a reader of
+                   anyone's relay (ADR-0017 decision 5). -->
+              <div class="kv"><span>address shape</span><b>{mailbox.aliasPattern ?? "—"}</b></div>
+              <div class="kv"><span>envelope header</span><b>{mailbox.trustedRecipientHeader || "not set"}</b></div>
+              <div class="kv"><span>provider profile</span><b>{mailbox.providerProfile}</b></div>
+              <div class="kv"><span>tls name</span><b>{mailbox.tlsServerName || mailbox.host}</b></div>
+            {/if}
+
+            {#if mailbox.configured && !editing && !rotating}
+              <div class="placerow mailboxrow">
+                <button disabled={mailboxBusy !== null}
+                        onclick={() => mailboxAction("verify", { action: "verify" })}>check connection</button>
+                <button disabled={mailboxBusy !== null}
+                        onclick={() => mailboxAction("probe", { action: "probe" })}>run setup probe</button>
+                <button disabled={mailboxBusy !== null}
+                        onclick={() => mailboxAction("enabled", {
+                          action: mailbox.enabled ? "disable" : "enable",
+                          expectedVersion: mailbox.version,
+                        })}>{mailbox.enabled ? "pause ingest" : "resume ingest"}</button>
+                <button disabled={mailboxBusy !== null} onclick={() => { rotating = true; password = ""; }}>
+                  rotate password…</button>
+                <button disabled={mailboxBusy !== null}
+                        onclick={() => mailboxAction("remove", { action: "remove", expectedVersion: mailbox.version })}>
+                  remove credential</button>
+              </div>
+            {/if}
+
+            {#if rotating}
+              <!-- The new password is proven against the provider before it
+                   is committed; a refusal leaves the old one active. -->
+              <form class="mailboxform" onsubmit={(event) => {
+                event.preventDefault();
+                mailboxAction("rotate", { action: "rotate", expectedVersion: mailbox.version, password });
+              }}>
+                <label>new password
+                  <input type="password" autocomplete="new-password" bind:value={password} required /></label>
+                <div class="placerow mailboxrow">
+                  <button type="submit" disabled={mailboxBusy !== null}>verify and rotate</button>
+                  <button type="button" onclick={() => { rotating = false; password = ""; }}>cancel</button>
+                </div>
+              </form>
+            {/if}
+
+            {#if editing}
+              <form class="mailboxform" onsubmit={(event) => {
+                event.preventDefault();
+                mailboxAction("set", { action: "set", expectedVersion: mailbox.version, ...draft, password });
+              }}>
+                <label>host <input bind:value={draft.host} required /></label>
+                <label>port <input type="number" min="1" max="65535" bind:value={draft.port} required /></label>
+                <label>account <input bind:value={draft.accountUser} placeholder="intake@example.com" required /></label>
+                <label>folder <input bind:value={draft.mailbox} required /></label>
+                <label>tls name <input bind:value={draft.tlsServerName} placeholder="same as host" /></label>
+                <label>provider
+                  <select bind:value={draft.providerProfile}>
+                    {#each PROVIDER_PROFILES as profile (profile)}<option value={profile}>{profile}</option>{/each}
+                  </select></label>
+                <label>envelope header <input bind:value={draft.trustedRecipientHeader} required /></label>
+                <label>poll seconds
+                  <input type="number" min="30" max="3600" bind:value={draft.pollSeconds} required /></label>
+                <label>password
+                  <input type="password" autocomplete="new-password" bind:value={password} required /></label>
+                <p class="mailboxnote">Relay addresses are plus-addresses of this account, so it has to be one the
+                  provider delivers sub-addressed mail to. The password is stored encrypted and never shown again.</p>
+                <div class="placerow mailboxrow">
+                  <button type="submit" disabled={mailboxBusy !== null}>verify and save</button>
+                  <button type="button" onclick={() => { editing = false; password = ""; }}>cancel</button>
+                </div>
+              </form>
+            {/if}
+
+            {#if mailboxOutcome}<div class="adminproblem" class:ok={mailboxOutcome === "verified" || mailboxOutcome === "delivered"}>{plainly(mailboxOutcome)}</div>{/if}
+            {#if mailboxProblem}<div class="adminproblem">{mailboxProblem}</div>{/if}
+          {/if}
         </div>
 
         <div class="half">
-          <div class="cardhead"><h3>Operations</h3><a href={resolve("/admin")}>open operations →</a></div>
+          <div class="cardhead"><h2>Operations</h2><a href={resolve("/admin")}>open operations →</a></div>
           {#each view.services as [tone, name, detail] (name)}
             <div class="svc"><i style="background:var(--{tone})"></i><b>{name}</b><small>{detail}</small></div>
           {/each}

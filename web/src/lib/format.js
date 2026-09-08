@@ -31,6 +31,18 @@ export const longDate = (iso) =>
     day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
   });
 
+/* The same date at chrome scale: "18 Sep 2026". For a line that sits under
+   something else and is read after it, where the month spelled out would be
+   the longest word on the row (#481's held seat). */
+/**
+ * @param {string} iso
+ * @returns {string}
+ */
+export const shortDate = (iso) =>
+  new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", {
+    day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+  });
+
 /**
  * @param {number | null | undefined} minor
  * @param {string} currency

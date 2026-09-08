@@ -3,19 +3,19 @@ import { spawnSync } from "node:child_process";
 import type { OidcDiscoveryFetchAdapter } from "./oidc-discovery";
 
 // The real `curl` adapter (issue #295 slice 5) — the shipped production
-// implementation the plan deferred from slice 3 (OidcDiscoveryFetchAdapter)
-// plus this slice's own deployment-asset fetch (install.sh:1400-1404,
-// guarantee #45's fetch half). Both factories below spawn a fixed `curl`
-// argv array via `spawnSync` — never a shell string — mirroring
-// install-docker-adapter.ts's own convention. Kept as two separate
-// factories (rather than one object implementing both interfaces) because
-// OidcDiscoveryFetchAdapter and AssetFetchAdapter each declare their own
-// `fetch` method with a different return shape — install.sh's own two curl
-// call sites (OIDC discovery vs. deployment-asset download) use different
-// flag sets for good reason (guarantee #25's HTTPS-pinning/timeout/size-cap
-// only applies to the untrusted-provider discovery fetch), so keeping them
-// as textually distinct methods avoids conflating two different curl
-// invocations behind one shared name.
+// implementation the plan deferred from slice 3 (OidcDiscoveryFetchAdapter),
+// plus the host-tool check that requires `curl` to be present at all
+// (install.sh:1305, guarantee #40). Both spawn a fixed `curl` argv array via
+// `spawnSync` — never a shell string — mirroring install-docker-adapter.ts's
+// own convention.
+//
+// ADR-0019 removed this module's other half. Deployment assets used to be
+// downloaded from GitHub's raw-content host, keyed by the commit id stamped
+// into the image; they now come out of the resolved image itself, via
+// install-docker-adapter.ts's create/cp/rm methods, with no download left as
+// a fallback. `curl` is still required on the host, but only for the OIDC
+// discovery request below (install.sh's own comment at :1303-1305 says the
+// same).
 
 export interface InstallCurlAdapterOptions {
   cwd?: string;
@@ -25,16 +25,7 @@ export interface InstallCurlAdapterOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-export interface AssetFetchResult {
-  ok: boolean;
-}
-
-export interface AssetFetchAdapter {
-  /** curl --fail --silent --show-error --location --output <destinationPath> <url> (install.sh:1400-1404). */
-  fetchAsset(url: string, destinationPath: string): AssetFetchResult;
-}
-
-/** command -v curl (install.sh:1262, guarantee #40's curl half). Shared by both factories below. */
+/** command -v curl (install.sh:1305, guarantee #40's curl half). */
 export function checkCurlAvailable(options: InstallCurlAdapterOptions = {}): boolean {
   const result = spawnSync(options.curlBinary ?? "curl", ["--version"], {
     cwd: options.cwd,
@@ -42,31 +33,6 @@ export function checkCurlAvailable(options: InstallCurlAdapterOptions = {}): boo
     stdio: ["ignore", "ignore", "ignore"],
   });
   return result.status === 0;
-}
-
-/**
- * The real AssetFetchAdapter: install.sh's plain deployment-asset fetch
- * (install.sh:1400-1404) — no HTTPS pinning of its own beyond what
- * `asset_base`'s fixed `https://raw.githubusercontent.com/...` prefix
- * already guarantees, no explicit timeout, no size cap (the fixed,
- * source-controlled asset allowlist is not untrusted third-party content the
- * way an OIDC provider's discovery document is).
- */
-export function createInstallAssetFetchAdapter(options: InstallCurlAdapterOptions = {}): AssetFetchAdapter {
-  const curlBinary = options.curlBinary ?? "curl";
-  const cwd = options.cwd;
-  const env = options.env ?? process.env;
-
-  return {
-    fetchAsset(url, destinationPath) {
-      const result = spawnSync(curlBinary, ["--fail", "--silent", "--show-error", "--location", "--output", destinationPath, url], {
-        cwd,
-        env,
-        stdio: ["ignore", "ignore", "ignore"],
-      });
-      return { ok: result.status === 0 };
-    },
-  };
 }
 
 /**

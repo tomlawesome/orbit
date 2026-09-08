@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # Proves the base compose file describes a deployment truthfully: an operator
-# who fetched only the deployment assets has no Dockerfile and no source, so a
-# build declaration there would describe something absent. The assets are
-# copied into an empty directory and validated with nothing else present.
+# whose directory holds only the deployment assets the installer extracted
+# from the image (ADR-0019) has no Dockerfile and no source, so a build
+# declaration there would describe something absent. The assets are copied
+# into an empty directory and validated with nothing else present.
 #
 # Extracted verbatim from the "Validate the deployment asset set without a
 # source tree" step of the &container_validation_steps anchor in
@@ -17,7 +18,7 @@ readonly repo_root
 cd "${repo_root}"
 
 deployment="$(mktemp -d)"
-cp docker-compose.yml docker-compose.mail.yml docker-compose.mail-alias-rotation.yml "${deployment}/"
+cp docker-compose.yml docker-compose.mail.yml "${deployment}/"
 cp .env-orbit "${deployment}/"
 mkdir -p "${deployment}/config"
 cp config/tika-config.json "${deployment}/config/"

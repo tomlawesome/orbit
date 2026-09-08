@@ -8,6 +8,7 @@ import { clearSessionCookie, sessionCookieName, setSessionCookie } from "@/lib/a
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
 import type { TextSize, UrgencyPalette } from "@/lib/preferences";
+import { themePackOrDefault } from "@/lib/preferences";
 
 export interface AuthenticatedSession {
   id: string;
@@ -30,7 +31,20 @@ export interface AuthenticatedSession {
   expiresAt: Date;
 }
 
-export async function createSession(userId: string, config: AuthConfig): Promise<{ token: string; expiresAt: Date }> {
+/**
+ * `userAgent` is the request's own `User-Agent` header, truncated to a bound
+ * that comfortably holds any real browser string while capping what a
+ * hostile caller could stuff into the column. It is stored for the "where
+ * you're signed in" list (#482) and never returned as-is — see
+ * `lib/auth/device.ts` for the coarse word pair that list actually shows.
+ */
+const USER_AGENT_MAX_LENGTH = 256;
+
+export async function createSession(
+  userId: string,
+  config: AuthConfig,
+  userAgent?: string | null,
+): Promise<{ token: string; expiresAt: Date }> {
   const token = randomUrlSafe(32);
   const expiresAt = new Date(Date.now() + config.sessionTtlSeconds * 1000);
   await getDb().transaction(async (transaction) => {
@@ -44,6 +58,7 @@ export async function createSession(userId: string, config: AuthConfig): Promise
       userId,
       tokenHash: hashSessionToken(token),
       expiresAt,
+      userAgent: userAgent ? userAgent.slice(0, USER_AGENT_MAX_LENGTH) : null,
     });
   });
   return { token, expiresAt };
@@ -84,6 +99,80 @@ export async function revokeUserSessions(userId: string): Promise<number> {
   });
 }
 
+/** How long a stale `last_seen_at` is left alone before a validating request
+ *  refreshes it — see `touchLastSeen` below. */
+const LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
+
+/**
+ * Records that a session just proved itself, throttled so an ordinary
+ * request does not write on every hit (#482).
+ *
+ * Every `readSession` call is a validation, and a busy reader validates many
+ * times a minute; writing `last_seen_at` on each one would turn a read path
+ * into a write storm for no benefit the "where you're signed in" list needs.
+ * Skipping the write below the throttle window is the whole of that
+ * trade-off — the list only needs to be accurate to within a few minutes.
+ */
+async function touchLastSeen(sessionId: string, lastSeenAt: Date | null): Promise<void> {
+  if (lastSeenAt && Date.now() - lastSeenAt.getTime() < LAST_SEEN_THROTTLE_MS) return;
+  await getDb().update(sessions).set({ lastSeenAt: new Date() }).where(eq(sessions.id, sessionId));
+}
+
+export interface SessionSummary {
+  id: string;
+  createdAt: Date;
+  lastSeenAt: Date | null;
+  userAgent: string | null;
+}
+
+/**
+ * Every session the caller holds, for the "where you're signed in" list
+ * (#482). Bounded facts only — never the token hash, and the raw
+ * `userAgent` returned here is reduced to a coarse word pair by the route,
+ * not by this function, so every other caller of `listSessions` (there are
+ * none yet, but the boundary is deliberate) gets the same choice to make
+ * rather than inheriting an already-lossy answer.
+ */
+export async function listSessions(userId: string): Promise<SessionSummary[]> {
+  return getDb()
+    .select({
+      id: sessions.id,
+      createdAt: sessions.createdAt,
+      lastSeenAt: sessions.lastSeenAt,
+      userAgent: sessions.userAgent,
+    })
+    .from(sessions)
+    .where(eq(sessions.userId, userId));
+}
+
+/**
+ * Ends exactly one of the caller's own sessions (#482) — the single-device
+ * counterpart to `revokeUserSessions`'s sign-out-everywhere.
+ *
+ * Scoped by `userId` in the same query as `id`, so a session id that exists
+ * but belongs to someone else fails exactly like one that does not exist at
+ * all: `session_not_found`, never a distinguishable error. The audit entry
+ * lives on the session as its own entity, unlike the user-scoped
+ * `sessions_revoked` count `revokeUserSessions` writes, because this action
+ * names one row rather than summarising a purge.
+ */
+export async function revokeSession(userId: string, sessionId: string): Promise<void> {
+  await getDb().transaction(async (transaction) => {
+    const [removed] = await transaction.delete(sessions)
+      .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
+      .returning({ id: sessions.id });
+    if (!removed) throw new AuthError("session_not_found", "That session is not available", 404);
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId: userId,
+      entityType: "session",
+      entityId: sessionId,
+      action: "session_revoked",
+      changes: {},
+    });
+  });
+}
+
 export async function readSession(cookies: CookieReader, config: AuthConfig): Promise<AuthenticatedSession | null> {
   const token = cookies.get(sessionCookieName(config));
   if (!token) return null;
@@ -93,6 +182,7 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       id: sessions.id,
       activeHouseholdId: sessions.activeHouseholdId,
       expiresAt: sessions.expiresAt,
+      lastSeenAt: sessions.lastSeenAt,
       userId: users.id,
       email: users.email,
       emailVerified: users.emailVerified,
@@ -117,6 +207,7 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
     await getDb().delete(sessions).where(eq(sessions.tokenHash, tokenHash));
     return null;
   }
+  await touchLastSeen(record.id, record.lastSeenAt);
   return {
     id: record.id,
     token,
@@ -130,7 +221,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       avatarUrl: record.avatarUrl,
       isInstanceAdmin: record.isInstanceAdmin,
       themeMode: record.themeMode ?? "system",
-      themeId: record.themeId ?? "after-dark",
+      /* #865: a stale stored value — a removed pack (atlas), or the column's
+         own pre-#325 legacy default ("after-dark", with the hyphen, which
+         was never a v19 pack id either) — resolves to the current default
+         rather than reaching the client unfiltered. */
+      themeId: themePackOrDefault(record.themeId),
       textSize: record.textSize === "standard" || record.textSize === "large" || record.textSize === "extra-large"
         ? record.textSize
         : "comfortable",
