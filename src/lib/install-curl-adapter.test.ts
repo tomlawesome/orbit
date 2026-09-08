@@ -31,9 +31,39 @@ function readArgvLog(logPath: string): string[] {
   return readFileSync(logPath, "utf8").split("\n").filter((line) => line.length > 0);
 }
 
+// Real curl's refusals, spliced into every fake below so none of them can be
+// more permissive than the tool the adapter really drives. Verified against
+// curl 8.14.1 on 2026-09-08 and re-asserted against the real binary by
+// scripts/tool-parity.test.mjs: an option curl does not know exits 2 with
+// "curl: option --x: is unknown", and an option given no value exits 2 too.
+// The adapter's own argv is asserted call-by-call below; this is the other
+// half — that no argv it could grow would be silently swallowed.
+const CURL_REFUSAL_PREAMBLE = [
+  "refuse_option() {",
+  "  printf 'curl: option %s: is unknown\\n' \"$1\" >&2",
+  "  exit 2",
+  "}",
+  "require_parameter() {",
+  "  printf 'curl: option %s: requires parameter\\n' \"$1\" >&2",
+  "  exit 2",
+  "}",
+  'curl_args=("$@")',
+  "for (( curl_i = 0; curl_i < ${#curl_args[@]}; curl_i++ )); do",
+  '  case "${curl_args[curl_i]}" in',
+  "    --output|-o|--write-out|-w|--header|-H|--connect-timeout|--max-time|-m|--max-filesize|--proto|--proto-redir|--retry|--resolve)",
+  '      (( curl_i + 1 < ${#curl_args[@]} )) || require_parameter "${curl_args[curl_i]}"',
+  "      (( curl_i++ ))",
+  "      ;;",
+  "    --fail|-f|--silent|-s|--show-error|-S|--location|-L|--tlsv1.2|--tlsv1.3|--version|-V) ;;",
+  '    -*) refuse_option "${curl_args[curl_i]}" ;;',
+  "  esac",
+  "done",
+].join("\n");
+
 function makeFakeCurlBin(script: string): string {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-curl-adapter-fakebin-"));
-  writeFileSync(join(binDir, "curl"), script);
+  const [shebang, ...body] = script.split("\n");
+  writeFileSync(join(binDir, "curl"), [shebang, CURL_REFUSAL_PREAMBLE, ...body].join("\n"));
   chmodSync(join(binDir, "curl"), 0o755);
   return binDir;
 }
