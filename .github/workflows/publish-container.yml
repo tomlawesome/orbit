@@ -658,7 +658,7 @@ jobs:
         run: bash scripts/ci/verify-tika-processor.sh
 
       - name: Build disposable OIDC acceptance provider
-        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml build orbit-oidc
+        run: docker compose --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml build orbit-oidc
 
       - name: Start application and database
         run: bash scripts/ci/start-acceptance-stack.sh

@@ -25,7 +25,7 @@ services:
     container_name: orbit
     # No build declaration: this file describes a deployment, which fetches
     # compose assets and a published image but no source tree. Building from
-    # source is an explicit developer workflow through docker-compose.build.yml.
+    # source is an explicit developer workflow through compose/docker-compose.build.yml.
     image: "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}"
     restart: unless-stopped
     env_file: .env-orbit
