@@ -1,0 +1,115 @@
+{
+  "note": [
+    "What each candidate job reads (#898). `classify` hashes the HEAD tree",
+    "filtered by these globs, and a job whose hash matches an earlier",
+    "merge-request pipeline's successful run of the same job stands on that run",
+    "instead of doing the work again.",
+    "Too broad only costs a rerun; too narrow reuses a stale result, which is a",
+    "correctness bug. Widen when in doubt.",
+    "Syntax: `*` stops at a directory boundary, `**` crosses it, an entry",
+    "starting with `@` names a group below, and one starting with `!` removes",
+    "matches an earlier entry made. `common` is added to every job, so a CI",
+    "change reruns everything.",
+    "The `image` group is what the Dockerfile's build actually consumes: the",
+    "context less the files no stage copies out of it. Test files are in the",
+    "context (`COPY . .`) but reach none of the artefacts the runner stage",
+    "copies -- web/build, web/node_modules, dist/cli/orbit.js -- so a test-only",
+    "change leaves the image identical. That exclusion is what makes reuse",
+    "worth having: the common fix after a red `fast` is a test or a fidelity",
+    "baseline, and neither changes the image."
+  ],
+  "common": [
+    ".gitlab-ci.yml",
+    "scripts/ci/job-inputs.json",
+    "scripts/ci/**"
+  ],
+  "groups": {
+    "image": [
+      "Dockerfile",
+      ".dockerignore",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "tsconfig.json",
+      "src/**",
+      "!src/**/*.test.ts",
+      "!src/**/*.test.tsx",
+      "web/**",
+      "!web/tests/**",
+      "drizzle/**",
+      "drizzle.config.ts",
+      "config/**",
+      "compose/**",
+      "docker-compose.yml",
+      "docker-compose.mail.yml",
+      ".env-orbit.example",
+      "scripts/**",
+      "!scripts/**/*.test.mjs"
+    ]
+  },
+  "jobs": {
+    "fast": [
+      "**"
+    ],
+    "integration": [
+      "src/**",
+      "web/**",
+      "tests/**",
+      "drizzle/**",
+      "drizzle.config.ts",
+      "vitest.config.ts",
+      "tsconfig.json",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "scripts/test-integration.mjs"
+    ],
+    "fidelity": [
+      "src/**",
+      "web/**",
+      "tsconfig.json",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml"
+    ],
+    "build_image": [
+      "@image"
+    ],
+    "smoke": [
+      "@image",
+      "tests/**",
+      "web/tests/**",
+      "scripts/test-frontend.sh"
+    ],
+    "acceptance": [
+      "@image",
+      "tests/**",
+      "docs/installer-guarantees.md"
+    ],
+    "repair_journeys": [
+      "@image",
+      "tests/**"
+    ],
+    "supply_chain_image": [
+      "@image",
+      "supply-chain/**",
+      ".github/supply-chain-policy.json"
+    ],
+    "sidecar_images": [
+      "supply-chain/**",
+      ".github/supply-chain-policy.json",
+      "compose/**",
+      "docker-compose.yml",
+      "docker-compose.mail.yml",
+      "config/**",
+      "scripts/supply-chain-policy.mjs",
+      "scripts/sidecar-image-evidence.mjs",
+      "scripts/sidecar-pins.mjs"
+    ],
+    "launcher_install_compat": [
+      "@image",
+      "tests/**",
+      "scripts/install.sh"
+    ]
+  }
+}
