@@ -1962,15 +1962,14 @@ publish_channel:
 # pipeline and cannot be trusted with a release action the same way a
 # purpose-made, ownable credential can.
 #
-# Before any of that, promote-stable.sh runs an evidence gate (#877):
-# gitlab-await-tested-image.sh, unchanged, fetches and checks GitLab's
-# validation record for the commit being promoted -- the same script and
-# evidence that already gate the GHCR copy -- reusing GITLAB_RELEASE_TOKEN as
-# the read token rather than minting a new one. It is an interim measure:
-# the shared cryptographic verifier #661 defined now exists
-# (scripts/ci/verify-validation-evidence.sh) and #877 is the issue that
-# wires promotion to it; see the comment at the gate in promote-stable.sh
-# for exactly what the interim gate does and does not check.
+# Before any of that, promote-stable.sh runs the shared verifier (#877):
+# scripts/ci/verify-validation-evidence.sh, the same one publish_channel
+# above runs, against the digest being promoted on registry.tomlawson.io
+# (CI_REGISTRY_IMAGE -- the attestation lives there, not on GHCR). It
+# refuses on the same four grounds -- mismatch, missing, ambiguous, expired
+# -- closing the gap #661's own spec named as this issue's follow-up
+# (promote_stable staying unguarded); see the comment at the gate in
+# promote-stable.sh for exactly what it checks and what it replaced.
 promote_stable:
   stage: publish
   extends: .dind
