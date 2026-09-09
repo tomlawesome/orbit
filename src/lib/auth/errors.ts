@@ -36,7 +36,15 @@ export type AuthErrorCode =
      answered without a fresh `auth_time`, so nobody was re-authenticated and
      the action stays blocked until the operator fixes the provider. */
   | "recent_authentication_required"
-  | "step_up_failed";
+  | "step_up_failed"
+  /* Linking and unlinking (ADR-0023 §6, §8). `link_exists` is the unique
+     index on `(issuer, subject)` speaking: that provider account already
+     belongs to an Orbit account, and an identity is never moved between them.
+     `link_last_method` is the rule that keeps somebody from locking
+     themselves out — at least one USABLE method has to survive, and an
+     identity is not usable while `ORBIT_AUTH_OIDC` is false. */
+  | "link_exists"
+  | "link_last_method";
 
 /**
  * Closed internal diagnostic reasons for a token-exchange failure.

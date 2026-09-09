@@ -84,6 +84,12 @@ const actionLabels: Record<string, string> = {
   setup_link_issued: "Setup link issued",
   password_set: "Password set",
   password_changed: "Password changed",
+  // M7 (ADR-0023 §6, §8): the sign-in methods a reader adds and removes for
+  // themselves. The label is what the administration screen renders; the
+  // `changes` payload carries an identity id and nothing else.
+  identity_linked: "Sign-in provider linked",
+  identity_unlinked: "Sign-in provider unlinked",
+  password_removed: "Password removed",
 };
 
 /** Maps persisted actions to a bounded administrator-facing label. */

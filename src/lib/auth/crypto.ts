@@ -28,6 +28,16 @@ export interface LoginTransaction {
   stepUpSessionId?: string;
   intent?: string;
   /**
+   * Set only by `POST /api/auth/link/oidc/start` (ADR-0023 §6): the id of the
+   * user the returning identity is to be linked to. It is sealed here, by the
+   * route that already checked the session and re-challenged the person, so
+   * the callback binds the new `external_identities` row to that user and
+   * never to anything on the request — a link target a browser could write
+   * would let a returning provider response attach an identity to somebody
+   * else's account.
+   */
+  linkUserId?: string;
+  /**
    * The `max_age` the authorization request carries. A step-up sends `0`,
    * which asks the provider to authenticate the person again now; its
    * presence is also what turns on the `auth_time` freshness rule in
@@ -38,15 +48,19 @@ export interface LoginTransaction {
 
 /**
  * What the callback should do with a transaction it has just opened. Slice 5
- * lands `login` and `bootstrap`, slice 7 `step-up`; the link branch
- * (ADR-0023 §6) adds its own kind here and a case in the callback's switch, so
- * the decision stays in one function rather than spreading across route bodies.
+ * lands `login` and `bootstrap`, slice 7 `step-up`, slice 10 `link`
+ * (ADR-0023 §6), so the decision stays in one function rather than spreading
+ * across route bodies.
  */
-export type LoginTransactionKind = "login" | "bootstrap" | "step-up";
+export type LoginTransactionKind = "login" | "bootstrap" | "step-up" | "link";
 
 export function transactionKind(transaction: LoginTransaction): LoginTransactionKind {
   if (transaction.bootstrap === true) return "bootstrap";
   if (typeof transaction.stepUpSessionId === "string" && transaction.stepUpSessionId.length > 0) return "step-up";
+  /* A link is decided after the step-up, so a transaction carrying both halves
+     is a step-up: proving who you are can never quietly attach an identity. No
+     route seals both, and this is what keeps that true if one ever tries. */
+  if (typeof transaction.linkUserId === "string" && transaction.linkUserId.length > 0) return "link";
   return "login";
 }
 
@@ -147,6 +161,9 @@ export async function openLoginTransaction(value: string, config: AuthConfig): P
         ? { stepUpSessionId: payload.stepUpSessionId }
         : {}),
       ...(typeof payload.intent === "string" && payload.intent.length > 0 ? { intent: payload.intent } : {}),
+      ...(typeof payload.linkUserId === "string" && payload.linkUserId.length > 0
+        ? { linkUserId: payload.linkUserId }
+        : {}),
       ...(typeof payload.maxAge === "number" && Number.isFinite(payload.maxAge) ? { maxAge: payload.maxAge } : {}),
     };
   } catch (error) {

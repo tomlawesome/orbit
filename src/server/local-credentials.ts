@@ -28,16 +28,28 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, credentialSetupTokens, instanceAuthority, localCredentials, sessions, userPreferences, users } from "@/db/schema";
-import { AppError } from "@/lib/app-error";
-import { INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
+import {
+  auditLog,
+  credentialSetupTokens,
+  externalIdentities,
+  instanceAuthority,
+  localCredentials,
+  sessions,
+  userPreferences,
+  users,
+} from "@/db/schema";
+import { ACCOUNT_LIFECYCLE_LOCK_KEY, INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { AuthError } from "@/lib/auth/errors";
+import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { hashPassword, verifyAgainstDecoy, verifyPassword } from "@/lib/auth/password";
+import type { RecentAuthentication } from "@/lib/auth/recent-auth";
 import { VerificationGateRefusedError } from "@/lib/auth/verification-gate";
+import { getAuthConfig } from "@/lib/env";
+import { AppError } from "@/lib/errors";
 import { log } from "@/lib/logger";
 
 /** The executor a caller already holds a transaction on, or `getDb()` itself. */
@@ -578,5 +590,262 @@ export async function consumeSetupToken(token: string, passwordHash: string): Pr
       purpose: row.purpose as CredentialSetupTokenPurpose,
       ...outcome,
     };
+  });
+}
+
+/* ===========================================================================
+ * Sign-in methods (slice 10)
+ *
+ * What a reader can see and change about how they sign in (ADR-0023 §6): the
+ * list, the link, and the two removals. Three rules hold this together, and
+ * each of them is a way somebody could otherwise be locked out or let in:
+ *
+ *  - **A link binds to the session's user, never to a request parameter.**
+ *    `linkIdentity` is called by the callback with the user id that was sealed
+ *    into the transaction by the route that checked the session and
+ *    re-challenged the person. Nothing a browser writes reaches it.
+ *  - **A provider account belongs to one Orbit account.** The unique index on
+ *    `(issuer, subject)` is the authority; `link_exists` is that index
+ *    speaking, and an identity is never moved from one user to another.
+ *  - **One usable method always survives.** A credential is usable. An
+ *    identity is usable only while `ORBIT_AUTH_OIDC` is true — turning the
+ *    provider off does not lock its users out of the instance, but it does
+ *    stop them removing the password that is now their only way in. Both
+ *    removals count what would remain, under the account-lifecycle lock, in
+ *    the same transaction that removes it.
+ * ========================================================================= */
+
+/** One linked provider account, as its owner sees it. Never another user's. */
+export interface LinkedIdentity {
+  id: string;
+  issuer: string;
+  linkedAt: Date;
+  lastLoginAt: Date;
+}
+
+/** The caller's own sign-in methods (ADR-0023 §6). */
+export interface SignInMethods {
+  local: { set: boolean; changedAt: Date | null };
+  oidc: LinkedIdentity[];
+}
+
+const uuidSchema = z.uuid();
+
+/**
+ * True when the instance would accept a provider identity as a way in
+ * (ADR-0023 §1, §3). Read at the moment of the decision rather than cached:
+ * an operator who has just turned the provider off has changed what "usable"
+ * means for the next request.
+ */
+function identitiesAreUsable(): boolean {
+  return getAuthConfig().oidc !== null;
+}
+
+/**
+ * The receipt check every removal makes for itself (ADR-0023 §5). The route
+ * has already called `requireRecentAuthentication`; this refuses a receipt
+ * earned by somebody else or for a different action, so the repository cannot
+ * be reached with the wrong challenge.
+ */
+function assertUnlinkChallenge(recentAuthentication: RecentAuthentication, userId: string): void {
+  if (recentAuthentication.userId !== userId || recentAuthentication.intent !== "unlink_method") {
+    throw new AuthError(
+      "recent_authentication_required",
+      "Confirm it is you before removing a sign-in method",
+      403,
+    );
+  }
+}
+
+/** The one refusal that keeps a reader from removing their way back in. */
+function lastMethod(): AuthError {
+  return new AuthError(
+    "link_last_method",
+    "Keep at least one way to sign in: add another method before removing this one",
+    409,
+  );
+}
+
+/** Lists the caller's own methods. Takes a user id, so it can never list another's. */
+export async function listMethods(userId: string): Promise<SignInMethods> {
+  const db = getDb();
+  const [credential] = await db
+    .select({ changedAt: localCredentials.passwordChangedAt })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .limit(1);
+  const identities = await db
+    .select({
+      id: externalIdentities.id,
+      issuer: externalIdentities.issuer,
+      linkedAt: externalIdentities.createdAt,
+      lastLoginAt: externalIdentities.lastLoginAt,
+    })
+    .from(externalIdentities)
+    .where(eq(externalIdentities.userId, userId))
+    .orderBy(asc(externalIdentities.createdAt));
+
+  /* The subject is deliberately absent: it is the provider's opaque
+     identifier for the person, it is of no use on the screen, and the issuer
+     plus the dates are what a reader needs to recognise the account. */
+  return {
+    local: { set: Boolean(credential), changedAt: credential?.changedAt ?? null },
+    oidc: identities,
+  };
+}
+
+/**
+ * Links a verified provider identity to a user (ADR-0023 §6).
+ *
+ * Called only by the callback's `link` branch, with the user id it opened out
+ * of the sealed transaction. There is no recent-authentication receipt here
+ * because the challenge happened before the browser left for the provider:
+ * the sealed transaction IS the carried authorisation, and it is the only
+ * thing that says which account the returning identity belongs to.
+ *
+ * An identity that already has a row is refused rather than moved or
+ * duplicated — including one already on this same account, where the link
+ * being asked for simply already exists.
+ */
+export async function linkIdentity(userId: string, identity: VerifiedIdentity): Promise<{ identityId: string }> {
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
+
+    const [existing] = await transaction
+      .select({ id: externalIdentities.id })
+      .from(externalIdentities)
+      .where(and(
+        eq(externalIdentities.issuer, identity.issuer),
+        eq(externalIdentities.subject, identity.subject),
+      ))
+      .limit(1);
+    if (existing) {
+      throw new AuthError(
+        "link_exists",
+        "That provider account is already linked to an Orbit account",
+        409,
+      );
+    }
+
+    const [owner] = await transaction
+      .select({ id: users.id, disabledAt: users.disabledAt })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!owner) throw new AppError("user_not_found", "That account is not available", 404);
+    if (owner.disabledAt) throw new AuthError("account_disabled", "This Orbit account is disabled", 403);
+
+    const [linked] = await transaction
+      .insert(externalIdentities)
+      .values({ userId, issuer: identity.issuer, subject: identity.subject })
+      .returning({ id: externalIdentities.id });
+
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId: userId,
+      entityType: "user",
+      entityId: userId,
+      action: "identity_linked",
+      changes: { identityId: linked.id },
+    });
+
+    /* Linking revokes nothing (ADR-0023 §7): the person has gained a way in,
+       not changed the secret behind an existing one. */
+    return { identityId: linked.id };
+  });
+}
+
+/**
+ * Removes the caller's password (ADR-0023 §6), leaving the account signed in
+ * by its provider identity alone — which is only allowed while the provider
+ * is switched on.
+ */
+export async function unlinkLocal(
+  userId: string,
+  recentAuthentication: RecentAuthentication,
+): Promise<{ removed: boolean }> {
+  assertUnlinkChallenge(recentAuthentication, userId);
+  const identitiesUsable = identitiesAreUsable();
+
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
+
+    const [credential] = await transaction
+      .select({ userId: localCredentials.userId })
+      .from(localCredentials)
+      .where(eq(localCredentials.userId, userId))
+      .limit(1);
+    if (!credential) throw new AppError("credential_not_found", "That sign-in method is not available", 404);
+
+    const identities = await transaction
+      .select({ id: externalIdentities.id })
+      .from(externalIdentities)
+      .where(eq(externalIdentities.userId, userId));
+    if (!identitiesUsable || identities.length === 0) throw lastMethod();
+
+    await transaction.delete(localCredentials).where(eq(localCredentials.userId, userId));
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId: userId,
+      entityType: "user",
+      entityId: userId,
+      action: "password_removed",
+      changes: {},
+    });
+    return { removed: true };
+  });
+}
+
+/**
+ * Removes one linked provider identity (ADR-0023 §6). Scoped to the caller's
+ * own rows, so an identity id belonging to somebody else is simply not found
+ * — the answer must not distinguish "not yours" from "does not exist".
+ */
+export async function unlinkIdentity(
+  userId: string,
+  identityId: string,
+  recentAuthentication: RecentAuthentication,
+): Promise<{ removed: boolean }> {
+  assertUnlinkChallenge(recentAuthentication, userId);
+  if (!uuidSchema.safeParse(identityId).success) {
+    throw new AppError("identity_not_found", "That sign-in method is not available", 404);
+  }
+  const identitiesUsable = identitiesAreUsable();
+
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
+
+    const [identity] = await transaction
+      .select({ id: externalIdentities.id })
+      .from(externalIdentities)
+      .where(and(eq(externalIdentities.id, identityId), eq(externalIdentities.userId, userId)))
+      .limit(1);
+    if (!identity) throw new AppError("identity_not_found", "That sign-in method is not available", 404);
+
+    const [credential] = await transaction
+      .select({ userId: localCredentials.userId })
+      .from(localCredentials)
+      .where(eq(localCredentials.userId, userId))
+      .limit(1);
+    const remaining = await transaction
+      .select({ id: externalIdentities.id })
+      .from(externalIdentities)
+      .where(and(eq(externalIdentities.userId, userId), ne(externalIdentities.id, identityId)));
+    /* A password always counts. Another identity counts only while the
+       provider is switched on, so unlinking down to nothing but identities on
+       a local-only instance is refused rather than silently locking the
+       account. */
+    if (!credential && !(identitiesUsable && remaining.length > 0)) throw lastMethod();
+
+    await transaction.delete(externalIdentities).where(eq(externalIdentities.id, identityId));
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId: userId,
+      entityType: "user",
+      entityId: userId,
+      action: "identity_unlinked",
+      changes: { identityId },
+    });
+    return { removed: true };
   });
 }
