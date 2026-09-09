@@ -198,6 +198,31 @@ changes nothing, writes no audit row, and still succeeds. It requires the
 database to be reachable, which is true whenever maintenance is what stands
 between users and a running instance.
 
+## Recovering the primary administrator
+
+If the primary administrator has forgotten their local password, or only ever
+used OIDC and has lost the provider, recover from the deployment host:
+
+```sh
+docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth recovery-link
+```
+
+The command reads `instance_authority` for the current primary administrator,
+mints a one-time setup link for them, revokes every session they held, records
+the `recovery_link_issued` audit entry, and prints that one URL to the
+terminal — nothing else. Opening the link sets (or replaces) the primary
+administrator's local password and signs them in. The link expires **5
+minutes** after issue: an administrator doing this should be doing it
+instantly, and a stale link answers the same `setup_token_invalid` as any
+other expired or already-used setup link. It never touches `is_instance_admin`
+and never moves primary authority, so it cannot bypass the last-administrator
+or primary-administrator invariants.
+
+Anyone who can run `docker compose exec` on the host can recover the primary
+administrator at any time (ADR-0022 §6). That is the trust boundary this
+command sits inside, not a gap it introduces: host access to the running
+deployment already means full control of it.
+
 ## Provider tests
 
 The SMTP test verifies connection and authentication only. It does not send a
