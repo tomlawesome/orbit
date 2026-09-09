@@ -224,6 +224,34 @@
                  border:0;cursor:pointer;padding:4px;flex:none}
   .person .place:hover{color:var(--accent-text)}
 
+  /* THE ROSTER ROW HAS TWO ACTIONS NOW (#915): the row wraps rather than
+     shrinking anything, and the actions take the line under the person they
+     belong to on a narrow viewport. */
+  .person{flex-wrap:wrap}
+  .person .who{flex:1 1 60%}
+  .person .place:first-of-type{margin-left:auto}
+
+  /* Add a local user (#915, ADR-0023 §3; composition §2.7). Built from the
+     panel's existing furniture — .placerow buttons — with a label-and-field
+     grid of its own, because the People card had no form to borrow from. */
+  .localuser{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;
+        padding:4px 2px 12px;border-bottom:1px solid var(--line-soft)}
+  .localuser label{font:10.5px var(--mono);letter-spacing:.06em;color:var(--ink-quiet)}
+  .localuser input{font:12px var(--mono);color:var(--ink);background:none;
+        border:1px solid var(--line-soft);border-radius:6px;padding:5px 7px;width:100%}
+  .localuser input:focus-visible{border-color:var(--accent)}
+  .localuser .days{display:flex;align-items:center;gap:8px;
+        font:10.5px var(--mono);color:var(--ink-quiet)}
+  .localuser .days input{width:5em}
+  .localuser .localuserrow{grid-column:1 / -1;padding:6px 2px 0;border-bottom:0}
+  .localuser.resend{padding-left:44px}
+  .placerow{display:flex;gap:6px;flex-wrap:wrap;padding:4px 2px 10px 44px;
+        border-bottom:1px solid var(--line-soft)}
+  .placerow button{font:10.5px var(--mono);color:var(--ink-mid);background:none;
+        border:1px solid var(--line);border-radius:99px;padding:4px 11px;cursor:pointer}
+  .placerow button:hover{border-color:var(--accent);color:var(--accent-text)}
+  @media (max-width:560px){.localuser{grid-template-columns:1fr}}
+
   .system{display:flex;align-items:center;gap:14px;padding:10px 2px;
           border-bottom:1px solid var(--line-soft)}
   .system:last-child{border:0}
@@ -497,6 +525,22 @@
 
     <div class="card">
       <div class="cardhead"><h3>People</h3><button>invite someone</button></div>
+
+      <!-- Add a local user (#915, ADR-0023 §3; composition §2.7): the row
+           above the roster. Orbit mails the setup link to the address typed
+           here; it is never shown on this screen. -->
+      <form class="localuser">
+        <label for="localuser-email">email</label>
+        <input id="localuser-email" type="email" placeholder="newcomer@example.com">
+        <label for="localuser-name">display name</label>
+        <input id="localuser-name" placeholder="Their name">
+        <label for="localuser-days">link valid for</label>
+        <span class="days"><input id="localuser-days" type="number" value="7"> days</span>
+        <div class="placerow localuserrow">
+          <button type="submit">create</button>
+        </div>
+      </form>
+
       <div class="person">
         <span class="avatar">TL</span>
         <div class="who"><b>Tom Lawson &middot; you</b><span>tom@lawson.example &middot; in 5 systems</span></div>
@@ -507,24 +551,28 @@
         <div class="who"><b>Emma Lawson</b><span>emma@lawson.example &middot; owns 2 systems</span></div>
         <span class="role">user</span>
         <button class="place" title="Admins can add any user to any system">place in a system&hellip;</button>
+        <button class="place" aria-label="send a new setup link to Emma Lawson">send a new setup link&hellip;</button>
       </div>
       <div class="person">
         <span class="avatar">RL</span>
         <div class="who"><b>Rob Lawson</b><span>rob@lawson.example &middot; in 2 systems</span></div>
         <span class="role">user</span>
         <button class="place">place in a system&hellip;</button>
+        <button class="place" aria-label="send a new setup link to Rob Lawson">send a new setup link&hellip;</button>
       </div>
       <div class="person">
         <span class="avatar">SL</span>
         <div class="who"><b>Sue Lawson</b><span>sue@lawson.example &middot; owns 1 system</span></div>
         <span class="role">user</span>
         <button class="place">place in a system&hellip;</button>
+        <button class="place" aria-label="send a new setup link to Sue Lawson">send a new setup link&hellip;</button>
       </div>
       <div class="person">
         <span class="avatar">G</span>
         <div class="who"><b>Gran</b><span>gran@lawson.example &middot; in 1 system</span></div>
         <span class="role">user</span>
         <button class="place">place in a system&hellip;</button>
+        <button class="place" aria-label="send a new setup link to Gran">send a new setup link&hellip;</button>
       </div>
     </div>
 

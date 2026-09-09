@@ -154,6 +154,20 @@
                 border:1px solid var(--line);border-radius:9px;padding:7px 13px;cursor:pointer}
   .idrow button:hover{border-color:var(--accent);color:var(--accent-text)}
 
+  /* Sign-in methods (#915, ADR-0023 §6; composition §2.7). Borrows the card
+     family's own .kv rows; only the sub-heading and the row's
+     value-and-actions cluster are new. */
+  /* .card .methods-head, not .methods-head alone: this h3 also matches the
+     card family's own ".card h3" rule above, and needs to outrank its
+     margin-bottom rather than lose to it on source order. */
+  .card .methods-head{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+        color:var(--ink-quiet);margin:18px 0 4px}
+  .method{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+  .method b{color:var(--ink);font-weight:500}
+  .method button{font:11px var(--mono);color:var(--ink-mid);background:none;
+        border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
+  .method button:hover{border-color:var(--accent);color:var(--accent-text)}
+
   /* the sky chooser: each card is PAINTED by its own pack variables */
   .relaunch{display:block;margin-top:14px;font:11.5px var(--mono);color:var(--accent-text);
             background:none;border:0;padding:0;cursor:pointer;text-align:left}
@@ -248,8 +262,22 @@
     <h3>You</h3>
     <div class="idrow">
       <span class="avatar" aria-hidden="true">TL</span>
-      <div class="who"><b>Tom Lawson</b><span>tom@lawson.example · signed in via your identity provider</span></div>
+      <div class="who"><b>Tom Lawson</b><span>tom@lawson.example</span></div>
       <button>edit name</button>
+    </div>
+
+    <!-- Sign-in methods (#915, ADR-0023 §6; composition §2.7): replaces the
+         single "signed in via your identity provider" line above — an account
+         can have a password, a provider identity, or both, so this block says
+         which, with each row carrying its own way to change it. -->
+    <h3 class="methods-head">Sign-in methods</h3>
+    <div class="kv">
+      <span>password</span>
+      <span class="method"><b>set · changed 24 Aug 2026</b><button>change</button><button>remove</button></span>
+    </div>
+    <div class="kv">
+      <span>identity provider</span>
+      <span class="method"><b>id.lawson-home.example · linked 2 Jun 2026</b><button>unlink</button></span>
     </div>
   </div>
 
