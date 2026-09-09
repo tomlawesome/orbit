@@ -3,8 +3,8 @@ import { z } from "zod";
 
 import { listInstanceUsers, setInstanceAdministrator, setInstanceUserDisabled } from "orbit/server/admin-repository";
 import { requireInstanceAdministrator } from "orbit/server/authorization";
-import { createLocalUser, issueSetupToken, verifyCredential } from "orbit/server/local-credentials";
-import { AuthError } from "orbit/lib/auth/errors";
+import { createLocalUser, issueSetupToken } from "orbit/server/local-credentials";
+import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
 import { getAuthConfig } from "orbit/lib/env";
 
 import { ADMIN_USERS_FIXTURE } from "$lib/data/fixtures/admin.js";
@@ -15,29 +15,13 @@ const disabledUpdateSchema = z.object({ userId: z.uuid(), disabled: z.boolean() 
 const createLocalUserSchema = z.object({
   email: z.string(),
   displayName: z.string(),
-  /** The acting administrator's own current password (ADR-0023 §5). */
-  currentPassword: z.string(),
+  /**
+   * The acting administrator's own current password (ADR-0023 §5), when they
+   * have a local credential; absent for an OIDC-only administrator, who is
+   * challenged with a step-up proof cookie instead.
+   */
+  currentPassword: z.string().optional(),
 });
-
-/**
- * The local-credential half of "always challenge" (ADR-0023 §5) for the two
- * admin routes below. An OIDC-only administrator's step-up is
- * `src/lib/auth/recent-auth.ts` (#910), which no slice has landed yet — this
- * checks only the branch that already exists, and fails closed rather than
- * skip the challenge for an administrator who has no local credential.
- *
- * TODO(#910): route an OIDC-only administrator through the step-up guard
- * here once it lands, instead of falling through to `recent_authentication_required`.
- */
-async function requireRecentLocalAuthentication(session, currentPassword) {
-  const verdict = await verifyCredential(session.user.email, currentPassword);
-  if (verdict.outcome === "throttled") {
-    throw new AuthError("too_many_attempts", "Too many attempts at once; try again shortly", 429);
-  }
-  if (verdict.outcome !== "verified" || verdict.userId !== session.user.id) {
-    throw new AuthError("recent_authentication_required", "Confirm your password to continue", 401);
-  }
-}
 
 export const GET = read(
   async (_event, session) => {
@@ -79,7 +63,7 @@ export const PATCH = write(async (event, session) => {
 export const POST = write(async (event, session) => {
   await requireInstanceAdministrator(session.user.id);
   const submitted = createLocalUserSchema.parse(await event.request.json());
-  await requireRecentLocalAuthentication(session, submitted.currentPassword);
+  await requireRecentAuthentication(event, session, submitted, "local_user_create");
 
   const user = await createLocalUser(
     { email: submitted.email, displayName: submitted.displayName },
