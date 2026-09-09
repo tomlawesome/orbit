@@ -74,9 +74,11 @@
         location.href = "/";
         return;
       }
+      /* The envelope `authErrorResponse` writes is `{ error: { code, message } }`;
+         only the code is read, never the message. */
       let code;
       try {
-        code = (await response.json())?.error;
+        code = (await response.json())?.error?.code;
       } catch {
         code = undefined;
       }
