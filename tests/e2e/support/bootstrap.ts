@@ -26,7 +26,7 @@ const ADMINISTRATOR = "Orbit Administrator";
  * declares ORBIT_IMAGE as required and is parsed even for `logs`, so a
  * placeholder is supplied exactly as the workflow's diagnostics step does.
  */
-function stackLog(): string {
+export function stackLog(): string {
   const project = process.env.COMPOSE_PROJECT_NAME;
   return execFileSync(
     "docker",

@@ -113,7 +113,7 @@ describe("the declarations", () => {
 
   it("has the jobs that test the image rerun whenever the image's own inputs do", () => {
     const image = resolveGlobs(config, "build_image");
-    for (const job of ["smoke", "acceptance", "repair_journeys", "launcher_install_compat", "supply_chain_image"]) {
+    for (const job of ["smoke", "smoke_local_only", "acceptance", "repair_journeys", "launcher_install_compat", "supply_chain_image"]) {
       const globs = resolveGlobs(config, job);
       for (const path of ["Dockerfile", "src/server/boot.ts", "web/src/routes/+page.svelte", "pnpm-lock.yaml"]) {
         expect(selects(image, path) && !selects(globs, path), `${job} would miss a change to ${path}`).toBe(false);

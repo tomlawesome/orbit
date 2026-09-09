@@ -1,0 +1,35 @@
+# The second acceptance profile: an Orbit with no identity provider at all
+# (M7 #916, ADR-0023 §1). Test-only, like compose/docker-compose.acceptance.yml,
+# and never part of a real deployment's file set.
+#
+# It is the *absence* of compose/docker-compose.acceptance.yml that removes the
+# provider: that overlay is what declares the disposable `orbit-oidc` sidecar
+# and points OIDC_ISSUER at it. A Compose overlay cannot delete a service, so
+# this file is used INSTEAD of that one rather than alongside it -- see the
+# file sets in scripts/test-e2e-local.sh (`--profile local-only`) and the
+# `smoke_local_only` job in .gitlab-ci.yml, which are the only two callers.
+#
+# What is deliberately missing matters as much as what is here: no mail
+# sidecar either, because nothing in tests/e2e/local-only-specs.txt sends or
+# reads mail, and a profile that starts services its specs never touch is a
+# slower profile that proves the same thing.
+services:
+  orbit-app:
+    environment:
+      # The whole point of the profile. Since ADR-0023 §1 the provider is
+      # opt-in, so a stack that simply leaves the OIDC_* fields unset is
+      # already local-only; naming the key `false` says it on purpose, and
+      # keeps the profile honest if .env-orbit ever arrives with the key set
+      # (`configure.sh` writes it, and the guided OIDC flow writes `true`).
+      ORBIT_AUTH_OIDC: "false"
+      # .env-orbit.example ships APP_URL=https://orbit.example.com, and the
+      # application derives `secureCookies` from that scheme -- so without
+      # this the session and claim cookies would be `__Secure-` prefixed and a
+      # browser on plain http would drop every one of them. The acceptance
+      # overlay pins the same value for the same reason; this profile does not
+      # include it, so it has to say so itself.
+      #
+      # ORBIT_PORT is unset in CI, which publishes on 3000; it is set per run
+      # by scripts/test-e2e-local.sh, whose compose/docker-compose.local-e2e.yml
+      # overlay is applied after this one and pins the identical expression.
+      APP_URL: http://127.0.0.1:${ORBIT_PORT:-3000}
