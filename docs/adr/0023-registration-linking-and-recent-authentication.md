@@ -128,7 +128,12 @@ window is deleted; the transfer calls this instead).
   **60 s** (`clockTolerance` 5 s). It then sets a sealed proof cookie
   (`__Secure-orbit-step-up`, audience `step-up-proof`, bound to session id
   and intent, **120 s** TTL) and returns the browser to the action. The
-  action consumes and clears the proof. A provider that returns no
+  action consumes and clears the proof (revised at build, 2026-09-09: the
+  proof is also recorded server-side under a `jti` sealed inside it, in
+  `step_up_proofs`, and spent by one conditional update before the action
+  runs, so a captured cookie cannot be replayed within its 120 s life —
+  clearing the cookie only disarms the browser that presented it; owner
+  ruling, 2026-09-09). A provider that returns no
   `auth_time`, or a stale one, gets `step_up_failed` and the action stays
   blocked until the operator fixes the provider: that is the correct failure
   direction.
