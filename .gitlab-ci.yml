@@ -1870,22 +1870,49 @@ launcher_install_compat:
       set -eu
       export ORBIT_LAUNCHER_LIVE_BINARY="$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
       export ORBIT_LAUNCHER_LIVE_RAW_LOG="$CI_PROJECT_DIR/.orbit-launcher-live-raw.log"
-      # The candidate installer is this commit's own scripts/install.sh, served
+      # The candidate configuration tree -- this commit's own install.sh plus
+      # the configuration scripts and .env-orbit.example beside it -- served
       # from the checkout on loopback. Fetching it from the repository-files API
       # would need a job token in the URL, and the launcher's raw pty log --
       # kept as an artifact below -- may echo the URL it was given.
+      #
+      # The URL carries /scripts/ because the launcher derives the rest of the
+      # tree from it rather than being told where it is: scriptSourceURLs drops
+      # install.sh to get the scripts base, then drops a trailing /scripts to
+      # get the root that .env-orbit.example sits at (orbit-launcher,
+      # internal/deploy/configure.go). Serving install.sh at the server root
+      # instead collapses both bases onto one directory -- not the shape a real
+      # install has -- and every other fetch 404s. The launcher answers a 404
+      # by falling back to the terminal hand-off without saying so, so the
+      # in-console guided configuration this job exists to cover never ran
+      # (#926). Hence exact-path routing over a real /scripts/ layout, and the
+      # curl | cmp assertions below, which fail the job here rather than
+      # letting it pass on the fallback path.
       node -e '
-        const http = require("node:http"), fs = require("node:fs");
-        const script = fs.readFileSync(process.argv[1]);
+        const http = require("node:http"), fs = require("node:fs"), path = require("node:path");
+        const root = process.argv[1];
+        const shell = "text/x-shellscript";
+        const routes = [
+          ["/scripts/install.sh", "scripts/install.sh", shell],
+          ["/scripts/configure.sh", "scripts/configure.sh", shell],
+          ["/scripts/configuration.sh", "scripts/configuration.sh", shell],
+          ["/scripts/installer-ui.sh", "scripts/installer-ui.sh", shell],
+          ["/.env-orbit.example", ".env-orbit.example", "text/plain; charset=utf-8"],
+        ];
+        const served = new Map(routes.map(([url, rel, type]) => [url, [fs.readFileSync(path.join(root, rel)), type]]));
         http.createServer((req, res) => {
-          if (req.url !== "/install.sh") { res.writeHead(404); return res.end(); }
-          res.writeHead(200, { "content-type": "text/x-shellscript" }); res.end(script);
+          const hit = served.get(req.url);
+          if (!hit) { res.writeHead(404); return res.end(); }
+          res.writeHead(200, { "content-type": hit[1] }); res.end(hit[0]);
         }).listen(0, "127.0.0.1", function () { fs.writeFileSync(process.argv[2], String(this.address().port)); });
-      ' "$CI_PROJECT_DIR/scripts/install.sh" "$CI_PROJECT_DIR/.installer-port" &
+      ' "$CI_PROJECT_DIR" "$CI_PROJECT_DIR/.installer-port" &
       for _ in $(seq 1 50); do [ -s "$CI_PROJECT_DIR/.installer-port" ] && break; sleep 0.1; done
       [ -s "$CI_PROJECT_DIR/.installer-port" ] || { echo "installer server did not start"; exit 1; }
-      export ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="http://127.0.0.1:$(cat "$CI_PROJECT_DIR/.installer-port")/install.sh"
+      installer_origin="http://127.0.0.1:$(cat "$CI_PROJECT_DIR/.installer-port")"
+      export ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="$installer_origin/scripts/install.sh"
       curl -fsS "$ORBIT_LAUNCHER_INSTALL_SCRIPT_URL" | cmp - "$CI_PROJECT_DIR/scripts/install.sh"
+      curl -fsS "$installer_origin/scripts/configure.sh" | cmp - "$CI_PROJECT_DIR/scripts/configure.sh"
+      curl -fsS "$installer_origin/.env-orbit.example" | cmp - "$CI_PROJECT_DIR/.env-orbit.example"
       # install.sh and the image it verifies are one generation: the image
       # built by this pipeline, from the loopback registry started above.
       # `preview` here would be last week's image, and the launcher would
