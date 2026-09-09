@@ -11,6 +11,14 @@ nothing here migrates, backfills or stays compatible with a prior state.
 
 ## 1. What changed since the 2026-08-16 note
 
+Owner rulings of 2026-09-09 on the first draft of this plan (numbers are
+the questions as asked that day): (1) door composition decided, no design
+round — see 2.7; (2) the claim is a boot-time log line, not a file — see 2.6
+and ADR-0022; (3) recovery link expires in 5 minutes; (4) primary transfer
+becomes always-challenge, confirmed; (5) ADRs stay Proposed; (6)
+`ORBIT_AUTH_OIDC` is an explicit key and provider fields may stay set while
+it is `false`.
+
 Verified in the tree at `b879a60` (dev, 2026-09-09):
 
 - **#263 is delivered.** `instance_authority` exists (migration 0027, a
@@ -48,16 +56,16 @@ Verified in the tree at `b879a60` (dev, 2026-09-09):
 
 - New keys in `ALLOWED_KEYS` (`src/lib/config-contract.ts:16-91`) and in
   `scripts/configuration.sh` / `scripts/configure.sh` in the **same commit**
-  (the parity tests fail otherwise): `ORBIT_AUTH_OIDC` (`true|false`,
-  default `false`) and `ORBIT_BOOTSTRAP_CLAIM_FILE` (canonical
-  `/run/orbit-secrets/orbit-bootstrap-claim`).
+  (the parity tests fail otherwise): one key, `ORBIT_AUTH_OIDC`
+  (`true|false`, default `false`). No claim-file key: the claim has no
+  storage (ADR-0022 §1).
 - `evaluateReadiness` (`config-contract.ts:340-448`): OIDC fields
-  `required()` only when `ORBIT_AUTH_OIDC=true`; when `false`, a non-blank
-  OIDC field is a readiness failure ("set `ORBIT_AUTH_OIDC=true` or clear
-  it"). The claim file is reported like the OIDC secret file: canonical path,
-  regular file, mode.
+  `required()` only when `ORBIT_AUTH_OIDC=true`; when `false` they are
+  **ignored and may remain set** (owner, 2026-09-09: switch the provider off
+  without deleting its configuration). `configure.sh --check` lists them as
+  "not in use" in that case, never as errors.
 - `AuthConfig` (`src/lib/env.ts`) becomes `{ appUrl, sessionSecret,
-  sessionTtlSeconds, secureCookies, bootstrapClaimFile, oidc: null | {
+  sessionTtlSeconds, secureCookies, oidc: null | {
   issuer, clientId, clientSecret, callbackUrl, scopes, claims } }`. Only
   `src/lib/auth/oidc.ts` and its test read the provider fields today, so the
   blast radius is small; `oidc.ts` functions take the non-null block.
@@ -115,7 +123,7 @@ gains `INSTANCE_BOOTSTRAP_LOCK_KEY = "orbit:first-administrator"`.
 |---|---|
 | `src/lib/auth/password.ts` (new) | Argon2id policy constants, `hashPassword`, `verifyPassword → {verified, needsRehash}`, decoy hash, password bounds and NFC normalisation (ADR-0021). |
 | `src/lib/auth/verification-gate.ts` (new) | The 2-concurrent / 16-queued / 5 s gate every derivation passes through. |
-| `src/lib/auth/bootstrap.ts` (new) | Reads the claim file, `verifyClaim`, seal/open the claim cookie (audience `bootstrap-claim`), `isClaimed()`. |
+| `src/lib/auth/bootstrap.ts` (new) | Holds the in-memory claim code, `generateClaim()`, `printClaimNotice()` (the one documented bypass of `operationalDetail`), `verifyClaim`, seal/open the claim cookie (audience `bootstrap-claim`, 5 min), `isClaimed()`. `src/server/boot.ts` calls it last in `registerNode`. |
 | `src/lib/auth/crypto.ts` | Grows a generic `sealProof(payload, audience, ttl)` / `openProof(value, audience)` pair; `sealLoginTransaction` keeps its name and becomes a caller. Login transaction gains optional `bootstrap`, `linkUserId`, `stepUpSessionId`, `intent`, `maxAge` fields. |
 | `src/lib/auth/oidc.ts` | `createAuthorizationUrl` gains `max_age` when the transaction asks; `validateIdTokenClaims` gains the `auth_time` freshness rule for step-up. Takes `config.oidc`. |
 | `src/lib/auth/recent-auth.ts` (new) | `requireRecentAuthentication(event, session, body)`; seal/open the step-up proof cookie. |
@@ -154,42 +162,52 @@ callback does and replace the browser's previous session. Recent
 authentication is ADR-0023 §5; the step-up proof cookie is
 `__Secure-orbit-step-up` (path `/`, 120 s, httpOnly, lax), consumed once.
 
-### 2.6 Installer and secrets (ADR-0022 §1, §4)
+### 2.6 Installer and the claim notice (ADR-0022 §1, §4)
 
-- `scripts/configure.sh --init`: `ensure_secret_file bootstrap-claim` with a
-  base32 renderer next to `generate_hex_secret` (`configure.sh:142-155`);
-  `--set-bootstrap-claim` mirrors `--set-oidc-secret` (`configure.sh:873-930`)
-  and the CLI `configure` verbs (`src/cli/orbit.ts:545-560`).
-- `docker-compose.yml`: secret `orbit-bootstrap-claim` from
-  `${ORBIT_SECRETS_DIR}/bootstrap-claim`, listed on the app service;
-  `container-entrypoint.sh` stages it like the others (no zero-byte
-  placeholder case: the installer always writes it).
+- No new secret file, Compose secret, entrypoint step or `configure.sh`
+  verb. The claim is generated in memory at the end of `registerNode`
+  (`src/server/boot.ts:153`) while `instance_authority` is empty, printed
+  once as the last start-up line (link with the code in the URL fragment,
+  plus the bare code), regenerated on every restart, inert once claimed.
+  Rotation is `docker compose restart orbit-app`.
 - `install.sh`: the guided fields drop the OIDC trio from the required path;
   a mode question ("Sign in with local accounts only, or also with an
   identity provider? OIDC can be added later with `configure.sh`") sets
   `ORBIT_AUTH_OIDC`; `print_completion_screen` (`install.sh:1264-1278`) adds
-  one line naming the claim file's path.
+  one line: run `docker compose logs orbit-app` and open the link on its
+  last line to create the first administrator. The installer never prints
+  the code itself.
 - `scripts/test-install-acceptance.sh` gains a local-only run;
-  `docs/installer-guarantees.md` gains entries for the claim file.
+  `docs/installer-guarantees.md` gains one entry: the installer does not
+  create the first administrator and never sees the claim code.
 
 ### 2.7 UI surfaces
 
-Design calls the owner ratifies first (ruling 3) — slice 11, `fable:
-dialogue`:
+Composition ruled by the owner on 2026-09-09 (no design round; #906 closed
+as superseded). The styling source for every new card is the
+first-household card — `web/src/lib/arrival/CreateSystem.svelte`'s
+`form.card` inside the ring (design/v19/first-run-card/round-3/ring.html) —
+repurposed for sign-in fields:
 
-- **Claim card**: the door's chrome present, one field ("claim code"), the
-  path hint below it, replaces the Sign in gate while unclaimed.
-- **Identity card**: chrome gone, small centred card, sky visible; two
-  modes from one component — *create* (email, display name, password) for
-  the bootstrap and *sign in* (email, password) for every later local
-  sign-in; when OIDC is enabled a single "continue with your identity
-  provider" line under the fields. Recommended composition: the ratified
-  door stays pixel-identical and its Sign in gate opens the identity card
-  in local mode, so the create-system card (untouched, three things only)
-  remains stage two of first-run and stage one of nothing else.
-- **Setup screen** `/setup/<token>`: the identity card in a third mode
-  (password, password again) — same family, shape of
-  `web/src/routes/invite/[token]/`.
+- **Unclaimed**: the ring shows that card with one field, "claim code"
+  (pre-filled and submitted from the `#claim=` fragment when the operator
+  arrived by the link; typed by hand otherwise), and one sentence saying
+  where the code is (`docker compose logs orbit-app`, last line). No Sign
+  in gate.
+- **Local-only, claimed**: the ring shows the same card with email (or
+  username — the field accepts the account's email) and password.
+- **Mixed mode** (OIDC on and local accounts exist): the ratified door is
+  unchanged — Sign in gate as today — plus one subtle line under the gate,
+  "local login", which opens that same card in the ring. `availability`
+  reports `methods.localAccounts: boolean` so the line appears only when a
+  local credential exists.
+- **Create mode** after a successful claim: the same card asks email,
+  display name, password (the identity of the first administrator); when
+  OIDC is enabled a single "continue with your identity provider" line sits
+  under the fields instead of a gate. The create-system card that follows
+  is untouched (three things only, §15).
+- **Setup screen** `/setup/<token>`: the same card in a fourth mode
+  (password, password again) — shape of `web/src/routes/invite/[token]/`.
 
 Composition calls made here so the build slices contain none:
 
@@ -228,11 +246,20 @@ unconsumed, and no session survived (the documented revocation boundary).
 ### 2.10 e2e strategy
 
 - `tests/e2e/support/bootstrap.ts` (new): `claimInstanceAsAdministrator(browser)`
-  reads `${ORBIT_SECRETS_DIR:-./.orbit-secrets}/bootstrap-claim` from the
-  host, POSTs the claim, then completes the OIDC bootstrap as "Orbit
-  Administrator"; idempotent (a claimed instance short-circuits). The five
-  specs swap `establishInstanceAdmin` for it in the slice that closes the
-  hole, so the acceptance stage never goes red between slices.
+  asks `GET /api/auth/availability`; if `claimed` it signs in as "Orbit
+  Administrator" as today. Otherwise it reads the claim notice from the
+  stack's own log — `docker compose -p $COMPOSE_PROJECT_NAME logs --no-color
+  orbit-app` (`COMPOSE_PROJECT_NAME` is already exported to the suite for
+  exactly this kind of question; `v19-tour.spec.ts` is the precedent; CI
+  runs without `-p` and the variable is unset there, matching the script's
+  own comment) — takes the **last** `bootstrap.claim` line, POSTs the code,
+  then completes the OIDC bootstrap as "Orbit Administrator". A losing
+  racer gets `bootstrap_claimed` and falls back to the sign-in path. The
+  database is not reset between specs (`v19-arrival.spec.ts:21`), so the
+  claim happens once per stack. Chosen over a test-only fixed code: no knob
+  in the shipped image, and the helper walks the operator's real path. The
+  five specs swap `establishInstanceAdmin` for it in the slice that closes
+  the hole, so the acceptance stage never goes red between slices.
 - `compose/docker-compose.local-only.yml` (new overlay): `ORBIT_AUTH_OIDC=false`,
   no provider sidecar; a small local-only spec list.
 - New specs: `bootstrap-protection.spec.ts` (the negative that matters),
@@ -249,18 +276,18 @@ on the final one of each.
 
 | # | Issue | Slice | Depends on | Parallel with |
 |---|---|---|---|---|
-| 1 | #903 | Config: `ORBIT_AUTH_OIDC`, claim-file key, `AuthConfig.oidc` | — | 2, 3, 11 |
-| 2 | #904 | Migration 0038 and schema | — | 1, 3, 11 |
-| 3 | #905 | Password module and verification gate | — | 1, 2, 11 |
-| 4 | #907 | Installer: claim secret, mode question, compose, entrypoint | 1 | 5, 6 |
-| 5 | #908 | Claim endpoint, OIDC bootstrap gate, provisioning policy, e2e helper | 1, 2 | 4 |
+| 1 | #903 | Config: `ORBIT_AUTH_OIDC`, `AuthConfig.oidc` | — | 2, 3 |
+| 2 | #904 | Migration 0038 and schema | — | 1, 3 |
+| 3 | #905 | Password module and verification gate | — | 1, 2 |
+| 4 | #907 | Installer: mode question, completion pointer, local-only acceptance | 1 | 5, 6 |
+| 5 | #908 | Claim notice and endpoint, OIDC bootstrap gate, provisioning policy, e2e helper | 1, 2 | 4 |
 | 6 | #909 | Local bootstrap and local sign-in | 3, 5 | 4 |
 | 7 | #910 | Recent authentication (inline password, OIDC step-up), transfer adopts it | 6 | 8 |
 | 8 | #911 | Setup tokens: admin-created local users, `/api/auth/local/setup`, password set/change | 6 | 7 |
 | 9 | #912 | Primary-administrator recovery CLI | 8 | 10, 12 |
 | 10 | #913 | Methods list, link, unlink | 7 | 9, 12 |
-| 11 | #906 | Mockups: claim card, identity card, door in local mode (`fable: dialogue`) | — | 1–3 |
-| 12 | #914 | Door and first-run cards build; setup screen | 11 ratified, 6, 8 | 9, 10 |
+| 11 | #906 | ~~Mockups~~ — closed as superseded 2026-09-09; composition ruled in 2.7 | — | — |
+| 12 | #914 | Door and first-run cards build; setup screen | 6, 8 | 9, 10 |
 | 13 | #915 | Settings sign-in methods; administration add-local-user | 8, 10, 12 | 14 |
 | 14 | #916 | e2e: bootstrap protection, local-only profile, signed-out privacy | 12 | 13 |
 | 15 | #917 | Backup drill assertions and operator documentation | 13, 14 | — |
@@ -271,10 +298,11 @@ merges): `src/lib/auth/errors.ts`, `src/lib/logger.ts`,
 `web/src/routes/api/auth/callback/+server.js`, `src/lib/auth/crypto.ts`.
 Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
 
-### Slice 1 — Config: optional OIDC and the claim-file key
+### Slice 1 — Config: optional OIDC
 
 - **Outcome:** local-only startup is explicit and passes readiness with no
-  provider values; `AuthConfig.oidc` is `null` or the provider block.
+  provider values; `AuthConfig.oidc` is `null` or the provider block;
+  provider values left in place while the key is `false` are ignored.
 - **Touches:** `src/lib/env.ts`, `src/lib/config-contract.ts`,
   `scripts/configure.sh`, `scripts/configuration.sh`, `.env-orbit.example`,
   `src/lib/auth/oidc.ts` (take `config.oidc`),
@@ -283,9 +311,10 @@ Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
   so the door behaves as today), `web/src/routes/api/auth/{login,logout,callback}`
   (`auth_not_configured` when `oidc` is null).
 - **Done when:** `configure.sh --check` and `evaluateReadiness` agree on a
-  local-only fixture and an OIDC fixture; `ORBIT_AUTH_OIDC=false` with a
-  non-blank `OIDC_ISSUER` fails readiness by field name; the existing e2e
-  stack (OIDC enabled) is unchanged.
+  local-only fixture, an OIDC fixture, and a fixture with the key `false`
+  and a full provider block (ready; fields reported "not in use");
+  `ORBIT_AUTH_OIDC=true` with a blank `OIDC_ISSUER` fails readiness by field
+  name; the existing e2e stack (OIDC enabled) is unchanged.
 - **Tests:** extend `src/lib/env.test.ts`, `config-contract.parity.test.ts`,
   `config-contract.example.test.ts`, `scripts/configure.test.mjs`,
   `scripts/configuration.test.mjs`; shape: the existing cases in each.
@@ -318,34 +347,32 @@ Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
 - **Tests:** `src/lib/auth/password.test.ts`, `verification-gate.test.ts`
   (shape: `src/lib/auth/crypto.test.ts`).
 
-### Slice 4 — Installer: claim secret, mode question, compose and entrypoint
+### Slice 4 — Installer: mode question, completion pointer, local-only acceptance
 
-- **Outcome:** a fresh install writes the claim file, asks local-only vs
-  local-plus-OIDC, no longer requires the OIDC trio, and tells the operator
-  where the claim lives.
-- **Touches:** `scripts/configure.sh` (`ensure_secret_file` for
-  `bootstrap-claim`, base32 renderer, `--set-bootstrap-claim`),
-  `scripts/configuration.sh`, `src/cli/orbit.ts` (`configure` verbs),
-  `scripts/install.sh` (guided fields, mode prompt, completion line),
-  `scripts/installer-ui.sh` if the prompt needs a widget,
-  `docker-compose.yml`, `scripts/container-entrypoint.sh`,
+- **Outcome:** a fresh install asks local-only vs local-plus-OIDC, no longer
+  requires the OIDC trio, and tells the operator to read the claim link from
+  the container log.
+- **Touches:** `scripts/install.sh` (guided fields, mode prompt, completion
+  line), `scripts/installer-ui.sh` if the prompt needs a widget,
+  `scripts/configure.sh` only where the guided flow's field list is shared,
   `docs/installer-guarantees.md`, `scripts/test-install-acceptance.sh`
   (local-only run).
-- **Done when:** `--init` on an empty directory yields a `0600` base32 claim
-  file; `--set-bootstrap-claim` replaces it atomically without echo; the
-  entrypoint stages it `0400`; the install acceptance script reaches a
-  healthy `/api/health` with `ORBIT_AUTH_OIDC=false` and no OIDC values;
-  the installer's own output never contains the value.
-- **Tests:** `scripts/configure.test.mjs`, `scripts/oidc-secret-contract.test.mjs`
-  (add a claim-file twin), `scripts/installer-ui.test.mjs`.
+- **Done when:** the guided flow completes with `ORBIT_AUTH_OIDC=false` and
+  no OIDC values; the completion screen names `docker compose logs
+  orbit-app` and says the last line is the claim link; the install
+  acceptance script reaches a healthy `/api/health` local-only and finds
+  exactly one `bootstrap.claim` line in the container log; the installer's
+  own output never contains the code.
+- **Tests:** `scripts/configure.test.mjs`, `scripts/installer-ui.test.mjs`.
 
 ### Slice 5 — Claim endpoint, OIDC bootstrap gate, provisioning policy
 
-- **Outcome:** an unclaimed instance can only be claimed with the claim
-  secret; the first OIDC sign-in after a claim becomes primary
+- **Outcome:** an unclaimed instance prints its claim notice last at boot
+  and can only be claimed with that code; the first OIDC sign-in after a claim becomes primary
   administrator; after the claim, OIDC self-registers and email collisions
   are refused; the e2e helper claims deterministically.
-- **Touches:** `src/lib/auth/bootstrap.ts`, `src/lib/auth/crypto.ts`
+- **Touches:** `src/lib/auth/bootstrap.ts`, `src/server/boot.ts` (call
+  `printClaimNotice` last in `registerNode`), `src/lib/auth/crypto.ts`
   (`sealProof`/`openProof`, transaction `bootstrap` field),
   `src/lib/auth/provision.ts`, `src/lib/auth/errors.ts`, `src/lib/logger.ts`,
   `src/server/admin-operations.ts`, `web/src/routes/api/auth/bootstrap/claim/+server.js`,
@@ -358,8 +385,10 @@ Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
   `bootstrap_invalid`; N concurrent OIDC bootstraps with valid cookies yield
   one authority row and N−1 `bootstrap_claimed`; a second `(issuer,
   subject)` after the claim becomes an ordinary user; a new subject with an
-  existing email gets `link_required` and creates nothing; a missing claim
-  file logs the bounded blocked record and refuses every route.
+  existing email gets `link_required` and creates nothing; a claimed
+  instance prints no notice at boot; the code never appears in any
+  `operationalDetail` record, the database or a response body; a 5 minute
+  old claim cookie is refused.
 - **Tests:** `tests/integration/bootstrap.test.ts` (shape:
   `primary-administrator.test.ts` for the route calls,
   `reviewed-intake-concurrency.test.ts` for the race);
@@ -432,8 +461,10 @@ Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
   (section "Recovering the primary administrator").
 - **Done when:** the command prints exactly one URL to stdout, writes
   nothing to the logger, revokes the primary's sessions, writes
-  `recovery_link_issued`; refuses when `instance_authority` is empty with a
-  bounded message; the link consumes like a setup token.
+  `recovery_link_issued`; the token expires **5 minutes** after issue
+  (owner, 2026-09-09) and a 6 minute old link is `setup_token_invalid`;
+  refuses when `instance_authority` is empty with a bounded message; the
+  link consumes like a setup token.
 - **Tests:** `src/cli/orbit.auth.test.ts` (new; shape:
   `src/cli/orbit.configure.test.ts`).
 
@@ -453,31 +484,31 @@ Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
 - **Tests:** `tests/integration/sign-in-methods.test.ts` (shape:
   `auth-session-contracts.test.ts`).
 
-### Slice 11 — Mockups: claim card, identity card, door in local mode (Fable dialogue)
+### Slice 11 — Mockups (superseded)
 
-- **Outcome:** the owner ratifies the two cards and how the ratified door
-  offers a password, before slice 12 is built (ruling 3).
-- **Touches:** `design/v19/claim-and-identity/round-N/*.html`,
-  `design/owner-decisions.md` (the ruling, once given). Hosted from an
-  `nginx:alpine` container per AGENTS.md; a mockup is never a file path.
-- **Done when:** the owner's ruling is recorded in `owner-decisions.md` and
-  on the issue, naming the round accepted.
-- **Design brief:** section 2.7 above; the "three things only" law governs
-  the create-system card and is untouched.
+Closed by the owner on 2026-09-09 (#906): the composition is ruled directly
+in 2.7 — the first-household card's styling, repurposed; a "local login"
+line under the gate in mixed mode. Slice 12 records that ruling in
+`design/owner-decisions.md` as part of its build.
 
 ### Slice 12 — Door and first-run cards; setup screen
 
-- **Outcome:** the ratified cards ship; the door is mode-aware; `/setup/<token>`.
+- **Outcome:** the cards ruled in 2.7 ship, styled from the first-household
+  card; the door is mode-aware; `/setup/<token>`.
 - **Touches:** `web/src/lib/flight/SignIn.svelte`, `door-state.js`,
   `web/src/lib/flight/Claim.svelte`, `Identity.svelte`,
   `web/src/routes/setup/[token]/+page.server.js`, `+page.svelte`,
-  `web/src/routes/+page.js` / `login/+page.js` as the ratification requires,
+  `web/src/lib/arrival/CreateSystem.svelte` only to lift shared card styles
+  into a shared stylesheet (no visual change to it),
+  `design/owner-decisions.md` (record the 2026-09-09 composition ruling),
   `web/tests/fidelity/screens.spec.js` and baselines for the new screens.
-- **Done when:** unclaimed shows the claim card and no gate; a valid claim
-  reveals the identity card in create mode; a claimed local-only instance
-  opens the identity card in sign-in mode from the gate; an OIDC-enabled
-  instance shows the provider line; every card passes the AxeBuilder sweep;
-  fidelity baselines exist and match.
+- **Done when:** unclaimed shows the claim card in the ring and no gate;
+  arriving with `#claim=` fills and submits it and the fragment is gone from
+  the address bar; a valid claim reveals create mode; a claimed local-only
+  instance shows the sign-in card in the ring; mixed mode shows the ratified
+  door unchanged plus the "local login" line, which opens the card; the
+  create-system card's fidelity baseline is unchanged; every card passes the
+  AxeBuilder sweep; new fidelity baselines exist and match.
 - **Tests:** `tests/e2e/v19-first-run-door.spec.ts` extended; a11y via the
   pattern in `signed-out.spec.ts:119`.
 
@@ -505,7 +536,9 @@ Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
   `docs/quality-strategy.md` (the new lane).
 - **Done when:** on a fresh database an attacker without the claim cannot
   reach the provider, create a user or see anything but the claim card; a
-  15 minute old claim cookie is refused; a replayed valid claim after the
+  5 minute old claim cookie is refused; the code is absent from every HTTP
+  response and every operational-log line other than the notice; a
+  restart prints a different code; a replayed valid claim after the
   bootstrap is `bootstrap_claimed`; the local-only profile claims, signs
   in, signs out and signs in again; no signed-out route reveals whether an
   email exists or which provider is configured.
@@ -542,25 +575,19 @@ Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
   rescoped out on 2026-09-03.
 - **First-run as a new route** — the ratification says it sits on top of
   the login screen; a stage, not a route.
-- **Deleting the claim file after use** — state enforces single use.
+- **Installer-generated claim file** (`ORBIT_BOOTSTRAP_CLAIM_FILE`, the
+  `orbit-bootstrap-claim` Compose secret, `--set-bootstrap-claim`) — replaced
+  by the boot-time log line on 2026-09-09 (ADR-0022).
+- **Mockup round for the claim and identity cards (#906)** — composition
+  ruled directly on 2026-09-09.
 - **Password reset by email, breached-password list, trusted-proxy
   contract, SSO-only mode** — each its own future issue.
 
 ## 5. Open questions for the owner
 
-Numbered here from 1; the relaying session renumbers.
+Numbered here from 1; the relaying session renumbers. Questions 1–6 of the
+first draft were answered on 2026-09-09 (see the top of section 1).
 
-1. **Door composition (slice 11).** The recommendation keeps the ratified
-   door pixel-identical and opens the identity card from its Sign in gate,
-   so a local sign-in is two steps (gate, then card). The alternative is
-   email and password on the door itself, which changes a ratified screen.
-   Which should the mockup round start from?
-2. **Claim code shape.** 32 bytes as base32 in groups of four is 52
-   characters to type from a file viewer. Acceptable, or prefer 20 bytes
-   (32 characters, still far beyond guessing under the backoff)?
-3. **Recovery CLI output.** The one-time URL is printed to the operator's
-   terminal (never the container log). Acceptable, or must it be written to
-   a file in `.orbit-secrets` and never displayed?
-4. **Transfer strictness.** Replacing #263's 15 minute window with a
-   challenge makes primary transfer stricter than it shipped. Confirm that is
-   intended by ruling 5 (the plan assumes yes).
+1. **Log shippers.** ADR-0022 §6 tells operators who ship container logs
+   to claim before attaching the shipper. Should the installer's completion
+   screen also say this in one line, or is the operator guide enough?
