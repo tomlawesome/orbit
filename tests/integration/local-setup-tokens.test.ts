@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { auditLog, credentialSetupTokens, localCredentials, sessions } from "@/db/schema";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
 import { createSession } from "@/lib/auth/session";
 import { getAuthConfig } from "@/lib/env";
 import { createLocalUser, RECOVERY_TOKEN_TTL_MS } from "@/server/local-credentials";
@@ -58,12 +59,13 @@ async function call(
   handler: Parameters<typeof callRouteForSession>[0],
   session: IntegrationSession,
   path: string,
-  init: { body?: unknown; params?: Record<string, string> } = {},
+  init: { body?: unknown; params?: Record<string, string>; headers?: Record<string, string> } = {},
 ): Promise<{ status: number; body: Record<string, unknown>; response: Response }> {
   const response = await callRouteForSession(handler, session, {
     url: `${ORIGIN}${path}`,
     params: init.params,
     method: "POST",
+    headers: init.headers,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
   return { status: response.status, body: (await response.clone().json()) as Record<string, unknown>, response };
@@ -81,6 +83,12 @@ async function callSignedOut(
     body: JSON.stringify(body),
   });
   return { status: response.status, body: (await response.clone().json()) as Record<string, unknown>, response };
+}
+
+/** A caller's own session cookie plus a step-up proof, as the browser sends both together. */
+function withStepUpProof(session: IntegrationSession, proof: string): Record<string, string> {
+  const config = getAuthConfig();
+  return { cookie: `${session.headers.cookie}; ${stepUpProofCookieName(config)}=${proof}` };
 }
 
 async function sessionCountFor(userId: string): Promise<number> {
@@ -162,7 +170,7 @@ describe("an administrator creating a local user (ADR-0023 §3)", () => {
       const wrongPassword = await call(createUser, admin, "/api/admin/users", {
         body: { email: "unchallenged@example.invalid", displayName: "Unchallenged", currentPassword: "not-the-password" },
       });
-      expect(wrongPassword.status).toBe(401);
+      expect(wrongPassword.status).toBe(403);
       expect((wrongPassword.body.error as { code: string }).code).toBe("recent_authentication_required");
     } finally {
       await fixture.cleanup();
@@ -303,14 +311,36 @@ describe("re-issuing a link for a local user who forgot their password (ADR-0023
   }, 30_000);
 });
 
-describe("changing a signed-in password (ADR-0023 §6, §7)", () => {
-  it("sets a first password with no challenge and revokes nothing", async () => {
-    const fixture = await createIntegrationFixture("password-first-set");
+describe("changing a signed-in password (ADR-0023 §5, §6, §7)", () => {
+  it("refuses an OIDC-only caller setting a first password with no step-up proof", async () => {
+    const fixture = await createIntegrationFixture("password-first-set-unchallenged");
     try {
+      // The fixture's `owner` carries an external identity and no local
+      // credential (`support/fixtures.ts`), so this is exactly the OIDC-only
+      // caller ADR-0023 §5 sends through a step-up rather than a password.
       const owner = await fixture.session("owner");
 
       const response = await call(changePassword, owner, "/api/auth/local/password", {
         body: { password: NEW_PASSWORD },
+      });
+      expect(response.status).toBe(403);
+      expect((response.body.error as { code: string }).code).toBe("recent_authentication_required");
+      expect(await getDb().select().from(localCredentials).where(eq(localCredentials.userId, owner.userId))).toEqual([]);
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
+  it("sets a first password for an OIDC-only caller given a valid step-up proof, and revokes nothing", async () => {
+    const fixture = await createIntegrationFixture("password-first-set");
+    try {
+      const owner = await fixture.session("owner");
+      const config = getAuthConfig();
+      const proof = await sealStepUpProof(owner.sessionId, "password_set", config);
+
+      const response = await call(changePassword, owner, "/api/auth/local/password", {
+        body: { password: NEW_PASSWORD },
+        headers: withStepUpProof(owner, proof),
       });
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ changed: false, sessionsRevoked: 0 });
@@ -321,7 +351,8 @@ describe("changing a signed-in password (ADR-0023 §6, §7)", () => {
 
       // Nothing was revoked: the caller's own original session still answers.
       expect(await isAuthenticated(owner.token)).toBe(true);
-      expect(response.response.headers.get("set-cookie")).toBeNull();
+      // The proof is spent (cleared) but no session cookie is reissued.
+      expect(readSetCookie(response.response, sessionCookieName(config))).toBeUndefined();
 
       const audit = await getDb().select({ action: auditLog.action, changes: auditLog.changes, actorUserId: auditLog.actorUserId })
         .from(auditLog).where(eq(auditLog.entityId, owner.userId));
@@ -372,13 +403,13 @@ describe("changing a signed-in password (ADR-0023 §6, §7)", () => {
       const wrong = await call(changePassword, owner, "/api/auth/local/password", {
         body: { currentPassword: "not-the-password", password: NEW_PASSWORD },
       });
-      expect(wrong.status).toBe(401);
+      expect(wrong.status).toBe(403);
       expect((wrong.body.error as { code: string }).code).toBe("recent_authentication_required");
 
       const missing = await call(changePassword, owner, "/api/auth/local/password", {
         body: { password: NEW_PASSWORD },
       });
-      expect(missing.status).toBe(401);
+      expect(missing.status).toBe(403);
       expect((missing.body.error as { code: string }).code).toBe("recent_authentication_required");
 
       const [credential] = await getDb().select({ passwordHash: localCredentials.passwordHash })
