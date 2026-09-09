@@ -444,7 +444,13 @@ only knob is the model name, and the Compose `ai` profile that supplies the
 service. Reaching anywhere else needs a code change to that constant, which
 needs an ADR superseding ADR-0025. Confining `orbit-ollama` to the egress-free
 processing network that already holds Tika and ClamAV is the matching
-structural control and is tracked separately.
+structural control: the service carries no default-network route and no
+published port, so the container that holds document text has no path to the
+internet whatever image or model is loaded into it. Compose validation refuses
+a configuration that adds one. The server cannot fetch its own model as a
+result, so a separate one-shot puller reaches the model registry on the
+default network, writes into the shared model volume, and exits; it never
+receives document text and never runs as a side effect of starting the stack.
 
 Each document produces exactly one request, for exactly one JSON object, and
 every axis of it is bounded by a constant in code: a fixed input character
@@ -480,7 +486,6 @@ another household, address a tool, or send anything outward. Review-first
 ingestion ([ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md)) is
 unchanged - a model suggestion is still only a suggestion a person accepts.
 
-Still to come, and out of this boundary until they land: the network move and
-the deliberate model pull, wiring the model path in as the default where the
-profile is present, showing extractor disagreement to the reviewer, and
-reporting model availability to the administrator.
+Still to come, and out of this boundary until they land: wiring the model path
+in as the default where the profile is present, showing extractor disagreement
+to the reviewer, and reporting model availability to the administrator.
