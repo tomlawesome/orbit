@@ -81,6 +81,10 @@ test("the operator claims a provider-less Orbit and becomes its administrator", 
   const before = await (await request.get("/api/auth/availability")).json() as {
     claimed: boolean; methods: { local: boolean; oidc: boolean; localAccounts: boolean };
   };
+  /* The whole-suite run is the oidc profile, where this journey has no
+     meaning: the provider claims the instance. Skip there, so that the one
+     stack that can walk it (the local-only lane) is the only one judged. */
+  test.skip(before.methods.oidc, "provider configured: this journey runs in the local-only profile");
   expect(
     before.claimed,
     "this instance is already claimed, so the claim journey cannot be walked. This file "

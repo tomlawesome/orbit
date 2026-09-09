@@ -232,6 +232,10 @@ async function openSettingsFromHome(page: Page) {
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+  /* The sign-in methods block (#915) is read after the helm itself, so an
+     audit that starts on `.cards` alone collects its expected set before the
+     block's buttons exist and then meets them by Tab. Wait for the rows. */
+  await expect(page.locator(".method").first()).toBeVisible({ timeout: 30_000 });
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -575,6 +579,13 @@ test("administration: the local-user controls are reachable and announced", asyn
     await expect(row.getByLabel("email")).toBeVisible();
     await expect(row.getByLabel("display name")).toBeVisible();
     await expect(row.getByLabel("link valid for")).toBeVisible();
+
+    /* The row is a real form: its fields are `required`, so an empty Create
+       is stopped by the browser before the screen sees it. Fill it the way
+       a keyboard user would, then arm. Nothing is created: the challenge
+       opens, and the test never confirms it. */
+    await row.getByLabel("email").fill(`keyboard-${Date.now()}@example.invalid`);
+    await row.getByLabel("display name").fill("Keyboard Newcomer");
 
     /* Arming Create by keyboard opens the challenge, and the field it opens
        is the very next thing Tab reaches. */
