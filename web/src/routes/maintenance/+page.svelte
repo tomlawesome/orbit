@@ -10,8 +10,9 @@
    * Maintenance — totality (CON-15). An eclipse is the sky's own scheduled
    * downtime: the light goes out, briefly and predictably, then comes back.
    * The corona is only visible during totality, which is why a corona drawn on
-   * a bright sun never worked. The moon's transit doubles as the progress bar
-   * and the diamond ring is the service returning.
+   * a bright sun never worked. The diamond ring is the service returning.
+   * (A blue progress arc round the moon was removed on 2026-09-09: the owner
+   * read it as a stray line, and the timeline below already says how long.)
    *
    * The headline is three words, deliberately: "maintenance — back soon". The
    * visual carries the drama; the words state the fact. Beneath it, what the
@@ -77,7 +78,7 @@
    *
    * Nothing here bakes in a theme colour: `--star-near`/`--star-far` (#893)
    * are used by the starfield above, which carries no filter and is untouched,
-   * and `--accent` is on the unfiltered progress arc. So no raster has to be
+   * and `--accent` appears only in the HTML below the sky. So no raster has to be
    * rebuilt when the pack changes, and the cache needs no colour in its key.
    */
   const F_B2 = '<filter id="b2"><feGaussianBlur stdDeviation="2"/></filter>';
@@ -487,11 +488,6 @@
   <image data-r="chromo" opacity=".22" preserveAspectRatio="none"/>
   <image class="ring-inner" data-r="ringInner" opacity=".8" preserveAspectRatio="none"/>
   <circle cx="800" cy="440" r="170" fill="none" stroke="#fffdf6" stroke-width="1.2" opacity=".95"/>
-
-  <!-- transit is the progress bar -->
-  <circle class="progress" pathLength="100" cx="800" cy="440" r="186" fill="none"
-          stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" opacity=".5"
-          transform="rotate(-90 800 440)"/>
 
   <!-- the diamond ring: service returning (demo loops). The whole group is one
        raster — the bloom, the anamorphic streak and the six-point glint all
