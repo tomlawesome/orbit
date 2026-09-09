@@ -94,6 +94,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   mail_in_unattributed_replies: ["address_sha256", "last_replied_at", "created_at", "updated_at"],
   local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "created_at", "updated_at"],
   credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
+  step_up_proofs: ["id", "session_id", "intent", "expires_at", "consumed_at", "created_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -174,6 +175,7 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   sessions_token_hash_unique: { table: "sessions", columns: ["token_hash"], unique: true },
   user_email_lookup_idx: { table: "users", columns: ["email"], unique: false },
   credential_setup_tokens_user_idx: { table: "credential_setup_tokens", columns: ["user_id"], unique: false },
+  step_up_proofs_session_idx: { table: "step_up_proofs", columns: ["session_id"], unique: false },
   // user_email_unique_ci is a functional index (lower(email)): PostgreSQL
   // records its indkey as 0 for the expression column, which readSchemaContract's
   // introspection join over pg_attribute cannot resolve, so it never appears
@@ -318,6 +320,8 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   credential_setup_tokens_token_hash_unique: unique("credential_setup_tokens", ["token_hash"]),
   credential_setup_tokens_user_id_users_id_fk: foreign("credential_setup_tokens", ["user_id"], "users", ["id"], "cascade"),
   credential_setup_tokens_created_by_users_id_fk: foreign("credential_setup_tokens", ["created_by_user_id"], "users", ["id"], "set_null"),
+  step_up_proofs_pkey: primary("step_up_proofs", ["id"]),
+  step_up_proofs_session_id_sessions_id_fk: foreign("step_up_proofs", ["session_id"], "sessions", ["id"], "cascade"),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;
