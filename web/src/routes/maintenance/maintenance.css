@@ -15,10 +15,13 @@ body{background:#060a18}
   --ink:#e9edf8;--ink-mid:#8791b3;--ink-faint:#737e9e;--ink-quiet:#8b95b6;
   --accent:#d8b45a;--star-far:#e9edf8;--star-near:#f4f0ff}
 
-/* the shimmer on the limb: each arc fades on its own period and delay,
-   both set per arc by sky.js, so the ring never glints in step */
-.shimmer path{opacity:0;animation:shim 4s ease-in-out infinite alternate}
-@keyframes shim{from{opacity:0}to{opacity:var(--o,.5)}}
+/* glints on the limb: each flares up fast and dies slowly on its own period
+   and delay (both set per glint by sky.js), lit for about a third of its
+   cycle, so a few sparkle at any moment and never the same few */
+.glints .glint{opacity:0;transform-box:fill-box;transform-origin:center;
+          animation:glint 6s ease-in-out infinite}
+@keyframes glint{0%,62%{opacity:0;transform:scale(.35)}70%{opacity:1;transform:scale(1)}
+                 80%{opacity:.55;transform:scale(.9)}100%{opacity:0;transform:scale(.5)}}
 
 /* corona layers — every group breathes on its own period, nothing in sync */
 .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
@@ -93,21 +96,22 @@ body{background:#060a18}
   74%{opacity:.3}
   79%,100%{opacity:0}
 }
-/* The notice column sits beneath the ring — its lower edge is at 62.6% of
-   the height at the design's aspect ratio — and runs to the bottom, so the
-   drawer has somewhere to open into. Everything in it is centred and narrow:
+/* The notice column sits beneath the ring — the world's viewBox starts at
+   y=90 so the ring's lower edge is at about 52% of the height at any aspect
+   ratio, and the text starts clear of the corona's glow (owner, 2026-09-09)
+   — and runs to the bottom, so the drawer has somewhere to open into. Everything in it is centred and narrow:
    an announcement, not a document. */
-.notice{position:fixed;left:0;right:0;top:65vh;bottom:0;z-index:3;
+.notice{position:fixed;left:0;right:0;top:69vh;bottom:0;z-index:3;
         display:flex;flex-direction:column;align-items:center;gap:12px;
         padding:0 24px calc(16px + env(safe-area-inset-bottom));text-align:center}
 .notice p{margin:0}
-.msg{margin:0;font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
+.msg{margin:0;font:500 16px var(--mono);letter-spacing:.28em;color:var(--ink);
      text-transform:uppercase}
 .latest{display:flex;flex-direction:column;gap:6px;max-width:44ch}
-.when{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-quiet);
+.when{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
       text-transform:uppercase}
-.body{font:400 15px/1.5 var(--ui);color:var(--ink)}
-.back{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
+.body{font:400 18px/1.5 var(--ui);color:var(--ink)}
+.back{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink);
       text-transform:uppercase}
 .back time{color:var(--accent)}
 
@@ -135,6 +139,6 @@ body{background:#060a18}
 .log .body{font-size:13px;color:var(--ink-mid)}
 @media (prefers-reduced-motion: reduce){
   .flare,.wash,.ringflare,.flarewave{opacity:0!important}
-  .shimmer path{animation:none;opacity:.28}
+  .glints .glint{animation:none;opacity:.45}
   .earlier summary,.earlier summary svg{transition:none}
 }
