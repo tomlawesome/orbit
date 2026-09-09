@@ -98,6 +98,7 @@ function factsFor(_fixture: Fixture): OidcSecretFileFacts {
 
 const completeCore: EnvOrbitRecord = {
   APP_URL: "https://orbit.parity.invalid",
+  ORBIT_AUTH_OIDC: "true",
   OIDC_ISSUER: "https://oidc.parity.invalid/application/o/orbit/",
   OIDC_CLIENT_ID: "orbit-parity",
   OIDC_CLIENT_SECRET_FILE: CANONICAL_OIDC_SECRET_FILE_PATH,
@@ -108,6 +109,20 @@ const completeCore: EnvOrbitRecord = {
 
 const fixtures: Record<string, Fixture> = {
   "complete core, no optional groups": { record: completeCore },
+  // ADR-0023 §1 (M7 slice 1): local sign-in is always available; OIDC is
+  // enabled only by this explicit key.
+  "local-only: ORBIT_AUTH_OIDC unset, OIDC fields absent": {
+    record: {
+      APP_URL: completeCore.APP_URL,
+      ORBIT_IMAGE: completeCore.ORBIT_IMAGE,
+    },
+  },
+  "ORBIT_AUTH_OIDC=false with a full provider block left in place stays ready, fields not in use": {
+    record: { ...completeCore, ORBIT_AUTH_OIDC: "false" },
+  },
+  "ORBIT_AUTH_OIDC=true with a blank OIDC_ISSUER fails readiness by field name": {
+    record: { ...completeCore, OIDC_ISSUER: "" },
+  },
   "loopback APP_URL is not deployment-ready": {
     record: {
       ...completeCore,

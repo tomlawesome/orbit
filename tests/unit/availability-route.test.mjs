@@ -29,7 +29,7 @@ describe("GET /api/auth/availability", () => {
     mocks.getAuthConfig.mockReset();
     mocks.readPublicContactAddress.mockReset();
     mocks.getBootPhase.mockReset();
-    mocks.getAuthConfig.mockReturnValue({});
+    mocks.getAuthConfig.mockReturnValue({ oidc: null });
     mocks.readPublicContactAddress.mockResolvedValue(null);
   });
 
@@ -66,6 +66,24 @@ describe("GET /api/auth/availability", () => {
     const response = await GET();
     const body = await response.json();
 
-    expect(body).toEqual({ configured: false, phase: "running", contactAddress: "ops@example.com" });
+    expect(body).toEqual({
+      configured: false,
+      claimed: true,
+      methods: { local: true, oidc: false },
+      phase: "running",
+      contactAddress: "ops@example.com",
+    });
+  });
+
+  it("reports methods.oidc true only when getAuthConfig returns a non-null oidc block (M7 slice 1)", async () => {
+    mocks.getBootPhase.mockReturnValue("running");
+    mocks.getAuthConfig.mockReturnValue({ oidc: { issuer: "https://auth.example/" } });
+
+    const { GET } = await import("../../web/src/routes/api/auth/availability/+server.js");
+    const response = await GET();
+    const body = await response.json();
+
+    expect(body.methods).toEqual({ local: true, oidc: true });
+    expect(body.claimed).toBe(true);
   });
 });

@@ -55,6 +55,7 @@ function makeReadyFixture() {
   writeFileSync(join(dir, ".orbit-secrets", "oidc-client-secret"), "fixture-secret\n", { mode: 0o600 });
   const record = [
     "APP_URL=https://orbit.bundle-smoke.invalid",
+    "ORBIT_AUTH_OIDC=true",
     "OIDC_ISSUER=https://oidc.bundle-smoke.invalid/application/o/orbit/",
     "OIDC_CLIENT_ID=orbit-bundle-smoke",
     `OIDC_CLIENT_SECRET_FILE=${CANONICAL_OIDC_SECRET_FILE_PATH}`,

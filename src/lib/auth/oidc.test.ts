@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AuthConfig } from "../env";
+import type { OidcAuthConfig } from "../env";
 import type { TokenExchangeReason } from "./errors";
 import {
   createAuthorizationUrl,
@@ -13,17 +13,13 @@ import {
   type OidcMetadata,
 } from "./oidc";
 
-const config: AuthConfig = {
-  appUrl: new URL("https://orbit.example"),
-  sessionSecret: "test-secret-that-is-at-least-thirty-two-characters",
-  sessionTtlSeconds: 3600,
+const config: OidcAuthConfig = {
   issuer: "https://auth.example/application/o/orbit/",
   clientId: "orbit",
   clientSecret: "secret",
   callbackUrl: "https://orbit.example/api/auth/callback",
   scopes: "openid profile email",
   claims: { email: "email", emailVerified: "email_verified", name: "name", avatar: "picture" },
-  secureCookies: true,
 };
 
 const metadata: OidcMetadata = {

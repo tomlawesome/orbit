@@ -1,3 +1,4 @@
+import { AuthError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
 import { setTransactionCookie } from "orbit/lib/auth/cookies";
 import { randomUrlSafe, safeReturnPath, sealLoginTransaction } from "orbit/lib/auth/crypto";
@@ -23,7 +24,10 @@ import { api } from "$lib/server/api.js";
 export const GET = api(
   async (event) => {
     const config = getAuthConfig();
-    const metadata = await discoverProvider(config);
+    if (!config.oidc) {
+      throw new AuthError("auth_not_configured", "OpenID Connect sign-in is not configured on this instance", 503);
+    }
+    const metadata = await discoverProvider(config.oidc);
 
     /* State, nonce and verifier are generated per attempt and sealed into the
        transaction cookie, so a replayed callback cannot be matched against a
@@ -41,7 +45,7 @@ export const GET = api(
     return new Response(null, {
       status: 302,
       headers: {
-        location: createAuthorizationUrl(config, metadata, transaction).href,
+        location: createAuthorizationUrl(config.oidc, metadata, transaction).href,
         "cache-control": "no-store",
       },
     });
