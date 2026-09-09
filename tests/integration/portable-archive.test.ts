@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import { items } from "@/db/schema";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import { importPortableArchive } from "@/server/portable-archive-repository";
+import { openMetadataReader } from "@/server/metadata/tier1";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
 const passphrase = "correct-horse-battery-staple";
@@ -80,9 +81,14 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
       conflictItemIds: [],
     });
     expect(result.importedItems).toBe(1);
-    const [stored] = await getDb().select({ notes: items.notes }).from(items)
+    // Notes are Tier 1 now (ADR-0024): the import writes the envelope and
+    // clears the plaintext, so the cap is asserted on the decrypted value.
+    const [stored] = await getDb().select({ id: items.id, notes: items.notes, notesEnc: items.notesEnc }).from(items)
       .where(and(eq(items.householdId, fixture.household.id), eq(items.title, "Imported item")));
-    expect(stored?.notes).toHaveLength(2_000);
+    expect(stored?.notes).toBeNull();
+    const metadata = await openMetadataReader(fixture.household.id);
+    expect(metadata.text("items.notes", stored.id, { encrypted: stored.notesEnc, plaintext: stored.notes }).value)
+      .toHaveLength(2_000);
   });
 
   it("rejects out-of-range costMinor and recurrenceMonths the same way", async () => {

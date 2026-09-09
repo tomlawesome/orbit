@@ -120,6 +120,11 @@ export const operationalReasons = [
      because a provider that ignores `max_age` blocks every sensitive action;
      the record names no person and no provider text. */
   "step_up_rejected",
+  /* Tier 1 metadata (ADR-0024 decision 5): one stored value would not
+     authenticate. The record names the table, column and row so an
+     administrator can find it; it never carries the value, the ciphertext or
+     any key material, and the rest of the row keeps working. */
+  "metadata_integrity_failed",
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
 
@@ -161,6 +166,8 @@ export const operationalImpacts = [
   "backup_unavailable",
   "recovery_blocked",
   "worker_degraded",
+  /* One field is unreadable, not the row and not the application. */
+  "metadata_field_unreadable",
 ] as const;
 export type OperationalImpact = typeof operationalImpacts[number];
 
@@ -219,6 +226,10 @@ export const operationalEvents = {
   "recovery.operation": "recovery",
   "maintenance.worker": "maintenance",
   "configuration.problem": "configuration",
+  /* Tier 1 metadata encryption (ADR-0024): a value that failed its integrity
+     check, and the resumable backfill that converts pre-encryption rows. */
+  "metadata.integrity": "metadata",
+  "metadata.backfill": "metadata",
 } as const;
 export type OperationalEventName = keyof typeof operationalEvents;
 export type OperationalComponent = typeof operationalEvents[OperationalEventName];
