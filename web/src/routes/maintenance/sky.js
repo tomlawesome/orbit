@@ -47,4 +47,33 @@ export function mountTotalitySky() {
     if (rng() < 0.3) { c.setAttribute("class", "tw"); c.style.animationDelay = (rng() * 6).toFixed(1) + "s"; }
     near.appendChild(c); made++;
   }
+  mountShimmer();
+}
+
+/**
+ * The shimmer on the photon ring (owner, 2026-09-09): short arcs just outside
+ * the crisp 1.2-wide ring, each fading in and out on its own period and
+ * delay, so the limb glints unevenly rather than pulsing as one. Plain
+ * strokes with an opacity animation — no filter, nothing for the GPU law to
+ * object to (#902). Same seed each load, so the picture is reproducible.
+ */
+function mountShimmer() {
+  const rng = seededRng(20260909);
+  const host = document.getElementById("shimmer");
+  if (!host) return;
+  const NS = "http://www.w3.org/2000/svg";
+  const R = 172.4;
+  for (let i = 0; i < 34; i++) {
+    const a0 = rng() * Math.PI * 2;
+    const span = (3 + rng() * 11) * (Math.PI / 180);
+    const x1 = 800 + R * Math.cos(a0), y1 = 440 + R * Math.sin(a0);
+    const x2 = 800 + R * Math.cos(a0 + span), y2 = 440 + R * Math.sin(a0 + span);
+    const arc = document.createElementNS(NS, "path");
+    arc.setAttribute("d", `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`);
+    arc.setAttribute("stroke-width", (0.8 + rng() * 1.4).toFixed(2));
+    arc.style.setProperty("--o", (0.3 + rng() * 0.45).toFixed(2));
+    arc.style.animationDuration = (2.2 + rng() * 3.6).toFixed(1) + "s";
+    arc.style.animationDelay = (-rng() * 6).toFixed(1) + "s";
+    host.appendChild(arc);
+  }
 }

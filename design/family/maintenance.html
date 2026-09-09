@@ -11,6 +11,8 @@ body{background:#060a18}
 @keyframes driftn{to{transform:translateX(-1600px)}}
 .tw{animation:twinkle 5s ease-in-out infinite alternate}
 @keyframes twinkle{from{opacity:.2}to{opacity:.85}}
+.shimmer path{opacity:0;animation:shim 4s ease-in-out infinite alternate}
+@keyframes shim{from{opacity:0}to{opacity:var(--o,.5)}}
 
 /* corona layers — every group breathes on its own period, nothing in sync */
 .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
@@ -107,6 +109,7 @@ body{background:#060a18}
 .grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
 @media (prefers-reduced-motion: reduce){
   .flare,.wash,.ringflare,.flarewave{opacity:0!important}
+  .shimmer path{animation:none;opacity:.28}
   .earlier summary,.earlier summary svg{transition:none}
 }
 </style></head><body>
@@ -274,6 +277,8 @@ body{background:#060a18}
   <circle cx="800" cy="440" r="170" fill="none" stroke="#ffb46a" stroke-width="7" opacity=".22" filter="url(#b9)"/>
   <circle class="ring-inner" cx="800" cy="440" r="170" fill="none" stroke="#ffe9bd" stroke-width="3.2" opacity=".8" filter="url(#b2)"/>
   <circle cx="800" cy="440" r="170" fill="none" stroke="#fffdf6" stroke-width="1.2" opacity=".95"/>
+  <!-- the shimmer on the limb: filled by the script below, no filter -->
+  <g id="shimmer" class="shimmer" fill="none" stroke="#fffdf6" stroke-linecap="round"></g>
 
   <!-- the diamond ring: service returning (demo loops) -->
   <g class="flare">
@@ -366,6 +371,23 @@ while (made < 26) {
   c.setAttribute("opacity", (0.45 + rng() * 0.4).toFixed(2));
   if (rng() < 0.3) { c.setAttribute("class", "tw"); c.style.animationDelay = (rng() * 6).toFixed(1) + "s"; }
   near.appendChild(c); made++;
+}
+// the shimmer on the limb: short arcs just outside the ring, each on its own clock
+{
+  const rng2 = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(20260909);
+  const host = document.getElementById("shimmer"), R = 172.4;
+  for (let i = 0; i < 34; i++) {
+    const a0 = rng2() * Math.PI * 2, span = (3 + rng2() * 11) * (Math.PI / 180);
+    const x1 = 800 + R * Math.cos(a0), y1 = 440 + R * Math.sin(a0);
+    const x2 = 800 + R * Math.cos(a0 + span), y2 = 440 + R * Math.sin(a0 + span);
+    const arc = document.createElementNS(NS, "path");
+    arc.setAttribute("d", `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`);
+    arc.setAttribute("stroke-width", (0.8 + rng2() * 1.4).toFixed(2));
+    arc.style.setProperty("--o", (0.3 + rng2() * 0.45).toFixed(2));
+    arc.style.animationDuration = (2.2 + rng2() * 3.6).toFixed(1) + "s";
+    arc.style.animationDelay = (-rng2() * 6).toFixed(1) + "s";
+    host.appendChild(arc);
+  }
 }
 </script>
 </body></html>
