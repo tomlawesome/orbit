@@ -35,6 +35,11 @@ body{background:#060a18}
 .horizon{animation:horiz 17s ease-in-out infinite alternate}
 @keyframes horiz{from{opacity:.75}to{opacity:1}}
 
+/* #902: the rasters stay invisible until every one has loaded, then all
+   appear in the same frame (the page script flips `ready`). visibility, not
+   opacity, because the flicker/sway keyframes above own opacity. */
+.world[data-rasterised="pending"] image[data-r]{visibility:hidden}
+
 /* the diamond ring — service returning; demo loops every 36s */
 .flare{opacity:0;animation:ringflash 36s linear infinite}
 @keyframes ringflash{

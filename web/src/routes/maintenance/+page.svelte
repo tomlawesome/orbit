@@ -325,8 +325,10 @@
       /* Marks this surface for the fidelity gate (screens.spec.js), which
          waits for it before screenshotting so the async decode below can
          never race a capture. Set before the first await, so it is in the
-         DOM by the time mount returns and the gate cannot look too early. */
-      world.dataset.rasterised = "pending";
+         DOM by the time mount returns and the gate cannot look too early.
+         Left at `ready` on a resize rebuild, so the rasters already showing
+         are not hidden (maintenance.css) while their replacements build. */
+      if (world.dataset.rasterised !== "ready") world.dataset.rasterised = "pending";
 
       /* One raster per frame, not thirteen in one task (#798): each is
          rendered, encoded and set aside on its own, with a frame's rest
@@ -358,15 +360,34 @@
         if (stale()) return;
       }
 
+      /* The warm decode above is a hint, not a promise: WebKit may still
+         decode the <image> hrefs on their own clocks, and the owner saw the
+         big corona layers arrive after the rest. So the hrefs are set while
+         the rasters are still invisible (maintenance.css hides them until
+         `ready`), each <image> is waited for, and only then does the whole
+         set appear in one frame. */
+      /** @type {Promise<void>[]} */
+      const shown = [];
       for (const [name, url] of built) {
         const img = world.querySelector(`image[data-r="${name}"]`);
+        if (!img) continue;
         const f = frameOf(GROUPS[/** @type {keyof typeof GROUPS} */ (name)].crop, scale);
-        img?.setAttribute("x", String(f.x));
-        img?.setAttribute("y", String(f.y));
-        img?.setAttribute("width", String(f.w));
-        img?.setAttribute("height", String(f.h));
-        img?.setAttribute("href", url);
+        shown.push(
+          new Promise((resolve) => {
+            img.addEventListener("load", () => resolve(), { once: true });
+            img.addEventListener("error", () => resolve(), { once: true });
+          }),
+        );
+        img.setAttribute("x", String(f.x));
+        img.setAttribute("y", String(f.y));
+        img.setAttribute("width", String(f.w));
+        img.setAttribute("height", String(f.h));
+        img.setAttribute("href", url);
       }
+      await Promise.all(shown);
+      if (stale()) return;
+      await new Promise((r) => requestAnimationFrame(r));
+      if (stale()) return;
       world.dataset.rasterised = "ready";
     }
 
