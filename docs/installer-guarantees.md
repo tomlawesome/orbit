@@ -19,9 +19,9 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   the fixed safe/reversible action set only: fix-permissions,
   restore-transaction, restart-services; stage two/dangerous actions remain
   unimplemented) was added 2026-08-13.
-- **Totals:** 370 guarantees — 213 HIGH, 124 MEDIUM, 33 LOW.
+- **Totals:** 371 guarantees — 214 HIGH, 124 MEDIUM, 33 LOW.
   Install/configuration family: 207 (118 HIGH). Backup/recovery/deploy
-  family: 163 (95 HIGH).
+  family: 164 (96 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
   harness scenarios cite entries here. Line numbers drift — treat the
@@ -689,6 +689,11 @@ and a separate `--recover` manual-recovery mode for crash safety.
 48. Restore is marked `completed` — and the journal/checkpoint purged — only after documents are replaced, the database is restored, scan leases are reset, active correspondence validates, and the health check passes; any single failure short-circuits into rollback instead.
     `restore.sh:930-933` — category: transactional/rollback — criticality: HIGH
 
+**Authentication data and the revocation boundary (#917, ADR-0022 §6, ADR-0023 §7)**
+
+49. The unconditional whole-database swap (guarantee 25) applies to authentication state with no special-casing: a `local_credentials` password hash and an unconsumed `credential_setup_tokens` row present at backup time are restored byte-for-byte intact, while a `sessions` row created after the backup point is absent from the restored database because it was never part of the dump — restoring an earlier backup cannot resurrect a session an operator believed was already revoked. `scripts/test-backup-restore.sh`'s `assert_credential_fixture_present` exercises all three on every run of the drill.
+    `restore.sh:578-583` — category: provenance/immutability — criticality: HIGH
+
 ---
 
 ## build-container.sh
@@ -755,21 +760,21 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 ## Summary
 
-**Total guarantees catalogued: 163**
+**Total guarantees catalogued: 164**
 
 ### Counts by criticality
 
 | Criticality | Count |
 |---|---|
-| HIGH | 95 |
+| HIGH | 96 |
 | MEDIUM | 54 |
 | LOW | 14 |
-| **Total** | **163** |
+| **Total** | **164** |
 
 ### Counts by category
 
 An entry may belong to more than one category (e.g. "secret-handling / refusal"), so the
-category tag counts below sum to more than 163. `deployment-correctness` is a category used
+category tag counts below sum to more than 164. `deployment-correctness` is a category used
 only for `build-container.sh`/`deploy-container.sh`/`update-and-start.sh` items that are
 about correct deployment behavior rather than data-loss/security boundaries; it falls outside
 the original 8-category taxonomy and is called out separately.
@@ -779,7 +784,7 @@ the original 8-category taxonomy and is called out separately.
 | input-validation | 55 |
 | secret-handling | 42 |
 | refusal / fail-closed | 29 |
-| provenance/immutability | 30 |
+| provenance/immutability | 31 |
 | transactional/rollback | 26 |
 | recovery | 16 |
 | idempotency | 7 |
@@ -794,7 +799,7 @@ the original 8-category taxonomy and is called out separately.
 | export-recovery-bundle.sh | 16 |
 | import-recovery-bundle.sh | 27 |
 | recovery-crypto.mjs | 16 |
-| restore.sh | 48 |
+| restore.sh | 49 |
 | build-container.sh | 6 |
 | deploy-container.sh | 8 |
 | update-and-start.sh | 4 |
