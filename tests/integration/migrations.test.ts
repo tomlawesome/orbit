@@ -31,6 +31,14 @@ async function insertFixtureHousehold(client: MigrationTestClient, id: string): 
   await client.unsafe(`INSERT INTO "households" (id, name) VALUES ($1, $2)`, [id, "Synthetic readiness household"]);
 }
 
+async function insertFixtureUser(client: MigrationTestClient, email: string): Promise<string> {
+  const [row] = await client.unsafe(
+    `INSERT INTO "users" ("email", "display_name") VALUES ($1, $2) RETURNING "id"`,
+    [email, "Fixture user"],
+  );
+  return String(row.id);
+}
+
 async function insertFixtureDocument(client: MigrationTestClient, params: {
   householdId: string;
   lifecycle: string;
@@ -428,5 +436,47 @@ describe("PostgreSQL migration evidence", () => {
       display_name: legacyDisplayName,
       content_sha256: legacyHash,
     }]);
+  });
+
+  it("treats email as the same identity regardless of case (0038, ADR-0023 §2)", async () => {
+    const database = await createMigrationTestDatabase("email-case-insensitive");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const insertUser = (email: string) => database.client.unsafe(
+      `INSERT INTO "users" ("email", "display_name") VALUES ($1, $2)`,
+      [email, "Fixture user"],
+    );
+
+    await expect(insertUser("person@example.invalid")).resolves.toBeDefined();
+    /* Same address, different case: the unique index is on lower(email), so
+       this must collide even though no plain-text unique constraint does. */
+    await expect(insertUser("Person@Example.invalid")).rejects.toThrow(/user_email_unique_ci/u);
+    await expect(insertUser("someone-else@example.invalid")).resolves.toBeDefined();
+  });
+
+  it("bounds a credential setup token to its two purposes and cascades with its user (0038, ADR-0023 §2)", async () => {
+    const database = await createMigrationTestDatabase("credential-setup-tokens");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const userId = await insertFixtureUser(database.client, "setup-token-owner@example.invalid");
+    const insertToken = (purpose: string, tokenHash: string) => database.client.unsafe(
+      `INSERT INTO "credential_setup_tokens" ("user_id", "token_hash", "purpose", "expires_at")
+       VALUES ($1, $2, $3, now() + interval '1 day')`,
+      [userId, tokenHash, purpose],
+    );
+
+    await expect(insertToken("setup", "a".repeat(64))).resolves.toBeDefined();
+    await expect(insertToken("recovery", "b".repeat(64))).resolves.toBeDefined();
+    await expect(insertToken("bogus", "c".repeat(64))).rejects.toThrow(/credential_setup_tokens_purpose/u);
+
+    /* The setup token is a child of the user it was issued for: deleting the
+       user must not leave an orphaned token behind. */
+    await database.client.unsafe(`DELETE FROM "users" WHERE "id" = $1`, [userId]);
+    expect(await database.client.unsafe(
+      `SELECT count(*)::int AS count FROM "credential_setup_tokens" WHERE "user_id" = $1`,
+      [userId],
+    )).toEqual([{ count: 0 }]);
   });
 });
