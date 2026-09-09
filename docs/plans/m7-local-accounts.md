@@ -221,9 +221,13 @@ Composition calls made here so the build slices contain none:
   every device" already uses at `:237-260`); an OIDC-only user's action
   redirects to the step-up and returns to the same block.
 - Administration users table: an **Add a local user** row above the table
-  (email, display name, Create) whose success state shows the setup link
-  once with a Copy control and the words "shown once"; each local user's
-  row gains "Send a new setup link" behind the same inline challenge.
+  (email, display name, "link valid for" 1–14 days defaulting to 7, Create)
+  whose success state says "Setup link sent to <email>, valid until
+  <date>" — the link itself is never shown (owner ruling, 2026-09-09,
+  replacing the earlier "shown once with a Copy control"; ADR-0023 §3);
+  a mail failure shows the bounded reason and a Retry. Each local user's
+  row gains "Send a new setup link" (same lifetime field) behind the same
+  inline challenge.
 
 ### 2.8 Audit and operational records
 
@@ -446,8 +450,13 @@ Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
   `web/src/routes/api/auth/local/setup/+server.js`,
   `web/src/routes/api/auth/local/password/+server.js`, `admin-operations.ts`
   labels.
-- **Done when:** POST creates a user with no credential and returns the URL
-  once; the list never contains it; consuming a token sets the password,
+- **Done when:** POST creates a user with no credential and emails the
+  setup link to that address with the administrator's chosen lifetime
+  (`expiresInDays` 1–14, default 7; revised 2026-09-09, owner ruling in
+  ADR-0023 §3 — the first cut returned the URL once); the response and the
+  list never contain the URL; a mail failure is one of the invitation
+  mailer's bounded errors and the user still exists, so the administrator
+  can send again; re-issuing invalidates earlier tokens; consuming a token sets the password,
   marks it consumed, creates a session; a consumed or expired token is
   `setup_token_invalid`; a password change revokes N sessions and the caller
   keeps a working one; a non-administrator gets 403 from both admin routes.
