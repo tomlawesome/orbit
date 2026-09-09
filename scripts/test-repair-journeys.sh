@@ -245,6 +245,50 @@ install_deployment() {
   owner="$(docker inspect orbit-postgres --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
   [[ "$owner" == "$project" ]] ||
     fail "the stack is not owned by $project (got '${owner:-none}'); refusing to continue"
+
+  apply_ci_healthcheck_override
+}
+
+# Shortens the app's healthcheck interval for this throwaway deployment, so
+# the unhealthy-app journey's wait for Docker's own health flip costs about
+# fifty seconds instead of about two minutes (#923 recommendation 20). The
+# override changes the interval and nothing else -- probe command, probe
+# timeout and retry count are still the image's own, and the production
+# numbers are held honest by scripts/healthcheck-timing-contract.test.mjs
+# rather than by this harness sitting through them.
+#
+# It has to go in AFTER install.sh runs, not before: install.sh accepts a
+# non-empty target only when it is already a deployment or is a
+# pre-provisioned input holding exactly .env-orbit and .orbit-secrets
+# (install.sh's is_preprovisioned_input), so seeding a third file first would
+# make the install refuse. `docker-compose.override.yml` is the name Compose
+# loads automatically beside docker-compose.yml, which is what puts the
+# override in front of every later compose call -- this harness's, repair.sh's
+# and install.sh's alike -- rather than only the one that installed it.
+#
+# Recreating orbit-app is what applies it: a container's healthcheck is fixed
+# when the container is created. That is also why nothing later in the run can
+# lose it -- repair.sh's restart-services uses `docker restart` on the
+# existing container (repair.sh's restart_compose_service), which keeps the
+# configuration it was created with.
+apply_ci_healthcheck_override() {
+  local interval
+  cp -a -- "$repo_root/compose/docker-compose.repair-journeys-ci.yml" \
+    "$target/docker-compose.override.yml" ||
+    fail 'could not place the CI healthcheck override in the target'
+
+  compose up -d --no-deps --force-recreate orbit-app >/dev/null 2>&1 ||
+    fail 'could not recreate the app container with the CI healthcheck override'
+
+  # Prove it landed. Without this a Compose that stopped auto-loading the
+  # override file would leave the journey waiting the full production
+  # interval, and the only symptom would be unhealthy-app timing out on a
+  # deadline that no longer allows for it -- a failure that reads as a
+  # broken repair path rather than as a missing override.
+  interval="$(docker inspect orbit \
+    --format '{{if .Config.Healthcheck}}{{.Config.Healthcheck.Interval}}{{end}}' 2>/dev/null || true)"
+  [[ "$interval" == 2s ]] ||
+    fail "the CI healthcheck override did not take effect (interval '${interval:-none}', wanted 2s)"
 }
 
 # docker-compose.yml pins fixed container names (orbit, orbit-postgres, ...),
@@ -1126,11 +1170,16 @@ journey_failed_db_migration() {
 
 # A genuinely wedged application: SIGSTOP freezes the app's PID 1, so the
 # health endpoint stops answering while the container keeps running, and
-# Docker's own healthcheck (interval 10s, retries 10) eventually marks it
-# unhealthy — the exact state an operator sees from a hung app. A restart
-# genuinely fixes it, which is what makes restart-services the honest
-# routing to prove here. The docker-status wait is the long pole: the flip
-# needs ten consecutive probe failures, so the deadline is generous.
+# Docker's own healthcheck eventually marks it unhealthy — the exact state an
+# operator sees from a hung app. A restart genuinely fixes it, which is what
+# makes restart-services the honest routing to prove here.
+#
+# The docker-status wait is still the long pole: the flip needs ten
+# consecutive probe failures, each of which sits out the 3s probe timeout
+# before the interval starts again. apply_ci_healthcheck_override cuts the
+# interval to 2s for this deployment only, which puts the flip near fifty
+# seconds instead of the production interval's two minutes; the deadline
+# below leaves more than double that for a contended runner.
 journey_unhealthy_app() {
   local before output status=0 health deadline
   before="$(deployment_manifest)"
@@ -1138,13 +1187,13 @@ journey_unhealthy_app() {
   docker kill --signal=STOP orbit >/dev/null 2>&1 ||
     fail 'unhealthy-app: could not freeze the app container'
 
-  deadline=$((SECONDS + 240))
+  deadline=$((SECONDS + 120))
   while :; do
     health="$(docker inspect orbit --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || true)"
     [[ "$health" == unhealthy ]] && break
     ((SECONDS < deadline)) || { docker kill --signal=CONT orbit >/dev/null 2>&1 || true
       fail 'unhealthy-app: the frozen app never reached docker health status unhealthy'; }
-    sleep 5
+    sleep 2
   done
 
   # On failure, print the window repair.sh step 12 reads. Which run of the
