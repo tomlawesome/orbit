@@ -90,6 +90,24 @@ const fakeConfigureScript =
     "  --init)",
     '    [[ "${FAKE_CONFIGURE_INIT_FAIL:-}" != "1" ]] || exit 42',
     '    profile_lines="$(grep -E "^(COMPOSE_PROFILES|TIKA_URL|OLLAMA_MODEL)=" .env-orbit 2>/dev/null || true)"',
+    // #918: install.sh hands an existing deployment's sign-in mode to --init
+    // via ORBIT_CONFIGURE_AUTH_MODE. This fake only mirrors the wiring under
+    // test here (which env var install.sh passes and when); configure.sh's
+    // own guided_init handling of ORBIT_CONFIGURE_AUTH_MODE is covered
+    // directly in scripts/configure.test.mjs.
+    '    if [[ "${ORBIT_CONFIGURE_AUTH_MODE:-}" == "local" ]]; then',
+    "      exec {fake_tty_fd}<>/dev/tty",
+    '      IFS= read -r -u "$fake_tty_fd" app_url || exit 1',
+    "      exec {fake_tty_fd}>&-",
+    "      cat > .env-orbit <<ENV",
+    "APP_URL=${app_url}",
+    "ORBIT_IMAGE=${ORBIT_IMAGE:-fake-registry.example/example/orbit-fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
+    "ORBIT_AUTH_OIDC=false",
+    "ENV",
+    '      [[ -z "$profile_lines" ]] || printf "%s\\n" "$profile_lines" >> .env-orbit',
+    "      chmod 600 .env-orbit",
+    "      exit 0",
+    "    fi",
     '    if [[ "${FAKE_CONFIGURE_INIT_PROMPT:-}" == "1" ]]; then',
     "      exec {fake_tty_fd}<>/dev/tty",
     '      IFS= read -r -u "$fake_tty_fd" app_url || exit 1',
@@ -1381,6 +1399,35 @@ describe("install.sh", () => {
     expect(result.stdout).toContain(
       'Claim this instance: run "docker compose --env-file .env-orbit logs orbit-app" and open the link on its last line to create the first administrator.',
     );
+  });
+
+  // #918: a recognized local-only deployment missing APP_URL used to have
+  // its sign-in mode re-asked (and, under machine prompts, the OIDC trio
+  // demanded) by a bare `configure.sh --init`. install.sh now reads the
+  // existing ORBIT_AUTH_OIDC and hands --init an explicit
+  // ORBIT_CONFIGURE_AUTH_MODE, so only APP_URL is asked and the deployment
+  // stays local-only.
+  it("hands the existing local-only sign-in mode to guided --init during an interactive update", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const environmentPath = join(targetDir, ".env-orbit");
+    writeFileSync(
+      environmentPath,
+      ["ORBIT_AUTH_OIDC=false", "ORBIT_IMAGE=", ""].join("\n"),
+    );
+    chmodSync(environmentPath, 0o600);
+
+    const appUrl = "https://orbit.local-only-repair.internal";
+    const result = runInstallWithControllingTerminal(targetDir, {}, `${appUrl}\n`, ["--update"]);
+
+    expect(result.status).toBe(0);
+    const environment = readFileSync(environmentPath, "utf8");
+    expect(environment).toContain(`APP_URL=${appUrl}`);
+    expect(environment).toContain("ORBIT_AUTH_OIDC=false");
+    expect(environment).not.toContain("OIDC_ISSUER=https://");
+    expect(result.stdout).not.toContain("[local/oidc]");
+    expect(result.stdout).not.toContain("OIDC_ISSUER");
+    expect(result.calls).not.toContain("curl oidc-discovery");
   });
 
   it("rejects unsupported installer options before any external action", () => {

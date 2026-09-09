@@ -1019,8 +1019,26 @@ prepare_configuration() {
     if [[ -n "$missing" ]] && has_controlling_terminal; then
       guided_missing="$(missing_guided_fields "$readiness")"
       if [[ -n "$guided_missing" ]]; then
-        bash scripts/configure.sh --init ||
-          fail "Guided configuration was cancelled or invalid; restoring the previous deployment."
+        # An existing deployment already chose its sign-in mode (#918): hand
+        # it to --init so a local-only target is asked for APP_URL alone and
+        # an OIDC one for its provider fields, rather than re-asking the mode
+        # question or, under machine prompts, demanding the OIDC trio a
+        # local-only deployment never uses. A file with no ORBIT_AUTH_OIDC at
+        # all leaves the choice to --init. An operator's own explicit
+        # ORBIT_CONFIGURE_AUTH_MODE still wins.
+        existing_auth_mode="$(read_environment_value ORBIT_AUTH_OIDC 2>/dev/null || true)"
+        case "${ORBIT_CONFIGURE_AUTH_MODE:-}:${existing_auth_mode}" in
+          :true) configure_auth_mode=oidc ;;
+          :false) configure_auth_mode=local ;;
+          *) configure_auth_mode="${ORBIT_CONFIGURE_AUTH_MODE:-}" ;;
+        esac
+        if [[ -n "$configure_auth_mode" ]]; then
+          ORBIT_CONFIGURE_AUTH_MODE="$configure_auth_mode" bash scripts/configure.sh --init ||
+            fail "Guided configuration was cancelled or invalid; restoring the previous deployment."
+        else
+          bash scripts/configure.sh --init ||
+            fail "Guided configuration was cancelled or invalid; restoring the previous deployment."
+        fi
       fi
 
       readiness="$(bash scripts/configure.sh --check 2>/dev/null)" || true
