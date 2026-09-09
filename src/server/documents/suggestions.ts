@@ -101,7 +101,19 @@ function extractDates(bounded: string): string[] {
   for (const match of bounded.matchAll(DAY_FIRST_NUMERIC)) {
     const index = match.index ?? 0;
     if (match[2] === "." && looksLikeVersion(bounded, index, index + match[0].length)) continue;
-    push(index, isoFromParts(fullYear(match[4]), Number(match[3]), match[1]));
+    const leading = Number(match[1]);
+    const following = Number(match[3]);
+    // Day-first is the house reading, and stays the reading whenever both
+    // numbers could be a month: 06/05/24 is 6 May. Only when the second
+    // number cannot be a month and the first can — 03/15/2026 — is the date
+    // unambiguously month-first, so the swap never guesses.
+    const monthLeads = following > 12 && leading <= 12;
+    push(
+      index,
+      monthLeads
+        ? isoFromParts(fullYear(match[4]), leading, match[3])
+        : isoFromParts(fullYear(match[4]), following, match[1]),
+    );
   }
   for (const match of bounded.matchAll(YEAR_FIRST_NUMERIC)) {
     const index = match.index ?? 0;
@@ -110,17 +122,20 @@ function extractDates(bounded: string): string[] {
   }
   // "the 1st of October 2026" is one date, so the optional "of" belongs to the
   // written-date patterns.
+  // A written date may abbreviate its year the way a numeric one does, so a
+  // plan year reads as "01 Jul 26 - 30 Jun 27". The month name must end at a
+  // word boundary, or a two-digit year would let ordinary prose through.
   const dayFirst = new RegExp(
-    `\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${MONTH_PATTERN})\\.?\\s+(20\\d{2})\\b`,
+    `\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${MONTH_PATTERN})\\b\\.?\\s+(20\\d{2}|\\d{2})(?!\\d)`,
     "giu",
   );
   for (const match of bounded.matchAll(dayFirst)) {
     const month = MONTH_NAMES[match[2].slice(0, 4).toLowerCase()] ??
       MONTH_NAMES[match[2].slice(0, 3).toLowerCase()];
-    push(match.index ?? 0, month ? isoFromParts(match[3], month, match[1]) : undefined);
+    push(match.index ?? 0, month ? isoFromParts(fullYear(match[3]), month, match[1]) : undefined);
   }
   const monthFirst = new RegExp(
-    `\\b(${MONTH_PATTERN})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(20\\d{2})\\b`,
+    `\\b(${MONTH_PATTERN})\\b\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(20\\d{2})\\b`,
     "giu",
   );
   for (const match of bounded.matchAll(monthFirst)) {
@@ -135,8 +150,23 @@ function extractDates(bounded: string): string[] {
     .slice(0, 12);
 }
 
-const REFERENCE_LABEL =
-  /\b(?:policy|plan|account|invoice|licence|license|customer|membership|reference)\b\s*(?:number|no\.?|reference|ref\.?|#)?\s*[:#]?\s*/giu;
+// How a label says "the value after me is the identifier".
+const REFERENCE_QUALIFIER = "(?:number|no\\.?|reference|ref\\.?|#)";
+// Some documents put the reference beside a rival identifier: an MOT test
+// number beside a registration mark and an odometer, a certificate number
+// beside a serial. Those words name the identifier ONLY when the label spells
+// it out — "Test number", "Certificate no.", "Registration ref" — so the
+// heading "MOT TEST CERTIFICATE" and the field "Registration mark" are not
+// labels at all, and cannot hand back the token that happens to follow them.
+const REFERENCE_LABEL = new RegExp(
+  "(?:" +
+    "\\b(?:policy|plan|account|invoice|licence|license|customer|membership|reference)\\b" +
+    `\\s*${REFERENCE_QUALIFIER}?` +
+    "|" +
+    `\\b(?:certificate|test|registration)\\b\\s*${REFERENCE_QUALIFIER}` +
+  ")\\s*[:#]?\\s*",
+  "giu",
+);
 // References run across spaces ("8802 5514 9", "NSM 44/22910"), so the value is
 // read token by token rather than stopping at the first space. Only a
 // reference-shaped token continues the run, which keeps ordinary prose
@@ -180,13 +210,18 @@ const PROVIDER_LABEL = /(?:provider|insurer|supplier)\s*[:\-]\s*([^\r\n]{2,160})
 // A provider is often named in prose instead of after a label: "Sent 12 August
 // 2026 by Hartswood Garage Services, Westhaven".
 const PROVIDER_IN_PROSE = /\bby\s+([A-Z][A-Za-z&'.-]*(?:\s+[A-Z][A-Za-z&'.-]*){1,4})/u;
-// A letterhead names the sender only when it names a kind of organisation and
-// is not itself the document's title: "BOROUGH OF WESTHAVEN" counts, "COUNCIL
-// TAX DEMAND NOTICE" does not.
-const ORGANISATION_WORD =
-  /\b(?:borough|council|authority|ltd|limited|plc|llp|mutual|society|association|company|bank|trust|cooperative|co-operative)\b/iu;
+// "If you pay by Direct Debit we will collect..." names a way of paying, not
+// the company being paid. A confidently wrong provider is worse than none, so
+// these are refused outright rather than ranked below something better.
+const PAYMENT_METHOD =
+  /^(?:direct debit|standing order|bank transfer|credit card|debit card|card payment|cheque|cash)$/iu;
+// A title describes the paper; a letterhead names who sent it. "COUNCIL TAX
+// DEMAND NOTICE" and "QUICK START CARD" are titles.
 const DOCUMENT_WORD =
   /\b(?:statement|certificate|invoice|demand|notice|bill|schedule|agreement|reminder|receipt|card|guide|summary|renewal|invitation|licence|license|policy|plan)\b/iu;
+// A letter opens by addressing its reader. "Dear Mr Lawson," names the
+// recipient, so it is never the sender's letterhead.
+const ADDRESSED_TO_A_PERSON = /^(?:dear|hello|hi)\b|\b(?:mr|mrs|ms|miss|dr)\b/iu;
 const MINOR_WORDS = new Set(["of", "the", "and", "for", "at", "in", "on", "upon"]);
 
 // An all-capitals letterhead is shouting; it is read back as a name.
@@ -200,13 +235,31 @@ function titleCased(line: string): string {
     .join(" ");
 }
 
+// A name is written as a name: every word capitalised or shouted, with
+// ampersands and small joining words allowed between them. "Received with
+// thanks" is a sentence about the document, so it is not one.
+function looksLikeName(words: string[]): boolean {
+  return words.every((word, index) => {
+    if (/^[&+/-]+$/u.test(word)) return true;
+    if (index > 0 && MINOR_WORDS.has(word.toLowerCase())) return true;
+    const initial = word.charAt(0);
+    return initial === initial.toUpperCase() && initial !== initial.toLowerCase();
+  });
+}
+
+// The sender's name at the top of the page. Most household documents put it
+// there and nowhere else, so it is read before prose is guessed at: a
+// letterhead is the sender by position, while "by" in a sentence can introduce
+// a payment method, an administrator or a date. The whole first line is tested
+// for a document word, so "SMART THERMOSTAT - QUICK START CARD" is refused as
+// a title even though its opening words read like a name.
 function providerFromLetterhead(bounded: string): string | undefined {
   const first = bounded.split(/[\r\n]/u).map((line) => line.trim()).find((line) => line.length > 0);
-  if (!first) return undefined;
-  const head = (first.split(/\s[—–-]\s/u)[0] ?? "").trim();
+  if (!first || DOCUMENT_WORD.test(first) || ADDRESSED_TO_A_PERSON.test(first)) return undefined;
+  const head = (first.split(/\s[—–-]\s/u)[0] ?? "").trim().replace(/[,;.]+$/u, "");
   const words = head.split(/\s+/u).filter((word) => word.length > 0);
   if (words.length < 2 || words.length > 6 || head.length > 60) return undefined;
-  if (/\d/u.test(head) || !ORGANISATION_WORD.test(head) || DOCUMENT_WORD.test(head)) return undefined;
+  if (/\d/u.test(head) || !looksLikeName(words)) return undefined;
   return titleCased(head);
 }
 
@@ -216,10 +269,30 @@ function withoutAside(value: string): string {
   return value.split("(")[0].trim().replace(/[,;.]+$/u, "");
 }
 
+// A name never runs on past the end of a sentence: "Issued by Vanterra
+// Appliances. Warranty service is carried out by..." names Vanterra
+// Appliances. An initial is not a sentence end, so only a word of real length
+// closes one — "J. Marsh & Son" stays whole.
+function untilSentenceEnd(value: string): string {
+  const kept: string[] = [];
+  for (const word of value.split(" ")) {
+    const bare = word.replace(/\.$/u, "");
+    const sentenceEnd = bare !== word && bare.replace(/[^A-Za-z]/gu, "").length > 2;
+    kept.push(sentenceEnd ? bare : word);
+    if (sentenceEnd) break;
+  }
+  return kept.join(" ");
+}
+
+function providerFromProse(bounded: string): string | undefined {
+  const named = withoutAside(untilSentenceEnd(bounded.match(PROVIDER_IN_PROSE)?.[1] ?? ""));
+  return PAYMENT_METHOD.test(named) ? undefined : named;
+}
+
 function extractProvider(bounded: string): string | undefined {
   const labelled = bounded.match(PROVIDER_LABEL)?.[1];
   const candidates = labelled === undefined
-    ? [withoutAside(bounded.match(PROVIDER_IN_PROSE)?.[1] ?? ""), providerFromLetterhead(bounded)]
+    ? [providerFromLetterhead(bounded), providerFromProse(bounded)]
     : [withoutAside(labelled)];
   for (const candidate of candidates) {
     const provider = safeDocumentPlainText(candidate, 100);
