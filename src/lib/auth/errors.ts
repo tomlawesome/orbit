@@ -25,7 +25,15 @@ export type AuthErrorCode =
      password outside the bounds of ADR-0021 §6. */
   | "credentials_invalid"
   | "too_many_attempts"
-  | "password_rejected";
+  | "password_rejected"
+  /* Recent authentication (ADR-0023 §5, §8). `recent_authentication_required`
+     is every way a sensitive action can arrive unproven — no password, a wrong
+     one, no step-up proof, or a proof sealed for another session or another
+     action. `step_up_failed` is narrower and is the provider's fault: it
+     answered without a fresh `auth_time`, so nobody was re-authenticated and
+     the action stays blocked until the operator fixes the provider. */
+  | "recent_authentication_required"
+  | "step_up_failed";
 
 /**
  * Closed internal diagnostic reasons for a token-exchange failure.
