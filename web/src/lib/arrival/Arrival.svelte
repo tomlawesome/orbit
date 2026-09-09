@@ -15,6 +15,10 @@
     arrivalStageOf, collidingHouseholdOf, createSystemCommand, isInvitedLanding,
     preferredCurrency, preferredTimeZone,
   } from "./stage.js";
+  /* The ring and the card themselves (#914): shared with the sign-in door's
+     four cards since the owner's 2026-09-09 composition ruling. arrival.css
+     keeps only what belongs to the create path's own journey. */
+  import "$lib/ringcard.css";
   import "./arrival.css";
 
   /**

@@ -18,8 +18,16 @@ import { redirect } from "@sveltejs/kit";
  * session — its own load asks, so that the same screen serves the person
  * arriving from the mail and the person coming back from the identity
  * provider — but it is never gated on having one.
+ *
+ * `/setup/[token]` is open for exactly the same reason (#914, ADR-0023 §3):
+ * the whole point of a setup or recovery link is that the person holding it
+ * has no way in yet. It reads no session at all — the token in the body of
+ * the POST it makes is the entire authorisation — so there is nothing for a
+ * gate to protect. It is deliberately NOT in `DOORS` below: maintenance
+ * closes it like any other screen, because setting a password is not the
+ * administrator action a window exists to allow.
  */
-const OPEN_ROUTES = new Set(["/", "/login", "/logout", "/maintenance", "/invite/[token]"]);
+const OPEN_ROUTES = new Set(["/", "/login", "/logout", "/maintenance", "/invite/[token]", "/setup/[token]"]);
 
 /**
  * The screens maintenance never closes (#526; ADR-0013 decision 3): the door
