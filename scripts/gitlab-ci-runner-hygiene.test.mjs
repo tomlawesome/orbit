@@ -42,7 +42,10 @@ describe("in-job Docker daemons clean up after themselves (#823)", () => {
 
   it("covers the jobs known to start a daemon", () => {
     expect(jobs.map(([name]) => name).sort()).toEqual(
-      ["acceptance", "install_bootstrap", "launcher_install_compat", "repair_journeys", "smoke", "supply_chain_image"].sort(),
+      [
+        "acceptance", "install_bootstrap", "launcher_install_compat", "repair_journeys",
+        "smoke", "smoke_local_only", "supply_chain_image",
+      ].sort(),
     );
   });
 

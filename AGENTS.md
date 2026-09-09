@@ -154,7 +154,10 @@ Check the list before building a test rig or handing a check to the owner.
   disagrees
 - `scripts/test-integration.mjs` — integration suite against a real database
 - `scripts/test-e2e-local.sh` — local stack with disposable OIDC and GreenMail
-  sidecars, then Playwright
+  sidecars, then Playwright. `--profile local-only` swaps them for an Orbit
+  with no identity provider at all and runs the short list in
+  `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only`
+  runs too (#916)
 - `scripts/test-install-acceptance.sh` — real fresh install to a healthy
   `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
   fixture, so no provider credentials are needed
