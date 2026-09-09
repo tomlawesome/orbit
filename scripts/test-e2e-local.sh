@@ -86,6 +86,9 @@
 #   3. Worktree, no shared node_modules to check, or dependencies differ:
 #      refuse, naming the trap, rather than install here or trust an
 #      unverified workaround.
+#   4. Worktree with its own real node_modules directory: installs as case
+#      1 does -- the preinstall guard admits it, and nothing it writes can
+#      reach the main checkout.
 #
 # #858: the two remaining pnpm calls -- install-test-browser.sh's browser
 # download and the Playwright suite run below -- go through `pnpm exec`,
@@ -343,7 +346,12 @@ done
 
 # --- Dependencies -------------------------------------------------------------
 
-if [[ "$in_worktree" == 0 ]]; then
+# A worktree that owns its node_modules outright -- a real directory, not a
+# symlink -- is the case the preinstall guard (#784, #858) already proves
+# safe: an install there writes only inside the worktree, through pnpm's
+# shared store. It gets the main checkout's treatment; only a worktree that
+# reaches into the main checkout's install is held to the checks below.
+if [[ "$in_worktree" == 0 || ( -d "$repo_dir/node_modules" && ! -L "$repo_dir/node_modules" ) ]]; then
   pnpm install --frozen-lockfile
 else
   # #876: do not install from here (see the header comment for why). Check
