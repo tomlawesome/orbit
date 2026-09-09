@@ -56,6 +56,10 @@ export async function GET(event) {
   }
 
   try {
+    if (!config.oidc) {
+      throw new AuthError("auth_not_configured", "OpenID Connect sign-in is not configured on this instance", 503);
+    }
+
     const providerError = event.url.searchParams.get("error");
     if (providerError) {
       throw new AuthError("provider_error", "The identity provider declined the sign-in request", 401);
@@ -75,8 +79,8 @@ export async function GET(event) {
       throw new AuthError("invalid_state", "The authorization state does not match", 400);
     }
 
-    const metadata = await discoverProvider(config);
-    const identity = await completeAuthorization(config, metadata, code, transaction);
+    const metadata = await discoverProvider(config.oidc);
+    const identity = await completeAuthorization(config.oidc, metadata, code, transaction);
     const user = await provisionIdentity(identity);
     if (user.disabledAt) {
       throw new AuthError("account_disabled", "This Orbit account is disabled", 403);

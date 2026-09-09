@@ -7,13 +7,8 @@ const config: AuthConfig = {
   appUrl: new URL("https://orbit.example"),
   sessionSecret: "test-secret-that-is-at-least-thirty-two-characters",
   sessionTtlSeconds: 3600,
-  issuer: "https://auth.example/application/o/orbit/",
-  clientId: "orbit",
-  clientSecret: "secret",
-  callbackUrl: "https://orbit.example/api/auth/callback",
-  scopes: "openid profile email",
-  claims: { email: "email", emailVerified: "email_verified", name: "name", avatar: "picture" },
   secureCookies: true,
+  oidc: null,
 };
 
 const session: AuthenticatedSession = {

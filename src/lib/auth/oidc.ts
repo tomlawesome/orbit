@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createRemoteJWKSet, base64url, jwtVerify, type JWTPayload } from "jose";
 import { z } from "zod";
-import type { AuthConfig } from "@/lib/env";
+import type { OidcAuthConfig } from "@/lib/env";
 import { constantTimeEqual, createPkceChallenge, type LoginTransaction } from "@/lib/auth/crypto";
 import { AuthError, type TokenExchangeReason } from "@/lib/auth/errors";
 
@@ -44,7 +44,7 @@ function assertHttpsEndpoint(value: string, label: string): void {
   }
 }
 
-export async function discoverProvider(config: AuthConfig): Promise<OidcMetadata> {
+export async function discoverProvider(config: OidcAuthConfig): Promise<OidcMetadata> {
   const cached = metadataCache.get(config.issuer);
   if (cached && cached.expiresAt > Date.now()) return cached.promise;
 
@@ -78,7 +78,7 @@ export async function discoverProvider(config: AuthConfig): Promise<OidcMetadata
   return promise;
 }
 
-export function createAuthorizationUrl(config: AuthConfig, metadata: OidcMetadata, transaction: LoginTransaction): URL {
+export function createAuthorizationUrl(config: OidcAuthConfig, metadata: OidcMetadata, transaction: LoginTransaction): URL {
   const url = new URL(metadata.authorization_endpoint);
   url.searchParams.set("client_id", config.clientId);
   url.searchParams.set("redirect_uri", config.callbackUrl);
@@ -127,7 +127,7 @@ function tokenExchangeFailure(reason: TokenExchangeReason): AuthError {
   });
 }
 
-async function exchangeCode(config: AuthConfig, metadata: OidcMetadata, code: string, codeVerifier: string) {
+async function exchangeCode(config: OidcAuthConfig, metadata: OidcMetadata, code: string, codeVerifier: string) {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
@@ -179,7 +179,7 @@ function validateAccessTokenHash(accessToken: string, tokenHash: string, algorit
 }
 
 export async function verifyIdToken(
-  config: AuthConfig,
+  config: OidcAuthConfig,
   metadata: OidcMetadata,
   idToken: string,
   accessToken: string | undefined,
@@ -246,7 +246,7 @@ function claimString(claims: Record<string, unknown>, name: string): string | un
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-export function profileFromClaims(config: AuthConfig, claims: Record<string, unknown>): VerifiedIdentity {
+export function profileFromClaims(config: OidcAuthConfig, claims: Record<string, unknown>): VerifiedIdentity {
   const subject = claimString(claims, "sub");
   const email = claimString(claims, config.claims.email)?.toLowerCase();
   if (!subject) throw new AuthError("invalid_id_token", "The ID token has no usable subject", 401);
@@ -270,7 +270,7 @@ export function profileFromClaims(config: AuthConfig, claims: Record<string, unk
 }
 
 export async function completeAuthorization(
-  config: AuthConfig,
+  config: OidcAuthConfig,
   metadata: OidcMetadata,
   code: string,
   transaction: LoginTransaction,
@@ -281,7 +281,7 @@ export async function completeAuthorization(
   return profileFromClaims(config, { ...idClaims, ...userInfo, sub: idClaims.sub });
 }
 
-export function createProviderLogoutUrl(config: AuthConfig, metadata: OidcMetadata, postLogoutReturnTo: URL): URL | null {
+export function createProviderLogoutUrl(config: OidcAuthConfig, metadata: OidcMetadata, postLogoutReturnTo: URL): URL | null {
   if (!metadata.end_session_endpoint) return null;
   const url = new URL(metadata.end_session_endpoint);
   url.searchParams.set("client_id", config.clientId);

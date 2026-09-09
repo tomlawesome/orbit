@@ -328,6 +328,7 @@ ready <FIELD>
 missing <FIELD>
 optional <FIELD>
 app-managed <FIELD>
+not in use <FIELD>
 ```
 
 - One line per readiness item, in the fixed order below.
@@ -335,12 +336,21 @@ app-managed <FIELD>
   line; orbit-launcher's own parser discards any line that does not split
   into exactly two fields, and treats a run that produces no `ready`,
   `missing`, `optional` or `app-managed` line at all as a structural failure
-  rather than "everything is ready".
+  rather than "everything is ready". `not in use <FIELD>` is four tokens, so
+  that same parser discards it today rather than misreading it — the safe
+  outcome, since a "not in use" field must never appear in `Missing` or
+  `Unfixable` either.
 - `app-managed <FIELD>` means the field's credential is administration-
   screen configuration stored encrypted in the database, not .env-orbit
   (ADR-0017): it is reported unconditionally, regardless of any environment
   content, is never counted toward `Missing`/`Unfixable`, and never turns
   the exit status non-zero.
+- `not in use <FIELD>` (ADR-0023 §1) means the field belongs to a sign-in
+  method that is currently switched off (`ORBIT_AUTH_OIDC=false`, the
+  default): a value left in .env-orbit is neither validated nor required
+  while the method is off, so operators can disable a provider without
+  deleting its configuration. It is never counted toward `Missing`/
+  `Unfixable` and never turns the exit status non-zero.
 - `<FIELD>` is always a fixed name, never a configured value: `--check` never
   discloses secrets, URLs or other configured content, by field name alone.
 - Exit status is non-zero whenever any line reports `missing`, zero
@@ -348,7 +358,9 @@ app-managed <FIELD>
 
 ### field
 
-Required fields — reported only as `ready` or `missing`, never `optional`:
+Required fields — reported as `ready` or `missing`, and additionally, for the
+four OIDC fields below, as `not in use` whenever `ORBIT_AUTH_OIDC` is not
+`true`:
 
 ```
 APP_URL
