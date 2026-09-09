@@ -11,6 +11,10 @@ const workflow = readFileSync(new URL("../.github/workflows/publish-container.ym
 // assertions live in the two scripts it calls.
 const processorScope = readFileSync(new URL("./ci/detect-processor-scope.sh", import.meta.url), "utf8");
 const processorRuntime = readFileSync(new URL("./ci/verify-tika-processor.sh", import.meta.url), "utf8");
+// The resolved-configuration half of the model server's no-egress proof (#935):
+// the assertions here read the compose file, that script reads what Compose
+// renders from it, and this file keeps the two from drifting apart.
+const validateCompose = readFileSync(new URL("./ci/validate-compose.sh", import.meta.url), "utf8");
 
 /**
  * Extracts one service block.
@@ -47,6 +51,16 @@ describe("service block extraction", () => {
 
   it("refuses to silently return nothing for an absent service", () => {
     expect(() => serviceBlock("orbit-does-not-exist")).toThrow(/is not declared/u);
+  });
+
+  it("stops before the model pull helper", () => {
+    // orbit-ollama-model-pull deliberately sits on the default network, which
+    // is the one thing orbit-ollama must not have. If the server's block leaked
+    // into its neighbour, the no-egress assertions below would be reading the
+    // wrong service and could later be relaxed to compensate.
+    const ollama = serviceBlock("orbit-ollama");
+    expect(ollama).not.toContain("networks:\n      - default");
+    expect(ollama).not.toContain('profiles: ["ai-model-pull"]');
   });
 });
 
@@ -104,5 +118,72 @@ describe("hostile document processor contract", () => {
     expect(processorRuntime).toContain('test "${tika_read_only}" = "true"');
     expect(exactProcessorTest).toContain("EMBEDDED-CONTENT-MUST-NOT-APPEAR");
     expect(exactProcessorTest).toContain("OCR BLOCKED");
+  });
+});
+
+describe("private model server contract", () => {
+  it("confines the model server to the egress-free processing network", () => {
+    const ollama = serviceBlock("orbit-ollama");
+    // ADR-0025 gives two structural answers to "what stops this becoming a
+    // cloud extraction path later". One is that Orbit's endpoint is a
+    // compile-time constant with no configuration surface. This is the other:
+    // the container that holds hostile document text has nowhere to send it,
+    // whatever a future image or model tries. Same treatment as Tika.
+    const declared = ollama.match(/\n {4}networks:\n((?: {6}- \S+\n)+)/u)?.[1];
+    expect(declared?.trim()).toBe("- orbit-document-processing");
+    expect(compose).toContain("orbit-document-processing:\n    internal: true");
+    // Unpublished port, so the model is not reachable from the host either.
+    expect(ollama).not.toMatch(/\n\s+ports:/u);
+    // Defence in depth behind the network, never instead of it.
+    expect(ollama).toContain('OLLAMA_NO_CLOUD: "1"');
+    expect(ollama).toContain('profiles: ["ai"]');
+  });
+
+  it("keeps getting a model in a deliberate, separate operator step", () => {
+    const pull = serviceBlock("orbit-ollama-model-pull");
+    // The server can no longer fetch its own model, which is why this exists.
+    // Its own profile is what keeps it out of every `up`: an operator asks for
+    // a pull by name, or nothing in this stack ever reaches the internet.
+    expect(pull).toContain('profiles: ["ai-model-pull"]');
+    expect(pull).toContain('restart: "no"');
+    expect(pull).toContain("networks:\n      - default");
+    // Same pinned image and same volume as the server it fills, or it fills
+    // nothing the server will read.
+    const image = serviceBlock("orbit-ollama").match(/\n {4}image: (\S+)\n/u)?.[1];
+    expect(image).toMatch(/^ollama\/ollama:[^@\s]+@sha256:[0-9a-f]{64}$/u);
+    expect(pull).toContain(`image: ${image}`);
+    expect(pull).toContain("- orbit-ollama-data:/root/.ollama");
+    // It fetches model data and nothing else: no application secrets, no host
+    // port, no document storage, no lingering container name to collide with.
+    expect(pull).not.toMatch(/\n\s+(?:secrets|ports|configs|container_name):/u);
+    expect(pull).toContain("cap_drop:\n      - ALL");
+    expect(pull).toContain("no-new-privileges:true");
+    // The temporary server it runs for the length of the download binds
+    // loopback, so nothing else on the egress network can talk to it.
+    expect(pull).toContain("OLLAMA_HOST: 127.0.0.1:11434");
+    // Compose expands `${...}` before the container sees the command, so every
+    // dollar the container's own shell must read is written `$$`. A single `$`
+    // is silently replaced with an empty string at config time, which would
+    // leave a script that runs and quietly does the wrong thing.
+    expect(pull).toContain("server_pid=$$!");
+    expect(pull).toContain('kill "$$server_pid"');
+    expect(pull).toContain('/bin/ollama pull "$${ORBIT_OLLAMA_MODEL}"');
+  });
+
+  it("asserts no egress against the Compose configuration Compose resolves", () => {
+    // The assertions above read the file. This one keeps the check that reads
+    // what Compose actually resolves wired in, so a profile, an override file
+    // or an inherited default cannot reintroduce egress without failing.
+    expect(validateCompose).toContain(
+      '.services["orbit-ollama"].networks | keys == ["orbit-document-processing"]',
+    );
+    expect(validateCompose).toContain('((.services["orbit-ollama"].ports // []) | length == 0)');
+    expect(validateCompose).toContain('((.services | has("orbit-ollama-model-pull")) | not)');
+    expect(validateCompose).toContain(
+      "--profile ai --profile ai-model-pull config --format json",
+    );
+    expect(validateCompose).toContain(
+      '(.services["orbit-ollama-model-pull"].networks | keys == ["default"])',
+    );
   });
 });

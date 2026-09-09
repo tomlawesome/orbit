@@ -539,6 +539,92 @@ docker compose --env-file .env-orbit up -d orbit-app
 docker compose --env-file .env-orbit --profile processing stop orbit-tika
 ```
 
+## Private model server and its model pull
+
+The default stack does not start the `ai` profile. An operator who leaves it off
+gets no model server, no pull helper, and no change of any kind.
+
+Where the profile is on, the model server runs on the same egress-denied network
+as the document parser, and its port is not published to the host. This is
+deliberate and structural: the container that would hold document text has no
+route to the internet, so it cannot become a way out for household documents,
+whatever image or model is loaded into it. The address Orbit would use is fixed
+in the application code, so there is no base URL, proxy setting or API key to
+configure, and therefore no configuration that could aim extraction at a hosted
+service. Do not give this service the default network, a second network or a
+published port; the Compose validation refuses the configuration if you do.
+
+### Pulling a model
+
+Because the server has no route out, it cannot download a model. Getting one in
+is a separate step that an operator runs by name — it never happens as a side
+effect of starting the stack. Set the model reference in `.env-orbit` first. A
+digest-pinned reference is recommended, so that a later pull fetches the model
+that was actually evaluated rather than whatever the tag points at that day:
+
+```sh
+# .env-orbit
+OLLAMA_MODEL=<model>@sha256:<digest>
+```
+
+Then check the resolved configuration and run the pull. It downloads into the
+`orbit-ollama-data` volume and exits:
+
+```sh
+docker compose --env-file .env-orbit --profile ai-model-pull config --quiet
+docker compose --env-file .env-orbit --profile ai-model-pull \
+  run --rm orbit-ollama-model-pull
+```
+
+Start the server once the pull has reported success:
+
+```sh
+docker compose --env-file .env-orbit --profile ai up -d orbit-ollama
+```
+
+Run the pull again whenever the model reference changes. The pull helper is the
+only part of this stack that reaches the internet for model data, it runs only
+for as long as your command runs, and it never receives document text.
+
+### Hosts with no direct internet access
+
+The pull helper needs outbound access to the model registry, so on an isolated
+host it cannot fetch anything. Two options, in order of preference:
+
+1. Allow the host outbound access, or point the Docker daemon at an HTTP proxy,
+   for the length of the pull only, then take it away again. The model server
+   is unaffected either way: the access belongs to the host and to the one-shot
+   pull container, never to the service Orbit talks to.
+2. Carry the model in from a machine that does have access. Run the pull there
+   against the same compose file, export the model volume, and import it on the
+   isolated host. Only model data moves; no household data is involved.
+
+```sh
+# on the connected machine, after the pull above has succeeded
+docker compose --env-file .env-orbit --profile ai-model-pull \
+  run --rm --entrypoint /bin/sh -v "$PWD:/export" orbit-ollama-model-pull \
+  -c 'tar -C /root/.ollama -czf /export/orbit-model.tar.gz .'
+
+# on the isolated host, with the ai profile stopped
+docker compose --env-file .env-orbit --profile ai-model-pull \
+  run --rm --entrypoint /bin/sh -v "$PWD:/import" orbit-ollama-model-pull \
+  -c 'tar -C /root/.ollama -xzf /import/orbit-model.tar.gz'
+```
+
+Transfer the archive between the two machines by whatever means the site already
+trusts. Then confirm the server can see the model:
+
+```sh
+docker compose --env-file .env-orbit --profile ai up -d orbit-ollama
+docker compose --env-file .env-orbit --profile ai exec orbit-ollama ollama list
+```
+
+To stop using the model server, stop the profile. Nothing else changes:
+
+```sh
+docker compose --env-file .env-orbit --profile ai stop orbit-ollama
+```
+
 ## Audit history
 
 Instance-wide actions may have no household, so `audit_log.household_id` is
