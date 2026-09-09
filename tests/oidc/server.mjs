@@ -64,7 +64,7 @@ function redirect(response, location) {
   response.end();
 }
 
-function signIdToken({ user, nonce }) {
+function signIdToken({ user, nonce, authTime }) {
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(JSON.stringify({ alg: "RS256", kid: jwk.kid, typ: "JWT" }));
   const payload = base64url(JSON.stringify({
@@ -73,6 +73,11 @@ function signIdToken({ user, nonce }) {
     aud: clientId,
     exp: now + 300,
     iat: now,
+    /* Always emitted, as a provider that supports `max_age` must (ADR-0023 §5).
+       This provider authenticates the person at the moment they pick an
+       identity, so `auth_time` is that moment — which is what makes `max_age=0`
+       honest here rather than merely accepted. */
+    auth_time: authTime ?? now,
     nonce,
     email: user.email,
     email_verified: true,
@@ -114,6 +119,10 @@ const server = createServer({ key: readFileSync(keyPath), cert: readFileSync(cer
   }
   if (request.method === "GET" && url.pathname === "/jwks") return responseJson(response, 200, { keys: [jwk] });
   if (request.method === "GET" && url.pathname === "/authorize") {
+    /* `max_age` needs no branch to be honoured: this provider keeps no session
+       of its own, so every authorize request makes the person pick an identity
+       again, and `auth_time` below is that moment. `max_age=0` therefore means
+       what it says here. */
     const parameters = query(request);
     const redirectUri = parameters.get("redirect_uri");
     if (parameters.get("client_id") !== clientId || parameters.get("response_type") !== "code" || !redirectUri || !parameters.get("state") || !parameters.get("nonce") || !parameters.get("code_challenge")) {
@@ -130,8 +139,22 @@ const server = createServer({ key: readFileSync(keyPath), cert: readFileSync(cer
     }
     const user = users.get(selectedUser);
     if (!user) return responseJson(response, 400, { error: "invalid_user" });
+    /* `stale=1` is the switch a step-up test flips: the identity picker's own
+       links carry every parameter the authorize request arrived with, so a
+       spec that navigates to `.../authorize?...&stale=1` gets an ID token whose
+       `auth_time` is a quarter of an hour old — a provider that answered a
+       `max_age=0` request without actually re-authenticating anybody. Orbit
+       must refuse it with `step_up_failed`. */
+    const now = Math.floor(Date.now() / 1000);
+    const authTime = parameters.get("stale") === "1" ? now - 900 : now;
     const code = randomBytes(32).toString("base64url");
-    codes.set(code, { user, nonce: parameters.get("nonce"), redirectUri, challenge: parameters.get("code_challenge") });
+    codes.set(code, {
+      user,
+      nonce: parameters.get("nonce"),
+      redirectUri,
+      challenge: parameters.get("code_challenge"),
+      authTime,
+    });
     const callback = new URL(redirectUri);
     callback.searchParams.set("code", code);
     callback.searchParams.set("state", parameters.get("state"));

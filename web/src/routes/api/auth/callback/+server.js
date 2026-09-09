@@ -11,6 +11,7 @@ import { authErrorResponse } from "orbit/lib/auth/http";
 import { reportAuthCallbackFailure } from "orbit/lib/auth/observability";
 import { completeAuthorization, discoverProvider } from "orbit/lib/auth/oidc";
 import { provisionIdentity } from "orbit/lib/auth/provision";
+import { completeStepUp, isStepUpIntent, setStepUpProofCookie } from "orbit/lib/auth/recent-auth";
 import { createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 import { readInvitationCookie } from "orbit/server/invitations/cookie";
@@ -85,11 +86,37 @@ export async function GET(event) {
 
     /* What the provider's answer is FOR is decided by the transaction this
        process sealed, never by anything on the request (ADR-0022 §2). Slice 5
-       lands two kinds; the link and step-up branches (ADR-0023 §5, §6) add
-       their own case here and their own kind in `transactionKind`. */
+       lands two kinds and slice 7 the step-up; the link branch (ADR-0023 §6)
+       adds its own case here and its own kind in `transactionKind`. */
     const kind = transactionKind(transaction);
     let user;
     switch (kind) {
+      case "step-up": {
+        /* A step-up proves the person is still there. It signs nobody in,
+           creates nothing and links nothing: it mints the two-minute proof the
+           action will consume, and sends the browser back to the action
+           (ADR-0023 §5). A stale or missing `auth_time` has already been
+           refused by `completeAuthorization` as `step_up_failed`, and lands on
+           the error screen with no proof and the action still blocked. */
+        if (!isStepUpIntent(transaction.intent)) {
+          throw new AuthError("invalid_state", "The sign-in transaction is invalid or has expired", 400);
+        }
+        const proof = await completeStepUp({
+          identity,
+          sessionId: /** @type {string} */ (transaction.stepUpSessionId),
+          intent: transaction.intent,
+          config,
+        });
+        clearTransactionCookie(event.cookies, config);
+        setStepUpProofCookie(event.cookies, proof, config);
+        return new Response(null, {
+          status: 303,
+          headers: {
+            location: new URL(transaction.returnTo, config.appUrl).href,
+            "cache-control": "no-store",
+          },
+        });
+      }
       case "bootstrap":
         /* The claim: this sign-in creates the first administrator and seats
            the instance's primary administrator. A racing claimant that loses
