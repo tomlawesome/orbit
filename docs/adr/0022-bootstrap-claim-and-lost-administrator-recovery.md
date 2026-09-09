@@ -103,8 +103,11 @@ unclaimed:
 
 - `POST /api/auth/bootstrap/claim { claim }` compares the normalised input
   with the in-memory value using `constantTimeEqual`, behind the verification
-  gate and the same backoff as sign-in (a persisted row keyed on the literal
-  `bootstrap`). Success mints a sealed cookie `__Secure-orbit-claim` (JWE,
+  gate and the same backoff schedule as sign-in, held **in process memory**
+  beside the code (revised at build, 2026-09-09: the first draft said a
+  persisted row keyed on the literal `bootstrap`, but migration 0038 has no
+  table that can hold one, and a restart replaces the code the counter
+  guards, so a counter with the same lifetime loses nothing). Success mints a sealed cookie `__Secure-orbit-claim` (JWE,
   audience `bootstrap-claim`, **5 minute** TTL). Failure is the generic
   `bootstrap_invalid`.
 - `GET /api/auth/login` (the OIDC start) requires that cookie and seals
