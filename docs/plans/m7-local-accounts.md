@@ -247,23 +247,23 @@ orchestrator merges into the batch branch. Every slice names an existing
 spec to copy the shape of. `Refs #259` on every commit; `Closes #<slice>`
 on the final one of each.
 
-| # | Slice | Depends on | Parallel with |
-|---|---|---|---|
-| 1 | Config: `ORBIT_AUTH_OIDC`, claim-file key, `AuthConfig.oidc` | — | 2, 3, 11 |
-| 2 | Migration 0038 and schema | — | 1, 3, 11 |
-| 3 | Password module and verification gate | — | 1, 2, 11 |
-| 4 | Installer: claim secret, mode question, compose, entrypoint | 1 | 5, 6 |
-| 5 | Claim endpoint, OIDC bootstrap gate, provisioning policy, e2e helper | 1, 2 | 4 |
-| 6 | Local bootstrap and local sign-in | 3, 5 | 4 |
-| 7 | Recent authentication (inline password, OIDC step-up), transfer adopts it | 6 | 8 |
-| 8 | Setup tokens: admin-created local users, `/api/auth/local/setup`, password set/change | 6 | 7 |
-| 9 | Primary-administrator recovery CLI | 8 | 10, 12 |
-| 10 | Methods list, link, unlink | 7 | 9, 12 |
-| 11 | Mockups: claim card, identity card, door in local mode (`fable: dialogue`) | — | 1–3 |
-| 12 | Door and first-run cards build; setup screen | 11 ratified, 6, 8 | 9, 10 |
-| 13 | Settings sign-in methods; administration add-local-user | 8, 10, 12 | 14 |
-| 14 | e2e: bootstrap protection, local-only profile, signed-out privacy | 12 | 13 |
-| 15 | Backup drill assertions and operator documentation | 13, 14 | — |
+| # | Issue | Slice | Depends on | Parallel with |
+|---|---|---|---|---|
+| 1 | #903 | Config: `ORBIT_AUTH_OIDC`, claim-file key, `AuthConfig.oidc` | — | 2, 3, 11 |
+| 2 | #904 | Migration 0038 and schema | — | 1, 3, 11 |
+| 3 | #905 | Password module and verification gate | — | 1, 2, 11 |
+| 4 | #907 | Installer: claim secret, mode question, compose, entrypoint | 1 | 5, 6 |
+| 5 | #908 | Claim endpoint, OIDC bootstrap gate, provisioning policy, e2e helper | 1, 2 | 4 |
+| 6 | #909 | Local bootstrap and local sign-in | 3, 5 | 4 |
+| 7 | #910 | Recent authentication (inline password, OIDC step-up), transfer adopts it | 6 | 8 |
+| 8 | #911 | Setup tokens: admin-created local users, `/api/auth/local/setup`, password set/change | 6 | 7 |
+| 9 | #912 | Primary-administrator recovery CLI | 8 | 10, 12 |
+| 10 | #913 | Methods list, link, unlink | 7 | 9, 12 |
+| 11 | #906 | Mockups: claim card, identity card, door in local mode (`fable: dialogue`) | — | 1–3 |
+| 12 | #914 | Door and first-run cards build; setup screen | 11 ratified, 6, 8 | 9, 10 |
+| 13 | #915 | Settings sign-in methods; administration add-local-user | 8, 10, 12 | 14 |
+| 14 | #916 | e2e: bootstrap protection, local-only profile, signed-out privacy | 12 | 13 |
+| 15 | #917 | Backup drill assertions and operator documentation | 13, 14 | — |
 
 Shared files several slices touch (expect reconciliation, not conflict-free
 merges): `src/lib/auth/errors.ts`, `src/lib/logger.ts`,
