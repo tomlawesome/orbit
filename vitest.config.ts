@@ -9,6 +9,24 @@ import { configDefaults, defineConfig, type TestUserConfig } from "vitest/config
 // easy.
 const sharedAliases = {
   "@": fileURLToPath(new URL("./src", import.meta.url)),
+  // The package-name form web/src files import the engine through
+  // ("orbit/server/boot" etc, matching the root package.json `exports` map).
+  // Both projects need it, and for two separate reasons (#895):
+  //
+  //  - it resolves at all. The specifier only works once a real `pnpm install`
+  //    links the workspace self-reference, and a worktree deliberately has
+  //    none (#784), the same reason $lib and $env/dynamic/private are aliased
+  //    (#717).
+  //  - it resolves to THIS checkout. The self-reference link is
+  //    `web/node_modules/orbit`, and it points at whichever tree pnpm
+  //    installed. Run the suite from a worktree borrowing that node_modules
+  //    and the link leads back to the main checkout, so a route imported
+  //    through it loads a SECOND copy of the engine. Every module-level
+  //    switch the suite sets -- `setReadinessDependenciesForTests` is the one
+  //    that caught this -- is then set on a module the route never reads, and
+  //    the test passes vacuously or fails for the wrong reason. Aliasing the
+  //    specifier makes the route and its test share one module either way.
+  orbit: fileURLToPath(new URL("./src", import.meta.url)),
   // SvelteKit's own alias, so the v19 unit tests in tests/unit can import a
   // web/ module that imports a sibling through $lib (#410). web/ test FILES
   // stay excluded below; only their subjects are reachable.
@@ -42,14 +60,6 @@ const test: TestUserConfig = {
       resolve: {
         alias: {
           ...sharedAliases,
-          // The package-name form web/src files import the engine through
-          // ("orbit/server/boot" etc, matching the root package.json `exports`
-          // map). It only ever resolves once a real `pnpm install` links the
-          // workspace self-reference; a worktree deliberately has none (#784),
-          // so a web/ subject that imports the engine this way needs it
-          // aliased here too, the same reason $lib and $env/dynamic/private
-          // are (#717).
-          orbit: fileURLToPath(new URL("./src", import.meta.url)),
           // hooks.server.js's `init` reads this to skip booting while the
           // adapter prerenders (#717); outside SvelteKit it is just a constant.
           "$app/environment": fileURLToPath(
@@ -86,6 +96,11 @@ const test: TestUserConfig = {
           // Playwright's test() outside a Playwright runner and fails to
           // load (#425).
           "web/**",
+          // Uses node:test, not vitest globals (#901): run standalone with
+          // `node --test scripts/lockfile-no-pnpm-exe.test.mjs`. Collecting
+          // it here would import it for its side effect of running the
+          // check immediately, without a vitest test to attach the result to.
+          "scripts/lockfile-no-pnpm-exe.test.mjs",
         ],
       },
     },

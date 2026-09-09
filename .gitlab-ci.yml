@@ -230,6 +230,97 @@ variables:
     exit 0
   fi
 
+# Standing on an earlier run instead of repeating it (#898).
+#
+# A fix pushed after one red job used to rerun every job that had already
+# passed. `classify` now hashes what each candidate job reads
+# (scripts/ci/job-inputs.json), looks through this merge request's earlier
+# pipelines for a successful run of the same job on the same hash, and hands
+# the verdict on. This gate goes at the top of that job's `script:` and stops
+# the job when there is one.
+#
+# Merge requests only, and .gitlab-ci.yml is in every job's input set, so a
+# pipeline on a delivery branch and any change to this file both rerun
+# everything. The proof is the evidence file the job wrote as its own last act;
+# a job that gated itself out wrote none and is never reused.
+#
+# Nothing here can fail a job: the script exits non-zero for every fault it
+# meets, and a non-zero status here simply means the job does the work.
+.reuse_gate: &reuse_gate |
+  if bash scripts/ci/reuse-gate.sh "$CI_JOB_NAME"; then
+    exit 0
+  fi
+
+# The other half: the evidence the next pipeline reads. The LAST line of a
+# candidate job's `script:`, so it is reached only when everything before it
+# passed -- never after_script, which runs whatever the job did.
+.reuse_evidence: &reuse_evidence bash scripts/ci/reuse-evidence.sh "$CI_JOB_NAME"
+
+# What nothing expensive may start before (#898, criterion 2).
+#
+# The acceptance stage used to start beside `fast` and the policy jobs, so a
+# red `fast` still cost a full image build, a browser suite, an installer run
+# and a launcher install before anyone read the first failure. Waiting for the
+# four cheap checks costs about seven minutes on a green pipeline and saves the
+# whole acceptance stage on a red one.
+#
+# `optional: true` on all four, because a pipeline that does not create one of
+# them -- a lane, a future rule -- must skip the wait rather than fail to build.
+# `artifacts: false` where the job reads nothing from them: a `needs` is a
+# waiting order here, not a delivery.
+#
+# None of the four is `allow_failure: true`, which is what makes this work: a
+# job allowed to fail does not hold up what needs it.
+.needs_gated: &needs_gated
+  - job: classify
+    artifacts: true
+  - job: fast
+    artifacts: false
+    optional: true
+  - job: gitleaks
+    artifacts: false
+    optional: true
+  - job: licence_policy
+    artifacts: false
+    optional: true
+  - job: supply_chain_source
+    artifacts: false
+    optional: true
+
+# The same wait, for the two jobs that already took `fast`'s artefacts.
+.needs_gated_with_fast_artifacts: &needs_gated_with_fast_artifacts
+  - job: classify
+    artifacts: true
+  - job: fast
+  - job: gitleaks
+    artifacts: false
+    optional: true
+  - job: licence_policy
+    artifacts: false
+    optional: true
+  - job: supply_chain_source
+    artifacts: false
+    optional: true
+
+# And for the five jobs that test the image `build_image` handed on.
+.needs_gated_image: &needs_gated_image
+  - job: classify
+    artifacts: true
+  - job: build_image
+    artifacts: true
+  - job: fast
+    artifacts: false
+    optional: true
+  - job: gitleaks
+    artifacts: false
+    optional: true
+  - job: licence_policy
+    artifacts: false
+    optional: true
+  - job: supply_chain_source
+    artifacts: false
+    optional: true
+
 # The scripts/ci steps were extracted from a GitHub workflow, so they hand a
 # value to a later step by appending a `key=value` line to $GITHUB_OUTPUT. A
 # job here points that variable at a file of its own and reads a key back with
@@ -292,7 +383,15 @@ variables:
     # runner's own `pull_policy = ["if-not-present"]` covers the job image
     # and not a service's, so `always` was still costing about 20 seconds a
     # job to re-fetch bytes that cannot have changed (#889).
-    - name: docker:29-dind@sha256:5efed980cba3fc126cf54e21a5a6ff8849d05b6e0623d6e7612f48e9cd6cd17e
+    #
+    # Held at 29.6.2, and so is every docker:*-cli below (#827): Docker
+    # 29.7.0 changed how a push tracks layers across repositories
+    # (moby/moby#53081) and the daemon now sometimes skips a blob it wrongly
+    # believes the registry already has, so record_image's push fails with
+    # "blob unknown to registry" (moby/moby#53293). The known-bad versions
+    # are listed in renovate.json's docker rule; Renovate offers the next
+    # release as usual, and record_image on that bump is the proof.
+    - name: docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659
       pull_policy: if-not-present
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -301,7 +400,7 @@ variables:
 .dind:
   extends: .dind_service
   image:
-    name: docker:29-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
+    name: docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
     pull_policy: if-not-present
 
 # The daemon inside the job's own container, for the two jobs that stand up a
@@ -558,7 +657,31 @@ classify:
       printf 'ORBIT_LAUNCHER_COMPAT=%s\n' "$launcher_compat" >> classify.env
       printf 'ORBIT_LANE=%s\n' "$lane" >> classify.env
       cat classify.env
+    # The reuse verdict (#898): one input hash per candidate job, then the
+    # lookup that says which of them can stand on an earlier run of this same
+    # merge request. A plain file artefact rather than more dotenv variables:
+    # GitLab caps a dotenv report at twenty variables, eight are already spent
+    # above, and ten candidate jobs need a hash each plus up to two verdict
+    # lines each. Every candidate job takes the file through its own
+    # `needs: classify` and reads it with scripts/ci/reuse-gate.sh.
+    #
+    # Both halves are fail-safe and neither may fail this job: no verdict means
+    # every job runs, which is the only direction that cannot be wrong.
+    - |
+      set -eu
+      mkdir -p .orbit-reuse
+      : > .orbit-reuse/reuse.env
+      if node scripts/ci/job-inputs.mjs hashes > .orbit-reuse/hashes.env; then
+        cat .orbit-reuse/hashes.env > .orbit-reuse/reuse.env
+      else
+        echo "the job input hashes could not be computed: every job will run"
+      fi
+      rm -f .orbit-reuse/hashes.env
+      node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
+        || echo "the reuse lookup failed: every job will run"
   artifacts:
+    paths:
+      - .orbit-reuse/reuse.env
     reports:
       dotenv: classify.env
     expire_in: 1 week
@@ -606,6 +729,7 @@ fast:
   script:
     - *reach_helpers
     - orbit_lane_admits fast || exit 0
+    - *reuse_gate
     - *docker_cli
     - pnpm install --frozen-lockfile
     # Everything from here runs unprivileged, because two of these tests assert
@@ -621,10 +745,12 @@ fast:
       else
         echo "skipped: no build-risk change"
       fi
+    - *reuse_evidence
   artifacts:
     name: orbit-coverage
     paths:
       - coverage/
+      - ci-evidence/
     expire_in: 14 days
     when: on_success
 
@@ -789,14 +915,16 @@ sidecar_images:
   allow_failure:
     exit_codes:
       - 3
-  needs:
-    - job: classify
-      artifacts: true
+  needs: *needs_gated
   script:
     - *reach_helpers
     - orbit_lane_admits sidecar_images || exit 0
     - *system_lane_gate
     - *apk_retry
+    # bash before the reuse gate: this image is Alpine, and both the gate and
+    # the evidence it writes are bash scripts.
+    - apk_add bash
+    - *reuse_gate
     - |
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
@@ -858,6 +986,9 @@ sidecar_images:
       set -e
       rm -rf .orbit-supply-chain/sidecar-scans
       if [ "$policy_status" -eq 0 ]; then
+        # The evidence goes here rather than in a script entry of its own,
+        # because the clean path leaves the job from inside this block (#898).
+        bash scripts/ci/reuse-evidence.sh "$CI_JOB_NAME"
         exit 0
       fi
       if [ ! -s .orbit-supply-chain/sidecar-evidence.json ]; then
@@ -872,6 +1003,7 @@ sidecar_images:
     paths:
       - .orbit-supply-chain/sidecar-evidence.json
       - .orbit-supply-chain/trivy-version.json
+      - ci-evidence/
     expire_in: 14 days
     when: always
 
@@ -964,13 +1096,11 @@ fidelity:
   rules:
     - *not_scheduled
     - when: on_success
-  needs:
-    - job: classify
-      artifacts: true
-    - job: fast
+  needs: *needs_gated_with_fast_artifacts
   script:
     - *reach_helpers
     - orbit_lane_admits fidelity || exit 0
+    - *reuse_gate
     - |
       if [ "${ORBIT_WEB:-true}" != "true" ]; then
         echo "skipped: no change to the v19 front end"
@@ -987,12 +1117,17 @@ fidelity:
       # that would have built it ever runs.
       pnpm --filter orbit-web exec svelte-kit sync
       pnpm --filter orbit-web fidelity
+    - *reuse_evidence
   artifacts:
     name: orbit-fidelity-diffs
     paths:
       - web/test-results/fidelity/
+      - ci-evidence/
     expire_in: 14 days
-    when: on_failure
+    # `on_failure` until #898: the diffs are only interesting on a red run, but
+    # the reuse evidence exists only on a green one, and a job has one
+    # `artifacts:` block. `always` uploads whichever of the two exists.
+    when: always
 
 # The workflow runs `pnpm test:integration`, which starts its own disposable
 # PostgreSQL container and reaches it on a published loopback port. That is not
@@ -1013,10 +1148,7 @@ integration:
   rules:
     - *not_scheduled
     - when: on_success
-  needs:
-    - job: classify
-      artifacts: true
-    - job: fast
+  needs: *needs_gated_with_fast_artifacts
   services:
     - name: $POSTGRES_IMAGE
       alias: postgres
@@ -1034,6 +1166,7 @@ integration:
     - *reach_helpers
     - orbit_lane_admits integration || exit 0
     - *system_lane_gate
+    - *reuse_gate
     - |
       if [ "${ORBIT_INTEGRATION:-true}" != "true" ]; then
         echo "skipped: no integration-risk change"
@@ -1048,6 +1181,12 @@ integration:
       unset DATABASE_URL_FILE SESSION_SECRET_FILE OIDC_CLIENT_SECRET_FILE
       pnpm exec tsx src/db/migrate.ts
       pnpm exec vitest run --project integration
+    - *reuse_evidence
+  artifacts:
+    paths:
+      - ci-evidence/
+    expire_in: 14 days
+    when: on_success
 
 # Builds the image once and hands it on as a tarball, so `smoke`,
 # `repair_journeys` and `record_image` all exercise and publish the same
@@ -1060,9 +1199,7 @@ build_image:
   rules:
     - *not_scheduled
     - when: on_success
-  needs:
-    - job: classify
-      artifacts: true
+  needs: *needs_gated
   variables:
     # Stable Git tags are the version calculator's durable baseline.
     GIT_DEPTH: 0
@@ -1072,7 +1209,11 @@ build_image:
     - orbit_lane_admits build_image || exit 0
     - *system_lane_gate
     - *apk_retry
-    - apk_add bash git nodejs
+    # curl as well, for the reuse gate: this is the one job whose gate fetches
+    # something -- the image.tar and build.env the jobs after it need, from the
+    # run it is standing on. bash for the gate itself; this image is Alpine.
+    - apk_add bash git nodejs curl
+    - *reuse_gate
     - |
       set -eu
       git fetch --quiet --tags origin
@@ -1136,8 +1277,16 @@ build_image:
       # Not a script output: the script proves the label equals the channel it
       # was given rather than reporting it back.
       printf 'ORBIT_RELEASE_STAGE=%s\n' "$publication_channel" >> build.env
+      # The revision baked into this image, which is this commit on a real
+      # build and an earlier one when the job stood on a previous run (#898).
+      # The jobs that assert what the running stack says about itself --
+      # verify-startup-banner.sh, verify-installed-image.sh -- must compare
+      # against the image in front of them, not against a commit it was never
+      # built from.
+      printf 'ORBIT_IMAGE_REVISION=%s\n' "$CI_COMMIT_SHA" >> build.env
       cat build.env
       docker save "$ORBIT_CI_IMAGE" -o image.tar
+    - *reuse_evidence
   after_script:
     # This job's declared artifacts are what `smoke`, `acceptance`,
     # `repair_journeys` and `supply_chain_image` read, and the runner reports
@@ -1152,6 +1301,11 @@ build_image:
   artifacts:
     paths:
       - image.tar
+      # A path as well as the dotenv report below, because a dotenv report is
+      # not in the downloadable archive: the reuse gate fetches this file back
+      # so a job standing on this one hands the same identity on (#898).
+      - build.env
+      - ci-evidence/
     reports:
       dotenv: build.env
     # Only the later stages of this same pipeline `docker load` it, so it need
@@ -1183,11 +1337,7 @@ supply_chain_image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
   timeout: 20m
-  needs:
-    - job: classify
-      artifacts: true
-    - job: build_image
-      artifacts: true
+  needs: *needs_gated_image
   variables:
     # /builds is a real volume rather than the job container's overlayfs, so
     # the Trivy database cache does not share a writable layer with the image
@@ -1203,6 +1353,7 @@ supply_chain_image:
     - *reach_helpers
     - orbit_lane_admits supply_chain_image || exit 0
     - *system_lane_gate
+    - *reuse_gate
     - *docker_in_job
     - mkdir -p "$RUNNER_TEMP"
     - docker load --input image.tar
@@ -1213,8 +1364,9 @@ supply_chain_image:
       set -eu
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
       TESTED_IMAGE_TAG="$ORBIT_CI_IMAGE" \
-      ORBIT_REVISION="$CI_COMMIT_SHA" \
+      ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
         bash scripts/ci/scan-image.sh
+    - *reuse_evidence
   after_script:
     - *docker_in_job_teardown
   artifacts:
@@ -1224,6 +1376,7 @@ supply_chain_image:
       - .orbit-supply-chain/image.spdx.json
       - .orbit-supply-chain/image-evidence.json
       - .orbit-supply-chain/trivy-version.json
+      - ci-evidence/
     expire_in: 14 days
     when: always
 
@@ -1249,11 +1402,7 @@ smoke:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
   timeout: 30m
-  needs:
-    - job: classify
-      artifacts: true
-    - job: build_image
-      artifacts: true
+  needs: *needs_gated_image
   variables:
     ORBIT_IMAGE: $ORBIT_CI_IMAGE
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -1269,6 +1418,7 @@ smoke:
     - *reach_helpers
     - orbit_lane_admits smoke || exit 0
     - *system_lane_gate
+    - *reuse_gate
     - *docker_in_job
     - npm install --global "$(node -p "require('./package.json').packageManager")"
     - pnpm install --frozen-lockfile
@@ -1287,13 +1437,14 @@ smoke:
       set -eu
       TESTED_IMAGE_VERSION="$ORBIT_IMAGE_VERSION" \
       PUBLICATION_CHANNEL="$ORBIT_RELEASE_STAGE" \
-      ORBIT_REVISION="$CI_COMMIT_SHA" \
+      ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
         bash scripts/ci/verify-startup-banner.sh
     - bash scripts/ci/verify-nonroot-runtime.sh
     - bash scripts/ci/verify-privacy-boundary.sh
     # The image ships the browser build that matches its Playwright version, so
     # nothing is downloaded here.
     - bash scripts/test-frontend.sh
+    - *reuse_evidence
   after_script:
     # Both scripts read COMPOSE_FILES and ORBIT_IMAGE, which are job variables
     # and so are still set in this second shell.
@@ -1307,6 +1458,7 @@ smoke:
     name: orbit-playwright-report
     paths:
       - playwright-report/
+      - ci-evidence/
     expire_in: 14 days
     when: always
 
@@ -1336,11 +1488,7 @@ acceptance:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
   timeout: 45m
-  needs:
-    - job: classify
-      artifacts: true
-    - job: build_image
-      artifacts: true
+  needs: *needs_gated_image
   variables:
     ORBIT_IMAGE: $ORBIT_CI_IMAGE
     # The scripts default $GITHUB_WORKSPACE to their own repository root, which
@@ -1369,6 +1517,7 @@ acceptance:
     - *reach_helpers
     - orbit_lane_admits acceptance || exit 0
     - *system_lane_gate
+    - *reuse_gate
     - *docker_in_job
     - *step_outputs
     - |
@@ -1387,7 +1536,7 @@ acceptance:
     - |
       set -eu
       ORBIT_VERSION="$ORBIT_IMAGE_VERSION" \
-      ORBIT_REVISION="$CI_COMMIT_SHA" \
+      ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
       ORBIT_CHANNEL="$ORBIT_RELEASE_STAGE" \
         bash scripts/ci/validate-compose.sh
     # Minutes of a live Tika stack, so it is skipped when nothing it covers
@@ -1446,8 +1595,9 @@ acceptance:
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
       INSTALL_TARGET="$(orbit_output install_target)" \
       GIT_MARKER="$(orbit_output git_marker)" \
-      ORBIT_REVISION="$CI_COMMIT_SHA" \
+      ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
         bash scripts/ci/verify-installed-image.sh
+    - *reuse_evidence
   after_script:
     # A second shell, so the outputs are re-read from the file rather than
     # inherited. Every removal the cleanup makes is guarded by the path prefix
@@ -1466,6 +1616,11 @@ acceptance:
       REFUSAL_OUTPUT="$(orbit_output refusal_output)" \
         bash scripts/ci/clean-up-installer.sh || true
     - *docker_in_job_teardown
+  artifacts:
+    paths:
+      - ci-evidence/
+    expire_in: 14 days
+    when: on_success
 
 # Live evidence for the repair journeys (#532): a real stack, broken for real,
 # recovered by scripts/repair.sh. Same daemon placement as `smoke`, and for the
@@ -1487,11 +1642,7 @@ repair_journeys:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
   timeout: 30m
-  needs:
-    - job: classify
-      artifacts: true
-    - job: build_image
-      artifacts: true
+  needs: *needs_gated_image
   variables:
     ORBIT_REPAIR_JOURNEYS_IMAGE: orbit-repair-journeys:ci
   rules:
@@ -1504,12 +1655,19 @@ repair_journeys:
     - *reach_helpers
     - orbit_lane_admits repair_journeys || exit 0
     - *system_lane_gate
+    - *reuse_gate
     - *docker_in_job
     - docker load --input image.tar
     - docker tag "$ORBIT_CI_IMAGE" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
     - bash scripts/test-repair-journeys.sh
+    - *reuse_evidence
   after_script:
     - *docker_in_job_teardown
+  artifacts:
+    paths:
+      - ci-evidence/
+    expire_in: 14 days
+    when: on_success
 
 # Ports .github/workflows/launcher-install-compat.yml (#819), retired because
 # GitHub receives no merge requests since the mirror flip (#801) and so never
@@ -1545,18 +1703,14 @@ launcher_install_compat:
   # The live suite's own -timeout is 30m; the job must outlive it so a slow
   # run fails with the suite's report rather than GitLab's.
   timeout: 35m
-  needs:
-    - job: classify
-      artifacts: true
-    # The image this pipeline built: the launcher installs *it*, served from
-    # the same loopback registry the acceptance job uses, so the candidate
-    # install.sh and the image it verifies really are one generation (#736).
-    # Pairing this commit's install.sh with the published `preview` image
-    # could never pass a change to the installer/image contract: the image
-    # that satisfies the new installer does not exist until this lands
-    # (ADR-0019, #890).
-    - job: build_image
-      artifacts: true
+  # Takes the image this pipeline built: the launcher installs *it*, served
+  # from the same loopback registry the acceptance job uses, so the candidate
+  # install.sh and the image it verifies really are one generation (#736).
+  # Pairing this commit's install.sh with the published `preview` image
+  # could never pass a change to the installer/image contract: the image
+  # that satisfies the new installer does not exist until this lands
+  # (ADR-0019, #890).
+  needs: *needs_gated_image
   variables:
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
     IMAGE_NAME: tomlawesome/orbit
@@ -1581,6 +1735,7 @@ launcher_install_compat:
         echo "skipped: neither scripts/install.sh nor this job's own definition (.gitlab-ci.yml) changed"
         exit 0
       fi
+    - *reuse_gate
     - *docker_in_job
     - *step_outputs
     # The tested image, into a disposable loopback registry, exactly as the
@@ -1686,7 +1841,11 @@ launcher_install_compat:
       (cd launcher && go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
       kill "$collector" 2>/dev/null || :
       wait "$collector" 2>/dev/null || :
-      exit "$status"
+      # Not `exit "$status"`: the reuse evidence below is the job's last line
+      # precisely so it is reached only when everything before it passed (#898),
+      # and this block used to leave the job whatever the suite did.
+      [ "$status" -eq 0 ] || exit "$status"
+    - *reuse_evidence
   after_script:
     # Never fails the job: this only gathers evidence for the next person to
     # read, win or lose. The live suite tears its own compose stack down on
@@ -1728,6 +1887,7 @@ launcher_install_compat:
     paths:
       - .orbit-launcher-live-raw.log*
       - .orbit-launcher-diagnostics/
+      - ci-evidence/
     expire_in: 7 days
     when: always
 
@@ -1854,7 +2014,7 @@ record_image:
 # is the same digest-pinned docker:29-cli the .dind jobs use.
 sign_evidence:
   stage: publish
-  image: docker:29-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
+  image: docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
   timeout: 10m
   # Same reasoning as record_image: a cancelled signing run leaves a pushed
   # digest with no evidence and nothing to show why.
@@ -1962,15 +2122,14 @@ publish_channel:
 # pipeline and cannot be trusted with a release action the same way a
 # purpose-made, ownable credential can.
 #
-# Before any of that, promote-stable.sh runs an evidence gate (#877):
-# gitlab-await-tested-image.sh, unchanged, fetches and checks GitLab's
-# validation record for the commit being promoted -- the same script and
-# evidence that already gate the GHCR copy -- reusing GITLAB_RELEASE_TOKEN as
-# the read token rather than minting a new one. It is an interim measure:
-# the shared cryptographic verifier #661 defined now exists
-# (scripts/ci/verify-validation-evidence.sh) and #877 is the issue that
-# wires promotion to it; see the comment at the gate in promote-stable.sh
-# for exactly what the interim gate does and does not check.
+# Before any of that, promote-stable.sh runs the shared verifier (#877):
+# scripts/ci/verify-validation-evidence.sh, the same one publish_channel
+# above runs, against the digest being promoted on registry.tomlawson.io
+# (CI_REGISTRY_IMAGE -- the attestation lives there, not on GHCR). It
+# refuses on the same four grounds -- mismatch, missing, ambiguous, expired
+# -- closing the gap #661's own spec named as this issue's follow-up
+# (promote_stable staying unguarded); see the comment at the gate in
+# promote-stable.sh for exactly what it checks and what it replaced.
 promote_stable:
   stage: publish
   extends: .dind
@@ -2311,6 +2470,11 @@ install_bootstrap:
 #                       publishes an image, only proposes a pin. Never
 #                       printed; read by scripts/ci/repin-base-image.sh,
 #                       which fails clearly if it is unset.
+#                       `classify` reads it too, since #898: it is the only
+#                       token a merge-request pipeline can present to look up
+#                       what an earlier pipeline of the same merge request
+#                       already proved, and unset there simply means every
+#                       job runs.
 base_image_repin:
   stage: maintenance
   extends: .dind_service

@@ -23,7 +23,7 @@
     "drizzle-orm": "^0.45.2",
     "imapflow": "1.7.8",
     "jose": "^6.0.0",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^10.0.1",
     "pdfjs-dist": "6.3.289",
     "postgres": "^3.4.7",
     "web-push": "^3.6.7",

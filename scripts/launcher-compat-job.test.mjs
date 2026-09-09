@@ -105,7 +105,7 @@ describe("launcher install compatibility gate", () => {
     expect(job).toContain(".orbit-launcher-diagnostics/");
     // The whole artifacts: block this after_script output belongs to must be
     // collected win or lose, the same way the raw log already is.
-    expect(job).toMatch(/artifacts:\s*\n\s*name: orbit-launcher-compat-live-raw-log\s*\n\s*paths:\s*\n\s*- \.orbit-launcher-live-raw\.log\*\s*\n\s*- \.orbit-launcher-diagnostics\/\s*\n\s*expire_in: 7 days\s*\n\s*when: always/u);
+    expect(job).toMatch(/artifacts:\s*\n\s*name: orbit-launcher-compat-live-raw-log\s*\n\s*paths:\s*\n\s*- \.orbit-launcher-live-raw\.log\*\s*\n\s*- \.orbit-launcher-diagnostics\/\s*\n(?:\s*- \S+\s*\n)*\s*expire_in: 7 days\s*\n\s*when: always/u);
   });
 
   it("classifies scripts/install.sh and its own job definition as launcher-compat scope", async () => {
