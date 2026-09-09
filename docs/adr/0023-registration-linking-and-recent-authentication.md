@@ -46,10 +46,13 @@ The owner's rulings this record turns into a model:
 Local sign-in is always available; it is the baseline. OIDC is enabled by
 one explicit key, **`ORBIT_AUTH_OIDC=true|false`** (default `false`). When
 `true`, the three OIDC fields are required exactly as today; when `false`,
-they must be blank, so a half-configured provider is a readiness failure
-rather than a silent fallback. `AuthConfig.oidc` becomes `null` or the
-provider block, and every OIDC route answers `auth_not_configured` when it
-is `null`. `GET /api/auth/availability` gains `claimed: boolean` and
+they are **ignored and may remain set** — the owner wants to switch the
+provider off without deleting its configuration (ruling, 2026-09-09).
+Readiness therefore checks the OIDC fields only when the key is `true`, and
+`configure.sh --check` reports them as "not in use" rather than as errors
+when it is `false`. `AuthConfig.oidc` becomes `null` or the provider block,
+and every OIDC route answers `auth_not_configured` when it is `null`. A
+half-configured provider with the key `true` is still a readiness failure. `GET /api/auth/availability` gains `claimed: boolean` and
 `methods: { local: true, oidc: boolean }`; it still reveals nothing about
 accounts.
 
