@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { sessionHeaders } from "./support/households";
+import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureLocalPassword } from "./support/local-credentials";
@@ -43,10 +43,49 @@ const NEW_PASSWORD = `helm-changed-${Date.now()}`;
    against a kept stack. */
 const NEWCOMER = `newcomer-${Date.now()}@example.invalid`;
 
+const households = householdRegister();
+
+/**
+ * A reader with no household anywhere never reaches the helm: hooks.server.js
+ * sends them to the arrival instead (#840). "Orbit Member" is that reader on
+ * a fresh stack, so give them one -- the shape `v19-membership.spec.ts` uses,
+ * swept again after the test -- and only when the arrival says so.
+ */
+async function ensureHousehold(page: Page) {
+  const adrift = await page.locator("#gobtn, h1:has-text('where do you belong?')").first().isVisible().catch(() => false);
+  if (!adrift) return;
+  const created = await page.evaluate(async (householdName) => {
+    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const householdId = crypto.randomUUID();
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+      body: JSON.stringify({
+        type: "household.create",
+        household: {
+          id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
+          memberCount: 1, canManage: true, onboardingComplete: true,
+          sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
+          items: [],
+        },
+      }),
+    });
+    if (!response.ok) throw new Error(`household.create failed: ${response.status}`);
+    return { id: householdId, name: householdName };
+  }, `Sign-in methods ${Date.now()}`);
+  households.track(created);
+}
+
+test.afterEach(async ({ page }) => {
+  await households.sweep(page);
+});
+
 async function signInAs(page: Page, account: string) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);
+  await ensureHousehold(page);
 }
 
 /** The helm, loaded — every card is gated on the screen's own fetch. */
