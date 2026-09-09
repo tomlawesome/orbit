@@ -1454,6 +1454,89 @@ smoke:
     expire_in: 14 days
     when: always
 
+# The second acceptance profile (#916, M7): `smoke` above against an Orbit
+# with no identity provider at all.
+#
+# Since ADR-0023 §1 a provider is optional, and an install that never
+# configures one is a supported deployment rather than a degraded one -- so
+# there is a whole shape of instance that `smoke` cannot reach, because its
+# stack has a provider and its specs claim through it. The journeys that only
+# exist there (claim from the container's log, sign in with a password, sign
+# out, sign back in) are what this lane runs.
+#
+# Same job shape as `smoke`, deliberately, and three differences:
+#   - COMPOSE_FILES swaps the mail and OIDC overlays for
+#     compose/docker-compose.local-only.yml. That overlay is what turns the
+#     provider off; the sidecar goes by the acceptance overlay not being
+#     named, because a Compose overlay cannot delete a service.
+#   - ORBIT_ACCEPTANCE_OIDC is left unset, so the browser neither trusts a
+#     disposable certificate nor redirects `orbit-oidc` anywhere. There is no
+#     provider for either to be about.
+#   - It runs the list in tests/e2e/local-only-specs.txt rather than the whole
+#     suite. scripts/test-e2e-local.sh's `--profile local-only` reads the same
+#     file with the same filter, so a spec added to that lane cannot reach one
+#     of the two callers and miss the other.
+#
+# It gates a merge exactly as `smoke` does and on the same rules; nothing else
+# about what gates a merge moves.
+smoke_local_only:
+  stage: acceptance
+  extends: .privileged_runner
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  timeout: 30m
+  needs: *needs_gated_image
+  variables:
+    ORBIT_IMAGE: $ORBIT_CI_IMAGE
+    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+    COMPOSE_FILES: -f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.ci-cap.yml
+  rules:
+    - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: manual
+      allow_failure: true
+  script:
+    - *reach_helpers
+    - orbit_lane_admits smoke_local_only || exit 0
+    - *system_lane_gate
+    - *reuse_gate
+    - *docker_in_job
+    - npm install --global "$(node -p "require('./package.json').packageManager")"
+    - pnpm install --frozen-lockfile
+    - docker load --input image.tar
+    # Same reason as `smoke`: configure.sh persists ORBIT_IMAGE when it sees
+    # one, and here it is a job variable.
+    - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
+    - bash scripts/ci/start-acceptance-stack.sh
+    - bash scripts/ci/verify-health-endpoint.sh
+    - |
+      set -eu
+      # The same filter scripts/test-e2e-local.sh applies to the same file:
+      # drop comments and blank lines, keep the rest verbatim.
+      specs="$(grep -vE '^[[:space:]]*(#|$)' tests/e2e/local-only-specs.txt | tr '\n' ' ')"
+      [ -n "$specs" ] || { echo "tests/e2e/local-only-specs.txt names no specs" >&2; exit 1; }
+      echo "local-only profile specs: $specs"
+      # Word splitting is the point: $specs is a list of paths.
+      # shellcheck disable=SC2086
+      node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts $specs
+    - *reuse_evidence
+  after_script:
+    - |
+      if [ "$CI_JOB_STATUS" != "success" ]; then
+        bash scripts/ci/show-stack-diagnostics.sh || true
+      fi
+      bash scripts/ci/stop-acceptance-stack.sh || true
+    - *docker_in_job_teardown
+  artifacts:
+    name: orbit-playwright-report-local-only
+    paths:
+      - playwright-report/
+      - ci-evidence/
+    expire_in: 14 days
+    when: always
+
 # The rest of the workflow's &container_validation_steps anchor, in the
 # anchor's order: the deployment asset set and every supported compose
 # combination, the confined hostile-document processor, and then the installer

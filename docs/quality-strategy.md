@@ -234,6 +234,37 @@ The acceptance stage now waits for `fast`, `gitleaks`, `licence_policy` and
 and no installer run — about seven minutes added to a green pipeline, and the
 whole acceptance stage saved on a red one.
 
+### The second browser lane: an Orbit with no identity provider (#916)
+
+Since [ADR-0023](adr/0023-registration-linking-and-recent-authentication.md) §1
+an identity provider is optional. An install that never configures one is a
+supported deployment, not a broken one, so the browser evidence has to cover
+it — and `smoke`'s stack cannot, because it has a provider and its specs sign
+in through it.
+
+`smoke_local_only` is that second lane. It runs the same job shape as `smoke`
+against the same tested image, with `compose/docker-compose.local-only.yml`
+in place of the OIDC and mail overlays: `ORBIT_AUTH_OIDC=false`, and no
+provider sidecar at all. It runs the short list in
+`tests/e2e/local-only-specs.txt` rather than the whole suite — the claim from
+the container's own log, the first administrator's password, signing out and
+signing back in, and the signed-out privacy checks, which are the journeys
+that only exist when there is nothing else to sign in with.
+
+`scripts/test-e2e-local.sh --profile local-only` is the same stack locally,
+and reads the same list file, so a spec added to the lane reaches both callers
+or neither.
+
+Two things this lane does not change. It gates a merge on the same rules as
+`smoke` and nothing else moves; and the ordinary suite still runs against the
+provider stack, because most of Orbit has nothing to do with how anyone
+signed in.
+
+The negative half lives in the provider stack instead:
+`tests/e2e/bootstrap-protection.spec.ts` proves that an unclaimed instance
+refuses to start a provider sign-in at all ([ADR-0022](adr/0022-bootstrap-claim-and-lost-administrator-recovery.md)
+§2), which is a refusal that only exists where there is a provider to refuse.
+
 ### Launcher install compatibility
 
 `launcher_install_compat` (`.gitlab-ci.yml`) installs Orbit through a real

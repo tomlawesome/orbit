@@ -1,0 +1,17 @@
+# The local-only acceptance profile's spec list (M7 #916).
+#
+# One spec path per line, `#` comments and blank lines ignored. Read by both
+# callers of compose/docker-compose.local-only.yml -- scripts/test-e2e-local.sh
+# (`--profile local-only`) and the `smoke_local_only` job in .gitlab-ci.yml --
+# so the two lanes can never drift into running different things.
+#
+# Small on purpose. This profile exists to prove the journeys that only exist
+# when there is no identity provider; everything else belongs in the ordinary
+# browser suite, against the ordinary stack, where it already runs.
+#
+# Order matters, and Playwright runs files in path order with one worker
+# (tests/e2e/playwright.config.ts). local-sign-in claims the instance and
+# leaves a local administrator behind; signed-out then runs against a claimed
+# local-only instance, which is the state its privacy assertions are about.
+tests/e2e/local-sign-in.spec.ts
+tests/e2e/signed-out.spec.ts
