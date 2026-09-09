@@ -75,6 +75,28 @@ const actionLabels: Record<string, string> = {
   imap_notification_delivery_retried: "Mailbox notification delivery retried",
   document_purged: "Document retention completed",
   document_storage_missing: "Missing document storage detected",
+  // M7 (ADR-0023 §8): the audit record the claim writes, so the
+  // administration screen never renders the raw action string.
+  instance_claimed: "Instance claimed",
+  // M7 slice 8 (#911, ADR-0023 §3, §6-§8): administrator-created local users
+  // and the setup/recovery links and password changes that follow.
+  local_user_created: "Local user created",
+  setup_link_issued: "Setup link issued",
+  // Written only when the mail carrying that link actually went (owner ruling
+  // 2026-09-09: the link is emailed, never shown), so the two records
+  // together say whether anybody could have received it.
+  setup_link_sent: "Setup link emailed",
+  password_set: "Password set",
+  password_changed: "Password changed",
+  // M7 (ADR-0023 §6, §8): the sign-in methods a reader adds and removes for
+  // themselves. The label is what the administration screen renders; the
+  // `changes` payload carries an identity id and nothing else.
+  identity_linked: "Sign-in provider linked",
+  identity_unlinked: "Sign-in provider unlinked",
+  password_removed: "Password removed",
+  // M7 slice 9 (#912, ADR-0022 §5): the primary-administrator recovery CLI's
+  // own audit record, alongside `issueSetupToken`'s `setup_link_issued`.
+  recovery_link_issued: "Recovery link issued",
 };
 
 /** Maps persisted actions to a bounded administrator-facing label. */

@@ -101,6 +101,25 @@ export const operationalReasons = [
      than we support", which have different remedies. */
   "database_mismatch",
   "database_below_floor",
+  /* The claim (ADR-0022, ADR-0023 §8). `bootstrap_unclaimed` is the state an
+     instance boots into before anyone has claimed it; `bootstrap_rejected` is
+     a claim attempt that did not match. Neither record ever carries the code
+     itself — the notice is printed outside this protocol on purpose, and is
+     the only place in Orbit that prints a secret. */
+  "bootstrap_unclaimed",
+  "bootstrap_rejected",
+  /* Local sign-in (ADR-0023 §8). `credentials_rejected` is a password that did
+     not match — or an address that has no account, which is deliberately the
+     same record; `attempts_exhausted` is the verification gate turning a
+     caller away. Neither ever carries the address, the password or a count. */
+  "credentials_rejected",
+  "attempts_exhausted",
+  /* Recent authentication (ADR-0023 §5, §8): a step-up came back without a
+     usable re-authentication — no `auth_time`, a stale one, or an identity
+     that is not the one holding the session. The operator needs to know,
+     because a provider that ignores `max_age` blocks every sensitive action;
+     the record names no person and no provider text. */
+  "step_up_rejected",
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
 
@@ -178,6 +197,11 @@ export const operationalEvents = {
   "database.migration": "migrations",
   "auth.configuration": "authentication",
   "auth.provider": "authentication",
+  /* Local sign-in (M7). Neither of the two authentication events above fits a
+     password attempt — nothing about the configuration changed and no provider
+     was involved — and an operator reading the log should be able to tell the
+     three apart at a glance. */
+  "auth.local": "authentication",
   "notification.worker": "notification",
   "document.worker": "document",
   "document.job": "document",

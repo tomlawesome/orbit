@@ -139,3 +139,42 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .mailboxform .mailboxrow{grid-column:1 / -1}
 .mission-page .mailboxform .mailboxnote{font:10.5px var(--mono);line-height:1.5;color:var(--ink-quiet);margin-top:2px}
 .mission-page .adminproblem.ok{color:var(--ok-text)}
+
+/* THE ROSTER ROW HAS TWO ACTIONS NOW (#915), and two of them plus a name, an
+   address and a role pill do not fit across the People card's half of the
+   ratified two-column grid. Nothing is shrunk to make them: the type stays the
+   card's own and the address keeps the one ellipsis the ratified row already
+   gave it. The row simply wraps, and the actions take the line under the
+   person they belong to — the same accommodation the helm makes for its
+   session rows on a narrow viewport. Widening the card, or shortening the
+   control's ruled name, would both be composition calls and are not made here. */
+.mission-page .person{flex-wrap:wrap}
+.mission-page .person .who{flex:1 1 60%}
+.mission-page .person .place:first-of-type{margin-left:auto}
+
+/* Add a local user, and send a new setup link (#915, ADR-0023 §3; composition
+   §2.7). Built from the panel's existing furniture — .placerow buttons and
+   .adminproblem for both outcomes — with a label-and-field grid of its own,
+   because the People card had no form to borrow from. Labels sit beside their
+   fields rather than above, so the row stays one band above the roster instead
+   of a second panel; the type is the card's own, and nothing is shrunk. */
+.mission-page .localuser{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;
+      padding:4px 2px 12px;border-bottom:1px solid var(--line-soft)}
+.mission-page .localuser label{font:10.5px var(--mono);letter-spacing:.06em;color:var(--ink-quiet)}
+.mission-page .localuser input{font:12px var(--mono);color:var(--ink);background:none;
+      border:1px solid var(--line-soft);border-radius:6px;padding:5px 7px;width:100%}
+/* As the helm's challenge fields do: the accent border marks the focused
+   field and the browser's own ring stays, so a keyboard reader has an
+   indicator that does not depend on noticing a colour change. */
+.mission-page .localuser input:focus-visible{border-color:var(--accent)}
+.mission-page .localuser .days{display:flex;align-items:center;gap:8px;
+      font:10.5px var(--mono);color:var(--ink-quiet)}
+.mission-page .localuser .days input{width:5em}
+.mission-page .localuser .localuserrow{grid-column:1 / -1;padding:6px 2px 0;border-bottom:0}
+/* The per-row form is indented to the roster's own text column, the way the
+   placement picker is, so it reads as belonging to the person above it. */
+.mission-page .localuser.resend{padding-left:44px}
+.mission-page .adminproblem .retry{font:10.5px var(--mono);color:var(--ink-mid);background:none;
+      border:1px solid var(--line);border-radius:99px;padding:3px 10px;margin-left:8px;cursor:pointer}
+.mission-page .adminproblem .retry:hover{border-color:var(--accent);color:var(--accent-text)}
+@media (max-width:560px){.mission-page .localuser{grid-template-columns:1fr}}

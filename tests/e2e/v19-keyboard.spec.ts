@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { FIXTURE_PASSWORD, ensureLocalPassword } from "./support/local-credentials";
 import {
   auditLightDismiss,
   auditTabOrder,
@@ -231,6 +232,10 @@ async function openSettingsFromHome(page: Page) {
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+  /* The sign-in methods block (#915) is read after the helm itself, so an
+     audit that starts on `.cards` alone collects its expected set before the
+     block's buttons exist and then meets them by Tab. Wait for the rows. */
+  await expect(page.locator(".method").first()).toBeVisible({ timeout: 30_000 });
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -501,6 +506,108 @@ test("sign out: the two-tap control ends the session by keyboard alone", async (
     await tabTo(page, { tag: "A", textIncludes: READER }, { screen: "identity provider" });
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/home$/, { timeout: 15_000 });
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+/* ────────────────────────────────────────────────────────────────────────
+ * SIGN-IN METHODS AND ADMIN-CREATED LOCAL USERS (#915).
+ *
+ * Two blocks arrived with M7, and both are worked entirely by Tab and Enter
+ * here like everything above. What is new about them, and what these two
+ * tests are actually for, is that each control opens ANOTHER control: the
+ * two-tap protocol arms an action and a field appears under it. A field a
+ * pointer reveals and a keyboard cannot reach is exactly the defect this
+ * file exists to catch, so the audit is run with the challenge OPEN, not
+ * only on the resting screen.
+ *
+ * `aria-expanded` is the screen-reader half of the same promise: the armed
+ * state is announced rather than only drawn, so a reader who cannot see the
+ * field appear is still told the control opened something.
+ *
+ * Both need a reader who HAS a password, because that is who is challenged
+ * with a field; an account with only a provider identity is challenged at
+ * the provider instead, which is a navigation and a different journey (it is
+ * walked in sign-in-methods.spec.ts). `ensureLocalPassword` is idempotent
+ * while every file sends the same password (see FIXTURE_PASSWORD), so a
+ * retried file meets the state the first attempt did.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+const KEYBOARD_PASSWORD = FIXTURE_PASSWORD[READER];
+
+test("settings: the sign-in-methods challenge arms by keyboard and is reachable", async ({ page }) => {
+  test.setTimeout(90_000);
+  const household = await arriveAtHome(page);
+  try {
+    await openSettingsFromHome(page);
+    await ensureLocalPassword(page, READER, KEYBOARD_PASSWORD);
+    await page.goto("/settings");
+    await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+
+    const change = page.locator(".method button", { hasText: "change" }).first();
+    await expect(change).toHaveAttribute("aria-expanded", "false");
+
+    await tabTo(page, { selector: ".method button", textIncludes: "change" }, { screen: "settings" });
+    const armer = await currentFocus(page);
+    expect(armer?.focusVisible, "settings: the change-password action has no visible focus indicator").toBe(true);
+
+    await page.keyboard.press("Enter");
+    await expect(change).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".challenge")).toBeVisible();
+
+    /* The whole screen again, with the challenge standing open: its two
+       fields and its two buttons have to be in the tab order like anything
+       else the screen is now showing. */
+    await auditTabOrder(page, "settings with the sign-in challenge open");
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("administration: the local-user controls are reachable and announced", async ({ page }) => {
+  test.setTimeout(90_000);
+  const household = await arriveAtHome(page);
+  try {
+    await openSettingsFromHome(page);
+    await ensureLocalPassword(page, READER, KEYBOARD_PASSWORD);
+    await page.goto("/administration");
+    await expect(page.locator(".card").first()).toBeVisible({ timeout: 30_000 });
+
+    /* Every field in the row is a labelled control, which is what lets a
+       screen reader say what is being asked for rather than "edit text". */
+    const row = page.locator("form.localuser").first();
+    await expect(row.getByLabel("email")).toBeVisible();
+    await expect(row.getByLabel("display name")).toBeVisible();
+    await expect(row.getByLabel("link valid for")).toBeVisible();
+
+    /* The row is a real form: its fields are `required`, so an empty Create
+       is stopped by the browser before the screen sees it. Fill it the way
+       a keyboard user would, then arm. Nothing is created: the challenge
+       opens, and the test never confirms it. */
+    await row.getByLabel("email").fill(`keyboard-${Date.now()}@example.invalid`);
+    await row.getByLabel("display name").fill("Keyboard Newcomer");
+
+    /* Arming Create by keyboard opens the challenge, and the field it opens
+       is the very next thing Tab reaches. */
+    await tabTo(page, { selector: "form.localuser button[type=submit]" }, { screen: "administration" });
+    const create = await currentFocus(page);
+    expect(create?.focusVisible, "administration: the create action has no visible focus indicator").toBe(true);
+    await page.keyboard.press("Enter");
+    await expect(row.getByLabel("your current password")).toBeVisible();
+    await tabTo(page, { selector: "#localuser-current" }, { screen: "administration challenge" });
+    const field = await currentFocus(page);
+    expect(field?.focusVisible, "administration: the challenge field has no visible focus indicator").toBe(true);
+
+    /* And the per-person control says who it is for, and whether it is open,
+       rather than repeating one unlabelled phrase down the roster. */
+    const resend = page
+      .locator(".person")
+      .filter({ hasNotText: "· you" })
+      .first()
+      .getByRole("button", { name: /send a new setup link/ });
+    await expect(resend).toHaveAttribute("aria-expanded", "false");
+    await expect(resend).toHaveAttribute("aria-label", /send a new setup link to .+/);
   } finally {
     await cleanup(page, household);
   }

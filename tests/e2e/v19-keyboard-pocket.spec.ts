@@ -431,6 +431,10 @@ test("settings (pocket): fully reachable by keyboard", async ({ page }) => {
   try {
     await page.goto("/settings");
     await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+    /* The sign-in methods block (#915) is read after the helm itself, so an
+       audit that starts on `.cards` alone collects its expected set before the
+       block's buttons exist and then meets them by Tab. Wait for the rows. */
+    await expect(page.locator(".method").first()).toBeVisible({ timeout: 30_000 });
     await auditTabOrder(page, "settings (pocket)");
   } finally {
     await cleanup(page, household);

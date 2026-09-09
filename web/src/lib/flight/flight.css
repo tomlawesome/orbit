@@ -152,6 +152,25 @@ body.lit .gate{opacity:1;transform:none}
 .gate:hover,#dusk .gate-wrap a:hover{filter:brightness(1.08)}
 .gate.flash{filter:brightness(1.25);box-shadow:0 0 0 6px rgba(216,180,90,.22),0 0 60px rgba(216,180,90,.6)}
 
+/* ══ THE LOCAL LOGIN LINE (#914, plan §2.7) ══════════════════════════════
+   Mixed mode only — an instance with an identity provider AND at least one
+   local credential. The owner's 2026-09-09 ruling is that the ratified door
+   is UNCHANGED and this is the one thing added to it, so the line is placed
+   out of the flow: `.gate-wrap` is centred in its grid cell, and a second
+   element laid out under the button would lift the button by half its own
+   height. Absolutely positioned off the wrapper's own bottom edge, it cannot
+   move anything. (No `position:relative` is needed for that: the wrapper's
+   `translateY(74px)` already makes it the containing block.)
+
+   It rides in on the gate's own delayed entrance, a beat later, so the mark
+   still holds the screen alone first and the line arrives as an afterthought
+   rather than as a rival to the pill. The word is the owner's, lower case:
+   `local login`. */
+.localopen{position:absolute;top:100%;left:50%;transform:translateX(-50%);
+      margin-top:18px;white-space:nowrap;text-align:center;
+      opacity:0;transition:opacity 1.6s ease 4.1s}
+body.lit .localopen{opacity:1}
+
 /* ══ THE THREE STATES WHERE THE DOOR CANNOT OPEN (#788) ═══════════════════
    design/v19/signin-states/round-1/, direction C ("the held dawn"),
    owner-ratified 2026-09-06. `SignIn.svelte` sets `data-state` on <body> —

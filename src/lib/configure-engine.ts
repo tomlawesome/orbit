@@ -211,6 +211,7 @@ const MINIMAL_ENVIRONMENT_SECTIONS: MinimalEnvironmentSection[] = [
   {
     heading: "Authentication",
     entries: [
+      { key: "ORBIT_AUTH_OIDC" },
       { key: "OIDC_ISSUER" },
       { key: "OIDC_CLIENT_ID" },
       { key: "OIDC_CLIENT_SECRET" },
@@ -583,12 +584,13 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
   ensureEnvironmentFile(deployDir);
   updateManagedKeys(deployDir, [
     ["APP_URL", normalizedAppUrl],
+    ["ORBIT_AUTH_OIDC", "true"],
     ["OIDC_ISSUER", input.issuer],
     ["OIDC_CLIENT_ID", input.clientId],
     ["OIDC_CALLBACK_URL", callbackUrl],
   ]);
 
-  return "Orbit guided configuration saved APP_URL, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.";
+  return "Orbit guided configuration saved APP_URL, ORBIT_AUTH_OIDC=true, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.";
 }
 
 // --- deployment profile ---------------------------------------------------

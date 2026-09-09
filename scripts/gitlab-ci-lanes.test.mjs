@@ -154,6 +154,7 @@ describe("pipeline lanes", () => {
       "repair_journeys",
       "sidecar_images",
       "smoke",
+      "smoke_local_only",
       "supply_chain_image",
       "supply_chain_source",
     ]);

@@ -15,8 +15,17 @@
 # validation.
 #
 # Usage:
-#   bash scripts/test-e2e-local.sh [--spec PATH] [--project NAME]
+#   bash scripts/test-e2e-local.sh [--profile NAME] [--spec PATH] [--project NAME]
 #
+#   --profile NAME  Which stack to test against (#916). Default: oidc.
+#                    oidc        the stack above: a disposable OIDC provider,
+#                                GreenMail, and the whole suite.
+#                    local-only  an Orbit with no identity provider at all
+#                                (compose/docker-compose.local-only.yml,
+#                                ORBIT_AUTH_OIDC=false, no provider or mail
+#                                sidecar), running the short list in
+#                                tests/e2e/local-only-specs.txt. --spec still
+#                                overrides that list.
 #   --spec PATH     Playwright spec file or glob, e.g.
 #                    tests/e2e/v19-mail-review.spec.ts
 #   --project NAME  Playwright project from tests/e2e/playwright.config.ts:
@@ -24,9 +33,10 @@
 #   --keep          Leave the stack up on exit instead of tearing it down, so a
 #                    failed run can be inspected: query the database, read the
 #                    container logs, open the app. The run logs its own
-#                    project name and app port at startup ("starting the
-#                    acceptance stack (project ..., app on ...)"); tear that
-#                    project down afterwards with:
+#                    profile, project name and app port at startup ("starting
+#                    the acceptance stack (profile ..., project ..., app on
+#                    ...)"); tear that project down afterwards with the file
+#                    set its profile used -- the oidc profile's is:
 #                      docker compose -p <project> --env-file .env-orbit \
 #                        -f docker-compose.yml -f docker-compose.mail.yml \
 #                        -f compose/docker-compose.acceptance.yml \
@@ -86,6 +96,9 @@
 #   3. Worktree, no shared node_modules to check, or dependencies differ:
 #      refuse, naming the trap, rather than install here or trust an
 #      unverified workaround.
+#   4. Worktree with its own real node_modules directory: installs as case
+#      1 does -- the preinstall guard admits it, and nothing it writes can
+#      reach the main checkout.
 #
 # #858: the two remaining pnpm calls -- install-test-browser.sh's browser
 # download and the Playwright suite run below -- go through `pnpm exec`,
@@ -101,12 +114,21 @@ cd "$repo_dir"
 
 spec=""
 playwright_project=""
+profile="oidc"
 keep=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep)
       keep=1
       shift
+      ;;
+    --profile)
+      [[ $# -ge 2 ]] || { printf 'test-e2e-local: --profile requires a value.\n' >&2; exit 2; }
+      case "$2" in
+        oidc | local-only) profile="$2" ;;
+        *) printf 'test-e2e-local: unknown profile: %s (expected oidc or local-only)\n' "$2" >&2; exit 2 ;;
+      esac
+      shift 2
       ;;
     --spec)
       [[ $# -ge 2 ]] || { printf 'test-e2e-local: --spec requires a value.\n' >&2; exit 2; }
@@ -119,7 +141,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help)
-      printf 'Usage: %s [--spec PATH] [--project desktop-chromium|mobile-chromium] [--keep]\n' "$0"
+      printf 'Usage: %s [--profile oidc|local-only] [--spec PATH] [--project desktop-chromium|mobile-chromium] [--keep]\n' "$0"
       exit 0
       ;;
     *)
@@ -136,7 +158,21 @@ done
 # Playwright's variadic parsing staying as it is today.
 playwright_args=()
 [[ -z "$playwright_project" ]] || playwright_args+=("--project=${playwright_project}")
-[[ -z "$spec" ]] || playwright_args+=("$spec")
+if [[ -n "$spec" ]]; then
+  playwright_args+=("$spec")
+elif [[ "$profile" == "local-only" ]]; then
+  # The list the local-only profile exists to run (#916), read from the file
+  # both callers share so this lane and the `smoke_local_only` job in
+  # .gitlab-ci.yml can never drift apart. Same filter on both sides: drop
+  # comments and blank lines, keep everything else verbatim.
+  local_only_count=0
+  while IFS= read -r local_only_spec; do
+    playwright_args+=("$local_only_spec")
+    local_only_count=$((local_only_count + 1))
+  done < <(grep -vE '^[[:space:]]*(#|$)' "${repo_dir}/tests/e2e/local-only-specs.txt")
+  [[ "$local_only_count" -gt 0 ]] ||
+    { printf 'test-e2e-local: tests/e2e/local-only-specs.txt names no specs.\n' >&2; exit 2; }
+fi
 
 # Assembled before any Docker or network work runs, so
 # scripts/test-e2e-local.test.mjs can prove the argument list is correct
@@ -180,7 +216,20 @@ readonly app_port
 # is still free -- and rejects a bad override -- before anything starts.
 export ORBIT_PORT="$app_port"
 readonly base_url="http://127.0.0.1:${app_port}"
-readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.local-e2e.yml)
+# The two profiles (#916). `local-only` is the acceptance overlay's absence as
+# much as its own overlay's presence: that file is what declares the
+# disposable `orbit-oidc` sidecar, and a Compose overlay cannot delete a
+# service, so the provider goes by not naming the file that brings it. The
+# mail sidecar goes for the same reason -- nothing in
+# tests/e2e/local-only-specs.txt sends or reads mail.
+# compose/docker-compose.local-e2e.yml stays in both: it is the per-run
+# container renaming and the published-port agreement, which every local run
+# needs whatever it is testing.
+if [[ "$profile" == "local-only" ]]; then
+  readonly compose_files=(-f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.local-e2e.yml)
+else
+  readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.local-e2e.yml)
+fi
 
 compose() {
   env ORBIT_IMAGE="$orbit_image" COMPOSE_PROJECT_NAME="$project_name" \
@@ -343,7 +392,12 @@ done
 
 # --- Dependencies -------------------------------------------------------------
 
-if [[ "$in_worktree" == 0 ]]; then
+# A worktree that owns its node_modules outright -- a real directory, not a
+# symlink -- is the case the preinstall guard (#784, #858) already proves
+# safe: an install there writes only inside the worktree, through pnpm's
+# shared store. It gets the main checkout's treatment; only a worktree that
+# reaches into the main checkout's install is held to the checks below.
+if [[ "$in_worktree" == 0 || ( -d "$repo_dir/node_modules" && ! -L "$repo_dir/node_modules" ) ]]; then
   pnpm install --frozen-lockfile
 else
   # #876: do not install from here (see the header comment for why). Check
@@ -392,12 +446,16 @@ env ORBIT_IMAGE="$orbit_image" ORBIT_VERSION="$orbit_version" ORBIT_REVISION="$o
   docker compose -p "$project_name" --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.build.yml \
   build orbit-app
 
-log "building the disposable OIDC acceptance provider"
-compose build orbit-oidc
+if [[ "$profile" == "local-only" ]]; then
+  log "local-only profile: no identity provider to build"
+else
+  log "building the disposable OIDC acceptance provider"
+  compose build orbit-oidc
+fi
 
 # --- Bring up the stack ------------------------------------------------------
 
-log "starting the acceptance stack (project ${project_name}, app on ${base_url})"
+log "starting the acceptance stack (profile ${profile}, project ${project_name}, app on ${base_url})"
 ORBIT_BIND_ADDRESS=127.0.0.1 ORBIT_PORT="$app_port" \
   compose up --detach --no-build --wait --wait-timeout 180 || {
   log "stack did not become healthy; service status and logs follow"
@@ -427,8 +485,14 @@ log "installing Playwright's Chromium build"
 # system libraries and needs root; a local checkout is not guaranteed sudo.
 bash scripts/install-test-browser.sh
 
-log "running the Playwright suite${spec:+ (spec: $spec)}${playwright_project:+ (project: $playwright_project)}"
+log "running the Playwright suite (profile: ${profile})${spec:+ (spec: $spec)}${playwright_project:+ (project: $playwright_project)}"
 suite_status=0
+# playwright.config.ts reads this to decide whether to trust the disposable
+# provider's self-signed certificate and where to resolve `orbit-oidc` to.
+# There is no provider in the local-only profile, so neither applies and the
+# variable is left off rather than set to a value that would be a lie.
+acceptance_oidc=()
+[[ "$profile" == "local-only" ]] || acceptance_oidc=(ORBIT_ACCEPTANCE_OIDC=true)
 # COMPOSE_PROJECT_NAME is handed to the suite because a spec may need to ask
 # the stack's own database a question -- tests/e2e/v19-tour.spec.ts proves the
 # tour's example body is never written down, which only the database can
@@ -442,7 +506,7 @@ suite_status=0
 # in a worktree `pnpm exec` re-verifies node_modules against the lockfile and
 # can abort trying to repair a node_modules it does not own (#858, same
 # reasoning as install-test-browser.sh's header comment). Same binary.
-PLAYWRIGHT_BASE_URL="$base_url" ORBIT_ACCEPTANCE_OIDC=true COMPOSE_PROJECT_NAME="$project_name" \
+env PLAYWRIGHT_BASE_URL="$base_url" COMPOSE_PROJECT_NAME="$project_name" "${acceptance_oidc[@]}" \
   node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts \
   "${playwright_args[@]}" || suite_status=$?
 

@@ -4,15 +4,18 @@ import {
   setSessionCookie,
   transactionCookieName,
 } from "orbit/lib/auth/cookies";
-import { constantTimeEqual, openLoginTransaction } from "orbit/lib/auth/crypto";
+import { clearClaimCookie } from "orbit/lib/auth/bootstrap";
+import { constantTimeEqual, openLoginTransaction, transactionKind } from "orbit/lib/auth/crypto";
 import { AuthError, asAuthError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
 import { reportAuthCallbackFailure } from "orbit/lib/auth/observability";
 import { completeAuthorization, discoverProvider } from "orbit/lib/auth/oidc";
 import { provisionIdentity } from "orbit/lib/auth/provision";
+import { completeStepUp, isStepUpIntent, setStepUpProofCookie } from "orbit/lib/auth/recent-auth";
 import { createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 import { readInvitationCookie } from "orbit/server/invitations/cookie";
+import { linkIdentity } from "orbit/server/local-credentials";
 
 /**
  * Where the identity provider sends the browser back (#735 port).
@@ -56,6 +59,10 @@ export async function GET(event) {
   }
 
   try {
+    if (!config.oidc) {
+      throw new AuthError("auth_not_configured", "OpenID Connect sign-in is not configured on this instance", 503);
+    }
+
     const providerError = event.url.searchParams.get("error");
     if (providerError) {
       throw new AuthError("provider_error", "The identity provider declined the sign-in request", 401);
@@ -75,9 +82,77 @@ export async function GET(event) {
       throw new AuthError("invalid_state", "The authorization state does not match", 400);
     }
 
-    const metadata = await discoverProvider(config);
-    const identity = await completeAuthorization(config, metadata, code, transaction);
-    const user = await provisionIdentity(identity);
+    const metadata = await discoverProvider(config.oidc);
+    const identity = await completeAuthorization(config.oidc, metadata, code, transaction);
+
+    /* What the provider's answer is FOR is decided by the transaction this
+       process sealed, never by anything on the request (ADR-0022 §2). Four
+       kinds now: the ordinary login and the claim, the step-up (ADR-0023 §5),
+       and the link (ADR-0023 §6). Each one's authorisation was decided before
+       the browser left for the provider and travels in the sealed
+       transaction, which is why the switch reads `transactionKind` rather
+       than anything on this request. */
+    const kind = transactionKind(transaction);
+    let user;
+    switch (kind) {
+      case "step-up": {
+        /* A step-up proves the person is still there. It signs nobody in,
+           creates nothing and links nothing: it mints the two-minute proof the
+           action will consume, and sends the browser back to the action
+           (ADR-0023 §5). A stale or missing `auth_time` has already been
+           refused by `completeAuthorization` as `step_up_failed`, and lands on
+           the error screen with no proof and the action still blocked. */
+        if (!isStepUpIntent(transaction.intent)) {
+          throw new AuthError("invalid_state", "The sign-in transaction is invalid or has expired", 400);
+        }
+        const proof = await completeStepUp({
+          identity,
+          sessionId: /** @type {string} */ (transaction.stepUpSessionId),
+          intent: transaction.intent,
+          config,
+        });
+        clearTransactionCookie(event.cookies, config);
+        setStepUpProofCookie(event.cookies, proof, config);
+        return new Response(null, {
+          status: 303,
+          headers: {
+            location: new URL(transaction.returnTo, config.appUrl).href,
+            "cache-control": "no-store",
+          },
+        });
+      }
+      case "link": {
+        /* Linking (ADR-0023 §6). Like the step-up, this signs nobody in: the
+           person already has a session, and what they have just gained is a
+           second way to start the next one. The account the identity attaches
+           to is the one sealed into the transaction by `link/oidc/start`,
+           after that route checked the session and re-challenged them — never
+           anything on this request. A provider account that already belongs to
+           an Orbit account is `link_exists` and lands on the error screen. */
+        const linkUserId = /** @type {string} */ (transaction.linkUserId);
+        await linkIdentity(linkUserId, identity);
+        clearTransactionCookie(event.cookies, config);
+        return new Response(null, {
+          status: 303,
+          headers: {
+            location: new URL(transaction.returnTo, config.appUrl).href,
+            "cache-control": "no-store",
+          },
+        });
+      }
+      case "bootstrap":
+        /* The claim: this sign-in creates the first administrator and seats
+           the instance's primary administrator. A racing claimant that loses
+           the lock is refused with `bootstrap_claimed` and creates nothing. */
+        user = await provisionIdentity(identity, { bootstrap: true });
+        clearClaimCookie(event.cookies, config);
+        break;
+      case "login":
+        user = await provisionIdentity(identity);
+        break;
+      default:
+        throw new AuthError("invalid_state", "The sign-in transaction is invalid or has expired", 400);
+    }
     if (user.disabledAt) {
       throw new AuthError("account_disabled", "This Orbit account is disabled", 403);
     }

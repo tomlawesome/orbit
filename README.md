@@ -40,10 +40,17 @@ curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/inst
 On a capable controlling terminal, the installer opens the Orbit command
 centre with Install, Update, Repair, and Exit choices. Install guides the
 operator through a supported Standard, Document processing, Full local stack,
-or Custom profile, then collects the public HTTPS Orbit origin, complete OIDC
-issuer, client ID, and hidden OIDC client secret in private staging. The target
-is not changed until the final review is accepted. Repair is a non-mutating
-dispatch point until the bounded repair engine in issue #261 is delivered.
+or Custom profile, then asks whether to sign in with local accounts only (the
+default) or also with an identity provider; only the latter answer collects
+the public HTTPS Orbit origin, complete OIDC issuer, client ID, and hidden
+OIDC client secret in private staging — a local-only install collects only the
+origin. The target is not changed until the final review is accepted.
+After the stack is up, the completion screen points the operator at the
+container log to claim the fresh instance and create its first
+administrator; see
+[authentication.md](docs/authentication.md#claiming-a-fresh-install). Repair
+is a non-mutating dispatch point until the bounded repair engine in issue
+#261 is delivered.
 Git is not required and the repository is not cloned: a deployment needs
 compose assets and a published image, not source or tests.
 
@@ -201,9 +208,10 @@ write documentation assets.
 - **Installable without private offline storage** — a PWA shell and
   service-worker push handling, while authenticated workspace data remains
   server-authoritative and changes are never queued for later replay.
-- **Private by design** — provider-neutral OIDC, opaque server-side sessions,
-  PKCE, signed token validation, same-origin enforcement, CSRF protection, and
-  authenticated household APIs.
+- **Private by design** — local password accounts always available, optional
+  provider-neutral OIDC, opaque server-side sessions, PKCE, signed token
+  validation, same-origin enforcement, CSRF protection, and authenticated
+  household APIs.
 
 ## One app. Standard supporting services.
 
@@ -216,14 +224,14 @@ flowchart LR
     postgres[("orbit-postgres")]
     documents[("encrypted document volume")]
     scanner["official ClamAV scanner"]
-    identity["OIDC identity provider"]
+    identity["OIDC identity provider (optional)"]
     delivery["SMTP and Web Push providers"]
 
     browser <-->|HTTPS| orbit
     orbit <-->|PostgreSQL| postgres
     orbit -->|ciphertext only| documents
     orbit -->|quarantined stream| scanner
-    orbit <-->|OpenID Connect| identity
+    orbit <-.->|OpenID Connect, when enabled| identity
     orbit -->|Notifications| delivery
 ```
 
@@ -257,17 +265,21 @@ The first, non-interactive command creates `.env-orbit` plus the private
 selected Orbit image once, with only a key-generation command, to generate and
 persist Orbit's VAPID Web Push key pair on first setup: the private key stays
 in `.orbit-secrets` and only the public key is written to `.env-orbit`. The
-explicit `--init` step then records the public HTTPS Orbit origin, full OIDC
-issuer URL, and client ID, and derives the exact callback URL. It never asks
-for or invents the provider's client secret. The dedicated secret step reads
-that credential silently and persists it in the private `.orbit-secrets`
-directory; only its runtime file path is recorded in `.env-orbit`. See
-[authentication setup](docs/authentication.md). The value-free `--check`
-reports whether required settings and optional setting groups are complete
-without printing their contents. For non-interactive installation or upgrade,
-plain `bash scripts/configure.sh` preserves the existing configuration and
-secret file; the installer will continue only when that existing configuration
-and secret file are already complete and safe.
+explicit `--init` step asks whether to sign in with local accounts only
+(the default, `ORBIT_AUTH_OIDC=false`) or also with an identity provider; only
+when the answer is "also" does it record the public HTTPS Orbit origin, full
+OIDC issuer URL, and client ID, and derive the exact callback URL. It never
+asks for or invents the provider's client secret. The dedicated secret step
+reads that credential silently and persists it in the private
+`.orbit-secrets` directory; only its runtime file path is recorded in
+`.env-orbit`. See [authentication setup](docs/authentication.md). The
+value-free `--check` reports whether required settings and optional setting
+groups are complete without printing their contents. For non-interactive
+installation or upgrade, plain `bash scripts/configure.sh` preserves the
+existing configuration and secret file; the installer will continue only when
+that existing configuration and secret file are already complete and safe.
+After Orbit starts, an operator claims the fresh instance — see
+[authentication.md](docs/authentication.md#claiming-a-fresh-install).
 
 ### 2. Start Orbit
 
@@ -429,11 +441,14 @@ to retain downloaded models.
 > identical. Do not switch between `localhost` and `127.0.0.1` during a sign-in
 > attempt.
 
-Orbit never exposes a household workspace to an unauthenticated visitor. After
-the first successful registration, that user becomes the initial instance
-administrator and completes a guided setup for the household name, timezone,
-currency, and sections. The wizard offers Home, Vehicles, Devices, and Services
-as sensible defaults or accepts a fully custom section list.
+Orbit never exposes a household workspace to an unauthenticated visitor. A
+fresh instance is unclaimed until an operator opens the claim link printed in
+the container's own start-up log (see
+[authentication.md](docs/authentication.md#claiming-a-fresh-install)); the
+person who claims it becomes the initial instance administrator and completes
+a guided setup for the household name, timezone, currency, and sections. The
+wizard offers Home, Vehicles, Devices, and Services as sensible defaults or
+accepts a fully custom section list.
 
 Instance administrators can manage every household and grant or remove
 administrator access for other registered users. Orbit prevents removal of the
@@ -466,9 +481,11 @@ Orbit already includes:
 - atomic, audited household ownership transfer;
 - PostgreSQL/Drizzle models for users, sessions, households, memberships,
   items, events, reminders, push devices, delivery state, and audit history;
-- provider-neutral OpenID Connect discovery and Authorization Code flow with
-  S256 PKCE;
-- just-in-time user provisioning and immutable issuer/subject identities;
+- local password accounts, always available, and optional provider-neutral
+  OpenID Connect discovery and Authorization Code flow with S256 PKCE — see
+  [authentication.md](docs/authentication.md);
+- just-in-time OIDC user provisioning and immutable issuer/subject identities
+  when OIDC is enabled;
 - SMTP and Web Push delivery through an atomic PostgreSQL-backed scheduler;
 - an authentication gate that reveals no workspace or cached household data to
   signed-out visitors;

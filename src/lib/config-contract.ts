@@ -15,6 +15,7 @@ import { z } from "zod";
 // scripts/configuration.sh.
 export const ALLOWED_KEYS = [
   "APP_URL",
+  "ORBIT_AUTH_OIDC",
   "OIDC_ISSUER",
   "OIDC_CLIENT_ID",
   "OIDC_CLIENT_SECRET",
@@ -221,6 +222,11 @@ export function isValidClientId(value: string): boolean {
 export const envOrbitSchema = z
   .object({
     APP_URL: z.string().optional(),
+    // Explicit mode key (ADR-0023 §1): local sign-in is always available;
+    // OIDC is enabled only when this is exactly "true" (default "false").
+    // When not "true" the OIDC fields below stay in the allowlist but are
+    // ignored by evaluateReadiness rather than required or validated.
+    ORBIT_AUTH_OIDC: z.enum(["", "true", "false"]).optional(),
     OIDC_ISSUER: z.string().optional(),
     OIDC_CLIENT_ID: z.string().optional(),
     OIDC_CLIENT_SECRET: z.string().optional(),
@@ -361,6 +367,15 @@ export function evaluateReadiness(
   const appManaged = (label: string) => {
     lines.push(`app-managed ${label}`);
   };
+  // ORBIT_AUTH_OIDC=false (the default): the provider fields may stay set —
+  // switching the provider off must not force deleting its configuration
+  // (owner, 2026-09-09, ADR-0023 §1) — so they are reported inert rather
+  // than missing, and never affect `ok`.
+  const notInUse = (label: string) => {
+    lines.push(`not in use ${label}`);
+  };
+
+  const oidcEnabled = record.ORBIT_AUTH_OIDC === "true";
 
   const normalizedAppUrl = isSet(record, "APP_URL")
     ? normalizePublicOrigin(record.APP_URL as string)
@@ -396,10 +411,17 @@ export function evaluateReadiness(
 
   required("APP_URL", appUrlReady);
   required("ORBIT_IMAGE", imageReady);
-  required("OIDC_ISSUER", issuerReady);
-  required("OIDC_CLIENT_ID", clientIdReady);
-  required("OIDC_CLIENT_SECRET", oidcSecretReady);
-  required("OIDC_CALLBACK_URL", callbackReady);
+  if (oidcEnabled) {
+    required("OIDC_ISSUER", issuerReady);
+    required("OIDC_CLIENT_ID", clientIdReady);
+    required("OIDC_CLIENT_SECRET", oidcSecretReady);
+    required("OIDC_CALLBACK_URL", callbackReady);
+  } else {
+    notInUse("OIDC_ISSUER");
+    notInUse("OIDC_CLIENT_ID");
+    notInUse("OIDC_CLIENT_SECRET");
+    notInUse("OIDC_CALLBACK_URL");
+  }
 
   const processingPresent =
     profileEnabled(record, "processing") || isSet(record, "TIKA_URL");

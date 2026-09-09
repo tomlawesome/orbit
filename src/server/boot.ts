@@ -364,4 +364,13 @@ export async function registerNode(): Promise<void> {
     });
   });
 
+  /* The last act of start-up (ADR-0022 §1). On an unclaimed instance this
+     prints the claim notice, so it is the last line of `docker logs
+     orbit-app` until the first request arrives and the operator can open it
+     straight from there. On a claimed instance it generates nothing and
+     prints nothing. It throws only when no code can be produced at all, which
+     is a start-up fault like any other: an instance that is up and unclaimed
+     always has a live code (ADR-0022 §3). */
+  const { printClaimNotice } = await import("@/lib/auth/bootstrap");
+  await printClaimNotice();
 }

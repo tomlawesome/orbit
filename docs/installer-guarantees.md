@@ -19,9 +19,9 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   the fixed safe/reversible action set only: fix-permissions,
   restore-transaction, restart-services; stage two/dangerous actions remain
   unimplemented) was added 2026-08-13.
-- **Totals:** 369 guarantees — 212 HIGH, 124 MEDIUM, 33 LOW.
-  Install/configuration family: 206 (117 HIGH). Backup/recovery/deploy
-  family: 163 (95 HIGH).
+- **Totals:** 371 guarantees — 214 HIGH, 124 MEDIUM, 33 LOW.
+  Install/configuration family: 207 (118 HIGH). Backup/recovery/deploy
+  family: 164 (96 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
   harness scenarios cite entries here. Line numbers drift — treat the
@@ -212,6 +212,7 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 54. The final `ORBIT_IMAGE` rewrite is staged into a `mktemp` file (mode 600) under `staging_dir` and only `mv`'d over `.env-orbit` after the entire rewritten content has been successfully produced — `.env-orbit` is never edited in place with a risk of partial content on a mid-write failure. — install.sh:1505-1535 — category: transactional/rollback — criticality: HIGH
 55. `docker compose config --quiet` must succeed — validating the fully composed configuration — before any service is started or the transaction is committed; invalid Compose configuration is caught and fails closed pre-commit. — install.sh:1539-1541 — category: refusal/fail-closed — criticality: HIGH
 56. The file transaction is marked committed (`file_transaction_committed=1`) only after OIDC discovery, configuration migration, and `compose config --quiet` have all already succeeded; any failure before this point triggers the `EXIT`-trap rollback of every file change made so far, and only once committed do image pulls and service startup (steps outside the file-rollback mechanism's scope) begin. — install.sh:1479-1550 — category: transactional/rollback — criticality: HIGH
+57. The installer never creates the first administrator and never sees the bootstrap claim code (ADR-0022 section 1: the code lives only in the running application process's memory and is printed once, by the application itself, as the last line of the container's own start-up log). Guided configuration's sign-in mode question (`configure.sh --init`) only ever writes `ORBIT_AUTH_OIDC`; when the answer is local-only, `stage_guided_install_configuration` skips the `--set-oidc-secret` step entirely rather than collecting an unused secret, and the main run gates the OIDC-discovery phase itself on the same persisted value — `ORBIT_AUTH_OIDC=true` runs `verify_oidc_discovery` as before, anything else emits a `state=skipped` event and never contacts a provider. `print_completion_screen`'s one new line names only the `docker compose logs orbit-app` command and where on its output to look; it never reads, derives, or interpolates the claim code itself. — install.sh:1089-1096,1274-1293,1600-1613 — category: secret-handling — criticality: HIGH
 
 ## repair.sh (diagnosis, planning and execution entry point — issue #261; `--check`/`--plan`/`--execute --safe-only`/`--execute --dangerous`, plus `--export-diagnostics`)
 
@@ -303,28 +304,28 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 
 | Script | Guarantees |
 |---|---:|
-| install.sh | 56 |
+| install.sh | 57 |
 | configure.sh | 34 |
 | configuration.sh | 25 |
 | container-entrypoint.sh | 14 |
 | installer-ui.sh | 13 |
 | repair.sh | 56 |
 | installer-simulation.sh | 8 |
-| **Total** | **206** |
+| **Total** | **207** |
 
 **Guarantee count by category × criticality**
 
 | Category | HIGH | MEDIUM | LOW | Total |
 |---|---:|---:|---:|---:|
 | refusal/fail-closed | 27 | 25 | 7 | 59 |
-| secret-handling | 30 | 5 | 0 | 35 |
+| secret-handling | 31 | 5 | 0 | 36 |
 | input-validation | 6 | 20 | 7 | 33 |
 | provenance/immutability | 17 | 9 | 0 | 26 |
 | transactional/rollback | 18 | 3 | 0 | 21 |
 | permissions/ownership | 18 | 0 | 0 | 18 |
 | idempotency | 0 | 4 | 4 | 8 |
 | recovery | 1 | 4 | 1 | 6 |
-| **Total** | **117** | **70** | **19** | **206** |
+| **Total** | **118** | **70** | **19** | **207** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 
@@ -688,6 +689,11 @@ and a separate `--recover` manual-recovery mode for crash safety.
 48. Restore is marked `completed` — and the journal/checkpoint purged — only after documents are replaced, the database is restored, scan leases are reset, active correspondence validates, and the health check passes; any single failure short-circuits into rollback instead.
     `restore.sh:930-933` — category: transactional/rollback — criticality: HIGH
 
+**Authentication data and the revocation boundary (#917, ADR-0022 §6, ADR-0023 §7)**
+
+49. The unconditional whole-database swap (guarantee 25) applies to authentication state with no special-casing: a `local_credentials` password hash and an unconsumed `credential_setup_tokens` row present at backup time are restored byte-for-byte intact, while a `sessions` row created after the backup point is absent from the restored database because it was never part of the dump — restoring an earlier backup cannot resurrect a session an operator believed was already revoked. `scripts/test-backup-restore.sh`'s `assert_credential_fixture_present` exercises all three on every run of the drill.
+    `restore.sh:578-583` — category: provenance/immutability — criticality: HIGH
+
 ---
 
 ## build-container.sh
@@ -754,21 +760,21 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 ## Summary
 
-**Total guarantees catalogued: 163**
+**Total guarantees catalogued: 164**
 
 ### Counts by criticality
 
 | Criticality | Count |
 |---|---|
-| HIGH | 95 |
+| HIGH | 96 |
 | MEDIUM | 54 |
 | LOW | 14 |
-| **Total** | **163** |
+| **Total** | **164** |
 
 ### Counts by category
 
 An entry may belong to more than one category (e.g. "secret-handling / refusal"), so the
-category tag counts below sum to more than 163. `deployment-correctness` is a category used
+category tag counts below sum to more than 164. `deployment-correctness` is a category used
 only for `build-container.sh`/`deploy-container.sh`/`update-and-start.sh` items that are
 about correct deployment behavior rather than data-loss/security boundaries; it falls outside
 the original 8-category taxonomy and is called out separately.
@@ -778,7 +784,7 @@ the original 8-category taxonomy and is called out separately.
 | input-validation | 55 |
 | secret-handling | 42 |
 | refusal / fail-closed | 29 |
-| provenance/immutability | 30 |
+| provenance/immutability | 31 |
 | transactional/rollback | 26 |
 | recovery | 16 |
 | idempotency | 7 |
@@ -793,7 +799,7 @@ the original 8-category taxonomy and is called out separately.
 | export-recovery-bundle.sh | 16 |
 | import-recovery-bundle.sh | 27 |
 | recovery-crypto.mjs | 16 |
-| restore.sh | 48 |
+| restore.sh | 49 |
 | build-container.sh | 6 |
 | deploy-container.sh | 8 |
 | update-and-start.sh | 4 |

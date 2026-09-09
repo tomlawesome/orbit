@@ -565,7 +565,8 @@ describe("exact-image publication workflow", () => {
     expect(refusalStep).toContain("installer_status=$?");
     expect(refusalStep).toContain('[[ "${installer_status}" -ne 0 ]]');
     expect(refusalStep).toContain(
-      "Orbit installer: configuration fields requiring attention: APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL.",
+      // M7 (#909): OIDC is off by default, so an empty target owes only APP_URL.
+      "Orbit installer: configuration fields requiring attention: APP_URL.",
     );
     expect(refusalStep).toContain(
       "Orbit installer: Required configuration fields require attention; refusing to start Compose.",

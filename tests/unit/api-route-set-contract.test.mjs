@@ -53,12 +53,40 @@ const EXPECTED_ROUTES = [
   "/api/admin/operations/smtp-test",
   "/api/admin/primary",
   "/api/admin/users",
+  // Admin-issued setup and recovery links (M7 slice 8, #911, ADR-0023 §3):
+  // re-issues a `recovery` token for a local user who has forgotten their
+  // password; the initial link comes back from the plain POST above.
+  "/api/admin/users/[userId]/setup-link",
   "/api/auth/availability",
+  // The claim (M7, ADR-0022 §2): signed out by design, and called by the
+  // door and by the e2e claim helper, never by the identity provider.
+  "/api/auth/bootstrap/claim",
+  // The first administrator with a password (M7, ADR-0022 §2): the claim
+  // cookie is its whole authorisation, and it is called by the first-run card.
+  "/api/auth/bootstrap/local",
   "/api/auth/callback",
+  // Linking a provider identity to the signed-in account (M7, ADR-0023 §6):
+  // called by the settings sign-in-methods block, never by the provider.
+  "/api/auth/link/oidc/start",
+  // Local sign-in (M7, ADR-0023 §4): signed out by design, called by the door.
+  "/api/auth/local/login",
+  // Sets or changes the signed-in caller's own password (M7 slice 8, #911,
+  // ADR-0023 §6-§7): a session route, guarded by `write()`.
+  "/api/auth/local/password",
+  // Spends a setup or recovery link and signs its owner in (M7 slice 8,
+  // #911, ADR-0023 §3): signed out by design, called by `/setup/<token>`.
+  "/api/auth/local/setup",
   "/api/auth/login",
+  // The caller's own sign-in methods and their removal (M7, ADR-0023 §6).
+  "/api/auth/methods",
+  "/api/auth/methods/local",
+  "/api/auth/methods/oidc/[identityId]",
   "/api/auth/logout",
   "/api/auth/session",
   "/api/auth/session/refresh",
+  // The OIDC step-up (M7, ADR-0023 §5): the challenge for a reader with no
+  // password, called by every sensitive action's screen, never by the provider.
+  "/api/auth/step-up/start",
   "/api/auth/sessions",
   "/api/auth/sessions/[sessionId]/revoke",
   "/api/auth/sessions/revoke",
@@ -132,7 +160,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 52 route families -- no fewer, no more", () => {
+  it("has exactly the expected 64 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
