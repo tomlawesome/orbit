@@ -77,15 +77,25 @@ async function ensureHousehold(page: Page) {
   households.track(created);
 }
 
-test.afterEach(async ({ page }) => {
-  await households.sweep(page);
+/* #730: swept from the administrator's own session when the file is done --
+   a hard delete is an instance-admin power, and the reader who made the
+   household is deliberately ordinary. `v19-membership.spec.ts`'s shape. */
+test.afterAll(async ({ browser }) => {
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  try {
+    await signInAs(page, "Orbit Administrator", { household: false });
+    await households.sweep(page);
+  } finally {
+    await context.close();
+  }
 });
 
-async function signInAs(page: Page, account: string) {
+async function signInAs(page: Page, account: string, options: { household?: boolean } = {}) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);
-  await ensureHousehold(page);
+  if (options.household !== false) await ensureHousehold(page);
 }
 
 /** The helm, loaded — every card is gated on the screen's own fetch. */
