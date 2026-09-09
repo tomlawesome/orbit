@@ -31,10 +31,6 @@ body{background:#060a18}
 .horizon{animation:horiz 17s ease-in-out infinite alternate}
 @keyframes horiz{from{opacity:.75}to{opacity:1}}
 
-/* transit as the progress bar — the arc creeps, honestly slow */
-.progress{animation:transit 90s linear forwards}
-@keyframes transit{from{stroke-dasharray:52 48}to{stroke-dasharray:74 26}}
-
 /* the diamond ring — service returning; demo loops every 36s */
 .flare{opacity:0;animation:ringflash 36s linear infinite}
 @keyframes ringflash{
@@ -111,7 +107,6 @@ body{background:#060a18}
 .grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
 @media (prefers-reduced-motion: reduce){
   .flare,.wash,.ringflare,.flarewave{opacity:0!important}
-  .progress{stroke-dasharray:64 36}
   .earlier summary,.earlier summary svg{transition:none}
 }
 </style></head><body>
@@ -279,11 +274,6 @@ body{background:#060a18}
   <circle cx="800" cy="440" r="170" fill="none" stroke="#ffb46a" stroke-width="7" opacity=".22" filter="url(#b9)"/>
   <circle class="ring-inner" cx="800" cy="440" r="170" fill="none" stroke="#ffe9bd" stroke-width="3.2" opacity=".8" filter="url(#b2)"/>
   <circle cx="800" cy="440" r="170" fill="none" stroke="#fffdf6" stroke-width="1.2" opacity=".95"/>
-
-  <!-- transit is the progress bar -->
-  <circle class="progress" pathLength="100" cx="800" cy="440" r="186" fill="none"
-          stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" opacity=".5"
-          transform="rotate(-90 800 440)"/>
 
   <!-- the diamond ring: service returning (demo loops) -->
   <g class="flare">

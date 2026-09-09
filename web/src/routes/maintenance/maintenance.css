@@ -35,10 +35,6 @@ body{background:#060a18}
 .horizon{animation:horiz 17s ease-in-out infinite alternate}
 @keyframes horiz{from{opacity:.75}to{opacity:1}}
 
-/* transit as the progress bar — the arc creeps, honestly slow */
-.progress{animation:transit 90s linear forwards}
-@keyframes transit{from{stroke-dasharray:52 48}to{stroke-dasharray:74 26}}
-
 /* the diamond ring — service returning; demo loops every 36s */
 .flare{opacity:0;animation:ringflash 36s linear infinite}
 @keyframes ringflash{
@@ -114,6 +110,5 @@ body{background:#060a18}
 .log .body{font-size:13px;color:var(--ink-mid)}
 @media (prefers-reduced-motion: reduce){
   .flare,.wash,.ringflare,.flarewave{opacity:0!important}
-  .progress{stroke-dasharray:64 36}
   .earlier summary,.earlier summary svg{transition:none}
 }
