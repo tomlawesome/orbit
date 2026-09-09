@@ -114,6 +114,12 @@ export const operationalReasons = [
      caller away. Neither ever carries the address, the password or a count. */
   "credentials_rejected",
   "attempts_exhausted",
+  /* Recent authentication (ADR-0023 §5, §8): a step-up came back without a
+     usable re-authentication — no `auth_time`, a stale one, or an identity
+     that is not the one holding the session. The operator needs to know,
+     because a provider that ignores `max_age` blocks every sensitive action;
+     the record names no person and no provider text. */
+  "step_up_rejected",
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
 

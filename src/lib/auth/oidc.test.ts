@@ -8,6 +8,8 @@ import {
   completeAuthorization,
   discoverProvider,
   profileFromClaims,
+  StaleAuthenticationError,
+  STEP_UP_MAX_AUTH_AGE_SECONDS,
   validateIdTokenClaims,
   verifyIdToken,
   type OidcMetadata,
@@ -100,6 +102,85 @@ describe("OIDC validation", () => {
         trustedKeys,
       )).rejects.toMatchObject({ code: "invalid_id_token" });
     }
+  });
+
+  it("asks for max_age only when the transaction does, and a step-up asks for zero", () => {
+    const transaction = {
+      state: "state-value",
+      nonce: "nonce-value",
+      codeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+      returnTo: "/",
+    };
+    expect(createAuthorizationUrl(config, metadata, transaction).searchParams.has("max_age")).toBe(false);
+    const stepUp = createAuthorizationUrl(config, metadata, {
+      ...transaction,
+      stepUpSessionId: "11111111-1111-4111-8111-111111111111",
+      intent: "primary_transfer",
+      maxAge: 0,
+    });
+    expect(stepUp.searchParams.get("max_age")).toBe("0");
+  });
+
+  it("holds a step-up to a fresh auth_time, and an ordinary login to none", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const claims = (authTime?: number) => ({
+      sub: "subject",
+      aud: "orbit",
+      nonce: "expected",
+      ...(authTime === undefined ? {} : { auth_time: authTime }),
+    });
+
+    // No step-up asked for: auth_time is nobody's business.
+    expect(() => validateIdTokenClaims(claims(), "expected", "orbit")).not.toThrow();
+    expect(() => validateIdTokenClaims(claims(now - 86_400), "expected", "orbit")).not.toThrow();
+
+    const stepUp = { maxAuthAgeSeconds: STEP_UP_MAX_AUTH_AGE_SECONDS };
+    expect(() => validateIdTokenClaims(claims(now), "expected", "orbit", stepUp)).not.toThrow();
+    // 90 seconds old: the plan's case, and past the 60 s window plus tolerance.
+    expect(() => validateIdTokenClaims(claims(now - 90), "expected", "orbit", stepUp))
+      .toThrow(StaleAuthenticationError);
+    // A provider that answers max_age with no auth_time has re-authenticated
+    // nobody, so it fails the same way rather than being trusted.
+    expect(() => validateIdTokenClaims(claims(), "expected", "orbit", stepUp))
+      .toThrow(StaleAuthenticationError);
+    expect(() => validateIdTokenClaims({ ...claims(), auth_time: "now" }, "expected", "orbit", stepUp))
+      .toThrow(StaleAuthenticationError);
+    // Far in the future is a wrong clock or a forged claim, not evidence.
+    expect(() => validateIdTokenClaims(claims(now + 600), "expected", "orbit", stepUp))
+      .toThrow(StaleAuthenticationError);
+  });
+
+  it("answers a stale step-up with step_up_failed rather than invalid_id_token", async () => {
+    const trusted = await generateKeyPair("RS256");
+    const publicJwk = { ...await exportJWK(trusted.publicKey), alg: "RS256", kid: "primary", use: "sig" };
+    const trustedKeys = createLocalJWKSet({ keys: [publicJwk] });
+    const now = Math.floor(Date.now() / 1000);
+
+    const sign = (authTime: number | undefined) => {
+      const token = new SignJWT({
+        nonce: "expected-nonce",
+        ...(authTime === undefined ? {} : { auth_time: authTime }),
+      })
+        .setProtectedHeader({ alg: "RS256", kid: "primary" })
+        .setIssuer(config.issuer)
+        .setAudience(config.clientId)
+        .setSubject("immutable-subject")
+        .setIssuedAt(now)
+        .setExpirationTime(now + 300);
+      return token.sign(trusted.privateKey);
+    };
+
+    const stepUp = { maxAuthAgeSeconds: STEP_UP_MAX_AUTH_AGE_SECONDS };
+    await expect(verifyIdToken(config, metadata, await sign(now), undefined, "expected-nonce", trustedKeys, stepUp))
+      .resolves.toMatchObject({ sub: "immutable-subject" });
+    for (const authTime of [now - 90, undefined]) {
+      await expect(verifyIdToken(config, metadata, await sign(authTime), undefined, "expected-nonce", trustedKeys, stepUp))
+        .rejects.toMatchObject({ code: "step_up_failed", status: 401 });
+    }
+    // The same token is fine for an ordinary sign-in: the rule is the
+    // transaction's, not the provider's.
+    await expect(verifyIdToken(config, metadata, await sign(now - 90), undefined, "expected-nonce", trustedKeys))
+      .resolves.toMatchObject({ sub: "immutable-subject" });
   });
 
   it("maps mutable profile claims without changing issuer/subject identity", () => {

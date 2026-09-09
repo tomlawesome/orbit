@@ -19,18 +19,35 @@ export interface LoginTransaction {
    * write, so a returning provider response cannot promote itself.
    */
   bootstrap?: boolean;
+  /**
+   * Set only by `POST /api/auth/step-up/start` (ADR-0023 §5): the id of the
+   * session being re-challenged, and what it is being re-challenged for. The
+   * callback mints a proof bound to exactly this pair, so a step-up taken for
+   * one action on one session cannot be spent on another.
+   */
+  stepUpSessionId?: string;
+  intent?: string;
+  /**
+   * The `max_age` the authorization request carries. A step-up sends `0`,
+   * which asks the provider to authenticate the person again now; its
+   * presence is also what turns on the `auth_time` freshness rule in
+   * `validateIdTokenClaims`.
+   */
+  maxAge?: number;
 }
 
 /**
  * What the callback should do with a transaction it has just opened. Slice 5
- * lands `login` and `bootstrap`; the link and step-up branches (ADR-0023 §5,
- * §6) add their own kind here and a case in the callback's switch, so the
- * decision stays in one function rather than spreading across route bodies.
+ * lands `login` and `bootstrap`, slice 7 `step-up`; the link branch
+ * (ADR-0023 §6) adds its own kind here and a case in the callback's switch, so
+ * the decision stays in one function rather than spreading across route bodies.
  */
-export type LoginTransactionKind = "login" | "bootstrap";
+export type LoginTransactionKind = "login" | "bootstrap" | "step-up";
 
 export function transactionKind(transaction: LoginTransaction): LoginTransactionKind {
-  return transaction.bootstrap === true ? "bootstrap" : "login";
+  if (transaction.bootstrap === true) return "bootstrap";
+  if (typeof transaction.stepUpSessionId === "string" && transaction.stepUpSessionId.length > 0) return "step-up";
+  return "login";
 }
 
 export function randomUrlSafe(byteLength = 32): string {
@@ -123,6 +140,14 @@ export async function openLoginTransaction(value: string, config: AuthConfig): P
       /* Only the literal `true` carries; anything else is absent, so a
          transaction sealed without a claim can never open as one. */
       ...(payload.bootstrap === true ? { bootstrap: true } : {}),
+      /* Same rule for the step-up fields: each one carries only when it has
+         the type this process sealed, so a partially-formed payload opens as
+         an ordinary login rather than as a step-up with a missing half. */
+      ...(typeof payload.stepUpSessionId === "string" && payload.stepUpSessionId.length > 0
+        ? { stepUpSessionId: payload.stepUpSessionId }
+        : {}),
+      ...(typeof payload.intent === "string" && payload.intent.length > 0 ? { intent: payload.intent } : {}),
+      ...(typeof payload.maxAge === "number" && Number.isFinite(payload.maxAge) ? { maxAge: payload.maxAge } : {}),
     };
   } catch (error) {
     throw new AuthError("invalid_state", "The sign-in transaction is invalid or has expired", 400, { cause: error });
