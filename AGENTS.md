@@ -154,7 +154,10 @@ Check the list before building a test rig or handing a check to the owner.
   disagrees
 - `scripts/test-integration.mjs` — integration suite against a real database
 - `scripts/test-e2e-local.sh` — local stack with disposable OIDC and GreenMail
-  sidecars, then Playwright
+  sidecars, then Playwright. `--profile local-only` swaps them for an Orbit
+  with no identity provider at all and runs the short list in
+  `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only`
+  runs too (#916)
 - `scripts/test-install-acceptance.sh` — real fresh install to a healthy
   `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
   fixture, so no provider credentials are needed
@@ -205,7 +208,7 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Ten known ways to lose an afternoon, or worse.
+Eleven known ways to lose an afternoon, or worse.
 
 **`pnpm db:generate` refuses to run, on purpose.** `drizzle/meta/` holds
 snapshots only up to 0004, so `drizzle-kit generate` would diff against a
@@ -278,6 +281,15 @@ reverse, and no test notices unless it covers the boundary. Scan the string
 explicitly instead, as `isApplicationRelative` in
 `web/src/routes/login/+page.svelte` does, and give it cases for the empty
 string, a protocol-relative `//` and a backslash.
+
+**`scripts/test-install-acceptance.sh` refuses while any Orbit database
+volume exists on the host — the demo stack's `orbit-demo_orbit-db-data`
+included.** `install.sh`'s fresh-install guard (#13, #21) matches every
+volume ending `orbit-db-data`, whatever Compose project owns it, so with a
+demo or review stack up the harness fails one second into the positive
+scenario with "An existing Orbit database volume requires a recognized
+deployment". CI does not run this harness (deferred, see the top of
+`.gitlab-ci.yml`), so take the demo stack down first or run it elsewhere.
 
 **A lockfile diff adding an `@pnpm/exe` block is pnpm 11 talking, not your
 change.** The host's PATH `pnpm` is 11.9.0 and writes that block while

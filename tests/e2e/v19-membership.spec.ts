@@ -1,6 +1,7 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
+import { claimInstanceAsAdministrator } from "./support/bootstrap";
 
 /**
  * #453: membership and the empty sky (§11). A newcomer with no household
@@ -30,16 +31,6 @@ async function signInAs(page: Page, account: string) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);
-}
-
-/* A fresh instance promotes its first sign-in to instance admin — and an
- * admin never sees the empty sky (they see everything, §11). Claim the
- * promotion for the administrator so everyone below is ordinary. */
-async function establishInstanceAdmin(browser: Browser) {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  const page = await context.newPage();
-  await signInAs(page, "Orbit Administrator");
-  await context.close();
 }
 
 async function createHousehold(page: Page, name: string) {
@@ -147,7 +138,11 @@ test("a newcomer sees the labelled sky, asks, is approved, and enters the system
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(120_000);
 
-  await establishInstanceAdmin(browser);
+  /* An admin never sees the empty sky (they see everything, §11), so the
+     administrator claims the instance here and everyone below is ordinary.
+     Since ADR-0022 that is the claim code from the stack's own log, not a
+     race for the first sign-in. */
+  await claimInstanceAsAdministrator(browser);
 
   /* The member owns a household for the newcomer to ask into. */
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });

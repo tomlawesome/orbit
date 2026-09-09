@@ -109,16 +109,21 @@ describe("PostgreSQL public-contact-address contracts (#860)", () => {
     expect(signedOut.contactAddress).toBe("public-contact@example.invalid");
     expect(signedOut.contactAddress).not.toBe(fixture.users.admin.email);
     expect(signedOut.contactAddress).not.toBe(fixture.users.owner.email);
-    // The whole body is bounded to these three fields (door-state.js's
-    // availabilityOf reads only them, but the route itself is asserted here
-    // too): nothing about any account rides along on this read. `phase`
-    // joined them in #869 and is deliberately inside the bound rather than
-    // outside it — it is one of two words, "starting" or "running", and
-    // names neither a subsystem nor an error, so it tells a signed-out
-    // visitor when the door is worth polling and nothing else. Widening
-    // this list is a decision about an unauthenticated surface; make it
-    // here, on purpose, or not at all.
-    expect(Object.keys(signedOut).sort()).toEqual(["configured", "contactAddress", "phase"]);
+    // The whole body is bounded to these five fields (door-state.js's
+    // availabilityOf reads only some of them, but the route itself is
+    // asserted here too): nothing about any account rides along on this
+    // read. `phase` joined them in #869 and is deliberately inside the bound
+    // rather than outside it — it is one of two words, "starting" or
+    // "running", and names neither a subsystem nor an error, so it tells a
+    // signed-out visitor when the door is worth polling and nothing else.
+    // `claimed` and `methods` joined them in M7 by ADR-0023 §1: whether the
+    // instance has a primary administrator, and which methods it can offer
+    // at all. Neither says whether any account exists or which one, and
+    // `claimed` never carries anything about the claim code, which lives
+    // only in the container's own log. Widening this list is a decision
+    // about an unauthenticated surface; make it here, on purpose, or not at
+    // all.
+    expect(Object.keys(signedOut).sort()).toEqual(["claimed", "configured", "contactAddress", "methods", "phase"]);
   });
 
   it("reflects whether authentication is configured, without ever naming why not", async () => {

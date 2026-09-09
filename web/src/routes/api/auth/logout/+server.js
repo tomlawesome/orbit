@@ -36,11 +36,13 @@ export const POST = api(
     );
 
     let redirectTarget = postLogoutReturnTo;
-    try {
-      const metadata = await discoverProvider(config);
-      redirectTarget = createProviderLogoutUrl(config, metadata, postLogoutReturnTo) ?? postLogoutReturnTo;
-    } catch {
-      // Local logout must succeed even if the provider is unavailable.
+    if (config.oidc) {
+      try {
+        const metadata = await discoverProvider(config.oidc);
+        redirectTarget = createProviderLogoutUrl(config.oidc, metadata, postLogoutReturnTo) ?? postLogoutReturnTo;
+      } catch {
+        // Local logout must succeed even if the provider is unavailable.
+      }
     }
 
     clearSessionCookie(event.cookies, config);

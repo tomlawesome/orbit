@@ -79,14 +79,18 @@ export interface InvitationSendOutcome {
 }
 
 /**
- * Renders and sends one invitation, and reports which of the two happened.
+ * Puts one already-written message on the wire, now, and reports which of
+ * "sent" and "not sent, and why in one bounded word" happened.
  *
- * Never throws for a provider failure: an owner who has just typed an address
- * gets a row they can resend from, not a 500 that loses the invitation they
- * created a moment ago.
+ * The person-facing sends share this rather than each opening their own
+ * transporter: the invitation (#481) and the account setup link (#911,
+ * ADR-0023 §3, which names this module as the mailer it goes through). Both
+ * are somebody waiting on a link, so both are synchronous and both answer a
+ * failure to the person who asked for the send.
  */
-export async function sendInvitationMail(
-  context: InvitationMailContext,
+export async function sendBoundedMail(
+  to: string,
+  mail: { subject: string; text: string; html?: string },
   mailer?: InvitationMailer | null,
   now: Date = new Date(),
 ): Promise<InvitationSendOutcome> {
@@ -102,14 +106,13 @@ export async function sendInvitationMail(
   }
   if (!provider) return { sentAt: null, sendError: "smtp_unconfigured" };
 
-  const mail = renderInvitationMail(context);
   try {
     await provider.sendEmail({
       from,
-      to: context.email,
+      to,
       subject: mail.subject,
       text: mail.text,
-      html: mail.html,
+      ...(mail.html ? { html: mail.html } : {}),
       tlsMode: getNotificationWorkerConfig().smtpSecurity,
     });
     return { sentAt: now, sendError: null };
@@ -122,4 +125,19 @@ export async function sendInvitationMail(
         : "unknown";
     return { sentAt: null, sendError };
   }
+}
+
+/**
+ * Renders and sends one invitation, and reports which of the two happened.
+ *
+ * Never throws for a provider failure: an owner who has just typed an address
+ * gets a row they can resend from, not a 500 that loses the invitation they
+ * created a moment ago.
+ */
+export async function sendInvitationMail(
+  context: InvitationMailContext,
+  mailer?: InvitationMailer | null,
+  now: Date = new Date(),
+): Promise<InvitationSendOutcome> {
+  return sendBoundedMail(context.email, renderInvitationMail(context), mailer, now);
 }

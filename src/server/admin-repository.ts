@@ -1,20 +1,13 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, externalIdentities, instanceAuthority, memberships, sessions, users } from "@/db/schema";
+import { auditLog, externalIdentities, instanceAuthority, localCredentials, memberships, sessions, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY, ADMINISTRATOR_LOCK_KEY } from "@/lib/auth/authority-locks";
+import type { RecentAuthentication } from "@/lib/auth/recent-auth";
 import { requireInstanceAdministrator } from "@/server/authorization";
 
 const uuidSchema = z.uuid();
-
-/**
- * How long a session may be old and still count as fresh proof for a
- * primary-authority transfer (#263). There is no in-session re-auth flow yet
- * (that arrives with #259's local accounts), so "recently signed in" is the
- * available equivalent: past the window the transfer asks for a fresh sign-in.
- */
-const TRANSFER_FRESH_SESSION_SECONDS = 15 * 60;
 
 export interface InstanceUser {
   id: string;
@@ -270,20 +263,33 @@ export async function setInstanceUserDisabled(
  * concurrent disable, demotion or second transfer serializes behind it and
  * re-reads the authority row it may have moved. Only the current primary may
  * transfer; the target must be a different, active administrator with a
- * usable sign-in method. The former primary remains an ordinary active
- * administrator.
+ * usable sign-in method — a password or a linked provider identity
+ * (ADR-0023 §6). The former primary remains an ordinary active administrator.
  *
  * Administrator and primary status are read from the database on every
  * mutation rather than cached in sessions, so existing sessions see the new
  * authority immediately; nothing needs revoking.
+ *
+ * The caller must have just been re-challenged: `recentAuthentication` is the
+ * receipt `requireRecentAuthentication` returns (ADR-0023 §5), and it replaces
+ * #263's fifteen-minute session window, which is deleted. The receipt is
+ * checked here rather than trusted, so this function cannot be reached with
+ * somebody else's challenge or one earned for a different action.
  */
 export async function transferPrimaryAdministrator(
   actorUserId: string,
-  actorSessionId: string,
+  recentAuthentication: RecentAuthentication,
   targetUserId: string,
 ): Promise<InstanceUserList> {
   if (!uuidSchema.safeParse(targetUserId).success) {
     throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
+  }
+  if (recentAuthentication.userId !== actorUserId || recentAuthentication.intent !== "primary_transfer") {
+    throw new AppError(
+      "recent_authentication_required",
+      "Confirm it is you before transferring primary administrator authority",
+      403,
+    );
   }
 
   await getDb().transaction(async (transaction) => {
@@ -305,23 +311,6 @@ export async function transferPrimaryAdministrator(
       );
     }
 
-    /* Fresh proof: the session performing the transfer must be recent. A
-       stale request from an old session asks for a fresh sign-in instead
-       (#263); in-session re-authentication arrives with #259. */
-    const [actorSession] = await transaction
-      .select({ createdAt: sessions.createdAt })
-      .from(sessions)
-      .where(and(eq(sessions.id, actorSessionId), eq(sessions.userId, actorUserId)))
-      .limit(1);
-    const freshestAcceptable = Date.now() - TRANSFER_FRESH_SESSION_SECONDS * 1000;
-    if (!actorSession || actorSession.createdAt.getTime() < freshestAcceptable) {
-      throw new AppError(
-        "recent_authentication_required",
-        "Sign in again to transfer primary administrator authority",
-        403,
-      );
-    }
-
     if (targetUserId === actorUserId) {
       throw new AppError(
         "transfer_target_ineligible",
@@ -339,12 +328,21 @@ export async function transferPrimaryAdministrator(
         409,
       );
     }
+    /* The target must be able to sign in. Since M7 that is a password OR a
+       linked provider identity (ADR-0023 §6): on a local-only instance nobody
+       has an identity, and requiring one would leave the authority
+       untransferable. */
     const [identity] = await transaction
       .select({ id: externalIdentities.id })
       .from(externalIdentities)
       .where(eq(externalIdentities.userId, targetUserId))
       .limit(1);
-    if (!identity) {
+    const [credential] = await transaction
+      .select({ userId: localCredentials.userId })
+      .from(localCredentials)
+      .where(eq(localCredentials.userId, targetUserId))
+      .limit(1);
+    if (!identity && !credential) {
       throw new AppError(
         "transfer_target_ineligible",
         "Choose a different active administrator to receive primary authority",

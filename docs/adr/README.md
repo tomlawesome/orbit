@@ -35,3 +35,6 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0018: The engine is a library, `orbit-web` links it, adapter-node ships it](0018-engine-library-and-adapter-node-packaging.md)
 - [ADR-0019: Deployment assets ship inside the image](0019-deployment-assets-ship-inside-the-image.md)
 - [ADR-0020: Validation evidence is a cosign attestation binding digest and policy version; publication only consumes it](0020-validation-evidence-binds-digest-and-policy.md)
+- [ADR-0021: Local passwords are hashed with Argon2id via `@node-rs/argon2`](0021-local-password-hashing-argon2id.md) (Proposed)
+- [ADR-0022: The instance is claimed with a code printed once in the container's own log, and a lost administrator is recovered from the deployment host](0022-bootstrap-claim-and-lost-administrator-recovery.md) (Proposed)
+- [ADR-0023: One user, two optional sign-in methods; OIDC self-registers, local is administrator-created, sensitive actions always re-challenge](0023-registration-linking-and-recent-authentication.md) (Proposed)

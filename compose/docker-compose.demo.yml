@@ -21,6 +21,7 @@ services:
   orbit-app:
     environment:
       APP_URL: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:3443
+      ORBIT_AUTH_OIDC: "true"
       OIDC_ISSUER: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:4443/
       OIDC_CALLBACK_URL: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:3443/api/auth/callback
   orbit-oidc:

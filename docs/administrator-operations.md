@@ -198,6 +198,54 @@ changes nothing, writes no audit row, and still succeeds. It requires the
 database to be reachable, which is true whenever maintenance is what stands
 between users and a running instance.
 
+## Adding a local user
+
+Local sign-in is always available, whether or not OIDC is also enabled. From
+**Administration → Users**, enter the new user's email, display name, and how
+long their setup link should stay valid (1 to 14 days, default 7), then
+create the account. Orbit **emails the setup link to that address** — it is
+never shown on screen, never returned by the API, and never recoverable after
+the fact. The new user opens it, sets their own password, and is signed in.
+
+Because the link only ever leaves by mail, **an instance with no working SMTP
+configured cannot add a local user.** Configure SMTP first (see "Mailbox
+provider operation" below for the provider-verification contract outbound
+mail shares with inbound). If sending fails at creation time, the account
+still exists and the row shows a bounded reason with a Retry action, so
+nothing needs recreating.
+
+A local user who has forgotten their password gets the same mechanism: "Send
+a new setup link" on their row in the users table, behind the same recent-
+authentication challenge as any other sensitive action. Issuing a new link
+invalidates any earlier one for that user. See
+[authentication.md](authentication.md#administrator-adding-a-local-user) for
+the operator-facing walkthrough, including what to tell a new user.
+
+## Recovering the primary administrator
+
+If the primary administrator has forgotten their local password, or only ever
+used OIDC and has lost the provider, recover from the deployment host:
+
+```sh
+docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth recovery-link
+```
+
+The command reads `instance_authority` for the current primary administrator,
+mints a one-time setup link for them, revokes every session they held, records
+the `recovery_link_issued` audit entry, and prints that one URL to the
+terminal — nothing else. Opening the link sets (or replaces) the primary
+administrator's local password and signs them in. The link expires **5
+minutes** after issue: an administrator doing this should be doing it
+instantly, and a stale link answers the same `setup_token_invalid` as any
+other expired or already-used setup link. It never touches `is_instance_admin`
+and never moves primary authority, so it cannot bypass the last-administrator
+or primary-administrator invariants.
+
+Anyone who can run `docker compose exec` on the host can recover the primary
+administrator at any time (ADR-0022 §6). That is the trust boundary this
+command sits inside, not a gap it introduces: host access to the running
+deployment already means full control of it.
+
 ## Provider tests
 
 The SMTP test verifies connection and authentication only. It does not send a
@@ -220,13 +268,18 @@ bash scripts/configure.sh --check
 
 The first command is the non-interactive bootstrap and upgrade path: it creates
 missing generated secrets and preserves existing operator settings. Guided
-setup then atomically records the public HTTPS Orbit origin, complete OIDC
-issuer, client ID, and derived callback URL. It does not collect provider
+setup first asks whether to sign in with local accounts only or also with an
+identity provider (`ORBIT_AUTH_OIDC`, default local-only); answering "also"
+atomically records the public HTTPS Orbit origin, complete OIDC issuer,
+client ID, and derived callback URL. It does not collect provider
 credentials. The separate secret step reads the OIDC client secret silently,
 stores it atomically at `.orbit-secrets/oidc-client-secret` with mode `0600`,
 and records only `/run/orbit-secrets/orbit-oidc-client-secret` in
 `.env-orbit`. Do not provide the secret on the command line or through a
-literal shell pipeline.
+literal shell pipeline. Turning `ORBIT_AUTH_OIDC` back to `false` later
+disables provider sign-in without deleting its configuration, so it can be
+turned back on with no re-entry; see
+[authentication.md](authentication.md#adding-oidc-later).
 
 The readiness check validates required settings, direct-versus-file secret
 ambiguity, and partially configured optional groups. Its output contains only

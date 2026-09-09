@@ -1,8 +1,10 @@
 import { json } from "@sveltejs/kit";
 
+import { isClaimed } from "orbit/lib/auth/bootstrap";
 import { getAuthConfig } from "orbit/lib/env";
 import { getBootPhase } from "orbit/server/boot";
 import { readPublicContactAddress } from "orbit/server/instance-contact";
+import { hasAnyLocalCredential } from "orbit/server/local-credentials";
 
 /**
  * Whether the signed-out sign-in door may offer to sign in, and where to say
@@ -30,13 +32,45 @@ import { readPublicContactAddress } from "orbit/server/instance-contact";
  * no error text, no dependency name — for the same reason `configured` never
  * carries the thrown error: a signed-out visitor learning which subsystem
  * failed is reconnaissance, not diagnosis they are owed.
+ *
+ * `methods` (M7, ADR-0023 §1) says which sign-in methods this instance can
+ * offer at all: `local` is always true (local sign-in is the baseline),
+ * `oidc` is true only when `ORBIT_AUTH_OIDC=true` and fully configured. It
+ * says nothing about whether any account actually uses either method —
+ * except `localAccounts` (plan §2.7), the one fact the mixed-mode door needs:
+ * whether any account has a password, so the "local login" line under the
+ * gate appears only when it can lead somewhere. A boolean over the whole
+ * table, never keyed by anything the visitor sent; false on a failed read,
+ * so a hiccup hides a line rather than inventing one.
+ *
+ * `claimed` (M7, ADR-0022) says whether the instance already has a primary
+ * administrator: false is what puts the claim card in front of an anonymous
+ * visitor. It is the presence of the `instance_authority` row and nothing
+ * else, and it never says anything about the claim code, which lives only in
+ * the container's log and this process's memory.
  */
 export async function GET() {
   let configured = true;
+  let oidcMethodAvailable = false;
   try {
-    getAuthConfig();
+    oidcMethodAvailable = getAuthConfig().oidc !== null;
   } catch {
     configured = false;
+  }
+  /* True unless the database says otherwise: a visitor is never told an
+     instance is unclaimed on the strength of a failed read. The claim routes
+     re-check the same row, so this field only chooses what the door draws. */
+  let claimed = true;
+  try {
+    claimed = await isClaimed();
+  } catch {
+    claimed = true;
+  }
+  let localAccounts = false;
+  try {
+    localAccounts = await hasAnyLocalCredential();
+  } catch {
+    localAccounts = false;
   }
   let contactAddress = null;
   try {
@@ -47,5 +81,14 @@ export async function GET() {
     contactAddress = null;
   }
   const phase = getBootPhase();
-  return json({ configured, phase, contactAddress }, { headers: { "cache-control": "no-store" } });
+  return json(
+    {
+      configured,
+      claimed,
+      methods: { local: true, oidc: oidcMethodAvailable, localAccounts },
+      phase,
+      contactAddress,
+    },
+    { headers: { "cache-control": "no-store" } },
+  );
 }

@@ -81,6 +81,11 @@
       "web/tests/**",
       "scripts/test-frontend.sh"
     ],
+    "smoke_local_only": [
+      "@image",
+      "tests/**",
+      "web/tests/**"
+    ],
     "acceptance": [
       "@image",
       "tests/**",

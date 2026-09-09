@@ -1233,6 +1233,81 @@ function commandEndMaintenance(args: string[]): void {
   })();
 }
 
+/**
+ * `orbit auth recovery-link` (#912, ADR-0022 §5): the primary administrator's
+ * own lost-access path, run from the deployment host —
+ * `docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth recovery-link`.
+ *
+ * Reads `instance_authority`, mints a `recovery` setup token through the same
+ * `issueSetupToken` every setup/recovery link uses (five minute expiry,
+ * sha256 digest at rest, single use — nothing new here), revokes every
+ * session the primary administrator held with the existing sign-out-of-every-
+ * device helper, writes the `recovery_link_issued` audit record the ADR
+ * names, and prints the one resulting URL. The command's whole contract is
+ * that one line: nothing else reaches stdout, and nothing reaches the
+ * operational logger either — the only thing on this path that otherwise
+ * would is `@/db`'s own connect/disconnect notice, so the log level is
+ * raised past it before the database is touched. Neither `issueSetupToken`
+ * nor `revokeUserSessions` logs anything themselves.
+ */
+function commandAuthRecoveryLink(): void {
+  process.env.ORBIT_LOG_LEVEL = "error";
+  void (async () => {
+    const [{ getDb, closeDatabase }, { instanceAuthority, auditLog }, { issueSetupToken }, { revokeUserSessions }, { getAuthConfig }] =
+      await Promise.all([
+        import("../db"),
+        import("../db/schema"),
+        import("../server/local-credentials"),
+        import("../lib/auth/session"),
+        import("../lib/env"),
+      ]);
+    try {
+      const db = getDb();
+      const [authority] = await db.select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority).limit(1);
+      const primaryUserId = authority?.primaryUserId ?? null;
+      if (!primaryUserId) {
+        process.stderr.write("orbit: this Orbit instance has no primary administrator to recover\n");
+        await closeDatabase().catch(() => {});
+        process.exit(1);
+        return;
+      }
+
+      const { token } = await issueSetupToken(primaryUserId, "recovery", { createdByUserId: null });
+      await revokeUserSessions(primaryUserId);
+      await db.insert(auditLog).values({
+        householdId: null,
+        actorUserId: primaryUserId,
+        entityType: "user",
+        entityId: primaryUserId,
+        action: "recovery_link_issued",
+        changes: {},
+      });
+
+      const config = getAuthConfig();
+      const url = new URL(`/setup/${token}`, config.appUrl).toString();
+      process.stdout.write(`${url}\n`);
+    } catch {
+      // Category only, like every other refusal this CLI surfaces (see
+      // commandEndMaintenance's own comment): a connection or driver failure
+      // can carry the connection string, and this command's output is the
+      // one thing an operator recovering access is most likely to paste
+      // somewhere else.
+      process.stderr.write("orbit: recovery-link failed; the database could not be updated\n");
+      await closeDatabase().catch(() => {});
+      process.exit(1);
+      return;
+    }
+    await closeDatabase();
+  })();
+}
+
+function commandAuth(args: string[]): void {
+  if (args.length !== 1 || args[0] !== "recovery-link") {
+    usageExit("orbit: unknown auth subcommand (usage: orbit auth recovery-link)");
+  }
+  commandAuthRecoveryLink();
+}
+
 function main(): void {
   const [, , command, ...rest] = process.argv;
 
@@ -1295,6 +1370,9 @@ function main(): void {
       case "end-maintenance":
         commandEndMaintenance(commandArgs);
         break;
+      case "auth":
+        commandAuth(commandArgs);
+        break;
       default:
         failUsage();
     }
@@ -1313,7 +1391,7 @@ function main(): void {
 
 function failUsage(): never {
   fail(
-    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
+    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
   );
 }
 

@@ -152,6 +152,147 @@ export function nextDoorState(read) {
 }
 
 /**
+ * WHAT THE OPEN DOOR ASKS FOR (#914, ADR-0022, ADR-0023 §1, plan §2.7).
+ *
+ * A door that CAN open still has three faces, and which one it wears is the
+ * owner's 2026-09-09 composition ruling, not a preference:
+ *
+ * `CLAIM` — the instance has no primary administrator yet. The ring holds
+ * the claim-code card and there is no Sign in gate at all, because there is
+ * nobody to sign in as.
+ *
+ * `LOCAL` — claimed, and local accounts are the only way in. The ring holds
+ * the sign-in card: an email address and a password.
+ *
+ * `MIXED` — claimed, with an identity provider. The ratified door is
+ * unchanged — the gate, exactly as #788 left it — and the only addition is
+ * one quiet "local login" line under it, and only when a local credential
+ * actually exists.
+ *
+ * These are the states of an OPEN door, which is why they are decided
+ * separately from {@link nextDoorState}: `UNCONFIGURED`, `STARTING` and
+ * `FAILED` are the door being unable to open at all, and nothing here
+ * overrides them.
+ */
+export const CLAIM = "claim";
+export const LOCAL = "local";
+export const MIXED = "mixed";
+
+/**
+ * Reads `GET /api/auth/availability`'s claim and method fields into one of
+ * the three faces above. Kept separate from {@link availabilityOf} for the
+ * same reason {@link phaseOf} is: a caller deciding what the door DRAWS asks
+ * a different question from one deciding whether it may open at all, and
+ * folding them into one shape would make every existing reader of that shape
+ * care about M7.
+ *
+ * Reads exactly three fields and no others, so a chatty or hostile body can
+ * no more reach this decision than it can reach the door's own words:
+ * `claimed`, `methods.oidc` and `methods.localAccounts`.
+ *
+ * TWO DEFAULTS, BOTH CONSERVATIVE, both chosen so an unreadable answer lands
+ * on the screen that was already ratified rather than on a new one:
+ *
+ *   · `claimed` missing or not a boolean reads as CLAIMED. The route itself
+ *     takes the same line ("a visitor is never told an instance is unclaimed
+ *     on the strength of a failed read"), and the claim endpoints re-check
+ *     the row regardless, so nothing is authorised by this guess.
+ *   · `methods` missing or unreadable reads as MIXED — the ratified door. An
+ *     answer that does not say whether an identity provider is configured is
+ *     not evidence that there isn't one, and the gate is the screen every
+ *     reader already knows.
+ *
+ * `localAccounts` is the separate fact of whether any local credential
+ * exists (§2.7); `methods.local` says only that local sign-in is a method
+ * this build has, which is always true, and is deliberately not read here.
+ *
+ * `oidc` rides back out because CLAIM mode needs it after the mode itself is
+ * decided: the create card that follows a successful claim offers the
+ * provider in one line, or does not, on exactly this fact.
+ *
+ * @param {unknown} body
+ * @returns {{ mode: typeof CLAIM | typeof LOCAL | typeof MIXED, localAccounts: boolean, oidc: boolean }}
+ */
+export function doorModeOf(body) {
+  const record = body && typeof body === "object" ? /** @type {Record<string, unknown>} */ (body) : {};
+  const methods = record.methods && typeof record.methods === "object"
+    ? /** @type {Record<string, unknown>} */ (record.methods)
+    : null;
+  const readable = Boolean(methods) && typeof methods?.oidc === "boolean";
+  const oidc = readable ? methods?.oidc === true : true;
+  const localAccounts = readable && methods?.localAccounts === true;
+
+  if (record.claimed === false) return { mode: CLAIM, localAccounts: false, oidc };
+  if (!readable) return { mode: MIXED, localAccounts: false, oidc: true };
+  return { mode: oidc ? MIXED : LOCAL, localAccounts, oidc };
+}
+
+/**
+ * THE CODE IN THE FRAGMENT (ADR-0022 §1).
+ *
+ * The claim notice is a link whose code rides in the URL **fragment**, never
+ * a query string: browsers do not send fragments, so reverse proxies, access
+ * logs and `Referer` headers never see it. This reads it out; `SignIn.svelte`
+ * clears the address bar with `history.replaceState` before it POSTs, so a
+ * screenshot, a bookmark or a shoulder cannot keep the code either.
+ *
+ * The alphabet is the notice's own — base32 in groups of four — and nothing
+ * outside it is accepted, so a fragment carrying anything else (a router
+ * anchor, an attacker's payload) reads as no claim at all rather than as a
+ * code that will be sent somewhere. Case is normalised up because the notice
+ * says the code is case-insensitive on entry.
+ *
+ * @param {string | null | undefined} hash the raw `location.hash`, "#" and all
+ * @returns {string | null}
+ */
+export function claimFromHash(hash) {
+  if (typeof hash !== "string") return null;
+  const match = /^#claim=([A-Za-z2-7]{1,4}(?:-[A-Za-z2-7]{1,4})*)$/u.exec(hash.trim());
+  return match ? match[1].toUpperCase() : null;
+}
+
+/**
+ * ORBIT'S OWN WORDS FOR A REFUSED CARD (ADR-0023 §8).
+ *
+ * The four cards read the `error` code off the response and say this. The
+ * body's own message is never shown: it is written for an operator reading a
+ * log, and echoing server text onto a signed-out screen is exactly the habit
+ * the door's other wording rules exist to prevent.
+ *
+ * Nothing here names a field, a count or a remaining time — `credentials_invalid`
+ * is deliberately one sentence for an unknown address, a wrong password, a
+ * disabled account and an account with no password, because the route answers
+ * all four identically and a friendlier message would undo that.
+ *
+ * @param {unknown} code
+ * @returns {string}
+ */
+export function cardMessageFor(code) {
+  switch (code) {
+    case "bootstrap_invalid":
+      return "That code is not the one this instance printed.";
+    case "bootstrap_claimed":
+      return "This Orbit has already been claimed. Reload to sign in.";
+    case "bootstrap_unavailable":
+      return "This instance has no code waiting. Restart it and read the notice in its log.";
+    case "bootstrap_required":
+      return "That code has expired. Enter it again.";
+    case "credentials_invalid":
+      return "That email address and password do not match an Orbit account.";
+    case "too_many_attempts":
+      return "Too many attempts. Try again shortly.";
+    case "password_rejected":
+      return "That password is too short or too long.";
+    case "setup_token_invalid":
+      return "This link has been used already, or it has expired.";
+    case "invalid_request":
+      return "Fill in every field.";
+    default:
+      return "That didn’t work. Try again.";
+  }
+}
+
+/**
  * The STARTING backstop's own bound (#869): 2 minutes, matching the issue's
  * own words. A process can hang mid-boot without exiting, so the STARTING
  * poll cannot rely on "boot terminates" alone to end — this is the

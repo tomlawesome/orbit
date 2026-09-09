@@ -10,7 +10,41 @@ export type AuthErrorCode =
   | "account_disabled"
   | "session_required"
   | "session_not_found"
-  | "csrf_failed";
+  | "csrf_failed"
+  /* The claim and registration vocabulary (ADR-0023 §8). Added, never
+     reordered: later M7 slices append their own members to this list. */
+  | "bootstrap_required"
+  | "bootstrap_unavailable"
+  | "bootstrap_invalid"
+  | "bootstrap_claimed"
+  | "link_required"
+  /* Local sign-in (ADR-0023 §4, §8). `credentials_invalid` is the ONE answer
+     for an unknown address, a wrong password, a disabled account and an
+     account with no password; `too_many_attempts` covers both the persisted
+     backoff and a saturated verification gate; `password_rejected` is a new
+     password outside the bounds of ADR-0021 §6. */
+  | "credentials_invalid"
+  | "too_many_attempts"
+  | "password_rejected"
+  /* Setup tokens (ADR-0022 §5, ADR-0023 §3). An unknown, already-consumed or
+     expired setup/recovery token is the one generic `setup_token_invalid`. */
+  | "setup_token_invalid"
+  /* Recent authentication (ADR-0023 §5, §8). `recent_authentication_required`
+     is every way a sensitive action can arrive unproven — no password, a wrong
+     one, no step-up proof, or a proof sealed for another session or another
+     action. `step_up_failed` is narrower and is the provider's fault: it
+     answered without a fresh `auth_time`, so nobody was re-authenticated and
+     the action stays blocked until the operator fixes the provider. */
+  | "recent_authentication_required"
+  | "step_up_failed"
+  /* Linking and unlinking (ADR-0023 §6, §8). `link_exists` is the unique
+     index on `(issuer, subject)` speaking: that provider account already
+     belongs to an Orbit account, and an identity is never moved between them.
+     `link_last_method` is the rule that keeps somebody from locking
+     themselves out — at least one USABLE method has to survive, and an
+     identity is not usable while `ORBIT_AUTH_OIDC` is false. */
+  | "link_exists"
+  | "link_last_method";
 
 /**
  * Closed internal diagnostic reasons for a token-exchange failure.

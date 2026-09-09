@@ -94,6 +94,8 @@ function tourAtStopThree() {
  *   viewport?: { width: number, height: number },
  *   pack?: string,
  *   tourDue?: boolean,
+ *   availability?: Record<string, unknown> | null,
+ *   claimAccepted?: boolean,
  * }} Screen
  */
 
@@ -253,6 +255,104 @@ const SCREENS = [
         && !document.body.classList.contains("grounded");
     },
     mockupOnly: [".demos", ".sheet"],
+  },
+  /*
+   * ══ THE DOOR'S FOUR CARDS AND THE SETUP SCREEN (#914) ═══════════════════
+   *
+   * Composition ruled by the owner on 2026-09-09 (design/owner-decisions.md
+   * §17; docs/plans/m7-local-accounts.md §2.7), with no design round: #906
+   * was closed as superseded. There is therefore no mockup to port against —
+   * these five earn a baseline directly, which is what "owned" means here,
+   * and the drawing they are judged against is the first-household card's,
+   * shared rather than copied (web/src/lib/ringcard.css). If one of them
+   * drifts a padding from `first-run`, that entry's own 0-pixel port against
+   * design/v19/first-run.html is what catches it.
+   *
+   * Each names the availability body that puts its card on the screen, the
+   * same way the goodbye names its reader: the state is stated in the gate,
+   * beside the budget, rather than clicked into being.
+   */
+  {
+    /* UNCLAIMED: one field, one sentence, and no Sign in gate at all. */
+    name: "door-claim",
+    path: "/login",
+    availability: {
+      configured: true, phase: "running", contactAddress: null,
+      claimed: false, methods: { local: true, oidc: true },
+    },
+    settle: () => document.body.classList.contains("lit")
+      && document.body.classList.contains("showform")
+      && Boolean(document.querySelector("#claimcode"))
+      && document.querySelectorAll("#gate").length === 0,
+  },
+  {
+    /*
+     * CREATE MODE, reached the way an operator reaches it: by the link in the
+     * container's own start-up notice. The fragment carries an obviously
+     * fake code, the claim POST is answered as accepted (capture()'s
+     * `claimAccepted`), and the card that appears is the first
+     * administrator's identity — with the one identity-provider line under
+     * the fields, because this body says a provider is configured.
+     *
+     * It also photographs ADR-0022 §1's other half: by the time the shutter
+     * opens the fragment is gone from the address bar, cleared by
+     * `history.replaceState` before the first request went out.
+     */
+    name: "door-identity",
+    path: "/login#claim=ABCD-EFGH-2345",
+    availability: {
+      configured: true, phase: "running", contactAddress: null,
+      claimed: false, methods: { local: true, oidc: true },
+    },
+    claimAccepted: true,
+    settle: () => document.body.classList.contains("lit")
+      && document.body.classList.contains("showform")
+      && Boolean(document.querySelector("#idname"))
+      && location.hash === "",
+  },
+  {
+    /* LOCAL-ONLY, CLAIMED: the ring holds the sign-in card outright. */
+    name: "door-local",
+    path: "/login",
+    availability: {
+      configured: true, phase: "running", contactAddress: null,
+      claimed: true, methods: { local: true, oidc: false, localAccounts: true },
+    },
+    settle: () => document.body.classList.contains("lit")
+      && document.body.classList.contains("showform")
+      && Boolean(document.querySelector("#idemail"))
+      && document.querySelectorAll("#idname").length === 0,
+  },
+  {
+    /*
+     * MIXED MODE: the ratified door, unchanged, plus the one quiet line. The
+     * `login` entry above photographs the same screen WITHOUT the line — its
+     * body carries no methods at all — so the pair is what proves the ruling
+     * was kept: everything but the line is the same pixels.
+     */
+    name: "door-mixed",
+    path: "/login",
+    availability: {
+      configured: true, phase: "running", contactAddress: null,
+      claimed: true, methods: { local: true, oidc: true, localAccounts: true },
+    },
+    settle: () => document.body.classList.contains("lit")
+      && !document.body.classList.contains("showform")
+      && Boolean(document.querySelector("#gate"))
+      && Boolean(document.querySelector("#localopen")),
+  },
+  {
+    /*
+     * THE SETUP SCREEN: the same card in its fourth mode. The token in the
+     * path is an obvious placeholder and is never presented — the screen
+     * draws before anything is asked of the server, and the gate never
+     * presses the button.
+     */
+    name: "setup",
+    path: "/setup/fidelity-gate-placeholder-token",
+    settle: () => document.body.classList.contains("lit")
+      && document.body.classList.contains("showform")
+      && Boolean(document.querySelector("#idagain")),
   },
   {
     /*
@@ -658,11 +758,14 @@ function maskRegions(png, rects) {
  *   trim?: ((html: string) => string) | null,
  *   pack?: string,
  *   tourDue?: boolean,
+ *   availability?: Record<string, unknown> | null,
+ *   claimAccepted?: boolean,
  * }} [options]
  */
 async function capture(
   page, url, settle, mockupOnly = [], viewport = null, signedOut = false,
-  { reducedMotion = null, trim = null, pack = "starchart", tourDue = false } = {},
+  { reducedMotion = null, trim = null, pack = "starchart", tourDue = false,
+    availability = null, claimAccepted = false } = {},
 ) {
   /*
    * WHICH SKY. Star chart unless a screen names another, because that is the
@@ -770,13 +873,46 @@ async function capture(
   await page.route("**/api/health", (/** @type {import("@playwright/test").Route} */ route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"ready"}' }),
   );
+  /*
+   * WHICH FACE THE OPEN DOOR WEARS (#914). The default body deliberately
+   * carries no `claimed` and no `methods`, exactly as it did before M7 — and
+   * `doorModeOf` reads that as the ratified door, which is what keeps the
+   * login, first-run and logout baselines standing across this change rather
+   * than needing a re-cut for a screen that did not move.
+   *
+   * A screen that IS one of the new cards says so instead, as a whole
+   * availability body: the three fields above plus whatever claim and method
+   * facts put the card it is photographing on the screen. Stated per screen
+   * rather than reached by clicking, for the reason the login's own entry
+   * gives — the selection stays in the gate, next to the budget.
+   */
   await page.route("**/api/auth/availability", (/** @type {import("@playwright/test").Route} */ route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: '{"configured":true,"phase":"running","contactAddress":null}',
+      body: JSON.stringify(
+        availability ?? { configured: true, phase: "running", contactAddress: null },
+      ),
     }),
   );
+
+  /*
+   * THE CLAIM THE CREATE CARD STANDS BEHIND. The create card is only ever
+   * reached by presenting a valid code, and the gate's harness has no
+   * unclaimed instance and no code to present. So the one screen that
+   * photographs it says the claim was accepted; every other screen leaves
+   * this route alone and the real one answers. Nothing is claimed and no
+   * cookie is minted — the fulfilment is the whole of it.
+   */
+  if (claimAccepted) {
+    await page.route("**/api/auth/bootstrap/claim", (/** @type {import("@playwright/test").Route} */ route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: '{"claimed":false,"methods":{"local":true,"oidc":true}}',
+      }),
+    );
+  }
 
   /* Most of the family is drawn for a desk. The mobile dialect is drawn for a
      phone, and comparing it at 1600 wide would measure the wrong thing. */
@@ -917,7 +1053,8 @@ async function captureAppOnce(page, screen) {
   if (!appShots.has(screen.name)) {
     const { png } = await capture(
       page, APP + screen.path, screen.settle, [], screen.viewport ?? null, screen.signedOut,
-      { reducedMotion: screen.reducedMotion, pack: screen.pack, tourDue: screen.tourDue });
+      { reducedMotion: screen.reducedMotion, pack: screen.pack, tourDue: screen.tourDue,
+        availability: screen.availability, claimAccepted: screen.claimAccepted });
     appShots.set(screen.name, { width: png.width, height: png.height, data: png.data });
   }
   const shot = appShots.get(screen.name);

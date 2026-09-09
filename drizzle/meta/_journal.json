@@ -267,6 +267,20 @@
       "when": 1788220800000,
       "tag": "0037_mail_in_held_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1788307200000,
+      "tag": "0038_local_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1788393600000,
+      "tag": "0039_step_up_proofs",
+      "breakpoints": true
     }
   ]
 }

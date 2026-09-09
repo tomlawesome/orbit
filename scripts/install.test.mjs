@@ -80,7 +80,7 @@ const fakeConfigureScript =
     "printf 'CONFIGURE_INVOKED ORBIT_IMAGE=%s\\n' \"${ORBIT_IMAGE:-}\"",
     "case \"${1:-}\" in",
     "  --check)",
-    '    if [[ -f .env-orbit && -s .orbit-secrets/oidc-client-secret ]]; then',
+    '    if [[ -f .env-orbit ]] && grep -q "^APP_URL=" .env-orbit && [[ -s .orbit-secrets/oidc-client-secret ]]; then',
     "      printf '%s\\n' 'ready APP_URL' 'ready ORBIT_IMAGE' 'ready OIDC_ISSUER' 'ready OIDC_CLIENT_ID' 'ready OIDC_CLIENT_SECRET' 'ready OIDC_CALLBACK_URL'",
     "      exit 0",
     "    fi",
@@ -104,6 +104,7 @@ const fakeConfigureScript =
     "    cat > .env-orbit <<ENV",
     "APP_URL=${app_url}",
     "ORBIT_IMAGE=${ORBIT_IMAGE:-fake-registry.example/example/orbit-fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
+    "ORBIT_AUTH_OIDC=true",
     "OIDC_ISSUER=${issuer}",
     "OIDC_CLIENT_ID=${client_id}",
     "OIDC_CLIENT_SECRET=",
@@ -163,6 +164,7 @@ const fakeConfigureScript =
     "    cat > .env-orbit <<ENV",
     "APP_URL=https://orbit.install-test.internal",
     "ORBIT_IMAGE=${ORBIT_IMAGE:-fake-registry.example/example/orbit-fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
+    "ORBIT_AUTH_OIDC=true",
     "OIDC_ISSUER=https://auth.install-test.internal/application/o/orbit/",
     "OIDC_CLIENT_ID=install-test-client",
     "OIDC_CLIENT_SECRET=",
@@ -726,6 +728,7 @@ function makePreprovisionedDeployment(targetDir) {
     [
       "APP_URL=https://orbit.preprovisioned-install.internal",
       "ORBIT_IMAGE=old-registry.example/orbit@sha256:" + "c".repeat(64),
+      "ORBIT_AUTH_OIDC=true",
       "OIDC_ISSUER=https://auth.preprovisioned-install.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=preprovisioned-install-client",
       "OIDC_CLIENT_SECRET=",
@@ -748,6 +751,7 @@ function makeFullExistingDeployment(targetDir) {
       "EXISTING_ENV=1",
       "APP_URL=https://orbit.install-test.internal",
       "ORBIT_IMAGE=old-registry.example/orbit@sha256:" + "c".repeat(64),
+      "ORBIT_AUTH_OIDC=true",
       "OIDC_ISSUER=https://auth.install-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=existing-install-client",
       "OIDC_CLIENT_SECRET=",
@@ -780,6 +784,7 @@ function makeLegacyExistingDeployment(targetDir) {
     [
       "APP_URL=https://orbit.install-test.internal",
       `ORBIT_IMAGE=${resolvedReference}`,
+      "ORBIT_AUTH_OIDC=true",
       "OIDC_ISSUER=https://auth.install-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=existing-install-client",
       "OIDC_CLIENT_SECRET=legacy-client-secret",
@@ -1332,6 +1337,50 @@ describe("install.sh", () => {
     expect(result.stdout).toContain("Optional profiles: standard");
     expect(result.stdout).toContain("Status: docker compose --env-file .env-orbit ps");
     expect(result.stdout).toContain("Logs: docker compose --env-file .env-orbit logs --tail 200");
+    // ADR-0022 section 1: the installer only ever points at where the claim
+    // notice lives (the container's own start-up log) -- it never has the
+    // code itself to print.
+    expect(result.stdout).toContain(
+      'Claim this instance: run "docker compose --env-file .env-orbit logs orbit-app" and open the link on its last line to create the first administrator.',
+    );
+  });
+
+  it("skips OIDC discovery and still points at the claim link for a local-only deployment", () => {
+    const targetDir = makeTarget();
+    writeFileSync(
+      join(targetDir, ".env-orbit"),
+      [
+        "APP_URL=https://orbit.local-only-install.internal",
+        "ORBIT_AUTH_OIDC=false",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+    mkdirSync(join(targetDir, ".orbit-secrets"));
+    chmodSync(join(targetDir, ".orbit-secrets"), 0o700);
+    // Unused while ORBIT_AUTH_OIDC=false (ADR-0023 section 1: switching the
+    // provider off must not force deleting its configuration), but the
+    // unattended pre-provisioning contract (guarantee 6) requires this file
+    // regardless of sign-in mode.
+    writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "unused-placeholder");
+    chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o600);
+
+    const result = runInstall(targetDir, { FAKE_USE_REAL_CONFIGURATION: "1" }, ["--plain"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "phase=oidc component=oidc state=skipped reason=provider-discovery action=skip",
+    );
+    expect(result.stdout).not.toContain(
+      "phase=oidc component=oidc state=completed reason=provider-discovery action=verify",
+    );
+    expect(result.calls).not.toContain("curl oidc-discovery");
+    const environment = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    expect(environment).toContain("ORBIT_AUTH_OIDC=false");
+    expect(environment).not.toContain("OIDC_ISSUER=https://");
+    expect(result.stdout).toContain(
+      'Claim this instance: run "docker compose --env-file .env-orbit logs orbit-app" and open the link on its last line to create the first administrator.',
+    );
   });
 
   it("rejects unsupported installer options before any external action", () => {
@@ -2446,7 +2495,8 @@ describe("install.sh", () => {
     const result = runInstall(targetDir);
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("OIDC_ISSUER requires attention");
+    expect(result.stderr).toContain("APP_URL");
+    expect(result.stderr).toContain("Required configuration fields require attention");
     expect(result.calls).not.toContain("config --quiet");
     expect(result.calls).not.toContain("up -d");
     expect(targetEntries(targetDir)).toEqual(beforeEntries);
