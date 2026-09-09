@@ -139,6 +139,108 @@ test("the signed-out boundary fits the mobile viewport", async ({ page, isMobile
 });
 
 /*
+ * ══ WHAT A STRANGER LEARNS BY ASKING (#916, ADR-0023 §1 and §4) ═══════════
+ *
+ * The two facts a signed-out visitor must not be able to extract, whichever
+ * profile this suite is running against: whether a given address has an
+ * account here, and which identity provider this instance trusts. Both are
+ * reconnaissance -- the first names people to phish, the second names the
+ * system to attack instead of this one -- and neither is anything a visitor
+ * is owed.
+ *
+ * These run in both acceptance profiles on purpose. The ordinary stack has a
+ * provider and no local password; the local-only one
+ * (compose/docker-compose.local-only.yml) has a password and no provider. An
+ * assertion that held in only one of them would be an accident of the fixture.
+ */
+
+/** Real in the local-only profile: tests/e2e/local-sign-in.spec.ts creates it. */
+const REAL_ADDRESS = "administrator@example.invalid";
+
+/* Three addresses that must be indistinguishable from it: one that has never
+   existed anywhere, one shaped like an account that plausibly might, and one
+   that is not an address at all. */
+const ABSENT_ADDRESSES = [
+  "nobody-has-this-address@example.invalid",
+  "orbit@example.invalid",
+  "not-an-address",
+];
+
+test("no signed-out route says whether an address has an account", async ({ baseURL, request }) => {
+  /* The sign-in route asserts same-origin rather than a CSRF token, having no
+     session to derive one from. A browser sends `Origin` by itself and
+     Playwright's API context does not, so without this every answer would be
+     an identical `csrf_failed` and the test would prove nothing at all.
+     `baseURL`, never a literal, so no host or port is written down (#741). */
+  expect(baseURL, "the suite has no baseURL to send as the request origin").toBeTruthy();
+
+  /* One attempt each, with a password that is wrong for all of them. The
+     backoff is per credential and allows five (ADR-0023 §4), so this cannot
+     be what turns one answer into a different one. */
+  const answers = await Promise.all(
+    [REAL_ADDRESS, ...ABSENT_ADDRESSES].map(async (email) => {
+      const response = await request.post("/api/auth/local/login", {
+        headers: { origin: baseURL as string },
+        data: { email, password: "orbit-e2e-wrong-password-placeholder" },
+      });
+      return JSON.stringify({
+        status: response.status(),
+        cacheControl: response.headers()["cache-control"],
+        body: await response.json(),
+      });
+    }),
+  );
+
+  /* The whole assertion in one line: every address got the same answer, so
+     the set of distinct answers has exactly one member. An unknown address, a
+     wrong password, a disabled account and an account with no password are
+     one refusal, and this is the only shape of test that can say so. */
+  expect(new Set(answers).size, `distinct answers: ${[...new Set(answers)].join(" | ")}`).toBe(1);
+
+  const [only] = answers;
+  const answer = JSON.parse(only) as { status: number; body: { error: { code: string; message: string } } };
+  expect(answer.status).toBe(401);
+  expect(answer.body.error.code).toBe("credentials_invalid");
+  /* And it is bounded: no count, no remaining time, and not the address it
+     was handed back again. Each of those is the same question asked more
+     politely -- a message that said "no account for X" would undo everything
+     the identical-answers assertion above just proved. */
+  expect(answer.body.error.message).not.toMatch(/\d/u);
+  expect(JSON.stringify(answer.body)).not.toContain(REAL_ADDRESS);
+});
+
+test("nothing signed out says which identity provider this instance trusts", async ({ request }) => {
+  const response = await request.get("/api/auth/availability");
+  expect(response.ok()).toBe(true);
+  const body = (await response.json()) as Record<string, unknown>;
+
+  /* The bounded answer, exactly (ADR-0023 §1). `oidc` is a boolean -- whether
+     there is a provider at all, which the door has to know to draw itself --
+     and there is deliberately no field that could carry an issuer, a client
+     identifier, an endpoint or a raw provider error. A new key here is a new
+     thing a stranger is told, so the key set is asserted rather than sampled. */
+  expect(Object.keys(body).sort()).toEqual(
+    ["claimed", "configured", "contactAddress", "methods", "phase"],
+  );
+  expect(Object.keys(body["methods"] as Record<string, unknown>).sort())
+    .toEqual(["local", "localAccounts", "oidc"]);
+  for (const value of Object.values(body)) {
+    expect(typeof value === "string" ? value : "", JSON.stringify(body)).not.toMatch(/:\/\//u);
+  }
+
+  /* Nor does the door itself, which is the only other thing a stranger can
+     fetch. The provider's identity reaches the browser exactly once -- in the
+     redirect a reader gets after pressing Sign in -- and never before. */
+  for (const path of ["/", "/login"]) {
+    const screen = await request.get(path);
+    const markup = await screen.text();
+    for (const leak of ["openid-configuration", ".well-known", "client_id", "OIDC_ISSUER"]) {
+      expect(markup, `${path} names ${leak}`).not.toContain(leak);
+    }
+  }
+});
+
+/*
  * The three states below have no v19 home yet (#788). `SignIn.svelte` is the
  * door and only the door: it carries no wording for an instance that is still
  * starting, and none for one whose authentication is misconfigured.
