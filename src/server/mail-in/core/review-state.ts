@@ -7,6 +7,7 @@
  * working unchanged.
  */
 import { normalizeImapAttachmentName } from "./imap-attachment-validation";
+import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 
 export type ReviewInboxClassification = "ready" | "waiting" | "retry" | "cleanup" | "unavailable";
@@ -93,11 +94,14 @@ export function reviewAttachmentDisplayName(
   return normalizeImapAttachmentName(stored ?? undefined, displayFallbackMediaTypes.get(mediaType ?? "") ?? "application/pdf");
 }
 
-function comparableText(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.normalize("NFKC").replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, " ").replace(/\s+/g, " ").trim().toLocaleLowerCase("en-GB");
-  return normalized || undefined;
-}
+/**
+ * Promoted to `normalizeComparableMetadata` (ADR-0024 decision 2), so the
+ * blind index and every in-application comparison agree on one canonical form.
+ * The implementation moved for a second reason: the range it used to spell out
+ * by hand is exactly the regular-expression trap AGENTS.md warns about, and
+ * the shared version scans for control characters explicitly instead.
+ */
+const comparableText = normalizeComparableMetadata;
 
 export function findReviewedIntakeCandidateReason(
   proposal: Record<string, unknown>,
