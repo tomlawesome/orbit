@@ -1,9 +1,16 @@
 # ADR-0025: Model extraction is a schema-bound, evidence-grounded proposer on a fixed internal endpoint, gated by a hold-out corpus
 
-**Status:** Proposed (for owner ratification; drafted 2026-09-09 under the
-owner's decisions of 2026-08-13 on #319: the four fields stay and the model
-path must produce them; no training or fine-tuning, ever; no cloud
-extraction providers)
+**Status:** Accepted (owner, 2026-09-09), with the constants held lightly:
+the owner ratified "for now" and expects to revisit this one. Drafted under
+the owner's decisions of 2026-08-13 on #319: the four fields stay and the
+model path must produce them; no training or fine-tuning, ever; no cloud
+extraction providers.
+
+The parts most likely to move are the three fixed numbers -- the +0.05
+margin, the ten-document hold-out minimum, and minimum-of-five scoring --
+because none of them can be validated until the model path has run against
+real paperwork. Changing one is a revision of this ADR, not a build-time
+judgement.
 **Date:** 2026-09-09
 **Relates to:** #319 (the epic; outcome, non-goals and the four-field
 requirement are decided there); #933 (this design slice); #929 (the
