@@ -44,11 +44,17 @@ const ADMINISTRATOR = {
 
 test.describe.configure({ mode: "serial", retries: 0 });
 
-test.beforeAll(() => {
+test.beforeAll(async ({ request }) => {
   test.skip(
     test.info().project.name !== DESKTOP_PROJECT,
     "the unclaimed state exists once per stack, so this file runs under one project",
   );
+  /* The whole-suite run is the oidc profile, where this journey has no
+     meaning: the provider claims the instance, and the door has no local
+     card. Skip the file there, so that the one stack that can walk it (the
+     local-only lane) is the only one judged. */
+  const availability = await (await request.get("/api/auth/availability")).json() as { methods: { oidc: boolean } };
+  test.skip(availability.methods.oidc, "provider configured: this journey runs in the local-only profile");
 });
 
 /**
@@ -81,10 +87,6 @@ test("the operator claims a provider-less Orbit and becomes its administrator", 
   const before = await (await request.get("/api/auth/availability")).json() as {
     claimed: boolean; methods: { local: boolean; oidc: boolean; localAccounts: boolean };
   };
-  /* The whole-suite run is the oidc profile, where this journey has no
-     meaning: the provider claims the instance. Skip there, so that the one
-     stack that can walk it (the local-only lane) is the only one judged. */
-  test.skip(before.methods.oidc, "provider configured: this journey runs in the local-only profile");
   expect(
     before.claimed,
     "this instance is already claimed, so the claim journey cannot be walked. This file "
