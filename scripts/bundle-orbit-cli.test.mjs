@@ -191,6 +191,58 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     }
   });
 
+  // #912: `auth recovery-link` reaches `issueSetupToken` in
+  // `local-credentials.ts`, which imports `password.ts` for its other
+  // exports. Before `password.ts` loaded `@node-rs/argon2` lazily, that
+  // chain pulled the package's compiled `.node` native binding into this
+  // very bundling step, and esbuild cannot inline a `.node` file at all —
+  // reproduced by hand while diagnosing this: `node scripts/bundle-orbit-cli.mjs`
+  // failed outright with "No loader is configured for '.node' files", never
+  // producing dist/cli/orbit.js in the first place. `--external:@node-rs/argon2`
+  // (scripts/bundle-orbit-cli.mjs) is the same boundary `--external:next`
+  // already holds above; this test is what holds it, the same way.
+  it("does not inline the Argon2 native binding — @node-rs/argon2 stays external, loaded lazily only where a password is actually hashed or verified", () => {
+    const bundleSource = readFileSync(bundlePath, "utf8");
+    // The compiled binding's own generated text — this is what would appear
+    // here if esbuild had managed to inline it, which it never can.
+    expect(bundleSource).not.toMatch(/argon2\.(linux|darwin|win32)/);
+    // password.ts's lazy load survives as a literal, deferred `import()`
+    // rather than being resolved at bundle time.
+    expect(bundleSource).toMatch(/import\(["']@node-rs\/argon2["']\)/u);
+  });
+
+  it("`auth recovery-link` loads and runs with no node_modules anywhere in reach — the Argon2 binding it never uses is never required", () => {
+    // Copied outside the repo tree, unlike bundlePath itself: this is the
+    // isolation the shipped image actually has (only /opt/orbit/web/node_modules
+    // exists there, and it is not an ancestor of /opt/orbit/cli/), so Node's
+    // own upward node_modules search has nothing to find.
+    const isolatedDir = scratchDir();
+    const isolatedBundle = join(isolatedDir, "orbit.js");
+    writeFileSync(isolatedBundle, readFileSync(bundlePath));
+    const isolatedEnv = { PATH: dirname(resolveTool("node")) };
+
+    const usage = failOnProcessDeadline(spawnSync("node", [isolatedBundle, "auth", "bogus"], {
+      ...SPAWN_OPTS,
+      env: isolatedEnv,
+    }), { label: "auth usage with no node_modules" });
+    expect(usage.status).toBe(2);
+    expect(usage.stderr).toContain("usage: orbit auth recovery-link");
+
+    // No DATABASE_URL/POSTGRES_PASSWORD in this environment either: the
+    // command reaches its own bounded database-failure message, never an
+    // Argon2 module-load error — proving the binding is genuinely unreached
+    // on this path, not just absent from the bundle text above.
+    const recoveryLink = failOnProcessDeadline(spawnSync("node", [isolatedBundle, "auth", "recovery-link"], {
+      ...SPAWN_OPTS,
+      env: isolatedEnv,
+    }), { label: "auth recovery-link with no node_modules" });
+    expect(recoveryLink.status).toBe(1);
+    expect(recoveryLink.stdout).toBe("");
+    expect(recoveryLink.stderr.trim().split("\n")).toHaveLength(1);
+    expect(recoveryLink.stderr).not.toContain("@node-rs/argon2");
+    expect(recoveryLink.stderr).not.toContain("Cannot find module");
+  });
+
   it("the guard is inert outside container mode (ORBIT_ENGINE_CONTEXT unset): behavior is unchanged from before this slice", () => {
     const targetDir = scratchDir();
     const callLogPath = join(scratchDir(), "docker-calls.log");

@@ -84,6 +84,9 @@ const actionLabels: Record<string, string> = {
   setup_link_issued: "Setup link issued",
   password_set: "Password set",
   password_changed: "Password changed",
+  // M7 slice 9 (#912, ADR-0022 §5): the primary-administrator recovery CLI's
+  // own audit record, alongside `issueSetupToken`'s `setup_link_issued`.
+  recovery_link_issued: "Recovery link issued",
 };
 
 /** Maps persisted actions to a bounded administrator-facing label. */
