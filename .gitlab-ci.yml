@@ -46,6 +46,15 @@ stages:
   - maintenance
 
 workflow:
+  # Stop the rest of the pipeline the moment a job fails (#923 finding 4,
+  # owner ruling 2026-09-09). interruptible and the project's auto-cancel only
+  # act when a NEW pipeline starts, so a red pipeline used to keep both
+  # orbit-build slots busy for another 25 minutes -- in 822, everything after
+  # fidelity went red at 12.5 minutes. Losing the siblings' evidence is
+  # accepted: a retry or a fix reruns them. Publish-lane jobs are
+  # interruptible: false and are left alone.
+  auto_cancel:
+    on_job_failure: all
   rules:
     # Tags publish nothing here; the release lane is GitHub's.
     - if: $CI_COMMIT_TAG
