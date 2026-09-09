@@ -134,7 +134,8 @@ new review rather than relying on this decision.
 
 The same release comparison could not infer licences for a set of updated
 direct package declarations. Their installed, versioned package manifests were
-manually checked on 2026-07-31; `next` and `eslint-config-next` have since left
+manually checked on 2026-07-31, and `nodemailer` again on 2026-09-08 at 10.0.1,
+which is still MIT-0; `next` and `eslint-config-next` have since left
 the dependency tree entirely (neither is in any `package.json` or in
 `pnpm-lock.yaml`) and are dropped from the table below rather than kept as a
 record of a package that is no longer here:
@@ -142,7 +143,7 @@ record of a package that is no longer here:
 | Package | Version | Declared licence |
 | --- | --- | --- |
 | `drizzle-orm` | 0.45.2 | Apache-2.0 |
-| `nodemailer` | 9.0.3 | MIT-0 |
+| `nodemailer` | 10.0.1 | MIT-0 |
 
 These declarations are already inside the global allow-list and require no
 package exception. Dependency, secret, exact-image vulnerability, SBOM,
