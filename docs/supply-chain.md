@@ -94,6 +94,24 @@ vulnerable is blocked afresh, and every entry expires on the same date. #794
 tracks retiring them; when they expire the scan goes red until they are
 removed or renewed with a reason recorded there.
 
+### Prebuilt native modules
+
+Two napi-rs native modules ship in the runtime image, and both are pinned the
+same way: the main package plus exactly the two Linux x64 platform packages
+the musl image and the glibc CI hosts need, at an exact version, in both
+`package.json` and `web/package.json`. `@napi-rs/canvas` 1.0.8 (MIT) with
+`@napi-rs/canvas-linux-x64-gnu` and `-linux-x64-musl` is the older of the
+two. `@node-rs/argon2` 2.2.0 (MIT, `napi-rs/node-rs` on GitHub) with
+`@node-rs/argon2-linux-x64-gnu` and `-linux-x64-musl` 2.2.0 was added for
+local-account password hashing under ADR-0021; its licence was confirmed as
+MIT for all three packages from their published metadata on 2026-09-09, and
+the `licence_policy` job checks them on every run from then on. Neither
+package family runs an install script, so `allowBuilds` in
+`pnpm-workspace.yaml` is unchanged and `pnpm install --frozen-lockfile`
+still fetches no binaries of its own: the prebuilt `.node` files arrive
+inside the pinned platform packages, which is why these were chosen over
+`argon2`, whose install compiles with node-gyp or downloads a prebuild.
+
 ### Sharp/libvips v1 licence decision (historical; exception removed)
 
 The exception this section describes was removed from
