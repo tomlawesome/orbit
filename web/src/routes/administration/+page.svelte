@@ -1,7 +1,17 @@
 <script>
   import { onMount } from "svelte";
   import { resolve } from "$app/paths";
-  import { addMember, commandContact, commandMailbox, readAdminScreen } from "$lib/data/workspace.js";
+  import {
+    addMember,
+    commandContact,
+    commandMailbox,
+    createLocalUser,
+    readAdminScreen,
+    readSignInMethods,
+    sendSetupLink,
+    startStepUp,
+  } from "$lib/data/workspace.js";
+  import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf, galaxyOf } from "$lib/data/chart.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
@@ -76,6 +86,195 @@
       busy = null;
     }
   }
+  /* ADD A LOCAL USER, AND SEND A NEW SETUP LINK (#915, ADR-0023 §3, §5;
+     composition ruled in docs/plans/m7-local-accounts.md §2.7).
+
+     There is no self-registration in Orbit: an administrator names the person,
+     and Orbit MAILS them a link to choose their own password. Three things
+     follow from the owner's 2026-09-09 ruling, and the markup below keeps all
+     three.
+
+       · THE LINK IS NEVER SHOWN. Not to the administrator, not to this list,
+         not in a copy control — it goes to the address the account is
+         registered with and nowhere else. What this screen reports is where it
+         went and when it lapses.
+       · A FAILED SEND IS NOT A LOST PERSON. The account is created first, so a
+         mailer that refused leaves an account and a Retry rather than an error
+         that threw the typing away. The reason is one bounded word.
+       · THE ADMINISTRATOR IS RE-CHALLENGED EVERY TIME (ADR-0023 §5), inline,
+         exactly as the helm's sign-in-methods block challenges a reader:
+         somebody with a password answers with it here; somebody with only a
+         provider identity is sent back to that provider first and returns with
+         the proof in a cookie. `?stepup=` names what they left to do. */
+  const SETUP_LINK_DAYS = { min: 1, max: 14, fallback: 7 };
+  let localDraft = $state({ email: "", displayName: "", expiresInDays: SETUP_LINK_DAYS.fallback });
+  /** True once Create has been tapped and the challenge under it is open. */
+  let localArmed = $state(false);
+  let localPassword = $state("");
+  let localBusy = $state(false);
+  /** @type {?(Awaited<ReturnType<typeof sendSetupLink>> & { userId?: string })} */
+  let localDelivery = $state(null);
+  /** @type {string | null} */
+  let localProblem = $state(null);
+  /**
+   * Whether the acting administrator has a password of their own. It decides
+   * which challenge every action on this screen asks for, so it is read once
+   * with the screen rather than guessed per button. It starts true because
+   * that is the answer for almost every administrator and the one the server
+   * re-checks anyway — a wrong guess costs a refused request, never a change
+   * that should not have happened.
+   */
+  let actorHasPassword = $state(true);
+  /**
+   * Which action this page load already carries a step-up proof for, if any.
+   * The intent and not a boolean, because a proof is bound to ONE action
+   * (ADR-0023 §5): one earned for creating a user cannot be spent issuing
+   * somebody a link, and the server would refuse it if this screen tried.
+   * Without it an OIDC-only administrator would be sent back to the provider
+   * by the very tap that was supposed to spend the proof they just earned.
+   * @type {string}
+   */
+  let provenIntent = $state("");
+
+  /**
+   * The typed draft, carried across a step-up (#915). Leaving for the provider
+   * is a full navigation, so without this an OIDC-only administrator would
+   * come back to an empty form and have to type the person in again. Session
+   * storage, not local: it belongs to this tab and this errand, and it holds
+   * only what the administrator typed — never a password, never a link.
+   */
+  const DRAFT_KEY = "orbit-local-user-draft";
+
+  function stashDraft() {
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(localDraft)); } catch { /* storage refused: the form simply starts empty */ }
+  }
+
+  function restoreDraft() {
+    try {
+      const held = sessionStorage.getItem(DRAFT_KEY);
+      sessionStorage.removeItem(DRAFT_KEY);
+      if (held) localDraft = { ...localDraft, ...JSON.parse(held) };
+    } catch { /* nothing held, or unreadable: the form starts empty */ }
+  }
+
+  /** Which person's "send a new setup link" is open, by user id. @type {string | null} */
+  let resendFor = $state(null);
+  let resendDays = $state(SETUP_LINK_DAYS.fallback);
+  let resendPassword = $state("");
+  let resendBusy = $state(false);
+  /** @type {Awaited<ReturnType<typeof sendSetupLink>> | null} */
+  let resendDelivery = $state(null);
+  /** @type {string | null} */
+  let resendProblem = $state(null);
+
+  /** The lapse date as a reader reads it, in UTC so the gate photographs one date. */
+  /** @param {string} iso */
+  const lapses = (iso) =>
+    new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+  /** The mailer's bounded word, said plainly. @param {string} reason */
+  const sendWords = (reason) =>
+    reason === "smtp_unconfigured"
+      ? "this instance has no outgoing mail configured, so nothing was sent"
+      : reason === "smtp_unavailable"
+        ? "the mail server could not be reached, so nothing was sent"
+        : reason === "smtp_rejected"
+          ? "the mail server refused the message, so nothing was sent"
+          : "the message could not be sent";
+
+  /** What a refused action means here, from the bounded code. @param {unknown} error */
+  function setupWords(error) {
+    const code = /** @type {{ code?: string, message?: string }} */ (error)?.code;
+    if (code === "recent_authentication_required") return "that isn't your current password — nothing was created";
+    if (code === "too_many_attempts") return "too many attempts at once; try again shortly";
+    if (code === "provider_handover_unreadable") {
+      return "not started — Orbit could not hand you to your identity provider";
+    }
+    return /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+  }
+
+  /**
+   * The first tap on a challenged action. An administrator with a password
+   * gets the field under it; one without is handed to the provider and comes
+   * back here with the proof.
+   *
+   * @param {string} intent
+   * @param {() => void} openField
+   */
+  async function challengeThen(intent, openField) {
+    localProblem = null;
+    resendProblem = null;
+    if (actorHasPassword || provenIntent === intent) { openField(); return; }
+    try {
+      stashDraft();
+      await startStepUp({ intent, returnTo: `/administration?stepup=${encodeURIComponent(intent)}` });
+    } catch (error) {
+      localProblem = setupWords(error);
+    }
+  }
+
+  /** Creates the account and mails its link (ADR-0023 §3). */
+  async function createLocalUserNow() {
+    if (localBusy) return;
+    localBusy = true;
+    localProblem = null;
+    localDelivery = null;
+    try {
+      const answer = await createLocalUser({
+        email: localDraft.email,
+        displayName: localDraft.displayName,
+        expiresInDays: Number(localDraft.expiresInDays),
+        ...(actorHasPassword ? { currentPassword: localPassword } : {}),
+      });
+      localDelivery = { ...answer, userId: answer.user?.id };
+      localArmed = false;
+      localPassword = "";
+      provenIntent = "";
+      /* Only a send that got out clears the form: a failure keeps what was
+         typed so the administrator can read it back against the Retry. */
+      if (!answer.sendError) {
+        localDraft = { email: "", displayName: "", expiresInDays: SETUP_LINK_DAYS.fallback };
+      }
+      view = await readAdminScreen();
+    } catch (error) {
+      localProblem = setupWords(error);
+    } finally {
+      localBusy = false;
+    }
+  }
+
+  /**
+   * Sends a fresh link — the Retry under a failed send, and the per-row
+   * control. Issuing one kills the earlier link, so this is the same act
+   * either way.
+   *
+   * @param {string} userId
+   * @param {number} days
+   * @param {string} password
+   */
+  async function sendSetupLinkNow(userId, days, password) {
+    if (resendBusy || localBusy) return;
+    resendBusy = true;
+    localBusy = true;
+    resendProblem = null;
+    try {
+      const answer = await sendSetupLink(userId, {
+        expiresInDays: Number(days),
+        ...(actorHasPassword ? { currentPassword: password } : {}),
+      });
+      resendDelivery = answer;
+      if (localDelivery?.userId === userId) localDelivery = { ...answer, userId };
+      resendFor = null;
+      resendPassword = "";
+      provenIntent = "";
+    } catch (error) {
+      resendProblem = setupWords(error);
+    } finally {
+      resendBusy = false;
+      localBusy = false;
+    }
+  }
+
   /* §15 mail machinery, made real (#743, ADR-0017 slice 2). The instance has
      ONE admin-owned mailbox; this is where it is set, checked, rotated,
      removed and switched on or off.
@@ -225,6 +424,30 @@
        second fetch. The one seed follows home's own pattern: pinned to the
        workspace under fixtures, so the fidelity gate can compare one
        deterministic sky against the mockup's; rolled fresh otherwise. */
+    /* #915: which challenge this administrator answers with, and — under
+       fixtures, where no challenged route can be reached at all — the delivery
+       answer the "add a local user" row is drawn from. `?localuser=` names
+       which of the two outcomes, so both can be photographed and walked. */
+    const parameters = new URLSearchParams(window.location.search);
+    if (data?.fixtures) {
+      const wanted = parameters.get("localuser");
+      if (wanted) {
+        localDelivery = /** @type {any} */ (SETUP_LINK_FIXTURES)[wanted] ?? SETUP_LINK_FIXTURES.sent;
+      }
+    } else {
+      readSignInMethods()
+        .then((own) => { if (!disposed) actorHasPassword = own.local.set; })
+        .catch(() => { /* additive: the password field stays the assumption */ });
+      /* Back from the provider carrying a proof: pick the errand up where it
+         was left rather than making them type the person in again. */
+      const resumed = parameters.get("stepup");
+      if (resumed) {
+        restoreDraft();
+        actorHasPassword = false;
+        provenIntent = resumed;
+      }
+    }
+
     readAdminScreen().then((screen) => {
       if (disposed) return;
       view = screen;
@@ -265,6 +488,57 @@
 
       <div class="card">
         <div class="cardhead"><h2>People</h2><button>invite someone</button></div>
+
+        <!-- ADD A LOCAL USER (#915, ADR-0023 §3; composition §2.7): the row
+             above the roster. Three things and a button — who they are, and
+             how long their setup link should live. Orbit mails the link to
+             the address typed here; it is never shown on this screen, so
+             there is deliberately nothing to copy. -->
+        <form class="localuser" onsubmit={(event) => { event.preventDefault();
+                                                       if (localArmed || provenIntent === "local_user_create") createLocalUserNow();
+                                                       else challengeThen("local_user_create", () => (localArmed = true)); }}>
+          <label for="localuser-email">email</label>
+          <input id="localuser-email" type="email" autocomplete="off" placeholder="newcomer@example.com"
+                 bind:value={localDraft.email} required />
+          <label for="localuser-name">display name</label>
+          <input id="localuser-name" autocomplete="off" placeholder="Their name"
+                 bind:value={localDraft.displayName} required />
+          <label for="localuser-days">link valid for</label>
+          <span class="days">
+            <input id="localuser-days" type="number" min={SETUP_LINK_DAYS.min} max={SETUP_LINK_DAYS.max}
+                   bind:value={localDraft.expiresInDays} required /> days
+          </span>
+          {#if localArmed}
+            <!-- The inline challenge, the same two-tap shape the helm's
+                 sign-in-methods block uses: Create arms it, this confirms it. -->
+            <label for="localuser-current">your current password</label>
+            <input id="localuser-current" type="password" autocomplete="current-password"
+                   bind:value={localPassword} required />
+          {/if}
+          <div class="placerow localuserrow">
+            <button type="submit" disabled={localBusy}>{localArmed ? "create and send the link" : "create"}</button>
+            {#if localArmed}
+              <button type="button" onclick={() => { localArmed = false; localPassword = ""; }}>cancel</button>
+            {/if}
+          </div>
+        </form>
+        {#if localDelivery}
+          {#if localDelivery.sendError}
+            <div class="adminproblem">
+              {localDelivery.sentTo} was created, but {sendWords(localDelivery.sendError)}
+              <button class="retry" disabled={localBusy}
+                      onclick={() => sendSetupLinkNow(
+                        /** @type {string} */ (localDelivery?.userId),
+                        localDraft.expiresInDays,
+                        localPassword,
+                      )}>retry</button>
+            </div>
+          {:else}
+            <div class="adminproblem ok">Setup link sent to {localDelivery.sentTo}, valid until {lapses(localDelivery.expiresAt)}</div>
+          {/if}
+        {/if}
+        {#if localProblem}<div class="adminproblem">{localProblem}</div>{/if}
+
         {#each view.users as person (person.id)}
           <div class="person">
             <span class="avatar">{initialsOf(person.displayName)}</span>
@@ -276,6 +550,18 @@
             {#if person.id !== view.user?.id}
               <button class="place" title="Admins can add any user to any system"
                       onclick={() => (placing = placing === person.id ? null : person.id)}>place in a system…</button>
+              <!-- A fresh link for somebody who never used theirs, or who has
+                   forgotten their password (ADR-0023 §3). Issuing it kills the
+                   earlier one, and it goes to their registered address — this
+                   screen never sees it. -->
+              <button class="place" onclick={() => challengeThen("setup_link_issue", () => {
+                        resendFor = resendFor === person.id ? null : person.id;
+                        resendDays = SETUP_LINK_DAYS.fallback;
+                        resendPassword = "";
+                        resendDelivery = null;
+                      })}
+                      aria-expanded={resendFor === person.id}
+                      aria-label={`send a new setup link to ${person.displayName}`}>send a new setup link…</button>
             {/if}
           </div>
           {#if placing === person.id}
@@ -285,7 +571,34 @@
               {/each}
             </div>
           {/if}
+          {#if resendFor === person.id}
+            <form class="localuser resend" onsubmit={(event) => { event.preventDefault();
+                                                                 sendSetupLinkNow(person.id, resendDays, resendPassword); }}>
+              <label for="resend-days">link valid for</label>
+              <span class="days">
+                <input id="resend-days" type="number" min={SETUP_LINK_DAYS.min} max={SETUP_LINK_DAYS.max}
+                       bind:value={resendDays} required /> days
+              </span>
+              {#if actorHasPassword}
+                <label for="resend-current">your current password</label>
+                <input id="resend-current" type="password" autocomplete="current-password"
+                       bind:value={resendPassword} required />
+              {/if}
+              <div class="placerow localuserrow">
+                <button type="submit" disabled={resendBusy}>send it</button>
+                <button type="button" onclick={() => (resendFor = null)}>cancel</button>
+              </div>
+            </form>
+          {/if}
         {/each}
+        {#if resendDelivery}
+          {#if resendDelivery.sendError}
+            <div class="adminproblem">{sendWords(resendDelivery.sendError)}</div>
+          {:else}
+            <div class="adminproblem ok">Setup link sent to {resendDelivery.sentTo}, valid until {lapses(resendDelivery.expiresAt)}</div>
+          {/if}
+        {/if}
+        {#if resendProblem}<div class="adminproblem">{resendProblem}</div>{/if}
         {#if problem}<div class="adminproblem">{problem}</div>{/if}
       </div>
 
