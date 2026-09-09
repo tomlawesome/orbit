@@ -1,5 +1,6 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
+import { claimInstanceAsAdministrator } from "./support/bootstrap";
 
 /**
  * #410/§15: THE ARRIVAL. The newcomer's journey and the create-system card,
@@ -66,25 +67,6 @@ async function signInThroughTheDoor(page: Page, account: string) {
   await page.goto("/");
   await page.locator("#gate").click();
   await page.getByRole("link", { name: account }).click();
-}
-
-/* A fresh instance promotes its first sign-in to instance admin — and an admin
- * never sees the labelled sky, because the server hands them every household as
- * a member would see it (§11). Claim the promotion for the administrator so
- * everyone below is ordinary. */
-async function establishInstanceAdmin(browser: Browser) {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  const page = await context.newPage();
-  await signInAs(page, "Orbit Administrator", "/home");
-  /* Not a fixed destination: this claims the promotion and nothing else, so
-     it must not assume a household exists anywhere yet. On a genuinely
-     empty database this is the instance's first-ever administrator sign-in
-     -- exactly the reader #840 sends to the arrival at `/` instead of
-     /home, which every other spec in this run relies on this identity
-     already having outgrown by the time IT signs in. */
-  const session = await page.request.get("/api/auth/session");
-  expect(session.ok()).toBe(true);
-  await context.close();
 }
 
 /**
@@ -169,7 +151,11 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 
-  await establishInstanceAdmin(browser);
+  /* An admin never sees the labelled sky, because the server hands them every
+     household as a member would see it (§11), so the administrator takes the
+     instance first and everyone below is ordinary. Since ADR-0022 that is the
+     claim code from the stack's own log rather than a first-sign-in race. */
+  await claimInstanceAsAdministrator(browser);
 
   /* Somebody's system for the newcomer to find, created through the arrival's
      own three-answer contract — so this step is also the proof that the server
