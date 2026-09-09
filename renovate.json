@@ -55,6 +55,11 @@
       "allowedVersions": "!/^44\\.6[34]\\.0$/"
     },
     {
+      "description": "The docker:*-dind service and docker:*-cli job images, which the gitlabci manager finds in .gitlab-ci.yml. Docker 29.7.0 changed how a push tracks layers across repositories (moby/moby#53081) and the daemon now sometimes skips a blob it wrongly believes the target already has, so record_image's push to registry.tomlawson.io fails with `blob unknown to registry` (moby/moby#53293, #827). 29.6.2 is unaffected and is what the pipeline holds. Only the versions seen broken are excluded -- every 29.7.x and 29.8.0 -- so whatever moby ships next (29.8.1, 29.8.4, 29.9.0) is offered in the usual weekly merge request; nothing waits for a named fix. That bump is proven by record_image: label the merge request `ci: acceptance` so the push actually runs, and if it goes red the same way, add that one version here and wait for the next.",
+      "matchPackageNames": ["docker"],
+      "allowedVersions": "!/^29\\.(7\\.\\d+|8\\.0)(-.*)?$/"
+    },
+    {
       "description": "The manual step Dependabot needed, which Renovate still needs. A sidecar pin lives in two places -- the file, and .github/supply-chain-policy.json, a bespoke schema no dependency updater parses -- so a bump lands with the two disagreeing and the drift axis of `node scripts/sidecar-pins.mjs check --offline` goes red in CI. It is not a postUpgradeTask: sync re-resolves the index digest with `docker buildx imagetools inspect`, and the renovate job runs on the shared untagged runner, which has no Docker daemon. Only orbit-build is privileged, and putting Renovate there would queue the whole pipeline behind a weekly maintenance job. So the instruction goes on the merge request, where the person who has to act on it will see it.",
       "matchFileNames": ["docker-compose.yml", "tests/oidc/Dockerfile", ".gitlab-ci.yml", "scripts/test-integration.mjs"],
       "prBodyNotes": [
