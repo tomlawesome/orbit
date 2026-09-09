@@ -45,6 +45,45 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
               border:1px solid var(--line);border-radius:9px;padding:7px 13px;cursor:pointer}
 .helm-page .idrow button:hover{border-color:var(--accent);color:var(--accent-text)}
 
+/* Sign-in methods (#915, ADR-0023 §6; composition §2.7). The block borrows the
+   card family's own furniture — .kv rows and .note — so it reads as part of
+   the "You" card rather than a second design. Only the sub-heading, the row's
+   value-and-actions cluster and the challenge form are new, because the
+   ratified sheet had none of the three to borrow from. Nothing here is smaller
+   than the type already on this screen. */
+.helm-page .methods-head{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+      color:var(--ink-quiet);margin:18px 0 4px}
+.helm-page .method{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.helm-page .method b{color:var(--ink);font-weight:500}
+.helm-page .method button{font:11px var(--mono);color:var(--ink-mid);background:none;
+      border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
+.helm-page .method button:hover{border-color:var(--accent);color:var(--accent-text)}
+
+/* The armed action's own field, under the row it belongs to — the two-tap
+   protocol made visible. It sits in the row's rhythm, so the block does not
+   jump when one opens. */
+.helm-page .challenge{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;padding:12px 2px;
+      border-bottom:1px solid var(--line-soft)}
+.helm-page .challenge label{display:flex;flex-direction:column;gap:4px;
+      font:10.5px var(--mono);letter-spacing:.06em;color:var(--ink-quiet)}
+.helm-page .challenge input{font:12px var(--mono);color:var(--ink);background:none;
+      border:1px solid var(--line-soft);border-radius:6px;padding:6px 8px}
+/* The accent border marks the focused field, and the browser's own ring is
+   deliberately LEFT ON rather than traded for it: this screen is walked by
+   v19-keyboard.spec.ts, which requires an outline or a shadow at every stop,
+   and a border colour is neither. */
+.helm-page .challenge input:focus-visible{border-color:var(--accent)}
+.helm-page .challenge .challengenote,
+.helm-page .challenge .challengerow,
+.helm-page .challenge .note{grid-column:1 / -1}
+.helm-page .challenge .challengenote{font:10.5px var(--mono);line-height:1.5;color:var(--ink-quiet)}
+.helm-page .challenge .challengerow{display:flex;gap:6px;flex-wrap:wrap}
+.helm-page .challenge button{font:11px var(--mono);color:var(--ink-mid);background:none;
+      border:1px solid var(--line);border-radius:9px;padding:6px 12px;cursor:pointer}
+.helm-page .challenge button:hover{border-color:var(--accent);color:var(--accent-text)}
+.helm-page .challenge button[disabled]{opacity:.55;cursor:progress}
+@media (max-width:560px){.helm-page .challenge{grid-template-columns:1fr}}
+
 /* the sky chooser: each card is PAINTED by its own pack variables */
 .helm-page .packs{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
 .helm-page .pack{border:1px solid var(--line);border-radius:13px;overflow:hidden;cursor:pointer;
@@ -90,6 +129,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    the ratified card is unchanged; the :has rule keeps the row above it the
    last one for the purposes of the divider. */
 .helm-page .note{margin-top:10px;font:11px var(--mono);color:var(--warm)}
+/* The same line when it is good news — a change that DID happen (#915). */
+.helm-page .note.ok{color:var(--ok-text)}
 .helm-page .kv:has(+ .note){border:0}
 .helm-page .danger .note{margin-top:8px}
 

@@ -1509,6 +1509,235 @@ export async function signOut() {
 }
 
 /* ---------------------------------------------------------------------------
+ * SIGN-IN METHODS AND ADMINISTRATOR-CREATED LOCAL USERS (#915, M7).
+ *
+ * ADR-0023 gives one account two optional ways in — a password and a provider
+ * identity — and re-challenges the reader before every change to either. The
+ * routes below are already built (slices 8 and 10); this is the seam the helm's
+ * "Sign-in methods" block and administration's "add a local user" row call.
+ *
+ * THE CHALLENGE TRAVELS IN THE BODY. A reader who has a password answers with
+ * `currentPassword` on the very request making the change; a reader who has
+ * only a provider identity has to come back from a step-up first, and the
+ * proof of that is an HTTP-only cookie the browser carries on its own. So
+ * every function here takes an optional `currentPassword` and nothing else:
+ * there is no second "prove it" round trip to sequence, and no proof value
+ * this module could hold even if it wanted to.
+ */
+
+/**
+ * The caller's own sign-in methods — GET /api/auth/methods (ADR-0023 §6).
+ *
+ * @typedef {object} SignInMethods
+ * @property {{ set: boolean, changedAt: ?string }} local
+ * @property {{ id: string, issuer: string, linkedAt: string, lastLoginAt: ?string }[]} oidc
+ */
+
+/**
+ * @returns {Promise<SignInMethods>}
+ */
+export async function readSignInMethods() {
+  /** @type {Partial<SignInMethods>} */
+  const body = await json(await fetch("/api/auth/methods", { credentials: "same-origin" }));
+  return { local: body.local ?? { set: false, changedAt: null }, oidc: body.oidc ?? [] };
+}
+
+/**
+ * Whether this instance offers a provider at all — GET /api/auth/availability.
+ *
+ * The helm needs it to decide whether "link your identity provider" is an
+ * offer worth making: `ORBIT_AUTH_OIDC=false` is a whole instance with no
+ * provider, and an action pointing at one would be a dead end rather than a
+ * choice. Unauthenticated by design (the sign-in door reads the same answer),
+ * so this asks for no session and treats an unreadable answer as "no offer" —
+ * the direction that shows the reader one fewer control rather than one that
+ * cannot work.
+ *
+ * @returns {Promise<{ local: boolean, oidc: boolean }>}
+ */
+export async function readAuthMethodsOffered() {
+  try {
+    /** @type {{ methods?: { local?: boolean, oidc?: boolean } }} */
+    const body = await json(await fetch("/api/auth/availability", { credentials: "same-origin" }));
+    return { local: body.methods?.local ?? true, oidc: body.methods?.oidc ?? false };
+  } catch {
+    return { local: true, oidc: false };
+  }
+}
+
+/**
+ * Sets a first password, or replaces the one the caller has —
+ * POST /api/auth/local/password (ADR-0023 §5, §7).
+ *
+ * Replacing one revokes every session including this browser's, and the route
+ * re-issues this browser's own in the same response, so a caller does NOT have
+ * to sign in again. The cached session is dropped all the same: the CSRF token
+ * is derived from the session token, and the one held here belongs to the
+ * session that just died.
+ *
+ * @param {{ password: string, currentPassword?: string }} change
+ * @returns {Promise<{ changed: boolean, sessionsRevoked: number }>}
+ */
+export async function writeLocalPassword({ password, currentPassword }) {
+  /** @type {{ changed?: boolean, sessionsRevoked?: number }} */
+  const body = await json(
+    await csrfFetch("/api/auth/local/password", {
+      body: currentPassword ? { password, currentPassword } : { password },
+    }),
+  );
+  sessionPromise = null;
+  return { changed: body.changed ?? false, sessionsRevoked: body.sessionsRevoked ?? 0 };
+}
+
+/**
+ * Removes the caller's password — DELETE /api/auth/methods/local.
+ *
+ * Refused with `link_last_method` unless a usable provider identity survives
+ * it, which is the rule that keeps a reader from removing their way back in.
+ *
+ * @param {{ currentPassword?: string }} [challenge]
+ */
+export async function removeLocalPassword({ currentPassword } = {}) {
+  await json(
+    await csrfFetch("/api/auth/methods/local", {
+      method: "DELETE",
+      body: currentPassword ? { currentPassword } : {},
+    }),
+  );
+}
+
+/**
+ * Removes one linked provider identity — DELETE /api/auth/methods/oidc/{id}.
+ *
+ * @param {string} identityId
+ * @param {{ currentPassword?: string }} [challenge]
+ */
+export async function unlinkProviderIdentity(identityId, { currentPassword } = {}) {
+  await json(
+    await csrfFetch(`/api/auth/methods/oidc/${encodeURIComponent(identityId)}`, {
+      method: "DELETE",
+      body: currentPassword ? { currentPassword } : {},
+    }),
+  );
+}
+
+/**
+ * Hands the browser to the identity provider for a link or a step-up.
+ *
+ * KNOWN LIMIT, AND THE SHAPE OF ITS FIX (#915). Both routes answer a bare 302
+ * to the provider, and both require the per-session CSRF header — which is a
+ * pair a browser cannot complete. A header can only be set by `fetch`, and a
+ * `fetch` cannot read a cross-origin redirect: `redirect: "manual"` gives an
+ * opaque response with no Location, and `redirect: "follow"` walks into a
+ * provider that answers no CORS headers. A form post could navigate but
+ * cannot carry the header.
+ *
+ * `POST /api/auth/logout` already solves exactly this: asked with
+ * `Accept: application/json` it answers the provider's URL as a string instead
+ * of redirecting, and `signOut` above navigates to it. This function asks
+ * these two routes the same question and follows the same answer, so the day
+ * either grows that branch this seam needs no change. Until then an OIDC-only
+ * reader gets the bounded refusal below rather than a control that silently
+ * does nothing.
+ *
+ * @param {string} path
+ * @param {Record<string, unknown>} body
+ * @returns {Promise<never>}  navigates away, or throws
+ */
+async function handToProvider(path, body) {
+  const { csrfToken } = await readSession();
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    redirect: "manual",
+    headers: { "content-type": "application/json", "x-csrf-token": csrfToken, accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (response.ok) {
+    /** @type {?{ location?: string }} */
+    const answer = await response.json().catch(() => null);
+    if (answer?.location) {
+      window.location.assign(answer.location);
+      /* The navigation is under way; nothing after this runs in this page. */
+      return await new Promise(() => {});
+    }
+  }
+  /* A refusal — a stale CSRF token, a provider that is not configured, a
+     challenge that did not hold — comes back as the shared envelope, so let
+     `json` raise it in the server's own words. */
+  if (!response.ok && response.type !== "opaqueredirect") return json(response);
+  throw new WorkspaceError(
+    "Orbit could not hand you to your identity provider",
+    { code: "provider_handover_unreadable" },
+  );
+}
+
+/**
+ * Starts an OIDC step-up — POST /api/auth/step-up/start (ADR-0023 §5). The
+ * challenge for a reader with no password: the provider authenticates them
+ * again, and the browser comes back to `returnTo` carrying the proof.
+ *
+ * @param {{ intent: string, returnTo: string }} request
+ */
+export function startStepUp({ intent, returnTo }) {
+  return handToProvider("/api/auth/step-up/start", { intent, returnTo });
+}
+
+/**
+ * Starts linking a provider identity — POST /api/auth/link/oidc/start
+ * (ADR-0023 §6). Challenged like every other change to a sign-in method.
+ *
+ * @param {{ returnTo: string, currentPassword?: string }} request
+ */
+export function startProviderLink({ returnTo, currentPassword }) {
+  return handToProvider(
+    "/api/auth/link/oidc/start",
+    currentPassword ? { returnTo, currentPassword } : { returnTo },
+  );
+}
+
+/**
+ * What an administrator is told after Orbit tries to mail a setup link
+ * (ADR-0023 §3). Never the link and never the token: where it went, when it
+ * lapses, and one bounded word if it did not go.
+ *
+ * @typedef {object} SetupLinkDelivery
+ * @property {string} sentTo
+ * @property {string} expiresAt   ISO-8601
+ * @property {?string} sendError  smtp_unconfigured | smtp_unavailable | smtp_rejected | unknown
+ */
+
+/**
+ * Creates a local user and mails them their setup link —
+ * POST /api/admin/users (ADR-0023 §3).
+ *
+ * The account survives a failed send, which is why `sendError` is an answer
+ * rather than a throw: the administrator sends again from the person's row
+ * instead of losing the person they just typed in.
+ *
+ * @param {{ email: string, displayName: string, expiresInDays?: number, currentPassword?: string }} draft
+ * @returns {Promise<SetupLinkDelivery & { user: { id: string, displayName: string, email: string } }>}
+ */
+export async function createLocalUser(draft) {
+  return json(await csrfFetch("/api/admin/users", { body: draft }));
+}
+
+/**
+ * Sends a fresh setup link to one existing user —
+ * POST /api/admin/users/{id}/setup-link (ADR-0023 §3). Issuing it kills the
+ * earlier link, so this is also how a used or lapsed one is replaced.
+ *
+ * @param {string} userId
+ * @param {{ expiresInDays?: number, currentPassword?: string }} [options]
+ * @returns {Promise<SetupLinkDelivery>}
+ */
+export async function sendSetupLink(userId, options = {}) {
+  return json(
+    await csrfFetch(`/api/admin/users/${encodeURIComponent(userId)}/setup-link`, { body: options }),
+  );
+}
+
+/* ---------------------------------------------------------------------------
  * Household management (#410, §15) — ONE system, seen from inside.
  *
  * Every route below already exists in the engine; nothing here is new server

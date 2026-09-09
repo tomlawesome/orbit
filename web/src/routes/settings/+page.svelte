@@ -4,18 +4,27 @@
   import { resolve } from "$app/paths";
   import {
     clearTourSeen,
+    readAuthMethodsOffered,
     readSessions,
     readSettingsScreen,
+    readSignInMethods,
+    removeLocalPassword,
     revokeSession,
     signOutEverywhere,
+    startProviderLink,
+    startStepUp,
+    unlinkProviderIdentity,
+    writeLocalPassword,
     writeReminders,
   } from "$lib/data/workspace.js";
+  import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { agoLong } from "$lib/format.js";
   import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
   import { relaunchTour } from "$lib/tour/relaunch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { DEFAULT_THEME, THEME_PACKS } from "$lib/theme.js";
   import Chrome from "$lib/Chrome.svelte";
+  import SignInChallenge from "./SignInChallenge.svelte";
   import "./settings.css";
 
   /**
@@ -29,6 +38,8 @@
    * it manages households, which this screen deliberately does not. The flip
    * is a cutover line once those journeys exist v19-side (#453).
    */
+  /** @type {{ data: { fixtures: boolean } }} */
+  let { data } = $props();
   /** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */
   let view = $state(null);
 
@@ -189,6 +200,155 @@
   }
 
   /**
+   * SIGN-IN METHODS (#915, ADR-0023 §5, §6; composition ruled in
+   * docs/plans/m7-local-accounts.md §2.7).
+   *
+   * The line that used to say "signed in via your identity provider" was a
+   * guess this build can no longer make: an account may have a password, a
+   * provider identity, or both, and the reader is the one who decides which.
+   * So the "You" card now lists what actually exists — the password with the
+   * date it last changed, each provider with its issuer and the date it was
+   * linked — and offers the change beside each.
+   *
+   * THE CHALLENGE IS INLINE, and it is the two-tap protocol "sign out of every
+   * device" already uses below: the first tap ARMS the action and opens the
+   * field under it, the confirm inside that field is the second tap. What the
+   * field asks for depends on how the reader can prove themselves (ADR-0023
+   * §5): somebody with a password answers with it, and somebody with only a
+   * provider is sent back to that provider to authenticate again and returns
+   * here carrying a short-lived proof — `?stepup=` names the action they left
+   * to do, so the block re-arms itself on the way back in.
+   */
+  /* The cast is on the initial value rather than the declaration: a `@type`
+     comment above a `$state(null)` is not picked up here (the same reason
+     `view` above is cast at each of its uses), and this way the type is
+     stated once, where the null is. */
+  let methods = $state(/** @type {Awaited<ReturnType<typeof readSignInMethods>> | null} */ (null));
+  /** Whether this instance has a provider at all — no provider, no offer to link. */
+  let providerOffered = $state(false);
+  /** @type {string | null} */
+  let methodsProblem = $state(null);
+  /**
+   * Which action is armed, if any: `password_set`, `password_change`,
+   * `password_remove`, `link_oidc`, or `unlink:<identity id>`.
+   * @type {string | null}
+   */
+  let armedMethod = $state(null);
+  let currentPassword = $state("");
+  let newPassword = $state("");
+  let methodBusy = $state(false);
+  /** @type {string | null} */
+  let methodOutcome = $state(null);
+  /** @type {string | null} */
+  let methodProblem = $state(null);
+  /* There is deliberately no "am I standing on a step-up proof" flag. A reader
+     with no password can only reach an armed action by coming back from one —
+     `tapMethod` sends them there rather than opening a field — so `hasPassword`
+     already answers which challenge is in play, and a second piece of state
+     saying the same thing is a second thing that can disagree. */
+  const hasPassword = $derived(methods?.local.set ?? false);
+  const identities = $derived(methods?.oidc ?? []);
+
+  /** The provider as a reader recognises it: its host, never the whole issuer URL. */
+  /** @param {string} issuer */
+  function issuerHost(issuer) {
+    try { return new URL(issuer).host; } catch { return issuer; }
+  }
+
+  /** A date a reader can read, in UTC so the gate photographs the same one. */
+  /** @param {?string} iso */
+  const on = (iso) =>
+    iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "";
+
+  /** The step-up intent each armed action is bound to (ADR-0023 §5). */
+  /** @param {string} action */
+  const intentOf = (action) =>
+    action.startsWith("unlink:") ? "unlink_method" : action === "password_remove" ? "unlink_method" : action;
+
+  /**
+   * The first tap. Somebody with a password gets the field; somebody without
+   * one is handed to the provider, and comes back to this block re-armed.
+   *
+   * @param {string} action
+   */
+  async function tapMethod(action) {
+    methodProblem = null;
+    methodOutcome = null;
+    currentPassword = "";
+    newPassword = "";
+    if (armedMethod === action) { armedMethod = null; return; }
+    if (hasPassword) { armedMethod = action; return; }
+    /* No password: the challenge is a fresh authentication at the provider.
+       `returnTo` carries the action so this block can pick it up again. */
+    const identity = action.startsWith("unlink:") ? `&identity=${encodeURIComponent(action.slice(7))}` : "";
+    try {
+      await startStepUp({ intent: intentOf(action), returnTo: `/settings?stepup=${encodeURIComponent(action)}${identity}` });
+    } catch (error) {
+      methodProblem = methodWords(error);
+    }
+  }
+
+  /** What a refusal means in this block's own words, from the bounded code. */
+  /** @param {unknown} error */
+  function methodWords(error) {
+    const code = /** @type {{ code?: string, message?: string }} */ (error)?.code;
+    if (code === "recent_authentication_required") return "that isn't your current password — nothing was changed";
+    if (code === "too_many_attempts") return "too many attempts at once; try again shortly";
+    if (code === "password_rejected") return /** @type {{ message?: string }} */ (error)?.message ?? "that password was refused";
+    if (code === "link_last_method") return "keep at least one way to sign in: add another method before removing this one";
+    if (code === "link_exists") return "that provider account already belongs to an Orbit account";
+    if (code === "step_up_failed") return "your identity provider did not re-authenticate you, so nothing was changed";
+    if (code === "provider_handover_unreadable") {
+      return "not started — Orbit could not hand you to your identity provider";
+    }
+    return /** @type {{ message?: string }} */ (error)?.message ?? "not changed — Orbit could not reach your sign-in methods";
+  }
+
+  /** Disarms whatever is armed, leaving the block as this reader found it. */
+  function cancelMethod() {
+    armedMethod = null;
+    currentPassword = "";
+    newPassword = "";
+  }
+
+  /** The second tap: the change itself, carrying whichever proof applies. */
+  async function confirmMethod() {
+    if (!armedMethod || methodBusy) return;
+    methodBusy = true;
+    methodProblem = null;
+    /* A step-up proof is a cookie the browser carries; a password travels in
+       the body. Exactly one of them is in play, never both. */
+    const challenge = hasPassword ? { currentPassword } : {};
+    const action = armedMethod;
+    try {
+      if (action === "link_oidc") {
+        await startProviderLink({ returnTo: "/settings", ...challenge });
+        return;
+      }
+      if (action === "password_set" || action === "password_change") {
+        const outcome = await writeLocalPassword({ password: newPassword, ...challenge });
+        methodOutcome = outcome.changed
+          ? "password changed — every other device was signed out"
+          : "password set";
+      } else if (action === "password_remove") {
+        await removeLocalPassword(challenge);
+        methodOutcome = "password removed";
+      } else if (action.startsWith("unlink:")) {
+        await unlinkProviderIdentity(action.slice(7), challenge);
+        methodOutcome = "identity provider unlinked";
+      }
+      armedMethod = null;
+      currentPassword = "";
+      newPassword = "";
+      methods = await readSignInMethods();
+    } catch (error) {
+      methodProblem = methodWords(error);
+    } finally {
+      methodBusy = false;
+    }
+  }
+
+  /**
    * "Where you're signed in" (#482): every session the caller holds, loaded
    * alongside the rest of the screen. Additive like the relay and reminders
    * cards above — a session list that cannot be reached costs the reader
@@ -277,6 +437,36 @@
     } catch {
       sessionsProblem = "not shown — Orbit could not reach your session list";
     }
+
+    /* Sign-in methods (#915). Additive like the cards above: a block that
+       cannot be read costs the reader that block, not the helm.
+
+       Under fixtures there is no session to read them off — `GET
+       /api/auth/methods` answers the CALLER's own rows and the harness has no
+       caller — so the gate's screen is drawn from the fixture instead, the way
+       administration's relay rows already are. `?signin=` names which state,
+       so both can be photographed and walked. */
+    const parameters = new URLSearchParams(window.location.search);
+    if (data?.fixtures) {
+      const wanted = parameters.get("signin") ?? "both";
+      methods = /** @type {any} */ (SIGN_IN_METHODS_FIXTURES)[wanted] ?? SIGN_IN_METHODS_FIXTURES.both;
+      providerOffered = true;
+    } else {
+      try {
+        [methods, { oidc: providerOffered }] = await Promise.all([
+          readSignInMethods(),
+          readAuthMethodsOffered(),
+        ]);
+      } catch {
+        methodsProblem = "not shown — Orbit could not reach your sign-in methods";
+      }
+    }
+
+    /* Back from the provider (ADR-0023 §5): the proof is in a cookie the
+       browser carries, and this is the action it was earned for. Re-arm it so
+       the reader finishes where they left off rather than starting again. */
+    const resumed = parameters.get("stepup");
+    if (resumed && methods && !methods.local.set) armedMethod = resumed;
   });
 </script>
 
@@ -306,9 +496,82 @@
       <h2>You</h2>
       <div class="idrow">
         <span class="avatar" aria-hidden="true">{initials}</span>
-        <div class="who"><b>{view.user?.displayName ?? ""}</b><span>{view.user?.email ?? ""} · signed in via your identity provider</span></div>
+        <div class="who"><b>{view.user?.displayName ?? ""}</b><span>{view.user?.email ?? ""}</span></div>
         <button>edit name</button>
       </div>
+
+      <!-- Sign-in methods (#915, ADR-0023 §6; composition §2.7). This replaces
+           the single "signed in via your identity provider" line: an account
+           can have a password, providers, or both, so the block says which,
+           and each row carries its own way to change it. The rows are the
+           card family's own .kv furniture — same type, same rhythm, nothing
+           shrunk to make room. -->
+      <h3 class="methods-head">Sign-in methods</h3>
+      {#if methods}
+        <div class="kv">
+          <span>password</span>
+          <span class="method">
+            {#if hasPassword}
+              <b>set{methods.local.changedAt ? ` · changed ${on(methods.local.changedAt)}` : ""}</b>
+              <button onclick={() => tapMethod("password_change")}
+                      aria-expanded={armedMethod === "password_change"}>change</button>
+              <button onclick={() => tapMethod("password_remove")}
+                      aria-expanded={armedMethod === "password_remove"}>remove</button>
+            {:else}
+              <b>not set</b>
+              <button onclick={() => tapMethod("password_set")}
+                      aria-expanded={armedMethod === "password_set"}>set a password</button>
+            {/if}
+          </span>
+        </div>
+        {#if armedMethod === "password_set" || armedMethod === "password_change" || armedMethod === "password_remove"}
+          <SignInChallenge wantsNewPassword={armedMethod !== "password_remove"}
+                           confirmLabel={armedMethod === "password_remove" ? "remove it" : "save it"}
+                           hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                           bind:currentPassword bind:newPassword
+                           onconfirm={confirmMethod} oncancel={cancelMethod} />
+        {/if}
+
+        {#each identities as identity (identity.id)}
+          <div class="kv">
+            <span>identity provider</span>
+            <span class="method">
+              <b>{issuerHost(identity.issuer)} · linked {on(identity.linkedAt)}</b>
+              <button onclick={() => tapMethod(`unlink:${identity.id}`)}
+                      aria-expanded={armedMethod === `unlink:${identity.id}`}
+                      aria-label={`unlink ${issuerHost(identity.issuer)}`}>unlink</button>
+            </span>
+          </div>
+          {#if armedMethod === `unlink:${identity.id}`}
+            <SignInChallenge confirmLabel="unlink it"
+                             hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                             bind:currentPassword bind:newPassword
+                             onconfirm={confirmMethod} oncancel={cancelMethod} />
+          {/if}
+        {/each}
+
+        <!-- One offer, and only where it can be taken: an instance with no
+             provider configured has nothing to link to. -->
+        {#if providerOffered && identities.length === 0}
+          <div class="kv">
+            <span>identity provider</span>
+            <span class="method">
+              <b>not linked</b>
+              <button onclick={() => tapMethod("link_oidc")}
+                      aria-expanded={armedMethod === "link_oidc"}>link your identity provider</button>
+            </span>
+          </div>
+          {#if armedMethod === "link_oidc"}
+            <SignInChallenge confirmLabel="continue to your provider"
+                             hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                             bind:currentPassword bind:newPassword
+                             onconfirm={confirmMethod} oncancel={cancelMethod} />
+          {/if}
+        {/if}
+
+        {#if methodOutcome}<div class="note ok">{methodOutcome}</div>{/if}
+      {/if}
+      {#if methodsProblem}<div class="note">{methodsProblem}</div>{/if}
     </div>
 
     <div class="card wide">
