@@ -6,6 +6,20 @@ body{background:#060a18}
    totality's own range — the day stars are brighter than any night screen's. */
 .tw{--tw-min:.2;--tw-max:.85;animation:twinkle 5s ease-in-out infinite alternate}
 
+/* Totality is night whatever the pack: the ground here is always #060a18,
+   so the two daylight packs' dark inks, ink-coloured stars (#893) and blue
+   accent vanish or jar on it (owner, 2026-09-09: text unreadable, stars
+   gone). On this screen only they borrow starchart's night ladder; the
+   night packs keep their own. Values are starchart's in $lib/packs.css. */
+[data-theme=dawn] body,[data-theme=clouds] body{
+  --ink:#e9edf8;--ink-mid:#8791b3;--ink-faint:#737e9e;--ink-quiet:#8b95b6;
+  --accent:#d8b45a;--star-far:#e9edf8;--star-near:#f4f0ff}
+
+/* the shimmer on the limb: each arc fades on its own period and delay,
+   both set per arc by sky.js, so the ring never glints in step */
+.shimmer path{opacity:0;animation:shim 4s ease-in-out infinite alternate}
+@keyframes shim{from{opacity:0}to{opacity:var(--o,.5)}}
+
 /* corona layers — every group breathes on its own period, nothing in sync */
 .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes cbreathe{from{opacity:.66}to{opacity:1}}
@@ -115,5 +129,6 @@ body{background:#060a18}
 .log .body{font-size:13px;color:var(--ink-mid)}
 @media (prefers-reduced-motion: reduce){
   .flare,.wash,.ringflare,.flarewave{opacity:0!important}
+  .shimmer path{animation:none;opacity:.28}
   .earlier summary,.earlier summary svg{transition:none}
 }
