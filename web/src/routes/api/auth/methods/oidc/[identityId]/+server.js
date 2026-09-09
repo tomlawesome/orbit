@@ -26,6 +26,7 @@ export const DELETE = write(async (event, session) => {
   }
 
   const recentAuthentication = await requireRecentAuthentication(event, session, body, "unlink_method");
-  const result = await unlinkIdentity(session.user.id, event.params.identityId, recentAuthentication);
+  const identityId = /** @type {string} */ (event.params.identityId);
+  const result = await unlinkIdentity(session.user.id, identityId, recentAuthentication);
   return json(result, { headers: { "cache-control": "no-store" } });
 });
