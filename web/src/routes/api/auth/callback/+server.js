@@ -4,7 +4,8 @@ import {
   setSessionCookie,
   transactionCookieName,
 } from "orbit/lib/auth/cookies";
-import { constantTimeEqual, openLoginTransaction } from "orbit/lib/auth/crypto";
+import { clearClaimCookie } from "orbit/lib/auth/bootstrap";
+import { constantTimeEqual, openLoginTransaction, transactionKind } from "orbit/lib/auth/crypto";
 import { AuthError, asAuthError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
 import { reportAuthCallbackFailure } from "orbit/lib/auth/observability";
@@ -81,7 +82,27 @@ export async function GET(event) {
 
     const metadata = await discoverProvider(config.oidc);
     const identity = await completeAuthorization(config.oidc, metadata, code, transaction);
-    const user = await provisionIdentity(identity);
+
+    /* What the provider's answer is FOR is decided by the transaction this
+       process sealed, never by anything on the request (ADR-0022 §2). Slice 5
+       lands two kinds; the link and step-up branches (ADR-0023 §5, §6) add
+       their own case here and their own kind in `transactionKind`. */
+    const kind = transactionKind(transaction);
+    let user;
+    switch (kind) {
+      case "bootstrap":
+        /* The claim: this sign-in creates the first administrator and seats
+           the instance's primary administrator. A racing claimant that loses
+           the lock is refused with `bootstrap_claimed` and creates nothing. */
+        user = await provisionIdentity(identity, { bootstrap: true });
+        clearClaimCookie(event.cookies, config);
+        break;
+      case "login":
+        user = await provisionIdentity(identity);
+        break;
+      default:
+        throw new AuthError("invalid_state", "The sign-in transaction is invalid or has expired", 400);
+    }
     if (user.disabledAt) {
       throw new AuthError("account_disabled", "This Orbit account is disabled", 403);
     }

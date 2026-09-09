@@ -3,6 +3,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { waitForSenderVerificationToken } from "./support/mail";
+import { claimInstanceAsAdministrator } from "./support/bootstrap";
 
 /**
  * #459: the mail proving ground — no interception anywhere. A real message
@@ -86,22 +87,18 @@ async function signInAsMember(page: Page) {
   await settleArrival(page);
 }
 
-// A fresh instance promotes its first sign-in to instance admin, and admins
-// have an empty relay inbox by design. Claim that promotion for the
-// administrator in a throwaway context so the member below is an ordinary
-// user with a real inbox.
+// Admins have an empty relay inbox by design, so the administrator takes the
+// instance in a throwaway context and the member below is an ordinary user
+// with a real inbox. Since ADR-0022 nobody is promoted by signing in: the
+// instance is claimed with the code from the stack's own log, and the mailbox
+// is configured on the administrator's own signed-in page.
 async function establishInstanceAdmin(browser: Browser) {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  const page = await context.newPage();
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  /* Not a fixed destination (#840): this only needs the promotion claimed,
-     not a landing on /home -- see signInAsMember above. */
-  const session = await page.request.get("/api/auth/session");
-  expect(session.ok()).toBe(true);
-  await settleArrival(page);
-  await configureMailbox(page);
-  await context.close();
+  await claimInstanceAsAdministrator(browser, {
+    afterSignIn: async (page) => {
+      await settleArrival(page);
+      await configureMailbox(page);
+    },
+  });
 }
 
 /**

@@ -10,7 +10,14 @@ export type AuthErrorCode =
   | "account_disabled"
   | "session_required"
   | "session_not_found"
-  | "csrf_failed";
+  | "csrf_failed"
+  /* The claim and registration vocabulary (ADR-0023 §8). Added, never
+     reordered: later M7 slices append their own members to this list. */
+  | "bootstrap_required"
+  | "bootstrap_unavailable"
+  | "bootstrap_invalid"
+  | "bootstrap_claimed"
+  | "link_required";
 
 /**
  * Closed internal diagnostic reasons for a token-exchange failure.

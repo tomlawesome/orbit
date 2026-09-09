@@ -75,6 +75,9 @@ const actionLabels: Record<string, string> = {
   imap_notification_delivery_retried: "Mailbox notification delivery retried",
   document_purged: "Document retention completed",
   document_storage_missing: "Missing document storage detected",
+  // M7 (ADR-0023 §8): the audit record the claim writes, so the
+  // administration screen never renders the raw action string.
+  instance_claimed: "Instance claimed",
 };
 
 /** Maps persisted actions to a bounded administrator-facing label. */
