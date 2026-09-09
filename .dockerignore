@@ -19,6 +19,10 @@ tmp
 .orbit-secrets
 backups
 coverage
+# The reuse verdict and evidence a pipeline job writes (#898). Both arrive in
+# the checkout as CI artefacts, and neither belongs in an image layer.
+.orbit-reuse
+ci-evidence
 docs
 README.md
 scripts/install.sh

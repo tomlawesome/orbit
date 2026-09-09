@@ -14,6 +14,8 @@ dist
 .claude/
 backups/
 coverage
+.orbit-reuse/
+ci-evidence/
 playwright-report/
 test-results/
 *.tsbuildinfo

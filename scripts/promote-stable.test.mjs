@@ -28,12 +28,14 @@ const workflow = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "ut
 );
 
 const IMAGE = "ghcr.io/tomlawesome/orbit";
+const REGISTRY_IMAGE = "registry.tomlawson.io/ai/orbit";
 const GOOD_SHA = "a".repeat(40);
 const PREVIEW_DIGEST = `sha256:${"1".repeat(64)}`;
 const OTHER_DIGEST = `sha256:${"2".repeat(64)}`;
 const VERSION = "v1.4.0";
 const GHCR_TOKEN = "TEST-GHCR-TOKEN-NOT-REAL";
 const GITLAB_TOKEN = "TEST-GITLAB-TOKEN-NOT-REAL";
+const REGISTRY_PASSWORD = "TEST-REGISTRY-PASSWORD-NOT-REAL";
 
 function sanitize(ref) {
   return ref.replace(/[/:@*]/gu, "_");
@@ -186,36 +188,29 @@ const CURL_STUB = [
   "",
 ].join("\n");
 
-// Stands in for scripts/ci/gitlab-await-tested-image.sh (#877's evidence
-// gate), which promote-stable.sh now runs before promoting. That script's
-// own refusals -- missing pipeline/job/artifact, evidence for another
-// commit/ref/pipeline/registry, evidence older than seven days -- are
-// already driven against the real script with a stub curl in
-// scripts/publish-from-gitlab-workflow.test.mjs; this stub is not a second
+// Stands in for scripts/ci/verify-validation-evidence.sh (#877's evidence
+// gate), which promote-stable.sh now runs before promoting -- the same
+// verifier publish-channel.test.mjs stubs the same way for the same reason.
+// The verifier's own crafted-input refusals -- one per ground, with the
+// specific message asserted -- are driven against the real script in
+// scripts/verify-validation-evidence.test.mjs; this stub is not a second
 // copy of that. It exists only to prove two things about the new call site
-// in promote-stable.sh: that it is invoked with the right commit, ref,
-// registry and token (STUB_EVIDENCE_FAIL unset, happy path -- the default
-// every other test in this file relies on to get past the gate), and that a
-// refusal from the gate script -- digest mismatch, which is new logic added
-// in promote-stable.sh itself, or a refusal propagated unchanged from the
-// real script, represented here as STUB_EVIDENCE_FAIL -- stops promotion
-// with its message intact rather than being swallowed.
-const AWAIT_STUB = [
+// in promote-stable.sh: that it is invoked with the right image, digest,
+// commit and ref (STUB_VERIFY_FAIL unset, happy path -- the default every
+// other test in this file relies on to get past the gate), and that a
+// refusal from the verifier -- represented here as STUB_VERIFY_FAIL/
+// STUB_VERIFY_EXIT -- stops promotion with its message and exit code intact
+// rather than being swallowed.
+const VERIFY_STUB = [
   "#!/usr/bin/env bash",
   "set -uo pipefail",
-  'log="$STUB_LOG"',
-  "printf 'await\\x1f%s\\x1f%s\\x1f%s\\x1f%s\\x1f%s\\x1f%s\\x1e' \\",
-  '  "$GITLAB_API_URL" "$GITLAB_PROJECT_ID" "$GITLAB_READ_TOKEN" "$GITLAB_REGISTRY" "$ORBIT_COMMIT" "$ORBIT_REF" >> "$log"',
-  "",
-  'if [ -n "${STUB_EVIDENCE_FAIL:-}" ]; then',
-  "  printf 'gitlab-await-tested-image: %s\\n' \"$STUB_EVIDENCE_FAIL\" >&2",
-  "  exit 1",
+  "printf 'verify\\x1f%s\\x1f%s\\x1f%s\\x1f%s\\x1e' \\",
+  '  "$ORBIT_IMAGE" "$ORBIT_DIGEST" "$ORBIT_COMMIT" "${ORBIT_REF:-}" >> "$STUB_LOG"',
+  'if [ -n "${STUB_VERIFY_FAIL:-}" ]; then',
+  "  printf 'verify-validation-evidence: refused %s\\n' \"$STUB_VERIFY_FAIL\" >&2",
+  '  exit "${STUB_VERIFY_EXIT:-13}"',
   "fi",
-  "",
-  'mkdir -p "$ORBIT_EVIDENCE_DIR"',
-  'printf \'{"imageDigest":"%s","commit":"%s","ref":"%s"}\' \\',
-  '  "${STUB_EVIDENCE_DIGEST:-$PREVIEW_DIGEST}" "$ORBIT_COMMIT" "$ORBIT_REF" \\',
-  '  > "$ORBIT_EVIDENCE_DIR/gitlab-tested-image.json"',
+  "exit 0",
   "",
 ].join("\n");
 
@@ -230,7 +225,7 @@ function makeStubs() {
     ["docker", DOCKER_STUB],
     ["git", GIT_STUB],
     ["curl", CURL_STUB],
-    ["await", AWAIT_STUB],
+    ["verify", VERIFY_STUB],
   ]) {
     const stubPath = join(dir, name);
     writeFileSync(stubPath, content);
@@ -240,7 +235,7 @@ function makeStubs() {
   return {
     dir,
     digestsDir,
-    awaitScript: join(dir, "await"),
+    verifyScript: join(dir, "verify"),
     seedDigest: (ref, digest) => writeFileSync(join(digestsDir, sanitize(ref)), digest),
     calls: () =>
       readFileSync(logFile, "utf8")
@@ -272,8 +267,6 @@ function run({
   embeddedRevision = GOOD_SHA,
   embeddedChannel = "preview",
   reportedVersion = `Orbit ${VERSION}`,
-  evidenceDigest = null,
-  evidenceFail = null,
   env = {},
 } = {}) {
   const stubs = makeStubs();
@@ -292,11 +285,12 @@ function run({
         GHCR_PUBLISH_TOKEN: GHCR_TOKEN,
         GITLAB_RELEASE_TOKEN: GITLAB_TOKEN,
         CI_REGISTRY: "registry.tomlawson.io",
-        PROMOTE_AWAIT_SCRIPT: stubs.awaitScript,
+        CI_REGISTRY_USER: "gitlab-ci-token",
+        CI_REGISTRY_PASSWORD: REGISTRY_PASSWORD,
+        CI_REGISTRY_IMAGE: REGISTRY_IMAGE,
+        PROMOTE_VERIFY_SCRIPT: stubs.verifyScript,
         STUB_LOG: stubs.logFile,
         STUB_DIGESTS_DIR: stubs.digestsDir,
-        ...(evidenceDigest ? { STUB_EVIDENCE_DIGEST: evidenceDigest } : {}),
-        ...(evidenceFail ? { STUB_EVIDENCE_FAIL: evidenceFail } : {}),
         STUB_MAIN_HEAD: mainHead,
         STUB_PREVIEW_HEAD: previewHead,
         STUB_TAG_EXISTS_EXIT: tagExistsOnGitLab ? "0" : "2",
@@ -378,18 +372,22 @@ describe("scripts/ci/promote-stable.sh", () => {
     expect(result.stderr).toContain("does not match calculated version");
   });
 
-  it("refuses when the GitLab tag already exists, without logging in or tagging", () => {
+  it("refuses when the GitLab tag already exists, without logging into GHCR or tagging", () => {
     const { result, calls } = run({ tagExistsOnGitLab: true });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("already exists on GitLab");
-    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login"))).toBe(false);
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login ghcr.io"))).toBe(
+      false,
+    );
   });
 
-  it("refuses when the version tag already exists in GHCR, without logging in or tagging", () => {
+  it("refuses when the version tag already exists in GHCR, without logging into GHCR or tagging", () => {
     const { result, calls } = run({ versionTagDigest: PREVIEW_DIGEST });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("already exists in GHCR");
-    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login"))).toBe(false);
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login ghcr.io"))).toBe(
+      false,
+    );
     expect(
       calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
     ).toBe(false);
@@ -409,11 +407,23 @@ describe("scripts/ci/promote-stable.sh", () => {
     expect(createCall[1]).toContain(`${IMAGE}@${PREVIEW_DIGEST}`);
     expect(createCall[1]).not.toContain(":stable");
 
-    const loginCall = recordedCalls.find((call) => call[0] === "docker" && call[1].startsWith("login"));
-    expect(loginCall).toBeDefined();
-    expect(loginCall[1]).toContain("ghcr.io");
-    expect(loginCall[1]).toContain("-u tomlawesome");
-    expect(loginCall[2]).toBe(`<stdin:${GHCR_TOKEN}>`);
+    // Two logins: registry.tomlawson.io (so the verifier below can read the
+    // attestation) then GHCR (to publish). Both piped on stdin, never argv.
+    const registryLoginCall = recordedCalls.find(
+      (call) => call[0] === "docker" && call[1].startsWith("login registry.tomlawson.io"),
+    );
+    expect(registryLoginCall).toBeDefined();
+    expect(registryLoginCall[2]).toBe(`<stdin:${REGISTRY_PASSWORD}>`);
+
+    const ghcrLoginCall = recordedCalls.find(
+      (call) => call[0] === "docker" && call[1].startsWith("login ghcr.io"),
+    );
+    expect(ghcrLoginCall).toBeDefined();
+    expect(ghcrLoginCall[1]).toContain("-u tomlawesome");
+    expect(ghcrLoginCall[2]).toBe(`<stdin:${GHCR_TOKEN}>`);
+
+    // The registry login, and so the verifier, run before GHCR is touched.
+    expect(recordedCalls.indexOf(registryLoginCall)).toBeLessThan(recordedCalls.indexOf(ghcrLoginCall));
 
     const curlCall = recordedCalls.find((call) => call[0] === "curl");
     expect(curlCall).toBeDefined();
@@ -427,21 +437,18 @@ describe("scripts/ci/promote-stable.sh", () => {
     // Tokens only ever show up inlined from a stubbed file (tagged
     // "name@<...>") or as the piped stdin content recorded above -- never as
     // a bare argv word, which is what proves the real script kept them off
-    // the command line. The "await" entries are the exception: gitlab-await-
-    // tested-image.sh takes GITLAB_READ_TOKEN as an environment variable, so
-    // the stub logs it from the environment (asserted directly by "asks the
-    // evidence gate..." above) to prove the right value arrived -- that is a
-    // property of this test double, not argv exposure by the real script.
+    // the command line.
     for (const call of recordedCalls) {
-      if (call[0] === "await") continue;
       for (const part of call) {
         if (part.startsWith("<stdin:")) continue;
         if (part.includes("@<")) continue;
         expect(part).not.toBe(GHCR_TOKEN);
         expect(part).not.toBe(GITLAB_TOKEN);
+        expect(part).not.toBe(REGISTRY_PASSWORD);
         if (!part.includes("<")) {
           expect(part).not.toContain(GHCR_TOKEN);
           expect(part).not.toContain(GITLAB_TOKEN);
+          expect(part).not.toContain(REGISTRY_PASSWORD);
         }
       }
     }
@@ -462,51 +469,92 @@ describe("scripts/ci/promote-stable.sh", () => {
     expect(createCall[1]).toContain(`--tag ${IMAGE}:v1.3.1`);
   });
 
-  it("asks the evidence gate about the exact commit, ref and registry being promoted, reusing GITLAB_RELEASE_TOKEN", () => {
+  it("asks the shared verifier about the exact image, digest, commit and ref being promoted", () => {
     const { result, calls } = run();
     expect(result.status, result.stderr).toBe(0);
-    const awaitCall = calls().find((call) => call[0] === "await");
-    expect(awaitCall).toBeDefined();
-    const [, apiUrl, projectId, readToken, registry, commit, ref] = awaitCall;
-    expect(apiUrl).toBe("https://gitlab.tomlawson.io/api/v4");
-    expect(projectId).toBe("49");
-    expect(readToken).toBe(GITLAB_TOKEN);
-    expect(registry).toBe("registry.tomlawson.io");
+    const verifyCall = calls().find((call) => call[0] === "verify");
+    expect(verifyCall).toBeDefined();
+    const [, image, digest, commit, ref] = verifyCall;
+    expect(image).toBe(REGISTRY_IMAGE);
+    expect(digest).toBe(PREVIEW_DIGEST);
     expect(commit).toBe(GOOD_SHA);
     expect(ref).toBe("preview");
   });
 
-  it("refuses when GitLab's evidence recorded a different digest than the one being promoted, without promoting", () => {
-    const { result, calls } = run({ evidenceDigest: OTHER_DIGEST });
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("recorded digest");
-    expect(result.stderr).toContain(OTHER_DIGEST);
-    expect(result.stderr).toContain(PREVIEW_DIGEST);
-    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login"))).toBe(false);
+  // The four grounds the shared verifier refuses on (scripts/ci/
+  // verify-validation-evidence.sh); each crafted message here stands in for
+  // a real refusal, proving promote-stable.sh passes it through with the
+  // ground-specific message and exit code intact, without promoting.
+  it("refuses on a mismatch (exit 10), the verifier's message intact, without promoting", () => {
+    const { result, calls } = run({
+      env: {
+        STUB_VERIFY_FAIL:
+          `(mismatch): evidence names digest ${OTHER_DIGEST}, not the digest being published (${PREVIEW_DIGEST})`,
+        STUB_VERIFY_EXIT: "10",
+      },
+    });
+    expect(result.status).toBe(10);
+    expect(result.stderr).toContain(
+      `evidence names digest ${OTHER_DIGEST}, not the digest being published (${PREVIEW_DIGEST})`,
+    );
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login ghcr.io"))).toBe(
+      false,
+    );
     expect(
       calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
     ).toBe(false);
   });
 
-  it("refuses, without promoting, when the evidence gate finds no evidence for the commit", () => {
+  it("refuses on missing evidence (exit 11), the verifier's message intact, without promoting", () => {
     const { result, calls } = run({
-      evidenceFail: "pipeline 12345 has no successful record_image job",
+      env: {
+        STUB_VERIFY_FAIL: "(missing): no verifiable validation attestation for this digest",
+        STUB_VERIFY_EXIT: "11",
+      },
     });
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("has no successful record_image job");
-    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login"))).toBe(false);
+    expect(result.status).toBe(11);
+    expect(result.stderr).toContain("no verifiable validation attestation for this digest");
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login ghcr.io"))).toBe(
+      false,
+    );
     expect(
       calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
     ).toBe(false);
   });
 
-  it("refuses, without promoting, when the evidence gate finds evidence older than seven days", () => {
+  it("refuses on ambiguous evidence (exit 12), the verifier's message intact, without promoting", () => {
     const { result, calls } = run({
-      evidenceFail: "evidence recorded at 2026-08-01T00:00:00Z is older than seven days",
+      env: {
+        STUB_VERIFY_FAIL: "(ambiguous): 2 verified attestations make 2 conflicting claims about what was validated",
+        STUB_VERIFY_EXIT: "12",
+      },
     });
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("older than seven days");
-    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login"))).toBe(false);
+    expect(result.status).toBe(12);
+    expect(result.stderr).toContain(
+      "2 verified attestations make 2 conflicting claims about what was validated",
+    );
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login ghcr.io"))).toBe(
+      false,
+    );
+    expect(
+      calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
+    ).toBe(false);
+  });
+
+  it("refuses on expired evidence (exit 13), the verifier's message intact, without promoting", () => {
+    const { result, calls } = run({
+      env: {
+        STUB_VERIFY_FAIL: "(expired): evidence recorded at 2026-08-01T00:00:00Z is older than 7 days",
+        STUB_VERIFY_EXIT: "13",
+      },
+    });
+    expect(result.status).toBe(13);
+    expect(result.stderr).toContain(
+      "evidence recorded at 2026-08-01T00:00:00Z is older than 7 days",
+    );
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login ghcr.io"))).toBe(
+      false,
+    );
     expect(
       calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
     ).toBe(false);

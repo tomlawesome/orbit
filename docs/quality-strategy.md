@@ -207,6 +207,33 @@ is classified again.
 those scripts are the acceptance stage's own checks, so a change to one is not
 exercised until it merges to `dev`, where every pipeline runs everything again.
 
+### Standing on an earlier run (#898)
+
+A fix pushed after one red job used to rerun every job that had already passed.
+Now `classify` hashes what each job reads (`scripts/ci/job-inputs.json`) and
+looks through the same merge request's earlier pipelines for a run of that job
+that passed on the same hash. Where it finds one the job says which run it
+stands on and stops; where it does not, it runs. Ten jobs can do this: `fast`,
+`integration`, `fidelity`, `build_image`, `smoke`, `acceptance`,
+`repair_journeys`, `supply_chain_image`, `sidecar_images` and
+`launcher_install_compat`. A reused `build_image` fetches the image and its
+identity file back, so the jobs after it get the bytes a real build would
+have given them.
+
+Three limits keep it from weakening the gate. Merge requests only — a pipeline
+on `dev`, `preview`, `main` or `hotfix/*` runs everything, every time.
+`.gitlab-ci.yml` is in every input set, so a change to the pipeline reruns the
+lot. And the proof is `ci-evidence/<job>.json`, written as the job's own last
+act and naming both its inputs and any older run it stood on, so a job that
+skipped itself leaves nothing and is never reused. The lookup reads the API
+with `BASE_REPIN_TOKEN`; an unset token, an unreachable API or an expired
+artefact is logged and read as "no reuse", which reruns the job.
+
+The acceptance stage now waits for `fast`, `gitleaks`, `licence_policy` and
+`supply_chain_source`, so a red `fast` costs no image build, no browser suite
+and no installer run — about seven minutes added to a green pipeline, and the
+whole acceptance stage saved on a red one.
+
 ### Launcher install compatibility
 
 `launcher_install_compat` (`.gitlab-ci.yml`) installs Orbit through a real
