@@ -11,8 +11,8 @@ body{background:#060a18}
 @keyframes driftn{to{transform:translateX(-1600px)}}
 .tw{animation:twinkle 5s ease-in-out infinite alternate}
 @keyframes twinkle{from{opacity:.2}to{opacity:.85}}
-.shimmer path{opacity:0;animation:shim 4s ease-in-out infinite alternate}
-@keyframes shim{from{opacity:0}to{opacity:var(--o,.5)}}
+.glints .glint{opacity:0;transform-box:fill-box;transform-origin:center;animation:glint 6s ease-in-out infinite}
+@keyframes glint{0%,62%{opacity:0;transform:scale(.35)}70%{opacity:1;transform:scale(1)}80%{opacity:.55;transform:scale(.9)}100%{opacity:0;transform:scale(.5)}}
 
 /* corona layers — every group breathes on its own period, nothing in sync */
 .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
@@ -70,17 +70,17 @@ body{background:#060a18}
    the height at the design's aspect ratio — and runs to the bottom, so the
    drawer has somewhere to open into. Everything in it is centred and narrow:
    an announcement, not a document. */
-.notice{position:fixed;left:0;right:0;top:65vh;bottom:0;z-index:3;
+.notice{position:fixed;left:0;right:0;top:69vh;bottom:0;z-index:3;
         display:flex;flex-direction:column;align-items:center;gap:12px;
         padding:0 24px calc(16px + env(safe-area-inset-bottom));text-align:center}
 .notice p{margin:0}
-.msg{margin:0;font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
+.msg{margin:0;font:500 16px var(--mono);letter-spacing:.28em;color:var(--ink);
      text-transform:uppercase}
 .latest{display:flex;flex-direction:column;gap:6px;max-width:44ch}
-.when{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-faint);
+.when{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
       text-transform:uppercase}
-.body{font:400 15px/1.5 var(--ui);color:var(--ink)}
-.back{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
+.body{font:400 18px/1.5 var(--ui);color:var(--ink)}
+.back{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink);
       text-transform:uppercase}
 .back time{color:var(--accent)}
 
@@ -109,7 +109,7 @@ body{background:#060a18}
 .grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
 @media (prefers-reduced-motion: reduce){
   .flare,.wash,.ringflare,.flarewave{opacity:0!important}
-  .shimmer path{animation:none;opacity:.28}
+  .glints .glint{animation:none;opacity:.45}
   .earlier summary,.earlier summary svg{transition:none}
 }
 </style></head><body>
@@ -125,7 +125,7 @@ body{background:#060a18}
   <g class="sky-drift-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
 </svg></div>
 
-<div class="world" style="position:fixed;inset:0;z-index:1"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
+<div class="world" style="position:fixed;inset:0;z-index:1"><svg viewBox="0 90 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
   <defs>
     <!-- totality sky: the eerie 360-degree sunset around the whole horizon -->
     <linearGradient id="duskband" x1="0" y1="0" x2="0" y2="1">
@@ -141,6 +141,11 @@ body{background:#060a18}
     </radialGradient>
 
     <!-- corona -->
+    <radialGradient id="glintg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff8ea" stop-opacity=".9"/>
+      <stop offset="35%" stop-color="#fff0cf" stop-opacity=".35"/>
+      <stop offset="100%" stop-color="#fff0cf" stop-opacity="0"/>
+    </radialGradient>
     <radialGradient id="coronaIn" cx="50%" cy="50%" r="50%">
       <stop offset="38%" stop-color="#fff8ea" stop-opacity="0"/>
       <stop offset="41%" stop-color="#fff8ea" stop-opacity=".85"/>
@@ -204,7 +209,7 @@ body{background:#060a18}
 
   <!-- horizon: sunset in every direction -->
   <g class="horizon">
-    <rect x="0" y="700" width="1600" height="300" fill="url(#duskband)"/>
+    <rect x="0" y="700" width="1600" height="400" fill="url(#duskband)"/>
     <ellipse cx="120" cy="1010" rx="560" ry="230" fill="url(#cornerwarm)" filter="url(#b18)"/>
     <ellipse cx="1480" cy="1010" rx="560" ry="230" fill="url(#cornerwarm)" filter="url(#b18)"/>
     <ellipse cx="800" cy="1030" rx="900" ry="200" fill="url(#cornerwarm)" filter="url(#b18)" opacity=".8"/>
@@ -277,8 +282,8 @@ body{background:#060a18}
   <circle cx="800" cy="440" r="170" fill="none" stroke="#ffb46a" stroke-width="7" opacity=".22" filter="url(#b9)"/>
   <circle class="ring-inner" cx="800" cy="440" r="170" fill="none" stroke="#ffe9bd" stroke-width="3.2" opacity=".8" filter="url(#b2)"/>
   <circle cx="800" cy="440" r="170" fill="none" stroke="#fffdf6" stroke-width="1.2" opacity=".95"/>
-  <!-- the shimmer on the limb: filled by the script below, no filter -->
-  <g id="shimmer" class="shimmer" fill="none" stroke="#fffdf6" stroke-linecap="round"></g>
+  <!-- glints on the limb: filled by the script below, no filter -->
+  <g id="glints" class="glints"></g>
 
   <!-- the diamond ring: service returning (demo loops) -->
   <g class="flare">
@@ -300,7 +305,7 @@ body{background:#060a18}
   </g>
   <circle class="flarewave" cx="948" cy="348" r="30" fill="none" stroke="#ffe9bd" stroke-width="2"/>
   <circle class="ringflare" cx="800" cy="440" r="170" fill="none" stroke="#ffffff" stroke-width="3.4"/>
-  <rect class="wash" x="0" y="0" width="1600" height="1000" fill="url(#washg)"/>
+  <rect class="wash" x="0" y="0" width="1600" height="1100" fill="url(#washg)"/>
 </svg></div>
 
 <main class="notice">
@@ -372,21 +377,23 @@ while (made < 26) {
   if (rng() < 0.3) { c.setAttribute("class", "tw"); c.style.animationDelay = (rng() * 6).toFixed(1) + "s"; }
   near.appendChild(c); made++;
 }
-// the shimmer on the limb: short arcs just outside the ring, each on its own clock
+// glints on the limb: small bright sparkles at random points just outside the ring, each on its own clock
 {
   const rng2 = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(20260909);
-  const host = document.getElementById("shimmer"), R = 172.4;
-  for (let i = 0; i < 34; i++) {
-    const a0 = rng2() * Math.PI * 2, span = (3 + rng2() * 11) * (Math.PI / 180);
-    const x1 = 800 + R * Math.cos(a0), y1 = 440 + R * Math.sin(a0);
-    const x2 = 800 + R * Math.cos(a0 + span), y2 = 440 + R * Math.sin(a0 + span);
-    const arc = document.createElementNS(NS, "path");
-    arc.setAttribute("d", `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`);
-    arc.setAttribute("stroke-width", (0.8 + rng2() * 1.4).toFixed(2));
-    arc.style.setProperty("--o", (0.3 + rng2() * 0.45).toFixed(2));
-    arc.style.animationDuration = (2.2 + rng2() * 3.6).toFixed(1) + "s";
-    arc.style.animationDelay = (-rng2() * 6).toFixed(1) + "s";
-    host.appendChild(arc);
+  const host = document.getElementById("glints"), R = 171.2;
+  for (let i = 0; i < 22; i++) {
+    const a = rng2() * Math.PI * 2, x = 800 + R * Math.cos(a), y = 440 + R * Math.sin(a);
+    const size = 0.9 + rng2() * 0.9;
+    const at = document.createElementNS(NS, "g");
+    at.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${size.toFixed(2)})`);
+    const g = document.createElementNS(NS, "g"); g.setAttribute("class", "glint");
+    g.style.animationDuration = (3.5 + rng2() * 6).toFixed(1) + "s";
+    g.style.animationDelay = (-rng2() * 9).toFixed(1) + "s";
+    const halo = document.createElementNS(NS, "circle"); halo.setAttribute("r", "9"); halo.setAttribute("fill", "url(#glintg)");
+    const cross = document.createElementNS(NS, "path"); cross.setAttribute("d", "M -7 0 H 7 M 0 -7 V 7");
+    cross.setAttribute("stroke", "#fffdf6"); cross.setAttribute("stroke-width", "0.7"); cross.setAttribute("stroke-linecap", "round"); cross.setAttribute("opacity", ".8");
+    const core = document.createElementNS(NS, "circle"); core.setAttribute("r", "1.6"); core.setAttribute("fill", "#ffffff");
+    g.append(halo, cross, core); at.appendChild(g); host.appendChild(at);
   }
 }
 </script>

@@ -47,33 +47,46 @@ export function mountTotalitySky() {
     if (rng() < 0.3) { c.setAttribute("class", "tw"); c.style.animationDelay = (rng() * 6).toFixed(1) + "s"; }
     near.appendChild(c); made++;
   }
-  mountShimmer();
+  mountGlints();
 }
 
 /**
- * The shimmer on the photon ring (owner, 2026-09-09): short arcs just outside
- * the crisp 1.2-wide ring, each fading in and out on its own period and
- * delay, so the limb glints unevenly rather than pulsing as one. Plain
- * strokes with an opacity animation — no filter, nothing for the GPU law to
- * object to (#902). Same seed each load, so the picture is reproducible.
+ * Glints on the limb (owner, 2026-09-09): small bright, almost sparkly spots
+ * at random points just outside the photon ring — the beads of light that
+ * break through at the moon's edge — each flaring up and dying on its own
+ * clock, so a few are lit at any moment and never the same few. A soft halo,
+ * a hot core and a thin four-point cross, all plain shapes with an opacity
+ * and scale animation: no filter, nothing for the GPU law to object to
+ * (#902). Same seed each load, so the picture is reproducible.
  */
-function mountShimmer() {
+function mountGlints() {
   const rng = seededRng(20260909);
-  const host = document.getElementById("shimmer");
+  const host = document.getElementById("glints");
   if (!host) return;
   const NS = "http://www.w3.org/2000/svg";
-  const R = 172.4;
-  for (let i = 0; i < 34; i++) {
-    const a0 = rng() * Math.PI * 2;
-    const span = (3 + rng() * 11) * (Math.PI / 180);
-    const x1 = 800 + R * Math.cos(a0), y1 = 440 + R * Math.sin(a0);
-    const x2 = 800 + R * Math.cos(a0 + span), y2 = 440 + R * Math.sin(a0 + span);
-    const arc = document.createElementNS(NS, "path");
-    arc.setAttribute("d", `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`);
-    arc.setAttribute("stroke-width", (0.8 + rng() * 1.4).toFixed(2));
-    arc.style.setProperty("--o", (0.3 + rng() * 0.45).toFixed(2));
-    arc.style.animationDuration = (2.2 + rng() * 3.6).toFixed(1) + "s";
-    arc.style.animationDelay = (-rng() * 6).toFixed(1) + "s";
-    host.appendChild(arc);
+  const R = 171.2;
+  for (let i = 0; i < 22; i++) {
+    const a = rng() * Math.PI * 2;
+    const x = 800 + R * Math.cos(a), y = 440 + R * Math.sin(a);
+    const size = 0.9 + rng() * 0.9;
+    // the position sits on an outer group: the animation's CSS transform
+    // would replace a transform attribute on the same element
+    const at = document.createElementNS(NS, "g");
+    at.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${size.toFixed(2)})`);
+    const g = document.createElementNS(NS, "g");
+    g.setAttribute("class", "glint");
+    g.style.animationDuration = (3.5 + rng() * 6).toFixed(1) + "s";
+    g.style.animationDelay = (-rng() * 9).toFixed(1) + "s";
+    const halo = document.createElementNS(NS, "circle");
+    halo.setAttribute("r", "9"); halo.setAttribute("fill", "url(#glintg)");
+    const cross = document.createElementNS(NS, "path");
+    cross.setAttribute("d", "M -7 0 H 7 M 0 -7 V 7");
+    cross.setAttribute("stroke", "#fffdf6"); cross.setAttribute("stroke-width", "0.7");
+    cross.setAttribute("stroke-linecap", "round"); cross.setAttribute("opacity", ".8");
+    const core = document.createElementNS(NS, "circle");
+    core.setAttribute("r", "1.6"); core.setAttribute("fill", "#ffffff");
+    g.append(halo, cross, core);
+    at.appendChild(g);
+    host.appendChild(at);
   }
 }

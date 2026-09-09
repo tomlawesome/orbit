@@ -154,7 +154,7 @@
    */
   const GROUPS = {
     horizon: {
-      crop: /** @type {const} */ ([0, 700, 1600, 300]),
+      crop: /** @type {const} */ ([0, 700, 1600, 400]),
       defs: F_B18 + G_CORNERWARM,
       body:
         '<ellipse cx="120" cy="1010" rx="560" ry="230" fill="url(#cornerwarm)" filter="url(#b18)"/>' +
@@ -430,7 +430,7 @@
   live <filter> definitions are gone with them: each raster body carries its
   own copy, so the paint tree has no filter left to declare a region for.
 -->
-<div class="world" style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
+<div class="world" style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 90 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
   <defs>
     <!-- totality sky: the eerie 360-degree sunset around the whole horizon -->
     <linearGradient id="duskband" x1="0" y1="0" x2="0" y2="1">
@@ -439,6 +439,13 @@
       <stop offset="85%" stop-color="#f0a35a" stop-opacity=".22"/>
       <stop offset="100%" stop-color="#ffd9a0" stop-opacity=".3"/>
     </linearGradient>
+
+    <!-- the glints' halo (sky.js) -->
+    <radialGradient id="glintg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff8ea" stop-opacity=".9"/>
+      <stop offset="35%" stop-color="#fff0cf" stop-opacity=".35"/>
+      <stop offset="100%" stop-color="#fff0cf" stop-opacity="0"/>
+    </radialGradient>
 
     <!-- corona -->
     <radialGradient id="coronaIn" cx="50%" cy="50%" r="50%">
@@ -470,7 +477,7 @@
        stays live (nothing to gain); the three warm ellipses are the raster,
        and the group keeps the opacity breath for both. -->
   <g class="horizon">
-    <rect x="0" y="700" width="1600" height="300" fill="url(#duskband)"/>
+    <rect x="0" y="700" width="1600" height="400" fill="url(#duskband)"/>
     <image data-r="horizon" preserveAspectRatio="none"/>
   </g>
 
@@ -513,8 +520,8 @@
   <image class="ring-inner" data-r="ringInner" opacity=".8" preserveAspectRatio="none"/>
   </g>
   <circle cx="800" cy="440" r="170" fill="none" stroke="#fffdf6" stroke-width="1.2" opacity=".95"/>
-  <!-- the shimmer on the limb: filled by sky.js, no filter (owner, 2026-09-09) -->
-  <g id="shimmer" class="shimmer" fill="none" stroke="#fffdf6" stroke-linecap="round"></g>
+  <!-- glints on the limb: filled by sky.js, no filter (owner, 2026-09-09) -->
+  <g id="glints" class="glints"></g>
 
   <!-- the diamond ring: service returning (demo loops). The whole group is one
        raster — the bloom, the anamorphic streak and the six-point glint all
@@ -522,7 +529,7 @@
   <image class="flare" data-r="flare" preserveAspectRatio="none"/>
   <circle class="flarewave" cx="948" cy="348" r="30" fill="none" stroke="#ffe9bd" stroke-width="2"/>
   <circle class="ringflare" cx="800" cy="440" r="170" fill="none" stroke="#ffffff" stroke-width="3.4"/>
-  <rect class="wash" x="0" y="0" width="1600" height="1000" fill="url(#washg)"/>
+  <rect class="wash" x="0" y="0" width="1600" height="1100" fill="url(#washg)"/>
 </svg></div>
 
 <main class="notice">
