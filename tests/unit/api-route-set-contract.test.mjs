@@ -61,9 +61,16 @@ const EXPECTED_ROUTES = [
   // cookie is its whole authorisation, and it is called by the first-run card.
   "/api/auth/bootstrap/local",
   "/api/auth/callback",
+  // Linking a provider identity to the signed-in account (M7, ADR-0023 §6):
+  // called by the settings sign-in-methods block, never by the provider.
+  "/api/auth/link/oidc/start",
   // Local sign-in (M7, ADR-0023 §4): signed out by design, called by the door.
   "/api/auth/local/login",
   "/api/auth/login",
+  // The caller's own sign-in methods and their removal (M7, ADR-0023 §6).
+  "/api/auth/methods",
+  "/api/auth/methods/local",
+  "/api/auth/methods/oidc/[identityId]",
   "/api/auth/logout",
   "/api/auth/session",
   "/api/auth/session/refresh",
@@ -143,7 +150,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 57 route families -- no fewer, no more", () => {
+  it("has exactly the expected 61 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
