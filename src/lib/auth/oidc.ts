@@ -34,6 +34,34 @@ export interface VerifiedIdentity {
   avatarUrl: string | null;
 }
 
+/**
+ * How old the provider's `auth_time` may be for a step-up to count
+ * (ADR-0023 §5). The authorization request asks for `max_age=0` — "make them
+ * authenticate now" — and this is Orbit's own acceptance window for the answer
+ * that comes back, wide enough for a person to type a password at the provider
+ * and narrow enough that a token minted for an older session is refused.
+ */
+export const STEP_UP_MAX_AUTH_AGE_SECONDS = 60;
+
+/** The same tolerance the ID token's own `exp`/`iat` checks use. */
+const AUTH_TIME_CLOCK_TOLERANCE_SECONDS = 5;
+
+/**
+ * A step-up whose `auth_time` is missing, stale or in the future.
+ *
+ * Separate from the other claim failures because it has a different answer:
+ * `step_up_failed` rather than `invalid_id_token`, and an operator remedy —
+ * a provider that does not honour `max_age` cannot re-challenge anybody, and
+ * the sensitive action stays blocked until that is fixed. That is the correct
+ * failure direction (ADR-0023 §5).
+ */
+export class StaleAuthenticationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StaleAuthenticationError";
+  }
+}
+
 const metadataCache = new Map<string, { expiresAt: number; promise: Promise<OidcMetadata> }>();
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 const allowedIdTokenAlgorithms = new Set(["RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA"]);
@@ -88,6 +116,9 @@ export function createAuthorizationUrl(config: OidcAuthConfig, metadata: OidcMet
   url.searchParams.set("nonce", transaction.nonce);
   url.searchParams.set("code_challenge", createPkceChallenge(transaction.codeVerifier));
   url.searchParams.set("code_challenge_method", "S256");
+  /* Only a transaction this process sealed can ask for it, and a step-up asks
+     for `0`: authenticate the person again, now (ADR-0023 §5). */
+  if (transaction.maxAge !== undefined) url.searchParams.set("max_age", String(transaction.maxAge));
   return url;
 }
 
@@ -185,6 +216,7 @@ export async function verifyIdToken(
   accessToken: string | undefined,
   expectedNonce: string,
   verificationKey?: Parameters<typeof jwtVerify>[1],
+  options: IdTokenClaimOptions = {},
 ): Promise<JWTPayload> {
   try {
     let key = verificationKey;
@@ -205,22 +237,58 @@ export async function verifyIdToken(
       clockTolerance: 5,
     });
 
-    validateIdTokenClaims(payload, expectedNonce, config.clientId);
+    validateIdTokenClaims(payload, expectedNonce, config.clientId, options);
     if (typeof payload.at_hash === "string") {
       if (!accessToken) throw new Error("ID token contains at_hash without an access token");
       validateAccessTokenHash(accessToken, payload.at_hash, protectedHeader.alg);
     }
     return payload;
   } catch (error) {
+    /* A step-up that the provider did not re-authenticate is not a malformed
+       token: it gets its own answer so the caller can leave the action blocked
+       and say why (ADR-0023 §5). */
+    if (error instanceof StaleAuthenticationError) {
+      throw new AuthError("step_up_failed", "The identity provider did not re-authenticate this person", 401, { cause: error });
+    }
     throw new AuthError("invalid_id_token", "The ID token failed signature or claim validation", 401, { cause: error });
   }
 }
 
-export function validateIdTokenClaims(payload: JWTPayload, expectedNonce: string, clientId: string): void {
+export interface IdTokenClaimOptions {
+  /**
+   * Set only for a step-up. When present, the token must carry an `auth_time`
+   * no older than this many seconds — a provider that omits it, or answers
+   * with a stale one, has not re-authenticated anybody.
+   */
+  maxAuthAgeSeconds?: number;
+}
+
+export function validateIdTokenClaims(
+  payload: JWTPayload,
+  expectedNonce: string,
+  clientId: string,
+  options: IdTokenClaimOptions = {},
+): void {
   if (!payload.sub || payload.nonce !== expectedNonce) throw new Error("Subject or nonce is invalid");
   if (payload.azp && payload.azp !== clientId) throw new Error("Authorized party does not match client");
   if (Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== clientId) {
     throw new Error("Multi-audience token is missing the expected authorized party");
+  }
+
+  const { maxAuthAgeSeconds } = options;
+  if (maxAuthAgeSeconds === undefined) return;
+  const authTime = payload.auth_time;
+  if (typeof authTime !== "number" || !Number.isFinite(authTime)) {
+    throw new StaleAuthenticationError("The ID token carries no auth_time claim");
+  }
+  const age = Math.floor(Date.now() / 1000) - authTime;
+  if (age > maxAuthAgeSeconds + AUTH_TIME_CLOCK_TOLERANCE_SECONDS) {
+    throw new StaleAuthenticationError("The provider authenticated this person too long ago");
+  }
+  /* An auth_time in the future is a provider clock ahead of ours or a forged
+     claim; either way it is not evidence of a re-authentication that happened. */
+  if (age < -AUTH_TIME_CLOCK_TOLERANCE_SECONDS) {
+    throw new StaleAuthenticationError("The provider reported an auth_time in the future");
   }
 }
 
@@ -276,7 +344,18 @@ export async function completeAuthorization(
   transaction: LoginTransaction,
 ): Promise<VerifiedIdentity> {
   const tokens = await exchangeCode(config, metadata, code, transaction.codeVerifier);
-  const idClaims = await verifyIdToken(config, metadata, tokens.id_token, tokens.access_token, transaction.nonce);
+  /* The freshness rule comes off the sealed transaction, never off the
+     request: only a step-up this process started asks for `max_age`, so only a
+     step-up is held to `auth_time` (ADR-0023 §5). */
+  const idClaims = await verifyIdToken(
+    config,
+    metadata,
+    tokens.id_token,
+    tokens.access_token,
+    transaction.nonce,
+    undefined,
+    transaction.maxAge === undefined ? {} : { maxAuthAgeSeconds: STEP_UP_MAX_AUTH_AGE_SECONDS },
+  );
   const userInfo = tokens.access_token ? await fetchUserInfo(metadata, tokens.access_token, idClaims.sub as string) : {};
   return profileFromClaims(config, { ...idClaims, ...userInfo, sub: idClaims.sub });
 }
