@@ -16,11 +16,13 @@ import {
   externalIdentities,
   instanceAuthority,
   sessions,
+  stepUpProofs,
   userPreferences,
   users,
 } from "@/db/schema";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { hashPassword } from "@/lib/auth/password";
+import type { RecentAuthentication } from "@/lib/auth/recent-auth";
 import {
   completeStepUp,
   requireRecentAuthentication,
@@ -157,6 +159,16 @@ async function transfer(
   });
 }
 
+/** The guard alone, called with one proof cookie and nothing else. */
+function guardWith(actor: Actor, proof: string): Promise<RecentAuthentication> {
+  return requireRecentAuthentication(
+    { cookies: { get: () => proof, set: () => {} } },
+    { id: actor.sessionId, user: { id: actor.id, email: actor.email } },
+    {},
+    "primary_transfer",
+  );
+}
+
 async function errorCode(response: Response): Promise<string> {
   const body = (await response.clone().json()) as { error?: { code?: string } };
   return body.error?.code ?? "";
@@ -249,9 +261,12 @@ describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
     // again for the next sensitive action.
     expect(readSetCookie(accepted, stepUpProofCookieName(config))).toMatchObject({ value: "", maxAge: 0 });
 
-    // And a refused one is cleared too, rather than left to be retried.
+    /* And a refused one is cleared too, rather than left to be retried. The
+       proof is sealed for a real but different session, because a proof is now
+       a row keyed on a live session (0039_step_up_proofs) and one bound to a
+       session that never existed cannot be minted at all. */
     const spent = await transfer(await actorFor(actorId), targetId, {
-      proof: await sealStepUpProof("11111111-1111-4111-8111-111111111111", "primary_transfer", config),
+      proof: await sealStepUpProof(other.sessionId, "primary_transfer", config),
     });
     expect(readSetCookie(spent, stepUpProofCookieName(config))).toMatchObject({ value: "", maxAge: 0 });
   });
@@ -304,9 +319,62 @@ describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
     })).rejects.toMatchObject({ code: "step_up_failed" });
   });
 
+  it("spends a proof on the server, so a copied cookie cannot be replayed", async () => {
+    /* The gap this closes (owner ruling, 2026-09-09): clearing the cookie only
+       disarms the browser that presented it. Anyone who had copied the value
+       out of that browser could present it again for the rest of its two
+       minutes, and the guard had no way to tell the copy from the original. */
+    const actorId = await oidcUser("stepup-replay");
+    const actor = await actorFor(actorId);
+    const config = getAuthConfig();
+    const proof = await completeStepUp({
+      identity: identityOf("stepup-replay"),
+      sessionId: actor.sessionId,
+      intent: "primary_transfer",
+      config,
+    });
+
+    await expect(guardWith(actor, proof)).resolves.toMatchObject({ method: "step_up" });
+
+    // The identical cookie value, well inside its life: refused, because the
+    // row behind it is already spent.
+    await expect(guardWith(actor, proof)).rejects.toMatchObject({
+      code: "recent_authentication_required",
+      status: 403,
+    });
+
+    const [row] = await getDb()
+      .select({ consumedAt: stepUpProofs.consumedAt })
+      .from(stepUpProofs)
+      .where(eq(stepUpProofs.sessionId, actor.sessionId));
+    expect(row?.consumedAt).toBeInstanceOf(Date);
+  });
+
+  it("refuses a proof whose session has been revoked", async () => {
+    const actorId = await oidcUser("stepup-revoked");
+    const actor = await actorFor(actorId);
+    const config = getAuthConfig();
+    const proof = await completeStepUp({
+      identity: identityOf("stepup-revoked"),
+      sessionId: actor.sessionId,
+      intent: "primary_transfer",
+      config,
+    });
+
+    /* Revocation deletes the `sessions` row, and the proof cascades with it:
+       a step-up earned by a session must not outlive the session it proves. */
+    await getDb().delete(sessions).where(eq(sessions.id, actor.sessionId));
+    expect(await getDb().select().from(stepUpProofs).where(eq(stepUpProofs.sessionId, actor.sessionId))).toEqual([]);
+
+    await expect(guardWith(actor, proof)).rejects.toMatchObject({
+      code: "recent_authentication_required",
+      status: 403,
+    });
+  });
+
   it("mints a proof that expires on its own", async () => {
-    // The TTL is the cookie's and the seal's: a proof left behind is worth
-    // nothing two minutes later, with no server-side record to clean up.
+    // The TTL is the cookie's, the seal's and the row's: a proof left behind is
+    // worth nothing two minutes later, and the next mint sweeps the dead row.
     expect(STEP_UP_PROOF_TTL_SECONDS).toBe(120);
     const actorId = await oidcUser("stepup-ttl");
     const actor = await actorFor(actorId);
