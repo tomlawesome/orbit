@@ -19,6 +19,76 @@ export const ADMIN_USERS_FIXTURE = {
   ],
 };
 
+/**
+ * THE M7 SIGN-IN SURFACES UNDER FIXTURES (#915, ADR-0023).
+ *
+ * Two blocks arrived with local accounts, and neither has a route the fixture
+ * harness can answer: `GET /api/auth/methods` reads the caller's own rows and
+ * the administration routes need a real challenge. So the screens read these
+ * when `data.fixtures` is set, exactly as the relay rows above stand in for a
+ * mailbox nobody configured.
+ *
+ * Every date is a LITERAL, and deliberately so: the fidelity gate photographs
+ * these screens, and a date derived from `now` would move the pixels under it
+ * every day. They are the same 2026 the rest of this fixture lives in.
+ */
+
+/**
+ * The helm's "Sign-in methods" block. Both states of the password row are
+ * here, keyed the way the front door's `?arrival=` states are: `/settings`
+ * shows a reader who has both methods, `/settings?signin=nopassword` the
+ * OIDC-only reader whose password row reads "not set".
+ */
+export const SIGN_IN_METHODS_FIXTURES = {
+  both: {
+    local: { set: true, changedAt: "2026-08-24T09:12:00.000Z" },
+    oidc: [
+      {
+        id: "id-fixture-1",
+        issuer: "https://id.lawson-home.example/",
+        linkedAt: "2026-06-02T18:40:00.000Z",
+        lastLoginAt: "2026-09-08T07:55:00.000Z",
+      },
+    ],
+  },
+  nopassword: {
+    local: { set: false, changedAt: null },
+    oidc: [
+      {
+        id: "id-fixture-1",
+        issuer: "https://id.lawson-home.example/",
+        linkedAt: "2026-06-02T18:40:00.000Z",
+        lastLoginAt: "2026-09-08T07:55:00.000Z",
+      },
+    ],
+  },
+  /* No identity at all: the state that earns the "link your identity
+     provider" offer, which is drawn only when the instance HAS a provider. */
+  passwordonly: {
+    local: { set: true, changedAt: "2026-08-24T09:12:00.000Z" },
+    oidc: [],
+  },
+};
+
+/**
+ * Administration's "add a local user" row, after Create. `sent` is the happy
+ * answer the row reports; `failed` is a send the mailer refused, which leaves
+ * the account created and the row offering Retry (ADR-0023 §3) —
+ * `/administration?localuser=failed` renders it.
+ */
+export const SETUP_LINK_FIXTURES = {
+  sent: {
+    sentTo: "newcomer@lawson.example",
+    expiresAt: "2026-09-16T11:00:00.000Z",
+    sendError: null,
+  },
+  failed: {
+    sentTo: "newcomer@lawson.example",
+    expiresAt: "2026-09-16T11:00:00.000Z",
+    sendError: "smtp_unavailable",
+  },
+};
+
 export const adminFixture = {
   /* per-user membership summaries — #453's admin surface will make these real */
   peopleMeta: /** @type {Record<string, string>} */ ({
