@@ -17,7 +17,15 @@ export type AuthErrorCode =
   | "bootstrap_unavailable"
   | "bootstrap_invalid"
   | "bootstrap_claimed"
-  | "link_required";
+  | "link_required"
+  /* Local sign-in (ADR-0023 §4, §8). `credentials_invalid` is the ONE answer
+     for an unknown address, a wrong password, a disabled account and an
+     account with no password; `too_many_attempts` covers both the persisted
+     backoff and a saturated verification gate; `password_rejected` is a new
+     password outside the bounds of ADR-0021 §6. */
+  | "credentials_invalid"
+  | "too_many_attempts"
+  | "password_rejected";
 
 /**
  * Closed internal diagnostic reasons for a token-exchange failure.
