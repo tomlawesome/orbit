@@ -91,12 +91,24 @@ linked case.
   email exists; nothing is created. Email equality, verified or not, never
   links anything.
 - **Local, after the claim:** an administrator creates the user (email,
-  display name) from the administration screen. The response carries the
-  setup URL once; the list never shows it. The new user opens
-  `/setup/<token>`, chooses a password, and is signed in; they then take the
-  newcomer arrival like anyone else. Administrators re-issue a setup token
-  (purpose `recovery`) for a local user who has forgotten their password;
-  the primary administrator's own recovery is the CLI (ADR-0022 §5).
+  display name, and how long the setup link lives: 1 to 14 days, default
+  7) from the administration screen. The setup link is **emailed to the
+  address the user is registered with** by the invitation mailer (#481,
+  `src/server/invitations/send.ts`, synchronous, bounded failures) and is
+  never shown to the administrator or to the list (revised at build,
+  2026-09-09, owner ruling: the first draft returned the URL once with a
+  copy control; the owner chose delivery to the registered address so the
+  link cannot be handed to anyone else, with the lifetime the
+  administrator's call up to 14 days). The new user opens `/setup/<token>`,
+  chooses a password, and is signed in; they then take the newcomer arrival
+  like anyone else. The link is single use: used or expired, the
+  administrator sends a new one from the user's row, which invalidates any
+  earlier link. Administrators re-issue a setup token (purpose `recovery`)
+  the same way for a local user who has forgotten their password; the
+  primary administrator's own recovery is the CLI (ADR-0022 §5), printed to
+  the terminal, 5 minutes, unchanged by this revision. An instance with no
+  outgoing mail configured therefore cannot add local users — the limit
+  invitations already carry.
 - There is no anonymous self-registration and no toggle for one.
 
 ### 4. Sign-in
