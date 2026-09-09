@@ -24,6 +24,16 @@
    *
    * This component is the form and only the form: the host owns the stage, the
    * ring, the submit, the reclaim and the launch.
+   *
+   * THE DRAWING IS SHARED NOW, not copied (#914): the ring, this card, its
+   * fields, its note, its refusal line and its act live in
+   * `$lib/ringcard.css`, because the owner's 2026-09-09 composition ruling
+   * makes this same card the sign-in door's claim, sign-in, first-administrator
+   * and setup cards. Nothing about this one moved a pixel — arrival.css keeps
+   * `#hhname` and the create path's own `body.rejected` and `body.reclaimed`
+   * beats, and every one of those outranks its shared base on specificity, so
+   * the cascade cannot turn on which file a bundler emits first. The markup
+   * below is untouched by that lift.
    */
   /**
    * @type {{

@@ -1,4 +1,6 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { householdRegister } from "./support/households";
 
 /**
@@ -35,6 +37,18 @@ async function signInAs(page: Page, account: string, returnTo = "/") {
 }
 
 test.describe.configure({ mode: "serial" });
+
+/*
+ * The instance has to be claimed before anybody can sign in at all (#908,
+ * ADR-0022): `GET /api/auth/login` answers `bootstrap_required` on an
+ * unclaimed one. Every spec in a full run used to leave this to whichever
+ * ran first; slice 5 shipped the helper that does it deterministically, from
+ * the container's own log, so this file no longer depends on running after
+ * somebody else. Idempotent -- an already-claimed instance just signs in.
+ */
+test.beforeAll(async ({ browser }) => {
+  await claimInstanceAsAdministrator(browser);
+});
 
 test.afterAll(async ({ browser }) => {
   if (!seeded) return;
@@ -125,4 +139,189 @@ test("a fresh sign-in returned to /home meets the arrival, not the item form", a
      transaction, so hooks.server.js never has anything left to ask. */
   await page.goto("/");
   await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
+});
+
+/*
+ * ══ THE DOOR IS MODE-AWARE (#914, plan §2.7) ═════════════════════════════
+ *
+ * The owner ruled the composition on 2026-09-09 (design/owner-decisions.md
+ * §17); these are its four cards and the setup screen, walked.
+ *
+ * WHY THE AVAILABILITY ANSWER IS STUBBED IN THE BROWSER. Which face the door
+ * wears is decided from one public, unauthenticated body, and the four faces
+ * need four DIFFERENT INSTANCES to arise naturally: an unclaimed one, a
+ * local-only one, a mixed one, and one mid-claim. The acceptance stack is a
+ * single claimed instance with a provider, and every other spec in the run
+ * depends on it staying that way -- so reaching these states by
+ * reconfiguring it would be reaching them by breaking everything else.
+ *
+ * The route itself is not what is under test here and is covered where it
+ * belongs (the availability route's own unit test, and slice 5's and 6's
+ * integration tests); `doorModeOf` is pinned without a browser in
+ * tests/unit/door-state.test.mjs. What only a browser can show is what these
+ * assert: that the card appears IN THE RING with the ratified chrome off it,
+ * that the gate is absent where the owner said it is absent, that the
+ * fragment leaves the address bar before anything is sent, and that every
+ * one of them survives the WCAG sweep. The genuinely-unclaimed and
+ * genuinely-local-only journeys are slice 14's, against their own stack
+ * profile (#916).
+ */
+
+const RUNNING = { configured: true, phase: "running", contactAddress: null };
+
+/** Answers the door's own two mount-time questions with a stated instance. */
+async function instance(page: Page, availability: Record<string, unknown>) {
+  await page.route("**/api/auth/availability", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ...RUNNING, ...availability }),
+    }),
+  );
+}
+
+/** The WCAG sweep every card has to pass (the pattern in signed-out.spec.ts). */
+async function sweep(page: Page) {
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(results.violations).toEqual([]);
+}
+
+test.describe("the door's cards", () => {
+  /* Independent of the journey above and of each other: nothing here creates
+     a household, signs anyone in, or leaves a mark on the instance. */
+  test.describe.configure({ mode: "default" });
+
+  test("unclaimed shows the claim card in the ring, and no gate at all", async ({ page }) => {
+    await instance(page, { claimed: false, methods: { local: true, oidc: true } });
+    await page.goto("/login");
+
+    await expect(page.locator("#claimcode")).toBeVisible();
+    /* The whole of the ruling's first line: no Sign in gate. Not hidden --
+       absent, so it is not reachable by keyboard or screen reader either. */
+    await expect(page.locator("#gate")).toHaveCount(0);
+    /* The card stands in the ring, and the login chrome is off the screen. */
+    await expect(page.locator(".bigring .ringglass")).toBeAttached();
+    await expect(page.locator(".loginchrome")).toBeHidden();
+    /* The one sentence that says where the code is. */
+    await expect(page.locator(".card .note")).toContainText("docker compose logs orbit-app");
+
+    await sweep(page);
+  });
+
+  test("arriving by the notice's link fills the code, sends it, and clears the fragment", async ({ page }) => {
+    await instance(page, { claimed: false, methods: { local: true, oidc: true } });
+
+    /* The claim the operator's code would have earned. Recorded so the body
+       can be inspected: the point of ADR-0022 §1 is that the code travels in
+       the POST and never in an address a proxy or a log would see. */
+    let presented: string | null = null;
+    await page.route("**/api/auth/bootstrap/claim", async (route) => {
+      presented = JSON.parse(route.request().postData() ?? "{}").claim ?? null;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: '{"claimed":false,"methods":{"local":true,"oidc":true}}',
+      });
+    });
+
+    await page.goto("/login#claim=ABCD-EFGH-2345");
+
+    /* CREATE MODE: the identity of the first administrator, three fields. */
+    await expect(page.locator("#idname")).toBeVisible();
+    await expect(page.locator("#idemail")).toBeVisible();
+    await expect(page.locator("#idpassword")).toBeVisible();
+    expect(presented).toBe("ABCD-EFGH-2345");
+
+    /* AND THE ADDRESS BAR IS CLEAN. `history.replaceState`, so there is no
+       history entry holding it either -- a back press cannot bring it back. */
+    expect(new URL(page.url()).hash).toBe("");
+    await expect(page).toHaveURL(/\/login$/);
+
+    /* With a provider configured, ONE line under the fields and no gate. */
+    await expect(page.locator("#gate")).toHaveCount(0);
+    await expect(page.locator(".card .quietline"))
+      .toHaveText("continue with your identity provider");
+
+    await sweep(page);
+  });
+
+  test("a claimed local-only instance shows the sign-in card in the ring", async ({ page }) => {
+    await instance(page, { claimed: true, methods: { local: true, oidc: false, localAccounts: true } });
+    await page.goto("/login");
+
+    await expect(page.locator("#idemail")).toBeVisible();
+    await expect(page.locator("#idpassword")).toBeVisible();
+    /* Sign-in, not create: no display name is asked for, and no gate stands
+       in front of a provider this instance does not have. */
+    await expect(page.locator("#idname")).toHaveCount(0);
+    await expect(page.locator("#gate")).toHaveCount(0);
+    await expect(page.locator("#idbtn")).toHaveText("Sign in");
+    await expect(page.locator(".bigring .ringglass")).toBeAttached();
+
+    await sweep(page);
+  });
+
+  test("mixed mode is the ratified door plus one line, which opens the same card", async ({ page }) => {
+    await instance(page, { claimed: true, methods: { local: true, oidc: true, localAccounts: true } });
+    await page.goto("/login");
+
+    /* THE RATIFIED DOOR, UNCHANGED: the gate, the lockup, no card. */
+    await expect(page.locator("#gate")).toBeVisible();
+    await expect(page.locator(".loginchrome")).toBeVisible();
+    await expect(page.locator(".card")).toHaveCount(0);
+
+    await expect(page.locator("#localopen")).toBeVisible();
+    await page.locator("#localopen").click();
+
+    /* The same card, opened rather than offered -- and the chrome goes with
+       it, exactly as it does for the create-system card. */
+    await expect(page.locator("#idemail")).toBeVisible();
+    await expect(page.locator("#idpassword")).toBeVisible();
+    await expect(page.locator("#gate")).toHaveCount(0);
+
+    await sweep(page);
+  });
+
+  test("the local login line stays off when no local credential exists", async ({ page }) => {
+    /* §2.7, verbatim: "the line appears only when a local credential
+       exists". An instance with a provider and no local account is the
+       ordinary state of every deployment that never used local sign-in, and
+       offering it a way in that cannot work would be worse than silence. */
+    await instance(page, { claimed: true, methods: { local: true, oidc: true, localAccounts: false } });
+    await page.goto("/login");
+
+    await expect(page.locator("#gate")).toBeVisible();
+    await expect(page.locator("#localopen")).toHaveCount(0);
+  });
+
+  test("the setup screen asks for the password twice and refuses a spent link", async ({ page }) => {
+    /* The real route, with an obviously fake token: an unknown, spent and
+       expired token are one generic answer, so a token that never existed
+       exercises exactly the path a spent one takes. */
+    await page.goto("/setup/e2e-placeholder-token-that-never-existed");
+
+    await expect(page.locator("#idpassword")).toBeVisible();
+    await expect(page.locator("#idagain")).toBeVisible();
+    await expect(page.locator(".bigring .ringglass")).toBeAttached();
+    await sweep(page);
+
+    /* The one refusal the card decides for itself, because the server cannot
+       see it: two passwords that do not match. */
+    await page.fill("#idpassword", "orbit-e2e-placeholder-secret");
+    await page.fill("#idagain", "orbit-e2e-placeholder-secre");
+    await expect(page.locator(".err.shown")).toHaveText("Those two passwords are not the same.");
+    await expect(page.locator("#idbtn")).toBeDisabled();
+
+    await page.fill("#idagain", "orbit-e2e-placeholder-secret");
+    await expect(page.locator("#idbtn")).toBeEnabled();
+    await page.locator("#idbtn").click();
+
+    /* Orbit's own words, and the same ones for all three ways a token can be
+       no good: nothing here tells whoever is holding it which it was. */
+    await expect(page.locator(".err.shown"))
+      .toHaveText("This link has been used already, or it has expired.", { timeout: 30_000 });
+    await expect(page).toHaveURL(/\/setup\//);
+  });
 });
