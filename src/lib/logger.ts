@@ -131,6 +131,10 @@ export const operationalActions = [
   "check_migrations",
   "check_scanner",
   "check_parser",
+  /* The optional local model of ADR-0025: reachable, loaded and answering
+     inside its deadline. Distinct from check_parser because the parser being
+     down blocks processing, while the model being down only costs suggestions. */
+  "check_model",
   "check_provider",
   "retry",
   "retry_job",
@@ -155,6 +159,9 @@ export const operationalImpacts = [
   "migration_blocked",
   "document_upload_blocked",
   "document_processing_blocked",
+  /* ADR-0025 section 5: the model path failed, so an upload gets the heuristic
+     proposal alone. Nothing is blocked and no user sees an error. */
+  "heuristic_suggestions_only",
   "notification_delivery_delayed",
   "mail_receipt_delayed",
   "mail_delivery_delayed",
@@ -211,6 +218,10 @@ export const operationalEvents = {
   "document.inspection": "document",
   "document.preview": "document",
   "document.parse": "parser",
+  /* The optional local-model proposer (ADR-0025). It reports beside the
+     document events rather than the parser's, because a failure here degrades
+     suggestions instead of stopping processing. */
+  "document.model_extraction": "document",
   "imap.ingestion": "ingestion",
   "imap.receipt": "mail",
   "delivery.smtp": "delivery",
