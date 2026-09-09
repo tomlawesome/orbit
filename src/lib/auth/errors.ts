@@ -25,7 +25,14 @@ export type AuthErrorCode =
      password outside the bounds of ADR-0021 §6. */
   | "credentials_invalid"
   | "too_many_attempts"
-  | "password_rejected";
+  | "password_rejected"
+  /* Setup tokens and recent authentication (ADR-0023 §5, §8). An unknown,
+     already-consumed or expired setup/recovery token is the one generic
+     `setup_token_invalid`; a sensitive action with no or a wrong current
+     password is `recent_authentication_required` — its OIDC-only twin,
+     `step_up_failed`, is added by the slice that builds the step-up guard. */
+  | "setup_token_invalid"
+  | "recent_authentication_required";
 
 /**
  * Closed internal diagnostic reasons for a token-exchange failure.

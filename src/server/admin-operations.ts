@@ -78,6 +78,12 @@ const actionLabels: Record<string, string> = {
   // M7 (ADR-0023 §8): the audit record the claim writes, so the
   // administration screen never renders the raw action string.
   instance_claimed: "Instance claimed",
+  // M7 slice 8 (#911, ADR-0023 §3, §6-§8): administrator-created local users
+  // and the setup/recovery links and password changes that follow.
+  local_user_created: "Local user created",
+  setup_link_issued: "Setup link issued",
+  password_set: "Password set",
+  password_changed: "Password changed",
 };
 
 /** Maps persisted actions to a bounded administrator-facing label. */
