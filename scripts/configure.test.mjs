@@ -1124,6 +1124,108 @@ describe("configure.sh", () => {
       expect(stagingLeftovers(targetDir)).toEqual([]);
     });
 
+    it("derives and atomically writes ORBIT_AUTH_OIDC=true alongside a complete environment set (ADR-0023 section 1)", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      });
+
+      expect(result.status).toBe(0);
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain("ORBIT_AUTH_OIDC=true");
+    });
+
+    it("ORBIT_CONFIGURE_AUTH_MODE=local writes only APP_URL and ORBIT_AUTH_OIDC=false, never the OIDC trio", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_AUTH_MODE: "local",
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("ORBIT_AUTH_OIDC=false");
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain("UNRELATED_KEY=keep-me");
+      expect(updated).toContain(`APP_URL=${validAppUrl}`);
+      expect(updated).toContain("ORBIT_AUTH_OIDC=false");
+      expect(updated).not.toContain("OIDC_ISSUER=");
+      expect(updated).not.toContain("OIDC_CLIENT_ID=");
+      expect(updated).not.toContain("OIDC_CALLBACK_URL=");
+    });
+
+    it("switching to local-only preserves an existing OIDC configuration instead of deleting it (ADR-0023 section 1)", () => {
+      const initial = [
+        "APP_URL=https://old.guided-test.internal",
+        "OIDC_ISSUER=https://old-auth.guided-test.internal/o/orbit/",
+        "OIDC_CLIENT_ID=old-client-id",
+        "OIDC_CALLBACK_URL=https://old.guided-test.internal/api/auth/callback",
+        "",
+      ].join("\n");
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_AUTH_MODE: "local",
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+      });
+
+      expect(result.status).toBe(0);
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain(`APP_URL=${validAppUrl}`);
+      expect(updated).toContain("ORBIT_AUTH_OIDC=false");
+      expect(updated).toContain("OIDC_ISSUER=https://old-auth.guided-test.internal/o/orbit/");
+      expect(updated).toContain("OIDC_CLIENT_ID=old-client-id");
+    });
+
+    it("rejects ORBIT_CONFIGURE_AUTH_MODE=local combined with a complete OIDC environment set", () => {
+      const initial = "UNRELATED_KEY=keep-me\n";
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_AUTH_MODE: "local",
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
+
+    it("rejects an invalid ORBIT_CONFIGURE_AUTH_MODE value without mutation", () => {
+      const initial = "UNRELATED_KEY=keep-me\n";
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_AUTH_MODE: "sso",
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+    });
+
+    it("the interactive mode question defaults to local-only and asks nothing further", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const result = runConfigureWithControllingTerminal(
+        targetDir,
+        ["--init"],
+        { TERM: "xterm" },
+        `\r${validAppUrl}\r`,
+      );
+
+      expect(result.status).toBe(0);
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain(`APP_URL=${validAppUrl}`);
+      expect(updated).toContain("ORBIT_AUTH_OIDC=false");
+      expect(updated).not.toContain("OIDC_ISSUER=");
+    });
+
     it("normalizes one harmless trailing slash from the public Orbit origin", () => {
       const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
 
@@ -1172,7 +1274,7 @@ describe("configure.sh", () => {
         targetDir,
         ["--init"],
         { TERM: "xterm" },
-        `${validAppUrl}\n${validIssuer}\n${validClientId}X\x1b[D\x1b[3~\r`,
+        `oidc\n${validAppUrl}\n${validIssuer}\n${validClientId}X\x1b[D\x1b[3~\r`,
       );
 
       expect(result.status).toBe(0);

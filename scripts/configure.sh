@@ -562,6 +562,30 @@ prompt_oidc_client_id() {
   done
 }
 
+# ADR-0023 section 1: local accounts (email and password) are always
+# available; an identity provider is opt-in. Guided configuration asks once,
+# up front, which mode this deployment starts in -- OIDC can always be turned
+# on later with a plain `configure.sh --init` rerun.
+prompt_auth_mode() {
+  local input
+  while true; do
+    if ! input="$(read_guided_line 'Sign in with local accounts only, or also with an identity provider? OIDC can be added later with configure.sh. [local/oidc] (default: local): ')"; then
+      return 1
+    fi
+    case "${input,,}" in
+      '' | local)
+        printf 'local'
+        return 0
+        ;;
+      oidc)
+        printf 'oidc'
+        return 0
+        ;;
+    esac
+    printf 'Enter "local" for local accounts only, or "oidc" to also enable an identity provider.\n' >&2
+  done
+}
+
 # --- Machine prompt mode (ORBIT_CONFIGURE_PROMPTS=machine) -------------------
 #
 # docs/engine-events.md "Machine prompts (v0)" documents the exact line
@@ -726,13 +750,27 @@ machine_prompt_collect() {
   return 1
 }
 
-# Guided (--init) collection of the non-secret public URL and OIDC values.
-# Prompts interactively only when stdin/stdout are terminals; otherwise the
-# complete ORBIT_CONFIGURE_APP_URL / ORBIT_CONFIGURE_OIDC_ISSUER /
-# ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set is required and a partial
-# set is refused. Values are never echoed. Nothing is written until every
-# input validates.
+# Guided (--init) collection of the non-secret public URL and, when the
+# operator also wants an identity provider, the OIDC values (ADR-0023
+# section 1: local accounts are always available, OIDC is opt-in).
+#
+# The sign-in mode comes from, in order: an explicit ORBIT_CONFIGURE_AUTH_MODE
+# (local|oidc); otherwise the complete ORBIT_CONFIGURE_APP_URL /
+# ORBIT_CONFIGURE_OIDC_ISSUER / ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set
+# implies "oidc" (a partial set is still refused); otherwise machine-prompt
+# mode asks for APP_URL only (the mode question is a TTY-only prompt -- v0's
+# machine-prompt grammar is unchanged by this slice) and keeps today's
+# OIDC-required behaviour; otherwise an interactive terminal asks the mode
+# question first, via prompt_auth_mode, defaulting to local-only. Values are
+# never echoed. Nothing is written until every input validates.
 guided_init() {
+  local auth_mode=""
+  case "${ORBIT_CONFIGURE_AUTH_MODE:-}" in
+    local | oidc) auth_mode="$ORBIT_CONFIGURE_AUTH_MODE" ;;
+    '') ;;
+    *) fail "ORBIT_CONFIGURE_AUTH_MODE must be 'local' or 'oidc'." ;;
+  esac
+
   local env_count=0
   if [[ -n "${ORBIT_CONFIGURE_APP_URL:-}" ]]; then env_count=$((env_count + 1)); fi
   if [[ -n "${ORBIT_CONFIGURE_OIDC_ISSUER:-}" ]]; then env_count=$((env_count + 1)); fi
@@ -740,31 +778,48 @@ guided_init() {
 
   local app_url issuer client_id
 
-  if [[ "$env_count" -eq 3 ]]; then
+  if [[ "$auth_mode" == local && -n "${ORBIT_CONFIGURE_APP_URL:-}" ]]; then
+    [[ -z "${ORBIT_CONFIGURE_OIDC_ISSUER:-}" && -z "${ORBIT_CONFIGURE_OIDC_CLIENT_ID:-}" ]] ||
+      fail "ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set."
+    app_url="$ORBIT_CONFIGURE_APP_URL"
+  elif [[ "$env_count" -eq 3 ]]; then
+    [[ -z "$auth_mode" || "$auth_mode" == oidc ]] ||
+      fail "ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set."
+    auth_mode="oidc"
     app_url="$ORBIT_CONFIGURE_APP_URL"
     issuer="$ORBIT_CONFIGURE_OIDC_ISSUER"
     client_id="$ORBIT_CONFIGURE_OIDC_CLIENT_ID"
   elif [[ "$env_count" -gt 0 ]]; then
     fail "Guided configuration requires all of ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID together, not a partial set."
   elif [[ "$machine_prompts" == 1 ]]; then
+    [[ -n "$auth_mode" ]] || auth_mode="oidc"
     if ! app_url="$(machine_prompt_collect APP_URL normalize_public_origin classify_app_url_rejection)"; then
       fail "Guided configuration was cancelled."
     fi
-    if ! issuer="$(machine_prompt_collect OIDC_ISSUER machine_validate_oidc_issuer classify_oidc_issuer_rejection)"; then
-      fail "Guided configuration was cancelled."
-    fi
-    if ! client_id="$(machine_prompt_collect OIDC_CLIENT_ID machine_validate_oidc_client_id classify_oidc_client_id_rejection)"; then
-      fail "Guided configuration was cancelled."
+    if [[ "$auth_mode" == oidc ]]; then
+      if ! issuer="$(machine_prompt_collect OIDC_ISSUER machine_validate_oidc_issuer classify_oidc_issuer_rejection)"; then
+        fail "Guided configuration was cancelled."
+      fi
+      if ! client_id="$(machine_prompt_collect OIDC_CLIENT_ID machine_validate_oidc_client_id classify_oidc_client_id_rejection)"; then
+        fail "Guided configuration was cancelled."
+      fi
     fi
   elif open_controlling_terminal; then
+    if [[ -z "$auth_mode" ]]; then
+      if ! auth_mode="$(prompt_auth_mode)"; then
+        fail "Guided configuration was cancelled."
+      fi
+    fi
     if ! app_url="$(prompt_app_url)"; then
       fail "Guided configuration was cancelled."
     fi
-    if ! issuer="$(prompt_oidc_issuer)"; then
-      fail "Guided configuration was cancelled."
-    fi
-    if ! client_id="$(prompt_oidc_client_id)"; then
-      fail "Guided configuration was cancelled."
+    if [[ "$auth_mode" == oidc ]]; then
+      if ! issuer="$(prompt_oidc_issuer)"; then
+        fail "Guided configuration was cancelled."
+      fi
+      if ! client_id="$(prompt_oidc_client_id)"; then
+        fail "Guided configuration was cancelled."
+      fi
     fi
   else
     fail "Guided configuration needs a controlling terminal, or the complete ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set for non-interactive use."
@@ -773,6 +828,17 @@ guided_init() {
   local normalized_app_url
   if ! normalized_app_url="$(normalize_public_origin "$app_url")"; then
     fail "APP_URL must be a complete https:// public origin with no credentials, path, query, fragment, loopback address or example.com placeholder."
+  fi
+
+  if [[ "$auth_mode" == local ]]; then
+    ensure_environment_file
+    # Local-only never touches OIDC_*: switching the provider off must not
+    # force deleting its configuration (owner, 2026-09-09, ADR-0023 section 1).
+    update_managed_keys \
+      APP_URL "$normalized_app_url" \
+      ORBIT_AUTH_OIDC false
+    printf 'Orbit guided configuration saved APP_URL and set ORBIT_AUTH_OIDC=false (local accounts only).\n'
+    return 0
   fi
 
   if ! validate_oidc_issuer "$issuer"; then
@@ -788,11 +854,12 @@ guided_init() {
   ensure_environment_file
   update_managed_keys \
     APP_URL "$normalized_app_url" \
+    ORBIT_AUTH_OIDC true \
     OIDC_ISSUER "$issuer" \
     OIDC_CLIENT_ID "$client_id" \
     OIDC_CALLBACK_URL "$callback_url"
 
-  printf 'Orbit guided configuration saved APP_URL, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.\n'
+  printf 'Orbit guided configuration saved APP_URL, ORBIT_AUTH_OIDC=true, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.\n'
 }
 
 ensure_secret_file() {

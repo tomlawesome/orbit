@@ -19,8 +19,8 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   the fixed safe/reversible action set only: fix-permissions,
   restore-transaction, restart-services; stage two/dangerous actions remain
   unimplemented) was added 2026-08-13.
-- **Totals:** 369 guarantees — 212 HIGH, 124 MEDIUM, 33 LOW.
-  Install/configuration family: 206 (117 HIGH). Backup/recovery/deploy
+- **Totals:** 370 guarantees — 213 HIGH, 124 MEDIUM, 33 LOW.
+  Install/configuration family: 207 (118 HIGH). Backup/recovery/deploy
   family: 163 (95 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
@@ -212,6 +212,7 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 54. The final `ORBIT_IMAGE` rewrite is staged into a `mktemp` file (mode 600) under `staging_dir` and only `mv`'d over `.env-orbit` after the entire rewritten content has been successfully produced — `.env-orbit` is never edited in place with a risk of partial content on a mid-write failure. — install.sh:1505-1535 — category: transactional/rollback — criticality: HIGH
 55. `docker compose config --quiet` must succeed — validating the fully composed configuration — before any service is started or the transaction is committed; invalid Compose configuration is caught and fails closed pre-commit. — install.sh:1539-1541 — category: refusal/fail-closed — criticality: HIGH
 56. The file transaction is marked committed (`file_transaction_committed=1`) only after OIDC discovery, configuration migration, and `compose config --quiet` have all already succeeded; any failure before this point triggers the `EXIT`-trap rollback of every file change made so far, and only once committed do image pulls and service startup (steps outside the file-rollback mechanism's scope) begin. — install.sh:1479-1550 — category: transactional/rollback — criticality: HIGH
+57. The installer never creates the first administrator and never sees the bootstrap claim code (ADR-0022 section 1: the code lives only in the running application process's memory and is printed once, by the application itself, as the last line of the container's own start-up log). Guided configuration's sign-in mode question (`configure.sh --init`) only ever writes `ORBIT_AUTH_OIDC`; when the answer is local-only, `stage_guided_install_configuration` skips the `--set-oidc-secret` step entirely rather than collecting an unused secret, and the main run gates the OIDC-discovery phase itself on the same persisted value — `ORBIT_AUTH_OIDC=true` runs `verify_oidc_discovery` as before, anything else emits a `state=skipped` event and never contacts a provider. `print_completion_screen`'s one new line names only the `docker compose logs orbit-app` command and where on its output to look; it never reads, derives, or interpolates the claim code itself. — install.sh:1089-1096,1274-1293,1600-1613 — category: secret-handling — criticality: HIGH
 
 ## repair.sh (diagnosis, planning and execution entry point — issue #261; `--check`/`--plan`/`--execute --safe-only`/`--execute --dangerous`, plus `--export-diagnostics`)
 
@@ -303,28 +304,28 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 
 | Script | Guarantees |
 |---|---:|
-| install.sh | 56 |
+| install.sh | 57 |
 | configure.sh | 34 |
 | configuration.sh | 25 |
 | container-entrypoint.sh | 14 |
 | installer-ui.sh | 13 |
 | repair.sh | 56 |
 | installer-simulation.sh | 8 |
-| **Total** | **206** |
+| **Total** | **207** |
 
 **Guarantee count by category × criticality**
 
 | Category | HIGH | MEDIUM | LOW | Total |
 |---|---:|---:|---:|---:|
 | refusal/fail-closed | 27 | 25 | 7 | 59 |
-| secret-handling | 30 | 5 | 0 | 35 |
+| secret-handling | 31 | 5 | 0 | 36 |
 | input-validation | 6 | 20 | 7 | 33 |
 | provenance/immutability | 17 | 9 | 0 | 26 |
 | transactional/rollback | 18 | 3 | 0 | 21 |
 | permissions/ownership | 18 | 0 | 0 | 18 |
 | idempotency | 0 | 4 | 4 | 8 |
 | recovery | 1 | 4 | 1 | 6 |
-| **Total** | **117** | **70** | **19** | **206** |
+| **Total** | **118** | **70** | **19** | **207** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 

@@ -1080,8 +1080,18 @@ stage_guided_install_configuration() {
     fail_with configuration-failure retry "Guided configuration was cancelled or invalid; the target remains unchanged."
   ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" ||
     fail_with configuration-failure retry "Secret generation failed; the target remains unchanged."
-  ORBIT_CONFIGURE_TTY_INPUT=1 bash "$staging_dir/scripts/configure.sh" --set-oidc-secret ||
-    fail_with configuration-failure retry "OIDC client secret collection was cancelled or invalid; the target remains unchanged."
+
+  # --init just asked the sign-in mode question (ADR-0023 section 1) and
+  # wrote its answer into the staged environment file; read it back rather
+  # than asking again here. Anything other than the literal "false" is
+  # treated as OIDC-enabled, the same fail-safe default guided_init itself
+  # uses when the key is missing or malformed.
+  local staged_auth_mode=""
+  staged_auth_mode="$(grep -m1 '^ORBIT_AUTH_OIDC=' -- "$staging_dir/$environment_file" 2>/dev/null || true)"
+  if [[ "$staged_auth_mode" != 'ORBIT_AUTH_OIDC=false' ]]; then
+    ORBIT_CONFIGURE_TTY_INPUT=1 bash "$staging_dir/scripts/configure.sh" --set-oidc-secret ||
+      fail_with configuration-failure retry "OIDC client secret collection was cancelled or invalid; the target remains unchanged."
+  fi
 
   if [[ "$profile_change" == 1 ]]; then
     if [[ "$selected_profile" == ai || "$selected_profile" == full ]]; then
@@ -1275,6 +1285,11 @@ print_completion_screen() {
   printf 'Optional profiles: %s\n' "$selected_profile"
   printf 'Status: docker compose --env-file %s ps\n' "$environment_file"
   printf 'Logs: docker compose --env-file %s logs --tail 200\n' "$environment_file"
+  # ADR-0022 section 1: the claim is generated in the running process's
+  # memory only and printed once, as the last line of the container's own
+  # start-up log -- it has no file, no Compose secret and no installer-visible
+  # form, so this is a pointer to where to read it, never the code itself.
+  printf 'Claim this instance: run "docker compose --env-file %s logs orbit-app" and open the link on its last line to create the first administrator.\n' "$environment_file"
 }
 
 installer_ui_event host host starting host-tools check
@@ -1583,9 +1598,19 @@ installer_ui_event configuration configuration completed configuration-migration
 
 installer_ui_phase=oidc
 installer_ui_component=oidc
-installer_ui_event oidc oidc starting provider-discovery verify
-verify_oidc_discovery
-installer_ui_event oidc oidc completed provider-discovery verify
+# ADR-0023 section 1: local accounts are always available and OIDC is
+# opt-in. ORBIT_AUTH_OIDC absent or anything other than "true" means this
+# deployment never configured an identity provider, so there is nothing to
+# discover -- verify_oidc_discovery would otherwise fail a healthy
+# local-only install on a deliberately unset OIDC_ISSUER.
+oidc_auth_mode="$(read_environment_value ORBIT_AUTH_OIDC 2>/dev/null || true)"
+if [[ "$oidc_auth_mode" == true ]]; then
+  installer_ui_event oidc oidc starting provider-discovery verify
+  verify_oidc_discovery
+  installer_ui_event oidc oidc completed provider-discovery verify
+else
+  installer_ui_event oidc oidc skipped provider-discovery skip
+fi
 
 is_regular_non_symlink_file "$environment_file" ||
   fail "Configuration did not leave a regular, non-symlink ${environment_file}."
