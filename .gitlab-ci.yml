@@ -383,7 +383,15 @@ variables:
     # runner's own `pull_policy = ["if-not-present"]` covers the job image
     # and not a service's, so `always` was still costing about 20 seconds a
     # job to re-fetch bytes that cannot have changed (#889).
-    - name: docker:29-dind@sha256:5efed980cba3fc126cf54e21a5a6ff8849d05b6e0623d6e7612f48e9cd6cd17e
+    #
+    # Held at 29.6.2, and so is every docker:*-cli below (#827): Docker
+    # 29.7.0 changed how a push tracks layers across repositories
+    # (moby/moby#53081) and the daemon now sometimes skips a blob it wrongly
+    # believes the registry already has, so record_image's push fails with
+    # "blob unknown to registry" (moby/moby#53293). The known-bad versions
+    # are listed in renovate.json's docker rule; Renovate offers the next
+    # release as usual, and record_image on that bump is the proof.
+    - name: docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659
       pull_policy: if-not-present
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -392,7 +400,7 @@ variables:
 .dind:
   extends: .dind_service
   image:
-    name: docker:29-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
+    name: docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
     pull_policy: if-not-present
 
 # The daemon inside the job's own container, for the two jobs that stand up a
@@ -2006,7 +2014,7 @@ record_image:
 # is the same digest-pinned docker:29-cli the .dind jobs use.
 sign_evidence:
   stage: publish
-  image: docker:29-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
+  image: docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
   timeout: 10m
   # Same reasoning as record_image: a cancelled signing run leaves a pushed
   # digest with no evidence and nothing to show why.
