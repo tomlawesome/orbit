@@ -75,7 +75,7 @@ function mountGlints() {
     for (let i = 0; i < n; i++) {
       const a = centre + (rng() - 0.5) * span;
       const x = 800 + R * Math.cos(a), y = 440 + R * Math.sin(a);
-      const size = 0.6 + rng() * 1.1;
+      const size = 0.55 + rng() * 0.95;
       const at = document.createElementNS(NS, "g");
       // the position sits on an outer group: the animation's CSS transform
       // would replace a transform attribute on the same element
