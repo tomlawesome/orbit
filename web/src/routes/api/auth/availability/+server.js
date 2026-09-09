@@ -1,5 +1,6 @@
 import { json } from "@sveltejs/kit";
 
+import { isClaimed } from "orbit/lib/auth/bootstrap";
 import { getAuthConfig } from "orbit/lib/env";
 import { getBootPhase } from "orbit/server/boot";
 import { readPublicContactAddress } from "orbit/server/instance-contact";
@@ -37,9 +38,10 @@ import { readPublicContactAddress } from "orbit/server/instance-contact";
  * says nothing about whether any account actually uses either method.
  *
  * `claimed` (M7, ADR-0022) says whether the instance already has a primary
- * administrator. Slice 5 wires it to `instance_authority`; until then this
- * route always answers `true` so the signed-out door behaves exactly as it
- * does today.
+ * administrator: false is what puts the claim card in front of an anonymous
+ * visitor. It is the presence of the `instance_authority` row and nothing
+ * else, and it never says anything about the claim code, which lives only in
+ * the container's log and this process's memory.
  */
 export async function GET() {
   let configured = true;
@@ -48,6 +50,15 @@ export async function GET() {
     oidcMethodAvailable = getAuthConfig().oidc !== null;
   } catch {
     configured = false;
+  }
+  /* True unless the database says otherwise: a visitor is never told an
+     instance is unclaimed on the strength of a failed read. The claim routes
+     re-check the same row, so this field only chooses what the door draws. */
+  let claimed = true;
+  try {
+    claimed = await isClaimed();
+  } catch {
+    claimed = true;
   }
   let contactAddress = null;
   try {
@@ -61,7 +72,7 @@ export async function GET() {
   return json(
     {
       configured,
-      claimed: true,
+      claimed,
       methods: { local: true, oidc: oidcMethodAvailable },
       phase,
       contactAddress,

@@ -54,6 +54,9 @@ const EXPECTED_ROUTES = [
   "/api/admin/primary",
   "/api/admin/users",
   "/api/auth/availability",
+  // The claim (M7, ADR-0022 §2): signed out by design, and called by the
+  // door and by the e2e claim helper, never by the identity provider.
+  "/api/auth/bootstrap/claim",
   "/api/auth/callback",
   "/api/auth/login",
   "/api/auth/logout",
@@ -132,7 +135,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 52 route families -- no fewer, no more", () => {
+  it("has exactly the expected 53 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

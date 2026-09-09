@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { waitForInvitationLink } from "./support/mail";
+import { claimInstanceAsAdministrator } from "./support/bootstrap";
 
 /**
  * #481: THE MAILED INVITATION, end to end. An owner sends one to an address
@@ -48,19 +49,6 @@ async function signInAs(page: Page, account: string) {
   expect(session.ok()).toBe(true);
 }
 
-/* A fresh instance promotes its first sign-in to instance admin, and only an
-   administrator can hard-delete a household in the cleanup below. Claiming it
-   here is idempotent: every other spec that needs it does the same. */
-async function establishInstanceAdmin(browser: Browser) {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  const page = await context.newPage();
-  try {
-    await signInAs(page, ADMIN_ACCOUNT);
-  } finally {
-    await context.close();
-  }
-}
-
 async function createHousehold(page: Page, name: string) {
   const headers = await sessionHeaders(page);
   const response = await page.request.post("/api/workspace/commands", {
@@ -103,7 +91,11 @@ test.afterAll(async ({ browser }) => {
 test("a mailed invitation makes a stranger a member, through the real pipe", async ({ page, browser }) => {
   test.setTimeout(180_000);
 
-  await establishInstanceAdmin(browser);
+  /* Only an administrator can hard-delete a household in the cleanup below,
+     and since ADR-0022 nobody is promoted by signing in: the instance is
+     claimed with the code from its own log. Idempotent, as both callers
+     below need it. */
+  await claimInstanceAsAdministrator(browser);
 
   await signInAs(page, OWNER_ACCOUNT);
   const created = await createHousehold(page, HOUSEHOLD);
@@ -150,7 +142,11 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
 test("an invited reader's arrival never draws the chooser: the sky moves to the household instead (#871)", async ({ page, browser }) => {
   test.setTimeout(180_000);
 
-  await establishInstanceAdmin(browser);
+  /* Only an administrator can hard-delete a household in the cleanup below,
+     and since ADR-0022 nobody is promoted by signing in: the instance is
+     claimed with the code from its own log. Idempotent, as both callers
+     below need it. */
+  await claimInstanceAsAdministrator(browser);
 
   await signInAs(page, OWNER_ACCOUNT);
   const invitedHousehold = `${HOUSEHOLD} (invited landing)`;

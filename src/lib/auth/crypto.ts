@@ -5,12 +5,32 @@ import { AuthError } from "@/lib/auth/errors";
 
 const TRANSACTION_ISSUER = "orbit";
 const TRANSACTION_AUDIENCE = "oidc-login-transaction";
+const LOGIN_TRANSACTION_TTL_SECONDS = 600;
 
 export interface LoginTransaction {
   state: string;
   nonce: string;
   codeVerifier: string;
   returnTo: string;
+  /**
+   * Set only by `GET /api/auth/login` while the instance is unclaimed and the
+   * caller presented a valid claim cookie (ADR-0022 §2). The callback learns
+   * the claim from this sealed value rather than from anything the browser can
+   * write, so a returning provider response cannot promote itself.
+   */
+  bootstrap?: boolean;
+}
+
+/**
+ * What the callback should do with a transaction it has just opened. Slice 5
+ * lands `login` and `bootstrap`; the link and step-up branches (ADR-0023 §5,
+ * §6) add their own kind here and a case in the callback's switch, so the
+ * decision stays in one function rather than spreading across route bodies.
+ */
+export type LoginTransactionKind = "login" | "bootstrap";
+
+export function transactionKind(transaction: LoginTransaction): LoginTransactionKind {
+  return transaction.bootstrap === true ? "bootstrap" : "login";
 }
 
 export function randomUrlSafe(byteLength = 32): string {
@@ -39,23 +59,58 @@ function transactionKey(secret: string): Uint8Array {
   return createHash("sha256").update(`oidc-transaction:${secret}`, "utf8").digest();
 }
 
-export async function sealLoginTransaction(transaction: LoginTransaction, config: AuthConfig): Promise<string> {
-  return new EncryptJWT({ ...transaction })
+/**
+ * The generic short-lived proof (ADR-0022 §1): a JWE sealed under
+ * `SESSION_SECRET` with a fixed issuer and a caller-chosen audience, which is
+ * the extension point every other short-lived proof hangs off — the login
+ * transaction below, the claim cookie (`bootstrap-claim`), and later the
+ * step-up proof. The audience is what keeps them from being interchangeable:
+ * a value sealed for one is refused by every other opener.
+ *
+ * Nothing secret should be put in a payload: it is encrypted, but it travels
+ * in a cookie, and a proof exists to say a check already passed.
+ */
+export async function sealProof(
+  payload: Record<string, unknown>,
+  audience: string,
+  ttlSeconds: number,
+  config: AuthConfig,
+): Promise<string> {
+  return new EncryptJWT({ ...payload })
     .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
     .setIssuer(TRANSACTION_ISSUER)
-    .setAudience(TRANSACTION_AUDIENCE)
+    .setAudience(audience)
     .setIssuedAt()
-    .setExpirationTime("10m")
+    .setExpirationTime(`${ttlSeconds}s`)
     .encrypt(transactionKey(config.sessionSecret));
+}
+
+/**
+ * Opens a proof sealed by {@link sealProof} for exactly this audience.
+ * Throws the underlying `jose` error; each caller decides what its own
+ * failure means, because "expired claim cookie" and "forged login
+ * transaction" are not the same answer to a browser.
+ */
+export async function openProof(
+  value: string,
+  audience: string,
+  config: AuthConfig,
+): Promise<Record<string, unknown>> {
+  const { payload } = await jwtDecrypt(value, transactionKey(config.sessionSecret), {
+    issuer: TRANSACTION_ISSUER,
+    audience,
+    clockTolerance: 5,
+  });
+  return payload as Record<string, unknown>;
+}
+
+export async function sealLoginTransaction(transaction: LoginTransaction, config: AuthConfig): Promise<string> {
+  return sealProof({ ...transaction }, TRANSACTION_AUDIENCE, LOGIN_TRANSACTION_TTL_SECONDS, config);
 }
 
 export async function openLoginTransaction(value: string, config: AuthConfig): Promise<LoginTransaction> {
   try {
-    const { payload } = await jwtDecrypt(value, transactionKey(config.sessionSecret), {
-      issuer: TRANSACTION_ISSUER,
-      audience: TRANSACTION_AUDIENCE,
-      clockTolerance: 5,
-    });
+    const payload = await openProof(value, TRANSACTION_AUDIENCE, config);
     const fields = [payload.state, payload.nonce, payload.codeVerifier, payload.returnTo];
     if (!fields.every((field) => typeof field === "string" && field.length > 0)) {
       throw new Error("Login transaction claims are incomplete");
@@ -65,6 +120,9 @@ export async function openLoginTransaction(value: string, config: AuthConfig): P
       nonce: payload.nonce as string,
       codeVerifier: payload.codeVerifier as string,
       returnTo: payload.returnTo as string,
+      /* Only the literal `true` carries; anything else is absent, so a
+         transaction sealed without a claim can never open as one. */
+      ...(payload.bootstrap === true ? { bootstrap: true } : {}),
     };
   } catch (error) {
     throw new AuthError("invalid_state", "The sign-in transaction is invalid or has expired", 400, { cause: error });
