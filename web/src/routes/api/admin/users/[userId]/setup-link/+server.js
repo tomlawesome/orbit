@@ -2,36 +2,29 @@ import { json } from "@sveltejs/kit";
 import { z } from "zod";
 
 import { AppError } from "orbit/lib/app-error";
-import { AuthError } from "orbit/lib/auth/errors";
 import { getAuthConfig } from "orbit/lib/env";
-import { issueSetupToken, verifyCredential } from "orbit/server/local-credentials";
+import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
+import { issueSetupToken } from "orbit/server/local-credentials";
 import { requireInstanceAdministrator } from "orbit/server/authorization";
 
 import { write } from "$lib/server/api.js";
 
 const bodySchema = z.object({
-  /** The acting administrator's own current password (ADR-0023 §5). */
-  currentPassword: z.string(),
+  /**
+   * The acting administrator's own current password (ADR-0023 §5), when they
+   * have a local credential; absent for an OIDC-only administrator, who is
+   * challenged with a step-up proof cookie instead.
+   */
+  currentPassword: z.string().optional(),
 });
-
-/**
- * The local-credential half of "always challenge" (ADR-0023 §5) — see the
- * matching helper and its TODO(#910) in `web/src/routes/api/admin/users/+server.js`.
- */
-async function requireRecentLocalAuthentication(session, currentPassword) {
-  const verdict = await verifyCredential(session.user.email, currentPassword);
-  if (verdict.outcome === "throttled") {
-    throw new AuthError("too_many_attempts", "Too many attempts at once; try again shortly", 429);
-  }
-  if (verdict.outcome !== "verified" || verdict.userId !== session.user.id) {
-    throw new AuthError("recent_authentication_required", "Confirm your password to continue", 401);
-  }
-}
 
 /**
  * Re-issues a setup link (purpose `recovery`) for a local user who has
  * forgotten their password (ADR-0023 §3). Returns the URL once, exactly as
  * the initial creation does; the administration screen never stores it.
+ *
+ * The acting administrator is re-challenged first, same as creation (ADR-0023
+ * §5, `requireRecentAuthentication`, intent `setup_link_issue`).
  */
 export const POST = write(async (event, session) => {
   await requireInstanceAdministrator(session.user.id);
@@ -40,7 +33,7 @@ export const POST = write(async (event, session) => {
     throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
   }
   const submitted = bodySchema.parse(await event.request.json());
-  await requireRecentLocalAuthentication(session, submitted.currentPassword);
+  await requireRecentAuthentication(event, session, submitted, "setup_link_issue");
 
   const config = getAuthConfig();
   const { token } = await issueSetupToken(userId, "recovery", { createdByUserId: session.user.id });
