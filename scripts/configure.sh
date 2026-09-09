@@ -223,7 +223,7 @@ ensure_environment_file() {
     fail "Could not secure the temporary Orbit environment file."
   write_minimal_environment \
     'Core' ORBIT_CONFIG_SCHEMA_VERSION APP_URL ORBIT_IMAGE managed:ORBIT_CONFIG_APPLIED_VERSION managed:ORBIT_CONFIG_APPLIED_DIGEST --section \
-    'Authentication' OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET managed:OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL --section \
+    'Authentication' ORBIT_AUTH_OIDC OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET managed:OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL --section \
     'Generated secrets and keys' SESSION_SECRET_FILE DOCUMENT_KEK_FILE POSTGRES_PASSWORD_FILE VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY_FILE --section \
     'Deployment' managed:COMPOSE_PROJECT_NAME ORBIT_BIND_ADDRESS ORBIT_PORT COMPOSE_PROFILES POSTGRES_DB POSTGRES_USER --section \
     'Optional services' TIKA_URL OLLAMA_MODEL --section \
@@ -1063,6 +1063,14 @@ run_check() {
     printf 'app-managed %s\n' "$1"
   }
 
+  # ORBIT_AUTH_OIDC=false (the default): the provider fields may stay set --
+  # switching the provider off must not force deleting its configuration
+  # (owner, 2026-09-09, ADR-0023 section 1) -- so they are reported inert
+  # rather than missing, and never affect overall_status.
+  report_not_in_use() {
+    printf 'not in use %s\n' "$1"
+  }
+
   local processing_present=0 processing_ready=0
   if profile_enabled processing || is_set TIKA_URL; then processing_present=1; fi
   if profile_enabled processing && is_set TIKA_URL; then processing_ready=1; fi
@@ -1132,12 +1140,22 @@ run_check() {
     oidc_secret_ready=1
   fi
 
+  local oidc_enabled=0
+  [[ "${values[ORBIT_AUTH_OIDC]:-}" == true ]] && oidc_enabled=1
+
   report_required_bool APP_URL "$app_url_ready"
   report_required_bool ORBIT_IMAGE "$image_ready"
-  report_required_bool OIDC_ISSUER "$issuer_ready"
-  report_required_bool OIDC_CLIENT_ID "$client_id_ready"
-  report_required_bool OIDC_CLIENT_SECRET "$oidc_secret_ready"
-  report_required_bool OIDC_CALLBACK_URL "$callback_ready"
+  if [[ "$oidc_enabled" == 1 ]]; then
+    report_required_bool OIDC_ISSUER "$issuer_ready"
+    report_required_bool OIDC_CLIENT_ID "$client_id_ready"
+    report_required_bool OIDC_CLIENT_SECRET "$oidc_secret_ready"
+    report_required_bool OIDC_CALLBACK_URL "$callback_ready"
+  else
+    report_not_in_use OIDC_ISSUER
+    report_not_in_use OIDC_CLIENT_ID
+    report_not_in_use OIDC_CLIENT_SECRET
+    report_not_in_use OIDC_CALLBACK_URL
+  fi
   report_optional processing "$processing_ready" "$processing_present"
   report_optional ai "$ai_ready" "$ai_present"
   report_optional mail "$mail_ready" "$mail_present"

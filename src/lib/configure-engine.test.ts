@@ -52,6 +52,7 @@ function statAndReadNoFollow(path: string): { mode: number; content: string } {
 const EXAMPLE_CONTENT = `ORBIT_CONFIG_SCHEMA_VERSION=1
 
 APP_URL=https://orbit.example.com
+ORBIT_AUTH_OIDC=false
 OIDC_ISSUER=https://auth.example.com/application/o/orbit/
 OIDC_CLIENT_ID=
 OIDC_CLIENT_SECRET=

@@ -211,6 +211,7 @@ const MINIMAL_ENVIRONMENT_SECTIONS: MinimalEnvironmentSection[] = [
   {
     heading: "Authentication",
     entries: [
+      { key: "ORBIT_AUTH_OIDC" },
       { key: "OIDC_ISSUER" },
       { key: "OIDC_CLIENT_ID" },
       { key: "OIDC_CLIENT_SECRET" },

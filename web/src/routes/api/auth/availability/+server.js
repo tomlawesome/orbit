@@ -30,11 +30,22 @@ import { readPublicContactAddress } from "orbit/server/instance-contact";
  * no error text, no dependency name — for the same reason `configured` never
  * carries the thrown error: a signed-out visitor learning which subsystem
  * failed is reconnaissance, not diagnosis they are owed.
+ *
+ * `methods` (M7, ADR-0023 §1) says which sign-in methods this instance can
+ * offer at all: `local` is always true (local sign-in is the baseline),
+ * `oidc` is true only when `ORBIT_AUTH_OIDC=true` and fully configured. It
+ * says nothing about whether any account actually uses either method.
+ *
+ * `claimed` (M7, ADR-0022) says whether the instance already has a primary
+ * administrator. Slice 5 wires it to `instance_authority`; until then this
+ * route always answers `true` so the signed-out door behaves exactly as it
+ * does today.
  */
 export async function GET() {
   let configured = true;
+  let oidcMethodAvailable = false;
   try {
-    getAuthConfig();
+    oidcMethodAvailable = getAuthConfig().oidc !== null;
   } catch {
     configured = false;
   }
@@ -47,5 +58,14 @@ export async function GET() {
     contactAddress = null;
   }
   const phase = getBootPhase();
-  return json({ configured, phase, contactAddress }, { headers: { "cache-control": "no-store" } });
+  return json(
+    {
+      configured,
+      claimed: true,
+      methods: { local: true, oidc: oidcMethodAvailable },
+      phase,
+      contactAddress,
+    },
+    { headers: { "cache-control": "no-store" } },
+  );
 }
