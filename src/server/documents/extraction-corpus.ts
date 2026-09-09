@@ -166,4 +166,162 @@ Replace the battery when the unit chirps.`,
       dates: [],
     },
   },
+  // --- Harder documents (issue #319, slice 1). Ground truth here is what a
+  // careful human reading the page would say, not what today's heuristics
+  // return. Some of these are expected to miss; that is the measurement.
+  {
+    name: "water statement, fully labelled with ISO dates",
+    filename: "water-statement.pdf",
+    text: `CLEARSPRING WATER — STATEMENT OF ACCOUNT
+Provider: Clearspring Water Ltd
+Account number: CW-0099-4471
+Charges for the period 2026-04-01 to 2027-03-31.
+Your next statement is due 2026-10-01. Balance carried forward £0.00.`,
+    expected: {
+      dates: ["2026-04-01", "2027-03-31", "2026-10-01"],
+      provider: "Clearspring Water Ltd",
+      reference: "CW-0099-4471",
+    },
+  },
+  {
+    name: "MOT reminder letter, three dates, garage named in prose",
+    filename: "mot-reminder.pdf",
+    text: `VEHICLE MOT REMINDER
+Sent 12 August 2026 by Hartswood Garage Services, Westhaven.
+Our records show your vehicle was last tested on 28 August 2025.
+The certificate on file expires 28 August 2026. Book early to avoid a lapse.
+Test slots are held for 48 hours.`,
+    expected: {
+      dates: ["2026-08-12", "2025-08-28", "2026-08-28"],
+      provider: "Hartswood Garage Services",
+    },
+  },
+  {
+    name: "council tax demand, space-separated reference and letterhead issuer",
+    filename: "council-tax-demand.pdf",
+    text: `BOROUGH OF WESTHAVEN
+COUNCIL TAX DEMAND NOTICE 2027/28
+Issued 09 March 2027
+Property: 14 Larkspur Way, Westhaven WH4 2QP
+Council tax reference 8802 5514 9
+Ten instalments are payable from 1 April 2027 to 1 January 2028.`,
+    expected: {
+      dates: ["2027-03-09", "2027-04-01", "2028-01-01"],
+      provider: "Borough of Westhaven",
+      reference: "8802 5514 9",
+    },
+  },
+  {
+    name: "broadband agreement, hyphenated numeric date",
+    filename: "broadband-agreement.pdf",
+    text: `NORTHGATE FIBRE — SERVICE AGREEMENT
+Supplier: Northgate Fibre Ltd
+Customer account 4471-8820-3390
+Service start date 2 October 2026. Minimum term ends 31-03-2028.
+Speeds quoted are estimates and are not guaranteed.`,
+    expected: {
+      dates: ["2026-10-02", "2028-03-31"],
+      provider: "Northgate Fibre Ltd",
+      reference: "4471-8820-3390",
+    },
+  },
+  {
+    name: "life cover statement, two-digit year and slashed plan number",
+    filename: "life-cover-statement.pdf",
+    text: `ACORN MUTUAL — LIFE COVER STATEMENT
+Provider: Acorn Mutual Assurance Society
+Plan number LC/2291/443
+Your plan started on 06/05/24 and the premium is fixed for life.
+The next annual review is 6 May 2027.`,
+    expected: {
+      dates: ["2024-05-06", "2027-05-06"],
+      provider: "Acorn Mutual Assurance Society",
+      reference: "LC/2291/443",
+    },
+  },
+  {
+    name: "buildings renewal, reference with an internal space",
+    filename: "buildings-renewal.pdf",
+    text: `NORTHERN SHIRE MUTUAL — BUILDINGS COVER
+Insurer: Northern Shire Mutual Insurance Society
+Quotation prepared 04 Feb 2027
+Your current policy expires 21 Feb 2027. If you do nothing we will renew it
+from 22 Feb 2027 for a further twelve months at £412.00.
+Policy: NSM 44/22910`,
+    expected: {
+      dates: ["2027-02-04", "2027-02-21", "2027-02-22"],
+      provider: "Northern Shire Mutual Insurance Society",
+      reference: "NSM 44/22910",
+    },
+  },
+  {
+    name: "thermostat quick-start card, firmware version shaped like a date",
+    filename: "thermostat-quick-start.pdf",
+    text: `SMART THERMOSTAT — QUICK START CARD
+Hold the dial for five seconds to pair the thermostat with your hub.
+Firmware on this unit: 2.4.2026. Check the app for updates.
+Support line 0800 118 2255, open 8am to 8pm every day.
+Keep this card with your appliance paperwork.`,
+    expected: {
+      dates: [],
+    },
+  },
+  {
+    name: "gym membership, dates written as the 1st of October",
+    filename: "gym-membership.pdf",
+    text: `RIVERBANK LEISURE CLUB — MEMBERSHIP AGREEMENT
+Provider: Riverbank Leisure Club
+Membership number: RLC-7781-22
+Signed at the club on 24 September 2026.
+Your twelve-month membership begins on the 1st of October 2026 and ends on
+the 30th of September 2027. One calendar month's notice applies.`,
+    expected: {
+      dates: ["2026-09-24", "2026-10-01", "2027-09-30"],
+      provider: "Riverbank Leisure Club",
+      reference: "RLC-7781-22",
+    },
+  },
+  {
+    name: "renewal invitation, insurer and administrator on one line",
+    filename: "contents-renewal-invitation.pdf",
+    text: `RENEWAL INVITATION — CONTENTS INSURANCE
+Insurer: Kestrel Mutual (administered by Faircross Broking Ltd)
+Policy number 88-2291-KM
+Your cover ends on 30-09-2026 and the new policy year starts 01-10-2026.
+Please check your details before 23 September 2026. New premium £318.40.`,
+    expected: {
+      dates: ["2026-09-30", "2026-10-01", "2026-09-23"],
+      provider: "Kestrel Mutual",
+      reference: "88-2291-KM",
+    },
+  },
+  {
+    name: "roofing agreement, year-first slashed dates",
+    filename: "roofing-agreement.pdf",
+    text: `FAIRWEATHER ROOFING — MAINTENANCE AGREEMENT
+Supplier: Fairweather Roofing Ltd
+Agreement reference FR/2026/0418
+Signed 18 April 2026 at Westhaven.
+Annual inspection due 2026/07/15, with a second visit on 2027/01/20 if the
+first identifies work.`,
+    expected: {
+      dates: ["2026-04-18", "2026-07-15", "2027-01-20"],
+      provider: "Fairweather Roofing Ltd",
+      reference: "FR/2026/0418",
+    },
+  },
+  {
+    name: "dental plan, single renewal date among undated payment terms",
+    filename: "dental-plan.pdf",
+    text: `BRIGHTMOOR DENTAL PLAN
+Provider: Brightmoor Dental Care Ltd
+Membership number: BDC-771244
+Your plan renews on 1 December 2026.
+Payments of £18.50 are collected on the 1st of each month.`,
+    expected: {
+      dates: ["2026-12-01"],
+      provider: "Brightmoor Dental Care Ltd",
+      reference: "BDC-771244",
+    },
+  },
 ];
