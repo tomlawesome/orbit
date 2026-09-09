@@ -950,3 +950,42 @@ the day's rounds on Windows/Firefox; the phone's Safari is not required
   start to fall — it was the one thing still arriving late.
 - **Accepted** on the build at `1dd44bc` ("good"); the 404 baseline was
   re-captured on that acceptance.
+
+## 17. The door is mode-aware; every card is the first-household card (owner, 2026-09-09)
+
+The composition for M7's local accounts (#259), ruled directly rather than
+through a design round: #906 (mockups) was closed as superseded the same day.
+The full text stands in `docs/plans/m7-local-accounts.md` §2.7 and is the
+specification; this records that it is the owner's, and when.
+
+- **One card, repurposed, everywhere.** The styling source for every new
+  card is the first-household card — `web/src/lib/arrival/CreateSystem.svelte`'s
+  `form.card` inside the ring (`design/v19/first-run-card/round-3/ring.html`)
+  — with sign-in fields in it instead of a system's name. Not a lookalike:
+  the drawing itself is shared (`web/src/lib/ringcard.css`), so the five
+  places it appears cannot drift apart one padding at a time.
+- **Unclaimed.** The ring shows that card with one field, "claim code" —
+  pre-filled and submitted from the `#claim=` fragment when the operator
+  arrived by the link in the container's log, typed by hand otherwise — and
+  one sentence saying where the code is (`docker compose logs orbit-app`,
+  last line). **No Sign in gate**: there is nobody to sign in as yet.
+- **Local-only, claimed.** The ring shows the same card with email (or
+  username — the field accepts the account's email) and password.
+- **Mixed mode** (an identity provider is on and local accounts exist). The
+  ratified door is **unchanged** — the Sign in gate exactly as today — plus
+  one subtle line under the gate, "local login", which opens that same card
+  in the ring. `GET /api/auth/availability` reports `methods.localAccounts`
+  so the line appears only when a local credential exists.
+- **Create mode**, after a successful claim. The same card asks email,
+  display name and password: the identity of the first administrator. When
+  an identity provider is enabled, a single "continue with your identity
+  provider" line sits under the fields **instead of a gate**. The
+  create-system card that follows is untouched (three things only, §15).
+- **The setup screen** `/setup/<token>`: the same card in a fourth mode —
+  password, password again — taking the shape of
+  `web/src/routes/invite/[token]/`.
+
+Two further composition calls were made in the same ruling and belong to the
+slices that build them, not to this screen: settings' **Sign-in methods**
+block with its inline recent-authentication challenge, and administration's
+**Add a local user** row with its shown-once setup link (§2.7, second half).
