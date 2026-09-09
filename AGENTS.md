@@ -282,8 +282,10 @@ string, a protocol-relative `//` and a backslash.
 **A lockfile diff adding an `@pnpm/exe` block is pnpm 11 talking, not your
 change.** The host's PATH `pnpm` is 11.9.0 and writes that block while
 handing over to the pinned 12.3.4, which no longer pins it (the `pnpm`
-package is the native executable from v12). Discard the diff; never commit
-it. CI activates 12.3.4 through corepack, so it never sees this (#884).
+package is the native executable from v12): a correct 12.3.4 lockfile has no
+such block. Run `node --test scripts/lockfile-no-pnpm-exe.test.mjs` before
+committing a lockfile change — discard the diff if it fails, never commit it.
+CI activates 12.3.4 through corepack, so it never sees this (#884, #901).
 
 ## The demo stack is disposable
 

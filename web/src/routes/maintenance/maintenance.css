@@ -6,15 +6,43 @@ body{background:#060a18}
    totality's own range — the day stars are brighter than any night screen's. */
 .tw{--tw-min:.2;--tw-max:.85;animation:twinkle 5s ease-in-out infinite alternate}
 
+/* Totality is night whatever the pack: the ground here is always #060a18,
+   so the two daylight packs' dark inks, ink-coloured stars (#893) and blue
+   accent vanish or jar on it (owner, 2026-09-09: text unreadable, stars
+   gone). On this screen only they borrow starchart's night ladder; the
+   night packs keep their own. Values are starchart's in $lib/packs.css. */
+[data-theme=dawn] body,[data-theme=clouds] body{
+  --ink:#e9edf8;--ink-mid:#8791b3;--ink-faint:#737e9e;--ink-quiet:#8b95b6;
+  --accent:#d8b45a;--star-far:#e9edf8;--star-near:#f4f0ff}
+
+/* Baily's beads on the limb: each bead flares up fast and dies slowly on its
+   string's period, offset a little from its neighbours (both set per bead by
+   sky.js), lit for about a quarter of the cycle, so a run of beads lights and
+   goes out one by one somewhere on the ring, never the same place twice */
+.glints .glint{opacity:0;transform-box:fill-box;transform-origin:center;
+          animation:glint 6s ease-in-out infinite}
+@keyframes glint{0%,64%{opacity:0;transform:scale(.6)}70%{opacity:.85;transform:scale(1)}
+                 78%{opacity:.6}84%{opacity:.75}100%{opacity:0;transform:scale(.8)}}
+
 /* corona layers — every group breathes on its own period, nothing in sync */
 .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes cbreathe{from{opacity:.66}to{opacity:1}}
-.streamers-a{transform-origin:800px 440px;animation:sway-a 26s ease-in-out infinite alternate;mix-blend-mode:screen}
-@keyframes sway-a{from{transform:rotate(-3.4deg) scale(1)}to{transform:rotate(3.8deg) scale(1.035)}}
-.streamers-b{transform-origin:800px 440px;animation:sway-b 39s ease-in-out infinite alternate;mix-blend-mode:screen}
-@keyframes sway-b{from{transform:rotate(3deg) scale(1.03)}to{transform:rotate(-2.8deg) scale(1)}}
+/* #902: the three swaying layers are now rasters, so `transform-box` is
+   spelled out rather than left to the default the way `.flare` below always
+   spelled it out. 800px 440px means the middle of the eclipse in viewBox
+   units — the reference box has to be the viewBox for that to hold, and an
+   <image> has a different bounding box from the <g> it replaced. Every
+   current browser already defaults to view-box, so nothing moves today; the
+   line is here so nothing can move later either. */
+.streamers-a{transform-origin:800px 440px;transform-box:view-box;
+             animation:sway-a 26s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-a{from{transform:rotate(-3.4deg) scale(1);opacity:.62}to{transform:rotate(3.8deg) scale(1.035);opacity:1}}
+.streamers-b{transform-origin:800px 440px;transform-box:view-box;
+             animation:sway-b 39s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-b{from{transform:rotate(3deg) scale(1.03);opacity:.8}to{transform:rotate(-2.8deg) scale(1);opacity:.45}}
 .streamers-b{animation-delay:-13s}
-.filaments{transform-origin:800px 440px;animation:sway-c 31s ease-in-out infinite alternate;mix-blend-mode:screen}
+.filaments{transform-origin:800px 440px;transform-box:view-box;
+           animation:sway-c 31s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes sway-c{from{transform:rotate(2deg);opacity:.6}to{transform:rotate(-2.6deg);opacity:1}}
 .prom{animation:flicker 7s ease-in-out infinite alternate}
 .prom.p2{animation-duration:9.5s;animation-delay:-3s}
@@ -25,9 +53,16 @@ body{background:#060a18}
 .horizon{animation:horiz 17s ease-in-out infinite alternate}
 @keyframes horiz{from{opacity:.75}to{opacity:1}}
 
-/* transit as the progress bar — the arc creeps, honestly slow */
-.progress{animation:transit 90s linear forwards}
-@keyframes transit{from{stroke-dasharray:52 48}to{stroke-dasharray:74 26}}
+/* #902: the rasters stay invisible until every one has loaded, then all
+   appear in the same frame (the page script flips `ready`). visibility, not
+   opacity, because the flicker/sway keyframes above own opacity. */
+.world[data-rasterised="pending"] image[data-r]{visibility:hidden}
+/* The corona's rasters take a second or two to build, so they land after
+   the moon, the ring and the words. The two `.lands` groups fade up over
+   that landing instead of popping (owner, 2026-09-09). The fade is on the
+   group, not the images, because the images' own keyframes own opacity. */
+.lands{transition:opacity 1.6s ease-out}
+.world[data-rasterised="pending"] .lands{opacity:0}
 
 /* the diamond ring — service returning; demo loops every 36s */
 .flare{opacity:0;animation:ringflash 36s linear infinite}
@@ -62,21 +97,22 @@ body{background:#060a18}
   74%{opacity:.3}
   79%,100%{opacity:0}
 }
-/* The notice column sits beneath the ring — its lower edge is at 62.6% of
-   the height at the design's aspect ratio — and runs to the bottom, so the
-   drawer has somewhere to open into. Everything in it is centred and narrow:
+/* The notice column sits beneath the ring — the world's viewBox starts at
+   y=90 so the ring's lower edge is at about 52% of the height at any aspect
+   ratio, and the text starts clear of the corona's glow (owner, 2026-09-09)
+   — and runs to the bottom, so the drawer has somewhere to open into. Everything in it is centred and narrow:
    an announcement, not a document. */
-.notice{position:fixed;left:0;right:0;top:65vh;bottom:0;z-index:3;
+.notice{position:fixed;left:0;right:0;top:69vh;bottom:0;z-index:3;
         display:flex;flex-direction:column;align-items:center;gap:12px;
         padding:0 24px calc(16px + env(safe-area-inset-bottom));text-align:center}
 .notice p{margin:0}
-.msg{margin:0;font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
+.msg{margin:0;font:500 16px var(--mono);letter-spacing:.28em;color:var(--ink);
      text-transform:uppercase}
 .latest{display:flex;flex-direction:column;gap:6px;max-width:44ch}
-.when{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-quiet);
+.when{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
       text-transform:uppercase}
-.body{font:400 15px/1.5 var(--ui);color:var(--ink)}
-.back{font:500 11px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
+.body{font:400 18px/1.5 var(--ui);color:var(--ink)}
+.back{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink);
       text-transform:uppercase}
 .back time{color:var(--accent)}
 
@@ -104,6 +140,6 @@ body{background:#060a18}
 .log .body{font-size:13px;color:var(--ink-mid)}
 @media (prefers-reduced-motion: reduce){
   .flare,.wash,.ringflare,.flarewave{opacity:0!important}
-  .progress{stroke-dasharray:64 36}
+  .glints .glint{animation:none;opacity:.45}
   .earlier summary,.earlier summary svg{transition:none}
 }

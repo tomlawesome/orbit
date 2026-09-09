@@ -96,6 +96,11 @@ const test: TestUserConfig = {
           // Playwright's test() outside a Playwright runner and fails to
           // load (#425).
           "web/**",
+          // Uses node:test, not vitest globals (#901): run standalone with
+          // `node --test scripts/lockfile-no-pnpm-exe.test.mjs`. Collecting
+          // it here would import it for its side effect of running the
+          // check immediately, without a vitest test to attach the result to.
+          "scripts/lockfile-no-pnpm-exe.test.mjs",
         ],
       },
     },

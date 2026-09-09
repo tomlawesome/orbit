@@ -4,6 +4,11 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+# Cheapest check first, and node_modules-free: catches the pnpm 11 -> 12.3.4
+# handoff writing an @pnpm/exe block back into the lockfile (#901). Runs via
+# `node --test`, not Vitest -- see vitest.config.ts's exclude entry for why.
+node --test scripts/lockfile-no-pnpm-exe.test.mjs
+
 # Static analysis covers the full-stack boundary; Vitest exercises all fast
 # server, authentication, database, domain, and reducer tests without Docker.
 #
