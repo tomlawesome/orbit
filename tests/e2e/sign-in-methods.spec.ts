@@ -52,7 +52,11 @@ const households = householdRegister();
  * swept again after the test -- and only when the arrival says so.
  */
 async function ensureHousehold(page: Page) {
-  const adrift = await page.locator("#gobtn, h1:has-text('where do you belong?')").first().isVisible().catch(() => false);
+  /* The two faces settleArrival waits for: the bare arrival, and the one
+     that lists systems to ask into (which is what the second reader meets,
+     once the first has made a household). */
+  const adrift = await page.locator("#gobtn").or(page.getByRole("heading", { name: "where do you belong?" }))
+    .first().isVisible().catch(() => false);
   if (!adrift) return;
   const created = await page.evaluate(async (householdName) => {
     const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
