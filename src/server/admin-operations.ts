@@ -82,6 +82,10 @@ const actionLabels: Record<string, string> = {
   // and the setup/recovery links and password changes that follow.
   local_user_created: "Local user created",
   setup_link_issued: "Setup link issued",
+  // Written only when the mail carrying that link actually went (owner ruling
+  // 2026-09-09: the link is emailed, never shown), so the two records
+  // together say whether anybody could have received it.
+  setup_link_sent: "Setup link emailed",
   password_set: "Password set",
   password_changed: "Password changed",
   // M7 (ADR-0023 §6, §8): the sign-in methods a reader adds and removes for

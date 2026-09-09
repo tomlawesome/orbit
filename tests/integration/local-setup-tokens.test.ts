@@ -7,7 +7,14 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
 import { createSession } from "@/lib/auth/session";
 import { getAuthConfig } from "@/lib/env";
-import { createLocalUser, RECOVERY_TOKEN_TTL_MS } from "@/server/local-credentials";
+import type { SmtpNotification } from "@/server/notification-worker";
+import {
+  createLocalUser,
+  RECOVERY_TOKEN_TTL_MS,
+  SETUP_TOKEN_DEFAULT_DAYS,
+  SETUP_TOKEN_MAX_DAYS,
+} from "@/server/local-credentials";
+import { createLocalUserAndSendSetupLink, sendSetupLink } from "@/server/local-credentials/setup-mail";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -22,9 +29,15 @@ import { readSetCookie } from "./support/set-cookie";
  * Unit-shaped assertions belong beside `local-sign-in.test.ts`; what only a
  * real database shows is here — that a token row's `FOR UPDATE` lock really
  * serialises redemption, that a password change really deletes every other
- * session and no more, and that the setup URL and the raw token appear in
- * exactly one response and nowhere else: no list, no second response, no
- * audit row.
+ * session and no more, and that the link reaches the registered address and
+ * NOTHING else: no response, no list, no audit row (owner ruling 2026-09-09,
+ * ADR-0023 §3).
+ *
+ * Every link this file uses is read out of the mail, because that is the only
+ * place a link exists. No SMTP is configured for the integration run, so a
+ * test that needs the mail to arrive hands the engine a fake mailer, and a
+ * test driving the admin routes gets the bounded `smtp_unconfigured` — which
+ * is itself the failed-send case the routes have to survive.
  */
 
 const { GET: listUsers, POST: createUser } = await loadRoute("admin/users");
@@ -48,11 +61,42 @@ async function seedLocalCredential(userId: string, password: string): Promise<vo
   await getDb().insert(localCredentials).values({ userId, passwordHash: await hashPassword(password) });
 }
 
-/** The one token a setup URL carries, as the browser that opens it would read it. */
-function tokenFromSetupUrl(setupUrl: string): string {
-  const match = /\/setup\/([^/?#]+)/u.exec(setupUrl);
-  if (!match) throw new Error(`No setup token in ${setupUrl}`);
-  return decodeURIComponent(match[1]);
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Captures the mail instead of sending it, which is also how a test gets the
+ * link: it exists in the mail and in nothing else.
+ */
+function captureMailer() {
+  const sent: SmtpNotification[] = [];
+  return {
+    sent,
+    mailer: { async sendEmail(notification: SmtpNotification) { sent.push(notification); } },
+    /** The one token in the last mail, as the recipient's browser would read it. */
+    lastToken(): string {
+      const last = sent.at(-1);
+      if (!last) throw new Error("No setup mail was sent");
+      const link = /https?:\/\/\S*\/setup\/(\S+)/u.exec(last.text);
+      if (!link) throw new Error("The setup mail carried no link");
+      return decodeURIComponent(link[1]);
+    },
+  };
+}
+
+/** A new local user whose link came out of the mail, ready to be spent. */
+async function createUserWithMailedLink(
+  actorUserId: string,
+  email: string,
+  displayName = "New Local User",
+  expiresInDays?: number,
+) {
+  const capture = captureMailer();
+  const created = await createLocalUserAndSendSetupLink(
+    actorUserId,
+    { email, displayName },
+    { mailer: capture.mailer, expiresInDays },
+  );
+  return { ...created, capture, token: capture.lastToken() };
 }
 
 async function call(
@@ -106,24 +150,27 @@ async function isAuthenticated(token: string): Promise<boolean> {
 }
 
 describe("an administrator creating a local user (ADR-0023 §3)", () => {
-  it("creates a user with no credential, hands back the setup URL once, and the list never carries it", async () => {
+  it("creates a user with no credential and emails the link to their registered address alone", async () => {
     const fixture = await createIntegrationFixture("setup-create");
     try {
       const admin = await fixture.session("admin");
       await seedLocalCredential(admin.userId, ADMIN_PASSWORD);
+      const email = `new-local-${fixture.household.id.slice(0, 8)}@example.invalid`;
 
-      const created = await call(createUser, admin, "/api/admin/users", {
-        body: {
-          email: `new-local-${fixture.household.id.slice(0, 8)}@example.invalid`,
-          displayName: "New Local User",
-          currentPassword: ADMIN_PASSWORD,
-        },
-      });
-      expect(created.status).toBe(201);
-      const setupUrl = created.body.setupUrl as string;
-      expect(setupUrl).toMatch(new RegExp(`^${ORIGIN}/setup/`, "u"));
-      const newUserId = (created.body.user as { id: string }).id;
-      const token = tokenFromSetupUrl(setupUrl);
+      const issuedAt = Date.now();
+      const created = await createUserWithMailedLink(admin.userId, email);
+      const newUserId = created.user.id;
+
+      // The mail went to the registered address, and to no other.
+      expect(created.sendError).toBeNull();
+      expect(created.sentTo).toBe(email);
+      expect(created.capture.sent).toHaveLength(1);
+      expect(created.capture.sent[0].to).toBe(email);
+      expect(created.capture.sent[0].text).toContain(`${ORIGIN}/setup/`);
+
+      // The default lifetime is seven days, not the recovery link's five minutes.
+      expect(created.expiresAt.getTime()).toBeGreaterThan(issuedAt + (SETUP_TOKEN_DEFAULT_DAYS * DAY_MS) - 60_000);
+      expect(created.expiresAt.getTime()).toBeLessThanOrEqual(issuedAt + (SETUP_TOKEN_DEFAULT_DAYS * DAY_MS) + 60_000);
 
       // No password exists yet: nothing can sign in as this account.
       expect(await getDb().select().from(localCredentials).where(eq(localCredentials.userId, newUserId))).toEqual([]);
@@ -138,14 +185,122 @@ describe("an administrator creating a local user (ADR-0023 §3)", () => {
       // The list an administrator reads back never carries the URL or the token.
       const list = await call(listUsers, admin, "/api/admin/users");
       const serialisedList = JSON.stringify(list.body);
-      expect(serialisedList).not.toContain(token);
-      expect(serialisedList).not.toContain("setupUrl");
+      expect(serialisedList).not.toContain(created.token);
+      expect(serialisedList).not.toContain("/setup/");
 
       const auditRows = await getDb().select({ action: auditLog.action, changes: auditLog.changes, entityId: auditLog.entityId })
         .from(auditLog).where(eq(auditLog.entityId, newUserId));
-      expect(auditRows.map((row) => row.action).sort()).toEqual(["local_user_created", "setup_link_issued"]);
+      expect(auditRows.map((row) => row.action).sort())
+        .toEqual(["local_user_created", "setup_link_issued", "setup_link_sent"]);
       expect(auditRows.find((row) => row.action === "setup_link_issued")?.changes).toEqual({ userId: newUserId, purpose: "setup" });
-      expect(JSON.stringify(auditRows)).not.toContain(token);
+      expect(JSON.stringify(auditRows)).not.toContain(created.token);
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
+  it("answers the administrator where it went and when it lapses, and never the link itself", async () => {
+    const fixture = await createIntegrationFixture("setup-create-route");
+    try {
+      const admin = await fixture.session("admin");
+      await seedLocalCredential(admin.userId, ADMIN_PASSWORD);
+      const email = `mailed-${fixture.household.id.slice(0, 8)}@example.invalid`;
+
+      const created = await call(createUser, admin, "/api/admin/users", {
+        body: { email, displayName: "Mailed User", currentPassword: ADMIN_PASSWORD },
+      });
+      expect(created.status).toBe(201);
+      expect(Object.keys(created.body).sort()).toEqual(["expiresAt", "sendError", "sentTo", "user"]);
+      expect(created.body.sentTo).toBe(email);
+      expect(JSON.stringify(created.body)).not.toContain("/setup/");
+
+      /* No SMTP is configured for the integration run, so this is also the
+         failed-send case: the account exists, it holds a live link, and the
+         administrator is told one bounded word rather than the provider's. */
+      expect(created.body.sendError).toBe("smtp_unconfigured");
+      const newUserId = (created.body.user as { id: string }).id;
+      const tokens = await getDb().select({ consumedAt: credentialSetupTokens.consumedAt })
+        .from(credentialSetupTokens).where(eq(credentialSetupTokens.userId, newUserId));
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0].consumedAt).toBeNull();
+
+      // ... so the administrator can simply send again, from that user's row.
+      const again = await call(reissueSetupLink, admin, `/api/admin/users/${newUserId}/setup-link`, {
+        params: { userId: newUserId },
+        body: { currentPassword: ADMIN_PASSWORD },
+      });
+      expect(again.status).toBe(200);
+      expect(Object.keys(again.body).sort()).toEqual(["expiresAt", "sendError", "sentTo"]);
+      expect(again.body.sentTo).toBe(email);
+      expect(JSON.stringify(again.body)).not.toContain("/setup/");
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
+  it("takes a lifetime of 1 to 14 whole days and refuses anything else", async () => {
+    const fixture = await createIntegrationFixture("setup-lifetime");
+    try {
+      const admin = await fixture.session("admin");
+      await seedLocalCredential(admin.userId, ADMIN_PASSWORD);
+      const suffix = fixture.household.id.slice(0, 8);
+
+      for (const expiresInDays of [0, SETUP_TOKEN_MAX_DAYS + 1]) {
+        const refused = await call(createUser, admin, "/api/admin/users", {
+          body: {
+            email: `lifetime-${expiresInDays}-${suffix}@example.invalid`,
+            displayName: "Out Of Bounds",
+            expiresInDays,
+            currentPassword: ADMIN_PASSWORD,
+          },
+        });
+        expect(refused.status).toBe(400);
+        expect((refused.body.error as { code: string }).code).toBe("invalid_request");
+      }
+      // Nothing was created by either refusal.
+      const list = await call(listUsers, admin, "/api/admin/users");
+      expect(JSON.stringify(list.body)).not.toContain(`lifetime-0-${suffix}`);
+
+      const issuedAt = Date.now();
+      const chosen = await createUserWithMailedLink(
+        admin.userId,
+        `lifetime-max-${suffix}@example.invalid`,
+        "Fortnight",
+        SETUP_TOKEN_MAX_DAYS,
+      );
+      expect(chosen.expiresAt.getTime()).toBeGreaterThan(issuedAt + (SETUP_TOKEN_MAX_DAYS * DAY_MS) - 60_000);
+      expect(chosen.expiresAt.getTime()).toBeLessThanOrEqual(issuedAt + (SETUP_TOKEN_MAX_DAYS * DAY_MS) + 60_000);
+      expect(chosen.capture.sent[0].text).toContain("Good until");
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
+  it("keeps the user when the mail is rejected, and never repeats the provider's words", async () => {
+    const fixture = await createIntegrationFixture("setup-mail-rejected");
+    try {
+      const admin = await fixture.session("admin");
+      const email = `rejected-${fixture.household.id.slice(0, 8)}@example.invalid`;
+      /* A provider refusal carrying exactly what must never reach a response:
+         the relay host and the credential it refused. */
+      const refusal = Object.assign(new Error("535 5.7.8 relay.example rejected orbit@relay.example"), { code: "EAUTH" });
+
+      const created = await createLocalUserAndSendSetupLink(
+        admin.userId,
+        { email, displayName: "Undeliverable" },
+        { mailer: { async sendEmail() { throw refusal; } } },
+      );
+      expect(created.sendError).toBe("smtp_rejected");
+      expect(JSON.stringify(created)).not.toContain("relay.example");
+
+      // The account and its link survive, so the administrator can send again.
+      const [tokenRow] = await getDb().select({ consumedAt: credentialSetupTokens.consumedAt })
+        .from(credentialSetupTokens).where(eq(credentialSetupTokens.userId, created.user.id));
+      expect(tokenRow.consumedAt).toBeNull();
+      const auditActions = await getDb().select({ action: auditLog.action })
+        .from(auditLog).where(eq(auditLog.entityId, created.user.id));
+      // Issued, but never recorded as sent: nothing claims a mail that failed.
+      expect(auditActions.map((row) => row.action).sort()).toEqual(["local_user_created", "setup_link_issued"]);
     } finally {
       await fixture.cleanup();
     }
@@ -185,11 +340,13 @@ describe("consuming a setup or recovery link (ADR-0023 §3, §7)", () => {
       const admin = await fixture.session("admin");
       await seedLocalCredential(admin.userId, ADMIN_PASSWORD);
 
-      const created = await call(createUser, admin, "/api/admin/users", {
-        body: { email: `consume-${fixture.household.id.slice(0, 8)}@example.invalid`, displayName: "Consumer", currentPassword: ADMIN_PASSWORD },
-      });
-      const newUserId = (created.body.user as { id: string }).id;
-      const token = tokenFromSetupUrl(created.body.setupUrl as string);
+      const created = await createUserWithMailedLink(
+        admin.userId,
+        `consume-${fixture.household.id.slice(0, 8)}@example.invalid`,
+        "Consumer",
+      );
+      const newUserId = created.user.id;
+      const token = created.token;
 
       const consumed = await callSignedOut(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD });
       expect(consumed.status).toBe(200);
@@ -228,18 +385,56 @@ describe("consuming a setup or recovery link (ADR-0023 §3, §7)", () => {
     try {
       const admin = await fixture.session("admin");
       await seedLocalCredential(admin.userId, ADMIN_PASSWORD);
-      const created = await call(createUser, admin, "/api/admin/users", {
-        body: { email: `expired-${fixture.household.id.slice(0, 8)}@example.invalid`, displayName: "Expired", currentPassword: ADMIN_PASSWORD },
-      });
-      const token = tokenFromSetupUrl(created.body.setupUrl as string);
+      const created = await createUserWithMailedLink(
+        admin.userId,
+        `expired-${fixture.household.id.slice(0, 8)}@example.invalid`,
+        "Expired",
+      );
 
       await getDb().update(credentialSetupTokens)
         .set({ expiresAt: new Date(Date.now() - 1000) })
-        .where(eq(credentialSetupTokens.userId, (created.body.user as { id: string }).id));
+        .where(eq(credentialSetupTokens.userId, created.user.id));
 
-      const response = await callSignedOut(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD });
+      const response = await callSignedOut(consumeSetup, "/api/auth/local/setup", { token: created.token, password: NEW_PASSWORD });
       expect(response.status).toBe(400);
       expect((response.body.error as { code: string }).code).toBe("setup_token_invalid");
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
+  it("kills the earlier link when a new one is sent, so only the newest works", async () => {
+    const fixture = await createIntegrationFixture("setup-supersede");
+    try {
+      const admin = await fixture.session("admin");
+      await seedLocalCredential(admin.userId, ADMIN_PASSWORD);
+
+      const created = await createUserWithMailedLink(
+        admin.userId,
+        `superseded-${fixture.household.id.slice(0, 8)}@example.invalid`,
+        "Superseded",
+      );
+
+      const capture = captureMailer();
+      const resent = await sendSetupLink(admin.userId, created.user.id, { mailer: capture.mailer });
+      expect(resent.sendError).toBeNull();
+      expect(resent.sentTo).toBe(created.sentTo);
+      const newToken = capture.lastToken();
+      expect(newToken).not.toBe(created.token);
+
+      /* The account still has no password, so this is a second SETUP link with
+         the same chosen lifetime — not a five-minute recovery one. */
+      const rows = await getDb().select({ purpose: credentialSetupTokens.purpose })
+        .from(credentialSetupTokens).where(eq(credentialSetupTokens.userId, created.user.id));
+      expect(rows.map((row) => row.purpose)).toEqual(["setup", "setup"]);
+
+      const stale = await callSignedOut(consumeSetup, "/api/auth/local/setup", { token: created.token, password: NEW_PASSWORD });
+      expect(stale.status).toBe(400);
+      expect((stale.body.error as { code: string }).code).toBe("setup_token_invalid");
+      expect(await getDb().select().from(localCredentials).where(eq(localCredentials.userId, created.user.id))).toEqual([]);
+
+      const fresh = await callSignedOut(consumeSetup, "/api/auth/local/setup", { token: newToken, password: NEW_PASSWORD });
+      expect(fresh.status).toBe(200);
     } finally {
       await fixture.cleanup();
     }
@@ -264,12 +459,17 @@ describe("re-issuing a link for a local user who forgot their password (ADR-0023
       expect(await sessionCountFor(target.id)).toBe(1);
 
       const issuedAt = Date.now();
-      const reissued = await call(reissueSetupLink, admin, `/api/admin/users/${target.id}/setup-link`, {
-        params: { userId: target.id },
-        body: { currentPassword: ADMIN_PASSWORD },
+      const capture = captureMailer();
+      /* A user who HAS a password is recovering a forgotten one, so this is a
+         `recovery` link at its ratified five minutes — the administrator's
+         chosen lifetime applies to a first password, not to this. */
+      const reissued = await sendSetupLink(admin.userId, target.id, {
+        mailer: capture.mailer,
+        expiresInDays: SETUP_TOKEN_MAX_DAYS,
       });
-      expect(reissued.status).toBe(200);
-      const token = tokenFromSetupUrl(reissued.body.setupUrl as string);
+      expect(reissued.sendError).toBeNull();
+      expect(capture.sent[0].to).toBe(target.email);
+      const token = capture.lastToken();
 
       const [tokenRow] = await getDb().select({ purpose: credentialSetupTokens.purpose, expiresAt: credentialSetupTokens.expiresAt })
         .from(credentialSetupTokens).where(eq(credentialSetupTokens.userId, target.id));
