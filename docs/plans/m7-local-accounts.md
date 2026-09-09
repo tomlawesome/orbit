@@ -128,6 +128,7 @@ gains `INSTANCE_BOOTSTRAP_LOCK_KEY = "orbit:first-administrator"`.
 | `src/lib/auth/oidc.ts` | `createAuthorizationUrl` gains `max_age` when the transaction asks; `validateIdTokenClaims` gains the `auth_time` freshness rule for step-up. Takes `config.oidc`. |
 | `src/lib/auth/recent-auth.ts` (new) | `requireRecentAuthentication(event, session, body)`; seal/open the step-up proof cookie. |
 | `src/server/local-credentials.ts` (new) | Repository: `createLocalUser`, `setPassword`, `verifyCredential` with persisted backoff, `issueSetupToken`, `consumeSetupToken`, `listMethods`, `unlinkLocal`, `unlinkIdentity` (last-usable-method rule under `ACCOUNT_LIFECYCLE_LOCK_KEY`). |
+| `src/server/local-credentials/setup-mail.ts`, `.../mail.ts` (new) | Mailing the setup link (ADR-0023 §3): the link's URL, the mail's words, and the two acts an administrator takes — create-and-send, send-again — each answering `sentTo`, `expiresAt` and a bounded `sendError`. |
 | `src/lib/auth/provision.ts` | Loses the auto-admin line; gains `{ bootstrap }` and the `link_required` collision refusal and the collision-safe email refresh. |
 | `src/lib/auth/errors.ts`, `src/lib/logger.ts`, `src/server/admin-operations.ts` | Closed vocabularies extended exactly as ADR-0023 §8 lists. |
 | `src/cli/orbit.ts` | `auth recovery-link` (ADR-0022 §5). |
@@ -150,8 +151,8 @@ gains `INSTANCE_BOOTSTRAP_LOCK_KEY = "orbit:first-administrator"`.
 | `DELETE /api/auth/methods/local`, `DELETE /api/auth/methods/oidc/[identityId]` | session + CSRF + recent auth | `link_last_method` |
 | `POST /api/auth/link/oidc/start` | session + CSRF + recent auth | 302 to provider |
 | `POST /api/auth/step-up/start` | session + CSRF | 302 to provider with `max_age=0` |
-| `POST /api/admin/users` (new verb on existing file) | admin + CSRF + recent auth | creates local user, returns setup URL once |
-| `POST /api/admin/users/[userId]/setup-link` | admin + CSRF + recent auth | re-issues a `recovery` token, returns URL once |
+| `POST /api/admin/users` (new verb on existing file) | admin + CSRF + recent auth | creates local user, emails the setup link, answers `sentTo`/`expiresAt`/`sendError` and never the URL |
+| `POST /api/admin/users/[userId]/setup-link` | admin + CSRF + recent auth | re-issues and re-sends: `setup` for an account with no password yet, `recovery` for one that has; same answer, still no URL |
 | `POST /api/admin/primary` (existing) | + recent auth | window removed |
 
 ### 2.5 Sessions, CSRF, recent authentication
@@ -445,7 +446,11 @@ Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
   passwords; users set and change passwords; a change signs every other
   device out.
 - **Touches:** `src/server/local-credentials.ts` (`issueSetupToken`,
-  `consumeSetupToken`, `setPassword`), `web/src/routes/api/admin/users/+server.js`
+  `consumeSetupToken`, `setPassword`),
+  `src/server/local-credentials/setup-mail.ts` and
+  `src/server/local-credentials/mail.ts` (the mail and its words, sent
+  through `src/server/invitations/send.ts`'s bounded
+  `sendBoundedMail`), `web/src/routes/api/admin/users/+server.js`
   (POST), `web/src/routes/api/admin/users/[userId]/setup-link/+server.js`,
   `web/src/routes/api/auth/local/setup/+server.js`,
   `web/src/routes/api/auth/local/password/+server.js`, `admin-operations.ts`

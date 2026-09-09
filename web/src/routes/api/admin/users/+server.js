@@ -3,9 +3,8 @@ import { z } from "zod";
 
 import { listInstanceUsers, setInstanceAdministrator, setInstanceUserDisabled } from "orbit/server/admin-repository";
 import { requireInstanceAdministrator } from "orbit/server/authorization";
-import { createLocalUser, issueSetupToken } from "orbit/server/local-credentials";
+import { createLocalUserAndSendSetupLink } from "orbit/server/local-credentials/setup-mail";
 import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
-import { getAuthConfig } from "orbit/lib/env";
 
 import { ADMIN_USERS_FIXTURE } from "$lib/data/fixtures/admin.js";
 import { read, write } from "$lib/server/api.js";
@@ -15,6 +14,12 @@ const disabledUpdateSchema = z.object({ userId: z.uuid(), disabled: z.boolean() 
 const createLocalUserSchema = z.object({
   email: z.string(),
   displayName: z.string(),
+  /**
+   * How many whole days the setup link lives, 1 to 14, default 7 (ADR-0023
+   * §3). The bounds are the engine's, so the refusal is Orbit's own bounded
+   * `invalid_request` wherever the call comes from.
+   */
+  expiresInDays: z.number().optional(),
   /**
    * The acting administrator's own current password (ADR-0023 §5), when they
    * have a local credential; absent for an OIDC-only administrator, who is
@@ -53,28 +58,29 @@ export const PATCH = write(async (event, session) => {
 });
 
 /**
- * Creates a local user with no password (ADR-0023 §3): an administrator
- * names the address and the display name, and the response carries the
- * one-time setup URL the new user opens to choose their own password. The
- * URL is returned exactly once — `GET` never carries it, and neither does
- * any other response — because it is, until consumed, everything needed to
- * sign in as that user.
+ * Creates a local user with no password (ADR-0023 §3): an administrator names
+ * the address, the display name and how long the setup link should live, and
+ * Orbit EMAILS the link to that address.
+ *
+ * No response on any route carries the URL or the token (owner ruling,
+ * 2026-09-09): the administrator learns where it went and when it lapses, so
+ * a link cannot be handed on to anybody but the person it is for. A mail that
+ * did not go is reported as one bounded word in `sendError` — the account
+ * exists either way, and the administrator sends again from its row.
  */
 export const POST = write(async (event, session) => {
   await requireInstanceAdministrator(session.user.id);
   const submitted = createLocalUserSchema.parse(await event.request.json());
   await requireRecentAuthentication(event, session, submitted, "local_user_create");
 
-  const user = await createLocalUser(
+  const { user, sentTo, expiresAt, sendError } = await createLocalUserAndSendSetupLink(
+    session.user.id,
     { email: submitted.email, displayName: submitted.displayName },
-    { createdByUserId: session.user.id },
+    { expiresInDays: submitted.expiresInDays },
   );
-  const config = getAuthConfig();
-  const { token } = await issueSetupToken(user.id, "setup", { createdByUserId: session.user.id });
-  const setupUrl = new URL(`/setup/${token}`, config.appUrl).toString();
 
   return json(
-    { user, setupUrl },
+    { user, sentTo, expiresAt: expiresAt.toISOString(), sendError },
     { status: 201, headers: { "cache-control": "no-store" } },
   );
 });
