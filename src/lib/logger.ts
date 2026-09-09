@@ -101,6 +101,13 @@ export const operationalReasons = [
      than we support", which have different remedies. */
   "database_mismatch",
   "database_below_floor",
+  /* The claim (ADR-0022, ADR-0023 §8). `bootstrap_unclaimed` is the state an
+     instance boots into before anyone has claimed it; `bootstrap_rejected` is
+     a claim attempt that did not match. Neither record ever carries the code
+     itself — the notice is printed outside this protocol on purpose, and is
+     the only place in Orbit that prints a secret. */
+  "bootstrap_unclaimed",
+  "bootstrap_rejected",
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
 

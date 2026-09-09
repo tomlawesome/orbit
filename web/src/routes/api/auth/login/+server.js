@@ -1,3 +1,4 @@
+import { hasClaimProof, isClaimed } from "orbit/lib/auth/bootstrap";
 import { AuthError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
 import { setTransactionCookie } from "orbit/lib/auth/cookies";
@@ -27,6 +28,16 @@ export const GET = api(
     if (!config.oidc) {
       throw new AuthError("auth_not_configured", "OpenID Connect sign-in is not configured on this instance", 503);
     }
+    /* While the instance is unclaimed the provider is unreachable without the
+       claim cookie (ADR-0022 §2): the first sign-in is what creates the first
+       administrator, so anyone who can start it can seize the instance. The
+       claim travels on into the sealed transaction, which is how the callback
+       learns it from a value the browser cannot forge. */
+    const claimed = await isClaimed();
+    if (!claimed && !(await hasClaimProof(event.cookies, config))) {
+      throw new AuthError("bootstrap_required", "This Orbit instance has not been claimed yet", 403);
+    }
+
     const metadata = await discoverProvider(config.oidc);
 
     /* State, nonce and verifier are generated per attempt and sealed into the
@@ -37,6 +48,7 @@ export const GET = api(
       nonce: randomUrlSafe(),
       codeVerifier: randomUrlSafe(),
       returnTo: safeReturnPath(event.url.searchParams.get("returnTo")),
+      ...(claimed ? {} : { bootstrap: true }),
     };
     const sealedTransaction = await sealLoginTransaction(transaction, config);
 

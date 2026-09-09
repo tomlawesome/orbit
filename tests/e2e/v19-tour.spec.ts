@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
+import { claimInstanceAsAdministrator } from "./support/bootstrap";
 
 /**
  * #754/#477: THE FIRST-RUN WALK, END TO END. The five journeys of slice 4,
@@ -323,6 +324,15 @@ test.describe("the first-run walk", () => {
   test.beforeEach(() => {
     test.skip(test.info().project.name.startsWith("mobile"), "the journeys are asserted on the desk dialect");
     test.setTimeout(180_000);
+  });
+
+  /* The reader here is the administrator, and since ADR-0022 no sign-in
+     promotes anybody: the instance is claimed with the code from its own log
+     first, or every journey below meets `bootstrap_required` at the door.
+     Idempotent, so it costs one availability read on an already-claimed
+     stack. */
+  test.beforeAll(async ({ browser }) => {
+    await claimInstanceAsAdministrator(browser);
   });
 
   /* #730: the skies these journeys walk do not outlive the file. The sweep
