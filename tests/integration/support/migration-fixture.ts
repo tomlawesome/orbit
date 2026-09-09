@@ -92,6 +92,8 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   mail_in_relays: ["user_id", "current_generation", "previous_generation", "previous_expires_at", "ingest_paused_at", "rotated_at", "version", "created_at", "updated_at"],
   mail_in_sender_addresses: ["id", "user_id", "address", "source", "verified_at", "verification_token_digest", "verification_expires_at", "created_at", "updated_at"],
   mail_in_unattributed_replies: ["address_sha256", "last_replied_at", "created_at", "updated_at"],
+  local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "created_at", "updated_at"],
+  credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -171,6 +173,11 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   section_household_slug: { table: "sections", columns: ["household_id", "slug"], unique: true },
   sessions_token_hash_unique: { table: "sessions", columns: ["token_hash"], unique: true },
   user_email_lookup_idx: { table: "users", columns: ["email"], unique: false },
+  credential_setup_tokens_user_idx: { table: "credential_setup_tokens", columns: ["user_id"], unique: false },
+  // user_email_unique_ci is a functional index (lower(email)): PostgreSQL
+  // records its indkey as 0 for the expression column, which readSchemaContract's
+  // introspection join over pg_attribute cannot resolve, so it never appears
+  // in this contract. Its behaviour is asserted directly in migrations.test.ts.
 };
 
 type ExpectedConstraint = {
@@ -305,6 +312,12 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   /* Truncated to 63 characters by PostgreSQL's identifier limit, exactly as
      the migration writes it. */
   imap_recipient_aliases_alias_key_secret_id_mail_in_secrets_id_f: foreign("imap_recipient_aliases", ["alias_key_secret_id"], "mail_in_secrets", ["id"], "set_null"),
+  local_credentials_pkey: primary("local_credentials", ["user_id"]),
+  local_credentials_user_id_users_id_fk: foreign("local_credentials", ["user_id"], "users", ["id"], "cascade"),
+  credential_setup_tokens_pkey: primary("credential_setup_tokens", ["id"]),
+  credential_setup_tokens_token_hash_unique: unique("credential_setup_tokens", ["token_hash"]),
+  credential_setup_tokens_user_id_users_id_fk: foreign("credential_setup_tokens", ["user_id"], "users", ["id"], "cascade"),
+  credential_setup_tokens_created_by_users_id_fk: foreign("credential_setup_tokens", ["created_by_user_id"], "users", ["id"], "set_null"),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;

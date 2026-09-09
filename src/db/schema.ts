@@ -81,7 +81,13 @@ export const users = pgTable("users", {
   isInstanceAdmin: boolean("is_instance_admin").notNull().default(false),
   disabledAt: timestamp("disabled_at", { withTimezone: true }),
   ...auditColumns,
-}, (table) => [index("user_email_lookup_idx").on(table.email)]);
+}, (table) => [
+  index("user_email_lookup_idx").on(table.email),
+  // Case-insensitive: sign-in and provisioning treat email as the same
+  // identity regardless of case (ADR-0023 §2). There are no existing rows,
+  // so this ships as a plain index rather than a migration risk.
+  uniqueIndex("user_email_unique_ci").on(sql`lower(${table.email})`),
+]);
 
 export const userPreferences = pgTable("user_preferences", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
@@ -267,6 +273,47 @@ export const sessions = pgTable("sessions", {
   userAgent: text("user_agent"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
 });
+
+/**
+ * A user's local password credential (ADR-0021, ADR-0023 §2): at most one
+ * per user, an optional 1:1 child of `users`. `failedAttemptCount` and
+ * `lockedUntil` are the persisted sign-in backoff (5 free attempts, then
+ * doubling up to a 15 minute ceiling); `lastVerifiedAt` is the last
+ * successful verification; `passwordChangedAt` is distinct from the row's
+ * own audit `updatedAt` because a rehash on login touches the hash without
+ * the password changing.
+ */
+export const localCredentials = pgTable("local_credentials", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  passwordHash: text("password_hash").notNull(),
+  failedAttemptCount: integer("failed_attempt_count").notNull().default(0),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+  passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }).notNull().defaultNow(),
+  ...auditColumns,
+});
+
+/**
+ * A one-use token for setting or resetting a local password (ADR-0023 §2):
+ * `purpose` is `setup` (an administrator-created user's first password) or
+ * `recovery` (a forgotten one, including the primary administrator's CLI
+ * path, ADR-0022 §5). `tokenHash` is the sha256 digest of a 32-byte token;
+ * the token itself is never stored. `createdByUserId` is null when the CLI
+ * issued it.
+ */
+export const credentialSetupTokens = pgTable("credential_setup_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  purpose: text("purpose").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("credential_setup_tokens_user_idx").on(table.userId),
+  check("credential_setup_tokens_purpose", sql`${table.purpose} IN ('setup','recovery')`),
+]);
 
 export const households = pgTable("households", {
   id: uuid("id").primaryKey().defaultRandom(),
