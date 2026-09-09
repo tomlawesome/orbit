@@ -10,12 +10,17 @@ import { proposalFromText } from "./suggestions";
 // The floor is a ratchet: raise it when extraction durably improves; never
 // lower it to make a change pass.
 
-// Measured 1.00 (32/32) on 2026-08-13 after the corpus-driven reference
-// fix. The floor sits below the measurement so that ADDING harder corpus
+// Measured 1.00 (78/78) on 2026-09-09, after the extractor learned the
+// harder corpus: hyphenated, year-first and two-digit-year numeric dates,
+// "the 1st of October", references carrying spaces and slashes, providers
+// named in prose or on the letterhead, and firmware versions refused as
+// dates. The floor sits below the measurement so that ADDING harder corpus
 // documents is always welcome: a hard new document may land red-margin
 // against perfection but must never take the whole measure below this
-// floor without an accompanying, recorded floor decision.
-const ACCURACY_FLOOR = 0.9;
+// floor without an accompanying, recorded floor decision. Raised 0.9 -> 0.95
+// with that measurement; 0.95 still leaves about four points of the current
+// 78 free for the next batch of hard documents.
+const ACCURACY_FLOOR = 0.95;
 
 interface Score {
   earned: number;
