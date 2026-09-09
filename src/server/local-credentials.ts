@@ -28,7 +28,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -393,19 +393,53 @@ export type CredentialSetupTokenPurpose = "setup" | "recovery";
 export const RECOVERY_TOKEN_TTL_MS = 5 * 60 * 1000;
 
 /**
- * Neither ADR-0022 nor ADR-0023 states a lifetime for a `setup` token (an
- * administrator-created user's first link, handed to its recipient
- * out-of-band rather than opened "instantly" by the administrator
- * themselves) — only `recovery`'s five minutes is ratified. This reuses that
- * same ratified figure rather than inventing an unrelated number; it is
- * flagged as an open question in the slice 8 delivery report and should be
- * revisited once the owner rules on it.
+ * A `setup` link's lifetime is the administrator's to choose: whole days, 1
+ * to 14, defaulting to 7 (owner ruling 2026-09-09, ADR-0023 §3). It is a
+ * different question from `recovery`'s five minutes because it is a
+ * different journey — the administrator opens a recovery link's story
+ * instantly with the person in front of them, while a setup link is emailed
+ * to somebody who may not read their mail today.
  */
-export const SETUP_TOKEN_TTL_MS = RECOVERY_TOKEN_TTL_MS;
+export const SETUP_TOKEN_MIN_DAYS = 1;
+export const SETUP_TOKEN_MAX_DAYS = 14;
+export const SETUP_TOKEN_DEFAULT_DAYS = 7;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface IssueSetupTokenOptions {
   /** The administrator who issued it; omitted (null) when the CLI did (#912). */
   createdByUserId?: string | null;
+  /**
+   * Whole days a `setup` link lives for, 1 to 14 (default 7). Ignored for
+   * `recovery`, whose five minutes is ratified and not an administrator's to
+   * lengthen.
+   */
+  expiresInDays?: number;
+}
+
+/**
+ * Refuses a lifetime outside 1 to 14 whole days.
+ *
+ * Exported because a caller that creates an account before issuing its link
+ * must be able to refuse the request BEFORE the account exists: an
+ * administrator who mistypes the number gets a refusal, not a spare user.
+ */
+export function assertSetupTokenLifetime(expiresInDays?: number): void {
+  const days = expiresInDays ?? SETUP_TOKEN_DEFAULT_DAYS;
+  if (!Number.isInteger(days) || days < SETUP_TOKEN_MIN_DAYS || days > SETUP_TOKEN_MAX_DAYS) {
+    throw new AuthError(
+      "invalid_request",
+      `Choose how long the setup link lasts: ${SETUP_TOKEN_MIN_DAYS} to ${SETUP_TOKEN_MAX_DAYS} whole days`,
+      400,
+    );
+  }
+}
+
+/** How long a link of this purpose lasts, with the choice validated here. */
+function setupTokenTtlMs(purpose: CredentialSetupTokenPurpose, expiresInDays?: number): number {
+  if (purpose === "recovery") return RECOVERY_TOKEN_TTL_MS;
+  assertSetupTokenLifetime(expiresInDays);
+  return (expiresInDays ?? SETUP_TOKEN_DEFAULT_DAYS) * DAY_MS;
 }
 
 /**
@@ -414,6 +448,13 @@ export interface IssueSetupTokenOptions {
  * returned once and is not retrievable afterwards — only its digest is
  * stored, so a caller that fails to hand it to its recipient has lost it for
  * good, exactly like an invitation.
+ *
+ * Issuing invalidates every earlier unspent link this user holds, whatever
+ * its purpose (ADR-0023 §3: "sends a new one ... which invalidates any
+ * earlier link"). They are invalidated by expiring them — `expires_at` moved
+ * to now — rather than by marking them consumed, because `consumed_at` means
+ * somebody redeemed the link, and a table that cannot tell a spent link from
+ * a superseded one is a table that cannot answer whether a link was used.
  */
 export async function issueSetupToken(
   userId: string,
@@ -422,13 +463,22 @@ export async function issueSetupToken(
 ): Promise<{ token: string; expiresAt: Date }> {
   const token = createSetupToken();
   const tokenHash = setupTokenDigest(token);
-  const ttlMs = purpose === "recovery" ? RECOVERY_TOKEN_TTL_MS : SETUP_TOKEN_TTL_MS;
-  const expiresAt = new Date(Date.now() + ttlMs);
+  const expiresAt = new Date(Date.now() + setupTokenTtlMs(purpose, options.expiresInDays));
   const createdByUserId = options.createdByUserId ?? null;
 
   await getDb().transaction(async (transaction) => {
     const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
     if (!target) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
+
+    const supersededAt = new Date();
+    await transaction
+      .update(credentialSetupTokens)
+      .set({ expiresAt: supersededAt })
+      .where(and(
+        eq(credentialSetupTokens.userId, userId),
+        isNull(credentialSetupTokens.consumedAt),
+        gt(credentialSetupTokens.expiresAt, supersededAt),
+      ));
 
     await transaction.insert(credentialSetupTokens).values({
       userId,
