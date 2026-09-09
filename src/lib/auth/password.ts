@@ -13,14 +13,36 @@
 // should start to.
 
 import { randomBytes } from "node:crypto";
-import { hash, parseOptions, verify } from "@node-rs/argon2";
 import type { Algorithm, Options } from "@node-rs/argon2";
 import { verificationGate } from "@/lib/auth/verification-gate";
 
 // The package's `Algorithm` is an ambient const enum, which this project's
 // `isolatedModules` forbids reading at runtime. 2 is `Algorithm.Argon2id` in
-// its own index.d.ts, and `parseOptions` reports the same numbering back.
+// its own index.d.ts, and the PHC header this module writes and reads back
+// (see `readPhcHeader` below) reports the same numbering.
 const ARGON2ID = 2 as Algorithm;
+
+/*
+ * `@node-rs/argon2` is loaded lazily, not at module import time (#912,
+ * ADR-0015 decision 3). The CLI bundle (`scripts/bundle-orbit-cli.mjs`)
+ * reaches this module through `local-credentials.ts`'s `issueSetupToken`,
+ * which `orbit auth recovery-link` calls — and that path never hashes or
+ * verifies a password. Importing this module used to run the package's own
+ * top-level native-binding `require()` regardless, which esbuild cannot
+ * inline (it is a compiled `.node` file) and which the shipped CLI has no
+ * node_modules to resolve at runtime either way (only `hashPassword`,
+ * `verifyPassword` and `decoyHash` actually touch the binding, and each
+ * loads it through `loadArgon2` below on first real use, cached for the rest
+ * of the process). `scripts/bundle-orbit-cli.mjs` marks the package external
+ * for the same reason: bundled or not, nothing here forces it to load.
+ */
+type Argon2Module = typeof import("@node-rs/argon2");
+let argon2Module: Promise<Argon2Module> | undefined;
+
+function loadArgon2(): Promise<Argon2Module> {
+  argon2Module ??= import("@node-rs/argon2");
+  return argon2Module;
+}
 
 /**
  * The current hashing policy (ADR-0021 §2): RFC 9106's memory-constrained
@@ -107,7 +129,36 @@ export async function hashPassword(password: string): Promise<string> {
   const rejection = checkPasswordBounds(password);
   if (rejection) throw new PasswordRejectedError(rejection);
   const normalized = normalizePassword(password);
+  const { hash } = await loadArgon2();
   return verificationGate.run(() => hash(normalized, PASSWORD_POLICY));
+}
+
+/** The PHC string's own header: `$argon2<variant>$v=<version>$m=<n>,t=<n>,p=<n>$...`. */
+const PHC_HEADER_PATTERN = /^\$argon2(id|i|d)\$v=\d+\$m=(\d+),t=(\d+),p=(\d+)\$/u;
+
+const PHC_ALGORITHM_BY_VARIANT = { d: 0, i: 1, id: 2 } as Record<"d" | "i" | "id", Algorithm>;
+
+/**
+ * Reads just the four PHC-header fields `needsRehash` compares against the
+ * policy, by matching the header text directly rather than through
+ * `@node-rs/argon2`'s own `parseOptions` (#912): `needsRehash` is called
+ * synchronously from `verifyPassword` and its result is asserted
+ * synchronously in `password.test.ts`, so it cannot become an async
+ * `loadArgon2` caller without changing its exported signature — and it does
+ * not need to, since every field it reads is already plain text in the
+ * stored string. Returns null for anything that does not match, exactly the
+ * cases a caught `parseOptions` throw used to cover.
+ */
+function readPhcHeader(storedHash: string): { algorithm: Algorithm; memoryCost: number; timeCost: number; parallelism: number } | null {
+  const match = PHC_HEADER_PATTERN.exec(storedHash);
+  if (!match) return null;
+  const [, variant, memoryCost, timeCost, parallelism] = match;
+  return {
+    algorithm: PHC_ALGORITHM_BY_VARIANT[variant as "d" | "i" | "id"],
+    memoryCost: Number(memoryCost),
+    timeCost: Number(timeCost),
+    parallelism: Number(parallelism),
+  };
 }
 
 /**
@@ -118,12 +169,8 @@ export async function hashPassword(password: string): Promise<string> {
  * verified anyway, and re-hashing is the safe answer.
  */
 export function needsRehash(storedHash: string): boolean {
-  let parsed;
-  try {
-    parsed = parseOptions(storedHash);
-  } catch {
-    return true;
-  }
+  const parsed = readPhcHeader(storedHash);
+  if (!parsed) return true;
   return parsed.algorithm !== PASSWORD_POLICY.algorithm
     || parsed.memoryCost < PASSWORD_POLICY.memoryCost
     || parsed.timeCost < PASSWORD_POLICY.timeCost
@@ -145,6 +192,7 @@ export async function verifyPassword(storedHash: string, password: string): Prom
     return { verified: false, needsRehash: false };
   }
   const normalized = normalizePassword(password);
+  const { verify } = await loadArgon2();
   const verified = await verificationGate.run(async () => {
     try {
       return await verify(storedHash, normalized, PASSWORD_POLICY);
@@ -176,7 +224,10 @@ export function decoyHash(): Promise<string> {
      `too_many_attempts` while a known one answered `credentials_invalid`,
      which is exactly the oracle §5 exists to close. Clearing the slot lets
      the next caller make the decoy properly. */
-  decoy ??= verificationGate.run(() => hash(randomBytes(32), PASSWORD_POLICY)).catch((error: unknown) => {
+  decoy ??= (async () => {
+    const { hash } = await loadArgon2();
+    return verificationGate.run(() => hash(randomBytes(32), PASSWORD_POLICY));
+  })().catch((error: unknown) => {
     decoy = null;
     throw error;
   });

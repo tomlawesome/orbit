@@ -90,6 +90,9 @@ const actionLabels: Record<string, string> = {
   identity_linked: "Sign-in provider linked",
   identity_unlinked: "Sign-in provider unlinked",
   password_removed: "Password removed",
+  // M7 slice 9 (#912, ADR-0022 §5): the primary-administrator recovery CLI's
+  // own audit record, alongside `issueSetupToken`'s `setup_link_issued`.
+  recovery_link_issued: "Recovery link issued",
 };
 
 /** Maps persisted actions to a bounded administrator-facing label. */
