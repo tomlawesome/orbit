@@ -9,12 +9,22 @@ body{background:#060a18}
 /* corona layers — every group breathes on its own period, nothing in sync */
 .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes cbreathe{from{opacity:.66}to{opacity:1}}
-.streamers-a{transform-origin:800px 440px;animation:sway-a 26s ease-in-out infinite alternate;mix-blend-mode:screen}
+/* #902: the three swaying layers are now rasters, so `transform-box` is
+   spelled out rather than left to the default the way `.flare` below always
+   spelled it out. 800px 440px means the middle of the eclipse in viewBox
+   units — the reference box has to be the viewBox for that to hold, and an
+   <image> has a different bounding box from the <g> it replaced. Every
+   current browser already defaults to view-box, so nothing moves today; the
+   line is here so nothing can move later either. */
+.streamers-a{transform-origin:800px 440px;transform-box:view-box;
+             animation:sway-a 26s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes sway-a{from{transform:rotate(-3.4deg) scale(1)}to{transform:rotate(3.8deg) scale(1.035)}}
-.streamers-b{transform-origin:800px 440px;animation:sway-b 39s ease-in-out infinite alternate;mix-blend-mode:screen}
+.streamers-b{transform-origin:800px 440px;transform-box:view-box;
+             animation:sway-b 39s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes sway-b{from{transform:rotate(3deg) scale(1.03)}to{transform:rotate(-2.8deg) scale(1)}}
 .streamers-b{animation-delay:-13s}
-.filaments{transform-origin:800px 440px;animation:sway-c 31s ease-in-out infinite alternate;mix-blend-mode:screen}
+.filaments{transform-origin:800px 440px;transform-box:view-box;
+           animation:sway-c 31s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes sway-c{from{transform:rotate(2deg);opacity:.6}to{transform:rotate(-2.6deg);opacity:1}}
 .prom{animation:flicker 7s ease-in-out infinite alternate}
 .prom.p2{animation-duration:9.5s;animation-delay:-3s}
