@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
-import { ensureLocalPassword } from "./support/local-credentials";
+import { FIXTURE_PASSWORD, ensureLocalPassword } from "./support/local-credentials";
 import {
   auditLightDismiss,
   auditTabOrder,
@@ -529,11 +529,12 @@ test("sign out: the two-tap control ends the session by keyboard alone", async (
  * Both need a reader who HAS a password, because that is who is challenged
  * with a field; an account with only a provider identity is challenged at
  * the provider instead, which is a navigation and a different journey (it is
- * walked in sign-in-methods.spec.ts). `ensureLocalPassword` is idempotent, so
- * a retried file meets the state the first attempt did.
+ * walked in sign-in-methods.spec.ts). `ensureLocalPassword` is idempotent
+ * while every file sends the same password (see FIXTURE_PASSWORD), so a
+ * retried file meets the state the first attempt did.
  * ──────────────────────────────────────────────────────────────────────── */
 
-const KEYBOARD_PASSWORD = "keyboard-fixture-915";
+const KEYBOARD_PASSWORD = FIXTURE_PASSWORD[READER];
 
 test("settings: the sign-in-methods challenge arms by keyboard and is reachable", async ({ page }) => {
   test.setTimeout(90_000);

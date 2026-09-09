@@ -2,6 +2,19 @@ import { expect, type Page } from "@playwright/test";
 import { sessionHeaders } from "./households";
 
 /**
+ * THE ONE PASSWORD an account ever gets from a spec. Once an account holds a
+ * password, `requireRecentAuthentication` (src/lib/auth/recent-auth.ts)
+ * challenges with that password and nothing else -- a step-up proof no longer
+ * answers -- so `ensureLocalPassword` is idempotent only while every caller
+ * sends the same value. Two files giving "Orbit Administrator" different
+ * passwords is a 403 for whichever runs second (pipeline 822, smoke).
+ */
+export const FIXTURE_PASSWORD = {
+  "Orbit Administrator": "e2e-administrator-fixture-915",
+  "Orbit Outsider": "e2e-outsider-fixture-915",
+} as const;
+
+/**
  * Giving the signed-in reader a password, through the API, because no screen
  * can yet do it for them (#915, ADR-0023 §5).
  *

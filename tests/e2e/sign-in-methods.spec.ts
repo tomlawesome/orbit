@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
-import { ensureLocalPassword } from "./support/local-credentials";
+import { FIXTURE_PASSWORD, ensureLocalPassword } from "./support/local-credentials";
 
 /**
  * #915: the two screens M7 gave sign-in methods to, driven the way a reader
@@ -35,7 +35,11 @@ import { ensureLocalPassword } from "./support/local-credentials";
  * retried file starts where the first attempt did.
  */
 
-const PASSWORD = `helm-fixture-${Date.now()}`;
+/* Fixed, not per-run: the accounts keep their password across files and
+   across runs on a kept stack, and only the current one answers a challenge
+   (FIXTURE_PASSWORD). The administrator's is shared with v19-keyboard.spec.ts. */
+const PASSWORD = FIXTURE_PASSWORD["Orbit Outsider"];
+const ADMINISTRATOR_PASSWORD = FIXTURE_PASSWORD["Orbit Administrator"];
 const NEW_PASSWORD = `helm-changed-${Date.now()}`;
 /* One address per run: the account outlives the test (there is no
    remove-a-user route, and disabling is the strongest thing an administrator
@@ -199,7 +203,7 @@ test("an administrator adds a local user and is told where the link went", async
   await openSettings(page);
   /* An administrator who can answer the inline challenge. Without a password
      of their own the challenge is a step-up, which is a journey of its own. */
-  await ensureLocalPassword(page, "Orbit Administrator", PASSWORD);
+  await ensureLocalPassword(page, "Orbit Administrator", ADMINISTRATOR_PASSWORD);
 
   await page.goto("/administration");
   await expect(page.locator(".card").first()).toBeVisible({ timeout: 30_000 });
@@ -213,7 +217,7 @@ test("an administrator adds a local user and is told where the link went", async
   /* Create arms the challenge rather than creating anything. */
   await row.getByRole("button", { name: "create", exact: true }).click();
   await expect(row.getByLabel("your current password")).toBeVisible();
-  await row.getByLabel("your current password").fill(PASSWORD);
+  await row.getByLabel("your current password").fill(ADMINISTRATOR_PASSWORD);
   await row.getByRole("button", { name: "create and send the link" }).click();
 
   /* WHERE IT WENT AND WHEN IT LAPSES — never the link itself (owner ruling,
@@ -234,7 +238,7 @@ test("an administrator sends a new setup link from somebody's row", async ({ pag
 
   await signInAs(page, "Orbit Administrator");
   await openSettings(page);
-  await ensureLocalPassword(page, "Orbit Administrator", PASSWORD);
+  await ensureLocalPassword(page, "Orbit Administrator", ADMINISTRATOR_PASSWORD);
 
   await page.goto("/administration");
   const person = page.locator(".person", { hasText: "Orbit Member" }).first();
@@ -244,7 +248,7 @@ test("an administrator sends a new setup link from somebody's row", async ({ pag
   const resend = page.locator("form.localuser.resend");
   await expect(resend).toBeVisible();
   await resend.getByLabel("link valid for").fill("14");
-  await resend.getByLabel("your current password").fill(PASSWORD);
+  await resend.getByLabel("your current password").fill(ADMINISTRATOR_PASSWORD);
   await resend.getByRole("button", { name: "send it" }).click();
 
   await expect(page.locator(".adminproblem.ok")).toContainText("Setup link sent to");
