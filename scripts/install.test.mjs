@@ -1170,7 +1170,7 @@ describe("install.sh", () => {
         { after: "Choose a deployment profile", input: "3\n" },
         { after: "Bounded local model identifier:", input: `${model}\n` },
         { after: "Prepare the selected local model after Ollama becomes healthy?", input: "2\n" },
-        { after: "Review: OIDC remains required", input: "1\n" },
+        { after: "Review: profile only", input: "1\n" },
         { after: "CONFIGURE_INVOKED ORBIT_IMAGE=\r", input: "full-secret\n" },
         { after: "Final review: apply the collected core settings", input: "1\n" },
       ],
