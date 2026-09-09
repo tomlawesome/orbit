@@ -5,6 +5,11 @@ services:
   orbit-app:
     environment:
       APP_URL: http://127.0.0.1:3000
+      # ADR-0023 §1: OIDC is opt-in, so the provider fields below do nothing
+      # until the mode is named. Without this the whole browser suite runs
+      # against a local-only instance and every provider sign-in fails with
+      # `auth_not_configured` (M7 slice 12's door spec found it).
+      ORBIT_AUTH_OIDC: "true"
       OIDC_ISSUER: https://orbit-oidc:4443/
       OIDC_CLIENT_ID: orbit-browser-tests
       OIDC_CLIENT_SECRET: orbit-browser-tests-only-secret
