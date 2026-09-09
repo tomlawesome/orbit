@@ -17,11 +17,13 @@ const mocks = vi.hoisted(() => ({
   getAuthConfig: vi.fn(),
   readPublicContactAddress: vi.fn(),
   getBootPhase: vi.fn(),
+  hasAnyLocalCredential: vi.fn(),
 }));
 
 vi.mock("orbit/lib/env", () => ({ getAuthConfig: mocks.getAuthConfig }));
 vi.mock("orbit/server/instance-contact", () => ({ readPublicContactAddress: mocks.readPublicContactAddress }));
 vi.mock("orbit/server/boot", () => ({ getBootPhase: mocks.getBootPhase }));
+vi.mock("orbit/server/local-credentials", () => ({ hasAnyLocalCredential: mocks.hasAnyLocalCredential }));
 
 describe("GET /api/auth/availability", () => {
   beforeEach(() => {
@@ -29,6 +31,8 @@ describe("GET /api/auth/availability", () => {
     mocks.getAuthConfig.mockReset();
     mocks.readPublicContactAddress.mockReset();
     mocks.getBootPhase.mockReset();
+    mocks.hasAnyLocalCredential.mockReset();
+    mocks.hasAnyLocalCredential.mockResolvedValue(false);
     mocks.getAuthConfig.mockReturnValue({ oidc: null });
     mocks.readPublicContactAddress.mockResolvedValue(null);
   });
@@ -69,7 +73,7 @@ describe("GET /api/auth/availability", () => {
     expect(body).toEqual({
       configured: false,
       claimed: true,
-      methods: { local: true, oidc: false },
+      methods: { local: true, oidc: false, localAccounts: false },
       phase: "running",
       contactAddress: "ops@example.com",
     });
@@ -83,7 +87,18 @@ describe("GET /api/auth/availability", () => {
     const response = await GET();
     const body = await response.json();
 
-    expect(body.methods).toEqual({ local: true, oidc: true });
+    expect(body.methods).toEqual({ local: true, oidc: true, localAccounts: false });
     expect(body.claimed).toBe(true);
+  });
+
+  it("reports methods.localAccounts from hasAnyLocalCredential, and false when that read fails (M7 slice 12)", async () => {
+    mocks.getBootPhase.mockReturnValue("running");
+    mocks.hasAnyLocalCredential.mockResolvedValue(true);
+
+    const { GET } = await import("../../web/src/routes/api/auth/availability/+server.js");
+    expect((await (await GET()).json()).methods.localAccounts).toBe(true);
+
+    mocks.hasAnyLocalCredential.mockRejectedValue(new Error("database away"));
+    expect((await (await GET()).json()).methods.localAccounts).toBe(false);
   });
 });

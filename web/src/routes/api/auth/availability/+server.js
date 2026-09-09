@@ -4,6 +4,7 @@ import { isClaimed } from "orbit/lib/auth/bootstrap";
 import { getAuthConfig } from "orbit/lib/env";
 import { getBootPhase } from "orbit/server/boot";
 import { readPublicContactAddress } from "orbit/server/instance-contact";
+import { hasAnyLocalCredential } from "orbit/server/local-credentials";
 
 /**
  * Whether the signed-out sign-in door may offer to sign in, and where to say
@@ -35,7 +36,12 @@ import { readPublicContactAddress } from "orbit/server/instance-contact";
  * `methods` (M7, ADR-0023 §1) says which sign-in methods this instance can
  * offer at all: `local` is always true (local sign-in is the baseline),
  * `oidc` is true only when `ORBIT_AUTH_OIDC=true` and fully configured. It
- * says nothing about whether any account actually uses either method.
+ * says nothing about whether any account actually uses either method —
+ * except `localAccounts` (plan §2.7), the one fact the mixed-mode door needs:
+ * whether any account has a password, so the "local login" line under the
+ * gate appears only when it can lead somewhere. A boolean over the whole
+ * table, never keyed by anything the visitor sent; false on a failed read,
+ * so a hiccup hides a line rather than inventing one.
  *
  * `claimed` (M7, ADR-0022) says whether the instance already has a primary
  * administrator: false is what puts the claim card in front of an anonymous
@@ -60,6 +66,12 @@ export async function GET() {
   } catch {
     claimed = true;
   }
+  let localAccounts = false;
+  try {
+    localAccounts = await hasAnyLocalCredential();
+  } catch {
+    localAccounts = false;
+  }
   let contactAddress = null;
   try {
     contactAddress = await readPublicContactAddress();
@@ -73,7 +85,7 @@ export async function GET() {
     {
       configured,
       claimed,
-      methods: { local: true, oidc: oidcMethodAvailable },
+      methods: { local: true, oidc: oidcMethodAvailable, localAccounts },
       phase,
       contactAddress,
     },
