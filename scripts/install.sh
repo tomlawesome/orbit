@@ -739,7 +739,7 @@ choose_deployment_profile() {
 
   printf '\nProfiles keep data inside the private Compose network. Resource classes are fixed relative labels: standard, medium, and high; they are not hardware guarantees.\n' >&"$terminal_fd"
   printf 'Required Orbit core and private scanning stay enabled; document processing and local AI are optional services.\n' >&"$terminal_fd"
-  printf 'OIDC is the only supported authentication path today; these choices do not add local-only sign-in.\n' >&"$terminal_fd"
+  printf 'Sign-in is chosen separately: local accounts always work, and an identity provider (OIDC) is optional (configure.sh --init).\n' >&"$terminal_fd"
   printf 'Ollama is optional local infrastructure and is not yet consumed by Orbit product workflows.\n\n' >&"$terminal_fd"
   choice="$(installer_ui_select "$terminal_fd" \
     'Choose a deployment profile' standard \
@@ -795,7 +795,7 @@ choose_deployment_profile() {
   fi
 
   choice="$(installer_ui_select "$terminal_fd" \
-    'Review: OIDC remains required; discovery does not prove client authentication or a completed sign-in.' apply \
+    'Review: profile only; sign-in mode is unchanged, and provider discovery (when OIDC is on) does not prove client authentication or a completed sign-in.' apply \
     apply "Continue with the selected ${selected_profile} profile" \
     cancel 'Cancel without changing files or services')" || status=$?
   [[ "$status" == 0 ]] || return "$status"
@@ -917,9 +917,9 @@ missing_configuration_fields() {
 print_noninteractive_configuration_guidance() {
   local missing="$1"
   printf 'Orbit installer: configuration fields requiring attention: %s.\n' "$missing" >&2
-  printf 'Orbit installer: non-interactive use requires a complete .env-orbit and an existing owner-only .orbit-secrets/oidc-client-secret file.\n' >&2
+  printf 'Orbit installer: non-interactive use requires a complete .env-orbit and, when ORBIT_AUTH_OIDC=true, an existing owner-only .orbit-secrets/oidc-client-secret file.\n' >&2
   printf 'Orbit installer: safe next command in a controlling terminal: curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash\n' >&2
-  printf 'Orbit installer: configure with --init, provide the secret with --set-oidc-secret, then verify with --check before rerunning automation.\n' >&2
+  printf 'Orbit installer: configure with --init, provide the secret with --set-oidc-secret if OIDC is on, then verify with --check before rerunning automation.\n' >&2
 }
 
 verify_oidc_discovery() {
@@ -983,7 +983,7 @@ verify_oidc_discovery() {
 }
 
 prepare_configuration() {
-  local readiness readiness_status missing guided_missing
+  local readiness readiness_status missing guided_missing existing_auth_mode configure_auth_mode
 
   installer_ui_phase=configuration
   installer_ui_component=configuration

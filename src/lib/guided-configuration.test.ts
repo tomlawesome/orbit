@@ -115,9 +115,9 @@ describe("noninteractiveConfigurationGuidance (install.sh:879-885, guarantee #24
   it("matches install.sh's exact remediation lines, space-joining missing fields", () => {
     expect(noninteractiveConfigurationGuidance(["APP_URL", "OIDC_CLIENT_SECRET"])).toEqual([
       "Orbit installer: configuration fields requiring attention: APP_URL OIDC_CLIENT_SECRET.",
-      "Orbit installer: non-interactive use requires a complete .env-orbit and an existing owner-only .orbit-secrets/oidc-client-secret file.",
+      "Orbit installer: non-interactive use requires a complete .env-orbit and, when ORBIT_AUTH_OIDC=true, an existing owner-only .orbit-secrets/oidc-client-secret file.",
       "Orbit installer: safe next command in a controlling terminal: curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash",
-      "Orbit installer: configure with --init, provide the secret with --set-oidc-secret, then verify with --check before rerunning automation.",
+      "Orbit installer: configure with --init, provide the secret with --set-oidc-secret if OIDC is on, then verify with --check before rerunning automation.",
     ]);
   });
 });
