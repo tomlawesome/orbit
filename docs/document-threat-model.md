@@ -425,6 +425,62 @@ create an item or transfer a staged attachment through the secure document
 lifecycle. Quarantined and failed views expose technical classifications and
 opaque identifiers only.
 
-Inline previews, OCR, model-dependent semantic extraction, public sharing, S3
-storage, archive uploads, and automatic duplicate merging remain deferred.
-Each must extend this threat model before implementation.
+Inline previews, OCR, public sharing, S3 storage, archive uploads, and
+automatic duplicate merging remain deferred. Each must extend this threat
+model before implementation. Model-dependent semantic extraction is no longer
+deferred as a design: its boundary is recorded below.
+
+## Local model extraction boundary
+
+[ADR-0025](adr/0025-local-model-extraction.md) sections 1-3 decide this
+boundary; the client that implements it is
+`src/server/documents/model-extraction.ts`.
+
+Document text goes to one destination and no other. The endpoint is the
+compile-time constant `http://orbit-ollama:11434`: Orbit has no base-URL,
+host, port, proxy or API-key setting for it, so no deployment, environment
+variable or administrator can point document text at a different host. The
+only knob is the model name, and the Compose `ai` profile that supplies the
+service. Reaching anywhere else needs a code change to that constant, which
+needs an ADR superseding ADR-0025. Confining `orbit-ollama` to the egress-free
+processing network that already holds Tika and ClamAV is the matching
+structural control and is tracked separately.
+
+Each document produces exactly one request, for exactly one JSON object, and
+every axis of it is bounded by a constant in code: a fixed input character
+budget over the same normalised text any other untrusted evidence gets,
+schema-constrained decoding so the reply cannot be prose, temperature 0, a
+fixed seed, a generation-token cap, a response-size cap checked before parsing,
+and a wall-clock deadline. A reply that is late, oversized, refused, malformed
+or absent is discarded whole - no partial salvage, no repair prompt, no retry -
+and the upload keeps the heuristic proposal alone. The failure is a log record
+in the existing fixed vocabulary; no model output, and no caught error text,
+ever reaches a log.
+
+The system prompt tells the model that the document is untrusted data to be
+read rather than obeyed, but the prompt is not the control. Two things are.
+First, grounding: every value must arrive with a verbatim evidence span, and a
+value is dropped unless that span occurs in the normalised document text and
+itself carries the value. Numeric values must additionally show their digits in
+the span, and a cost is proposed only when its span carries an explicit
+currency symbol or code. Second, the surviving values pass
+`safeStoredDocumentProposal` exactly as a heuristic or stored proposal does, so
+normalisation, length caps, markup rejection and the fresh-object rebuild that
+discards unknown keys all apply unchanged.
+
+Closed vocabularies do the rest. The model labels dates with a role from a
+fixed list and never emits a schedule kind; the application derives that.
+Unknown roles are dropped, and a recurrence with no scheduled date to repeat is
+dropped with it.
+
+The blast radius is therefore the same one a hostile document already has over
+the heuristics: it can influence which candidate suggestions a reviewer is
+shown, and it can waste one bounded inference. It cannot cause a write, reach
+another household, address a tool, or send anything outward. Review-first
+ingestion ([ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md)) is
+unchanged - a model suggestion is still only a suggestion a person accepts.
+
+Still to come, and out of this boundary until they land: the network move and
+the deliberate model pull, wiring the model path in as the default where the
+profile is present, showing extractor disagreement to the reviewer, and
+reporting model availability to the administrator.
