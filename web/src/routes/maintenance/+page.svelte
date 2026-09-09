@@ -332,7 +332,7 @@
          before the next, so the page keeps painting through the build. The
          hrefs are then landed together in one tick, so the corona arrives as
          one picture rather than layer by layer. */
-      /** @type {[string, string][]} */
+      /** @type {[string, string, HTMLImageElement][]} */
       const built = [];
       for (const [name, { crop, defs, body }] of Object.entries(GROUPS)) {
         const f = frameOf(crop, scale);
@@ -341,7 +341,18 @@
           `viewBox="${f.x} ${f.y} ${f.w} ${f.h}"><defs>${defs}</defs>${body}</svg>`;
         const url = await rasteriseSvg(`maintenance-${name}|${f.pw}|${f.ph}`, svg, f.pw, f.ph);
         if (stale()) return;
-        built.push([name, url]);
+        /* Setting an href is not showing the picture: the PNG behind it is
+           decoded asynchronously, and thirteen set in one tick still paint
+           one by one as each decode finishes (seen on an iPhone, #902).
+           Decoding each here, while it is still this raster's own task,
+           puts the bitmap in the image cache before the landing tick, so
+           the hrefs below paint together. The element is kept so the cache
+           cannot drop the bitmap between now and then. */
+        const warm = new Image();
+        warm.src = url;
+        await warm.decode().catch(() => {});
+        if (stale()) return;
+        built.push([name, url, warm]);
         await breathe();
         if (stale()) return;
       }
