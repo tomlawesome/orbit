@@ -1,8 +1,8 @@
 # ADR-0024: Tier 1 metadata encrypts under one per-household DEK beneath the existing KEK, with a derived per-household blind index
 
-**Status:** Proposed (for owner ratification; drafted 2026-09-09 under the
+**Status:** Accepted (owner, 2026-09-09). Drafted 2026-09-09 under the
 owner's tiering decision of 2026-08-13 on #365, "Tiered application-layer
-encryption for household metadata")
+encryption for household metadata".
 **Date:** 2026-09-09
 **Relates to:** #365 (the epic; tiers and threat model are decided there and
 not reopened here); #928 (this design slice); ADR-0017 (the rewrap contract
