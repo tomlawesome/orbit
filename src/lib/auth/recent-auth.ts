@@ -21,13 +21,15 @@
  * it works offline, and it does not depend on the provider being reachable.
  *
  * Everything fails closed. No password, a wrong password, no proof, an expired
- * proof, a proof sealed for another session or another action: one answer,
- * `recent_authentication_required`, and the action does not happen.
+ * proof, a proof sealed for another session or another action, a proof already
+ * spent: one answer, `recent_authentication_required`, and the action does not
+ * happen.
  */
 
-import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { externalIdentities, localCredentials, sessions } from "@/db/schema";
+import { externalIdentities, localCredentials, sessions, stepUpProofs } from "@/db/schema";
 import { openProof, sealProof } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
@@ -118,17 +120,38 @@ export function stepUpProofCookieName(config: AuthConfig): string {
   return config.secureCookies ? "__Secure-orbit-step-up" : "orbit-step-up";
 }
 
+/** A `jti` Orbit minted: anything else never reaches the uuid column. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
 /**
  * Mints the proof the callback hands back to the browser. It carries no
- * secret: only the session it belongs to, the action it was earned for, and
- * its own two-minute expiry.
+ * secret: only the session it belongs to, the action it was earned for, its
+ * own two-minute expiry, and a fresh `jti` naming the one row that lets it be
+ * spent (ADR-0023 §5, owner ruling 2026-09-09).
+ *
+ * Sealing and recording are one step on purpose. A proof that opened but had
+ * no row would be refused, so a value that never reached the table is not a
+ * usable proof; there is nothing to leave half-minted.
+ *
+ * Every insert first deletes proofs whose life has run out, which is the whole
+ * of the cleanup story: at two minutes each, the table holds only what is
+ * still live and never needs a sweeper of its own.
  */
 export async function sealStepUpProof(
   sessionId: string,
   intent: StepUpIntent,
   config: AuthConfig,
 ): Promise<string> {
-  return sealProof({ sessionId, intent }, STEP_UP_PROOF_AUDIENCE, STEP_UP_PROOF_TTL_SECONDS, config);
+  const jti = randomUUID();
+  const db = getDb();
+  await db.delete(stepUpProofs).where(lt(stepUpProofs.expiresAt, sql`now()`));
+  await db.insert(stepUpProofs).values({
+    id: jti,
+    sessionId,
+    intent,
+    expiresAt: new Date(Date.now() + STEP_UP_PROOF_TTL_SECONDS * 1000),
+  });
+  return sealProof({ sessionId, intent, jti }, STEP_UP_PROOF_AUDIENCE, STEP_UP_PROOF_TTL_SECONDS, config);
 }
 
 export function setStepUpProofCookie(cookies: CookieSink, value: string, config: AuthConfig): void {
@@ -247,11 +270,10 @@ async function verifyStepUpProof(
   config: AuthConfig,
 ): Promise<RecentAuthentication> {
   const value = event.cookies.get(stepUpProofCookieName(config));
-  /* Consumed on sight, whatever it turns out to be: the browser gets one
-     action per step-up, and a refused proof is not left lying around to be
-     retried against a different one. The cookie is HTTP-only and expires in
-     two minutes, so clearing it is what "consumed" means here — Orbit keeps no
-     server-side record of which proofs have been spent. */
+  /* Cleared on sight, whatever it turns out to be: the browser gets one action
+     per step-up, and a refused proof is not left lying around to be retried
+     against a different one. Clearing the cookie is only half of it — see the
+     spend below, which is what stops a copied cookie value. */
   clearStepUpProofCookie(event.cookies, config);
   if (!value) throw unproven();
 
@@ -262,6 +284,32 @@ async function verifyStepUpProof(
     // Expired, forged, or sealed for another audience: all the same answer.
     throw unproven();
   }
+
+  /* Spend the proof (ADR-0023 §5, owner ruling 2026-09-09). Clearing the
+     cookie only disarms the browser that presented it; anyone who copied the
+     value could replay it for the rest of its two minutes. So the proof is
+     also one row, and this single UPDATE is the whole of the check: it matches
+     only a proof that exists, is still live and has not already been spent, so
+     the second attempt updates nothing and is refused. The database decides,
+     which is what makes two simultaneous requests safe — exactly one of them
+     can win the row.
+
+     This runs before the action, and must keep running before it: spending
+     afterwards would leave the replay window open for as long as the action
+     takes. */
+  const jti = payload.jti;
+  if (typeof jti !== "string" || !UUID_PATTERN.test(jti)) throw unproven();
+  const spent = await getDb()
+    .update(stepUpProofs)
+    .set({ consumedAt: sql`now()` })
+    .where(and(
+      eq(stepUpProofs.id, jti),
+      isNull(stepUpProofs.consumedAt),
+      gt(stepUpProofs.expiresAt, sql`now()`),
+    ))
+    .returning({ id: stepUpProofs.id });
+  if (spent.length === 0) throw unproven();
+
   if (payload.sessionId !== session.id || payload.intent !== intent) throw unproven();
   return { userId: session.user.id, intent, method: "step_up" };
 }

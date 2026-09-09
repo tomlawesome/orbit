@@ -315,6 +315,35 @@ export const credentialSetupTokens = pgTable("credential_setup_tokens", {
   check("credential_setup_tokens_purpose", sql`${table.purpose} IN ('setup','recovery')`),
 ]);
 
+/**
+ * One row per OIDC step-up proof, so a proof can be spent once and only once
+ * (ADR-0023 §5, owner ruling 2026-09-09).
+ *
+ * The sealed cookie already binds a proof to a session, an action and a two
+ * minute expiry, but clearing the cookie only stops the browser that holds it:
+ * anyone who copied the cookie value could present it again inside those two
+ * minutes. `id` is the `jti` sealed inside the proof, and the guard spends it
+ * with a single conditional UPDATE, so the second attempt finds nothing to
+ * update and is refused.
+ *
+ * The cascade on `sessionId` is what makes revocation reach these rows:
+ * signing a session out deletes the `sessions` row, and any proof earned by
+ * that session has to die with it rather than outlive the session it proves.
+ *
+ * Rows are swept on insert, so the table holds only live proofs and never
+ * needs a background job.
+ */
+export const stepUpProofs = pgTable("step_up_proofs", {
+  id: uuid("id").primaryKey(),
+  sessionId: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
+  intent: text("intent").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("step_up_proofs_session_idx").on(table.sessionId),
+]);
+
 export const households = pgTable("households", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
