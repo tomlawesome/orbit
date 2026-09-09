@@ -108,6 +108,12 @@ export const operationalReasons = [
      the only place in Orbit that prints a secret. */
   "bootstrap_unclaimed",
   "bootstrap_rejected",
+  /* Local sign-in (ADR-0023 §8). `credentials_rejected` is a password that did
+     not match — or an address that has no account, which is deliberately the
+     same record; `attempts_exhausted` is the verification gate turning a
+     caller away. Neither ever carries the address, the password or a count. */
+  "credentials_rejected",
+  "attempts_exhausted",
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
 
@@ -185,6 +191,11 @@ export const operationalEvents = {
   "database.migration": "migrations",
   "auth.configuration": "authentication",
   "auth.provider": "authentication",
+  /* Local sign-in (M7). Neither of the two authentication events above fits a
+     password attempt — nothing about the configuration changed and no provider
+     was involved — and an operator reading the log should be able to tell the
+     three apart at a glance. */
+  "auth.local": "authentication",
   "notification.worker": "notification",
   "document.worker": "document",
   "document.job": "document",

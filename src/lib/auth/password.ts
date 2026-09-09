@@ -170,7 +170,16 @@ let decoy: Promise<string> | null = null;
  * this at boot moves its one-off cost off the first sign-in.
  */
 export function decoyHash(): Promise<string> {
-  decoy ??= verificationGate.run(() => hash(randomBytes(32), PASSWORD_POLICY));
+  /* A refusal must not be memoised. `??=` keeps whatever promise it assigned,
+     so a gate refusal on the first-ever decoy would stay cached for the life
+     of the process: every sign-in naming an unknown address would answer
+     `too_many_attempts` while a known one answered `credentials_invalid`,
+     which is exactly the oracle §5 exists to close. Clearing the slot lets
+     the next caller make the decoy properly. */
+  decoy ??= verificationGate.run(() => hash(randomBytes(32), PASSWORD_POLICY)).catch((error: unknown) => {
+    decoy = null;
+    throw error;
+  });
   return decoy;
 }
 
