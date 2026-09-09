@@ -12,7 +12,7 @@ body{background:#060a18}
 .tw{animation:twinkle 5s ease-in-out infinite alternate}
 @keyframes twinkle{from{opacity:.2}to{opacity:.85}}
 .glints .glint{opacity:0;transform-box:fill-box;transform-origin:center;animation:glint 6s ease-in-out infinite}
-@keyframes glint{0%,60%{opacity:0;transform:scale(.6)}66%{opacity:1;transform:scale(1)}76%{opacity:.7}82%{opacity:.9}100%{opacity:0;transform:scale(.8)}}
+@keyframes glint{0%,64%{opacity:0;transform:scale(.6)}70%{opacity:.85;transform:scale(1)}78%{opacity:.6}84%{opacity:.75}100%{opacity:0;transform:scale(.8)}}
 
 /* corona layers — every group breathes on its own period, nothing in sync */
 .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
@@ -386,7 +386,7 @@ while (made < 26) {
     const n = 3 + Math.floor(rng2() * 4), period = 5 + rng2() * 4, start = -rng2() * period;
     for (let i = 0; i < n; i++) {
       const a = centre + (rng2() - 0.5) * span, x = 800 + R * Math.cos(a), y = 440 + R * Math.sin(a);
-      const size = 0.6 + rng2() * 1.1;
+      const size = 0.55 + rng2() * 0.95;
       const at = document.createElementNS(NS, "g");
       at.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${(a * 180 / Math.PI + 90).toFixed(1)}) scale(${size.toFixed(2)})`);
       const g = document.createElementNS(NS, "g"); g.setAttribute("class", "glint");

@@ -17,12 +17,12 @@ body{background:#060a18}
 
 /* Baily's beads on the limb: each bead flares up fast and dies slowly on its
    string's period, offset a little from its neighbours (both set per bead by
-   sky.js), lit for about a third of the cycle, so a run of beads lights and
+   sky.js), lit for about a quarter of the cycle, so a run of beads lights and
    goes out one by one somewhere on the ring, never the same place twice */
 .glints .glint{opacity:0;transform-box:fill-box;transform-origin:center;
           animation:glint 6s ease-in-out infinite}
-@keyframes glint{0%,60%{opacity:0;transform:scale(.6)}66%{opacity:1;transform:scale(1)}
-                 76%{opacity:.7}82%{opacity:.9}100%{opacity:0;transform:scale(.8)}}
+@keyframes glint{0%,64%{opacity:0;transform:scale(.6)}70%{opacity:.85;transform:scale(1)}
+                 78%{opacity:.6}84%{opacity:.75}100%{opacity:0;transform:scale(.8)}}
 
 /* corona layers — every group breathes on its own period, nothing in sync */
 .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
