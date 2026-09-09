@@ -93,9 +93,12 @@ issuer="https://oidc.acceptance.invalid/application/o/orbit/"
 # debris behind.
 target="$workdir/$project_name"
 # Slice 4 (#907): the local-only run (local_only_scenario) gets its own
-# target directory and its own Compose project name -- reusing $project_name
-# would collide with the primary deployment's still-running containers,
-# network and named volumes.
+# target directory and its own Compose project name, so the sweep can tell
+# the two deployments' debris apart. It still cannot run while the primary
+# deployment's database volume exists: install.sh #13/#21 refuse a fresh
+# install whenever any `*orbit-db-data` volume is on the host, whatever
+# project owns it (the lifecycle run asserts exactly that), so the primary
+# deployment is taken down, volumes included, before the local-only install.
 local_only_target="$workdir/local-only-deploy"
 local_only_project_name="${project_name}-local"
 
@@ -543,13 +546,15 @@ positive_scenario() {
 
 # Slice 4 (#907): a fresh, local-only, no-OIDC install (docs/plans/
 # m7-local-accounts.md "Slice 4" done-when). Reuses the image
-# positive_scenario already built/pushed to the local registry -- no second
-# build. Runs against its own target directory and Compose project name
-# (test-install-acceptance.sh's own header comment on $local_only_target),
-# so it can run alongside, not instead of, the primary OIDC-configured
-# deployment.
+# positive_scenario already built/pushed to the local registry (a plain
+# `docker run` container, untouched by the Compose teardown below) -- no
+# second build. Runs after, not alongside, the primary OIDC-configured
+# deployment: see the header comment on $local_only_target.
 local_only_scenario() {
   local first_target="$target" claim_lines=""
+
+  (cd "$first_target" && docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) ||
+    fail "could not take the primary deployment down before the local-only install"
 
   write_shim
   target="$local_only_target"
