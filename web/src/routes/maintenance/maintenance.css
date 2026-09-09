@@ -32,10 +32,10 @@ body{background:#060a18}
    line is here so nothing can move later either. */
 .streamers-a{transform-origin:800px 440px;transform-box:view-box;
              animation:sway-a 26s ease-in-out infinite alternate;mix-blend-mode:screen}
-@keyframes sway-a{from{transform:rotate(-3.4deg) scale(1)}to{transform:rotate(3.8deg) scale(1.035)}}
+@keyframes sway-a{from{transform:rotate(-3.4deg) scale(1);opacity:.62}to{transform:rotate(3.8deg) scale(1.035);opacity:1}}
 .streamers-b{transform-origin:800px 440px;transform-box:view-box;
              animation:sway-b 39s ease-in-out infinite alternate;mix-blend-mode:screen}
-@keyframes sway-b{from{transform:rotate(3deg) scale(1.03)}to{transform:rotate(-2.8deg) scale(1)}}
+@keyframes sway-b{from{transform:rotate(3deg) scale(1.03);opacity:.8}to{transform:rotate(-2.8deg) scale(1);opacity:.45}}
 .streamers-b{animation-delay:-13s}
 .filaments{transform-origin:800px 440px;transform-box:view-box;
            animation:sway-c 31s ease-in-out infinite alternate;mix-blend-mode:screen}
@@ -53,6 +53,12 @@ body{background:#060a18}
    appear in the same frame (the page script flips `ready`). visibility, not
    opacity, because the flicker/sway keyframes above own opacity. */
 .world[data-rasterised="pending"] image[data-r]{visibility:hidden}
+/* The corona's rasters take a second or two to build, so they land after
+   the moon, the ring and the words. The two `.lands` groups fade up over
+   that landing instead of popping (owner, 2026-09-09). The fade is on the
+   group, not the images, because the images' own keyframes own opacity. */
+.lands{transition:opacity 1.6s ease-out}
+.world[data-rasterised="pending"] .lands{opacity:0}
 
 /* the diamond ring — service returning; demo loops every 36s */
 .flare{opacity:0;animation:ringflash 36s linear infinite}

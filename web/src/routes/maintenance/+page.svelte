@@ -483,6 +483,7 @@
   <!-- streamers: pulled long at the equator, brushed short at the poles.
        One raster each, because sway-a and sway-b run different periods and
        ranges — the rotation and the screen blend ride the <image>. -->
+  <g class="lands">
   <image class="streamers-a" data-r="streamersA" preserveAspectRatio="none"/>
   <image class="streamers-b" data-r="streamersB" opacity=".8" preserveAspectRatio="none"/>
 
@@ -500,14 +501,17 @@
   <image class="prom p2" data-r="prom4" opacity=".6" preserveAspectRatio="none"/>
   <image class="prom p3" data-r="prom5" preserveAspectRatio="none"/>
   <image class="prom"    data-r="prom6" opacity=".5" preserveAspectRatio="none"/>
+  </g>
 
   <!-- the moon: black, with the faintest earthshine mottle -->
   <circle cx="800" cy="440" r="170" fill="url(#moonshade)"/>
 
   <!-- chromosphere + photon ring. The two blurred rings are rasters; the
        crisp 1.2-wide ring has no filter, so it stays a live circle. -->
+  <g class="lands">
   <image data-r="chromo" opacity=".22" preserveAspectRatio="none"/>
   <image class="ring-inner" data-r="ringInner" opacity=".8" preserveAspectRatio="none"/>
+  </g>
   <circle cx="800" cy="440" r="170" fill="none" stroke="#fffdf6" stroke-width="1.2" opacity=".95"/>
   <!-- the shimmer on the limb: filled by sky.js, no filter (owner, 2026-09-09) -->
   <g id="shimmer" class="shimmer" fill="none" stroke="#fffdf6" stroke-linecap="round"></g>
