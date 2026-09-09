@@ -21,20 +21,27 @@
  * Password plaintext is never logged, audited, returned or stored; only the
  * PHC string `src/lib/auth/password.ts` produces reaches the table.
  *
- * Later M7 slices add `setPassword`, `issueSetupToken`, `consumeSetupToken`,
- * `listMethods` and the unlink pair here (the plan's module map). Keep the
- * exported surface to what a route actually calls.
+ * This slice (#911) adds `issueSetupToken`, `consumeSetupToken` and
+ * `setPassword`. A later M7 slice (#913) adds `listMethods` and the unlink
+ * pair here (the plan's module map). Keep the exported surface to what a
+ * route actually calls.
  */
 
+import { createHash, randomBytes } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
+import { base64url } from "jose";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, instanceAuthority, localCredentials, userPreferences, users } from "@/db/schema";
+import { auditLog, credentialSetupTokens, instanceAuthority, localCredentials, sessions, userPreferences, users } from "@/db/schema";
+import { AppError } from "@/lib/app-error";
 import { INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { AuthError } from "@/lib/auth/errors";
 import { hashPassword, verifyAgainstDecoy, verifyPassword } from "@/lib/auth/password";
 import { VerificationGateRefusedError } from "@/lib/auth/verification-gate";
 import { log } from "@/lib/logger";
+
+/** The executor a caller already holds a transaction on, or `getDb()` itself. */
+type Executor = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 
 /** Failures allowed before a credential starts locking (ADR-0023 §4). */
 export const LOCAL_SIGN_IN_FREE_ATTEMPTS = 5;
@@ -87,6 +94,13 @@ export interface CreateLocalUserOptions {
    * its primary administrator, atomically, under the bootstrap lock.
    */
   bootstrap?: boolean;
+  /**
+   * The administrator who created this user from the administration screen
+   * (ADR-0023 §3). Ignored when `bootstrap` is true — the claim has no actor
+   * but itself. Present, this writes the `local_user_created` audit record
+   * in the same transaction as the insert.
+   */
+  createdByUserId?: string;
 }
 
 const emailSchema = z.email().max(MAX_EMAIL_LENGTH);
@@ -172,6 +186,15 @@ export async function createLocalUser(
         entityId: created.id,
         action: "instance_claimed",
         changes: { method: "local" },
+      });
+    } else if (options.createdByUserId) {
+      await transaction.insert(auditLog).values({
+        householdId: null,
+        actorUserId: options.createdByUserId,
+        entityType: "user",
+        entityId: created.id,
+        action: "local_user_created",
+        changes: { userId: created.id },
       });
     }
 
@@ -322,5 +345,238 @@ function rejected(): void {
     reason: "credentials_rejected",
     action: "none",
     impact: "sign_in_blocked",
+  });
+}
+
+/*
+ * Setup and recovery tokens (ADR-0022 §5, ADR-0023 §2–§3): a one-use link
+ * that lets someone who cannot yet sign in choose a password. `purpose`
+ * `setup` is an administrator-created user's first password; `recovery` is a
+ * forgotten one, re-issued by an administrator or minted by the CLI for the
+ * primary administrator (#912). The token itself exists in exactly two
+ * places — the URL handed to whoever is meant to open it, and never Orbit's
+ * own storage — copying the shape of `src/server/invitations/token.ts`: 32
+ * random bytes, base64url so it survives a URL and a copy-paste, sha256 at
+ * rest.
+ */
+
+/** Same strength as an invitation token, and for the same reason. */
+const SETUP_TOKEN_BYTES = 32;
+
+function createSetupToken(): string {
+  return base64url.encode(randomBytes(SETUP_TOKEN_BYTES));
+}
+
+function setupTokenDigest(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+export type CredentialSetupTokenPurpose = "setup" | "recovery";
+
+/**
+ * ADR-0022 §5: the owner's ruling — "an administrator doing this should be
+ * doing it instantly" — five minutes, for a `recovery` token however it is
+ * issued (the CLI, or an administrator re-issuing one for someone else).
+ */
+export const RECOVERY_TOKEN_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Neither ADR-0022 nor ADR-0023 states a lifetime for a `setup` token (an
+ * administrator-created user's first link, handed to its recipient
+ * out-of-band rather than opened "instantly" by the administrator
+ * themselves) — only `recovery`'s five minutes is ratified. This reuses that
+ * same ratified figure rather than inventing an unrelated number; it is
+ * flagged as an open question in the slice 8 delivery report and should be
+ * revisited once the owner rules on it.
+ */
+export const SETUP_TOKEN_TTL_MS = RECOVERY_TOKEN_TTL_MS;
+
+export interface IssueSetupTokenOptions {
+  /** The administrator who issued it; omitted (null) when the CLI did (#912). */
+  createdByUserId?: string | null;
+}
+
+/**
+ * Mints a one-use setup or recovery link for `userId` and records
+ * `setup_link_issued` in the same transaction (ADR-0023 §8). The token is
+ * returned once and is not retrievable afterwards — only its digest is
+ * stored, so a caller that fails to hand it to its recipient has lost it for
+ * good, exactly like an invitation.
+ */
+export async function issueSetupToken(
+  userId: string,
+  purpose: CredentialSetupTokenPurpose,
+  options: IssueSetupTokenOptions = {},
+): Promise<{ token: string; expiresAt: Date }> {
+  const token = createSetupToken();
+  const tokenHash = setupTokenDigest(token);
+  const ttlMs = purpose === "recovery" ? RECOVERY_TOKEN_TTL_MS : SETUP_TOKEN_TTL_MS;
+  const expiresAt = new Date(Date.now() + ttlMs);
+  const createdByUserId = options.createdByUserId ?? null;
+
+  await getDb().transaction(async (transaction) => {
+    const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
+    if (!target) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
+
+    await transaction.insert(credentialSetupTokens).values({
+      userId,
+      tokenHash,
+      purpose,
+      expiresAt,
+      createdByUserId,
+    });
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId: createdByUserId,
+      entityType: "user",
+      entityId: userId,
+      action: "setup_link_issued",
+      changes: { userId, purpose },
+    });
+  });
+
+  return { token, expiresAt };
+}
+
+/** Sets `userId`'s password hash inside whatever transaction the caller holds. */
+async function writePasswordHash(
+  executor: Executor,
+  userId: string,
+  passwordHash: string,
+): Promise<{ replaced: boolean }> {
+  const [existing] = await executor
+    .select({ userId: localCredentials.userId })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .limit(1);
+
+  if (existing) {
+    await executor
+      .update(localCredentials)
+      .set({
+        passwordHash,
+        failedAttemptCount: 0,
+        lockedUntil: null,
+        passwordChangedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(localCredentials.userId, userId));
+  } else {
+    await executor.insert(localCredentials).values({ userId, passwordHash });
+  }
+
+  return { replaced: Boolean(existing) };
+}
+
+export interface PasswordChangeOutcome {
+  /** False for a first password (ADR-0023 §6); true for a replacement. */
+  replaced: boolean;
+  /** Only non-zero when `replaced` is true (ADR-0023 §7). */
+  sessionsRevoked: number;
+}
+
+/**
+ * The one place ADR-0023 §7's rule lives: setting a first password revokes
+ * nothing, but replacing one revokes every session that account held —
+ * including, when this runs for a signed-in caller, the one making the
+ * request — and records `password_set` or `password_changed` with it, all
+ * inside `executor`'s transaction. A caller that needs the browser signed
+ * back in (a password change) or in for the first time (a setup token) mints
+ * a fresh session afterwards; nothing here does that, because only the route
+ * knows whether there is a browser to hand a cookie to.
+ */
+async function applyPasswordChange(
+  executor: Executor,
+  userId: string,
+  passwordHash: string,
+  actorUserId: string,
+): Promise<PasswordChangeOutcome> {
+  const { replaced } = await writePasswordHash(executor, userId, passwordHash);
+  let sessionsRevoked = 0;
+  if (replaced) {
+    const removed = await executor.delete(sessions).where(eq(sessions.userId, userId)).returning({ id: sessions.id });
+    sessionsRevoked = removed.length;
+  }
+  await executor.insert(auditLog).values({
+    householdId: null,
+    actorUserId,
+    entityType: "user",
+    entityId: userId,
+    action: replaced ? "password_changed" : "password_set",
+    changes: replaced ? { sessionsRevoked } : {},
+  });
+  return { replaced, sessionsRevoked };
+}
+
+/**
+ * Sets a signed-in user's own password: the first one (an OIDC-only account
+ * adding local sign-in) or a replacement (ADR-0023 §6). The caller is
+ * responsible for the recent-authentication challenge before calling this —
+ * see the `currentPassword` check in `web/src/routes/api/auth/local/password/+server.js`
+ * — and, when `replaced` comes back true, for re-issuing its own session.
+ */
+export async function setPassword(userId: string, passwordHash: string, actorUserId: string): Promise<PasswordChangeOutcome> {
+  return getDb().transaction((transaction) => applyPasswordChange(transaction, userId, passwordHash, actorUserId));
+}
+
+/** True when `userId` already has a password to challenge for recent authentication (ADR-0023 §5). */
+export async function hasLocalCredential(userId: string): Promise<boolean> {
+  const [existing] = await getDb()
+    .select({ userId: localCredentials.userId })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .limit(1);
+  return Boolean(existing);
+}
+
+export interface ConsumedSetupToken extends PasswordChangeOutcome {
+  userId: string;
+  purpose: CredentialSetupTokenPurpose;
+}
+
+/**
+ * Spends a setup or recovery token: verified, locked and consumed, and the
+ * password set, in one transaction — `SELECT ... FOR UPDATE` on the token row
+ * serialises two concurrent redemptions rather than racing them, so the
+ * loser sees the row already consumed instead of setting a password nobody
+ * will use. An unknown, already-consumed or expired token is the one
+ * generic `setup_token_invalid`, exactly as an unrecognised invitation link
+ * answers one generic state. The actor of the resulting `password_set` /
+ * `password_changed` record is the token's own owner: whoever redeemed it is
+ * choosing their own password, administrator-issued link or not.
+ */
+export async function consumeSetupToken(token: string, passwordHash: string): Promise<ConsumedSetupToken> {
+  const tokenHash = setupTokenDigest(token);
+
+  return getDb().transaction(async (transaction) => {
+    const [row] = await transaction
+      .select({
+        id: credentialSetupTokens.id,
+        userId: credentialSetupTokens.userId,
+        purpose: credentialSetupTokens.purpose,
+        expiresAt: credentialSetupTokens.expiresAt,
+        consumedAt: credentialSetupTokens.consumedAt,
+      })
+      .from(credentialSetupTokens)
+      .where(eq(credentialSetupTokens.tokenHash, tokenHash))
+      .for("update")
+      .limit(1);
+
+    if (!row || row.consumedAt || row.expiresAt.getTime() <= Date.now()) {
+      throw new AuthError("setup_token_invalid", "This setup link is no longer valid", 400);
+    }
+
+    await transaction
+      .update(credentialSetupTokens)
+      .set({ consumedAt: new Date() })
+      .where(eq(credentialSetupTokens.id, row.id));
+
+    const outcome = await applyPasswordChange(transaction, row.userId, passwordHash, row.userId);
+
+    return {
+      userId: row.userId,
+      purpose: row.purpose as CredentialSetupTokenPurpose,
+      ...outcome,
+    };
   });
 }

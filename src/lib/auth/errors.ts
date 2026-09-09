@@ -26,6 +26,9 @@ export type AuthErrorCode =
   | "credentials_invalid"
   | "too_many_attempts"
   | "password_rejected"
+  /* Setup tokens (ADR-0022 §5, ADR-0023 §3). An unknown, already-consumed or
+     expired setup/recovery token is the one generic `setup_token_invalid`. */
+  | "setup_token_invalid"
   /* Recent authentication (ADR-0023 §5, §8). `recent_authentication_required`
      is every way a sensitive action can arrive unproven — no password, a wrong
      one, no step-up proof, or a proof sealed for another session or another

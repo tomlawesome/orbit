@@ -53,6 +53,10 @@ const EXPECTED_ROUTES = [
   "/api/admin/operations/smtp-test",
   "/api/admin/primary",
   "/api/admin/users",
+  // Admin-issued setup and recovery links (M7 slice 8, #911, ADR-0023 §3):
+  // re-issues a `recovery` token for a local user who has forgotten their
+  // password; the initial link comes back from the plain POST above.
+  "/api/admin/users/[userId]/setup-link",
   "/api/auth/availability",
   // The claim (M7, ADR-0022 §2): signed out by design, and called by the
   // door and by the e2e claim helper, never by the identity provider.
@@ -63,6 +67,12 @@ const EXPECTED_ROUTES = [
   "/api/auth/callback",
   // Local sign-in (M7, ADR-0023 §4): signed out by design, called by the door.
   "/api/auth/local/login",
+  // Sets or changes the signed-in caller's own password (M7 slice 8, #911,
+  // ADR-0023 §6-§7): a session route, guarded by `write()`.
+  "/api/auth/local/password",
+  // Spends a setup or recovery link and signs its owner in (M7 slice 8,
+  // #911, ADR-0023 §3): signed out by design, called by `/setup/<token>`.
+  "/api/auth/local/setup",
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/session",
@@ -143,7 +153,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 57 route families -- no fewer, no more", () => {
+  it("has exactly the expected 60 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
