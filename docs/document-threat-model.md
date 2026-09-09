@@ -275,6 +275,50 @@ recoverable state.
   upload/download/rotation operations remain locked. Orbit never generates a
   replacement key automatically.
 
+## Household metadata encryption (Tier 1)
+
+ADR-0024 extends the same envelope encryption to the household metadata #365
+calls Tier 1: `items.notes`, `items.reference`,
+`imap_ingestion_messages.proposal` and `.field_evidence`.
+
+**The boundary this buys, stated plainly.** It protects against leakage of the
+database file: an exfiltrated volume, a SQL dump, a filesystem backup, a stolen
+disk. It does **not** protect against live compromise of the host, because the
+key-encryption key lives there and a running Orbit can read every value. It is
+the same boundary document encryption already has, no stronger, and no Orbit
+surface may describe it as more than this.
+
+- One random 32-byte metadata data-encryption key per household, wrapped under
+  the existing instance KEK (`DOCUMENT_KEK`), plus one instance-scope key for
+  mail-in receipts that are not attributed to a household yet. Deleting a
+  household deletes its key, which crypto-shreds any stray copy of that
+  household's ciphertext.
+- Each value is one AES-256-GCM envelope, `mdv1.<iv>.<tag>.<ciphertext>`,
+  bound to its table, column and row: a value moved to another row or column
+  fails authentication instead of decrypting.
+- `items.reference` also carries a blind index: HMAC-SHA-256 over the
+  normalised value, keyed by a key derived from the household's own data key
+  and never stored. It exists so duplicate detection can find an exact match
+  without decrypting every row. Within one household it reveals which rows
+  share an equal reference and how many distinct references exist; it reveals
+  nothing about the values, and because the key is per-household, equal
+  references in different households produce unrelated digests. That residual
+  leak is accepted and is the stated price of exact-match lookup.
+- A value that fails authentication is refused as `metadata_integrity_failed`:
+  a distinct marker, never an empty value and never fabricated plaintext, while
+  the rest of the row renders normally. Each failure logs an administrator
+  diagnostic naming the column and row and nothing else. Writing to the field
+  is the repair.
+- A missing KEK is the separate, already-defined state: the application stays
+  usable, Tier 1 fields read as locked rather than damaged, and writes to them
+  are refused, exactly as document operations lock today.
+- Rows written before this release keep their plaintext until a resumable
+  start-up job encrypts them. Two releases are needed before dumps stop
+  carrying Tier 1 plaintext: the expand release still holds the plaintext
+  columns until the contract release drops them.
+- The portable archive is the deliberate plaintext escape hatch: it exports
+  decrypted values and therefore itself requires a working KEK.
+
 ## Key generation, recovery, and loss
 
 - `scripts/configure.sh` generates the KEK once using a cryptographically secure
@@ -294,8 +338,8 @@ recoverable state.
 - Restore validation checks key ID and a non-sensitive verification value
   before enabling document access.
 - If both the KEK and recovery bundle/passphrase are lost, encrypted documents
-  are unrecoverable by design. Orbit must state this plainly during setup and
-  backup.
+  **and Tier 1 household metadata** are unrecoverable by design. Orbit must
+  state this plainly during setup and backup.
 
 The recovery-bundle implementation must use a reviewed, available primitive in
 the supported runtime. It must not introduce a custom cipher construction.
@@ -310,7 +354,11 @@ the supported runtime. It must not introduce a custom cipher construction.
 - Restore validates the archive and manifest before stopping Orbit, restores to
   staged storage, verifies database/blob correspondence, and only then switches
   the active document tree.
-- Restore never silently overwrites an existing KEK.
+- Restore never silently overwrites an existing KEK, and requires the same KEK
+  to read Tier 1 metadata as it does to read documents.
+- Once the contract release has dropped the plaintext columns, an ordinary
+  database dump no longer contains readable notes, references or mail-in
+  extracts. During the expand release it still does.
 - Mixed lifecycle states, missing blobs, corrupt tags, and a wrong KEK are
   covered by restore tests. In-flight scanner stages and their document/job
   correspondence are included; restore clears leases and requeues recoverable

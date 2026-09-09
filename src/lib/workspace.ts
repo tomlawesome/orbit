@@ -26,6 +26,20 @@ const activityKinds = [
   "archived",
 ] as const;
 
+/**
+ * Why a Tier 1 field is not being shown (ADR-0024 decision 5).
+ * `metadata_integrity_failed` is one damaged value; `metadata_locked` is the
+ * instance missing its key-encryption key, which is reversible. Neither is
+ * ever rendered as an empty value: the field is absent and the marker says so.
+ */
+export const metadataFieldStates = ["metadata_integrity_failed", "metadata_locked"] as const;
+export const metadataFieldStateSchema = z.enum(metadataFieldStates);
+export const itemMetadataStatusSchema = z.object({
+  reference: metadataFieldStateSchema.optional(),
+  notes: metadataFieldStateSchema.optional(),
+});
+export type ItemMetadataStatus = z.infer<typeof itemMetadataStatusSchema>;
+
 export const workspaceItemSchema = z.object({
   id: z.string().min(1).max(100),
   sectionId: z.string().min(1).max(100),
@@ -41,6 +55,8 @@ export const workspaceItemSchema = z.object({
   reminderDays: z.array(z.number().int().min(0).max(365)).max(8).optional(),
   snoozedUntil: calendarDate.optional(),
   notes: optionalText(2_000),
+  /** Read-only; the write path ignores whatever a client sends here. */
+  metadataStatus: itemMetadataStatusSchema.optional(),
   status: z.enum(itemStatuses),
   version: z.number().int().positive().optional(),
   updatedAt: z.iso.datetime().optional(),
