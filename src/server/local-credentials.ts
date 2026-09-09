@@ -591,6 +591,21 @@ export async function hasLocalCredential(userId: string): Promise<boolean> {
   return Boolean(existing);
 }
 
+/**
+ * Whether any account on this instance has a password at all: the one fact
+ * the signed-out door needs to decide whether to draw its "local login" line
+ * in mixed mode (plan §2.7, `availability.methods.localAccounts`). Says
+ * nothing about which account, and is never keyed by anything the visitor
+ * supplied.
+ */
+export async function hasAnyLocalCredential(): Promise<boolean> {
+  const [existing] = await getDb()
+    .select({ userId: localCredentials.userId })
+    .from(localCredentials)
+    .limit(1);
+  return Boolean(existing);
+}
+
 export interface ConsumedSetupToken extends PasswordChangeOutcome {
   userId: string;
   purpose: CredentialSetupTokenPurpose;
