@@ -312,6 +312,9 @@ describe("the service absent", () => {
       provider: "Acme Cover",
       reference: "AB-12345",
       dates: ["2027-08-01"],
+      // Empty by decision, not omission: the heuristics never attempt the
+      // four model-owned fields or the date roles (#319).
+      dateRoles: [],
     });
   });
 });

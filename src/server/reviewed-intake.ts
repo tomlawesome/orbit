@@ -19,6 +19,7 @@ import {
 import { AppError } from "@/lib/app-error";
 import { type HomeItem } from "@/lib/domain";
 import { workspaceItemSchema } from "@/lib/workspace";
+import type { DocumentProposal } from "@/server/documents/suggestions";
 import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader } from "@/server/metadata/tier1";
@@ -130,6 +131,45 @@ export function sanitizeReviewDraftMetadata(input: unknown): {
     if (parsed.success) fieldEvidence[field] = parsed.data;
   }
   return { proposal, fieldEvidence };
+}
+
+/**
+ * The mail-in review flow's side of ADR-0025 section 7: the same slots the
+ * Add-item surface offers (`buildDocumentSuggestions`,
+ * `src/server/item-document-inspection.ts`), in the shape a mailbox review
+ * draft stores. A field the proposal does not carry is offered to nobody,
+ * so where the model path is absent the four model-owned slots are simply
+ * absent here too.
+ *
+ * It goes back out through `sanitizeReviewDraftMetadata`, so nothing
+ * reaches durable metadata by a route that skips that boundary.
+ */
+export function reviewDraftMetadataFromProposal(proposal: DocumentProposal): {
+  proposal: Record<string, unknown>;
+  fieldEvidence: Record<string, { source: string; confidence: string }>;
+} {
+  const offered: Record<ProposalField, unknown> = {
+    title: proposal.title,
+    subtype: proposal.subtype,
+    provider: proposal.provider,
+    reference: proposal.reference,
+    costMinor: proposal.costMinor,
+    currency: proposal.currency,
+    // The scheduled date when the roles named one, otherwise the first date.
+    dueDate: proposal.scheduleDate ?? proposal.dates[0],
+    scheduleKind: proposal.scheduleKind,
+    recurrenceMonths: proposal.recurrenceMonths,
+  };
+  const fieldEvidence: Record<string, { source: string; confidence: string }> = {};
+  for (const field of proposalFields) {
+    if (offered[field] === undefined) continue;
+    // Title still comes from the file name; every other field is read out of
+    // the document text, which is what the reviewer is being asked to check.
+    fieldEvidence[field] = field === "title"
+      ? { source: "filename", confidence: "high" }
+      : { source: "document_text", confidence: "medium" };
+  }
+  return sanitizeReviewDraftMetadata({ proposal: offered, fieldEvidence });
 }
 
 function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem {
