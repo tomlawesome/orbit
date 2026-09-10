@@ -469,12 +469,19 @@ absent, those suggestion slots are simply empty, as they are today.
     has failed rather than qualified. The Compose service is capped at 2
     CPUs and 6 GB today, which is the shape a candidate is judged in.
   - **A GPU option is offered, and it asks for very little.** Nobody
-    hands a household document-filing system their whole graphics card,
-    so the optional accelerated path targets a small slice of VRAM
-    rather than a dedicated device, and degrades to the CPU path when it
-    is not there. Delivery is CUDA in Docker; the container, its network
-    and every bound in sections 1 to 3 are unchanged by it, so this is a
-    deployment option and not a second extraction path.
+    hands a household document-filing system their whole graphics card.
+    What the optional accelerated path can promise is that it does not
+    ask for much -- a 1-2B model needs on the order of 2 GB of VRAM, so
+    the rest of a shared card stays available to whatever else uses it.
+    It cannot promise a fenced-off slice: Ollama selects whole devices
+    and uses what the model needs, and there is no VRAM cap to set
+    (owner ruling, 2026-09-10, striking an earlier claim that the path
+    "targets a small slice of VRAM rather than a dedicated device" --
+    that described a control that does not exist). It degrades to the
+    CPU path when no device is there. Delivery is CUDA in Docker; the
+    container, its network and every bound in sections 1 to 3 are
+    unchanged by it, so this is a deployment option and not a second
+    extraction path.
   - The consequence for selection is that model *size* is a first-class
     score alongside accuracy. A candidate that wins on accuracy while
     only running acceptably on hardware a self-hoster does not have has
