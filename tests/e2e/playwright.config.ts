@@ -8,7 +8,16 @@ export default defineConfig({
   testDir: ".",
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 2 : 0,
+  // One retry, not two (#923 finding 3, owner ruling 2026-09-09): a genuinely
+  // broken test used to run three times before it reported, and ten spec files
+  // are test.describe.configure({ mode: "serial" }), where one failure re-runs
+  // the whole group -- v19-tour cost 41s that way in a single job.
+  retries: process.env.CI ? 1 : 0,
+  // Failures cluster: past the fifth, the rest of the run is noise paid for at
+  // ~2s a test on one worker. In pipeline 822's smoke, two keyboard tests each
+  // failed three times and the run continued through all 282 tests. Local runs
+  // keep no limit, so a full local sweep still reports everything.
+  maxFailures: process.env.CI ? 5 : 0,
   // One worker EVERYWHERE, not just in CI (#730). These specs share one Orbit
   // instance -- one database, one set of identities, one sky -- so running
   // files concurrently means they crowd each other's skies while they run.
