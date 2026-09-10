@@ -257,15 +257,26 @@ sender, which no mechanical rule between two candidate strings can do.
 
 Two bounds on the shape:
 
-- **Agreement settles the field.** When the blind pass and the heuristic
-  already agree, that is the confident case and no adjudicating pass is
-  paid for. This is the same instinct as #939's "do not even run the
-  partial once an exact match is found", applied to inference cost. It is a
-  **cost decision, not a correctness claim**: two extractors reading the
-  same text can fixate on the same salient wrong string, and agreement
-  there is not independent evidence. That case is bounded by review-first
-  (ADR-0005) and visible in section 6, where an agreed-but-wrong field
-  depresses all three numbers alike.
+- **Agreement settles the field, and is never revisited** (owner ruling,
+  2026-09-10). When the blind pass and the heuristic already agree, no
+  adjudicating pass is paid for. This is the same instinct as #939's "do not
+  even run the partial once an exact match is found".
+
+  The saving is the smaller half of the reason. The owner's argument is that
+  **adjudicating an agreed field introduces the chance to undo a correct
+  answer**, and the trade is negative: two extractors agree most often on
+  the documents where both are right, so a third read has far more
+  opportunities to break a good answer than to rescue a bad one. Agreement
+  between a deterministic reader and an unaided model reading is itself
+  evidence, and a single further read that has now seen both is weaker
+  evidence than the agreement it would overturn.
+
+  The cost is stated honestly rather than denied: two extractors reading the
+  same text *can* fixate on the same salient wrong string, and that case is
+  never caught by adjudication. It is bounded by review-first (ADR-0005) —
+  the person still sees the value — and it is visible in section 6, where an
+  agreed-but-wrong field depresses all three numbers alike. What it is not
+  is a reason to re-read every agreed field.
 - **Three numbers are kept, never two**: heuristic alone, model blind, and
   model adjudicated, per field and overall. Without the blind score there
   is no way to tell whether adjudication earns its keep or merely launders
