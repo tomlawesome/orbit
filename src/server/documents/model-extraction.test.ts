@@ -367,6 +367,30 @@ describe("grounding: a value whose evidence is not in the document is dropped", 
     });
   });
 
+  it("drops a value stitched out of the span across the punctuation between its tokens", async () => {
+    // The span is real and the letters and digits all occur in it, but the
+    // document prints `KM-99123`, never `KM99123` (#942).
+    const result = await extract({
+      reference: { value: "KM99123", evidence: "Policy number: KM-99123" },
+      provider: { value: "Kestrel MutualLimited", evidence: "Kestrel Mutual Limited" },
+    });
+    expect(result).toMatchObject({
+      status: "ready",
+      proposal: { reference: undefined, provider: undefined },
+    });
+  });
+
+  it("keeps a value differing from its span only by case or spacing", async () => {
+    const result = await extract({
+      provider: { value: "kestrel  mutual limited", evidence: "Kestrel Mutual Limited" },
+      reference: { value: "km-99123", evidence: "Policy number: KM-99123" },
+    });
+    expect(result).toMatchObject({
+      status: "ready",
+      proposal: { provider: "kestrel mutual limited", reference: "km-99123" },
+    });
+  });
+
   it("drops a span carrying control or bidi characters, which a copied span cannot", async () => {
     const result = await extract({
       provider: { value: "Kestrel Mutual Limited", evidence: "Kestrel\tMutual Limited" },

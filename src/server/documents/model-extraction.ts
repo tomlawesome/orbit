@@ -249,9 +249,12 @@ function containsControlCharacter(value: string): boolean {
   return false;
 }
 
-/** Letters and digits only, so casing and punctuation cannot hide a mismatch. */
-function comparableCore(value: string): string {
-  return value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+/**
+ * Case and whitespace runs are tolerated; nothing else. NFKC is already
+ * applied to the document text, so applying it here compares like with like.
+ */
+function comparableText(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
 }
 
 /**
@@ -265,10 +268,17 @@ function groundedSpan(evidence: unknown, normalizedText: string): string | undef
   return normalizedText.includes(span) ? span : undefined;
 }
 
-/** A value the span does not itself carry is a fabrication wearing a citation. */
+/**
+ * A value the span does not itself carry is a fabrication wearing a citation.
+ * The value must appear in the span as contiguous text (#942, ADR-0025
+ * section 3). Comparing letters and digits alone used to let a value be
+ * stitched out of the span across whatever separated them, so a span reading
+ * `Policy number: KM-99123` appeared to quote `KM99123`, a string the
+ * document never printed.
+ */
 function quotedBySpan(value: string, span: string): boolean {
-  const core = comparableCore(value);
-  return core.length > 0 && comparableCore(span).includes(core);
+  const quoted = comparableText(value);
+  return quoted.length > 0 && comparableText(span).includes(quoted);
 }
 
 function candidateRecord(value: unknown): Record<string, unknown> | undefined {
