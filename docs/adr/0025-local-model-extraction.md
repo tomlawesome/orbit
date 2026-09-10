@@ -1,6 +1,9 @@
 # ADR-0025: Model extraction is a schema-bound, evidence-grounded proposer on a fixed internal endpoint, gated by a hold-out corpus
 
-**Status:** Accepted (owner, 2026-09-09), with the constants held lightly:
+**Status:** Accepted (owner, 2026-09-09), **section 4 amended 2026-09-10**
+(owner ruling on #936: the model adjudicates over both readings rather than
+competing with the heuristics; the superseded wording is kept inside that
+section). With the constants held lightly:
 the owner ratified "for now" and expects to revisit this one. Drafted under
 the owner's decisions of 2026-08-13 on #319: the four fields stay and the
 model path must produce them; no training or fine-tuning, ever; no cloud
@@ -153,24 +156,70 @@ discards unknown keys — applies unchanged. Raw model responses are
 discarded after proposal derivation and never logged, exactly as raw parser
 responses are.
 
-### 4. Both extractors always run; disagreement is shown, never merged silently
+### 4. The model adjudicates; it does not compete
+
+**Amended 2026-09-10 by owner ruling (#936); the superseded position is
+recorded at the end of this section.**
 
 The heuristics run on every upload regardless — they are microseconds of
 regex and they are the fallback, so they must stay exercised. Where the
 model path is active (profile up, gate in section 6 passed at release
-time), the model's grounded value is the primary suggestion for a field,
-and a differing non-empty heuristic value is presented alongside it as a
-labelled alternative the reviewer can pick instead. Disagreement is a
-signal to the person — "the extractors read this differently" — never a
-silent overwrite in either direction and never an averaged value. Dates are
-the union of both extractors' validated dates, deduplicated, carrying the
-model's role labels where assigned. The four fields of section 7 are
-model-only, so no disagreement arises there. Suggestions carry a source
-marker distinguishing the model from the heuristics so the review surface
-can label the alternative; the exact composition of that surface is a view
-decision for the implementing slice, but showing the disagreement is not
-optional. Agreement per field is also recorded as a non-sensitive counter,
-feeding section 5.
+time), the model is used as an adjudicator over both readings rather than
+as a rival whose value wins a contest:
+
+1. **Blind pass.** The model reads the document under section 1's bounds
+   with no knowledge of the heuristic proposal, and its result is recorded.
+2. **Comparison.** The blind result is compared with the heuristic result,
+   field by field.
+3. **Adjudicating pass.** Only where the two disagree on a field, the model
+   is asked once more — same bounds, same schema — this time with both
+   readings supplied, and its answer is final for that field.
+
+**The order is the point, not an implementation detail.** Shown the
+heuristic's answer up front, the model anchors on it, and what looks like
+two extractors agreeing is one extractor twice. The blind pass is what
+keeps a genuinely independent second reading in the system, and recording
+it is what makes that independence checkable afterwards.
+
+It also turns disagreement from a tie-break into a judgement. A model told
+"the heuristic says Direct Debit" can reason that a payment method is not a
+sender, which no mechanical rule between two candidate strings can do.
+
+Two bounds on the shape:
+
+- **Agreement settles the field.** When the blind pass and the heuristic
+  already agree, that is the confident case and no adjudicating pass is
+  paid for. This is the same instinct as #939's "do not even run the
+  partial once an exact match is found", applied to inference cost.
+- **Three numbers are kept, never two**: heuristic alone, model blind, and
+  model adjudicated, per field and overall. Without the blind score there
+  is no way to tell whether adjudication earns its keep or merely launders
+  the heuristic's answer back out. Section 6 gates on these.
+
+The adjudicated value is a suggestion like any other: it passes section 3's
+grounding and validation unchanged, and nothing is written without review
+(ADR-0005). Adjudication decides *which reading is proposed*; it never
+decides whether to write.
+
+Dates are not adjudicated as a contest, because a date set has no single
+value to disagree about: they remain the union of both extractors'
+validated dates, deduplicated, carrying the model's role labels where
+assigned, exactly as before. The four fields of section 7 are model-only,
+so no disagreement arises there and no adjudicating pass is triggered by
+them. Per-field agreement is recorded as a non-sensitive counter, feeding
+section 5.
+
+**Superseded position (ratified 2026-09-09, replaced 2026-09-10).** Section
+4 previously read "Both extractors always run; disagreement is shown, never
+merged silently": the model's grounded value was the primary suggestion, a
+differing non-empty heuristic value was presented alongside it as a
+labelled alternative, and the reviewer chose. It is recorded rather than
+deleted because the reasoning behind it — that disagreement is information
+and must not be averaged away — still holds, and the amendment keeps it:
+adjudication is a reasoned reading of both, not a blend or a confidence
+score. What changed is who resolves the disagreement. The old shape asked
+the reviewer to resolve every one; the new shape spends a second inference
+to resolve it first, and only where the two readings actually differ.
 
 ### 5. Degradation: heuristics per upload, `document-health` for the administrator
 
@@ -206,12 +255,22 @@ moved to the tuning set and replaced. Enforcement is the recorded rule plus
 review, which is the honest limit of what a repository can promise, and it
 is the same choice #929's comment sketched.
 
+Section 4 makes this a three-way measurement rather than a two-way one.
+Every evaluation reports the heuristics alone, the model's blind pass and
+the model's adjudicated answer, separately. The margin below is judged on
+the **adjudicated** number, because that is what a reviewer would see; the
+blind number is kept beside it so it stays possible to tell whether the
+adjudicating pass earns its keep or merely repeats the heuristic back. An
+adjudicated score that beats the heuristics while the blind score does not
+is the anchoring failure section 4 warns about, and it is read as a finding
+about the prompt, not as a pass.
+
 The gate for the model path becoming the default where available:
 
-- on a hold-out of **at least 10 documents**, the model's minimum accuracy
-  over five runs exceeds the heuristics' hold-out accuracy by **at least
-  0.05** — that is the stated margin, measured where neither extractor was
-  tuned;
+- on a hold-out of **at least 10 documents**, the model's minimum
+  adjudicated accuracy over five runs exceeds the heuristics' hold-out
+  accuracy by **at least 0.05** — that is the stated margin, measured where
+  neither extractor was tuned;
 - on the tuning corpus, the model's minimum stays at or above
   `ACCURACY_FLOOR`;
 - corpus ground truth is extended to the four fields and role-labelled
@@ -247,9 +306,9 @@ absent, those suggestion slots are simply empty, as they are today.
 - Build slices can be filed against this ADR: the client and prompt with
   bounds (§1–2, including the Compose network move and pull helper), the
   proposal-contract and validation extension with corpus ground truth for
-  the four fields (§3, §7), the review-surface disagreement presentation
-  (§4), health reporting (§5), and the hold-out set plus evaluation script
-  (§6). None of them reopens a design question.
+  the four fields (§3, §7), the blind-then-adjudicate two-pass flow with
+  its three recorded numbers (§4), health reporting (§5), and the hold-out
+  set plus evaluation script (§6). None of them reopens a design question.
 - `docs/document-threat-model.md` must be extended by the first
   implementing slice, as its deferred-features section requires; the
   extension records sections 1–3 as the model boundary.
@@ -286,7 +345,19 @@ absent, those suggestion slots are simply empty, as they are today.
   is the separate deferred design the threat model already requires.
 - **Silent merge or confidence-weighted blend of model and heuristic
   values:** hides exactly the signal a reviewer needs; disagreement is
-  information, not noise.
+  information, not noise. Section 4's adjudication is not this: a blend
+  averages two strings mechanically, where adjudication asks a reader to
+  judge both and say which the document supports.
+- **The model and the heuristics as competitors with a mechanical
+  tie-break** (the position section 4 held until 2026-09-10): it spends the
+  model's only real advantage — that it can read — on being one candidate
+  string among two. Owner ruling, #936.
+- **Feeding the heuristic result into the single model pass:** cheaper than
+  two passes, and it destroys the independence the second opinion exists
+  for; the model anchors and agreement becomes unfalsifiable.
+- **Adjudicating every field, including the ones both readings agree on:**
+  pays for inference to confirm what is already settled, against #939's
+  ruling that a confident answer stops the search.
 - **Auto-applying high-confidence suggestions:** would breach ADR-0005's
   review-first invariant and #319's "never an automatic write".
 - **Scoring by mean over runs:** lets variance hide regressions; the
@@ -307,7 +378,14 @@ absent, those suggestion slots are simply empty, as they are today.
 1. Ratification of this ADR, including the constants it fixes: the 0.05
    hold-out margin, the 10-document hold-out minimum, and minimum-of-five
    scoring.
-2. An invitation, not a blocker: hold-out documents modelled on real
+2. Section 4's amendment settles who resolves a disagreement, but not
+   what the reviewer is shown afterwards. The superseded shape put the
+   losing value in front of them as a labelled alternative. Adjudication
+   could keep that (the reviewer sees the adjudicated value, with the
+   reading it rejected available), or show the adjudicated value alone.
+   Recorded rather than decided: it is a review-surface design call, and
+   the ruling did not cover it.
+3. An invitation, not a blocker: hold-out documents modelled on real
    household paper (all values fictionalised, per the no-real-data rule)
    would make the hold-out far stronger than synthetic documents written
    by the same agents that tune the extractors. Absent owner-supplied

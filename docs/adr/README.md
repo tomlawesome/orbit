@@ -39,4 +39,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0022: The instance is claimed with a code printed once in the container's own log, and a lost administrator is recovered from the deployment host](0022-bootstrap-claim-and-lost-administrator-recovery.md) (Proposed)
 - [ADR-0023: One user, two optional sign-in methods; OIDC self-registers, local is administrator-created, sensitive actions always re-challenge](0023-registration-linking-and-recent-authentication.md) (Proposed)
 - [ADR-0024: Tier 1 metadata encrypts under one per-household DEK beneath the existing KEK, with a derived per-household blind index](0024-tiered-metadata-encryption.md) (Accepted)
-- [ADR-0025: Model extraction is a schema-bound, evidence-grounded proposer on a fixed internal endpoint, gated by a hold-out corpus](0025-local-model-extraction.md) (Accepted)
+- [ADR-0025: Model extraction is a schema-bound, evidence-grounded proposer on a fixed internal endpoint, gated by a hold-out corpus](0025-local-model-extraction.md) (Accepted; §4 amended 2026-09-10)
