@@ -6,8 +6,15 @@ import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingOb
 import { log } from "@/lib/logger";
 import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
+import { adjudicateProposal } from "@/server/documents/adjudication";
 import { getDocumentConfig } from "@/server/documents/config";
+import { MODEL_MAILBOX_DEADLINE_MS } from "@/server/documents/model-extraction";
+import { proposalFromText } from "@/server/documents/suggestions";
+import { extractTextWithTika } from "@/server/documents/tika";
+import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 import { LocalDocumentStorage } from "@/server/documents/storage";
+import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
+import { requireReceiptMetadataWriter } from "@/server/metadata/fields";
 import { classifyImapBodyStructure, IMAP_ATTACHMENT_LIMITS, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
 import {
   deriveImapRecipientAlias,
@@ -705,6 +712,78 @@ const permanentAttachmentFailures = new Set([
   "message_too_large",
 ]);
 
+const DRAFT_PROPOSAL_MAX_EXTRACTED_CHARACTERS = 250_000;
+
+/**
+ * The text the receipt's draft proposal reads, from the first staged
+ * attachment that yields any: this is a best-effort suggestion source, not
+ * part of the attachment's own commit, so a parser failure here must never
+ * fail the attachment it was reading (mirrors `document-drafts.ts` and
+ * `item-document-inspection.ts`, the other two document paths' extraction).
+ */
+async function draftProposalTextFromAttachment(
+  bytes: Buffer,
+  mediaType: SupportedDocumentMediaType,
+  receiptId: string,
+): Promise<string | undefined> {
+  try {
+    const text = await extractTextWithTika(bytes, mediaType, receiptId);
+    return typeof text === "string" && text.length > 0 && text.length <= DRAFT_PROPOSAL_MAX_EXTRACTED_CHARACTERS ? text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** PostgreSQL- and model-free contract seam for extraction tests. */
+export function draftProposalTextForTests(bytes: Buffer, mediaType: SupportedDocumentMediaType, receiptId: string): Promise<string | undefined> {
+  return draftProposalTextFromAttachment(bytes, mediaType, receiptId);
+}
+
+/**
+ * The receipt's heuristic proposal, adjudicated against the model's
+ * independent reading (ADR-0025 sections 4 and 7), encrypted into the same
+ * columns `imap-inbox.ts` already reads and `reviewed-intake.ts` already
+ * clears at the end of the review. Best-effort like the extraction above:
+ * a model or encryption failure here leaves the receipt reviewable with no
+ * suggestions rather than stuck reprocessing (ADR-0025 section 5), and
+ * `undefined` here means the caller changes none of these columns.
+ */
+async function draftProposalColumns(
+  source: { text: string; filename: string },
+  receiptId: string,
+): Promise<{ proposal: Record<string, unknown>; proposalEnc: string; fieldEvidence: Record<string, unknown>; fieldEvidenceEnc: string } | undefined> {
+  try {
+    const heuristic = proposalFromText(source.text, source.filename);
+    const adjudication = await adjudicateProposal({
+      text: source.text,
+      filename: source.filename,
+      heuristic,
+      deadlineMs: MODEL_MAILBOX_DEADLINE_MS,
+    });
+    const { proposal, fieldEvidence } = reviewDraftMetadataFromProposal(adjudication.proposal, adjudication.alternatives);
+    // Tier 1 (ADR-0024): the household is not known yet at ingestion time,
+    // so this reads and writes under the instance scope, exactly as
+    // `imap-inbox.ts` already reads an unattributed receipt.
+    const cipher = await requireReceiptMetadataWriter(null);
+    return {
+      proposal: {},
+      proposalEnc: cipher.encryptJson("imap_ingestion_messages.proposal", receiptId, proposal),
+      fieldEvidence: {},
+      fieldEvidenceEnc: cipher.encryptJson("imap_ingestion_messages.field_evidence", receiptId, fieldEvidence),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Contract seam for adjudication/encryption wiring tests. */
+export function draftProposalColumnsForTests(
+  source: { text: string; filename: string },
+  receiptId: string,
+): ReturnType<typeof draftProposalColumns> {
+  return draftProposalColumns(source, receiptId);
+}
+
 async function processImapAttachments(
   client: ImapFlow,
   message: { uid: number; bodyStructure?: MessageStructureObject },
@@ -721,6 +800,7 @@ async function processImapAttachments(
       return;
     }
     let aggregateBytes = 0;
+    let draftSource: { text: string; filename: string } | undefined;
     for (const candidate of classification.candidates as ImapAttachmentCandidate[]) {
       const content = await downloadImapPart(client, message.uid, candidate.part, IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes - aggregateBytes);
       aggregateBytes += content.length;
@@ -736,6 +816,14 @@ async function processImapAttachments(
           mailboxIngestion: true,
           onCiphertextAllocated: (object) => registerStagingObject(receipt.id, receipt.leaseToken, object),
         });
+        // The receipt's draft proposal reads whichever staged attachment
+        // yields text first; a later attachment is not read for it once one
+        // has (ADR-0025: one document's fields per receipt, matching the
+        // single `proposal` column `imap-inbox.ts` already reads).
+        if (!draftSource) {
+          const text = await draftProposalTextFromAttachment(content, staged.mediaType as SupportedDocumentMediaType, receipt.id);
+          if (text) draftSource = { text, filename: staged.displayName };
+        }
       } finally { content.fill(0); }
       const attemptObject = { storageKey: staged.storageKey, id: staged.id };
       held.push(attemptObject);
@@ -753,7 +841,8 @@ async function processImapAttachments(
         held.pop();
       }
     }
-    const [finished] = await getDb().update(imapIngestionMessages).set({ status: "pending_review", receiptStatus: "pending", failureCode: null, attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, receipt.leaseToken))).returning({ id: imapIngestionMessages.id });
+    const draftColumns = draftSource ? await draftProposalColumns(draftSource, receipt.id) : undefined;
+    const [finished] = await getDb().update(imapIngestionMessages).set({ status: "pending_review", receiptStatus: "pending", failureCode: null, attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date(), ...draftColumns }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, receipt.leaseToken))).returning({ id: imapIngestionMessages.id });
     if (!finished) {
       await cleanupImapStagingAttempt(receipt.id, receipt.leaseToken, held);
       return;
