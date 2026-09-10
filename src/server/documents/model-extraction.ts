@@ -88,6 +88,16 @@ export interface ModelGenerateRequest {
   system: string;
   prompt: string;
   stream: false;
+  /**
+   * Reasoning off, on every pass (#973). Models whose thinking mode defaults
+   * to on spend `num_predict` reasoning instead of answering: measured on
+   * `qwen3.5:0.8b`, a request that left this unset produced 192 characters of
+   * reasoning, an empty reply, and 144 seconds of work. Thinking tokens come
+   * out of the same generation cap as the answer, so this is one more axis of
+   * ADR-0025 section 1's bounded reply -- and like the others it is a
+   * constant here, never configurable.
+   */
+  think: false;
   format: unknown;
   options: {
     temperature: number;
@@ -693,6 +703,7 @@ export async function modelProposalFromText(
     system: SYSTEM_PROMPT,
     prompt: `${DOCUMENT_OPEN}\n${normalizedText}\n${DOCUMENT_CLOSE}`,
     stream: false,
+    think: false,
     format: RESPONSE_SCHEMA,
     options: {
       temperature: 0,
@@ -841,6 +852,7 @@ export async function modelAdjudicateFields(
     system: ADJUDICATION_SYSTEM_PROMPT,
     prompt: `${DOCUMENT_OPEN}\n${normalizedText}\n${DOCUMENT_CLOSE}\n\n${readingsBlock(candidates)}`,
     stream: false,
+    think: false,
     format: adjudicationResponseSchema(candidates),
     options: {
       temperature: 0,

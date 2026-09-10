@@ -88,7 +88,8 @@ the prompt names as untrusted content to be read, never obeyed.
 
 The reply is bounded on every axis, all constants in code, none
 configurable: schema-constrained decoding (Ollama's structured-output
-`format`, so the reply cannot be prose), temperature 0 and a fixed seed, a
+`format`, so the reply cannot be prose), temperature 0 and a fixed seed,
+reasoning turned off (`think: false`), a
 generation-token cap, a response-size cap checked before parsing, and a
 wall-clock deadline — short for the interactive Add-item inspection, longer
 for the asynchronous mailbox path, never unbounded. That deadline bounds
