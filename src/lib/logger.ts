@@ -75,6 +75,7 @@ export const operationalReasons = [
   "key_unavailable",
   "purge_failed",
   "stage_purge_failed",
+  "rewrap_failed",
   "scan_recovery_expired",
   "staging_object_invalid",
   "smtp_unconfigured",
@@ -241,6 +242,10 @@ export const operationalEvents = {
      check, and the resumable backfill that converts pre-encryption rows. */
   "metadata.integrity": "metadata",
   "metadata.backfill": "metadata",
+  /* The document KEK rewrap worker (#932, ADR-0017): reports beside
+     "document.job" rather than reusing it, because this is a whole rotation's
+     outcome across all three key populations, not one job's. */
+  "document.kek_rotation": "document",
 } as const;
 export type OperationalEventName = keyof typeof operationalEvents;
 export type OperationalComponent = typeof operationalEvents[OperationalEventName];
