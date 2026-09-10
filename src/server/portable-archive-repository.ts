@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, gt, inArray, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, documents, dueEvents, households, items, memberships, portableArchives, reminderRules, sections, users } from "@/db/schema";
@@ -9,6 +9,8 @@ import { getDocumentConfig } from "@/server/documents/config";
 import { readDocumentDownload } from "@/server/document-repository";
 import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
+import { normalizeComparableMetadata } from "@/server/metadata/crypto";
+import { openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/tier1";
 import { acquireActiveHouseholdLock } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -83,6 +85,14 @@ export async function createPortableArchive(input: {
     db.select().from(documents).where(and(eq(documents.householdId, input.householdId), inArray(documents.lifecycle, ["available", "pending_deletion"]))),
   ]);
   if (!household) throw new AppError("household_not_found", "That household is not available", 404);
+  // The portable archive is the deliberate plaintext escape hatch (ADR-0024
+  // decision 6): it exports decrypted values, and therefore needs the KEK.
+  const metadata = await openMetadataReader(input.householdId);
+  const exportedItems = householdItems.map((item) => ({
+    ...item,
+    reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
+    notes: metadata.text("items.notes", item.id, { encrypted: item.notesEnc, plaintext: item.notes }).value,
+  }));
 
   const payload: Record<string, unknown> = {
     format: "orbit-portable-archive",
@@ -90,7 +100,7 @@ export async function createPortableArchive(input: {
     exportedAt: new Date().toISOString(),
     household: { id: household.id, name: household.name, timezone: household.timezone, defaultCurrency: household.defaultCurrency },
     sections: householdSections.map((section) => ({ id: section.id, slug: section.slug, name: section.name, icon: section.icon, accent: section.accent, position: section.position, visible: section.visible, archivedAt: section.archivedAt })),
-    items: householdItems.map((item) => ({ id: item.id, sectionId: item.sectionId, title: item.title, subtype: item.subtype, provider: item.provider, reference: item.reference, costMinor: item.costMinor, currency: item.currency, startDate: item.startDate, expiryDate: item.expiryDate, renewalDate: item.renewalDate, serviceDate: item.serviceDate, recurrenceMonths: item.recurrenceMonths, snoozedUntil: item.snoozedUntil, notes: item.notes, externalDocumentUrl: item.externalDocumentUrl, status: item.status, version: item.version })),
+    items: exportedItems.map((item) => ({ id: item.id, sectionId: item.sectionId, title: item.title, subtype: item.subtype, provider: item.provider, reference: item.reference, costMinor: item.costMinor, currency: item.currency, startDate: item.startDate, expiryDate: item.expiryDate, renewalDate: item.renewalDate, serviceDate: item.serviceDate, recurrenceMonths: item.recurrenceMonths, snoozedUntil: item.snoozedUntil, notes: item.notes, externalDocumentUrl: item.externalDocumentUrl, status: item.status, version: item.version })),
     dueEvents: events.map((event) => ({ id: event.id, itemId: event.itemId, kind: event.kind, dueDate: event.dueDate, completedAt: event.completedAt, completionKey: event.completionKey, nextEventId: event.nextEventId })),
     reminderRules: reminders,
     documents: documentRows.map((document) => ({ id: document.id, itemId: document.itemId, displayName: document.displayName, mediaType: document.mediaType, sizeBytes: document.sizeBytes, contentSha256: document.contentSha256, lifecycle: document.lifecycle, scanStatus: document.scanStatus, failureCode: document.failureCode, deleteAfter: document.deleteAfter, deletedAt: document.deletedAt, availableAt: document.availableAt, version: document.version })),
@@ -229,11 +239,73 @@ function decodeImportArchive(serialized: unknown, passphrase: string) {
   } finally { plaintext.fill(0); }
 }
 
+/**
+ * Which of `references` the household already holds, as normalised strings
+ * (ADR-0024 decision 2).
+ *
+ * The plaintext `items.reference` column is cleared the moment a row is
+ * encrypted, so an encrypted row is found only through `reference_index` —
+ * an HMAC-SHA-256 keyed by a derivation of the household DEK. Take the index
+ * away and duplicate detection stops finding anything the application wrote.
+ * The second query is the dual-read leg for rows the backfill has not reached
+ * yet, and it goes away with the plaintext column in the contract release.
+ */
+async function existingReferenceMatches(
+  executor: MetadataExecutor,
+  householdId: string,
+  references: Array<string | null | undefined>,
+): Promise<Set<string>> {
+  const found = new Set<string>();
+  const wanted = new Set<string>();
+  for (const reference of references) {
+    const normalized = normalizeComparableMetadata(reference);
+    if (normalized) wanted.add(normalized);
+  }
+  if (wanted.size === 0) return found;
+
+  const metadata = await openMetadataReader(householdId, executor);
+  if (!metadata.locked) {
+    const byDigest = new Map<string, string>();
+    for (const normalized of wanted) {
+      const digest = metadata.referenceIndex(normalized);
+      if (digest) byDigest.set(digest, normalized);
+    }
+    if (byDigest.size > 0) {
+      const rows = await executor.select({ referenceIndex: items.referenceIndex }).from(items)
+        .where(and(eq(items.householdId, householdId), inArray(items.referenceIndex, [...byDigest.keys()])));
+      for (const row of rows) {
+        const normalized = row.referenceIndex ? byDigest.get(row.referenceIndex) : undefined;
+        if (normalized) found.add(normalized);
+      }
+    }
+  }
+
+  const remaining = await executor.select({ reference: items.reference }).from(items)
+    .where(and(eq(items.householdId, householdId), isNotNull(items.reference)));
+  for (const row of remaining) {
+    const normalized = normalizeComparableMetadata(row.reference);
+    if (normalized && wanted.has(normalized)) found.add(normalized);
+  }
+  return found;
+}
+
+/** Title matching is unchanged: `items.title` is Tier 3 and stays in plaintext. */
+function duplicatesExistingItem(
+  source: { title: string; reference?: string | null },
+  existingTitles: Array<{ title: string }>,
+  duplicateReferences: Set<string>,
+): boolean {
+  const normalized = normalizeComparableMetadata(source.reference);
+  if (normalized && duplicateReferences.has(normalized)) return true;
+  return existingTitles.some((candidate) => candidate.title.toLowerCase() === source.title.toLowerCase());
+}
+
 export async function previewPortableImport(userId: string, householdId: string, serialized: unknown, passphrase: string) {
   await requireHouseholdAccess(userId, householdId);
   const archive = decodeImportArchive(serialized, passphrase);
-  const existing = await getDb().select({ id: items.id, title: items.title, reference: items.reference }).from(items).where(eq(items.householdId, householdId));
-  const conflicts = archive.items.filter((item) => existing.some((candidate) => (item.reference && candidate.reference && item.reference.toLowerCase() === candidate.reference.toLowerCase()) || candidate.title.toLowerCase() === item.title.toLowerCase())).map((item) => ({ id: item.id, title: item.title }));
+  const existing = await getDb().select({ title: items.title }).from(items).where(eq(items.householdId, householdId));
+  const duplicateReferences = await existingReferenceMatches(getDb(), householdId, archive.items.map((item) => item.reference));
+  const conflicts = archive.items.filter((item) => duplicatesExistingItem(item, existing, duplicateReferences)).map((item) => ({ id: item.id, title: item.title }));
   return { householdName: archive.household.name, sections: archive.sections.length, items: archive.items.length, documents: archive.documents.length, conflicts, documentsExcluded: archive.documents.length > 0 };
 }
 
@@ -252,13 +324,16 @@ export async function importPortableArchive(input: { userId: string; householdId
       if (!current) await transaction.insert(sections).values({ id, householdId: input.householdId, slug: source.slug, name: source.name, icon: source.icon, accent: source.accent, position: source.position, visible: source.visible });
       sectionMap.set(source.id, id);
     }
-    const existing = await transaction.select({ title: items.title, reference: items.reference }).from(items).where(eq(items.householdId, input.householdId));
+    const existing = await transaction.select({ title: items.title }).from(items).where(eq(items.householdId, input.householdId));
+    const duplicateReferences = await existingReferenceMatches(transaction, input.householdId, archive.items.map((item) => item.reference));
+    const metadata = await requireMetadataWriter(input.householdId, transaction);
     let count = 0;
     for (const source of archive.items) {
-      const duplicate = existing.some((candidate) => (source.reference && candidate.reference && source.reference.toLowerCase() === candidate.reference.toLowerCase()) || candidate.title.toLowerCase() === source.title.toLowerCase());
+      const duplicate = duplicatesExistingItem(source, existing, duplicateReferences);
       if (duplicate && !skipped.has(source.id)) throw new AppError("archive_conflict_unresolved", "Review every duplicate before importing", 409);
       if (duplicate || !sectionMap.has(source.sectionId)) continue;
-      await transaction.insert(items).values({ id: randomUUID(), householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, title: source.title, subtype: source.subtype ?? null, provider: source.provider ?? null, reference: source.reference ?? null, costMinor: source.costMinor ?? null, currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notes: source.notes ?? null, externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
+      const itemId = randomUUID();
+      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, title: source.title, subtype: source.subtype ?? null, provider: source.provider ?? null, reference: null, referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinor: source.costMinor ?? null, currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notes: null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
       count++;
     }
     await transaction.insert(auditLog).values({ householdId: input.householdId, actorUserId: input.userId, entityType: "portable_archive", entityId: randomUUID(), action: "portable_archive_imported", changes: { importedItems: count, skippedConflicts: skipped.size, documentsExcluded: archive.documents.length } });

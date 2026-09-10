@@ -22,7 +22,8 @@
     "orbit": "node_modules/tsx/dist/cli.mjs src/cli/orbit.ts",
     "build:cli": "node scripts/bundle-orbit-cli.mjs",
     "db:generate": "node scripts/db-generate-refused.mjs",
-    "db:migrate": "node scripts/run-with-orbit-env.mjs node_modules/tsx/dist/cli.mjs src/db/migrate.ts"
+    "db:migrate": "node scripts/run-with-orbit-env.mjs node_modules/tsx/dist/cli.mjs src/db/migrate.ts",
+    "rewrap-kek": "node scripts/run-with-orbit-env.mjs node_modules/tsx/dist/cli.mjs src/db/rewrap-kek.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "1.0.8",

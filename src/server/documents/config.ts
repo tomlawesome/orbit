@@ -21,6 +21,11 @@ const documentEnvironmentSchema = z.object({
   TIKA_URL: z.preprocess((value) => value === "" ? undefined : value, z.url().optional()),
   TIKA_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(45_000),
   DOCUMENT_KEK: z.string().regex(/^[a-fA-F0-9]{64}$/, "DOCUMENT_KEK must be exactly 32 bytes encoded as hexadecimal"),
+  // Populated only for the duration of an operator-driven KEK rotation
+  // (#954, ADR-0024 decision 4): the app holds this alongside DOCUMENT_KEK so
+  // every row stays readable by its own key_id whether or not the rewrap
+  // worker (#932) has reached it yet. Absent the rest of the time.
+  DOCUMENT_KEK_NEXT: z.string().regex(/^[a-fA-F0-9]{64}$/, "DOCUMENT_KEK_NEXT must be exactly 32 bytes encoded as hexadecimal").optional(),
 });
 
 export interface DocumentConfig {
@@ -43,6 +48,23 @@ export interface DocumentConfig {
   };
   keyEncryptionKey: Buffer;
   keyId: string;
+  /**
+   * The rotation-in-progress key, or both null when no rotation is under way
+   * (#954). `nextKeyId` is never null when `nextKeyEncryptionKey` isn't, and
+   * vice versa.
+   */
+  nextKeyEncryptionKey: Buffer | null;
+  nextKeyId: string | null;
+}
+
+/**
+ * The one place a document KEK's id is derived, so a rewrap operation (#932)
+ * computing the id of a candidate "next" key it was only just handed agrees,
+ * byte for byte, with what a running instance would derive from the same
+ * bytes once they became `DOCUMENT_KEK`.
+ */
+export function deriveDocumentKeyId(keyEncryptionKey: Buffer): string {
+  return createHash("sha256").update("orbit-document-kek-v1\0").update(keyEncryptionKey).digest("hex").slice(0, 24);
 }
 
 let cachedDocumentConfig: DocumentConfig | undefined;
@@ -57,12 +79,24 @@ export function getDocumentConfig(environment: NodeJS.ProcessEnv = process.env):
   const parsed = documentEnvironmentSchema.parse({
     ...environment,
     DOCUMENT_KEK: readRuntimeSecret(environment, "DOCUMENT_KEK"),
+    DOCUMENT_KEK_NEXT: readRuntimeSecret(environment, "DOCUMENT_KEK_NEXT"),
   });
   if (parsed.DOCUMENT_HOUSEHOLD_QUOTA_BYTES > parsed.DOCUMENT_INSTANCE_QUOTA_BYTES) {
     throw new Error("DOCUMENT_HOUSEHOLD_QUOTA_BYTES cannot exceed DOCUMENT_INSTANCE_QUOTA_BYTES");
   }
 
   const keyEncryptionKey = Buffer.from(parsed.DOCUMENT_KEK, "hex");
+  const keyId = deriveDocumentKeyId(keyEncryptionKey);
+  let nextKeyEncryptionKey: Buffer | null = null;
+  let nextKeyId: string | null = null;
+  if (parsed.DOCUMENT_KEK_NEXT) {
+    nextKeyEncryptionKey = Buffer.from(parsed.DOCUMENT_KEK_NEXT, "hex");
+    nextKeyId = deriveDocumentKeyId(nextKeyEncryptionKey);
+    if (nextKeyId === keyId) {
+      throw new Error("DOCUMENT_KEK_NEXT must differ from DOCUMENT_KEK; there is nothing to rotate");
+    }
+  }
+
   const config: DocumentConfig = {
     storageRoot: resolve(parsed.DOCUMENTS_ROOT),
     quarantineRoot: resolve(parsed.DOCUMENTS_QUARANTINE_ROOT),
@@ -82,7 +116,9 @@ export function getDocumentConfig(environment: NodeJS.ProcessEnv = process.env):
       timeoutMs: parsed.TIKA_TIMEOUT_MS,
     },
     keyEncryptionKey,
-    keyId: createHash("sha256").update("orbit-document-kek-v1\0").update(keyEncryptionKey).digest("hex").slice(0, 24),
+    keyId,
+    nextKeyEncryptionKey,
+    nextKeyId,
   };
 
   if (config.storageRoot === config.quarantineRoot) {
@@ -94,4 +130,38 @@ export function getDocumentConfig(environment: NodeJS.ProcessEnv = process.env):
 
 export function resetDocumentConfigForTests(): void {
   cachedDocumentConfig = undefined;
+}
+
+/**
+ * Picks the key-encryption key matching a stored row's own `key_id` (#954,
+ * ADR-0024 decision 4): a row is readable under whichever of the current and
+ * (rotation-in-progress) next key actually wrapped it, regardless of whether
+ * the rewrap worker (#932) has reached that row yet. Returns undefined when
+ * the row's `key_id` matches neither — a genuine lock, not a rotation-timing
+ * gap. Writes pick their key through `wrappingKey()` below; this only widens
+ * what can be read.
+ */
+export function keyEncryptionKeyFor(config: DocumentConfig, keyId: string): Buffer | undefined {
+  if (keyId === config.keyId) return config.keyEncryptionKey;
+  if (config.nextKeyId !== null && keyId === config.nextKeyId) return config.nextKeyEncryptionKey ?? undefined;
+  return undefined;
+}
+
+/**
+ * The key every new wrap uses: the next key while a rotation is in progress,
+ * the current key otherwise (#955).
+ *
+ * Writing under the current key during a rotation would strand any row created
+ * after the rewrap worker's final count, because the procedure destroys the
+ * outgoing key at the end. Writing under the next key means the outgoing key
+ * has nothing left on it by then, so destroying it is safe — which is what a
+ * rotation prompted by a suspected leak needs.
+ *
+ * Reads are unaffected: both keys are held, so a row wrapped either way is
+ * readable through `keyEncryptionKeyFor()` with no restart.
+ */
+export function wrappingKey(config: DocumentConfig): { keyEncryptionKey: Buffer; keyId: string } {
+  return config.nextKeyEncryptionKey !== null && config.nextKeyId !== null
+    ? { keyEncryptionKey: config.nextKeyEncryptionKey, keyId: config.nextKeyId }
+    : { keyEncryptionKey: config.keyEncryptionKey, keyId: config.keyId };
 }

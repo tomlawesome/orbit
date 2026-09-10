@@ -229,8 +229,17 @@ vi.mock("@/server/authorization", () => ({
   },
 }));
 
-vi.mock("@/server/documents/config", () => ({
-  getDocumentConfig: () => ({ keyEncryptionKey: mocks.keyEncryptionKey, keyId: mocks.keyId }),
+vi.mock("@/server/documents/config", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/server/documents/config")>(),
+  // #954: no rotation in progress in this suite, so only the current key is
+  // ever held. `keyEncryptionKeyFor` itself is the real implementation
+  // (spread from importOriginal above), not re-stubbed here.
+  getDocumentConfig: () => ({
+    keyEncryptionKey: mocks.keyEncryptionKey,
+    keyId: mocks.keyId,
+    nextKeyEncryptionKey: null,
+    nextKeyId: null,
+  }),
 }));
 
 vi.mock("./imap-ingestion", () => ({

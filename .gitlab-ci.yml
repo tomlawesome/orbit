@@ -1876,43 +1876,48 @@ launcher_install_compat:
       # would need a job token in the URL, and the launcher's raw pty log --
       # kept as an artifact below -- may echo the URL it was given.
       #
-      # The URL carries /scripts/ because the launcher derives the rest of the
-      # tree from it rather than being told where it is: scriptSourceURLs drops
-      # install.sh to get the scripts base, then drops a trailing /scripts to
-      # get the root that .env-orbit.example sits at (orbit-launcher,
-      # internal/deploy/configure.go). Serving install.sh at the server root
-      # instead collapses both bases onto one directory -- not the shape a real
-      # install has -- and every other fetch 404s. The launcher answers a 404
-      # by falling back to the terminal hand-off without saying so, so the
-      # in-console guided configuration this job exists to cover never ran
-      # (#926). Hence exact-path routing over a real /scripts/ layout, and the
-      # curl | cmp assertions below, which fail the job here rather than
-      # letting it pass on the fallback path.
+      # Served under /scripts/, not at the root, and with configure.sh and its
+      # siblings beside it: the launcher's in-console configuration stages a
+      # tree of its own before install.sh runs, fetching configure.sh,
+      # configuration.sh, installer-ui.sh and .env-orbit.example from bases it
+      # derives from this very URL (orbit-launcher `scriptSourceURLs` in
+      # internal/deploy/configure.go -- the scripts directory, and its parent
+      # for the root file). A root-level /install.sh made every one of those a
+      # 404, the launcher fell back to the terminal hand-off, and strict mode
+      # then stopped the run (#957); before strict mode existed the same 404s
+      # silently tested the hand-off instead of the path operators take (#926).
+      # The /scripts suffix is what makes the two bases differ here exactly as
+      # they do for a real install from raw.githubusercontent.com.
       node -e '
         const http = require("node:http"), fs = require("node:fs"), path = require("node:path");
         const root = process.argv[1];
-        const shell = "text/x-shellscript";
-        const routes = [
-          ["/scripts/install.sh", "scripts/install.sh", shell],
-          ["/scripts/configure.sh", "scripts/configure.sh", shell],
-          ["/scripts/configuration.sh", "scripts/configuration.sh", shell],
-          ["/scripts/installer-ui.sh", "scripts/installer-ui.sh", shell],
-          ["/.env-orbit.example", ".env-orbit.example", "text/plain; charset=utf-8"],
-        ];
-        const served = new Map(routes.map(([url, rel, type]) => [url, [fs.readFileSync(path.join(root, rel)), type]]));
+        const served = new Map([
+          ["/scripts/install.sh", "scripts/install.sh"],
+          ["/scripts/configure.sh", "scripts/configure.sh"],
+          ["/scripts/configuration.sh", "scripts/configuration.sh"],
+          ["/scripts/installer-ui.sh", "scripts/installer-ui.sh"],
+          ["/.env-orbit.example", ".env-orbit.example"],
+        ]);
+        const bodies = new Map();
+        for (const [url, rel] of served) bodies.set(url, fs.readFileSync(path.join(root, rel)));
         http.createServer((req, res) => {
-          const hit = served.get(req.url);
-          if (!hit) { res.writeHead(404); return res.end(); }
-          res.writeHead(200, { "content-type": hit[1] }); res.end(hit[0]);
+          const body = bodies.get(req.url);
+          if (body === undefined) { res.writeHead(404); return res.end(); }
+          const type = req.url.endsWith(".sh") ? "text/x-shellscript" : "text/plain";
+          res.writeHead(200, { "content-type": type }); res.end(body);
         }).listen(0, "127.0.0.1", function () { fs.writeFileSync(process.argv[2], String(this.address().port)); });
       ' "$CI_PROJECT_DIR" "$CI_PROJECT_DIR/.installer-port" &
       for _ in $(seq 1 50); do [ -s "$CI_PROJECT_DIR/.installer-port" ] && break; sleep 0.1; done
       [ -s "$CI_PROJECT_DIR/.installer-port" ] || { echo "installer server did not start"; exit 1; }
-      installer_origin="http://127.0.0.1:$(cat "$CI_PROJECT_DIR/.installer-port")"
-      export ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="$installer_origin/scripts/install.sh"
-      curl -fsS "$ORBIT_LAUNCHER_INSTALL_SCRIPT_URL" | cmp - "$CI_PROJECT_DIR/scripts/install.sh"
-      curl -fsS "$installer_origin/scripts/configure.sh" | cmp - "$CI_PROJECT_DIR/scripts/configure.sh"
-      curl -fsS "$installer_origin/.env-orbit.example" | cmp - "$CI_PROJECT_DIR/.env-orbit.example"
+      installer_base="http://127.0.0.1:$(cat "$CI_PROJECT_DIR/.installer-port")"
+      export ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="$installer_base/scripts/install.sh"
+      # Every file the launcher will ask for, byte for byte, before the suite
+      # starts: a missing one costs a 20-minute run to discover otherwise, and
+      # the failure it produces names the hand-off rather than the 404.
+      for served_file in scripts/install.sh scripts/configure.sh scripts/configuration.sh scripts/installer-ui.sh .env-orbit.example; do
+        curl -fsS "$installer_base/$served_file" | cmp - "$CI_PROJECT_DIR/$served_file" ||
+          { echo "loopback installer server did not serve $served_file byte for byte"; exit 1; }
+      done
       # install.sh and the image it verifies are one generation: the image
       # built by this pipeline, from the loopback registry started above.
       # `preview` here would be last week's image, and the launcher would
