@@ -10,7 +10,7 @@ import { readDocumentDownload } from "@/server/document-repository";
 import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
-import { openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/tier1";
+import { openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { acquireActiveHouseholdLock } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -92,6 +92,12 @@ export async function createPortableArchive(input: {
     ...item,
     reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
     notes: metadata.text("items.notes", item.id, { encrypted: item.notesEnc, plaintext: item.notes }).value,
+    // Tier 2 (#963) exports decrypted for the same reason Tier 1 does: the
+    // archive is the deliberate plaintext escape hatch, and an archive holding
+    // ciphertext nobody outside this instance can open would not be one.
+    title: metadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title }).value ?? "",
+    provider: metadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider }).value,
+    costMinor: metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc, plaintext: item.costMinor }).value,
   }));
 
   const payload: Record<string, unknown> = {
@@ -289,7 +295,12 @@ async function existingReferenceMatches(
   return found;
 }
 
-/** Title matching is unchanged: `items.title` is Tier 3 and stays in plaintext. */
+/**
+ * Title matching now compares decrypted titles (#963): `items.title` is Tier 2,
+ * not Tier 3 as this comment used to say, so the caller decrypts the
+ * household's titles before handing them here. It already reads every item in
+ * the household, so nothing is lost by comparing in the application.
+ */
 function duplicatesExistingItem(
   source: { title: string; reference?: string | null },
   existingTitles: Array<{ title: string }>,
@@ -300,10 +311,30 @@ function duplicatesExistingItem(
   return existingTitles.some((candidate) => candidate.title.toLowerCase() === source.title.toLowerCase());
 }
 
+/**
+ * The household's item titles, decrypted (#963). A locked instance yields the
+ * plaintext of any row the backfill has not reached and nothing for the rest,
+ * which is the correct conservative answer: an unreadable title cannot be
+ * shown to be a duplicate, so the import proceeds rather than being blocked by
+ * a comparison nobody can make.
+ */
+async function existingItemTitles(
+  executor: MetadataExecutor,
+  householdId: string,
+): Promise<Array<{ title: string }>> {
+  const rows = await executor.select({ id: items.id, title: items.title, titleEnc: items.titleEnc })
+    .from(items).where(eq(items.householdId, householdId));
+  const metadata = await openMetadataReader(householdId, executor);
+  return rows.flatMap((row) => {
+    const title = metadata.text("items.title", row.id, { encrypted: row.titleEnc, plaintext: row.title }).value;
+    return title ? [{ title }] : [];
+  });
+}
+
 export async function previewPortableImport(userId: string, householdId: string, serialized: unknown, passphrase: string) {
   await requireHouseholdAccess(userId, householdId);
   const archive = decodeImportArchive(serialized, passphrase);
-  const existing = await getDb().select({ title: items.title }).from(items).where(eq(items.householdId, householdId));
+  const existing = await existingItemTitles(getDb(), householdId);
   const duplicateReferences = await existingReferenceMatches(getDb(), householdId, archive.items.map((item) => item.reference));
   const conflicts = archive.items.filter((item) => duplicatesExistingItem(item, existing, duplicateReferences)).map((item) => ({ id: item.id, title: item.title }));
   return { householdName: archive.household.name, sections: archive.sections.length, items: archive.items.length, documents: archive.documents.length, conflicts, documentsExcluded: archive.documents.length > 0 };
@@ -324,7 +355,7 @@ export async function importPortableArchive(input: { userId: string; householdId
       if (!current) await transaction.insert(sections).values({ id, householdId: input.householdId, slug: source.slug, name: source.name, icon: source.icon, accent: source.accent, position: source.position, visible: source.visible });
       sectionMap.set(source.id, id);
     }
-    const existing = await transaction.select({ title: items.title }).from(items).where(eq(items.householdId, input.householdId));
+    const existing = await existingItemTitles(transaction, input.householdId);
     const duplicateReferences = await existingReferenceMatches(transaction, input.householdId, archive.items.map((item) => item.reference));
     const metadata = await requireMetadataWriter(input.householdId, transaction);
     let count = 0;
@@ -333,7 +364,7 @@ export async function importPortableArchive(input: { userId: string; householdId
       if (duplicate && !skipped.has(source.id)) throw new AppError("archive_conflict_unresolved", "Review every duplicate before importing", 409);
       if (duplicate || !sectionMap.has(source.sectionId)) continue;
       const itemId = randomUUID();
-      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, title: source.title, subtype: source.subtype ?? null, provider: source.provider ?? null, reference: null, referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinor: source.costMinor ?? null, currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notes: null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
+      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, title: null, titleEnc: metadata.encryptText("items.title", itemId, source.title), subtype: source.subtype ?? null, provider: null, providerEnc: metadata.encryptText("items.provider", itemId, source.provider), reference: null, referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinor: null, costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, source.costMinor), currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notes: null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
       count++;
     }
     await transaction.insert(auditLog).values({ householdId: input.householdId, actorUserId: input.userId, entityType: "portable_archive", entityId: randomUUID(), action: "portable_archive_imported", changes: { importedItems: count, skippedConflicts: skipped.size, documentsExcluded: archive.documents.length } });

@@ -22,7 +22,7 @@ import { workspaceItemSchema } from "@/lib/workspace";
 import type { DocumentProposal } from "@/server/documents/suggestions";
 import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
-import { openMetadataReader } from "@/server/metadata/tier1";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
 
 const proposalFields = [
@@ -275,14 +275,17 @@ async function reviewedItemMatches(input: ReviewedIntakeApproval, itemId: string
     const metadata = await openMetadataReader(existing.householdId);
     const persistedReference = metadata.text("items.reference", existing.id, { encrypted: existing.referenceEnc, plaintext: existing.reference });
     const persistedNotes = metadata.text("items.notes", existing.id, { encrypted: existing.notesEnc, plaintext: existing.notes });
+    const persistedTitle = metadata.text("items.title", existing.id, { encrypted: existing.titleEnc, plaintext: existing.title });
+    const persistedProvider = metadata.text("items.provider", existing.id, { encrypted: existing.providerEnc, plaintext: existing.provider });
+    const persistedCost = metadata.number("items.cost_minor", existing.id, { encrypted: existing.costMinorEnc, plaintext: existing.costMinor });
     const persisted = {
       id: existing.id,
       sectionId: existing.sectionId,
-      title: existing.title,
+      title: persistedTitle.value ?? "",
       subtype: existing.subtype ?? undefined,
-      provider: existing.provider ?? undefined,
+      provider: persistedProvider.value ?? undefined,
       reference: persistedReference.value ?? undefined,
-      costMinor: existing.costMinor ?? undefined,
+      costMinor: persistedCost.value ?? undefined,
       currency: existing.currency,
       dueDate: event?.dueDate ?? existing.serviceDate ?? existing.renewalDate ?? undefined,
       scheduleKind: event?.kind ?? (existing.serviceDate ? "service" : existing.renewalDate ? "renewal" : undefined),

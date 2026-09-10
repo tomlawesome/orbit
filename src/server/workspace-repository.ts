@@ -25,7 +25,7 @@ import {
   type WorkspaceState,
 } from "@/lib/workspace";
 import { planOwnershipTransfer } from "@/server/household-ownership";
-import { openMetadataReaders, requireMetadataWriter } from "@/server/metadata/tier1";
+import { openMetadataReaders, requireMetadataWriter } from "@/server/metadata/fields";
 import {
   acquireActiveHouseholdLock,
   requireHouseholdAccess,
@@ -170,18 +170,32 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
         const event = eventByItem.get(item.id);
         const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference });
         const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc, plaintext: item.notes });
-        const metadataStatus = { reference: reference.state, notes: notes.state };
+        // Tier 2 (#963): decrypted here rather than in SQL. Cost totals and
+        // search both run on these values in the client, over one household's
+        // rows, which is what the tiering decision traded the query for.
+        const title = metadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title });
+        const provider = metadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider });
+        const costMinor = metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc, plaintext: item.costMinor });
+        const metadataStatus = {
+          reference: reference.state,
+          notes: notes.state,
+          title: title.state,
+          provider: provider.state,
+          costMinor: costMinor.state,
+        };
+        const damaged = Object.values(metadataStatus).some(Boolean);
         const scheduleKind = event?.kind
           ?? (item.serviceDate ? "service" : item.renewalDate ? "renewal" : undefined);
         const dueDate = event?.dueDate ?? item.serviceDate ?? item.renewalDate ?? undefined;
         return {
           id: item.id,
           sectionId: item.sectionId,
-          title: item.title,
+          // Empty, never fabricated: `metadataStatus.title` is what says why.
+          title: title.value ?? "",
           subtype: item.subtype ?? undefined,
-          provider: item.provider ?? undefined,
+          provider: provider.value ?? undefined,
           reference: reference.value ?? undefined,
-          costMinor: item.costMinor ?? undefined,
+          costMinor: costMinor.value ?? undefined,
           currency: item.currency,
           dueDate,
           scheduleKind,
@@ -189,7 +203,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           reminderDays: remindersByItem.get(item.id)?.sort((left, right) => right - left),
           snoozedUntil: item.snoozedUntil ?? undefined,
           notes: notes.value ?? undefined,
-          metadataStatus: reference.state || notes.state ? metadataStatus : undefined,
+          metadataStatus: damaged ? metadataStatus : undefined,
           status: item.status,
           version: item.version,
           updatedAt: item.updatedAt.toISOString(),
@@ -475,20 +489,28 @@ export async function applyWorkspaceCommand(
       if (!ownedSection) throw new AppError("section_not_found", "Choose a section from this household", 422);
       const [existing] = await transaction.select({ version: items.version }).from(items)
         .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1);
-      // Tier 1 (ADR-0024 decision 3): encrypt and clear the plaintext in the
-      // same statement, so the row is never in both states at once. Writing a
-      // damaged field is also the repair for it: the new value encrypts
-      // cleanly and the old ciphertext is gone.
+      // The schema tolerates an empty title only so a damaged one can be read
+      // back (ADR-0024 decision 5); a write still has to carry a real one, and
+      // a client that sends `metadataStatus` to slip past that check is
+      // refused here rather than storing a nameless item.
+      if (!command.item.title.trim()) throw new AppError("invalid_item", "Give this a name", 422);
+      // Tier 1 and Tier 2 (ADR-0024 decision 3): encrypt and clear the
+      // plaintext in the same statement, so the row is never in both states at
+      // once. Writing a damaged field is also the repair for it: the new value
+      // encrypts cleanly and the old ciphertext is gone.
       const metadata = await requireMetadataWriter(householdId, transaction);
       const values = {
         sectionId,
-        title: command.item.title,
+        title: null,
+        titleEnc: metadata.encryptText("items.title", itemId, command.item.title),
         subtype: command.item.subtype ?? null,
-        provider: command.item.provider ?? null,
+        provider: null,
+        providerEnc: metadata.encryptText("items.provider", itemId, command.item.provider),
         reference: null,
         referenceEnc: metadata.encryptText("items.reference", itemId, command.item.reference),
         referenceIndex: metadata.referenceIndex(command.item.reference),
-        costMinor: command.item.costMinor ?? null,
+        costMinor: null,
+        costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, command.item.costMinor),
         currency: command.item.currency,
         recurrenceMonths: command.item.recurrenceMonths ?? null,
         snoozedUntil: command.item.snoozedUntil ?? null,
@@ -638,8 +660,19 @@ export async function applyWorkspaceCommand(
           nextEventId,
         }).where(eq(dueEvents.id, currentEvent.id));
       }
+      // Tier 2 (#963): a completion may carry a new cost, and when it does not
+      // the row keeps the one it has. Re-encrypting the value it already holds
+      // would be pointless work and one more chance to lose it, so an absent
+      // cost leaves both columns exactly as they are.
+      const completionCost = command.costMinor === undefined
+        ? {}
+        : {
+          costMinor: null,
+          costMinorEnc: (await requireMetadataWriter(householdId, transaction))
+            .encryptNumber("items.cost_minor", itemId, command.costMinor),
+        };
       await transaction.update(items).set({
-        costMinor: command.costMinor ?? current.costMinor,
+        ...completionCost,
         status: "active",
         snoozedUntil: null,
         recurrenceMonths: command.nextDate ? current.recurrenceMonths : null,

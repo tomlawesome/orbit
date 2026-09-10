@@ -33,7 +33,7 @@ export type MetadataExecutor = Database | Parameters<Parameters<Database["transa
  */
 export class MetadataKeyLockedError extends Error {
   constructor() {
-    super("Tier 1 metadata is locked");
+    super("Encrypted metadata is locked");
     this.name = "MetadataKeyLockedError";
   }
 }
