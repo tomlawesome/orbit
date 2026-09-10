@@ -16,7 +16,6 @@ describe("hostile document suggestion boundary", () => {
       provider: "Acme Cover",
       reference: "AB-12345",
       dates: ["2027-08-01"],
-      dateRoles: [],
     });
   });
 
@@ -44,7 +43,6 @@ describe("hostile document suggestion boundary", () => {
       provider: undefined,
       reference: "SAFE-12345",
       dates: ["2028-02-29"],
-      dateRoles: [],
     });
     expect(proposal).not.toHaveProperty("tool");
     expect(proposal).not.toHaveProperty("householdId");
@@ -68,7 +66,7 @@ describe("hostile document suggestion boundary", () => {
       recurrenceMonths: undefined,
       scheduleKind: undefined,
       scheduleDate: undefined,
-      dateRoles: [],
+      dateRoles: undefined,
     });
   });
 });
@@ -146,14 +144,14 @@ describe("the four model-owned fields at the storage boundary", () => {
 
   it("drops a role outside the closed set rather than coercing it to `other`", () => {
     const proposal = stored({ dateRoles: [{ date: "2030-12-20", role: "cancellation" }] });
-    expect(proposal.dateRoles).toEqual([]);
+    expect(proposal.dateRoles).toBeUndefined();
     expect(proposal.scheduleKind).toBeUndefined();
   });
 
   it("drops a role whose date the proposal does not carry", () => {
-    expect(stored({ dateRoles: [{ date: "2031-01-01", role: "renewal" }] }).dateRoles).toEqual([]);
-    expect(stored({ dateRoles: [{ date: "2031-02-30", role: "renewal" }] }).dateRoles).toEqual([]);
-    expect(stored({ dateRoles: "renewal" }).dateRoles).toEqual([]);
+    expect(stored({ dateRoles: [{ date: "2031-01-01", role: "renewal" }] }).dateRoles).toBeUndefined();
+    expect(stored({ dateRoles: [{ date: "2031-02-30", role: "renewal" }] }).dateRoles).toBeUndefined();
+    expect(stored({ dateRoles: "renewal" }).dateRoles).toBeUndefined();
   });
 
   it("derives the schedule kind from the roles and ignores one supplied as input", () => {
@@ -191,6 +189,45 @@ describe("the four model-owned fields at the storage boundary", () => {
     ]);
     expect(proposal.scheduleDate).toBe("2031-06-01");
     expect(proposal).not.toHaveProperty("householdId");
+  });
+
+  /**
+   * #967. The proposal is stored as JSON, so what a reviewer is later shown
+   * — and what an auditor reads back out of the drafts table — is the
+   * serialised form, not the in-memory object. A field no extractor filled
+   * must be a key that is not there: an empty `dateRoles` in stored evidence
+   * is a key nobody saw or approved, and it says nothing the missing key
+   * does not, since an absent `dateRoles` reads back as no roles anyway.
+   *
+   * `toEqual` is not enough on its own here: it treats an `undefined`
+   * property as equal to a missing one, which is exactly the difference
+   * this test exists to pin. Hence the round-trip through JSON.
+   */
+  it("writes no key at all for a role list, or a model field, that stayed empty", () => {
+    const heuristic = JSON.parse(JSON.stringify(
+      safeStoredDocumentProposal(proposalFromText("Renews 2030-12-20", "policy.pdf"), "policy.pdf"),
+    )) as Record<string, unknown>;
+
+    expect(heuristic).toEqual({ title: "policy", dates: ["2030-12-20"] });
+    for (const field of ["dateRoles", "subtype", "costMinor", "currency", "recurrenceMonths"]) {
+      expect(heuristic).not.toHaveProperty(field);
+    }
+
+    // The same for a proposal whose every role was refused by the boundary:
+    // the roles are gone, so the key goes with them.
+    const refused = JSON.parse(JSON.stringify(stored({
+      dateRoles: [{ date: "2030-12-20", role: "cancellation" }],
+      subtype: "<b>Travel</b>",
+      costMinor: 41_266,
+      recurrenceMonths: 12,
+    }))) as Record<string, unknown>;
+
+    expect(refused).toEqual({ title: "Policy", dates: ["2030-12-20"] });
+
+    // And a surviving role still reaches storage, so absence means absence
+    // rather than the key having been dropped unconditionally.
+    expect(JSON.parse(JSON.stringify(stored({ dateRoles: scheduled }))))
+      .toMatchObject({ dateRoles: [{ date: "2030-12-20", role: "renewal" }] });
   });
 });
 
