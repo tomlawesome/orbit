@@ -406,7 +406,24 @@ absent, those suggestion slots are simply empty, as they are today.
   number, not an assertion.
 - Choosing which local model to recommend is an evaluation outcome, not a
   design call: candidates are scored by the section 6 harness and the
-  winner is recorded with its numbers.
+  winner is recorded with its numbers. **The owner fixed the budget that
+  evaluation runs inside (2026-09-10): Orbit is self-hosted, typically on
+  unremarkable hardware, so the model path must do a lot with little.**
+  - **CPU is the baseline, not the fallback.** If the job can be done on
+    CPU it is done on CPU, and a candidate that needs a GPU to be usable
+    has failed rather than qualified. The Compose service is capped at 2
+    CPUs and 6 GB today, which is the shape a candidate is judged in.
+  - **A GPU option is offered, and it asks for very little.** Nobody
+    hands a household document-filing system their whole graphics card,
+    so the optional accelerated path targets a small slice of VRAM
+    rather than a dedicated device, and degrades to the CPU path when it
+    is not there. Delivery is CUDA in Docker; the container, its network
+    and every bound in sections 1 to 3 are unchanged by it, so this is a
+    deployment option and not a second extraction path.
+  - The consequence for selection is that model *size* is a first-class
+    score alongside accuracy. A candidate that wins on accuracy while
+    only running acceptably on hardware a self-hoster does not have has
+    not won.
 
 ## Alternatives rejected
 
