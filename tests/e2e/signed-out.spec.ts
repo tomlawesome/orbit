@@ -30,6 +30,7 @@ test("signed-out visitors get 401 from every workspace API route", async ({ requ
     request.delete(`/api/documents/${documentId}`),
     request.post(`/api/documents/${documentId}/restore`),
     request.get("/api/admin/documents/health"),
+    request.get("/api/admin/documents/rotation"),
   ])) {
     expect(response.status()).toBe(401);
   }

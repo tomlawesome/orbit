@@ -21,6 +21,7 @@ import { closeDatabase } from "@/db";
 import { deriveDocumentKeyId, getDocumentConfig } from "@/server/documents/config";
 import {
   recordRotationCompleted,
+  recordRotationStarted,
   rotationRemaining,
   runKekRotationToCompletion,
   type RotationKeys,
@@ -64,6 +65,10 @@ async function main(): Promise<void> {
   };
 
   try {
+    /* Idempotent (#956): the application's own boot usually recorded the
+       start when it came up holding DOCUMENT_KEK_NEXT, and a resumed rewrap
+       must not add a second row — one row per rotation, not per invocation. */
+    await recordRotationStarted({ previousKeyId: keys.currentKeyId, nextKeyId: keys.nextKeyId });
     const before = await rotationRemaining(keys);
     process.stdout.write(
       `Starting rewrap: ${before.documentsRemaining} document(s), ${before.metadataKeysRemaining} metadata key(s), `

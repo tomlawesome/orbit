@@ -406,6 +406,89 @@ export async function runKekRotationToCompletion(keys: RotationKeys, batchSize =
   }
 }
 
+/** The start-of-rotation audit fact (#956): when it began and which keys it moves between. */
+export interface RotationStart {
+  startedAt: Date;
+  previousKeyId: string;
+  nextKeyId: string;
+}
+
+interface RotationStartRow {
+  createdAt: Date;
+  changes: { previousKeyId?: unknown; nextKeyId?: unknown };
+}
+
+type AuditExecutor = Pick<ReturnType<typeof getDb>, "execute">;
+
+/**
+ * The most recent `document_kek_rotation_started` audit row not yet followed
+ * by a `document_kek_rotation_completed` row, or null when no rotation is
+ * open. Openness is purely temporal — latest started newer than latest
+ * completed — deliberately ignoring which keys each row names: an undo
+ * (docs/administrator-operations.md, "Undoing a rotation") completes in the
+ * opposite direction, and its completed row must still close the book.
+ */
+async function openRotationStartWith(executor: AuditExecutor): Promise<RotationStart | null> {
+  const rows = await executor.execute(sql<RotationStartRow>`
+    select changes, created_at as "createdAt"
+    from audit_log
+    where entity_type = 'document_kek'
+      and action = 'document_kek_rotation_started'
+      and created_at > coalesce((
+        select max(created_at) from audit_log
+        where entity_type = 'document_kek'
+          and action = 'document_kek_rotation_completed'
+      ), '-infinity')
+    order by created_at desc
+    limit 1
+  `);
+  const row = (rows as unknown as RotationStartRow[])[0];
+  if (!row) return null;
+  return {
+    startedAt: row.createdAt,
+    previousKeyId: typeof row.changes.previousKeyId === "string" ? row.changes.previousKeyId : "",
+    nextKeyId: typeof row.changes.nextKeyId === "string" ? row.changes.nextKeyId : "",
+  };
+}
+
+export async function findOpenRotationStart(): Promise<RotationStart | null> {
+  return openRotationStartWith(getDb());
+}
+
+/**
+ * Records that a rotation started (#956): one instance-level audit row per
+ * rotation, mirroring `recordRotationCompleted` below, carrying the outgoing
+ * and incoming key ids. Idempotent — called from every boot that finds a
+ * second key loaded and from every `pnpm rewrap-kek` invocation, so a restart
+ * or a resumed rewrap returns the already-open row rather than writing
+ * another. A different key pair while a rotation is open is a new rotation
+ * (the operator abandoned or reversed the last one), so it gets its own row.
+ * The advisory lock covers the boot-and-CLI race for one instance's audit
+ * trail; nothing else takes it.
+ */
+export async function recordRotationStarted(keyIds: { previousKeyId: string; nextKeyId: string }): Promise<RotationStart> {
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtext('document_kek_rotation_started'))`);
+    const open = await openRotationStartWith(transaction);
+    if (open && open.previousKeyId === keyIds.previousKeyId && open.nextKeyId === keyIds.nextKeyId) return open;
+    const [inserted] = await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId: null,
+      entityType: "document_kek",
+      entityId: randomUUID(),
+      action: "document_kek_rotation_started",
+      changes: { previousKeyId: keyIds.previousKeyId, nextKeyId: keyIds.nextKeyId },
+    }).returning({ createdAt: auditLog.createdAt });
+    log.info({
+      event: "document.kek_rotation",
+      state: "starting",
+      action: "none",
+      detail: operationalDetail`previous key ${keyIds.previousKeyId} next key ${keyIds.nextKeyId}`,
+    });
+    return { startedAt: inserted.createdAt, previousKeyId: keyIds.previousKeyId, nextKeyId: keyIds.nextKeyId };
+  });
+}
+
 /** The one audit row a completed rotation leaves, matching ADR-0017's instance-level vocabulary (`householdId: null`). */
 export async function recordRotationCompleted(keys: RotationKeys): Promise<void> {
   await getDb().insert(auditLog).values({
