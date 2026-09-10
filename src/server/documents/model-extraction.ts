@@ -53,9 +53,22 @@ const MODEL_SEED = 20_260_909;
 const EVIDENCE_SPAN_MAX_CHARACTERS = 200;
 const MAX_DATES = 12;
 
-/** Short for the interactive Add-item inspection, longer for the mailbox. */
+/**
+ * Short for the interactive Add-item inspection, minutes for the mailbox.
+ *
+ * The mailbox figure is deliberately generous (owner ruling, 2026-09-10:
+ * "no one cares about a 2-5 minute run on a doc that's being mailed in").
+ * Nobody is watching a mail-in receipt -- it is a queue -- and measurement
+ * on #965 put a full-budget document well past the old 45 seconds on CPU.
+ *
+ * It is still bounded, and that is the point. paperless-ai hardcodes a
+ * 30-minute timeout and its users report GPU-less setups exceeding it,
+ * leaving documents stuck "processing" and retried every cycle forever. The
+ * bound plus whole-reply discard and no automatic retry (ADR-0025 section 1)
+ * is what keeps a slow host from becoming that wedge loop.
+ */
 export const MODEL_INTERACTIVE_DEADLINE_MS = 8_000;
-export const MODEL_MAILBOX_DEADLINE_MS = 45_000;
+export const MODEL_MAILBOX_DEADLINE_MS = 300_000;
 
 /**
  * A model proposal is a `DocumentProposal` and nothing more. This module
