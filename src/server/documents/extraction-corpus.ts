@@ -5,11 +5,55 @@
 // or model. Add documents freely; never tune a fixture to make a parser
 // look better.
 
+import type { DocumentDateRole } from "./suggestions";
+import type { ScheduleKind } from "@/lib/domain";
+
 export interface CorpusExpectation {
   // ISO dates that a correct extraction should surface (order-free).
   dates: string[];
   provider?: string;
   reference?: string;
+  // --- The rest is the contract ADR-0025 section 7 gives the model path
+  // (issue #960). The heuristics never attempt any of it, by the owner's
+  // decision on #319, so every one of these is a blank for `proposalFromText`
+  // — that is the measurement, not a defect.
+  //
+  // Ground truth here is what a careful human reading the page would say,
+  // and it is declared only where the page actually says it. Two rules keep
+  // it from asking for something the design forbids producing:
+  //
+  //  - a `costMinor` is declared only where the amount is plainly THE cost of
+  //    the thing (a premium, a total due, the monthly price) AND its line
+  //    carries a currency symbol or code. A sum insured, an excess, an exit
+  //    fee or a balance is not the cost, and a page with several rival
+  //    amounts is left undeclared rather than guessed at.
+  //  - a `recurrenceMonths` is declared only where the page prints the month
+  //    count in DIGITS (the grounding rule needs them in the evidence span)
+  //    and the item has a scheduled date to repeat. "Annual", "twelve-month"
+  //    and "each month" therefore declare nothing.
+  //
+  // Every date carries a role naming what kind of date it is, regardless of
+  // whether it has already happened: a service date is a service date
+  // whether the engineer came last year or comes next year. Choosing which
+  // of them becomes the item's scheduled event is the application's job, not
+  // the label's.
+  //
+  // Known thin spot: exactly one of the 36 documents states a recurrence in
+  // a form the contract can produce (the gas safety record's "within 12
+  // months"), so `recurrence` is measured on a single point. Household
+  // paperwork mostly writes "annual" or "twelve-month" in words, which the
+  // digits-in-the-span rule refuses on purpose. The fix is more documents,
+  // not a looser rule — a document that prints its interval in digits is
+  // welcome here.
+  /** One role per expected date, in the order the document prints them. */
+  dateRoles?: Array<{ date: string; role: DocumentDateRole }>;
+  subtype?: string;
+  /** Minor units. Always declared together with `currency`, never alone. */
+  costMinor?: number;
+  currency?: string;
+  recurrenceMonths?: number;
+  /** Derived from the roles above; the model never emits it. */
+  scheduleKind?: ScheduleKind;
 }
 
 export interface CorpusDocument {
@@ -33,6 +77,12 @@ Buildings sum insured £450,000`,
       dates: ["2025-10-02", "2026-10-02"],
       provider: "Acme Cover Ltd",
       reference: "HI-9284712",
+      dateRoles: [
+        { date: "2025-10-02", role: "start" },
+        { date: "2026-10-02", role: "renewal" },
+      ],
+      subtype: "Home insurance",
+      scheduleKind: "renewal",
     },
   },
   {
@@ -45,6 +95,11 @@ Expiry date: 28 August 2026
 Issued: 29 August 2025 at Hartswood Garage`,
     expected: {
       dates: ["2026-08-28", "2025-08-29"],
+      dateRoles: [
+        { date: "2026-08-28", role: "expiry" },
+        { date: "2025-08-29", role: "issued" },
+      ],
+      subtype: "MOT test certificate",
     },
   },
   {
@@ -59,6 +114,14 @@ Amount due: £120.00`,
       dates: ["2025-09-04", "2026-09-04"],
       provider: "British Gas",
       reference: "INV-88213",
+      dateRoles: [
+        { date: "2025-09-04", role: "service" },
+        { date: "2026-09-04", role: "service" },
+      ],
+      subtype: "Annual boiler service",
+      costMinor: 12_000,
+      currency: "GBP",
+      scheduleKind: "service",
     },
   },
   {
@@ -73,6 +136,13 @@ Annual premium £642.18`,
       dates: ["2026-09-14"],
       provider: "Shield Motor Insurance",
       reference: "SM-2291-X",
+      dateRoles: [
+        { date: "2026-09-14", role: "renewal" },
+      ],
+      subtype: "Car insurance",
+      costMinor: 64_218,
+      currency: "GBP",
+      scheduleKind: "renewal",
     },
   },
   {
@@ -86,6 +156,14 @@ Total: £163.90`,
     expected: {
       dates: ["2026-06-01", "2026-06-30", "2026-07-21"],
       reference: "300481292",
+      dateRoles: [
+        { date: "2026-06-01", role: "start" },
+        { date: "2026-06-30", role: "other" },
+        { date: "2026-07-21", role: "due" },
+      ],
+      subtype: "Energy statement",
+      costMinor: 16_390,
+      currency: "GBP",
     },
   },
   {
@@ -97,6 +175,10 @@ Warranty valid until 3rd March 2027.
 Register your appliance to extend cover.`,
     expected: {
       dates: ["2027-03-03"],
+      dateRoles: [
+        { date: "2027-03-03", role: "expiry" },
+      ],
+      subtype: "Warranty certificate",
     },
   },
   {
@@ -109,6 +191,12 @@ A colour licence costs £169.50 a year.`,
     expected: {
       dates: ["2026-11-30"],
       reference: "TVL-04482913",
+      dateRoles: [
+        { date: "2026-11-30", role: "expiry" },
+      ],
+      subtype: "TV Licence",
+      costMinor: 16_950,
+      currency: "GBP",
     },
   },
   {
@@ -120,6 +208,10 @@ Questions? Quote reference HS-77120 when you call.`,
     expected: {
       dates: ["2026-01-12", "2027-01-11"],
       reference: "HS-77120",
+      dateRoles: [
+        { date: "2026-01-12", role: "start" },
+        { date: "2027-01-11", role: "expiry" },
+      ],
     },
   },
   {
@@ -130,6 +222,12 @@ J. Marsh & Son. 12/10/2025. £90 cash.
 We recommend annual sweeping.`,
     expected: {
       dates: ["2025-10-12"],
+      dateRoles: [
+        { date: "2025-10-12", role: "service" },
+      ],
+      costMinor: 9_000,
+      currency: "GBP",
+      scheduleKind: "service",
     },
   },
   {
@@ -141,6 +239,11 @@ First instalment due 01/04/2026, final instalment 01/01/2027.`,
     expected: {
       dates: ["2026-04-01", "2027-01-01"],
       reference: "55018824",
+      dateRoles: [
+        { date: "2026-04-01", role: "due" },
+        { date: "2027-01-01", role: "due" },
+      ],
+      subtype: "Council tax",
     },
   },
   {
@@ -154,6 +257,12 @@ Cover start 15/02/2026 — renews automatically 15/02/2027`,
       dates: ["2026-02-15", "2027-02-15"],
       provider: "PawGuard",
       reference: "PG881122",
+      dateRoles: [
+        { date: "2026-02-15", role: "start" },
+        { date: "2027-02-15", role: "renewal" },
+      ],
+      subtype: "Pet insurance",
+      scheduleKind: "renewal",
     },
   },
   {
@@ -181,6 +290,12 @@ Your next statement is due 2026-10-01. Balance carried forward £0.00.`,
       dates: ["2026-04-01", "2027-03-31", "2026-10-01"],
       provider: "Clearspring Water Ltd",
       reference: "CW-0099-4471",
+      dateRoles: [
+        { date: "2026-04-01", role: "start" },
+        { date: "2027-03-31", role: "other" },
+        { date: "2026-10-01", role: "due" },
+      ],
+      subtype: "Statement of account",
     },
   },
   {
@@ -194,6 +309,12 @@ Test slots are held for 48 hours.`,
     expected: {
       dates: ["2026-08-12", "2025-08-28", "2026-08-28"],
       provider: "Hartswood Garage Services",
+      dateRoles: [
+        { date: "2026-08-12", role: "issued" },
+        { date: "2025-08-28", role: "service" },
+        { date: "2026-08-28", role: "expiry" },
+      ],
+      scheduleKind: "service",
     },
   },
   {
@@ -209,6 +330,12 @@ Ten instalments are payable from 1 April 2027 to 1 January 2028.`,
       dates: ["2027-03-09", "2027-04-01", "2028-01-01"],
       provider: "Borough of Westhaven",
       reference: "8802 5514 9",
+      dateRoles: [
+        { date: "2027-03-09", role: "issued" },
+        { date: "2027-04-01", role: "due" },
+        { date: "2028-01-01", role: "due" },
+      ],
+      subtype: "Council tax demand notice",
     },
   },
   {
@@ -223,6 +350,11 @@ Speeds quoted are estimates and are not guaranteed.`,
       dates: ["2026-10-02", "2028-03-31"],
       provider: "Northgate Fibre Ltd",
       reference: "4471-8820-3390",
+      dateRoles: [
+        { date: "2026-10-02", role: "start" },
+        { date: "2028-03-31", role: "expiry" },
+      ],
+      subtype: "Service agreement",
     },
   },
   {
@@ -237,6 +369,11 @@ The next annual review is 6 May 2027.`,
       dates: ["2024-05-06", "2027-05-06"],
       provider: "Acorn Mutual Assurance Society",
       reference: "LC/2291/443",
+      dateRoles: [
+        { date: "2024-05-06", role: "start" },
+        { date: "2027-05-06", role: "due" },
+      ],
+      subtype: "Life cover",
     },
   },
   {
@@ -252,6 +389,15 @@ Policy: NSM 44/22910`,
       dates: ["2027-02-04", "2027-02-21", "2027-02-22"],
       provider: "Northern Shire Mutual Insurance Society",
       reference: "NSM 44/22910",
+      dateRoles: [
+        { date: "2027-02-04", role: "issued" },
+        { date: "2027-02-21", role: "expiry" },
+        { date: "2027-02-22", role: "renewal" },
+      ],
+      subtype: "Buildings cover",
+      costMinor: 41_200,
+      currency: "GBP",
+      scheduleKind: "renewal",
     },
   },
   {
@@ -279,6 +425,12 @@ the 30th of September 2027. One calendar month's notice applies.`,
       dates: ["2026-09-24", "2026-10-01", "2027-09-30"],
       provider: "Riverbank Leisure Club",
       reference: "RLC-7781-22",
+      dateRoles: [
+        { date: "2026-09-24", role: "issued" },
+        { date: "2026-10-01", role: "start" },
+        { date: "2027-09-30", role: "expiry" },
+      ],
+      subtype: "Membership agreement",
     },
   },
   {
@@ -293,6 +445,15 @@ Please check your details before 23 September 2026. New premium £318.40.`,
       dates: ["2026-09-30", "2026-10-01", "2026-09-23"],
       provider: "Kestrel Mutual",
       reference: "88-2291-KM",
+      dateRoles: [
+        { date: "2026-09-30", role: "expiry" },
+        { date: "2026-10-01", role: "renewal" },
+        { date: "2026-09-23", role: "due" },
+      ],
+      subtype: "Contents insurance",
+      costMinor: 31_840,
+      currency: "GBP",
+      scheduleKind: "renewal",
     },
   },
   {
@@ -308,6 +469,13 @@ first identifies work.`,
       dates: ["2026-04-18", "2026-07-15", "2027-01-20"],
       provider: "Fairweather Roofing Ltd",
       reference: "FR/2026/0418",
+      dateRoles: [
+        { date: "2026-04-18", role: "issued" },
+        { date: "2026-07-15", role: "service" },
+        { date: "2027-01-20", role: "service" },
+      ],
+      subtype: "Maintenance agreement",
+      scheduleKind: "service",
     },
   },
   {
@@ -322,6 +490,13 @@ Payments of £18.50 are collected on the 1st of each month.`,
       dates: ["2026-12-01"],
       provider: "Brightmoor Dental Care Ltd",
       reference: "BDC-771244",
+      dateRoles: [
+        { date: "2026-12-01", role: "renewal" },
+      ],
+      subtype: "Dental plan",
+      costMinor: 1_850,
+      currency: "GBP",
+      scheduleKind: "renewal",
     },
   },
   // --- Retired hold-out documents (issue #937). These thirteen were the
@@ -355,6 +530,13 @@ Policy LKM/44-12-8890                                        Page 1 of 3`,
       dates: ["2026-02-01", "2027-01-31"],
       provider: "Larkfield Mutual Insurance",
       reference: "LKM/44-12-8890",
+      dateRoles: [
+        { date: "2026-02-01", role: "start" },
+        { date: "2027-01-31", role: "expiry" },
+      ],
+      subtype: "Buildings and contents",
+      costMinor: 41_266,
+      currency: "GBP",
     },
   },
   {
@@ -375,6 +557,12 @@ Advisory: nearside front tyre close to the legal limit of 1.6mm.`,
       dates: ["2026-02-14", "2027-02-13"],
       provider: "Cobbledown Motors",
       reference: "4471 8802 5590",
+      dateRoles: [
+        { date: "2026-02-14", role: "service" },
+        { date: "2027-02-13", role: "expiry" },
+      ],
+      subtype: "MOT test certificate",
+      scheduleKind: "service",
     },
   },
   {
@@ -399,6 +587,15 @@ Cheques payable to Melbury Borough Council.`,
       dates: ["2026-03-12", "2026-04-01", "2027-03-31", "2027-01-01"],
       provider: "Melbury Borough Council",
       reference: "MB-8827441",
+      dateRoles: [
+        { date: "2026-03-12", role: "issued" },
+        { date: "2026-04-01", role: "start" },
+        { date: "2027-03-31", role: "other" },
+        { date: "2027-01-01", role: "due" },
+      ],
+      subtype: "Council tax demand notice",
+      costMinor: 138_162,
+      currency: "GBP",
     },
   },
   {
@@ -427,6 +624,14 @@ Your 14-day cancellation period runs from the day you placed the order,
       dates: ["2026-06-03", "2027-04-01", "2026-05-27"],
       provider: "Ferngate Broadband",
       reference: "FG 5512 8830 41",
+      dateRoles: [
+        { date: "2026-06-03", role: "start" },
+        { date: "2027-04-01", role: "other" },
+        { date: "2026-05-27", role: "issued" },
+      ],
+      subtype: "Ferngate Fibre 500",
+      costMinor: 3_800,
+      currency: "GBP",
     },
   },
   {
@@ -454,6 +659,14 @@ just after 15/07/26.`,
       dates: ["2025-12-03", "2026-06-04", "2026-06-30", "2026-07-15"],
       provider: "Wexley Water",
       reference: "55 214 887 3",
+      dateRoles: [
+        { date: "2025-12-03", role: "other" },
+        { date: "2026-06-04", role: "other" },
+        { date: "2026-06-30", role: "due" },
+        { date: "2026-07-15", role: "due" },
+      ],
+      costMinor: 38_946,
+      currency: "GBP",
     },
   },
   {
@@ -476,6 +689,12 @@ inspection. It says nothing about how efficiently it runs.`,
       dates: ["2026-09-09"],
       provider: "Ashcombe Gas Services",
       reference: "AGS-2026-0442",
+      dateRoles: [
+        { date: "2026-09-09", role: "service" },
+      ],
+      subtype: "Gas safety record",
+      scheduleKind: "service",
+      recurrenceMonths: 12,
     },
   },
   {
@@ -495,6 +714,11 @@ reference rather than the serial number.`,
       dates: ["2026-03-09", "2031-03-08"],
       provider: "Marrow & Finch",
       reference: "W-0099-2841",
+      dateRoles: [
+        { date: "2026-03-09", role: "start" },
+        { date: "2031-03-08", role: "expiry" },
+      ],
+      subtype: "Extended warranty",
     },
   },
   {
@@ -520,6 +744,14 @@ If you would rather not renew, tell us before 24 September 2026.`,
       dates: ["2026-10-01", "2026-09-30", "2026-09-24"],
       provider: "Pinfold Pet Insurance",
       reference: "8841-QP-77",
+      dateRoles: [
+        { date: "2026-10-01", role: "renewal" },
+        { date: "2026-09-30", role: "expiry" },
+        { date: "2026-09-24", role: "due" },
+      ],
+      costMinor: 3_144,
+      currency: "GBP",
+      scheduleKind: "renewal",
     },
   },
   {
@@ -544,6 +776,11 @@ device plan is paid off on 17 August 2027.`,
       dates: ["2025-08-18", "2027-08-17"],
       provider: "Quillet Mobile",
       reference: "QM-4471-0088-2",
+      dateRoles: [
+        { date: "2025-08-18", role: "start" },
+        { date: "2027-08-17", role: "expiry" },
+      ],
+      subtype: "Airtime plan",
     },
   },
   {
@@ -565,6 +802,7 @@ letter.`,
     expected: {
       dates: [],
       provider: "Trellis Energy",
+      subtype: "Trellis Fixed Saver",
     },
   },
   {
@@ -587,6 +825,11 @@ cover beyond the periods stated above.`,
       dates: ["2024-05-20", "2034-05-20"],
       provider: "Stonepath Structural Guarantees Limited",
       reference: "SP/NH/118420",
+      dateRoles: [
+        { date: "2024-05-20", role: "start" },
+        { date: "2034-05-20", role: "expiry" },
+      ],
+      subtype: "New Home Warranty",
     },
   },
   {
@@ -608,6 +851,16 @@ We wrote to you about this plan on 03 June 2026.`,
       dates: ["2026-07-01", "2027-06-30", "2025-09-11", "2026-06-03"],
       provider: "Halverston Home Cover",
       reference: "HHC 60 4471 22",
+      dateRoles: [
+        { date: "2026-07-01", role: "start" },
+        { date: "2027-06-30", role: "expiry" },
+        { date: "2025-09-11", role: "service" },
+        { date: "2026-06-03", role: "issued" },
+      ],
+      subtype: "Boiler and heating plan",
+      costMinor: 2_650,
+      currency: "GBP",
+      scheduleKind: "service",
     },
   },
   {
@@ -629,6 +882,11 @@ carried out by Vanterra Service UK.`,
       dates: ["2026-03-15", "2028-03-15"],
       provider: "Vanterra Appliances",
       reference: "VA-UK-778120",
+      dateRoles: [
+        { date: "2026-03-15", role: "start" },
+        { date: "2028-03-15", role: "expiry" },
+      ],
+      subtype: "Limited warranty",
     },
   },
 ];
