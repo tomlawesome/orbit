@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { getDocumentConfig, keyEncryptionKeyFor } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -61,7 +61,9 @@ async function holdBytes(
 ): Promise<HeldImapAttachment> {
   const config = getDocumentConfig();
   const contentSha256 = createHash("sha256").update(input.bytes).digest("hex");
-  const encrypted = encryptDocument(input.bytes, stagingContext(id, recipientUserId, receiptId, input.mediaType, input.bytes.length), config.keyEncryptionKey, config.keyId);
+  // The next key while a rotation is in progress, the current key otherwise (#955).
+  const wrap = wrappingKey(config);
+  const encrypted = encryptDocument(input.bytes, stagingContext(id, recipientUserId, receiptId, input.mediaType, input.bytes.length), wrap.keyEncryptionKey, wrap.keyId);
   const storageKey = storage().createStorageKey();
   try {
     await onCiphertextAllocated?.({ id, storageKey });
