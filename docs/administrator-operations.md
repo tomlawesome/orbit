@@ -468,12 +468,17 @@ and none is a container setting.
   restarting the exact deployed image. Never place a credential in a command,
   screenshot, issue, log, or acceptance record.
 
-If the document key is replaced without rewrapping (a recovery-bundle import,
-or repair regenerating `document-kek`), the stored mailbox credential can no
-longer be decrypted. Mail-in reports `credential_locked`, polling stops, and
-an administrator re-enters the password on the same screen. A mailbox password
-is re-obtainable from the provider; documents are not, which is why this
-degradation is acceptable.
+If the document key is replaced **without** rewrapping — a recovery-bundle
+import, or repair regenerating `document-kek` when no document volume is
+retained — the stored mailbox credential can no longer be decrypted. Mail-in
+reports `credential_locked`, polling stops, and an administrator re-enters the
+password on the same screen. A mailbox password is re-obtainable from the
+provider; documents and Tier 1 metadata are not, which is why this degradation
+is acceptable for those two paths specifically: both are a wholesale key
+*replacement*, not a rotation, and neither carries the old key forward for a
+rewrap to use. An ordinary planned rotation is different — see "Rotating the
+document key-encryption key" below — and leaves every credential, document and
+Tier 1 field readable throughout.
 
 ### Exact-image mailbox acceptance
 
@@ -508,6 +513,117 @@ malformed or incomplete proof, and emits no raw provider material.
 ordinary CI only. Its record is explicitly non-representative and cannot be
 used as live provider or release acceptance.
 
+## Rotating the document key-encryption key
+
+`DOCUMENT_KEK` wraps three populations: document encryption keys
+(`document_crypto`), the per-household Tier 1 metadata keys (`metadata_keys`,
+ADR-0024), and the mail-in mailbox credential and alias key (`mail_in_secrets`,
+ADR-0017). Rotating it is always an operator decision (#932) — nothing in
+Orbit rotates it automatically or on a schedule.
+
+Rotation is genuinely online: for its duration the running application holds
+**both** the current key and the next one (`DOCUMENT_KEK_NEXT`, #954,
+ADR-0024 decision 4), so every row stays readable by its own stored key id
+regardless of whether the rewrap worker has reached it yet. No row is ever
+unreadable, and no maintenance window is needed at any step below.
+
+1. Generate a fresh key and place it where the rotation overlay expects it,
+   with owner-only permissions:
+   ```sh
+   openssl rand -hex 32 > .orbit-secrets/document-kek-next
+   chmod 0400 .orbit-secrets/document-kek-next
+   ```
+2. Give the running application the next key *before* rewrapping anything,
+   using the `docker-compose.kek-rotation.yml` overlay:
+   ```sh
+   docker compose --env-file .env-orbit \
+     -f docker-compose.yml -f docker-compose.kek-rotation.yml config --quiet
+   COMPOSE_FILE=docker-compose.yml:docker-compose.kek-rotation.yml \
+     bash scripts/deploy-container.sh --pull
+   ```
+   After this restart Orbit holds both keys: every existing row is still on
+   the current key and reads exactly as before, and a row the worker moves to
+   the next key from here on reads too, by its own key id, with nothing
+   locked at any point in between. From this restart anything newly written —
+   an uploaded document, a new household's Tier 1 key, a mailbox credential —
+   is wrapped under the **next** key straight away (#955), so the rewrap in
+   step 3 is chasing a fixed set of rows rather than a moving one.
+3. Run the rewrap worker. It reads the current key exactly as the running
+   application does, and takes the next key only from the file you give it:
+   ```sh
+   pnpm rewrap-kek --next-key-file .orbit-secrets/document-kek-next
+   ```
+   It reports progress and keeps going until every `document_crypto`,
+   `metadata_keys` and `mail_in_secrets` row is wrapped under the next key,
+   resuming correctly if you stop it (Ctrl-C, a crash, a host reboot) and run
+   it again — every row it has not yet reached is still fully readable under
+   the current key, and every row it has already moved is fully readable
+   under the next one; a batch is one transaction, so a row is never left
+   half-migrated, and step 2 means both states read successfully the whole
+   time. It records one `document_kek_rotation_completed` audit entry when it
+   finishes.
+4. **The point of no return.** Only once the worker reports completion,
+   promote the next key to current and drop the overlay:
+   ```sh
+   mv .orbit-secrets/document-kek-next .orbit-secrets/document-kek
+   bash scripts/deploy-container.sh --pull
+   ```
+   Read this step as a confirmation. Everything before it can be undone.
+   This move overwrites the outgoing key, and after it that key is gone: no
+   row is wrapped under it any more, nothing needs it, and it cannot be used
+   to read anything ever again. That is deliberate — a rotation you are
+   running because a key may have leaked has not achieved much if the leaked
+   key is still sitting in `.orbit-secrets/` beside its replacement.
+
+   Orbit derives `DOCUMENT_KEK`'s id from the key bytes themselves, so this
+   restart always finds every row already on the key it just loaded as
+   current — nothing needs to know the id in advance. Dropping the overlay
+   (by deploying with just `docker-compose.yml` again) removes
+   `DOCUMENT_KEK_NEXT`; with the rewrap already complete, no row depended on
+   it being there.
+
+### If you are rotating because a key may have leaked
+
+The exposed key stays live, and stays able to read everything, until step 4.
+The exposure ends there, not at step 1. So run the steps together rather than
+leaving a rotation part-done overnight.
+
+Rotation also does not un-read anything already copied. It stops the exposed
+key being useful against this instance from step 4 onward; it does not undo a
+copy someone took before you started.
+
+### Undoing a rotation, before step 4 only
+
+Going back is not a rollback — there is nothing to roll back. It is a
+rotation in the other direction, from the new key to the original one, and it
+is available only while both keys are still loaded. After step 4 the original
+key no longer exists, so there is no way back and you should not plan for one.
+
+To undo, swap which key is which and run the same steps again:
+
+```sh
+mv .orbit-secrets/document-kek       .orbit-secrets/document-kek-abandoning
+mv .orbit-secrets/document-kek-next  .orbit-secrets/document-kek
+mv .orbit-secrets/document-kek-abandoning .orbit-secrets/document-kek-next
+```
+
+Then repeat steps 2, 3 and 4. Nothing is unreadable at any point of it: the
+instance holds the same two keys throughout, and every row reads under
+whichever of them wrapped it. Step 4 finishes by overwriting the abandoned
+key, which is what you want — a spare key left lying in `.orbit-secrets/` is
+one a later rotation can pick up by mistake, and this instance has already
+written rows under it.
+
+If you copied that key anywhere else — a password manager, a note, a backup
+of the secrets directory — delete it there too. Removing the file on this
+host is not the same as the key being gone.
+
+Recovery-bundle import and repair's `document-kek` regeneration remain
+wholesale key *replacements*, not rotations: neither carries the old key
+forward for a rewrap, so they still leave existing documents, Tier 1 fields
+and the mailbox credential unreadable under the new key (the paragraph above
+this section).
+
 ## Hostile document processor operation
 
 The default stack keeps `TIKA_URL` empty and does not start the `processing`
@@ -537,6 +653,92 @@ the review flow falls back to manual fields:
 ```sh
 docker compose --env-file .env-orbit up -d orbit-app
 docker compose --env-file .env-orbit --profile processing stop orbit-tika
+```
+
+## Private model server and its model pull
+
+The default stack does not start the `ai` profile. An operator who leaves it off
+gets no model server, no pull helper, and no change of any kind.
+
+Where the profile is on, the model server runs on the same egress-denied network
+as the document parser, and its port is not published to the host. This is
+deliberate and structural: the container that would hold document text has no
+route to the internet, so it cannot become a way out for household documents,
+whatever image or model is loaded into it. The address Orbit would use is fixed
+in the application code, so there is no base URL, proxy setting or API key to
+configure, and therefore no configuration that could aim extraction at a hosted
+service. Do not give this service the default network, a second network or a
+published port; the Compose validation refuses the configuration if you do.
+
+### Pulling a model
+
+Because the server has no route out, it cannot download a model. Getting one in
+is a separate step that an operator runs by name — it never happens as a side
+effect of starting the stack. Set the model reference in `.env-orbit` first. A
+digest-pinned reference is recommended, so that a later pull fetches the model
+that was actually evaluated rather than whatever the tag points at that day:
+
+```sh
+# .env-orbit
+OLLAMA_MODEL=<model>@sha256:<digest>
+```
+
+Then check the resolved configuration and run the pull. It downloads into the
+`orbit-ollama-data` volume and exits:
+
+```sh
+docker compose --env-file .env-orbit --profile ai-model-pull config --quiet
+docker compose --env-file .env-orbit --profile ai-model-pull \
+  run --rm orbit-ollama-model-pull
+```
+
+Start the server once the pull has reported success:
+
+```sh
+docker compose --env-file .env-orbit --profile ai up -d orbit-ollama
+```
+
+Run the pull again whenever the model reference changes. The pull helper is the
+only part of this stack that reaches the internet for model data, it runs only
+for as long as your command runs, and it never receives document text.
+
+### Hosts with no direct internet access
+
+The pull helper needs outbound access to the model registry, so on an isolated
+host it cannot fetch anything. Two options, in order of preference:
+
+1. Allow the host outbound access, or point the Docker daemon at an HTTP proxy,
+   for the length of the pull only, then take it away again. The model server
+   is unaffected either way: the access belongs to the host and to the one-shot
+   pull container, never to the service Orbit talks to.
+2. Carry the model in from a machine that does have access. Run the pull there
+   against the same compose file, export the model volume, and import it on the
+   isolated host. Only model data moves; no household data is involved.
+
+```sh
+# on the connected machine, after the pull above has succeeded
+docker compose --env-file .env-orbit --profile ai-model-pull \
+  run --rm --entrypoint /bin/sh -v "$PWD:/export" orbit-ollama-model-pull \
+  -c 'tar -C /root/.ollama -czf /export/orbit-model.tar.gz .'
+
+# on the isolated host, with the ai profile stopped
+docker compose --env-file .env-orbit --profile ai-model-pull \
+  run --rm --entrypoint /bin/sh -v "$PWD:/import" orbit-ollama-model-pull \
+  -c 'tar -C /root/.ollama -xzf /import/orbit-model.tar.gz'
+```
+
+Transfer the archive between the two machines by whatever means the site already
+trusts. Then confirm the server can see the model:
+
+```sh
+docker compose --env-file .env-orbit --profile ai up -d orbit-ollama
+docker compose --env-file .env-orbit --profile ai exec orbit-ollama ollama list
+```
+
+To stop using the model server, stop the profile. Nothing else changes:
+
+```sh
+docker compose --env-file .env-orbit --profile ai stop orbit-ollama
 ```
 
 ## Audit history

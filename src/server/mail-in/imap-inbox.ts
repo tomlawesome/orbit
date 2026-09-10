@@ -6,6 +6,7 @@ import { documents, households, imapIngestionAttachments, imapIngestionMessages,
 import { purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { requestDocumentDeletion } from "@/server/document-repository";
 import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
+import { openMetadataReader, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/tier1";
 import { validUuid } from "@/server/workspace-access";
 import {
   reviewInboxState,
@@ -23,6 +24,67 @@ import {
 // src/server/mail-in/core/review-state.ts for the implementations.
 export { reviewInboxState, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
 export type { ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
+
+/**
+ * Decrypts one receipt's Tier 1 draft (ADR-0024). A value that will not
+ * authenticate yields an empty object and a `metadata_integrity_failed`
+ * marker rather than a fabricated draft, and the receipt's structural fields
+ * — status, dates, attachments — render normally beside it.
+ */
+function readReceiptDraft(metadata: MetadataCipher, receipt: {
+  id: string;
+  proposal: unknown;
+  fieldEvidence: unknown;
+  proposalEnc: string | null;
+  fieldEvidenceEnc: string | null;
+}): {
+  proposal: Record<string, unknown>;
+  fieldEvidence: Record<string, unknown>;
+  metadataStatus?: { proposal?: MetadataFieldState; fieldEvidence?: MetadataFieldState };
+} {
+  const proposal = metadata.json("imap_ingestion_messages.proposal", receipt.id, { encrypted: receipt.proposalEnc, plaintext: receipt.proposal });
+  const fieldEvidence = metadata.json("imap_ingestion_messages.field_evidence", receipt.id, { encrypted: receipt.fieldEvidenceEnc, plaintext: receipt.fieldEvidence });
+  return {
+    proposal: proposal.value,
+    fieldEvidence: fieldEvidence.value,
+    metadataStatus: proposal.state || fieldEvidence.state
+      ? { proposal: proposal.state, fieldEvidence: fieldEvidence.state }
+      : undefined,
+  };
+}
+
+/**
+ * Re-encrypts a receipt's Tier 1 draft under a new scope's DEK. Returns only
+ * the columns that actually change, so a receipt with nothing encrypted yet
+ * (or nothing readable) is left alone.
+ */
+async function rekeyReceiptDraft(
+  current: { id: string; householdId: string | null; proposalEnc: string | null; fieldEvidenceEnc: string | null },
+  nextHouseholdId: string,
+  executor: MetadataExecutor,
+): Promise<Record<string, unknown>> {
+  if (current.householdId === nextHouseholdId) return {};
+  if (current.proposalEnc === null && current.fieldEvidenceEnc === null) return {};
+  const source = await openMetadataReader(current.householdId, executor);
+  const target = await requireReceiptMetadataWriter(nextHouseholdId, executor);
+  const changes: Record<string, unknown> = {};
+
+  if (current.proposalEnc !== null) {
+    const proposal = source.json("imap_ingestion_messages.proposal", current.id, { encrypted: current.proposalEnc, plaintext: {} });
+    if (!proposal.state) {
+      changes.proposal = {};
+      changes.proposalEnc = target.encryptJson("imap_ingestion_messages.proposal", current.id, proposal.value);
+    }
+  }
+  if (current.fieldEvidenceEnc !== null) {
+    const evidence = source.json("imap_ingestion_messages.field_evidence", current.id, { encrypted: current.fieldEvidenceEnc, plaintext: {} });
+    if (!evidence.state) {
+      changes.fieldEvidence = {};
+      changes.fieldEvidenceEnc = target.encryptJson("imap_ingestion_messages.field_evidence", current.id, evidence.value);
+    }
+  }
+  return changes;
+}
 
 const IMAP_STAGING_PURGE_RETRY_DELAY_MS = 60_000;
 /** Bounds every read on this endpoint: 50 receipts and 50 filed items, each
@@ -105,6 +167,8 @@ export async function listImapInbox(userId: string) {
       draftVersion: imapIngestionMessages.draftVersion,
       proposal: imapIngestionMessages.proposal,
       fieldEvidence: imapIngestionMessages.fieldEvidence,
+      proposalEnc: imapIngestionMessages.proposalEnc,
+      fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
       expiresAt: imapIngestionMessages.expiresAt,
       receivedAt: imapIngestionMessages.receivedAt,
       failureCode: imapIngestionMessages.failureCode,
@@ -169,6 +233,9 @@ export async function listImapInbox(userId: string) {
     if (existing) existing.push(row); else attachmentsByMessage.set(row.messageId, [row]);
   }
   for (const rows of attachmentsByMessage.values()) rows.reverse();
+  // Tier 1 (ADR-0024): a receipt still without a household reads under the
+  // instance key, which is the whole reason that scope exists.
+  const metadataReaders = await openReceiptMetadataReaders(receipts.map((receipt) => receipt.householdId));
   return {
     receipts: receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => {
       const state = reviewInboxState(receipt.status, receipt.failureCode, {
@@ -176,9 +243,10 @@ export async function listImapInbox(userId: string) {
         hasApprovedItem: Boolean(receipt.hasApprovedItem),
         expiresAt: receipt.expiresAt,
       });
+      const decrypted = readReceiptDraft(metadataReaders.get(receipt.householdId)!, receipt);
       const metadata = state.classification === "ready" || state.classification === "retry"
-        ? sanitizeReviewDraftMetadata({ proposal: receipt.proposal, fieldEvidence: receipt.fieldEvidence })
-        : { proposal: {}, fieldEvidence: {} };
+        ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
+        : { proposal: {}, fieldEvidence: {}, metadataStatus: decrypted.metadataStatus };
       return {
         id: receipt.id,
         status: receipt.status,
@@ -227,6 +295,8 @@ export async function getImapReview(userId: string, receiptId: string, household
     draftVersion: imapIngestionMessages.draftVersion,
     proposal: imapIngestionMessages.proposal,
     fieldEvidence: imapIngestionMessages.fieldEvidence,
+    proposalEnc: imapIngestionMessages.proposalEnc,
+    fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
     expiresAt: imapIngestionMessages.expiresAt,
     receivedAt: imapIngestionMessages.receivedAt,
     failureCode: imapIngestionMessages.failureCode,
@@ -243,15 +313,16 @@ export async function getImapReview(userId: string, receiptId: string, household
     hasApprovedItem: Boolean(receipt.hasApprovedItem),
     expiresAt: receipt.expiresAt,
   });
+  const decrypted = readReceiptDraft(await openMetadataReader(receipt.householdId), receipt);
   const metadata = state.classification === "ready" || state.classification === "retry"
-    ? sanitizeReviewDraftMetadata({ proposal: receipt.proposal, fieldEvidence: receipt.fieldEvidence })
-    : { proposal: {}, fieldEvidence: {} };
+    ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
+    : { proposal: {}, fieldEvidence: {}, metadataStatus: decrypted.metadataStatus };
   if (!state.canApprove) return { receipt: { id: receipt.id, status: receipt.status, householdId, draftVersion: receipt.draftVersion, expiresAt: receipt.expiresAt, receivedAt: receipt.receivedAt, ...state, ...metadata }, sections: [], candidates: [], attachments: [] };
 
   const [householdSections, householdItems, attachments] = await Promise.all([
     getDb().select({ id: sections.id, name: sections.name }).from(sections)
       .where(and(eq(sections.householdId, householdId), eq(sections.visible, true), isNull(sections.archivedAt))).orderBy(asc(sections.position)),
-    getDb().select({ id: items.id, title: items.title, provider: items.provider, reference: items.reference, subtype: items.subtype })
+    getDb().select({ id: items.id, title: items.title, provider: items.provider, reference: items.reference, referenceEnc: items.referenceEnc, subtype: items.subtype })
       .from(items).where(and(eq(items.householdId, householdId), inArray(items.status, ["active", "expired", "cancelled"]))).orderBy(asc(items.title)).limit(200),
     getDb().select({
       id: imapIngestionAttachments.id,
@@ -263,8 +334,15 @@ export async function getImapReview(userId: string, receiptId: string, household
       .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])))
       .orderBy(asc(imapIngestionAttachments.createdAt), asc(imapIngestionAttachments.id)),
   ]);
+  // Candidate matching stays an application-side comparison over decrypted
+  // values at household scale (ADR-0024 decision 2): it already reads every
+  // item in the household, so the blind index would buy it nothing.
+  const householdMetadata = await openMetadataReader(householdId);
   const candidates = householdItems.flatMap((item) => {
-    const reason = findReviewedIntakeCandidateReason(metadata.proposal, item);
+    const reason = findReviewedIntakeCandidateReason(metadata.proposal, {
+      ...item,
+      reference: householdMetadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
+    });
     return reason ? [{ itemId: item.id, title: item.title, reason }] : [];
   }).slice(0, 10);
   return {
@@ -518,8 +596,30 @@ export async function assignImapReceiptHousehold(userId: string, receiptId: stri
     const [membership] = await transaction.select({ householdId: memberships.householdId }).from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
       .where(and(eq(memberships.userId, userId), eq(memberships.householdId, householdId), isNull(households.deletionRequestedAt))).limit(1);
     if (!membership) throw new AppError("household_not_found", "That household is not available", 404);
-    const [row] = await transaction.update(imapIngestionMessages).set({ householdId, updatedAt: new Date() })
-      .where(and(eq(imapIngestionMessages.id, receiptId), eq(imapIngestionMessages.userId, userId), eq(imapIngestionMessages.status, "pending_review"))).returning({ id: imapIngestionMessages.id });
+    const owned = and(
+      eq(imapIngestionMessages.id, receiptId),
+      eq(imapIngestionMessages.userId, userId),
+      eq(imapIngestionMessages.status, "pending_review"),
+    );
+    const [current] = await transaction.select({
+      id: imapIngestionMessages.id,
+      householdId: imapIngestionMessages.householdId,
+      proposalEnc: imapIngestionMessages.proposalEnc,
+      fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
+    }).from(imapIngestionMessages).where(owned).limit(1);
+    if (!current) return undefined;
+    /* Tier 1 (ADR-0024 decision 1): which DEK encrypted a receipt's draft is
+       decided by its household, and this statement is what changes that
+       household. So the values move keys in the same transaction — from the
+       instance DEK, or from a previous household's — or they would become
+       unreadable the instant the column changed. A field that will not
+       decrypt is left exactly as it is: rewriting it would erase the evidence
+       of damage and put an empty draft in its place. */
+    const [row] = await transaction.update(imapIngestionMessages).set({
+      householdId,
+      ...await rekeyReceiptDraft(current, householdId, transaction),
+      updatedAt: new Date(),
+    }).where(owned).returning({ id: imapIngestionMessages.id });
     return row;
   });
   if (!changed) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);

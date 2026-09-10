@@ -281,6 +281,13 @@
       "when": 1788393600000,
       "tag": "0039_step_up_proofs",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788480000000,
+      "tag": "0040_tier1_metadata_encryption",
+      "breakpoints": true
     }
   ]
 }

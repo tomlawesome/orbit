@@ -40,22 +40,46 @@ protection. On a host without disk encryption, anyone who can read the
 filesystem gets the key and the ciphertext in the same reach — the envelope
 buys nothing in that scenario. This is exactly why layer 4 (below) exists.
 
-### 2. Database contents: none, by default — this is a real gap, not an oversight
+### 2. Database contents: none by default, apart from Tier 1 metadata — a real gap, not an oversight
 
 Stock PostgreSQL has no transparent data encryption (TDE). Orbit does not add
 any: the PostgreSQL data directory (the named `orbit-postgres` volume) is
 **cleartext on disk**. That includes household and item names, filenames and
 media types (which the threat model already treats as potentially sensitive
-on their own), audit events, session data, and every other row Orbit writes.
+on their own), audit events, session data, and every other row Orbit writes —
+apart from the four columns layer 2a covers.
 Percona's `pg_tde` extension is a possible future option — its WAL encryption
 is still marked experimental upstream, so Orbit does not depend on it today.
 It is being watched, not adopted, until that changes.
 
-Practically, the only thing standing between "database file on disk" and
-"readable data" for an instance's PostgreSQL volume is host disk encryption —
-layer 4. There is no application-layer substitute for this today, and
+Practically, host disk encryption — layer 4 — is what stands between "database
+file on disk" and "readable data" for almost every row. The one exception is
+layer 2a below. There is no general application-layer substitute for TDE, and
 claiming otherwise would be the marketing framing this document exists to
 avoid.
+
+### 2a. Four metadata columns: application-layer envelope encryption
+
+ADR-0024 encrypts the household metadata #365 calls Tier 1 — an item's notes
+and reference, and a mail-in receipt's extracted proposal and field evidence —
+the same way documents are encrypted, under the same `DOCUMENT_KEK`. One
+random 256-bit data-encryption key per household (plus one for mail-in
+receipts nobody has attributed yet) is wrapped under that KEK; each value is a
+compact AES-256-GCM envelope bound to its own table, column and row.
+
+`items.reference` also carries a blind index so duplicate detection can still
+find an exact match without decrypting every row. Within one household that
+index reveals which rows share a reference and how many distinct references
+there are, and nothing about the values themselves; across households it
+reveals nothing at all, because the key is per-household.
+
+**The boundary is the same one layer 1 has, and no larger.** It protects the
+database *file* — an exfiltrated volume, a SQL dump, a stolen disk — and not a
+live host, because a running Orbit holds the key. It is also being rolled out
+over two releases: the expand release adds the encrypted columns beside the
+plaintext ones and converts existing rows in the background, and only the
+contract release afterwards drops the plaintext columns. Until that lands, a
+database dump can still contain those four columns in the clear.
 
 ### 3. Backups and recovery bundles
 
@@ -124,8 +148,9 @@ exists so the operator picks it knowingly, rather than by accident.
 | Document bytes (live volume) | Application envelope (DOCUMENT_KEK) + disk encryption | — |
 | Document bytes (inside an `orbit backup` tar) | Application envelope (same DOCUMENT_KEK) + disk encryption | — |
 | `DOCUMENT_KEK` secret file itself | Filesystem mode `0600`/`0400` + disk encryption | Application envelope (it *is* the key) |
-| PostgreSQL data directory | Disk encryption only | No database-level or Orbit-level encryption |
-| Database dump inside an `orbit backup` tar | Disk encryption only | No application-layer encryption |
+| Tier 1 metadata columns (item notes/reference, mail-in draft) | Application envelope (same DOCUMENT_KEK) + disk encryption | — (but see the two-release rollout in 2a) |
+| PostgreSQL data directory, every other column | Disk encryption only | No database-level or Orbit-level encryption |
+| Database dump inside an `orbit backup` tar | Disk encryption only, plus the Tier 1 envelope for those four columns | No application-layer encryption for anything else |
 | Restore/repair checkpoints | Filesystem mode `0600`/`0700` + disk encryption | Application-layer encryption |
 | `DOCUMENT_KEK` inside a recovery bundle | ORBKEK01 passphrase envelope | — |
 

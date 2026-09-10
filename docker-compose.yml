@@ -118,6 +118,12 @@ services:
   # Optional private model server for a future reviewed semantic-extraction
   # workflow. Orbit does not call it yet, so selecting and pulling a model is an
   # explicit operator action rather than a deployment requirement.
+  #
+  # ADR-0025 makes this container egress-free: document text handed to a model
+  # must not sit somewhere that can reach the internet, and the model server is
+  # then structurally incapable of becoming a cloud extraction path, whatever a
+  # future image or configuration tries. Getting a model in is therefore a
+  # separate, deliberate step -- see the one-shot model pull helper below.
   orbit-ollama:
     container_name: orbit-ollama
     image: ollama/ollama:0.33.3@sha256:57a73f11f75b32b97b59b003f351445c9c2a8af4b9d586ecdc928dee6150ef26
@@ -145,6 +151,13 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # The model reads hostile document text, so it gets exactly what Tika gets:
+    # reachable from Orbit over the internal network, and no route out. This is
+    # the structural half of ADR-0025's "the endpoint cannot become a cloud
+    # path" -- OLLAMA_NO_CLOUD above is defence in depth behind it. Adding
+    # `default`, a published port, or any second network here reopens egress.
+    networks:
+      - orbit-document-processing
     cpus: "${OLLAMA_CPUS:-2.0}"
     mem_limit: ${OLLAMA_MEMORY_LIMIT:-6g}
     pids_limit: 512
@@ -154,6 +167,76 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 8
+
+  # One-shot model pull, and the only part of this stack allowed to fetch model
+  # data. Never started with the stack; the notes inside it say how it runs.
+  orbit-ollama-model-pull:
+    # The model server above has no route off the internal processing network,
+    # so it cannot fetch a model itself. This runs the same pinned image against
+    # the same model volume on the default network, which does have egress, and
+    # then exits. Its own profile keeps it out of `--profile ai` and out of
+    # every `up`, so it runs only when an operator names it, having first set
+    # OLLAMA_MODEL in .env-orbit to the model reference to fetch:
+    #
+    #   docker compose --env-file .env-orbit --profile ai-model-pull \
+    #     run --rm orbit-ollama-model-pull
+    #
+    # It never sees document text: it starts a private loopback server for the
+    # length of the download only, writes to the volume, and stops. Deliberately
+    # no container_name, and restart "no": a one-shot `run` container must not
+    # claim a name a long-lived service could want, nor come back by itself.
+    image: ollama/ollama:0.33.3@sha256:57a73f11f75b32b97b59b003f351445c9c2a8af4b9d586ecdc928dee6150ef26
+    profiles: ["ai-model-pull"]
+    restart: "no"
+    environment:
+      # Loopback only. The temporary server exists to accept this container's
+      # own pull; nothing on the default network should be able to reach it.
+      OLLAMA_HOST: 127.0.0.1:11434
+      # A pull of an explicitly named local model, never a cloud model or a
+      # cloud relay -- the same promise the serving container makes.
+      OLLAMA_NO_CLOUD: "1"
+      ORBIT_OLLAMA_MODEL: "${OLLAMA_MODEL:-}"
+    volumes:
+      - orbit-ollama-data:/root/.ollama
+    networks:
+      - default
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ["/bin/sh", "-eu", "-c"]
+    command:
+      - |
+        if [ -z "$${ORBIT_OLLAMA_MODEL:-}" ]; then
+          echo "Set OLLAMA_MODEL in .env-orbit to the model reference to pull." >&2
+          exit 2
+        fi
+        /bin/ollama serve > /tmp/orbit-model-pull.log 2>&1 &
+        server_pid=$$!
+        waited=0
+        while ! /bin/ollama list > /dev/null 2>&1; do
+          waited=$$((waited + 1))
+          if [ "$$waited" -ge 60 ]; then
+            echo "The temporary model server did not start; nothing was pulled." >&2
+            cat /tmp/orbit-model-pull.log >&2
+            kill "$$server_pid" 2>/dev/null || true
+            exit 1
+          fi
+          sleep 1
+        done
+        echo "Pulling $${ORBIT_OLLAMA_MODEL} into the orbit-ollama-data volume."
+        status=0
+        /bin/ollama pull "$${ORBIT_OLLAMA_MODEL}" || status=$$?
+        kill "$$server_pid" 2>/dev/null || true
+        wait "$$server_pid" 2>/dev/null || true
+        if [ "$$status" -ne 0 ]; then
+          echo "Model pull failed. Orbit is unaffected: the serving profile keeps whatever model the volume already held." >&2
+          exit "$$status"
+        fi
+        /bin/ollama list
+    cpus: "${OLLAMA_CPUS:-2.0}"
+    mem_limit: ${OLLAMA_MEMORY_LIMIT:-6g}
+    pids_limit: 512
 
 networks:
   orbit-document-processing:

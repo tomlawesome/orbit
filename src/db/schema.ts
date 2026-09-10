@@ -36,6 +36,8 @@ export const documentJobStatus = pgEnum("document_job_status", [
   "cancelled",
 ]);
 export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
+/** Which Tier 1 metadata key a row holds (ADR-0024 decision 1). */
+export const metadataKeyScope = pgEnum("metadata_key_scope", ["household", "instance"]);
 export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
   "processing",
   "pending_review",
@@ -406,6 +408,14 @@ export const items = pgTable("items", {
   subtype: text("subtype"),
   provider: text("provider"),
   reference: text("reference"),
+  /**
+   * Tier 1 metadata (ADR-0024). `reference_enc` holds the `mdv1.` envelope and
+   * `reference_index` the blind index; the plaintext `reference` column above
+   * survives only until the contract release drops it, and is read solely for
+   * rows the backfill has not reached yet.
+   */
+  referenceEnc: text("reference_enc"),
+  referenceIndex: text("reference_index"),
   costMinor: integer("cost_minor"),
   currency: text("currency").notNull(),
   startDate: date("start_date"),
@@ -415,6 +425,8 @@ export const items = pgTable("items", {
   recurrenceMonths: integer("recurrence_months"),
   snoozedUntil: date("snoozed_until"),
   notes: text("notes"),
+  /** Tier 1 metadata (ADR-0024); see `referenceEnc`. */
+  notesEnc: text("notes_enc"),
   externalDocumentUrl: text("external_document_url"),
   status: itemStatus("status").notNull().default("active"),
   /** Inbound documents are deliberately invisible until a member reviews them. */
@@ -424,6 +436,8 @@ export const items = pgTable("items", {
 }, (table) => [
   index("item_household_status_idx").on(table.householdId, table.status),
   index("item_household_section_idx").on(table.householdId, table.sectionId),
+  /** Serves blind-index duplicate detection (ADR-0024 decision 2). */
+  index("item_household_reference_index_idx").on(table.householdId, table.referenceIndex),
 ]);
 
 /** Metadata for an encrypted document; ciphertext and key material live in documentCrypto. */
@@ -464,6 +478,42 @@ export const documentCrypto = pgTable("document_crypto", {
   keyId: text("key_id").notNull(),
   ...auditColumns,
 }, (table) => [uniqueIndex("document_crypto_storage_key_unique").on(table.storageKey)]);
+
+/**
+ * One wrapped 32-byte Tier 1 metadata DEK per household (ADR-0024 decision 1),
+ * plus exactly one `instance`-scope row covering mail-in receipts that have no
+ * household yet. The envelope columns are deliberately identical to
+ * `document_crypto`'s so the rewrap worker (#932) can treat both the same way,
+ * and the wrapping KEK is the same `DOCUMENT_KEK` for the reasons ADR-0017
+ * recorded. Dropping a household drops its key, which crypto-shreds any stray
+ * copy of that household's ciphertext.
+ */
+export const metadataKeys = pgTable("metadata_keys", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  scope: metadataKeyScope("scope").notNull(),
+  householdId: uuid("household_id").references(() => households.id, { onDelete: "cascade" }),
+  envelopeVersion: integer("envelope_version").notNull(),
+  wrappedDek: text("wrapped_dek").notNull(),
+  wrapIv: text("wrap_iv").notNull(),
+  wrapAuthTag: text("wrap_auth_tag").notNull(),
+  keyId: text("key_id").notNull(),
+  version: integer("version").notNull().default(1),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("metadata_keys_household_unique").on(table.householdId),
+  /**
+   * A plain unique index would not constrain the instance row: PostgreSQL
+   * treats every NULL `household_id` as distinct, so nothing above stops a
+   * second instance key existing. This partial index is what makes it a
+   * singleton.
+   */
+  uniqueIndex("metadata_keys_instance_unique").on(table.scope).where(sql`${table.householdId} IS NULL`),
+  index("metadata_keys_key_id_idx").on(table.keyId),
+  check(
+    "metadata_keys_scope_household_valid",
+    sql`(${table.scope} = 'household' AND ${table.householdId} IS NOT NULL) OR (${table.scope} = 'instance' AND ${table.householdId} IS NULL)`,
+  ),
+]);
 
 /** Durable, idempotent worker jobs for document lifecycle operations. */
 export const documentJobs = pgTable("document_jobs", {
@@ -643,6 +693,14 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   draftVersion: integer("draft_version").notNull().default(1),
   proposal: jsonb("proposal").notNull().default({}),
   fieldEvidence: jsonb("field_evidence").notNull().default({}),
+  /**
+   * Tier 1 metadata (ADR-0024): the serialised JSON of the two columns above,
+   * encrypted under the receipt's household DEK, or under the instance DEK
+   * while the receipt is still unattributed. The plaintext columns are reset
+   * to `{}` — they are NOT NULL — as each row is encrypted.
+   */
+  proposalEnc: text("proposal_enc"),
+  fieldEvidenceEnc: text("field_evidence_enc"),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   approvalOperationId: uuid("approval_operation_id"),
   approvalResultId: uuid("approval_result_id"),

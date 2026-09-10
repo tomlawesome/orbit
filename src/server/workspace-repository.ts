@@ -25,6 +25,7 @@ import {
   type WorkspaceState,
 } from "@/lib/workspace";
 import { planOwnershipTransfer } from "@/server/household-ownership";
+import { openMetadataReaders, requireMetadataWriter } from "@/server/metadata/tier1";
 import {
   acquireActiveHouseholdLock,
   requireHouseholdAccess,
@@ -133,6 +134,9 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
       .orderBy(desc(notificationStates.updatedAt)),
   ]);
 
+  // One DEK unwrap per household, before any row is mapped (ADR-0024).
+  const metadataReaders = await openMetadataReaders(householdIds);
+
   const eventByItem = new Map<string, (typeof eventRows)[number]>();
   for (const event of eventRows) {
     if (!eventByItem.has(event.itemId)) eventByItem.set(event.itemId, event);
@@ -161,8 +165,12 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     activeHouseholdId,
     recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
     households: householdRows.map((household) => {
+      const metadata = metadataReaders.get(household.id)!;
       const householdItems = itemRows.filter((item) => item.householdId === household.id).map((item) => {
         const event = eventByItem.get(item.id);
+        const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference });
+        const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc, plaintext: item.notes });
+        const metadataStatus = { reference: reference.state, notes: notes.state };
         const scheduleKind = event?.kind
           ?? (item.serviceDate ? "service" : item.renewalDate ? "renewal" : undefined);
         const dueDate = event?.dueDate ?? item.serviceDate ?? item.renewalDate ?? undefined;
@@ -172,7 +180,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           title: item.title,
           subtype: item.subtype ?? undefined,
           provider: item.provider ?? undefined,
-          reference: item.reference ?? undefined,
+          reference: reference.value ?? undefined,
           costMinor: item.costMinor ?? undefined,
           currency: item.currency,
           dueDate,
@@ -180,7 +188,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           recurrenceMonths: item.recurrenceMonths ?? undefined,
           reminderDays: remindersByItem.get(item.id)?.sort((left, right) => right - left),
           snoozedUntil: item.snoozedUntil ?? undefined,
-          notes: item.notes ?? undefined,
+          notes: notes.value ?? undefined,
+          metadataStatus: reference.state || notes.state ? metadataStatus : undefined,
           status: item.status,
           version: item.version,
           updatedAt: item.updatedAt.toISOString(),
@@ -466,17 +475,25 @@ export async function applyWorkspaceCommand(
       if (!ownedSection) throw new AppError("section_not_found", "Choose a section from this household", 422);
       const [existing] = await transaction.select({ version: items.version }).from(items)
         .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1);
+      // Tier 1 (ADR-0024 decision 3): encrypt and clear the plaintext in the
+      // same statement, so the row is never in both states at once. Writing a
+      // damaged field is also the repair for it: the new value encrypts
+      // cleanly and the old ciphertext is gone.
+      const metadata = await requireMetadataWriter(householdId, transaction);
       const values = {
         sectionId,
         title: command.item.title,
         subtype: command.item.subtype ?? null,
         provider: command.item.provider ?? null,
-        reference: command.item.reference ?? null,
+        reference: null,
+        referenceEnc: metadata.encryptText("items.reference", itemId, command.item.reference),
+        referenceIndex: metadata.referenceIndex(command.item.reference),
         costMinor: command.item.costMinor ?? null,
         currency: command.item.currency,
         recurrenceMonths: command.item.recurrenceMonths ?? null,
         snoozedUntil: command.item.snoozedUntil ?? null,
-        notes: command.item.notes ?? null,
+        notes: null,
+        notesEnc: metadata.encryptText("items.notes", itemId, command.item.notes),
         status: command.item.status,
         updatedAt: new Date(),
         ...itemDates(command.item.scheduleKind, command.item.dueDate),

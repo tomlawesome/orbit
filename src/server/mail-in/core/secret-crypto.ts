@@ -54,11 +54,11 @@ export interface EncryptedMailInSecret {
   envelope: MailInSecretEnvelope;
 }
 
-function keyAdditionalData(context: MailInSecretContext, keyId: string): Buffer {
+function keyAdditionalData(secretId: string, keyId: string): Buffer {
   return Buffer.from(JSON.stringify({
     purpose: "orbit-mail-in-secret-dek",
     envelopeVersion: ENVELOPE_VERSION,
-    secretId: context.secretId,
+    secretId,
     keyId,
   }), "utf8");
 }
@@ -83,7 +83,7 @@ export function encryptMailInSecret(
   const dek = randomBytes(ENVELOPE_KEY_BYTES);
   try {
     const encrypted = encryptWithAad(plaintext, dek, contentAdditionalData(context));
-    const wrapped = wrapKeyWithAad(dek, keyEncryptionKey, keyAdditionalData(context, keyId));
+    const wrapped = wrapKeyWithAad(dek, keyEncryptionKey, keyAdditionalData(context.secretId, keyId));
     return {
       ciphertext: encrypted.ciphertext,
       envelope: {
@@ -117,9 +117,30 @@ export function decryptMailInSecret(
   if (envelope.envelopeVersion !== ENVELOPE_VERSION || envelope.algorithm !== ENVELOPE_ALGORITHM) {
     throw new Error("Unsupported mail-in secret envelope");
   }
-  const dek = unwrapKeyWithAad(envelope, keyEncryptionKey, keyAdditionalData(context, envelope.keyId));
+  const dek = unwrapKeyWithAad(envelope, keyEncryptionKey, keyAdditionalData(context.secretId, envelope.keyId));
   try {
     return decryptWithAad(ciphertext, envelope, dek, contentAdditionalData(context));
+  } finally {
+    dek.fill(0);
+  }
+}
+
+/**
+ * Rewraps a mail-in secret's DEK under a new KEK without touching its
+ * ciphertext or content AAD (ADR-0017's rewrap contract; the worker is #932).
+ * Only the secret's own id is bound to the key-wrap AAD, so a row moves
+ * between keys without needing its kind, host or account user.
+ */
+export function rewrapMailInSecret(
+  secretId: string,
+  envelope: Pick<MailInSecretEnvelope, "keyId" | "wrappedDek" | "wrapIv" | "wrapAuthTag">,
+  currentKeyEncryptionKey: Buffer,
+  nextKeyEncryptionKey: Buffer,
+  nextKeyId: string,
+): Pick<MailInSecretEnvelope, "keyId" | "wrappedDek" | "wrapIv" | "wrapAuthTag"> {
+  const dek = unwrapKeyWithAad(envelope, currentKeyEncryptionKey, keyAdditionalData(secretId, envelope.keyId));
+  try {
+    return { keyId: nextKeyId, ...wrapKeyWithAad(dek, nextKeyEncryptionKey, keyAdditionalData(secretId, nextKeyId)) };
   } finally {
     dek.fill(0);
   }

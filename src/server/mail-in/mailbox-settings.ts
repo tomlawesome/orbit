@@ -32,7 +32,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, mailInMailbox, mailInSecrets, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, wrappingKey } from "@/server/documents/config";
 import { requireInstanceAdministrator } from "@/server/authorization";
 import {
   createSmtpTransport,
@@ -239,7 +239,8 @@ async function insertSecret(
   account: { host: string; user: string },
   actorUserId: string,
 ): Promise<{ id: string; keyId: string }> {
-  const { keyEncryptionKey, keyId } = getDocumentConfig();
+  // The next key while a rotation is in progress, the current key otherwise (#955).
+  const { keyEncryptionKey, keyId } = wrappingKey(getDocumentConfig());
   const id = randomUUID();
   const encrypted = encryptMailInSecret(plaintext, { secretId: id, kind, host: account.host, user: account.user }, keyEncryptionKey, keyId);
   await transaction.insert(mailInSecrets).values({
