@@ -217,6 +217,34 @@ cap would not be enumerable. That pass uses the full section 1 schema, and
 its output for fields that were already settled is discarded rather than
 allowed to reopen them.
 
+**What the adjudicating pass may return.** It uses the same schema as the
+blind pass, so it emits a field value with its evidence span — it is *not* a
+choice between two candidates. Four outcomes are available to it, and all
+four are intended:
+
+1. endorse the heuristic's reading;
+2. endorse its own blind reading;
+3. propose a value neither reading found;
+4. return the field empty — "both readings are wrong and I have nothing
+   better."
+
+The fourth is deliberate and follows from #939: a wrong value costs more than
+a blank, so a model able to reject both readings is worth more than one
+forced to pick the least bad. The schema must therefore permit an absent
+field, and an empty adjudicated field is a **result, not a failed pass** —
+distinct from the late, malformed or absent reply of section 1, which leaves
+the heuristic value standing.
+
+Grounding is unchanged and constrains outcome 3: a value neither reading
+proposed must still occur verbatim in the document data block, so
+adjudication cannot invent one.
+
+The case that earns the second inference is the partial one. Where the
+heuristic has "Northfield Gas & Energy Ltd" and the blind pass has
+"Northfield Gas", both are defensible and the question is which the document
+actually supports — the judgement neither a regex nor a single unaided read
+can make, and the same question #939's tight-name ruling answered by hand.
+
 **The order is the point, not an implementation detail.** Shown the
 heuristic's answer up front, the model anchors on it, and what looks like
 two extractors agreeing is one extractor twice. The blind pass is what
