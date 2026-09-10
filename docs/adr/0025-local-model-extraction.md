@@ -91,8 +91,11 @@ configurable: schema-constrained decoding (Ollama's structured-output
 `format`, so the reply cannot be prose), temperature 0 and a fixed seed,
 reasoning turned off (`think: false`), a
 generation-token cap, a response-size cap checked before parsing, and a
-wall-clock deadline — short for the interactive Add-item inspection, longer
-for the asynchronous mailbox path, never unbounded. That deadline bounds
+wall-clock deadline — short for the interactive Add-item inspection, minutes
+for the asynchronous mailbox path, never unbounded. The asynchronous figure is
+deliberately generous, because nobody is waiting on a mail-in receipt (owner
+ruling, 2026-09-10); it stays bounded because an unbounded one is the wedge
+loop paperless-ai's users fell into, not because anyone is watching a clock. That deadline bounds
 **the whole flow, not each pass**: two sequential passes must not double
 what the interactive path waits for, so the adjudicating pass runs only
 inside what remains of the document's budget and is abandoned like any
@@ -464,9 +467,29 @@ absent, those suggestion slots are simply empty, as they are today.
   winner is recorded with its numbers. **The owner fixed the budget that
   evaluation runs inside (2026-09-10): Orbit is self-hosted, typically on
   unremarkable hardware, so the model path must do a lot with little.**
-  - **CPU is the baseline, not the fallback.** If the job can be done on
-    CPU it is done on CPU, and a candidate that needs a GPU to be usable
-    has failed rather than qualified. The Compose service is capped at 2
+  - **CPU is the baseline, not the fallback**, and it is scoped to the
+    asynchronous path. **Owner ruling, 2026-09-10, on #965's measurements:
+    a CPU-only instance runs the model path for mailed-in items only;
+    suggestions on live document upload require a GPU via CUDA.** Measurement
+    is what settled it -- generation ran at roughly 2 tokens per second on the
+    2-CPU cap and about 14 at ten cores, so the interactive deadline is
+    unreachable on CPU while the mailbox path has minutes to spend and does
+    not care.
+    This keeps the CPU baseline meaningful rather than abandoning it: the
+    ordinary self-hosted install still gets the model path where it fits, and
+    a candidate that cannot serve the mailbox path on CPU has still failed.
+    What it stops being is a promise about the interactive surface, which no
+    small model met on 2 cores. A GPU therefore buys a feature rather than
+    rescuing a broken one.
+  - **Where a GPU is present, both paths use the model, and the live path
+    takes preference** (owner ruling, 2026-09-10). Accelerating only the
+    interactive surface would leave the mailbox slower than the screen for no
+    reason, so the GPU serves both. Preference matters because the model
+    server runs one inference at a time (`OLLAMA_NUM_PARALLEL: 1`): a mail-in
+    document holding the model for minutes would otherwise put a person
+    waiting at an upload screen behind it. Ollama has no request priority, so
+    whatever delivers this is Orbit's own scheduling, and its shape is a
+    design question rather than something this ADR settles. The Compose service is capped at 2
     CPUs and 6 GB today, which is the shape a candidate is judged in.
   - **A GPU option is offered, and it asks for very little.** Nobody
     hands a household document-filing system their whole graphics card.
