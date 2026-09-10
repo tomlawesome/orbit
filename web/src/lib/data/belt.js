@@ -145,6 +145,7 @@ function documentRowOf(doc) {
  * @property {?string} provider
  * @property {?string} reference
  * @property {?string} notes
+ * @property {?{reference?: string, notes?: string}} metadataStatus
  * @property {string} status
  * @property {?string} snoozedUntil
  * @property {?string} due
@@ -193,6 +194,11 @@ export function beltManifestOf({ household, documentsByItem = {}, today, keepId 
         provider: item.provider ?? null,
         reference: item.reference ?? null,
         notes: item.notes ?? null,
+        /* #941: why a Tier 1 field is absent, when it is. The card renders the
+           row on the marker as well as on the value -- a damaged note that
+           travelled no further than here would reach the screen as one nobody
+           had written, which is the failure the marker exists to prevent. */
+        metadataStatus: item.metadataStatus ?? null,
         status: item.status,
         snoozedUntil: item.snoozedUntil ?? null,
         due: item.dueDate ?? null,
