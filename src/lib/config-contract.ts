@@ -29,6 +29,8 @@ export const ALLOWED_KEYS = [
   "SESSION_SECRET_FILE",
   "DOCUMENT_KEK",
   "DOCUMENT_KEK_FILE",
+  "DOCUMENT_KEK_NEXT",
+  "DOCUMENT_KEK_NEXT_FILE",
   "POSTGRES_PASSWORD",
   "POSTGRES_PASSWORD_FILE",
   "VAPID_PUBLIC_KEY",
@@ -259,6 +261,16 @@ export const envOrbitSchema = z
         message: `DOCUMENT_KEK ${SECRET_HEX256_REQUIREMENT}`,
       })
       .optional(),
+    // Set only for the duration of an online KEK rotation (#954, ADR-0024
+    // decision 4), normally via the docker-compose.kek-rotation.yml overlay
+    // rather than this file; accepted here too so a direct assignment is
+    // validated identically rather than rejected as unknown.
+    DOCUMENT_KEK_NEXT: z
+      .string()
+      .refine((v) => v === "" || SECRET_HEX256_PATTERN.test(v), {
+        message: `DOCUMENT_KEK_NEXT ${SECRET_HEX256_REQUIREMENT}`,
+      })
+      .optional(),
     ORBIT_PORT: z.string().regex(/^$|^[0-9]{1,5}$/).optional(),
     POSTGRES_PORT: z.string().regex(/^$|^[0-9]{1,5}$/).optional(),
     ORBIT_LOG_LEVEL: z.enum(["", "error", "warn", "info", "debug"]).optional(),
@@ -282,6 +294,7 @@ export const envOrbitSchema = z
     const exclusivePairs: Array<[AllowedKey, AllowedKey]> = [
       ["SESSION_SECRET", "SESSION_SECRET_FILE"],
       ["DOCUMENT_KEK", "DOCUMENT_KEK_FILE"],
+      ["DOCUMENT_KEK_NEXT", "DOCUMENT_KEK_NEXT_FILE"],
       ["POSTGRES_PASSWORD", "POSTGRES_PASSWORD_FILE"],
       ["OIDC_CLIENT_SECRET", "OIDC_CLIENT_SECRET_FILE"],
       ["VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY_FILE"],

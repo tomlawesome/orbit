@@ -1,0 +1,264 @@
+/**
+ * The one place Tier 1 columns are read and written (ADR-0024 decisions 3 and
+ * 5). Repositories call these accessors instead of touching `notes`,
+ * `reference`, `proposal` or `field_evidence` directly, so the dual-read
+ * window, the blind index and the damaged-value behaviour each have exactly
+ * one definition.
+ *
+ * Dual read, for the length of the expand release: a row whose `*_enc` column
+ * is non-null is decrypted, and a row the backfill has not reached yet is read
+ * from its plaintext column. Every write encrypts and clears the plaintext in
+ * the same statement, so a row never sits in both states.
+ */
+import { getDb } from "@/db";
+import { AppError } from "@/lib/app-error";
+import { log, operationalDetail } from "@/lib/logger";
+import {
+  computeBlindIndex,
+  decryptMetadataValue,
+  encryptMetadataValue,
+  MetadataIntegrityError,
+  type MetadataColumn,
+} from "@/server/metadata/crypto";
+import {
+  loadMetadataKey,
+  metadataCryptoAvailable,
+  MetadataKeyLockedError,
+  receiptKeyScope,
+  resolveMetadataKey,
+  type MetadataExecutor,
+  type MetadataKeyMaterial,
+} from "@/server/metadata/keys";
+
+export type { MetadataExecutor } from "@/server/metadata/keys";
+
+/**
+ * Why a value is not being shown. `metadata_integrity_failed` is a specific
+ * damaged value; `metadata_locked` is the whole instance missing its KEK,
+ * which is reversible and must not be mistaken for damage.
+ */
+export type MetadataFieldState = "metadata_integrity_failed" | "metadata_locked";
+
+export interface MetadataTextResult {
+  value: string | null;
+  state?: MetadataFieldState;
+}
+
+export interface MetadataJsonResult {
+  value: Record<string, unknown>;
+  state?: MetadataFieldState;
+}
+
+export interface StoredText {
+  encrypted: string | null;
+  plaintext: string | null;
+}
+
+export interface StoredJson {
+  encrypted: string | null;
+  plaintext: unknown;
+}
+
+function recordDamage(column: MetadataColumn, rowId: string): void {
+  log.warn({
+    event: "metadata.integrity",
+    state: "degraded",
+    reason: "metadata_integrity_failed",
+    impact: "metadata_field_unreadable",
+    action: "inspect_admin_diagnostics",
+    detail: operationalDetail`${column} row ${rowId} failed authentication`,
+  });
+}
+
+/**
+ * One scope's key, held for the length of a request. A cipher with no key
+ * material is locked: it reads every field as `metadata_locked` and refuses
+ * every write, rather than returning an empty value or fabricating one.
+ */
+export class MetadataCipher {
+  constructor(private readonly material: MetadataKeyMaterial | undefined) {}
+
+  get locked(): boolean {
+    return this.material === undefined;
+  }
+
+  private requireKey(): MetadataKeyMaterial {
+    if (!this.material) throw new MetadataKeyLockedError();
+    return this.material;
+  }
+
+  /** Decrypts a Tier 1 text column, falling back to plaintext for a row the backfill has not reached. */
+  text(column: MetadataColumn, rowId: string, stored: StoredText): MetadataTextResult {
+    if (stored.encrypted === null) {
+      // No ciphertext at all: this row is still pre-encryption, and its
+      // plaintext is readable whether or not the instance holds a KEK.
+      return { value: stored.plaintext };
+    }
+    if (!this.material) return { value: null, state: "metadata_locked" };
+    try {
+      return { value: decryptMetadataValue(stored.encrypted, this.material.dataKey, { column, rowId }) };
+    } catch (error) {
+      if (!(error instanceof MetadataIntegrityError)) throw error;
+      recordDamage(column, rowId);
+      return { value: null, state: "metadata_integrity_failed" };
+    }
+  }
+
+  /** As `text`, for the JSONB columns: the object is serialised whole and encrypted as one envelope. */
+  json(column: MetadataColumn, rowId: string, stored: StoredJson): MetadataJsonResult {
+    if (stored.encrypted === null) return { value: asRecord(stored.plaintext) };
+    if (!this.material) return { value: {}, state: "metadata_locked" };
+    let decrypted: string;
+    try {
+      decrypted = decryptMetadataValue(stored.encrypted, this.material.dataKey, { column, rowId });
+    } catch (error) {
+      if (!(error instanceof MetadataIntegrityError)) throw error;
+      recordDamage(column, rowId);
+      return { value: {}, state: "metadata_integrity_failed" };
+    }
+    try {
+      return { value: asRecord(JSON.parse(decrypted)) };
+    } catch {
+      // Authenticated bytes that are not JSON cannot come from this writer.
+      recordDamage(column, rowId);
+      return { value: {}, state: "metadata_integrity_failed" };
+    }
+  }
+
+  /** Produces the `*_enc` value for a text column. A null or empty value stays null. */
+  encryptText(column: MetadataColumn, rowId: string, value: string | null | undefined): string | null {
+    const key = this.requireKey();
+    if (value === null || value === undefined || value === "") return null;
+    return encryptMetadataValue(value, key.dataKey, { column, rowId });
+  }
+
+  /**
+   * Produces the `*_enc` value for a JSONB column. The value is serialised
+   * exactly as it was found rather than normalised through `asRecord` first:
+   * the writer that uses this — the backfill — clears the plaintext column in
+   * the same statement, so normalising here would silently discard anything
+   * that was not already an object. Reads normalise instead, where it costs
+   * nothing.
+   */
+  encryptJson(column: MetadataColumn, rowId: string, value: unknown): string {
+    const key = this.requireKey();
+    return encryptMetadataValue(JSON.stringify(value ?? {}), key.dataKey, { column, rowId });
+  }
+
+  /** The blind index for `items.reference` (ADR-0024 decision 2), or null when there is nothing to index. */
+  referenceIndex(value: string | null | undefined): string | null {
+    const key = this.requireKey();
+    return computeBlindIndex(value, key.dataKey, "items.reference") ?? null;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+/**
+ * A cipher for writing: mints the scope key on first use, and throws
+ * `MetadataKeyLockedError` when the instance has no usable KEK. Callers turn
+ * that into a refused write.
+ */
+export async function openMetadataWriter(
+  householdId: string,
+  executor: MetadataExecutor = getDb(),
+): Promise<MetadataCipher> {
+  return new MetadataCipher(await resolveMetadataKey("household", householdId, executor));
+}
+
+/** As `openMetadataWriter`, for a mail-in receipt whose household may not be known yet. */
+export async function openReceiptMetadataWriter(
+  householdId: string | null,
+  executor: MetadataExecutor = getDb(),
+): Promise<MetadataCipher> {
+  const scope = receiptKeyScope(householdId);
+  return new MetadataCipher(await resolveMetadataKey(scope.scope, scope.householdId, executor));
+}
+
+/**
+ * The refusal every Tier 1 writer gives when the instance has no usable KEK
+ * (ADR-0024 decision 5). It matches what document operations already do: the
+ * application stays usable and only the encrypted surface locks.
+ */
+export function metadataLockedError(): AppError {
+  return new AppError("metadata_locked", "Encrypted details cannot be saved until the document key is available", 503);
+}
+
+/** `openMetadataWriter`, with a locked instance surfaced as a refused write. */
+export async function requireMetadataWriter(
+  householdId: string,
+  executor: MetadataExecutor = getDb(),
+): Promise<MetadataCipher> {
+  try {
+    return await openMetadataWriter(householdId, executor);
+  } catch (error) {
+    if (error instanceof MetadataKeyLockedError) throw metadataLockedError();
+    throw error;
+  }
+}
+
+/** `openReceiptMetadataWriter`, with a locked instance surfaced as a refused write. */
+export async function requireReceiptMetadataWriter(
+  householdId: string | null,
+  executor: MetadataExecutor = getDb(),
+): Promise<MetadataCipher> {
+  try {
+    return await openReceiptMetadataWriter(householdId, executor);
+  } catch (error) {
+    if (error instanceof MetadataKeyLockedError) throw metadataLockedError();
+    throw error;
+  }
+}
+
+/**
+ * A cipher for reading. Never throws for want of a key: an instance with no
+ * KEK, or a household whose key has not been minted yet, yields a locked
+ * cipher, and rows still holding plaintext read normally through it.
+ */
+export async function openMetadataReader(
+  householdId: string | null,
+  executor: MetadataExecutor = getDb(),
+): Promise<MetadataCipher> {
+  if (!metadataCryptoAvailable()) return new MetadataCipher(undefined);
+  const scope = receiptKeyScope(householdId);
+  try {
+    return new MetadataCipher(await loadMetadataKey(scope.scope, scope.householdId, executor));
+  } catch (error) {
+    if (error instanceof MetadataKeyLockedError) return new MetadataCipher(undefined);
+    throw error;
+  }
+}
+
+/**
+ * Readers keyed by scope for a page of mail-in receipts, whose `household_id`
+ * is nullable: an unattributed receipt reads under the instance key. One
+ * unwrap per distinct scope, not one per receipt.
+ */
+export async function openReceiptMetadataReaders(
+  householdIds: Array<string | null>,
+  executor: MetadataExecutor = getDb(),
+): Promise<Map<string | null, MetadataCipher>> {
+  const readers = new Map<string | null, MetadataCipher>();
+  for (const householdId of new Set(householdIds)) {
+    readers.set(householdId, await openMetadataReader(householdId, executor));
+  }
+  return readers;
+}
+
+/**
+ * Readers for several households in one query, for `readWorkspace`, which
+ * shows every household the member belongs to. One unwrap per household, not
+ * one per row.
+ */
+export async function openMetadataReaders(
+  householdIds: string[],
+  executor: MetadataExecutor = getDb(),
+): Promise<Map<string, MetadataCipher>> {
+  const readers = new Map<string, MetadataCipher>();
+  for (const householdId of new Set(householdIds)) {
+    readers.set(householdId, await openMetadataReader(householdId, executor));
+  }
+  return readers;
+}

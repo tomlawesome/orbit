@@ -438,6 +438,119 @@ describe("PostgreSQL migration evidence", () => {
     }]);
   });
 
+  it("adds the Tier 1 columns without touching a single existing value (0040, ADR-0024)", async () => {
+    const database = await createMigrationTestDatabase("tier1-metadata-expand");
+    databases.push(database);
+    await verifyMigrationPrefix("drizzle");
+    const throughTagDirectory = await createMigrationDirectoryThroughTag("drizzle", "0039_step_up_proofs");
+    temporaryDirectories.push(throughTagDirectory);
+    await runMigrations(database.url, throughTagDirectory.path);
+
+    /* Rows written by the release before this one: plaintext notes, a
+       plaintext reference and a mail-in draft, exactly what an operator
+       upgrading in place already has in their database. */
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+    const [sectionRow] = await database.client.unsafe(
+      `INSERT INTO "sections" ("household_id", "slug", "name", "icon", "accent", "position")
+       VALUES ($1, 'legacy', 'Legacy', 'home', 'blue', 0) RETURNING "id"`,
+      [householdId],
+    );
+    const [itemRow] = await database.client.unsafe(
+      `INSERT INTO "items" ("household_id", "section_id", "title", "currency", "reference", "notes")
+       VALUES ($1, $2, 'Legacy item', 'GBP', 'LEGACY-1', 'Written before encryption') RETURNING "id"`,
+      [householdId, String(sectionRow.id)],
+    );
+    /* The two drafts are written as SQL jsonb literals rather than as bound
+       parameters: a JSON string handed to the driver and cast with `::jsonb`
+       is encoded a second time, so what lands in the column is a jsonb string
+       scalar and the row reads back as text instead of an object. Seeding the
+       literal is what makes this fixture the shape a real pre-encryption row
+       has. */
+    const [receiptRow] = await database.client.unsafe(
+      `INSERT INTO "imap_ingestion_messages"
+         ("mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256",
+          "household_id", "status", "expires_at", "proposal", "field_evidence")
+       VALUES ('INBOX', '1', 9001, $1, $2, $3, 'pending_review', now() + interval '1 day',
+               '{"title": "Legacy proposal"}'::jsonb,
+               '{"title": {"source": "subject", "confidence": "high"}}'::jsonb)
+       RETURNING "id"`,
+      ["a".repeat(64), "b".repeat(64), householdId],
+    );
+
+    await runMigrations(database.url, "drizzle");
+
+    /* The expand migration cannot encrypt: the key-encryption key is an
+       application secret and SQL has no access to it. What it must guarantee
+       is that every pre-existing row stays exactly as readable as it was, in
+       the dual-read state the running release reads — plaintext present,
+       ciphertext null — until the backfill job replaces it. */
+    const [item] = await database.client.unsafe(
+      `SELECT "reference", "notes", "reference_enc", "notes_enc", "reference_index" FROM "items" WHERE "id" = $1`,
+      [String(itemRow.id)],
+    );
+    expect(item).toEqual({
+      reference: "LEGACY-1",
+      notes: "Written before encryption",
+      reference_enc: null,
+      notes_enc: null,
+      reference_index: null,
+    });
+    const [receipt] = await database.client.unsafe(
+      `SELECT "proposal", "field_evidence", "proposal_enc", "field_evidence_enc"
+       FROM "imap_ingestion_messages" WHERE "id" = $1`,
+      [String(receiptRow.id)],
+    );
+    /* `toEqual` alone would not distinguish an object from the JSON text of
+       one, and a caller reading this column expects an object. */
+    expect(typeof receipt.proposal).toBe("object");
+    expect(receipt.proposal).toEqual({ title: "Legacy proposal" });
+    expect(typeof receipt.field_evidence).toBe("object");
+    expect(receipt.field_evidence).toEqual({ title: { source: "subject", confidence: "high" } });
+    expect(receipt.proposal_enc).toBeNull();
+    expect(receipt.field_evidence_enc).toBeNull();
+
+    /* No key is seeded either: keys are minted by the application on first
+       use, so an upgraded database starts with none. */
+    expect(await database.client.unsafe(`SELECT count(*)::int AS count FROM "metadata_keys"`))
+      .toEqual([{ count: 0 }]);
+  });
+
+  it("keeps the metadata key scopes honest: one per household, exactly one instance row (0040, ADR-0024)", async () => {
+    const database = await createMigrationTestDatabase("tier1-metadata-key-scopes");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+    const insertKey = (scope: string, household: string | null, keyId: string) => database.client.unsafe(
+      `INSERT INTO "metadata_keys" ("scope", "household_id", "envelope_version", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id")
+       VALUES ($1, $2, 1, 'dek', 'iv', 'tag', $3)`,
+      [scope, household, keyId],
+    );
+
+    await expect(insertKey("household", householdId, "key-one")).resolves.toBeDefined();
+    /* One DEK per household: a second row for the same household would leave
+       half its values on a key nothing reads. */
+    await expect(insertKey("household", householdId, "key-two")).rejects.toThrow(/metadata_keys_household_unique/u);
+    /* The check constraint pairs scope with household_id in both directions. */
+    await expect(insertKey("household", null, "key-three")).rejects.toThrow(/metadata_keys_scope_household_valid/u);
+    await expect(insertKey("instance", householdId, "key-four")).rejects.toThrow(/metadata_keys_scope_household_valid/u);
+
+    await expect(insertKey("instance", null, "key-five")).resolves.toBeDefined();
+    /* PostgreSQL treats every NULL as distinct, so the plain unique index
+       above does not constrain this one; the partial index is what does. */
+    await expect(insertKey("instance", null, "key-six")).rejects.toThrow(/metadata_keys_instance_unique/u);
+
+    /* Dropping a household drops its key, which crypto-shreds any stray copy
+       of that household's ciphertext. */
+    await database.client.unsafe(`DELETE FROM "households" WHERE "id" = $1`, [householdId]);
+    expect(await database.client.unsafe(`SELECT count(*)::int AS count FROM "metadata_keys" WHERE "scope" = 'household'`))
+      .toEqual([{ count: 0 }]);
+    expect(await database.client.unsafe(`SELECT count(*)::int AS count FROM "metadata_keys" WHERE "scope" = 'instance'`))
+      .toEqual([{ count: 1 }]);
+  });
+
   it("treats email as the same identity regardless of case (0038, ADR-0023 §2)", async () => {
     const database = await createMigrationTestDatabase("email-case-insensitive");
     databases.push(database);

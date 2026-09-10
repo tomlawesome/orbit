@@ -56,7 +56,10 @@ vi.mock("@/db", async () => {
   return { getDb: () => fakeDb };
 });
 
-vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
+vi.mock("@/server/documents/config", async (importActual) => ({
+  ...await importActual<typeof import("@/server/documents/config")>(),
+  getDocumentConfig: mocks.config,
+}));
 vi.mock("@/server/documents/crypto", () => ({
   decryptDocument: mocks.decryptDocument,
   encryptDocument: vi.fn(),
@@ -88,6 +91,8 @@ const config = {
   tika: { url: null, timeoutMs: 45_000 },
   keyEncryptionKey: Buffer.alloc(32, 1),
   keyId: "test-key-id",
+  nextKeyEncryptionKey: null,
+  nextKeyId: null,
 };
 
 function accessRow(overrides: Record<string, unknown> = {}) {
