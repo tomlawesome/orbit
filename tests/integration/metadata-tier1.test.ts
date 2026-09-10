@@ -2,16 +2,41 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { imapIngestionMessages, items, metadataKeys } from "@/db/schema";
+import { imapIngestionMessages, items, metadataDamageSightings, metadataKeys } from "@/db/schema";
 import { readWorkspace, applyWorkspaceCommand } from "@/server/workspace-repository";
 import { assignImapReceiptHousehold } from "@/server/mail-in/imap-inbox";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import { importPortableArchive, previewPortableImport } from "@/server/portable-archive-repository";
 import { runMetadataBackfillBatch } from "@/server/metadata/backfill";
 import { openMetadataReader } from "@/server/metadata/fields";
+import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
+import { resetDocumentConfigForTests } from "@/server/documents/config";
+import { getDocumentHealth } from "@/server/document-health";
+import {
+  flushMetadataDamageSightings,
+  resetMetadataDamageSightingsForTests,
+} from "@/server/metadata/damage-sightings";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
 const passphrase = "correct-horse-battery-staple";
+
+/**
+ * The instance with no usable key-encryption key: `getDocumentConfig()` throws
+ * for want of `DOCUMENT_KEK`, which is exactly the state a restart with the
+ * secret unmounted produces. Both caches have to go with it, or the process
+ * would keep answering from key material the instance no longer holds.
+ */
+function lockTheInstance(): () => void {
+  const kek = process.env.DOCUMENT_KEK;
+  delete process.env.DOCUMENT_KEK;
+  resetDocumentConfigForTests();
+  resetMetadataKeyCacheForTests();
+  return () => {
+    process.env.DOCUMENT_KEK = kek;
+    resetDocumentConfigForTests();
+    resetMetadataKeyCacheForTests();
+  };
+}
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -24,8 +49,10 @@ async function writeItem(input: {
   title: string;
   reference?: string;
   notes?: string;
+  /** Omitted for a new item; given to write over one that already exists. */
+  id?: string;
 }): Promise<string> {
-  const itemId = randomUUID();
+  const itemId = input.id ?? randomUUID();
   await applyWorkspaceCommand(input.userId, "metadata-tier1-test", {
     type: "item.upsert",
     householdId: input.householdId,
@@ -465,5 +492,185 @@ describe("the backfill converts rows that predate encryption (ADR-0024 decision 
     await getDb().delete(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId));
     expect(await getDb().select({ count: sql<number>`count(*)::int` }).from(metadataKeys)
       .where(eq(metadataKeys.scope, "instance"))).toEqual([{ count: 0 }]);
+  });
+});
+
+describe("a locked instance refuses the write instead of taking it (#941, ADR-0024 decision 5)", () => {
+  it("cannot silently overwrite a locked field, and gives the values back untouched when the key returns", async () => {
+    const fixture = await createIntegrationFixture("tier1-locked-no-overwrite");
+    const [section] = await getDb().select({ id: items.sectionId }).from(items).where(eq(items.id, fixture.item.id));
+    const itemId = await writeItem({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      sectionId: section.id,
+      title: "Locked item",
+      reference: "LOCK-1",
+      notes: "The note that must survive being locked",
+    });
+    // `titleEnc` too, since #963: the title is Tier 2 ciphertext, so "nothing
+    // moved" has to cover it as well as the two Tier 1 columns.
+    const storedColumns = { titleEnc: items.titleEnc, referenceEnc: items.referenceEnc, notesEnc: items.notesEnc, referenceIndex: items.referenceIndex, version: items.version };
+    const [before] = await getDb().select(storedColumns).from(items).where(eq(items.id, itemId));
+
+    const unlock = lockTheInstance();
+    try {
+      // Locked, not damaged: the marker says the value is intact and waiting,
+      // and no value and no empty string is handed out in its place.
+      const locked = await workspaceFor(fixture);
+      const lockedItem = locked.households.find((candidate) => candidate.id === fixture.household.id)!
+        .items.find((candidate) => candidate.id === itemId)!;
+      expect(lockedItem.metadataStatus).toEqual({ reference: "metadata_locked", notes: "metadata_locked", title: "metadata_locked" });
+      expect(lockedItem.reference).toBeUndefined();
+      expect(lockedItem.notes).toBeUndefined();
+      // The title is Tier 2 ciphertext since #963, so it is locked with the
+      // rest. It reads back empty rather than invented, and `metadataStatus`
+      // is what says why (ADR-0024 decision 5).
+      expect(lockedItem.title).toBe("");
+
+      // THE POINT OF THIS TEST. A panel opened before the key went away, sent
+      // after it: the reference and notes it carries are empty, because that
+      // is all the locked read could give it. The write must be refused, not
+      // accepted as a member deliberately clearing two fields.
+      await expect(writeItem({
+        userId: fixture.users.member.id,
+        householdId: fixture.household.id,
+        sectionId: section.id,
+        title: "Locked item",
+      })).rejects.toMatchObject({ code: "metadata_locked", status: 503 });
+
+      // Nothing moved: not the ciphertext, not the blind index, not even the
+      // row's version, so no other device sees a change that did not happen.
+      const [during] = await getDb().select(storedColumns).from(items).where(eq(items.id, itemId));
+      expect(during).toEqual(before);
+
+      // Every edit to the item is refused, not only the Tier 1 fields:
+      // item.upsert is a full-row write, so a title-only change locks too.
+      await expect(writeItem({
+        userId: fixture.users.member.id,
+        householdId: fixture.household.id,
+        sectionId: section.id,
+        title: "A different title entirely",
+      })).rejects.toMatchObject({ code: "metadata_locked", status: 503 });
+      const [after] = await getDb().select(storedColumns).from(items).where(eq(items.id, itemId));
+      expect(after).toEqual(before);
+    } finally {
+      unlock();
+    }
+
+    // Reversible, which is the whole difference from damaged.
+    const restored = await workspaceFor(fixture);
+    const restoredItem = restored.households.find((candidate) => candidate.id === fixture.household.id)!
+      .items.find((candidate) => candidate.id === itemId)!;
+    expect(restoredItem.metadataStatus).toBeUndefined();
+    expect(restoredItem.title).toBe("Locked item");
+    expect(restoredItem.reference).toBe("LOCK-1");
+    expect(restoredItem.notes).toBe("The note that must survive being locked");
+  });
+});
+
+describe("damaged values are countable for an administrator (#941)", () => {
+  it("records a sighting when a value fails to decrypt, counts it, and drops it when the value is written over", async () => {
+    const fixture = await createIntegrationFixture("tier1-damage-sightings");
+    // The suite shares one database, and earlier tests here deliberately fail
+    // integrity checks of their own. Start from a known empty table so the
+    // numbers below are this test's and nobody else's.
+    await getDb().delete(metadataDamageSightings);
+    resetMetadataDamageSightingsForTests();
+
+    const [section] = await getDb().select({ id: items.sectionId }).from(items).where(eq(items.id, fixture.item.id));
+    const itemId = await writeItem({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      sectionId: section.id,
+      title: "Counted item",
+      reference: "COUNT-1",
+      notes: "A note that is about to be damaged",
+    });
+    const [stored] = await getDb().select({ notesEnc: items.notesEnc }).from(items).where(eq(items.id, itemId));
+    await getDb().update(items)
+      .set({ notesEnc: `${stored.notesEnc!.slice(0, -4)}AAAA` })
+      .where(eq(items.id, itemId));
+
+    // Nothing has read the row yet, so nothing has been seen: the count is a
+    // count of sightings, exactly as the administrator card says.
+    await flushMetadataDamageSightings();
+    expect(await getDb().select().from(metadataDamageSightings)).toHaveLength(0);
+
+    const damaged = await workspaceFor(fixture);
+    expect(damaged.households.find((candidate) => candidate.id === fixture.household.id)!
+      .items.find((candidate) => candidate.id === itemId)!.metadataStatus?.notes).toBe("metadata_integrity_failed");
+
+    await flushMetadataDamageSightings();
+    const sightings = await getDb().select().from(metadataDamageSightings);
+    expect(sightings).toHaveLength(1);
+    // Keyed exactly like the value's own content AAD, so it names one value.
+    expect(sightings[0]).toMatchObject({ tableName: "items", columnName: "notes", rowId: itemId });
+    expect(sightings[0].firstSeenAt).toBeInstanceOf(Date);
+
+    // Reading it again is the same sighting, not a second one.
+    await workspaceFor(fixture);
+    await flushMetadataDamageSightings();
+    expect(await getDb().select().from(metadataDamageSightings)).toHaveLength(1);
+
+    const health = await getDocumentHealth();
+    expect(health.metadata).toMatchObject({
+      locked: false,
+      lockedItems: 0,
+      lockedReceipts: 0,
+      damagedValues: 1,
+      damagedItems: 1,
+      damagedReceipts: 0,
+    });
+
+    // Overwriting is the repair (ADR-0024), so the count goes with it. The
+    // same item id, deliberately: a new row beside the damaged one repairs
+    // nothing, and the sighting would rightly still be there.
+    await writeItem({
+      id: itemId,
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      sectionId: section.id,
+      title: "Counted item",
+      reference: "COUNT-1",
+      notes: "Retyped over the damage",
+    });
+    await flushMetadataDamageSightings();
+    expect(await getDb().select().from(metadataDamageSightings)).toHaveLength(0);
+    expect((await getDocumentHealth()).metadata.damagedValues).toBe(0);
+
+    const repaired = await workspaceFor(fixture);
+    const repairedItem = repaired.households.find((candidate) => candidate.id === fixture.household.id)!
+      .items.find((candidate) => candidate.id === itemId)!;
+    expect(repairedItem.notes).toBe("Retyped over the damage");
+    expect(repairedItem.metadataStatus).toBeUndefined();
+  });
+
+  it("counts locked rows instead, while the instance holds no key", async () => {
+    const fixture = await createIntegrationFixture("tier1-locked-counts");
+    await getDb().delete(metadataDamageSightings);
+    resetMetadataDamageSightingsForTests();
+    const [section] = await getDb().select({ id: items.sectionId }).from(items).where(eq(items.id, fixture.item.id));
+    await writeItem({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      sectionId: section.id,
+      title: "Waiting item",
+      notes: "Intact, and unreadable for now",
+    });
+
+    const unlock = lockTheInstance();
+    try {
+      const health = await getDocumentHealth();
+      expect(health.metadata.locked).toBe(true);
+      // Live SQL over the rows that actually hold ciphertext, not a guess.
+      expect(health.metadata.lockedItems).toBeGreaterThanOrEqual(1);
+      // Locked is not damage, and must never be counted as any.
+      expect(health.metadata.damagedValues).toBe(0);
+      expect(await getDb().select().from(metadataDamageSightings)).toHaveLength(0);
+    } finally {
+      unlock();
+    }
+
+    expect((await getDocumentHealth()).metadata.locked).toBe(false);
   });
 });

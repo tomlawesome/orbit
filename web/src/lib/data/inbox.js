@@ -33,6 +33,9 @@ export function receiptSuggestionsOf(receipts = []) {
           ? `${receipt.attachmentCount} forwarded document${receipt.attachmentCount === 1 ? "" : "s"}`
           : "forwarded email",
       fieldEvidence: receipt.fieldEvidence ?? {},
+      /* #941: a suggestion Orbit cannot read has to say so where it is
+         reviewed, not arrive looking like one nobody filled in. */
+      metadataStatus: receipt.metadataStatus ?? null,
       classification: receipt.classification,
       message: receipt.message,
     }));
@@ -56,6 +59,7 @@ export function receiptFailuresOf(receipts = []) {
       classification: receipt.classification,
       message: /** @type {string} */ (receipt.message),
       canDiscard: Boolean(receipt.canDiscard),
+      metadataStatus: receipt.metadataStatus ?? null,
     }));
 }
 
