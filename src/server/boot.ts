@@ -150,6 +150,64 @@ export async function reportScannerReadiness(): Promise<void> {
   );
 }
 
+/**
+ * Says, on every startup that finds `DOCUMENT_KEK_NEXT` loaded, that a
+ * document-KEK rotation is in progress (#956) — and makes sure the rotation
+ * has its one instance-level `document_kek_rotation_started` audit row, so
+ * "how long has this been open?" is answerable from the instance.
+ *
+ * A rotation in progress is not a configuration problem — the operator put
+ * the second key there on purpose, mid-procedure — so this is its own
+ * `document.kek_rotation` event on the same boot-time surface as
+ * `configuration.problem`, never filed as one. And it never blocks startup:
+ * a hard cut-off would turn a slow rotation into an outage, which is worse
+ * than the two-key window it would be guarding (#956, owner 2026-09-10).
+ */
+export async function reportKekRotationInProgress(): Promise<void> {
+  const [{ getDocumentConfig }, { log, operationalDetail }] = await Promise.all([
+    import("@/server/documents/config"),
+    import("@/lib/logger"),
+  ]);
+
+  let config: ReturnType<typeof getDocumentConfig>;
+  try {
+    config = getDocumentConfig();
+  } catch {
+    // Broken document configuration is reported by its own path.
+    return;
+  }
+  if (!config.nextKeyId) return;
+
+  let startedAt: Date | null = null;
+  try {
+    const { recordRotationStarted } = await import("@/server/documents/rewrap-worker");
+    startedAt = (await recordRotationStarted({
+      previousKeyId: config.keyId,
+      nextKeyId: config.nextKeyId,
+    })).startedAt;
+  } catch {
+    // The reminder below still goes out; only the durable row and the
+    // duration are missing, and refusing to start over bookkeeping is
+    // exactly what this path must never do.
+    log.warn({
+      event: "document.kek_rotation",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+    });
+  }
+
+  log.warn({
+    event: "document.kek_rotation",
+    state: "starting",
+    action: "inspect_admin_diagnostics",
+    impact: "none",
+    detail: operationalDetail`rotation in progress from key ${config.keyId} to ${config.nextKeyId} - deliberate and safe, but meant to be short: finish the rewrap and remove DOCUMENT_KEK_NEXT`,
+    ...(startedAt ? { durationMs: Date.now() - startedAt.getTime() } : {}),
+  });
+}
+
 export async function registerNode(): Promise<void> {
   const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log }, { getConfigurationProblems }] = await Promise.all([
     import("@/lib/startup-config"),
@@ -358,6 +416,22 @@ export async function registerNode(): Promise<void> {
   // post-boot reporting, not a boot step, so it flips before the scanner
   // probe kicks off rather than after.
   bootPhase = "running";
+
+  // Best-effort: the reminder that a KEK rotation is open must appear in
+  // every boot's log, but a failed audit write may not stop the boot (#956)
+  // — every failure inside is caught, and this catch is the last net.
+  // Awaited, unlike the scanner probe below, so the reminder lands in the
+  // startup log deterministically rather than racing the claim notice; it
+  // is one config read on the common no-rotation path.
+  await reportKekRotationInProgress().catch(() => {
+    log.warn({
+      event: "document.kek_rotation",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+    });
+  });
 
   // Probed after workers start so a slow or absent scanner never delays them.
   // Failure is reported, never thrown: readiness is the health surface's job.

@@ -1,20 +1,24 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
-import { afterAll, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { documentCrypto, documents, households, mailInSecrets, metadataKeys } from "@/db/schema";
+import { auditLog, documentCrypto, documents, households, mailInSecrets, metadataKeys } from "@/db/schema";
 import { deriveDocumentKeyId, getDocumentConfig, keyEncryptionKeyFor, resetDocumentConfigForTests, wrappingKey, type DocumentConfig } from "@/server/documents/config";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope, type DocumentEncryptionContext } from "@/server/documents/crypto";
 import { createWrappedMetadataKey, unwrapMetadataKey, type MetadataKeyContext } from "@/server/metadata/crypto";
 import { loadMetadataKey, resolveMetadataKey, resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { decryptMailInSecret, encryptMailInSecret, type MailInSecretContext, type MailInSecretEnvelope } from "@/server/mail-in/core/secret-crypto";
 import {
+  findOpenRotationStart,
+  recordRotationCompleted,
+  recordRotationStarted,
   rotationComplete,
   rotationRemaining,
   runKekRotationCycle,
   runKekRotationToCompletion,
   type RotationKeys,
 } from "@/server/documents/rewrap-worker";
+import { getKekRotationStatus } from "@/server/documents/rotation-status";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 
 afterAll(async () => {
@@ -573,6 +577,91 @@ describe("writes during a rotation go to the next key (#955)", () => {
         await getDb().delete(households).where(eq(households.id, lateHousehold));
       }
       await getDb().delete(households).where(eq(households.id, household));
+    }
+  });
+});
+
+describe("rotation visibility (#956): the start is recorded once and reported until completion", () => {
+  afterEach(async () => {
+    // The audit trail is this describe's whole subject; leave none behind
+    // for the other describes, whose rewraps assume a quiet audit_log.
+    await getDb().delete(auditLog).where(eq(auditLog.entityType, "document_kek"));
+  });
+
+  it("writes one instance-level started row per rotation — surviving restarts — and completion closes it", async () => {
+    const keys = keysFor(randomBytes(32));
+    expect(await findOpenRotationStart()).toBeNull();
+
+    const first = await recordRotationStarted({ previousKeyId: keys.currentKeyId, nextKeyId: keys.nextKeyId });
+    // A restart, or a resumed `pnpm rewrap-kek`, records nothing new.
+    const resumed = await recordRotationStarted({ previousKeyId: keys.currentKeyId, nextKeyId: keys.nextKeyId });
+    expect(resumed.startedAt.getTime()).toBe(first.startedAt.getTime());
+
+    const rows = await getDb().select().from(auditLog).where(and(
+      eq(auditLog.entityType, "document_kek"),
+      eq(auditLog.action, "document_kek_rotation_started"),
+    ));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].householdId).toBeNull();
+    expect(rows[0].actorUserId).toBeNull();
+    expect(rows[0].changes).toEqual({ previousKeyId: keys.currentKeyId, nextKeyId: keys.nextKeyId });
+
+    const open = await findOpenRotationStart();
+    expect(open?.previousKeyId).toBe(keys.currentKeyId);
+    expect(open?.nextKeyId).toBe(keys.nextKeyId);
+
+    // The pair: one started row, one completed row, and the book closes.
+    await recordRotationCompleted(keys);
+    expect(await findOpenRotationStart()).toBeNull();
+
+    // A later rotation opens its own row rather than resurrecting the old one.
+    const later = await recordRotationStarted({ previousKeyId: keys.nextKeyId, nextKeyId: keys.currentKeyId });
+    expect(later.startedAt.getTime()).toBeGreaterThan(first.startedAt.getTime());
+    expect((await findOpenRotationStart())?.nextKeyId).toBe(keys.currentKeyId);
+  });
+
+  it("treats a different key pair as a new rotation, not the old one resumed", async () => {
+    const abandoned = keysFor(randomBytes(32));
+    const replacement = keysFor(randomBytes(32));
+
+    await recordRotationStarted({ previousKeyId: abandoned.currentKeyId, nextKeyId: abandoned.nextKeyId });
+    await recordRotationStarted({ previousKeyId: replacement.currentKeyId, nextKeyId: replacement.nextKeyId });
+
+    const rows = await getDb().select().from(auditLog).where(and(
+      eq(auditLog.entityType, "document_kek"),
+      eq(auditLog.action, "document_kek_rotation_started"),
+    ));
+    expect(rows).toHaveLength(2);
+    // The open rotation is the one actually in play now.
+    expect((await findOpenRotationStart())?.nextKeyId).toBe(replacement.nextKeyId);
+  });
+
+  it("reports administration status from the started row and the loaded keys, without key ids", async () => {
+    const originalNext = process.env.DOCUMENT_KEK_NEXT;
+    try {
+      delete process.env.DOCUMENT_KEK_NEXT;
+      resetDocumentConfigForTests();
+      expect(await getKekRotationStatus()).toEqual({ inProgress: false, startedAt: null, secondKeyLoaded: false });
+
+      // A started row alone (this process restarted without the second key).
+      const keys = keysFor(randomBytes(32));
+      const started = await recordRotationStarted({ previousKeyId: keys.currentKeyId, nextKeyId: keys.nextKeyId });
+      const open = await getKekRotationStatus();
+      expect(open).toEqual({ inProgress: true, startedAt: started.startedAt.toISOString(), secondKeyLoaded: false });
+      // The admin surface's rule (the documents/health precedent): no key ids.
+      expect(JSON.stringify(open)).not.toContain("keyId");
+
+      // The second key loaded as well — the ordinary mid-rotation state.
+      process.env.DOCUMENT_KEK_NEXT = keys.nextKek.toString("hex");
+      resetDocumentConfigForTests();
+      const during = await getKekRotationStatus();
+      expect(during.inProgress).toBe(true);
+      expect(during.secondKeyLoaded).toBe(true);
+      expect(during.startedAt).toBe(started.startedAt.toISOString());
+    } finally {
+      if (originalNext === undefined) delete process.env.DOCUMENT_KEK_NEXT;
+      else process.env.DOCUMENT_KEK_NEXT = originalNext;
+      resetDocumentConfigForTests();
     }
   });
 });

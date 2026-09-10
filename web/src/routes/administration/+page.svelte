@@ -311,6 +311,21 @@
   /** @param {?string} iso */
   const stamp = (iso) => (iso ? new Date(iso).toLocaleString("en-GB", { timeZone: "UTC" }) : "never");
 
+  /**
+   * How long the rotation card's subject has been open (#956), in the
+   * sentence register — "open 3 days" — where format.js's ago() speaks in
+   * chrome shorthand and appends "ago".
+   * @param {string} iso
+   */
+  const openFor = (iso) => {
+    const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"}`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"}`;
+  };
+
   function openMailboxEditor() {
     const current = need().mailbox;
     if (current) {
@@ -485,6 +500,39 @@
 
   {#if view}
     <div class="grid">
+
+      <!-- AN OPEN DOCUMENT-KEY ROTATION (#956). The composition call, made
+           deliberately: this renders NOTHING when no rotation is open — the
+           common case earns zero pixels (and the fixture-mode screen the
+           fidelity gate photographs is unchanged) — and when one IS open it
+           stands first in the grid, full width, because the state's whole
+           failure mode is being forgotten. It is a notice, not an alarm: a
+           rotation is a deliberate operator procedure mid-flight, so it
+           speaks in the card's ordinary voice with an accent edge, states
+           the fact, how long, and the next step, and offers no buttons —
+           finishing a rotation is a shell procedure, not a click. It is
+           self-contained by design so #941's damaged/locked counts can stand
+           beside it later without either being rewritten. -->
+      {#if view.rotation?.inProgress}
+        <div class="card wide rotation">
+          <div class="cardhead"><h2>Document key rotation in progress</h2>
+            <span class="since">{view.rotation.startedAt
+              ? `open ${openFor(view.rotation.startedAt)} · since ${stamp(view.rotation.startedAt)}`
+              : "start time not recorded"}</span></div>
+          <p class="rotationwords">
+            {#if view.rotation.secondKeyLoaded}
+              Orbit is holding two document keys while the rotation runs. Every document stays readable —
+              this is safe, but it is meant to be brief. Finish the procedure: run the rewrap, promote the
+              new key, remove the old one — “Rotating the document key-encryption key” in the administrator
+              guide has the steps.
+            {:else}
+              A rotation was started and never recorded as finished, and this instance is no longer holding
+              the second key. Check where the rotation got to before changing anything — see “Rotating the
+              document key-encryption key” in the administrator guide.
+            {/if}
+          </p>
+        </div>
+      {/if}
 
       <div class="card">
         <div class="cardhead"><h2>People</h2><button>invite someone</button></div>

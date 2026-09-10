@@ -178,3 +178,12 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
       border:1px solid var(--line);border-radius:99px;padding:3px 10px;margin-left:8px;cursor:pointer}
 .mission-page .adminproblem .retry:hover{border-color:var(--accent);color:var(--accent-text)}
 @media (max-width:560px){.mission-page .localuser{grid-template-columns:1fr}}
+
+/* AN OPEN DOCUMENT-KEY ROTATION (#956). First in the grid only while one is
+   open; absent otherwise, so the everyday screen (and the fidelity baseline)
+   carries no trace of it. A notice in the card's ordinary voice — the accent
+   edge marks it out without borrowing .adminproblem's warning colour, because
+   a rotation mid-flight is deliberate, not wrong. */
+.mission-page .card.rotation{border-left:3px solid var(--accent)}
+.mission-page .card.rotation .since{margin-left:auto;font:10.5px var(--mono);color:var(--accent-text)}
+.mission-page .card.rotation .rotationwords{font:12px/1.6 var(--mono);color:var(--ink-mid);max-width:74ch}
