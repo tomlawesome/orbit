@@ -15,7 +15,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { metadataKeys } from "@/db/schema";
 import { ENVELOPE_VERSION, type WrappedKey } from "@/server/documents/crypto";
-import { getDocumentConfig, keyEncryptionKeyFor, type DocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey, type DocumentConfig } from "@/server/documents/config";
 import {
   createWrappedMetadataKey,
   unwrapMetadataKey,
@@ -136,17 +136,18 @@ export async function resolveMetadataKey(
 
   const config = readDocumentConfig();
   if (!config) throw new MetadataKeyLockedError();
-  // A freshly minted key always wraps under the current key — never the
-  // rotation-in-progress next one — so exactly one key is ever the wrapping
-  // key for new writes.
-  const context = { scope, householdId, keyId: config.keyId };
-  const minted = createWrappedMetadataKey(config.keyEncryptionKey, context);
+  // A freshly minted key wraps under whichever key new writes use: the next
+  // key while a rotation is in progress, the current key otherwise (#955).
+  // Exactly one key is ever the wrapping key at any one moment.
+  const wrap = wrappingKey(config);
+  const context = { scope, householdId, keyId: wrap.keyId };
+  const minted = createWrappedMetadataKey(wrap.keyEncryptionKey, context);
   try {
     await executor.insert(metadataKeys).values({
       scope,
       householdId,
       envelopeVersion: ENVELOPE_VERSION,
-      keyId: config.keyId,
+      keyId: wrap.keyId,
       ...minted.wrapped,
     }).onConflictDoNothing();
   } finally {

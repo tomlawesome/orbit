@@ -15,7 +15,7 @@ import {
 import { AppError } from "@/lib/app-error";
 import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
-import { getDocumentConfig, keyEncryptionKeyFor } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
@@ -492,6 +492,8 @@ export async function uploadItemDocument(input: {
         if (retryableFailureCode) {
           const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
           try {
+            // The next key while a rotation is in progress (#955).
+            const stagingWrap = wrappingKey(config);
             const staged = encryptDocument(plaintext, {
               documentId,
               householdId: input.householdId,
@@ -499,7 +501,7 @@ export async function uploadItemDocument(input: {
               mediaType,
               plaintextSize: received.sizeBytes,
               purpose: "scanner_recovery",
-            }, config.keyEncryptionKey, config.keyId);
+            }, stagingWrap.keyEncryptionKey, stagingWrap.keyId);
             stagingKey = storage.createStorageKey();
             await storage.writeStagingCiphertext(stagingKey, staged.ciphertext);
             const now = new Date();
@@ -620,6 +622,8 @@ export async function uploadItemDocument(input: {
 
     const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     let encrypted: ReturnType<typeof encryptDocument>;
+    // The next key while a rotation is in progress (#955).
+    const publishWrap = wrappingKey(config);
     try {
       encrypted = encryptDocument(plaintext, {
         documentId,
@@ -627,7 +631,7 @@ export async function uploadItemDocument(input: {
         itemId: input.itemId,
         mediaType,
         plaintextSize: received.sizeBytes,
-      }, config.keyEncryptionKey, config.keyId);
+      }, publishWrap.keyEncryptionKey, publishWrap.keyId);
     } finally {
       plaintext.fill(0);
     }

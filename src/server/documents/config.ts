@@ -138,11 +138,30 @@ export function resetDocumentConfigForTests(): void {
  * (rotation-in-progress) next key actually wrapped it, regardless of whether
  * the rewrap worker (#932) has reached that row yet. Returns undefined when
  * the row's `key_id` matches neither — a genuine lock, not a rotation-timing
- * gap. Every write still wraps under `config.keyEncryptionKey`/`config.keyId`
- * (the current key) unconditionally; this only widens what can be read.
+ * gap. Writes pick their key through `wrappingKey()` below; this only widens
+ * what can be read.
  */
 export function keyEncryptionKeyFor(config: DocumentConfig, keyId: string): Buffer | undefined {
   if (keyId === config.keyId) return config.keyEncryptionKey;
   if (config.nextKeyId !== null && keyId === config.nextKeyId) return config.nextKeyEncryptionKey ?? undefined;
   return undefined;
+}
+
+/**
+ * The key every new wrap uses: the next key while a rotation is in progress,
+ * the current key otherwise (#955).
+ *
+ * Writing under the current key during a rotation would strand any row created
+ * after the rewrap worker's final count, because the procedure destroys the
+ * outgoing key at the end. Writing under the next key means the outgoing key
+ * has nothing left on it by then, so destroying it is safe — which is what a
+ * rotation prompted by a suspected leak needs.
+ *
+ * Reads are unaffected: both keys are held, so a row wrapped either way is
+ * readable through `keyEncryptionKeyFor()` with no restart.
+ */
+export function wrappingKey(config: DocumentConfig): { keyEncryptionKey: Buffer; keyId: string } {
+  return config.nextKeyEncryptionKey !== null && config.nextKeyId !== null
+    ? { keyEncryptionKey: config.nextKeyEncryptionKey, keyId: config.nextKeyId }
+    : { keyEncryptionKey: config.keyEncryptionKey, keyId: config.keyId };
 }

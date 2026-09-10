@@ -15,7 +15,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { getDocumentConfig, keyEncryptionKeyFor } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -224,13 +224,16 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       return;
     }
     finalStorageKey = storage.createStorageKey();
+    // The next key while a rotation is in progress (#955): the staged object
+    // this republishes may have been wrapped under either key.
+    const wrap = wrappingKey(config);
     const encrypted = encryptDocument(plaintext, {
       documentId: job.documentId,
       householdId: record.householdId,
       itemId: record.itemId,
       mediaType: record.mediaType,
       plaintextSize: record.sizeBytes,
-    }, config.keyEncryptionKey, config.keyId);
+    }, wrap.keyEncryptionKey, wrap.keyId);
     await storage.writeCiphertext(finalStorageKey, encrypted.ciphertext);
     const now = new Date();
     const finalized = await getDb().transaction(async (transaction) => {

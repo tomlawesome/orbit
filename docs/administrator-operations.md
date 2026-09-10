@@ -544,7 +544,10 @@ unreadable, and no maintenance window is needed at any step below.
    After this restart Orbit holds both keys: every existing row is still on
    the current key and reads exactly as before, and a row the worker moves to
    the next key from here on reads too, by its own key id, with nothing
-   locked at any point in between.
+   locked at any point in between. From this restart anything newly written —
+   an uploaded document, a new household's Tier 1 key, a mailbox credential —
+   is wrapped under the **next** key straight away (#955), so the rewrap in
+   step 3 is chasing a fixed set of rows rather than a moving one.
 3. Run the rewrap worker. It reads the current key exactly as the running
    application does, and takes the next key only from the file you give it:
    ```sh
@@ -559,12 +562,19 @@ unreadable, and no maintenance window is needed at any step below.
    half-migrated, and step 2 means both states read successfully the whole
    time. It records one `document_kek_rotation_completed` audit entry when it
    finishes.
-4. Only once it reports completion, promote the next key to current and drop
-   the overlay:
+4. **The point of no return.** Only once the worker reports completion,
+   promote the next key to current and drop the overlay:
    ```sh
    mv .orbit-secrets/document-kek-next .orbit-secrets/document-kek
    bash scripts/deploy-container.sh --pull
    ```
+   Read this step as a confirmation. Everything before it can be undone.
+   This move overwrites the outgoing key, and after it that key is gone: no
+   row is wrapped under it any more, nothing needs it, and it cannot be used
+   to read anything ever again. That is deliberate — a rotation you are
+   running because a key may have leaked has not achieved much if the leaked
+   key is still sitting in `.orbit-secrets/` beside its replacement.
+
    Orbit derives `DOCUMENT_KEK`'s id from the key bytes themselves, so this
    restart always finds every row already on the key it just loaded as
    current — nothing needs to know the id in advance. Dropping the overlay
@@ -572,14 +582,41 @@ unreadable, and no maintenance window is needed at any step below.
    `DOCUMENT_KEK_NEXT`; with the rewrap already complete, no row depended on
    it being there.
 
-Do not remove the overlay or delete `.orbit-secrets/document-kek-next` while
-any row is still wrapped under the next key and step 4 has not run — those
-rows need the next key held to stay readable. Before step 3 has moved
-anything, stopping is free: remove the overlay, redeploy with only
-`docker-compose.yml`, and delete the unused next-key file. Once step 3 has
-made any progress, the only safe way out is forward: finish steps 3–4 (the
-worker always resumes correctly), then, if the rotation itself was a
-mistake, start a fresh rotation back to the original key from there.
+### If you are rotating because a key may have leaked
+
+The exposed key stays live, and stays able to read everything, until step 4.
+The exposure ends there, not at step 1. So run the steps together rather than
+leaving a rotation part-done overnight.
+
+Rotation also does not un-read anything already copied. It stops the exposed
+key being useful against this instance from step 4 onward; it does not undo a
+copy someone took before you started.
+
+### Undoing a rotation, before step 4 only
+
+Going back is not a rollback — there is nothing to roll back. It is a
+rotation in the other direction, from the new key to the original one, and it
+is available only while both keys are still loaded. After step 4 the original
+key no longer exists, so there is no way back and you should not plan for one.
+
+To undo, swap which key is which and run the same steps again:
+
+```sh
+mv .orbit-secrets/document-kek       .orbit-secrets/document-kek-abandoning
+mv .orbit-secrets/document-kek-next  .orbit-secrets/document-kek
+mv .orbit-secrets/document-kek-abandoning .orbit-secrets/document-kek-next
+```
+
+Then repeat steps 2, 3 and 4. Nothing is unreadable at any point of it: the
+instance holds the same two keys throughout, and every row reads under
+whichever of them wrapped it. Step 4 finishes by overwriting the abandoned
+key, which is what you want — a spare key left lying in `.orbit-secrets/` is
+one a later rotation can pick up by mistake, and this instance has already
+written rows under it.
+
+If you copied that key anywhere else — a password manager, a note, a backup
+of the secrets directory — delete it there too. Removing the file on this
+host is not the same as the key being gone.
 
 Recovery-bundle import and repair's `document-kek` regeneration remain
 wholesale key *replacements*, not rotations: neither carries the old key

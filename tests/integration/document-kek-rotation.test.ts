@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { documentCrypto, documents, households, mailInSecrets, metadataKeys } from "@/db/schema";
-import { deriveDocumentKeyId, getDocumentConfig, keyEncryptionKeyFor, resetDocumentConfigForTests, type DocumentConfig } from "@/server/documents/config";
+import { deriveDocumentKeyId, getDocumentConfig, keyEncryptionKeyFor, resetDocumentConfigForTests, wrappingKey, type DocumentConfig } from "@/server/documents/config";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope, type DocumentEncryptionContext } from "@/server/documents/crypto";
 import { createWrappedMetadataKey, unwrapMetadataKey, type MetadataKeyContext } from "@/server/metadata/crypto";
 import { loadMetadataKey, resolveMetadataKey, resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
@@ -361,12 +361,13 @@ describe("the running application holds both keys during a rotation (#954, ADR-0
       expect(rotationComplete(midway)).toBe(false);
       await assertEveryRowReadable(dualKeyConfig);
 
-      // A freshly minted metadata key still wraps only under the current
-      // key while both are held — exactly one key is ever the wrapping key
-      // for new writes, even mid-rotation.
+      // A freshly minted metadata key wraps under the next key while both
+      // are held (#955), so nothing new lands on the key step 4 destroys.
+      // Exactly one key is ever the wrapping key; which one it is depends on
+      // whether a rotation is in progress.
       const freshHousehold = await plantHousehold("Dual-key test household 3 (fresh write)");
       const minted = await resolveMetadataKey("household", freshHousehold);
-      expect(minted.keyId).toBe(current.keyId);
+      expect(minted.keyId).toBe(keys.nextKeyId);
       await getDb().delete(metadataKeys).where(eq(metadataKeys.householdId, freshHousehold));
       await getDb().delete(households).where(eq(households.id, freshHousehold));
 
@@ -405,5 +406,173 @@ describe("the running application holds both keys during a rotation (#954, ADR-0
     }
     await getDb().delete(households).where(eq(households.id, householdOne));
     await getDb().delete(households).where(eq(households.id, householdTwo));
+  });
+});
+
+describe("writes during a rotation go to the next key (#955)", () => {
+  it("leaves nothing on the outgoing key once the worker finishes, including rows written after its final count", async () => {
+    const household = await plantHousehold("Write-through household");
+    const current = getDocumentConfig();
+    const originalDocumentKek = process.env.DOCUMENT_KEK;
+    const nextKek = randomBytes(32);
+    const nextHex = nextKek.toString("hex");
+    const keys = keysFor(nextKek);
+
+    const early = await plantDocument(household, current.keyEncryptionKey, current.keyId);
+    let lateHousehold: string | undefined;
+    let lateDocument: PlantedDocument | undefined;
+    let lateSecret: PlantedSecret | undefined;
+
+    try {
+      // Step 2: the application is given the next key.
+      process.env.DOCUMENT_KEK_NEXT = nextHex;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      const dual = getDocumentConfig();
+      expect(wrappingKey(dual).keyId).toBe(keys.nextKeyId);
+
+      // Step 3: the worker runs to completion and reports zero remaining.
+      expect(rotationComplete(await runKekRotationToCompletion(keys))).toBe(true);
+
+      // The gap this issue is about: rows created *after* that final count,
+      // in the operator's gap before step 4. Under the old behaviour these
+      // landed on the outgoing key, which step 4 then destroyed.
+      lateHousehold = await plantHousehold("Write-through household (late)");
+      // resetMetadataKeyCacheForTests() zeroes the buffers it holds and this
+      // material points at one of them, so compare against a copy.
+      const lateKey = await resolveMetadataKey("household", lateHousehold);
+      const lateDataKey = Buffer.from(lateKey.dataKey);
+      const wrap = wrappingKey(dual);
+      lateDocument = await plantDocument(household, wrap.keyEncryptionKey, wrap.keyId);
+      lateSecret = await plantMailInSecret(wrap.keyEncryptionKey, wrap.keyId);
+      expect(lateKey.keyId).toBe(keys.nextKeyId);
+
+      // So the outgoing key still holds nothing, without re-running the worker.
+      expect(rotationComplete(await rotationRemaining(keys))).toBe(true);
+
+      // Step 4: promote and drop the overlay. The outgoing key is gone; every
+      // row, early and late, still reads.
+      process.env.DOCUMENT_KEK = nextHex;
+      delete process.env.DOCUMENT_KEK_NEXT;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      const promoted = getDocumentConfig();
+      expect(promoted.nextKeyId).toBeNull();
+      expect(keyEncryptionKeyFor(promoted, current.keyId)).toBeUndefined();
+
+      for (const planted of [early, lateDocument]) {
+        const envelope = await readDocumentEnvelope(planted.documentId);
+        const kek = keyEncryptionKeyFor(promoted, envelope.keyId);
+        expect(kek, `document ${planted.documentId} should be readable`).toBeDefined();
+        expect(decryptDocument(planted.ciphertext, planted.context, envelope, kek!).equals(planted.plaintext)).toBe(true);
+      }
+      const lateMaterial = await loadMetadataKey("household", lateHousehold);
+      expect(lateMaterial).toBeDefined();
+      expect(lateMaterial!.dataKey.equals(lateDataKey)).toBe(true);
+      const secretRow = await readSecretRow(lateSecret.secretId);
+      const secretKek = keyEncryptionKeyFor(promoted, secretRow.keyId);
+      expect(secretKek, "mail-in secret should be readable").toBeDefined();
+      expect(decryptMailInSecret(secretRow.ciphertext, lateSecret.context, secretEnvelopeFromRow(secretRow), secretKek!).equals(lateSecret.plaintext)).toBe(true);
+    } finally {
+      if (originalDocumentKek === undefined) delete process.env.DOCUMENT_KEK;
+      else process.env.DOCUMENT_KEK = originalDocumentKek;
+      delete process.env.DOCUMENT_KEK_NEXT;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      // Inside the finally, not after it: a failed assertion would otherwise
+      // leave rows wrapped under a key no later test holds, and the rewrap
+      // worker scans the whole table.
+      for (const planted of [early, lateDocument]) {
+        if (!planted) continue;
+        await getDb().delete(documentCrypto).where(eq(documentCrypto.documentId, planted.documentId));
+        await getDb().delete(documents).where(eq(documents.id, planted.documentId));
+      }
+      if (lateSecret) await getDb().delete(mailInSecrets).where(eq(mailInSecrets.id, lateSecret.secretId));
+      if (lateHousehold) {
+        await getDb().delete(metadataKeys).where(eq(metadataKeys.householdId, lateHousehold));
+        await getDb().delete(households).where(eq(households.id, lateHousehold));
+      }
+      await getDb().delete(households).where(eq(households.id, household));
+    }
+  });
+
+  it("undoes a rotation before step 4 by running it the other way, ending with every row on the original key", async () => {
+    const household = await plantHousehold("Undo household");
+    const original = getDocumentConfig();
+    const originalDocumentKek = process.env.DOCUMENT_KEK;
+    const originalHex = original.keyEncryptionKey.toString("hex");
+    const abandoned = randomBytes(32);
+    const abandonedHex = abandoned.toString("hex");
+    const forward = keysFor(abandoned);
+
+    const planted = await plantDocument(household, original.keyEncryptionKey, original.keyId);
+    let lateHousehold: string | undefined;
+
+    try {
+      // Steps 2 and 3 of a rotation the operator then changes their mind about.
+      process.env.DOCUMENT_KEK_NEXT = abandonedHex;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      await runKekRotationCycle(forward, 1);
+      lateHousehold = await plantHousehold("Undo household (written mid-rotation)");
+      const lateKey = await resolveMetadataKey("household", lateHousehold);
+      const lateDataKey = Buffer.from(lateKey.dataKey);
+      expect(lateKey.keyId).toBe(forward.nextKeyId);
+
+      // The undo: swap which key is which and run the same steps again. The
+      // instance holds the same two keys throughout, so nothing is ever
+      // unreadable in between.
+      process.env.DOCUMENT_KEK = abandonedHex;
+      process.env.DOCUMENT_KEK_NEXT = originalHex;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      const swapped = getDocumentConfig();
+      expect(swapped.keyId).toBe(forward.nextKeyId);
+      expect(swapped.nextKeyId).toBe(original.keyId);
+
+      const backwards: RotationKeys = {
+        currentKek: abandoned,
+        currentKeyId: forward.nextKeyId,
+        nextKek: original.keyEncryptionKey,
+        nextKeyId: original.keyId,
+      };
+      expect(rotationComplete(await runKekRotationToCompletion(backwards))).toBe(true);
+
+      // Step 4 of the undo overwrites the abandoned key. Everything is back
+      // on the original, and the abandoned key reads nothing.
+      process.env.DOCUMENT_KEK = originalHex;
+      delete process.env.DOCUMENT_KEK_NEXT;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      const restored = getDocumentConfig();
+      expect(restored.keyId).toBe(original.keyId);
+      expect(keyEncryptionKeyFor(restored, forward.nextKeyId)).toBeUndefined();
+
+      const envelope = await readDocumentEnvelope(planted.documentId);
+      expect(envelope.keyId).toBe(original.keyId);
+      const kek = keyEncryptionKeyFor(restored, envelope.keyId);
+      expect(kek).toBeDefined();
+      expect(decryptDocument(planted.ciphertext, planted.context, envelope, kek!).equals(planted.plaintext)).toBe(true);
+
+      const lateMaterial = await loadMetadataKey("household", lateHousehold);
+      expect(lateMaterial).toBeDefined();
+      expect(lateMaterial!.keyId).toBe(original.keyId);
+      expect(lateMaterial!.dataKey.equals(lateDataKey)).toBe(true);
+    } finally {
+      if (originalDocumentKek === undefined) delete process.env.DOCUMENT_KEK;
+      else process.env.DOCUMENT_KEK = originalDocumentKek;
+      delete process.env.DOCUMENT_KEK_NEXT;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      // As above: cleaning up in the finally keeps a failure here from
+      // stranding rows the next test's rewrap cannot account for.
+      await getDb().delete(documentCrypto).where(eq(documentCrypto.documentId, planted.documentId));
+      await getDb().delete(documents).where(eq(documents.id, planted.documentId));
+      if (lateHousehold) {
+        await getDb().delete(metadataKeys).where(eq(metadataKeys.householdId, lateHousehold));
+        await getDb().delete(households).where(eq(households.id, lateHousehold));
+      }
+      await getDb().delete(households).where(eq(households.id, household));
+    }
   });
 });
