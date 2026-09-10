@@ -1,9 +1,10 @@
 /**
- * The one place Tier 1 columns are read and written (ADR-0024 decisions 3 and
- * 5). Repositories call these accessors instead of touching `notes`,
- * `reference`, `proposal` or `field_evidence` directly, so the dual-read
- * window, the blind index and the damaged-value behaviour each have exactly
- * one definition.
+ * The one place encrypted metadata columns are read and written (ADR-0024
+ * decisions 3 and 5), for Tier 1 (#931) and Tier 2 (#963) alike. Repositories
+ * call these accessors instead of touching `notes`, `reference`, `title`,
+ * `provider`, `cost_minor`, `proposal`, `field_evidence` or the invitation
+ * address directly, so the dual-read window, the blind index and the
+ * damaged-value behaviour each have exactly one definition.
  *
  * Dual read, for the length of the expand release: a row whose `*_enc` column
  * is non-null is decrypted, and a row the backfill has not reached yet is read
@@ -59,6 +60,16 @@ export interface StoredJson {
   plaintext: unknown;
 }
 
+export interface StoredNumber {
+  encrypted: string | null;
+  plaintext: number | null;
+}
+
+export interface MetadataNumberResult {
+  value: number | null;
+  state?: MetadataFieldState;
+}
+
 function recordDamage(column: MetadataColumn, rowId: string): void {
   log.warn({
     event: "metadata.integrity",
@@ -87,7 +98,7 @@ export class MetadataCipher {
     return this.material;
   }
 
-  /** Decrypts a Tier 1 text column, falling back to plaintext for a row the backfill has not reached. */
+  /** Decrypts an encrypted text column, falling back to plaintext for a row the backfill has not reached. */
   text(column: MetadataColumn, rowId: string, stored: StoredText): MetadataTextResult {
     if (stored.encrypted === null) {
       // No ciphertext at all: this row is still pre-encryption, and its
@@ -145,10 +156,59 @@ export class MetadataCipher {
     return encryptMetadataValue(JSON.stringify(value ?? {}), key.dataKey, { column, rowId });
   }
 
-  /** The blind index for `items.reference` (ADR-0024 decision 2), or null when there is nothing to index. */
-  referenceIndex(value: string | null | undefined): string | null {
+  /**
+   * As `text`, for the one numeric Tier 2 column. The value is rendered as its
+   * decimal integer and encrypted like any other string; the database no
+   * longer holds a number it could sum, which is the point — totals are
+   * summed application-side over decrypted values (#365, owner 2026-08-13).
+   *
+   * A decrypted value that is not a safe non-negative integer is damage, not a
+   * cost: it is reported as such rather than coerced to NaN or to zero, either
+   * of which would be a fabricated figure in a money field.
+   */
+  number(column: MetadataColumn, rowId: string, stored: StoredNumber): MetadataNumberResult {
+    if (stored.encrypted === null) return { value: stored.plaintext };
+    if (!this.material) return { value: null, state: "metadata_locked" };
+    let decrypted: string;
+    try {
+      decrypted = decryptMetadataValue(stored.encrypted, this.material.dataKey, { column, rowId });
+    } catch (error) {
+      if (!(error instanceof MetadataIntegrityError)) throw error;
+      recordDamage(column, rowId);
+      return { value: null, state: "metadata_integrity_failed" };
+    }
+    const parsed = Number(decrypted);
+    if (!/^\d+$/.test(decrypted) || !Number.isSafeInteger(parsed)) {
+      recordDamage(column, rowId);
+      return { value: null, state: "metadata_integrity_failed" };
+    }
+    return { value: parsed };
+  }
+
+  /** Produces the `*_enc` value for a numeric column. A null or undefined value stays null. */
+  encryptNumber(column: MetadataColumn, rowId: string, value: number | null | undefined): string | null {
     const key = this.requireKey();
-    return computeBlindIndex(value, key.dataKey, "items.reference") ?? null;
+    if (value === null || value === undefined) return null;
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${column} must be a non-negative safe integer`);
+    return encryptMetadataValue(String(value), key.dataKey, { column, rowId });
+  }
+
+  /**
+   * The blind index for a column that needs exact-match lookup (ADR-0024
+   * decision 2), or null when there is nothing to index. Only two columns do:
+   * `items.reference`, and `household_invitations.email`, whose database rule
+   * "one open invitation per address" would otherwise be lost with the
+   * plaintext. Nothing else is indexed, deliberately — an index that serves no
+   * query leaks equality for nothing.
+   */
+  blindIndex(column: MetadataColumn, value: string | null | undefined): string | null {
+    const key = this.requireKey();
+    return computeBlindIndex(value, key.dataKey, column) ?? null;
+  }
+
+  /** `blindIndex` for `items.reference`, kept for the Tier 1 callers that read best that way. */
+  referenceIndex(value: string | null | undefined): string | null {
+    return this.blindIndex("items.reference", value);
   }
 }
 
@@ -178,7 +238,7 @@ export async function openReceiptMetadataWriter(
 }
 
 /**
- * The refusal every Tier 1 writer gives when the instance has no usable KEK
+ * The refusal every encrypted-metadata writer gives when the instance has no usable KEK
  * (ADR-0024 decision 5). It matches what document operations already do: the
  * application stays usable and only the encrypted surface locks.
  */

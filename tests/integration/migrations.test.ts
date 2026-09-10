@@ -551,6 +551,99 @@ describe("PostgreSQL migration evidence", () => {
       .toEqual([{ count: 1 }]);
   });
 
+  it("adds the Tier 2 columns without touching a single existing value (0041, ADR-0024)", async () => {
+    const database = await createMigrationTestDatabase("tier2-metadata-expand");
+    databases.push(database);
+    await verifyMigrationPrefix("drizzle");
+    const throughTagDirectory = await createMigrationDirectoryThroughTag("drizzle", "0040_tier1_metadata_encryption");
+    temporaryDirectories.push(throughTagDirectory);
+    await runMigrations(database.url, throughTagDirectory.path);
+
+    /* An item and an open invitation as the release before this one wrote
+       them: title, provider, cost and address all plaintext, and both columns
+       still NOT NULL at this point. */
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+    const [sectionRow] = await database.client.unsafe(
+      `INSERT INTO "sections" ("household_id", "slug", "name", "icon", "accent", "position")
+       VALUES ($1, 'legacy', 'Legacy', 'home', 'blue', 0) RETURNING "id"`,
+      [householdId],
+    );
+    const [itemRow] = await database.client.unsafe(
+      `INSERT INTO "items" ("household_id", "section_id", "title", "provider", "cost_minor", "currency")
+       VALUES ($1, $2, 'Legacy item', 'Legacy provider', 4242, 'GBP') RETURNING "id"`,
+      [householdId, String(sectionRow.id)],
+    );
+    const [invitationRow] = await database.client.unsafe(
+      `INSERT INTO "household_invitations" ("household_id", "email", "token_digest", "expires_at")
+       VALUES ($1, 'legacy@example.invalid', $2, now() + interval '7 days') RETURNING "id"`,
+      [householdId, "c".repeat(64)],
+    );
+
+    await runMigrations(database.url, "drizzle");
+
+    /* Same guarantee 0040 gives: SQL cannot encrypt, so what this migration
+       must do for existing rows is leave them exactly as readable as they
+       were, in the dual-read state the running release reads. */
+    const [item] = await database.client.unsafe(
+      `SELECT "title", "provider", "cost_minor", "title_enc", "provider_enc", "cost_minor_enc"
+       FROM "items" WHERE "id" = $1`,
+      [String(itemRow.id)],
+    );
+    expect(item).toEqual({
+      title: "Legacy item",
+      provider: "Legacy provider",
+      cost_minor: 4242,
+      title_enc: null,
+      provider_enc: null,
+      cost_minor_enc: null,
+    });
+    const [invitation] = await database.client.unsafe(
+      `SELECT "email", "email_enc", "email_index" FROM "household_invitations" WHERE "id" = $1`,
+      [String(invitationRow.id)],
+    );
+    expect(invitation).toEqual({ email: "legacy@example.invalid", email_enc: null, email_index: null });
+
+    /* The backfill needs both columns nullable to clear them; if the NOT NULL
+       survived, every conversion would fail at the last statement. */
+    await expect(database.client.unsafe(
+      `UPDATE "items" SET "title" = NULL, "title_enc" = 'mdv1.a.b.c' WHERE "id" = $1`,
+      [String(itemRow.id)],
+    )).resolves.toBeDefined();
+    await expect(database.client.unsafe(
+      `UPDATE "household_invitations" SET "email" = NULL, "email_enc" = 'mdv1.a.b.c' WHERE "id" = $1`,
+      [String(invitationRow.id)],
+    )).resolves.toBeDefined();
+  });
+
+  it("carries 'one open invitation per address' onto the blind index (0041, ADR-0024 decision 2)", async () => {
+    const database = await createMigrationTestDatabase("tier2-invitation-blind-index");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+    let digestSeed = 0;
+    const insertInvitation = (emailIndex: string | null) => database.client.unsafe(
+      `INSERT INTO "household_invitations" ("household_id", "email", "email_enc", "email_index", "token_digest", "expires_at")
+       VALUES ($1, NULL, 'mdv1.a.b.c', $2, $3, now() + interval '7 days')`,
+      [householdId, emailIndex, String(digestSeed += 1).padStart(64, "0")],
+    );
+
+    await expect(insertInvitation("digest-one")).resolves.toBeDefined();
+    /* The rule the plaintext index used to enforce, now enforced on the
+       digest: without this, clearing the plaintext would have retired it
+       silently, because PostgreSQL treats every NULL as distinct. */
+    await expect(insertInvitation("digest-one")).rejects.toThrow(/household_invitation_open_once_index/u);
+    await expect(insertInvitation("digest-two")).resolves.toBeDefined();
+
+    /* A withdrawn invitation is not open, so the address may be invited again. */
+    await database.client.unsafe(
+      `UPDATE "household_invitations" SET "revoked_at" = now() WHERE "email_index" = 'digest-one'`,
+    );
+    await expect(insertInvitation("digest-one")).resolves.toBeDefined();
+  });
+
   it("treats email as the same identity regardless of case (0038, ADR-0023 §2)", async () => {
     const database = await createMigrationTestDatabase("email-case-insensitive");
     databases.push(database);

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -5,6 +6,11 @@ import { auditLog, householdInvitations, households, memberships, sessions, user
 import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { acquireActiveHouseholdLock, requireHouseholdAccess, requireUuid } from "@/server/workspace-access";
+import {
+  openMetadataReader,
+  requireMetadataWriter,
+  type MetadataCipher,
+} from "@/server/metadata/fields";
 import { sendInvitationMail, invitationLink, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import {
   createInvitationToken,
@@ -76,19 +82,30 @@ const emailSchema = z.email();
 
 type InvitationRow = {
   id: string;
+  /** Plaintext only for a row the backfill has not reached; `emailEnc` otherwise (#963). */
+  email: string | null;
+  emailEnc: string | null;
   householdId: string;
-  email: string;
   createdAt: Date;
   sentAt: Date | null;
   sendError: string | null;
   expiresAt: Date;
 };
 
-function summarise(row: InvitationRow): HouseholdInvitation {
+/**
+ * The invited address, decrypted (#963). An address that will not decrypt is
+ * reported as the damaged-value marker rather than as an empty address or an
+ * invented one, and a marker never matches anybody at redemption.
+ */
+function invitationEmail(cipher: MetadataCipher, row: { id: string; email: string | null; emailEnc: string | null }): string | null {
+  return cipher.text("household_invitations.email", row.id, { encrypted: row.emailEnc, plaintext: row.email }).value;
+}
+
+function summarise(row: InvitationRow, cipher: MetadataCipher): HouseholdInvitation {
   return {
     id: row.id,
     householdId: row.householdId,
-    email: row.email,
+    email: invitationEmail(cipher, row) ?? "",
     createdAt: row.createdAt.toISOString(),
     sentAt: row.sentAt ? row.sentAt.toISOString() : null,
     sendError: (row.sendError as InvitationSendError | null) ?? null,
@@ -100,6 +117,7 @@ const summaryColumns = {
   id: householdInvitations.id,
   householdId: householdInvitations.householdId,
   email: householdInvitations.email,
+  emailEnc: householdInvitations.emailEnc,
   createdAt: householdInvitations.createdAt,
   sentAt: householdInvitations.sentAt,
   sendError: householdInvitations.sendError,
@@ -123,7 +141,9 @@ export async function listHouseholdInvitations(actorUserId: string, householdId:
     .from(householdInvitations)
     .where(and(eq(householdInvitations.householdId, householdId), stillOpen))
     .orderBy(asc(householdInvitations.createdAt));
-  return rows.map(summarise);
+  // One DEK unwrap for the whole list (ADR-0024 decision 1), not one per row.
+  const cipher = await openMetadataReader(householdId);
+  return rows.map((row) => summarise(row, cipher));
 }
 
 /** The owner check, made again inside the lock the write is taken under. */
@@ -179,15 +199,29 @@ export async function sendHouseholdInvitation(
   const now = options.now ?? new Date();
   const token = createInvitationToken();
   const expiresAt = invitationExpiry(now);
+  /* The row id has to exist before the address is encrypted: the content AAD
+     binds the ciphertext to its row, so a value cannot be replayed into
+     another invitation (ADR-0024 decision 3). A resend reuses the row it
+     replaces, and this id is discarded. */
+  const invitationRowId = randomUUID();
 
   const prepared = await getDb().transaction(async (transaction) => {
     await acquireActiveHouseholdLock(transaction, householdId);
     await assertOwnerUnderLock(transaction, actorUserId, householdId);
 
-    const open = await transaction.select({ id: householdInvitations.id, email: householdInvitations.email })
+    // Tier 2 (#963): the address is ciphertext, so "is there already one for
+    // this address" is answered by the per-household blind index rather than
+    // by comparing stored bytes. The index is what carries the database's
+    // "one open invitation per address" rule across the encryption, and the
+    // resend below still REPLACES the row it finds.
+    const metadata = await requireMetadataWriter(householdId, transaction);
+    const emailIndex = metadata.blindIndex("household_invitations.email", email);
+    const open = await transaction.select({ id: householdInvitations.id, email: householdInvitations.email, emailIndex: householdInvitations.emailIndex })
       .from(householdInvitations)
       .where(and(eq(householdInvitations.householdId, householdId), stillOpen));
-    const existing = open.find((row) => row.email === email);
+    const existing = open.find((row) => (
+      row.emailIndex !== null ? row.emailIndex === emailIndex : row.email === email
+    ));
     if (!existing && open.length >= MAX_OPEN_INVITATIONS) {
       throw new AppError(
         "invitation_limit",
@@ -197,6 +231,9 @@ export async function sendHouseholdInvitation(
     }
 
     const values = {
+      email: null,
+      emailEnc: metadata.encryptText("household_invitations.email", existing?.id ?? invitationRowId, email),
+      emailIndex,
       tokenDigest: invitationTokenDigest(token),
       expiresAt,
       invitedByUserId: actorUserId,
@@ -210,7 +247,7 @@ export async function sendHouseholdInvitation(
         .where(eq(householdInvitations.id, existing.id))
         .returning(summaryColumns)
       : await transaction.insert(householdInvitations)
-        .values({ householdId, email, role: "member", ...values })
+        .values({ id: invitationRowId, householdId, role: "member", ...values })
         .returning(summaryColumns);
     if (!row) throw new AppError("unexpected_failure", "The invitation could not be recorded", 500);
 
@@ -247,8 +284,9 @@ export async function sendHouseholdInvitation(
     .where(eq(householdInvitations.id, prepared.row.id))
     .returning(summaryColumns);
 
+  const cipher = await openMetadataReader(householdId);
   return {
-    invitation: summarise(recorded ?? { ...prepared.row, ...outcome }),
+    invitation: summarise(recorded ?? { ...prepared.row, ...outcome }, cipher),
     invitations: await listHouseholdInvitations(actorUserId, householdId),
   };
 }
@@ -273,15 +311,20 @@ export async function withdrawHouseholdInvitation(
         eq(householdInvitations.householdId, householdId),
         stillOpen,
       ))
-      .returning({ id: householdInvitations.id, email: householdInvitations.email });
+      .returning({ id: householdInvitations.id, email: householdInvitations.email, emailEnc: householdInvitations.emailEnc });
     if (!revoked) throw new AppError("invitation_not_found", "That invitation is no longer open", 404);
+    /* The audit line records a digest of the address, never the address, and
+       that is unchanged (#963). What changed is where the address comes from:
+       an unreadable one is recorded as no address rather than as an invented
+       digest, because a digest of "" would look exactly like a real record. */
+    const withdrawnEmail = invitationEmail(await openMetadataReader(householdId, transaction), revoked);
     await transaction.insert(auditLog).values({
       householdId,
       actorUserId,
       entityType: "household_invitation",
       entityId: revoked.id,
       action: "invitation_withdrawn",
-      changes: { emailSha256: invitationEmailDigest(revoked.email) },
+      changes: withdrawnEmail ? { emailSha256: invitationEmailDigest(withdrawnEmail) } : {},
     });
   });
 
@@ -292,6 +335,7 @@ const lookupColumns = {
   id: householdInvitations.id,
   householdId: householdInvitations.householdId,
   email: householdInvitations.email,
+  emailEnc: householdInvitations.emailEnc,
   expiresAt: householdInvitations.expiresAt,
   redeemedAt: householdInvitations.redeemedAt,
   revokedAt: householdInvitations.revokedAt,
@@ -384,7 +428,13 @@ export async function redeemInvitation(token: string, user: RedeemingUser): Prom
     /* THE MATCH (Q43). A mismatch changes nothing at all: the invitation stays
        open for the person it was addressed to, and the reader is told to sign
        out rather than quietly handed somebody else's household. */
-    if (normaliseInvitationEmail(user.email) !== row.email) {
+    /* Tier 2 (#963): the stored address decrypts under the household's own key
+       before the comparison, which is otherwise exactly the comparison it was.
+       An address that will not decrypt is null, and null matches nobody — the
+       invitation stays open and the reader is told to sign out, which is the
+       right way for this to fail. */
+    const invitedAddress = invitationEmail(await openMetadataReader(row.householdId, transaction), row);
+    if (!invitedAddress || normaliseInvitationEmail(user.email) !== invitedAddress) {
       return { state: "mismatch", inviterName, householdId: null, householdName: null };
     }
 
@@ -420,7 +470,9 @@ export async function redeemInvitation(token: string, user: RedeemingUser): Prom
       entityType: "household_invitation",
       entityId: row.id,
       action: "invitation_redeemed",
-      changes: { emailSha256: invitationEmailDigest(row.email) },
+      /* The address that was just matched, which is the decrypted one (#963);
+         a digest is recorded, never the address itself. */
+      changes: { emailSha256: invitationEmailDigest(invitedAddress) },
     });
 
     /* The arrival's household CHOICE never appears because there is nothing
