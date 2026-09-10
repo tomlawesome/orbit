@@ -47,7 +47,31 @@ Authenticated administrators use the bounded diagnostics surfaces together:
 | Required dependency | `/api/health` | `ready` or `degraded` only |
 | Configuration and provider | `/api/admin/operations` | configured state and allowlisted provider category |
 | Queue | `/api/admin/operations` | bounded status counts, safe failure category, attempts and timestamps |
-| Storage and document dependencies | `/api/admin/documents/health` | allowlisted encryption, storage, scanner, quota and worker state |
+| Storage and document dependencies | `/api/admin/documents/health` | allowlisted encryption, storage, scanner, model extraction, quota and worker state |
+
+### Model extraction (ADR-0025 section 5)
+
+`/api/admin/documents/health` carries a `modelExtraction` entry with three
+states, so an instance where every upload is quietly getting the heuristic
+suggestions alone does not look like a healthy one:
+
+- `not_configured` — the optional `ai` Compose profile is not running. This is
+  a design state, not a warning: most instances sit here for good, and it never
+  makes overall health degraded. The Compose profile is the only switch; there
+  is no in-app toggle.
+- `ready` — the model is answering, and recent attempts are mostly succeeding.
+- `unavailable` — the profile is configured but the model is not answering
+  (`unreachable`), or more than half of the recent attempts came back with
+  nothing (`failing`). This marks overall health degraded.
+
+The entry also reports the recent window as three counts — attempts, failures
+and, of those, how many lost the deadline race. A handful of timeouts with the
+status still `ready` is a host that is occasionally slow; `unreachable` is a
+model that is down. Nothing in the entry names a document, its content or the
+selected model: it is counts and a fixed vocabulary of reasons.
+
+Per upload, a model failure stays invisible to the person uploading: no error,
+no blocked flow, and the suggestions are simply the heuristic ones.
 
 The administrator routes remain session- and administrator-protected and
 non-cacheable. A degraded optional category is actionable independently and
@@ -297,7 +321,7 @@ base `docker-compose.yml` without mail secret files.
 
 **The mailbox is not container configuration.** Since ADR-0017 an instance
 administrator sets it on the administration screen, and Orbit stores the
-password encrypted in its own database under the document key. No `IMAP_*`
+password encrypted in its own database under the encryption key. No `IMAP_*`
 environment variable is accepted any more; a leftover one in `.env-orbit`
 fails the configuration check as a removed key. Outbound SMTP is unchanged and
 is still deployment configuration.
@@ -468,17 +492,17 @@ and none is a container setting.
   restarting the exact deployed image. Never place a credential in a command,
   screenshot, issue, log, or acceptance record.
 
-If the document key is replaced **without** rewrapping — a recovery-bundle
+If the encryption key is replaced **without** rewrapping — a recovery-bundle
 import, or repair regenerating `document-kek` when no document volume is
 retained — the stored mailbox credential can no longer be decrypted. Mail-in
 reports `credential_locked`, polling stops, and an administrator re-enters the
 password on the same screen. A mailbox password is re-obtainable from the
-provider; documents and Tier 1 metadata are not, which is why this degradation
+provider; documents and encrypted metadata are not, which is why this degradation
 is acceptable for those two paths specifically: both are a wholesale key
 *replacement*, not a rotation, and neither carries the old key forward for a
 rewrap to use. An ordinary planned rotation is different — see "Rotating the
 document key-encryption key" below — and leaves every credential, document and
-Tier 1 field readable throughout.
+encrypted metadata field readable throughout.
 
 ### Exact-image mailbox acceptance
 
@@ -513,11 +537,55 @@ malformed or incomplete proof, and emits no raw provider material.
 ordinary CI only. Its record is explicitly non-representative and cannot be
 used as live provider or release acceptance.
 
+## Restoring the document key-encryption key
+
+An instance that starts without `DOCUMENT_KEK` is **locked**, not damaged.
+Nothing is lost and nothing is overwritten: documents cannot be opened,
+encrypted notes, references and mail-in extracts cannot be read or written,
+and every item edit is refused with a 503, because saving an item rewrites its
+encrypted fields. The rest of Orbit stays usable, which is deliberate
+(ADR-0024 decision 5) — a missing key must not take the household's list down
+with it.
+
+Members see this at the field: "locked — safe, but unreadable right now", and
+a paused edit panel that names an administrator as who fixes it. The
+administration screen shows one "Encrypted details are locked" card with how
+many items and mail-in messages are waiting. No count and no key mechanic
+reaches a member, and Orbit never claims the data is gone, because it is not.
+
+To restore it, put the same key back where the deployment expects it and
+restart the exact deployed image:
+
+1. Confirm which key this database was written under. Every wrapped row
+   records its own `key_id`, and the startup log names the key id Orbit is
+   holding. A key that is not the one that wrote them leaves everything locked
+   exactly as it was — a wrong key can never damage a value, because
+   authenticated decryption refuses rather than guesses.
+2. Restore the key file from wherever you kept it — your recovery bundle, or
+   the secrets directory backup — with owner-only permissions:
+   ```sh
+   install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek
+   ```
+3. Restart the deployment:
+   ```sh
+   bash scripts/deploy-container.sh --pull
+   ```
+4. Confirm on the administration screen that the "Encrypted details are
+   locked" card has gone. It disappears the moment the instance holds a usable
+   key; nothing needs re-encrypting and no backfill runs, because the values
+   were never changed.
+
+If the key is genuinely gone and no recovery bundle holds it, this is not a
+restore. Encrypted documents and Tier 1 metadata are unrecoverable by design
+when both the key and the bundle are lost — that is the whole point of the
+encryption — and the way back is a restore of both the database and the key
+from a backup that has them together (ADR-0004).
+
 ## Rotating the document key-encryption key
 
 `DOCUMENT_KEK` wraps three populations: document encryption keys
-(`document_crypto`), the per-household Tier 1 metadata keys (`metadata_keys`,
-ADR-0024), and the mail-in mailbox credential and alias key (`mail_in_secrets`,
+(`document_crypto`), the per-household metadata keys that cover both Tier 1 and
+Tier 2 (`metadata_keys`, ADR-0024), and the mail-in mailbox credential and alias key (`mail_in_secrets`,
 ADR-0017). Rotating it is always an operator decision (#932) — nothing in
 Orbit rotates it automatically or on a schedule.
 
@@ -545,7 +613,7 @@ unreadable, and no maintenance window is needed at any step below.
    the current key and reads exactly as before, and a row the worker moves to
    the next key from here on reads too, by its own key id, with nothing
    locked at any point in between. From this restart anything newly written —
-   an uploaded document, a new household's Tier 1 key, a mailbox credential —
+   an uploaded document, a new household's metadata key, a mailbox credential —
    is wrapped under the **next** key straight away (#955), so the rewrap in
    step 3 is chasing a fixed set of rows rather than a moving one.
 
@@ -632,7 +700,7 @@ host is not the same as the key being gone.
 
 Recovery-bundle import and repair's `document-kek` regeneration remain
 wholesale key *replacements*, not rotations: neither carries the old key
-forward for a rewrap, so they still leave existing documents, Tier 1 fields
+forward for a rewrap, so they still leave existing documents, encrypted metadata
 and the mailbox credential unreadable under the new key (the paragraph above
 this section).
 

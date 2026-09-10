@@ -12,6 +12,7 @@
    */
   import { resolve } from "$app/paths";
   import { every, longDate, money, tminus } from "$lib/format.js";
+  import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState } from "$lib/data/metadata-status.js";
 
   /**
    * @typedef {import('$lib/data/chart.js').CorridorRow} CorridorRowData
@@ -37,6 +38,14 @@
   /** @param {ItemViewData} one */
   const detailDue = (one) =>
     one.dueDate ? `${tminus(one.dueDate, one.today)} · ${longDate(one.dueDate)}` : "unscheduled";
+
+  /* #941: the corridor's expanded detail shows the same two Tier 1 fields as
+     the item screen, and hid the same two states behind the same truthiness
+     test. Same vocabulary, from the one module that owns it -- the state has
+     to be visible wherever the field is, or a member reads a damaged note as
+     one they never wrote on whichever screen they happened to open. */
+  const referenceState = $derived(fieldState(detail?.metadataStatus, "reference"));
+  const notesState = $derived(fieldState(detail?.metadataStatus, "notes"));
 </script>
 
 <div class="itemview" id="{row.id}-view" role="region" aria-label="{row.title} — full detail">
@@ -69,6 +78,11 @@
     {/if}
     {#if detail.reference}
       <div class="kv"><span>reference</span><b>{detail.reference}</b></div>
+    {:else if referenceState === DAMAGED}
+      <div class="kv"><span>reference</span>
+        <b class="failed"><i aria-hidden="true"></i>{REFERENCE_WORDS[DAMAGED]}</b></div>
+    {:else if referenceState === LOCKED}
+      <div class="kv"><span>reference</span><b class="locked">{REFERENCE_WORDS[LOCKED]}</b></div>
     {/if}
     {#if detail.reminderDays?.length}
       <div class="kv"><span>reminders</span>
@@ -83,6 +97,9 @@
     {#if detail.notes}
       <h4>notes</h4>
       <p>{detail.notes}</p>
+    {:else if notesState}
+      <h4>notes</h4>
+      <p class={notesState === DAMAGED ? "failed" : "locked"}>{NOTES_WORDS[notesState]}</p>
     {/if}
     <div class="ivfoot">
       <button class="ivcopy" onclick={onCopyAddress}>{copied ? "link copied" : "copy link"}</button>

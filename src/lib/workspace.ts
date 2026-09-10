@@ -27,7 +27,7 @@ const activityKinds = [
 ] as const;
 
 /**
- * Why a Tier 1 field is not being shown (ADR-0024 decision 5).
+ * Why an encrypted field is not being shown (ADR-0024 decision 5).
  * `metadata_integrity_failed` is one damaged value; `metadata_locked` is the
  * instance missing its key-encryption key, which is reversible. Neither is
  * ever rendered as an empty value: the field is absent and the marker says so.
@@ -37,13 +37,22 @@ export const metadataFieldStateSchema = z.enum(metadataFieldStates);
 export const itemMetadataStatusSchema = z.object({
   reference: metadataFieldStateSchema.optional(),
   notes: metadataFieldStateSchema.optional(),
+  /* Tier 2 (#963). `title` is the one required field that can now be missing,
+     which is why the item schema below tolerates an empty title only when this
+     says why it is empty. */
+  title: metadataFieldStateSchema.optional(),
+  provider: metadataFieldStateSchema.optional(),
+  costMinor: metadataFieldStateSchema.optional(),
 });
 export type ItemMetadataStatus = z.infer<typeof itemMetadataStatusSchema>;
 
 export const workspaceItemSchema = z.object({
   id: z.string().min(1).max(100),
   sectionId: z.string().min(1).max(100),
-  title: z.string().trim().min(1).max(100),
+  /* Empty only for a damaged or locked title (ADR-0024 decision 5), which the
+     superRefine below is what allows: a write still has to carry a real one,
+     and the read path is the only producer of the empty case. */
+  title: z.string().trim().max(100),
   subtype: optionalText(80),
   provider: optionalText(100),
   reference: optionalText(80),
@@ -61,6 +70,9 @@ export const workspaceItemSchema = z.object({
   version: z.number().int().positive().optional(),
   updatedAt: z.iso.datetime().optional(),
 }).superRefine((item, context) => {
+  if (!item.title && !item.metadataStatus?.title) {
+    context.addIssue({ code: "custom", path: ["title"], message: "Give this a name" });
+  }
   if (item.scheduleKind && !item.dueDate) {
     context.addIssue({ code: "custom", path: ["dueDate"], message: "Choose a date for the scheduled event" });
   }

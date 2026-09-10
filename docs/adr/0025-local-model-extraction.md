@@ -1,6 +1,13 @@
 # ADR-0025: Model extraction is a schema-bound, evidence-grounded proposer on a fixed internal endpoint, gated by a hold-out corpus
 
-**Status:** Accepted (owner, 2026-09-09), with the constants held lightly:
+**Status:** Accepted (owner, 2026-09-09), **amended 2026-09-10** by the
+owner's ruling on #936: the model adjudicates over both readings rather than
+competing with the heuristics. Section 4 carries the new shape, with the
+superseded wording kept inside it. Section 1's request bound moved from one
+pass to two as a direct consequence, and sections 3 and 6 were tightened to
+match; section 2's boundary is untouched. The review-surface question the
+amendment left open was ruled on by the owner the same day and is recorded
+in section 4. With the constants held lightly:
 the owner ratified "for now" and expects to revisit this one. Drafted under
 the owner's decisions of 2026-08-13 on #319: the four fields stay and the
 model path must produce them; no training or fine-tuning, ever; no cloud
@@ -63,12 +70,17 @@ Facts verified in the tree on 2026-09-09:
 
 ## Decision
 
-### 1. One request, one schema, one deadline
+### 1. Bounded requests, one schema, one deadline
 
-Per document, the model is asked exactly once for exactly one thing: a
-single JSON object naming candidate field values, each with a verbatim
-evidence span copied from the document. The input is the same parser text
-the heuristics read, after the evidence normalisation already applied to
+Per document the model is asked for exactly one *kind* of thing -- a single
+JSON object naming candidate field values, each with a verbatim evidence
+span copied from the document -- and the number of times it is asked is
+bounded and enumerable: **at most two passes**, the blind pass and the
+adjudicating pass of section 4, never more. Every pass carries the identical
+bounds below; no pass relaxes them. (Until 2026-09-10 this section read
+"asked exactly once"; the section 4 amendment superseded that, and the
+bound moved from one request to two rather than being lifted.) The input
+is the same parser text the heuristics read, after the evidence normalisation already applied to
 anything untrusted (NFKC, controls and bidi formatting stripped), truncated
 to a fixed character budget set in code. The system prompt is a fixed
 string in the repository; the document rides in a delimited data block that
@@ -79,14 +91,25 @@ configurable: schema-constrained decoding (Ollama's structured-output
 `format`, so the reply cannot be prose), temperature 0 and a fixed seed, a
 generation-token cap, a response-size cap checked before parsing, and a
 wall-clock deadline — short for the interactive Add-item inspection, longer
-for the asynchronous mailbox path, never unbounded. A reply that is late,
+for the asynchronous mailbox path, never unbounded. That deadline bounds
+**the whole flow, not each pass**: two sequential passes must not double
+what the interactive path waits for, so the adjudicating pass runs only
+inside what remains of the document's budget and is abandoned like any
+other late reply once it is spent. A reply that is late,
 oversized, malformed, schema-violating or absent is discarded whole: no
 partial salvage, no repair prompt, no automatic retry. The upload proceeds
 with the heuristic proposal alone, and the failure is recorded as a sample
-for section 5. On hostile input this is the entire blast radius: an
+for section 5. Where it is the *adjudicating* pass that fails, the
+heuristic value stands for the disputed field -- not the blind model value
+-- because the heuristics are this design's fallback everywhere else, and a
+failed adjudication is evidence for neither reading. On hostile input this is the entire blast radius: an
 attacker who controls the document controls, at most, which *candidate
 suggestions* a reviewer sees — the same power a hostile document already
-has over the heuristics — and can waste one bounded inference.
+has over the heuristics — and can waste at most two bounded inferences. A
+hostile document can always manufacture a disagreement and so force the
+second pass, which is why the count is capped here rather than left to
+section 4's agreement test: that test is a cost optimisation, not a
+security control.
 
 ### 2. The endpoint is code, not configuration; the server loses egress
 
@@ -129,7 +152,12 @@ requirements beyond that:
 - **Grounding.** The heuristics can only quote the document; a model can
   invent. So every model value must arrive with its verbatim evidence span,
   and a field whose span does not occur in the normalised input text is
-  dropped before validation. Numeric fields (`costMinor`,
+  dropped before validation. **"Input text" means the document data block
+  and nothing else.** Section 4's adjudicating prompt carries the heuristic
+  and blind readings inside it; a value present only in those supplied
+  readings must not self-ground on them, or grounding becomes a check the
+  prompt can satisfy by quoting itself. The adjudicated answer is grounded
+  against the document exactly as the blind answer is. Numeric fields (`costMinor`,
   `recurrenceMonths`) additionally require their digits to appear in the
   span. Dates are canonicalised then checked by the existing
   `validCalendarDate`, deduplicated and capped as today. A grounded-but-
@@ -153,24 +181,154 @@ discards unknown keys — applies unchanged. Raw model responses are
 discarded after proposal derivation and never logged, exactly as raw parser
 responses are.
 
-### 4. Both extractors always run; disagreement is shown, never merged silently
+### 4. The model adjudicates; it does not compete
+
+**Amended 2026-09-10 by owner ruling (#936); the superseded position is
+recorded at the end of this section.**
 
 The heuristics run on every upload regardless — they are microseconds of
 regex and they are the fallback, so they must stay exercised. Where the
 model path is active (profile up, gate in section 6 passed at release
-time), the model's grounded value is the primary suggestion for a field,
-and a differing non-empty heuristic value is presented alongside it as a
-labelled alternative the reviewer can pick instead. Disagreement is a
-signal to the person — "the extractors read this differently" — never a
-silent overwrite in either direction and never an averaged value. Dates are
-the union of both extractors' validated dates, deduplicated, carrying the
-model's role labels where assigned. The four fields of section 7 are
-model-only, so no disagreement arises there. Suggestions carry a source
-marker distinguishing the model from the heuristics so the review surface
-can label the alternative; the exact composition of that surface is a view
-decision for the implementing slice, but showing the disagreement is not
-optional. Agreement per field is also recorded as a non-sensitive counter,
-feeding section 5.
+time), the model is used as an adjudicator over both readings rather than
+as a rival whose value wins a contest:
+
+1. **Blind pass.** The model reads the document under section 1's bounds
+   with no knowledge of the heuristic proposal, and its result is recorded.
+2. **Comparison.** The blind result is compared with the heuristic result,
+   field by field.
+3. **Adjudicating pass.** Only where the two disagree on a field, the model
+   is asked once more — same bounds, same schema — this time with both
+   readings supplied, and its answer is final for those fields.
+
+**"Disagree" is a defined term here, not a judgement call for the slice.**
+Comparison happens on values that have already passed section 3's
+validation and normalisation, never on raw model output or raw regex
+captures, so "EDF Energy" and "EDF ENERGY" are the same answer. A field
+where one extractor found a value and the other found nothing **is** a
+disagreement worth adjudicating: the whole hard case in this domain is a
+value that only one reading sees, and the superseded shape's
+"differing *non-empty* heuristic value" wording quietly excluded exactly
+that. A field neither extractor filled is not a disagreement and buys
+nothing.
+
+**One adjudicating pass covers every disputed field**, not one pass per
+field — the cap in section 1 is two passes per document, and a per-field
+cap would not be enumerable. That pass uses the full section 1 schema, and
+its output for fields that were already settled is discarded rather than
+allowed to reopen them.
+
+**What the adjudicating pass may return.** It uses the same schema as the
+blind pass, so it emits a field value with its evidence span — it is *not* a
+choice between two candidates. Four outcomes are available to it, and all
+four are intended:
+
+1. endorse the heuristic's reading;
+2. endorse its own blind reading;
+3. propose a value neither reading found;
+4. return the field empty — "both readings are wrong and I have nothing
+   better."
+
+The fourth is deliberate and follows from #939: a wrong value costs more than
+a blank, so a model able to reject both readings is worth more than one
+forced to pick the least bad. The schema must therefore permit an absent
+field, and an empty adjudicated field is a **result, not a failed pass** —
+distinct from the late, malformed or absent reply of section 1, which leaves
+the heuristic value standing.
+
+Grounding is unchanged and constrains outcome 3: a value neither reading
+proposed must still occur verbatim in the document data block, so
+adjudication cannot invent one.
+
+The case that earns the second inference is the partial one. Where the
+heuristic has "Northfield Gas & Energy Ltd" and the blind pass has
+"Northfield Gas", both are defensible and the question is which the document
+actually supports — the judgement neither a regex nor a single unaided read
+can make, and the same question #939's tight-name ruling answered by hand.
+
+**The order is the point, not an implementation detail.** Shown the
+heuristic's answer up front, the model anchors on it, and what looks like
+two extractors agreeing is one extractor twice. The blind pass is what
+keeps a genuinely independent second reading in the system, and recording
+it is what makes that independence checkable afterwards.
+
+It also turns disagreement from a tie-break into a judgement. A model told
+"the heuristic says Direct Debit" can reason that a payment method is not a
+sender, which no mechanical rule between two candidate strings can do.
+
+Two bounds on the shape:
+
+- **Agreement settles the field, and is never revisited** (owner ruling,
+  2026-09-10). When the blind pass and the heuristic already agree, no
+  adjudicating pass is paid for. This is the same instinct as #939's "do not
+  even run the partial once an exact match is found".
+
+  The saving is the smaller half of the reason. The owner's argument is that
+  **adjudicating an agreed field introduces the chance to undo a correct
+  answer**, and the trade is negative: two extractors agree most often on
+  the documents where both are right, so a third read has far more
+  opportunities to break a good answer than to rescue a bad one. Agreement
+  between a deterministic reader and an unaided model reading is itself
+  evidence, and a single further read that has now seen both is weaker
+  evidence than the agreement it would overturn.
+
+  The cost is stated honestly rather than denied: two extractors reading the
+  same text *can* fixate on the same salient wrong string, and that case is
+  never caught by adjudication. It is bounded by review-first (ADR-0005) —
+  the person still sees the value — and it is visible in section 6, where an
+  agreed-but-wrong field depresses all three numbers alike. What it is not
+  is a reason to re-read every agreed field.
+- **Three numbers are kept, never two**: heuristic alone, model blind, and
+  model adjudicated, per field and overall. Without the blind score there
+  is no way to tell whether adjudication earns its keep or merely launders
+  the heuristic's answer back out. Section 6 gates on these.
+
+The adjudicated value is a suggestion like any other: it passes section 3's
+grounding and validation unchanged, and nothing is written without review
+(ADR-0005). Adjudication decides *which reading is proposed*; it never
+decides whether to write.
+
+**What the reviewer sees (owner ruling, 2026-09-10).** The adjudicated value
+is the suggestion, and the reading it rejected stays available behind a quiet
+secondary affordance beside the field — "also read as: X" — which fills the
+field with that value when chosen. Where the two readings agreed, nothing
+extra is shown at all: the reviewer sees an ordinary suggestion and is not
+asked to think about extraction. This keeps the superseded position's still-
+valid principle that disagreement is information, and lets a doubtful
+reviewer pick the other reading instead of retyping it, without going back
+to making them resolve every disagreement — which is what the ruling
+removed. The alternative considered and rejected was showing the adjudicated
+value alone, which discards a reading the system paid two inferences to
+produce.
+
+**What that requires keeping.** Only the losing *validated* value, and only
+for the life of the pending review that offers it: it is discarded when the
+item is saved or the review is abandoned, along with everything else the
+review held. Nothing about the second reading is retained beyond that, and
+raw model responses are still never logged (section 3). Section 5's
+agreement counter is unaffected — it is a non-sensitive count and does not
+carry values.
+
+Dates are not adjudicated as a contest, because a date set has no single
+value to disagree about: they remain the union of both extractors'
+validated dates, deduplicated, carrying the model's role labels where
+assigned, exactly as before. The consequence is worth stating plainly:
+adjudication never *removes* a date. Date noise is corrected by the
+reviewer and measured by section 6, not adjudicated away. The four fields of section 7 are model-only,
+so no disagreement arises there and no adjudicating pass is triggered by
+them. Per-field agreement is recorded as a non-sensitive counter, feeding
+section 5.
+
+**Superseded position (ratified 2026-09-09, replaced 2026-09-10).** Section
+4 previously read "Both extractors always run; disagreement is shown, never
+merged silently": the model's grounded value was the primary suggestion, a
+differing non-empty heuristic value was presented alongside it as a
+labelled alternative, and the reviewer chose. It is recorded rather than
+deleted because the reasoning behind it — that disagreement is information
+and must not be averaged away — still holds, and the amendment keeps it:
+adjudication is a reasoned reading of both, not a blend or a confidence
+score. What changed is who resolves the disagreement. The old shape asked
+the reviewer to resolve every one; the new shape spends a second inference
+to resolve it first, and only where the two readings actually differ.
 
 ### 5. Degradation: heuristics per upload, `document-health` for the administrator
 
@@ -206,12 +364,34 @@ moved to the tuning set and replaced. Enforcement is the recorded rule plus
 review, which is the honest limit of what a repository can promise, and it
 is the same choice #929's comment sketched.
 
+Section 4 makes this a three-way measurement rather than a two-way one.
+Every evaluation reports the heuristics alone, the model's blind pass and
+the model's adjudicated answer, separately. The margin below is judged on
+the **adjudicated** number, because that is what a reviewer would see.
+
+A blind score at or below the heuristic baseline is **not** a failure and
+does not block the gate. The owner's ruling is that the model's value is as
+a judge over both readings, not as a solo extractor, so an ensemble that
+beats both of its components is this design working as intended rather than
+a result to be suspicious of.
+
+What the blind number is actually for is detecting laundering — adjudication
+parroting the heuristic instead of judging it. That failure has the opposite
+signature: it drives the adjudicated answer *towards* the heuristic, so it
+shows up as a missing margin, which the gate below already fails on its own.
+The sharper diagnostic, reported beside the three scores, is **per-disagreement
+resolution accuracy**: among the fields where the blind pass and the heuristic
+disagreed and the blind reading was the correct one, how often did adjudication
+side with the heuristic anyway. That is diagnostic reporting only. Making it a
+threshold would be a revision of this ADR needing ratification, not something a
+build slice decides.
+
 The gate for the model path becoming the default where available:
 
-- on a hold-out of **at least 10 documents**, the model's minimum accuracy
-  over five runs exceeds the heuristics' hold-out accuracy by **at least
-  0.05** — that is the stated margin, measured where neither extractor was
-  tuned;
+- on a hold-out of **at least 10 documents**, the model's minimum
+  adjudicated accuracy over five runs exceeds the heuristics' hold-out
+  accuracy by **at least 0.05** — that is the stated margin, measured where
+  neither extractor was tuned;
 - on the tuning corpus, the model's minimum stays at or above
   `ACCURACY_FLOOR`;
 - corpus ground truth is extended to the four fields and role-labelled
@@ -245,11 +425,12 @@ absent, those suggestion slots are simply empty, as they are today.
 ## Consequences
 
 - Build slices can be filed against this ADR: the client and prompt with
-  bounds (§1–2, including the Compose network move and pull helper), the
+  bounds (§1–2, including the two-pass cap, the Compose network move and
+  the pull helper), the
   proposal-contract and validation extension with corpus ground truth for
-  the four fields (§3, §7), the review-surface disagreement presentation
-  (§4), health reporting (§5), and the hold-out set plus evaluation script
-  (§6). None of them reopens a design question.
+  the four fields (§3, §7), the blind-then-adjudicate two-pass flow with
+  its three recorded numbers (§4), health reporting (§5), and the hold-out
+  set plus evaluation script (§6). None of them reopens a design question.
 - `docs/document-threat-model.md` must be extended by the first
   implementing slice, as its deferred-features section requires; the
   extension records sections 1–3 as the model boundary.
@@ -264,7 +445,24 @@ absent, those suggestion slots are simply empty, as they are today.
   number, not an assertion.
 - Choosing which local model to recommend is an evaluation outcome, not a
   design call: candidates are scored by the section 6 harness and the
-  winner is recorded with its numbers.
+  winner is recorded with its numbers. **The owner fixed the budget that
+  evaluation runs inside (2026-09-10): Orbit is self-hosted, typically on
+  unremarkable hardware, so the model path must do a lot with little.**
+  - **CPU is the baseline, not the fallback.** If the job can be done on
+    CPU it is done on CPU, and a candidate that needs a GPU to be usable
+    has failed rather than qualified. The Compose service is capped at 2
+    CPUs and 6 GB today, which is the shape a candidate is judged in.
+  - **A GPU option is offered, and it asks for very little.** Nobody
+    hands a household document-filing system their whole graphics card,
+    so the optional accelerated path targets a small slice of VRAM
+    rather than a dedicated device, and degrades to the CPU path when it
+    is not there. Delivery is CUDA in Docker; the container, its network
+    and every bound in sections 1 to 3 are unchanged by it, so this is a
+    deployment option and not a second extraction path.
+  - The consequence for selection is that model *size* is a first-class
+    score alongside accuracy. A candidate that wins on accuracy while
+    only running acceptably on hardware a self-hoster does not have has
+    not won.
 
 ## Alternatives rejected
 
@@ -280,13 +478,28 @@ absent, those suggestion slots are simply empty, as they are today.
   reply into a parsing surface and every hostile document into a prompt
   for one; grammar-constrained decoding removes the failure class.
 - **Retry or self-repair loops on malformed output:** unbounded spend a
-  hostile document can trigger; one bounded attempt, then heuristics.
+  hostile document can trigger. A failed pass is never re-attempted; the
+  two passes of sections 1 and 4 are two different questions, not one
+  question retried, and a failed adjudication falls back to the heuristic
+  value rather than asking again.
 - **Multimodal input (raw PDFs or images to the model):** v1's model reads
   only the text the existing parser boundary produced; scanned-input OCR
   is the separate deferred design the threat model already requires.
 - **Silent merge or confidence-weighted blend of model and heuristic
   values:** hides exactly the signal a reviewer needs; disagreement is
-  information, not noise.
+  information, not noise. Section 4's adjudication is not this: a blend
+  averages two strings mechanically, where adjudication asks a reader to
+  judge both and say which the document supports.
+- **The model and the heuristics as competitors with a mechanical
+  tie-break** (the position section 4 held until 2026-09-10): it spends the
+  model's only real advantage — that it can read — on being one candidate
+  string among two. Owner ruling, #936.
+- **Feeding the heuristic result into the single model pass:** cheaper than
+  two passes, and it destroys the independence the second opinion exists
+  for; the model anchors and agreement becomes unfalsifiable.
+- **Adjudicating every field, including the ones both readings agree on:**
+  pays for inference to confirm what is already settled, against #939's
+  ruling that a confident answer stops the search.
 - **Auto-applying high-confidence suggestions:** would breach ADR-0005's
   review-first invariant and #319's "never an automatic write".
 - **Scoring by mean over runs:** lets variance hide regressions; the

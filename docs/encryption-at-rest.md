@@ -40,14 +40,14 @@ protection. On a host without disk encryption, anyone who can read the
 filesystem gets the key and the ciphertext in the same reach — the envelope
 buys nothing in that scenario. This is exactly why layer 4 (below) exists.
 
-### 2. Database contents: none by default, apart from Tier 1 metadata — a real gap, not an oversight
+### 2. Database contents: none by default, apart from the Tier 1 and Tier 2 metadata columns — a real gap, not an oversight
 
 Stock PostgreSQL has no transparent data encryption (TDE). Orbit does not add
 any: the PostgreSQL data directory (the named `orbit-postgres` volume) is
 **cleartext on disk**. That includes household and item names, filenames and
 media types (which the threat model already treats as potentially sensitive
 on their own), audit events, session data, and every other row Orbit writes —
-apart from the four columns layer 2a covers.
+apart from the columns layer 2a covers.
 Percona's `pg_tde` extension is a possible future option — its WAL encryption
 is still marked experimental upstream, so Orbit does not depend on it today.
 It is being watched, not adopted, until that changes.
@@ -58,20 +58,39 @@ layer 2a below. There is no general application-layer substitute for TDE, and
 claiming otherwise would be the marketing framing this document exists to
 avoid.
 
-### 2a. Four metadata columns: application-layer envelope encryption
+### 2a. The Tier 1 and Tier 2 metadata columns: application-layer envelope encryption
 
-ADR-0024 encrypts the household metadata #365 calls Tier 1 — an item's notes
-and reference, and a mail-in receipt's extracted proposal and field evidence —
-the same way documents are encrypted, under the same `DOCUMENT_KEK`. One
-random 256-bit data-encryption key per household (plus one for mail-in
-receipts nobody has attributed yet) is wrapped under that KEK; each value is a
-compact AES-256-GCM envelope bound to its own table, column and row.
+ADR-0024 encrypts the household metadata #365 calls Tier 1 and Tier 2 the same
+way documents are encrypted, under the same `DOCUMENT_KEK`. One random 256-bit
+data-encryption key per household (plus one for mail-in receipts nobody has
+attributed yet) is wrapped under that KEK; each value is a compact AES-256-GCM
+envelope bound to its own table, column and row.
 
-`items.reference` also carries a blind index so duplicate detection can still
-find an exact match without decrypting every row. Within one household that
-index reveals which rows share a reference and how many distinct references
-there are, and nothing about the values themselves; across households it
-reveals nothing at all, because the key is per-household.
+**Tier 1** is an item's notes and reference, and a mail-in receipt's extracted
+proposal and field evidence. **Tier 2** is an item's name, its provider's name
+and its cost, and the address on an open household invitation. Tier 2 costs
+queries the database used to be able to do: searching item names, matching a
+provider and adding up costs all happen in Orbit now, over one household's
+decrypted rows. Measured on a seeded database, that costs about 4.5 ms for a
+100-item household and about 28 ms at the 500-item ceiling one household's item
+list can reach.
+
+**Tier 3 is deliberately left in plaintext**: due dates, statuses, recurrence,
+and household and member relationships. Those are what the reminder workers and
+due-window queries run on in SQL, and disk encryption (layer 4) is the answer
+for them. The account address `users.email` is also deliberately in plaintext,
+so that a missing key never locks anybody out of signing in — #966 is where
+that call is being decided properly.
+
+`items.reference` and the invitation address each carry a blind index, so an
+exact-match lookup still works without decrypting every row — for the
+invitation address, that index is what keeps "one open invitation per address"
+a rule the database enforces. Nothing else is indexed: an item's name, provider
+and cost are only ever compared by readers that already read the whole
+household, so an index would serve no query. Within one household an index
+reveals which rows share a value and how many distinct values there are, and
+nothing about the values themselves; across households it reveals nothing at
+all, because the key is per-household.
 
 **The boundary is the same one layer 1 has, and no larger.** It protects the
 database *file* — an exfiltrated volume, a SQL dump, a stolen disk — and not a
@@ -149,8 +168,9 @@ exists so the operator picks it knowingly, rather than by accident.
 | Document bytes (inside an `orbit backup` tar) | Application envelope (same DOCUMENT_KEK) + disk encryption | — |
 | `DOCUMENT_KEK` secret file itself | Filesystem mode `0600`/`0400` + disk encryption | Application envelope (it *is* the key) |
 | Tier 1 metadata columns (item notes/reference, mail-in draft) | Application envelope (same DOCUMENT_KEK) + disk encryption | — (but see the two-release rollout in 2a) |
+| Tier 2 metadata columns (item name/provider/cost, invited address) | Application envelope (same DOCUMENT_KEK) + disk encryption | — (but see the two-release rollout in 2a) |
 | PostgreSQL data directory, every other column | Disk encryption only | No database-level or Orbit-level encryption |
-| Database dump inside an `orbit backup` tar | Disk encryption only, plus the Tier 1 envelope for those four columns | No application-layer encryption for anything else |
+| Database dump inside an `orbit backup` tar | Disk encryption only, plus the envelope for the Tier 1 and Tier 2 columns | No application-layer encryption for anything else |
 | Restore/repair checkpoints | Filesystem mode `0600`/`0700` + disk encryption | Application-layer encryption |
 | `DOCUMENT_KEK` inside a recovery bundle | ORBKEK01 passphrase envelope | — |
 

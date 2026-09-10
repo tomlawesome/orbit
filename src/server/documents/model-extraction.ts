@@ -1,12 +1,24 @@
 import { isValidLocalModel } from "@/lib/deployment-profile";
-import type { ScheduleKind } from "@/lib/domain";
 import { log } from "@/lib/logger";
 import {
+  documentDateRoles,
+  MAX_COST_MINOR,
+  MAX_RECURRENCE_MONTHS,
+  MAX_SUBTYPE_CHARACTERS,
+  MIN_RECURRENCE_MONTHS,
   safeDocumentEvidence,
   safeDocumentPlainText,
   safeStoredDocumentProposal,
+  type DocumentDateRole,
+  type DocumentDateRoleLabel,
   type DocumentProposal,
 } from "@/server/documents/suggestions";
+
+// The proposal contract, including the closed role vocabulary and the four
+// model-owned fields, lives with every other proposal source in
+// `suggestions.ts` (ADR-0025 section 7). Re-exported here because this is
+// where callers of the model path look for it.
+export { documentDateRoles, type DocumentDateRole, type DocumentDateRoleLabel };
 
 /**
  * The local-model proposer of ADR-0025 (sections 1-3). One request per
@@ -26,6 +38,9 @@ import {
  */
 const MODEL_ENDPOINT = "http://orbit-ollama:11434/api/generate";
 
+/** The same fixed host, asked only whether it is answering (ADR-0025 section 5). */
+const MODEL_TAGS_ENDPOINT = "http://orbit-ollama:11434/api/tags";
+
 /** The only configurable part of the model path, per ADR-0025 section 2. */
 const MODEL_ENVIRONMENT_KEY = "OLLAMA_MODEL";
 
@@ -37,60 +52,19 @@ const CONTEXT_TOKENS = 8_192;
 const MODEL_SEED = 20_260_909;
 const EVIDENCE_SPAN_MAX_CHARACTERS = 200;
 const MAX_DATES = 12;
-const MAX_COST_MINOR = 100_000_000;
-const MIN_RECURRENCE_MONTHS = 1;
-const MAX_RECURRENCE_MONTHS = 120;
 
 /** Short for the interactive Add-item inspection, longer for the mailbox. */
 export const MODEL_INTERACTIVE_DEADLINE_MS = 8_000;
 export const MODEL_MAILBOX_DEADLINE_MS = 45_000;
 
 /**
- * The closed vocabulary of date roles. The model labels dates with these and
- * never emits a schedule kind; the application derives that (ADR-0025
- * section 3). Unknown role strings are dropped.
+ * A model proposal is a `DocumentProposal` and nothing more. This module
+ * adds grounding — every value must quote the document — and then hands the
+ * grounded values to `safeStoredDocumentProposal`, which owns the bounds,
+ * the closed role vocabulary and the derived schedule kind for every
+ * proposal source alike.
  */
-export const documentDateRoles = [
-  "renewal",
-  "expiry",
-  "due",
-  "service",
-  "issued",
-  "start",
-  "other",
-] as const;
-export type DocumentDateRole = (typeof documentDateRoles)[number];
-
-/**
- * Only a renewal or a service date is a scheduled event in Orbit's model
- * (`scheduleKinds`, src/lib/domain.ts). Every other role labels a date the
- * reviewer may still want, but produces no schedule kind.
- */
-const SCHEDULE_KIND_BY_ROLE: Partial<Record<DocumentDateRole, ScheduleKind>> = {
-  renewal: "renewal",
-  service: "service",
-};
-
-export interface DocumentDateRoleLabel {
-  date: string;
-  role: DocumentDateRole;
-}
-
-/**
- * The heuristic proposal plus the fields ADR-0025 section 7 gives the model
- * path. The base four are produced by `safeStoredDocumentProposal`, exactly as
- * a stored or heuristic proposal is; the rest are validated here to the same
- * bounds `src/lib/workspace.ts` already enforces on an item.
- */
-export interface ModelDocumentProposal extends DocumentProposal {
-  subtype?: string;
-  costMinor?: number;
-  currency?: string;
-  recurrenceMonths?: number;
-  scheduleKind?: ScheduleKind;
-  scheduleDate?: string;
-  dateRoles: DocumentDateRoleLabel[];
-}
+export type ModelDocumentProposal = DocumentProposal;
 
 /**
  * Fixed failure vocabulary. The model reads hostile documents, so neither its
@@ -358,14 +332,14 @@ function dateRole(value: unknown): DocumentDateRole | undefined {
     : undefined;
 }
 
-interface GroundedDate {
-  date: string;
-  role: DocumentDateRole;
-}
-
-function groundedDates(candidate: unknown, normalizedText: string): GroundedDate[] {
+/**
+ * Dates the model both labelled with a known role and quoted. An unknown
+ * role string takes its date with it: the model was asked for a role, and a
+ * date it could not label is not a date it read.
+ */
+function groundedDates(candidate: unknown, normalizedText: string): DocumentDateRoleLabel[] {
   if (!Array.isArray(candidate)) return [];
-  const grounded: GroundedDate[] = [];
+  const grounded: DocumentDateRoleLabel[] = [];
   for (const entry of candidate.slice(0, MAX_DATES)) {
     const record = candidateRecord(entry);
     if (!record || typeof record.date !== "string" || containsControlCharacter(record.date)) continue;
@@ -377,10 +351,12 @@ function groundedDates(candidate: unknown, normalizedText: string): GroundedDate
 }
 
 /**
- * Builds the proposal. The base fields go through `safeStoredDocumentProposal`
- * like any other proposal source, which is where calendar validity,
- * normalisation, length caps, markup rejection and the fresh-object rebuild
- * that discards unknown keys all happen.
+ * Builds the proposal. Everything grounded here then goes through
+ * `safeStoredDocumentProposal` like any other proposal source, which is
+ * where calendar validity, normalisation, length caps, markup rejection,
+ * the four fields' numeric bounds, the derived schedule kind and the
+ * fresh-object rebuild that discards unknown keys all happen. Nothing about
+ * a value's bounds is decided twice.
  */
 function proposalFromModelObject(
   value: unknown,
@@ -391,40 +367,17 @@ function proposalFromModelObject(
   if (!record) return undefined;
 
   const dates = groundedDates(record.dates, normalizedText);
-  const proposal = safeStoredDocumentProposal({
+  const cost = costFromCandidate(record.cost, normalizedText);
+  return safeStoredDocumentProposal({
     provider: groundedText(record.provider, 100, normalizedText),
     reference: groundedText(record.reference, 80, normalizedText),
-    dates: dates.map((entry) => entry.date),
-  }, filename);
-
-  // Only roles whose date survived calendar validation remain, first role wins.
-  const dateRoles: DocumentDateRoleLabel[] = [];
-  for (const entry of dates) {
-    if (!proposal.dates.includes(entry.date)) continue;
-    if (dateRoles.some((label) => label.date === entry.date)) continue;
-    dateRoles.push(entry);
-  }
-
-  // Derived, never emitted: the schedule kind follows the date's role.
-  const scheduled = dateRoles.find((label) => SCHEDULE_KIND_BY_ROLE[label.role]);
-  const scheduleKind = scheduled ? SCHEDULE_KIND_BY_ROLE[scheduled.role] : undefined;
-  const cost = costFromCandidate(record.cost, normalizedText);
-  // `workspaceItemSchema` refuses a recurrence without a schedule kind, so a
-  // recurrence that has no scheduled date to repeat is dropped here too.
-  const recurrenceMonths = scheduleKind
-    ? recurrenceFromCandidate(record.recurrenceMonths, normalizedText)
-    : undefined;
-
-  return {
-    ...proposal,
-    subtype: groundedText(record.subtype, 80, normalizedText),
+    subtype: groundedText(record.subtype, MAX_SUBTYPE_CHARACTERS, normalizedText),
     costMinor: cost?.costMinor,
     currency: cost?.currency,
-    recurrenceMonths,
-    scheduleKind,
-    scheduleDate: scheduleKind ? scheduled?.date : undefined,
-    dateRoles,
-  };
+    recurrenceMonths: recurrenceFromCandidate(record.recurrenceMonths, normalizedText),
+    dates: dates.map((entry) => entry.date),
+    dateRoles: dates,
+  }, filename);
 }
 
 async function* streamChunks(body: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
@@ -540,6 +493,7 @@ const LOG_REASON_BY_FAILURE = {
 } as const satisfies Record<ModelExtractionFailure, string>;
 
 function modelDegraded(reason: ModelExtractionFailure, startedAt: number): ModelExtractionResult {
+  recordModelExtractionSample(reason === "timed_out" ? "timed_out" : "failed");
   log.warn({
     event: "document.model_extraction",
     state: "degraded",
@@ -549,6 +503,99 @@ function modelDegraded(reason: ModelExtractionFailure, startedAt: number): Model
     durationMs: Math.max(0, Date.now() - startedAt),
   });
   return { status: "failed", reason };
+}
+
+/**
+ * Health inputs for `document-health` (ADR-0025 section 5). Each bounded
+ * request records one sample, so an administrator can see whether the model is
+ * answering without anything about a document being kept: these are counts of
+ * outcomes, never values, filenames or text.
+ */
+export type ModelExtractionSample = "ready" | "timed_out" | "failed";
+
+export interface ModelExtractionWindow {
+  samples: number;
+  failures: number;
+  timeouts: number;
+}
+
+/** How many recent attempts the failure rate is judged over. */
+export const MODEL_SAMPLE_WINDOW = 20;
+
+/**
+ * Above this share of failures the model is not usefully answering, so the
+ * entry turns `unavailable`. A host that loses the deadline race now and then
+ * stays below it, which is the difference an administrator needs to see
+ * between "occasionally slow" and "down".
+ */
+export const MODEL_FAILURE_RATE_THRESHOLD = 0.5;
+
+/** Below this many samples the rate is noise, so it never degrades health. */
+export const MODEL_FAILURE_RATE_MIN_SAMPLES = 5;
+
+const recentSamples: ModelExtractionSample[] = [];
+
+/** Records one bounded request's outcome. Counts only; nothing about the document. */
+export function recordModelExtractionSample(sample: ModelExtractionSample): void {
+  recentSamples.push(sample);
+  if (recentSamples.length > MODEL_SAMPLE_WINDOW) {
+    recentSamples.splice(0, recentSamples.length - MODEL_SAMPLE_WINDOW);
+  }
+}
+
+/** The recent sample window, as counts. */
+export function modelExtractionWindow(): ModelExtractionWindow {
+  let failures = 0;
+  let timeouts = 0;
+  for (const sample of recentSamples) {
+    if (sample !== "ready") failures += 1;
+    if (sample === "timed_out") timeouts += 1;
+  }
+  return { samples: recentSamples.length, failures, timeouts };
+}
+
+/** Clears the window. For tests and for a deliberate restart of the count. */
+export function resetModelExtractionWindow(): void {
+  recentSamples.length = 0;
+}
+
+/** Whether the recent window is failing above the threshold. */
+export function modelFailureRateExceeded(window: ModelExtractionWindow): boolean {
+  if (window.samples < MODEL_FAILURE_RATE_MIN_SAMPLES) return false;
+  return window.failures > window.samples * MODEL_FAILURE_RATE_THRESHOLD;
+}
+
+/** The readiness probe's own deadline, short enough for a health request. */
+export const MODEL_PING_DEADLINE_MS = 2_000;
+
+/**
+ * Asks the fixed endpoint whether it is answering, without sending it any
+ * document text. Same constant host as the generate path: readiness cannot be
+ * pointed anywhere configuration chooses (ADR-0025 section 2).
+ */
+export async function pingExtractionModel(options: { deadlineMs?: number } = {}): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.min(options.deadlineMs ?? MODEL_PING_DEADLINE_MS, MODEL_PING_DEADLINE_MS));
+  try {
+    const response = await fetch(MODEL_TAGS_ENDPOINT, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      redirect: "error",
+      signal: controller.signal,
+    });
+    const ready = response.status >= 200 && response.status < 300 && !response.redirected;
+    try {
+      await response.body?.cancel();
+    } catch {
+      // Readiness is the whole question; a discarded body's detail is not it.
+    }
+    return ready;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -622,6 +669,7 @@ export async function modelProposalFromText(
     const proposal = proposalFromModelObject(modelObjectFromEnvelope(read.bytes), filename, normalizedText);
     if (!proposal) return modelDegraded("malformed_response", startedAt);
 
+    recordModelExtractionSample("ready");
     // Counts and duration only. Model output is hostile-derived and never logged.
     log.info({
       event: "document.model_extraction",
