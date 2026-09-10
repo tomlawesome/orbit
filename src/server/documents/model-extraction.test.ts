@@ -183,7 +183,7 @@ describe("a good reply", () => {
     const result = await extract({
       dates: [{ date: "2027-02-30", role: "renewal", evidence: "Cover renews 2027-04-01" }],
     });
-    expect(result).toMatchObject({ status: "ready", proposal: { dates: [], dateRoles: [] } });
+    expect(result).toMatchObject({ status: "ready", proposal: { dates: [], dateRoles: undefined } });
   });
 
   it("proposes a cost only when its span carries an explicit currency", async () => {
@@ -320,9 +320,8 @@ describe("the service absent", () => {
       provider: "Acme Cover",
       reference: "AB-12345",
       dates: ["2027-08-01"],
-      // Empty by decision, not omission: the heuristics never attempt the
-      // four model-owned fields or the date roles (#319).
-      dateRoles: [],
+      // Absent by decision, not omission: the heuristics never attempt the
+      // four model-owned fields or the date roles (#319, #967).
     });
   });
 });
@@ -351,7 +350,7 @@ describe("grounding: a value whose evidence is not in the document is dropped", 
         recurrenceMonths: undefined,
         scheduleKind: undefined,
         scheduleDate: undefined,
-        dateRoles: [],
+        dateRoles: undefined,
       },
     });
   });

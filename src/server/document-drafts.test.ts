@@ -11,13 +11,12 @@ describe("proposalFromText", () => {
         dates: ["2027-08-01"],
         // The heuristics never label a date with a role: the four
         // model-owned fields and the roles are the model path's (#319,
-        // ADR-0025 section 7), so they stay empty here by decision.
-        dateRoles: [],
+        // ADR-0025 section 7), so the keys are simply absent here.
       });
   });
 
   it("falls back to the filename when no usable text is available", () => {
     expect(proposalFromText("", "receipt.png"))
-      .toEqual({ title: "receipt", provider: undefined, reference: undefined, dates: [], dateRoles: [] });
+      .toEqual({ title: "receipt", provider: undefined, reference: undefined, dates: [] });
   });
 });

@@ -122,7 +122,7 @@ describe("the four model-owned fields round-trip to a reviewed item", () => {
     expect(heuristic.costMinor).toBeUndefined();
     expect(heuristic.recurrenceMonths).toBeUndefined();
     expect(heuristic.scheduleKind).toBeUndefined();
-    expect(heuristic.dateRoles).toEqual([]);
+    expect(heuristic.dateRoles).toBeUndefined();
 
     const suggestions = buildDocumentSuggestions("buildings-schedule.pdf", heuristic);
     expect(suggestions.map((suggestion) => suggestion.field))

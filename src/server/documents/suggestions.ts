@@ -71,7 +71,16 @@ export interface DocumentProposal {
   recurrenceMonths?: number;
   scheduleKind?: ScheduleKind;
   scheduleDate?: string;
-  dateRoles: DocumentDateRoleLabel[];
+  /**
+   * Absent, not empty, when nothing labelled a date (#967). Roles are
+   * model-only like the four fields above, so they follow the same rule:
+   * a slot no extractor filled is a key the proposal does not carry.
+   * An empty array would put a key into stored evidence that no reviewer
+   * ever saw, and it states nothing the missing key does not —
+   * `safeStoredDocumentProposal` reads an absent `dateRoles` back as no
+   * roles, so the two are indistinguishable everywhere downstream.
+   */
+  dateRoles?: DocumentDateRoleLabel[];
 }
 
 export function safeDocumentPlainText(value: unknown, maximum: number): string | undefined {
@@ -368,7 +377,8 @@ function extractProvider(bounded: string): string | undefined {
 /**
  * The heuristics, unchanged: they attempt title, provider, reference and
  * dates and nothing else. The four model-owned fields and the date roles
- * stay empty here by decision, not by omission (#319, owner 2026-08-13).
+ * stay ABSENT here by decision, not by omission (#319, owner 2026-08-13):
+ * the heuristics never attempt them, so there is no finding to record.
  */
 export function proposalFromText(text: string, filename: string): DocumentProposal {
   const bounded = text.slice(0, MAX_EXTRACTED_CHARACTERS);
@@ -377,7 +387,6 @@ export function proposalFromText(text: string, filename: string): DocumentPropos
     provider: extractProvider(bounded),
     reference: safeDocumentPlainText(extractReference(bounded), 80),
     dates: extractDates(bounded),
-    dateRoles: [],
   };
 }
 
@@ -468,6 +477,9 @@ export function safeStoredDocumentProposal(value: unknown, filename: string): Do
       : undefined,
     scheduleKind,
     scheduleDate: scheduled?.date,
-    dateRoles,
+    // Only when a role survived. `undefined` here is dropped by JSON
+    // serialisation exactly as the optional fields above are, so no key a
+    // reviewer never saw reaches the stored proposal (#967).
+    dateRoles: dateRoles.length > 0 ? dateRoles : undefined,
   };
 }
