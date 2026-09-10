@@ -5,7 +5,9 @@ owner's ruling on #936: the model adjudicates over both readings rather than
 competing with the heuristics. Section 4 carries the new shape, with the
 superseded wording kept inside it. Section 1's request bound moved from one
 pass to two as a direct consequence, and sections 3 and 6 were tightened to
-match; section 2's boundary is untouched. With the constants held lightly:
+match; section 2's boundary is untouched. The review-surface question the
+amendment left open was ruled on by the owner the same day and is recorded
+in section 4. With the constants held lightly:
 the owner ratified "for now" and expects to revisit this one. Drafted under
 the owner's decisions of 2026-08-13 on #319: the four fields stay and the
 model path must produce them; no training or fine-tuning, ever; no cloud
@@ -246,6 +248,27 @@ grounding and validation unchanged, and nothing is written without review
 (ADR-0005). Adjudication decides *which reading is proposed*; it never
 decides whether to write.
 
+**What the reviewer sees (owner ruling, 2026-09-10).** The adjudicated value
+is the suggestion, and the reading it rejected stays available behind a quiet
+secondary affordance beside the field — "also read as: X" — which fills the
+field with that value when chosen. Where the two readings agreed, nothing
+extra is shown at all: the reviewer sees an ordinary suggestion and is not
+asked to think about extraction. This keeps the superseded position's still-
+valid principle that disagreement is information, and lets a doubtful
+reviewer pick the other reading instead of retyping it, without going back
+to making them resolve every disagreement — which is what the ruling
+removed. The alternative considered and rejected was showing the adjudicated
+value alone, which discards a reading the system paid two inferences to
+produce.
+
+**What that requires keeping.** Only the losing *validated* value, and only
+for the life of the pending review that offers it: it is discarded when the
+item is saved or the review is abandoned, along with everything else the
+review held. Nothing about the second reading is retained beyond that, and
+raw model responses are still never logged (section 3). Section 5's
+agreement counter is unaffected — it is a non-sensitive count and does not
+carry values.
+
 Dates are not adjudicated as a contest, because a date set has no single
 value to disagree about: they remain the union of both extractors'
 validated dates, deduplicated, carrying the model's role labels where
@@ -441,31 +464,7 @@ absent, those suggestion slots are simply empty, as they are today.
 1. Ratification of this ADR, including the constants it fixes: the 0.05
    hold-out margin, the 10-document hold-out minimum, and minimum-of-five
    scoring.
-2. **What the reviewer sees after adjudication, and what is kept to show
-   them.** The 2026-09-10 ruling settles who resolves a disagreement but
-   not what happens afterwards, so this is recorded rather than decided.
-   Two coupled halves:
-
-   - *The surface.* The superseded shape put the losing value in front of
-     the reviewer as a labelled alternative. Adjudication could keep that,
-     or show the adjudicated value alone. **Recommended (Fable, 2026-09-10):
-     the quiet alternative** — the adjudicated value is the suggestion, with
-     the rejected reading available behind a small secondary affordance
-     ("also read as: X"), and nothing extra at all where the two readings
-     agreed. It keeps the superseded position's still-valid principle that
-     disagreement is information, and lets a doubtful reviewer pick rather
-     than retype, without going back to asking them to resolve every
-     disagreement — which is the thing the ruling removed. Showing the
-     adjudicated value alone discards information the system paid two
-     inferences to produce.
-   - *The retention.* "Its result is recorded" in section 4 is unambiguous
-     for evaluation, where all three numbers are kept. For a production
-     upload it is not: is the validated blind proposal persisted — which
-     the quiet alternative needs — or only section 5's non-sensitive
-     agreement counter? Section 3's "raw responses are never logged" does
-     not answer it, because a validated proposal is not a raw response.
-     Whichever way this goes, the ADR must say which, and for how long.
-3. An invitation, not a blocker: hold-out documents modelled on real
+2. An invitation, not a blocker: hold-out documents modelled on real
    household paper (all values fictionalised, per the no-real-data rule)
    would make the hold-out far stronger than synthetic documents written
    by the same agents that tune the extractors. Absent owner-supplied
