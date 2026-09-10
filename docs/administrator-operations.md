@@ -497,12 +497,12 @@ import, or repair regenerating `document-kek` when no document volume is
 retained — the stored mailbox credential can no longer be decrypted. Mail-in
 reports `credential_locked`, polling stops, and an administrator re-enters the
 password on the same screen. A mailbox password is re-obtainable from the
-provider; documents and Tier 1 metadata are not, which is why this degradation
+provider; documents and encrypted metadata are not, which is why this degradation
 is acceptable for those two paths specifically: both are a wholesale key
 *replacement*, not a rotation, and neither carries the old key forward for a
 rewrap to use. An ordinary planned rotation is different — see "Rotating the
 document key-encryption key" below — and leaves every credential, document and
-Tier 1 field readable throughout.
+encrypted metadata field readable throughout.
 
 ### Exact-image mailbox acceptance
 
@@ -540,8 +540,8 @@ used as live provider or release acceptance.
 ## Rotating the document key-encryption key
 
 `DOCUMENT_KEK` wraps three populations: document encryption keys
-(`document_crypto`), the per-household Tier 1 metadata keys (`metadata_keys`,
-ADR-0024), and the mail-in mailbox credential and alias key (`mail_in_secrets`,
+(`document_crypto`), the per-household metadata keys that cover both Tier 1 and
+Tier 2 (`metadata_keys`, ADR-0024), and the mail-in mailbox credential and alias key (`mail_in_secrets`,
 ADR-0017). Rotating it is always an operator decision (#932) — nothing in
 Orbit rotates it automatically or on a schedule.
 
@@ -569,7 +569,7 @@ unreadable, and no maintenance window is needed at any step below.
    the current key and reads exactly as before, and a row the worker moves to
    the next key from here on reads too, by its own key id, with nothing
    locked at any point in between. From this restart anything newly written —
-   an uploaded document, a new household's Tier 1 key, a mailbox credential —
+   an uploaded document, a new household's metadata key, a mailbox credential —
    is wrapped under the **next** key straight away (#955), so the rewrap in
    step 3 is chasing a fixed set of rows rather than a moving one.
 
@@ -656,7 +656,7 @@ host is not the same as the key being gone.
 
 Recovery-bundle import and repair's `document-kek` regeneration remain
 wholesale key *replacements*, not rotations: neither carries the old key
-forward for a rewrap, so they still leave existing documents, Tier 1 fields
+forward for a rewrap, so they still leave existing documents, encrypted metadata
 and the mailbox credential unreadable under the new key (the paragraph above
 this section).
 

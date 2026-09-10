@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages, items } from "@/db/schema";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { assignImapReceiptHousehold, listImapInbox } from "@/server/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
@@ -58,8 +59,16 @@ describe("private reviewed intake approval boundary", () => {
     const second = await approveReviewedIntake(member.userId, input);
     expect(second.itemId).toBe(first.itemId);
     expect(await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, fixture.household.id))).toHaveLength(before.length + 1);
-    const [created] = await getDb().select({ title: items.title, provider: items.provider }).from(items).where(eq(items.id, first.itemId));
-    expect(created).toEqual({ title: "Exact reviewed value", provider: "Reviewed provider" });
+    // Title and provider are Tier 2 ciphertext since #963, so the row holds
+    // envelopes; the assertion is the same one, made on the decrypted values.
+    const [created] = await getDb().select({ id: items.id, title: items.title, titleEnc: items.titleEnc, provider: items.provider, providerEnc: items.providerEnc })
+      .from(items).where(eq(items.id, first.itemId));
+    expect({ title: created.title, provider: created.provider }).toEqual({ title: null, provider: null });
+    const metadata = await openMetadataReader(fixture.household.id);
+    expect({
+      title: metadata.text("items.title", created.id, { encrypted: created.titleEnc, plaintext: created.title }).value,
+      provider: metadata.text("items.provider", created.id, { encrypted: created.providerEnc, plaintext: created.provider }).value,
+    }).toEqual({ title: "Exact reviewed value", provider: "Reviewed provider" });
   });
 
   it("does not apply submitted fields when attaching to an existing item", async () => {
