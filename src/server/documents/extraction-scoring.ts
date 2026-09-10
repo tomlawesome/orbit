@@ -148,6 +148,53 @@ function classifyScalar(expected: string, actual: string | undefined): Classific
   return actual === undefined ? "blank" : "wrong";
 }
 
+/** Trailing company-form words, which a provider name may carry or omit.
+ * Owner ruling 2026-09-10: the suffix is technically the more correct
+ * answer, but a name without it is equally acceptable, so neither may be
+ * scored as a miss. */
+const LEGAL_SUFFIXES = [
+  "ltd",
+  "ltd.",
+  "limited",
+  "plc",
+  "plc.",
+  "llp",
+  "llc",
+  "cic",
+  "co",
+  "co.",
+  "company",
+  "group",
+  "holdings",
+];
+
+/** A provider name stripped of one trailing company-form word, for
+ * comparison only — never for display, and never written back to a corpus. */
+function withoutLegalSuffix(name: string): string {
+  const words = name.trim().split(/\s+/u);
+  if (words.length < 2) return name.trim();
+  const last = words[words.length - 1].toLowerCase().replace(/^&/u, "");
+  if (!LEGAL_SUFFIXES.includes(last)) return name.trim();
+  return words.slice(0, -1).join(" ").replace(/\s*&$/u, "").trim();
+}
+
+/** Provider is compared with its legal suffix optional on BOTH sides, per
+ * the owner's ruling above. "Northfield Gas & Energy Ltd" and "Northfield
+ * Gas & Energy" are the same answer, so scoring one of them wrong — and,
+ * since #939, charging it the wrong-value penalty on top — would be
+ * measuring a naming convention rather than extraction.
+ *
+ * Deliberately narrow: only ONE trailing company-form word is optional, and
+ * only at the end. Everything else still has to match exactly, so a genuinely
+ * different name ("Direct Debit" for a water company) is still wrong. */
+function classifyProvider(expected: string, actual: string | undefined): Classification {
+  if (actual === expected) return "correct";
+  if (actual !== undefined && withoutLegalSuffix(actual) === withoutLegalSuffix(expected)) {
+    return "correct";
+  }
+  return actual === undefined ? "blank" : "wrong";
+}
+
 /** An expected date missing from an extractor that returned nothing at all
  * is a blank. Missing from an extractor that returned other dates instead
  * is wrong: something was offered, and it was not this. */
@@ -203,7 +250,7 @@ function scoreDocument(document: CorpusDocument, extracted: ExtractedFields): Do
   }
   if (expected.provider !== undefined) {
     possible += 1;
-    const classification = classifyScalar(expected.provider, extracted.provider);
+    const classification = classifyProvider(expected.provider, extracted.provider);
     earned += addPoint(fieldTotals, "provider", classification);
     if (classification !== "correct") {
       misses.push(
