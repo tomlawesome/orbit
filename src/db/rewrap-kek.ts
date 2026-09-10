@@ -1,9 +1,12 @@
 /**
  * Operator entry point for the KEK rewrap worker (#932): `pnpm rewrap-kek
- * --next-key-file <path>`. Run this before ever replacing the live
- * `document-kek` secret — see docs/administrator-operations.md, "Rotating
- * the document key-encryption key", for the full procedure and its accepted
- * trade-off.
+ * --next-key-file <path>`. Run this only after the running application has
+ * also been given the next key via `DOCUMENT_KEK_NEXT`/`DOCUMENT_KEK_NEXT_FILE`
+ * (#954, ADR-0024 decision 4) — see docs/administrator-operations.md,
+ * "Rotating the document key-encryption key", for the full procedure. With
+ * the next key loaded application-side, every row stays readable throughout:
+ * one already moved to the next key, and one the worker has not reached yet,
+ * are both readable by their own `key_id`.
  *
  * The current key comes from the ordinary runtime configuration
  * (`DOCUMENT_KEK`/`DOCUMENT_KEK_FILE`, unchanged); the next key is read only
@@ -70,7 +73,7 @@ async function main(): Promise<void> {
     await recordRotationCompleted(keys);
     process.stdout.write(
       "Rewrap complete: every row now decrypts only under the next key.\n"
-      + "Replace the live document-kek secret with it and restart Orbit to finish the rotation.\n",
+      + "Replace the live document-kek secret with it, remove DOCUMENT_KEK_NEXT, and restart Orbit to finish the rotation.\n",
     );
   } finally {
     nextKek.fill(0);

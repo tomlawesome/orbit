@@ -15,7 +15,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -188,6 +188,11 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
   let availabilityFinalized = false;
   try {
     ciphertext = await storage.readStagingCiphertext(record.stagingStorageKey, config.maxBytes);
+    // Picks by the staged object's own key_id (#954): held staging objects
+    // outlive a poll cycle (up to `scanRecoveryRetentionHours`), long enough
+    // to span a rotation window.
+    const stagingKek = keyEncryptionKeyFor(config, record.keyId);
+    if (!stagingKek) throw new Error("staging object's key is not held by this instance");
     plaintext = decryptDocument(ciphertext!, {
       documentId: job.documentId,
       householdId: record.householdId,
@@ -204,7 +209,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       wrappedDek: record.wrappedDek,
       wrapIv: record.wrapIv,
       wrapAuthTag: record.wrapAuthTag,
-    } as DocumentCryptoEnvelope, config.keyEncryptionKey);
+    } as DocumentCryptoEnvelope, stagingKek);
     quarantinePath = await storage.writeQuarantineBytes(job.documentId, plaintext);
     const scan = await scanFileWithClamAv(quarantinePath, config.clamAv);
     await storage.discardQuarantine(quarantinePath);
