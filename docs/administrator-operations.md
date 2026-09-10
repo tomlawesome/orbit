@@ -321,7 +321,7 @@ base `docker-compose.yml` without mail secret files.
 
 **The mailbox is not container configuration.** Since ADR-0017 an instance
 administrator sets it on the administration screen, and Orbit stores the
-password encrypted in its own database under the document key. No `IMAP_*`
+password encrypted in its own database under the encryption key. No `IMAP_*`
 environment variable is accepted any more; a leftover one in `.env-orbit`
 fails the configuration check as a removed key. Outbound SMTP is unchanged and
 is still deployment configuration.
@@ -492,7 +492,7 @@ and none is a container setting.
   restarting the exact deployed image. Never place a credential in a command,
   screenshot, issue, log, or acceptance record.
 
-If the document key is replaced **without** rewrapping — a recovery-bundle
+If the encryption key is replaced **without** rewrapping — a recovery-bundle
 import, or repair regenerating `document-kek` when no document volume is
 retained — the stored mailbox credential can no longer be decrypted. Mail-in
 reports `credential_locked`, polling stops, and an administrator re-enters the
@@ -536,6 +536,50 @@ malformed or incomplete proof, and emits no raw provider material.
 `ORBIT_ACCEPTANCE_MODE=fake` is deterministic synthetic contract evidence for
 ordinary CI only. Its record is explicitly non-representative and cannot be
 used as live provider or release acceptance.
+
+## Restoring the document key-encryption key
+
+An instance that starts without `DOCUMENT_KEK` is **locked**, not damaged.
+Nothing is lost and nothing is overwritten: documents cannot be opened,
+encrypted notes, references and mail-in extracts cannot be read or written,
+and every item edit is refused with a 503, because saving an item rewrites its
+encrypted fields. The rest of Orbit stays usable, which is deliberate
+(ADR-0024 decision 5) — a missing key must not take the household's list down
+with it.
+
+Members see this at the field: "locked — safe, but unreadable right now", and
+a paused edit panel that names an administrator as who fixes it. The
+administration screen shows one "Encrypted details are locked" card with how
+many items and mail-in messages are waiting. No count and no key mechanic
+reaches a member, and Orbit never claims the data is gone, because it is not.
+
+To restore it, put the same key back where the deployment expects it and
+restart the exact deployed image:
+
+1. Confirm which key this database was written under. Every wrapped row
+   records its own `key_id`, and the startup log names the key id Orbit is
+   holding. A key that is not the one that wrote them leaves everything locked
+   exactly as it was — a wrong key can never damage a value, because
+   authenticated decryption refuses rather than guesses.
+2. Restore the key file from wherever you kept it — your recovery bundle, or
+   the secrets directory backup — with owner-only permissions:
+   ```sh
+   install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek
+   ```
+3. Restart the deployment:
+   ```sh
+   bash scripts/deploy-container.sh --pull
+   ```
+4. Confirm on the administration screen that the "Encrypted details are
+   locked" card has gone. It disappears the moment the instance holds a usable
+   key; nothing needs re-encrypting and no backfill runs, because the values
+   were never changed.
+
+If the key is genuinely gone and no recovery bundle holds it, this is not a
+restore. Encrypted documents and Tier 1 metadata are unrecoverable by design
+when both the key and the bundle are lost — that is the whole point of the
+encryption — and the way back is a restore of both the database and the key
+from a backup that has them together (ADR-0004).
 
 ## Rotating the document key-encryption key
 

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { readInboxScreen, approveReceipt, dismissReceipt } from "$lib/data/workspace.js";
   import { money, ago, agoLong } from "$lib/format.js";
+  import { LOCKED, evidenceReadable, fieldState, receiptWords } from "$lib/data/metadata-status.js";
   import { daysUntil } from "$lib/data/chart.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
@@ -97,10 +98,24 @@
    * @param {string} field
    */
   const mark = (receipt, field) => {
+    /* #941: fieldEvidence damaged on its own loses the provenance, not the
+       values, so the marks go and the values stay. A mark Orbit can no longer
+       stand behind is worse than no mark at all. */
+    if (!evidenceReadable(receipt.metadataStatus)) return null;
     const evidence = receipt.fieldEvidence?.[field];
     if (!evidence) return null;
     return evidence.confidence === "low" ? "READ · UNSURE" : "READ · SURE";
   };
+  /* Why Orbit cannot read a message, in the member's words, or null when it
+     can. Locked: intact, waiting for an administrator -- there is nothing to
+     review and nothing to accept, so those two ways in go, and the receipt
+     stays queued rather than being retired as a failure. Damaged: Orbit's copy
+     is gone, but the member's own mailbox still has the original, so every
+     action stays and the words say to forward it again. */
+  /** @param {import('$lib/data/workspace.js').Receipt | import('$lib/data/workspace.js').MailFailure} receipt */
+  const unreadable = (receipt) => receiptWords(receipt.metadataStatus);
+  /** @param {import('$lib/data/workspace.js').Receipt} receipt */
+  const locked = (receipt) => fieldState(receipt.metadataStatus, "proposal") === LOCKED;
   /* The list API names no files yet (#467): the fixture carries the design's
      names; live data degrades to the honest count. */
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
@@ -188,15 +203,23 @@
             {#each chips(receipt) as chip (chip)}
               <span class="attach">{chip.split(" · scanned clean")[0]} · <span class="clean">scanned clean</span></span>
             {/each}
+            <!-- The card's own quiet mono (.twotap), not an alarm colour: one
+                 of these two states is a wait and the other has a remedy the
+                 member can carry out, and neither is this screen's emergency. -->
+            {#if unreadable(receipt)}
+              <div class="twotap" style="margin-top:10px">{unreadable(receipt)}</div>
+            {/if}
             <div class="actions">
-              <button class="yes" disabled={busy === receipt.id} onclick={() => tap(receipt, "approve")}>
+              <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={() => tap(receipt, "approve")}>
                 {armed.id === receipt.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
               </button>
               <button disabled={busy === receipt.id} onclick={() => tap(receipt, "dismiss")}>
                 {armed.id === receipt.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
               </button>
               <span class="twotap">— both ask twice</span>
-              <a href={resolve("/item/[id]", { id: receipt.id })}>review &amp; amend →</a>
+              {#if !locked(receipt)}
+                <a href={resolve("/item/[id]", { id: receipt.id })}>review &amp; amend →</a>
+              {/if}
             </div>
             {#if problem && armed.id === receipt.id}
               <div class="mail-problem">{problem}</div>
@@ -231,7 +254,7 @@
             <i aria-hidden="true"></i>
             <div class="body">
               <b>A message from {short(failure.receivedAt)}</b>
-              <span>{failure.message}</span>
+              <span>{unreadable(failure) ?? failure.message}</span>
             </div>
             {#if failure.canDiscard}
               <button disabled={busy === failure.id} onclick={() => tap(failure, "dismiss")}>

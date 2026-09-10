@@ -21,6 +21,7 @@ import {
   MetadataIntegrityError,
   type MetadataColumn,
 } from "@/server/metadata/crypto";
+import { noteMetadataDamage, noteMetadataReadable } from "@/server/metadata/damage-sightings";
 import {
   loadMetadataKey,
   metadataCryptoAvailable,
@@ -71,6 +72,11 @@ export interface MetadataNumberResult {
 }
 
 function recordDamage(column: MetadataColumn, rowId: string): void {
+  // Two records, deliberately: the log line is the per-occurrence diagnostic
+  // ADR-0024 decision 5 requires, and the sighting is what lets an
+  // administrator be told how many there are (#941). Neither carries the
+  // value, the ciphertext or any key material.
+  noteMetadataDamage(column, rowId);
   log.warn({
     event: "metadata.integrity",
     state: "degraded",
@@ -107,7 +113,9 @@ export class MetadataCipher {
     }
     if (!this.material) return { value: null, state: "metadata_locked" };
     try {
-      return { value: decryptMetadataValue(stored.encrypted, this.material.dataKey, { column, rowId }) };
+      const value = decryptMetadataValue(stored.encrypted, this.material.dataKey, { column, rowId });
+      noteMetadataReadable(column, rowId);
+      return { value };
     } catch (error) {
       if (!(error instanceof MetadataIntegrityError)) throw error;
       recordDamage(column, rowId);
@@ -128,7 +136,9 @@ export class MetadataCipher {
       return { value: {}, state: "metadata_integrity_failed" };
     }
     try {
-      return { value: asRecord(JSON.parse(decrypted)) };
+      const value = asRecord(JSON.parse(decrypted));
+      noteMetadataReadable(column, rowId);
+      return { value };
     } catch {
       // Authenticated bytes that are not JSON cannot come from this writer.
       recordDamage(column, rowId);
@@ -182,6 +192,7 @@ export class MetadataCipher {
       recordDamage(column, rowId);
       return { value: null, state: "metadata_integrity_failed" };
     }
+    noteMetadataReadable(column, rowId);
     return { value: parsed };
   }
 
@@ -241,9 +252,13 @@ export async function openReceiptMetadataWriter(
  * The refusal every encrypted-metadata writer gives when the instance has no usable KEK
  * (ADR-0024 decision 5). It matches what document operations already do: the
  * application stays usable and only the encrypted surface locks.
+ *
+ * "the encryption key", not "the document key": the owner ruled on 2026-09-10
+ * that one key gets one name wherever a person reads it, because two names for
+ * the same thing read as two different faults.
  */
 export function metadataLockedError(): AppError {
-  return new AppError("metadata_locked", "Encrypted details cannot be saved until the document key is available", 503);
+  return new AppError("metadata_locked", "Encrypted details cannot be saved until the encryption key is available", 503);
 }
 
 /** `openMetadataWriter`, with a locked instance surfaced as a refused write. */

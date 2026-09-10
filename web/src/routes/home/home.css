@@ -335,6 +335,15 @@
   .itemview .kv:last-of-type{border-bottom:0}
   .itemview .kv b{color:var(--ink);font-weight:500;text-align:right}
   .itemview .kv b.over{color:var(--overdue-text)}
+  /* #941, the same b.<state> family: damaged carries inbox.css's .failed dot
+     and its --degraded tint, locked is --ink-quiet and nothing else, because
+     waiting for an administrator is not a failure. */
+  .itemview .kv b.failed{color:var(--degraded);font-weight:450}
+  .itemview .kv b.failed i{display:inline-block;width:8px;height:8px;border-radius:50%;
+    background:var(--degraded);margin-right:7px;vertical-align:baseline}
+  .itemview .kv b.locked{color:var(--ink-quiet);font-weight:450}
+  .itemview p.failed{color:var(--degraded)}
+  .itemview p.locked{color:var(--ink-quiet)}
   .itemview h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
                color:var(--ink-quiet);margin:18px 0 8px}
   .itemview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;

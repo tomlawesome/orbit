@@ -534,6 +534,31 @@ export const metadataKeys = pgTable("metadata_keys", {
   ),
 ]);
 
+/**
+ * One Tier 1 value that failed its integrity check, the first time anything
+ * saw it fail (#941, ADR-0024 decision 5). Damage is only discoverable by
+ * decrypting, so without this record there is nothing for an administrator to
+ * count: a damaged note is found when somebody opens the item, and is then
+ * forgotten again as soon as the response is sent.
+ *
+ * Keyed exactly like the value's own content AAD — table, column, row — so a
+ * sighting names one value and never the row's other encrypted column. The row
+ * is deleted when that value is written over, which is the repair.
+ *
+ * Deliberately no foreign key: `row_id` addresses two different tables, so no
+ * single reference could cover it. The counts join the owning table instead,
+ * which is also what stops a receipt that has since burned up inflating them.
+ */
+export const metadataDamageSightings = pgTable("metadata_damage_sightings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tableName: text("table_name").notNull(),
+  columnName: text("column_name").notNull(),
+  rowId: uuid("row_id").notNull(),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("metadata_damage_sighting_value_unique").on(table.tableName, table.columnName, table.rowId),
+]);
+
 /** Durable, idempotent worker jobs for document lifecycle operations. */
 export const documentJobs = pgTable("document_jobs", {
   id: uuid("id").primaryKey().defaultRandom(),

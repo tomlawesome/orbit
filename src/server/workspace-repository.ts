@@ -25,6 +25,7 @@ import {
   type WorkspaceState,
 } from "@/lib/workspace";
 import { planOwnershipTransfer } from "@/server/household-ownership";
+import { clearMetadataDamageForRow } from "@/server/metadata/damage-sightings";
 import { openMetadataReaders, requireMetadataWriter } from "@/server/metadata/fields";
 import {
   acquireActiveHouseholdLock,
@@ -534,6 +535,12 @@ export async function applyWorkspaceCommand(
       } else {
         await transaction.insert(items).values({ id: itemId, householdId, version: 1, ...values });
       }
+      // Every encrypted column on the row was just rewritten - Tier 1 and, since
+      // #963, Tier 2 - so anything this row had been seen damaged in is gone
+      // with the ciphertext that was damaged (#941).
+      // In the same transaction as the write, so a rolled-back save cannot
+      // leave the administrator count claiming a repair that did not happen.
+      await clearMetadataDamageForRow("items", itemId, transaction);
       await transaction.delete(dueEvents).where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt)));
       if (command.item.dueDate && command.item.scheduleKind) {
         await transaction.insert(dueEvents).values({

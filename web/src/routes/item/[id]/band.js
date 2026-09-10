@@ -104,6 +104,7 @@ import { seededRng } from "$lib/sky.js";
  * @property {?string}    provider
  * @property {?string}    reference
  * @property {?string}    notes
+ * @property {?{reference?: string, notes?: string}} metadataStatus  why a Tier 1 field is absent (#941)
  * @property {string}     status
  * @property {?string}    snoozedUntil
  * @property {?string}    due
