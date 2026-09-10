@@ -23,20 +23,26 @@ import { proposalFromText } from "./suggestions";
 // wiring and the measurement happened here, afterwards, so no document could
 // be adjusted after seeing what it scored.
 //
-// Measured 2026-09-10, under #939's scoring: minimum of 5 runs 85.2%
-// (46/54) -- provider 53.3% (8/15), reference 92.3% (12/13), dates 100.0%
-// (26/26). That is the first honest reading since 2c66021, and it says the
-// same thing the first fresh hold-out said before it was spent: provider is
-// the hard field and dates are close to solved.
+// Measured 2026-09-10: minimum of 5 runs 92.6% (50/54) -- provider 80.0%
+// (12/15), reference 92.3% (12/13), dates 100.0% (26/26). The first honest
+// reading since 2c66021, and it says what the first fresh hold-out said
+// before it was spent: provider is the hard field, dates are close to
+// solved.
 //
-// Two of the seven provider misses are scored wrong rather than blank
-// because the extractor returned the name WITH its legal suffix
-// ("Northfield Gas & Energy Ltd" against an expected "Northfield Gas &
-// Energy", and the same for "Fenwick Motors Ltd"). Whether the suffix
-// belongs in a provider name is a question about what the field means, not
-// a defect, and #939's wrong-value penalty makes it cost double. Raised on
-// #937 for the owner rather than settled here: editing the expectations
-// after seeing the score is the exact move a hold-out exists to prevent.
+// It first read 85.2% (46/54). The difference was not extraction: two
+// provider answers were returned with a legal suffix ("Northfield Gas &
+// Energy Ltd" against an expected "Northfield Gas & Energy", likewise
+// "Fenwick Motors Ltd"), and #939's wrong-value penalty charged each of
+// them double for it. The owner ruled on 2026-09-10 that the suffix is
+// technically the more correct form but a name without it is equally
+// acceptable, so `classifyProvider` now treats the two as one answer and
+// the four points came back. The corpus was NOT edited to reach that
+// number -- the meaning of the field was settled instead, which is the only
+// move available once a hold-out has been scored.
+//
+// The four remaining misses are all genuine blanks: a sender in an email
+// header rather than a letterhead, a plan name, a brand carrying a "+", and
+// one reference.
 //
 // No floor, for the same reasons as the first hold-out: the tuning corpus
 // carries the ratchet, and a floor here invites editing the paper until the
