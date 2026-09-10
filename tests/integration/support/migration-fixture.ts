@@ -89,6 +89,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   imap_ingestion_staging_objects: ["id", "message_id", "lease_token", "storage_key", "status", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
   imap_notification_deliveries: ["id", "message_id", "user_id", "kind", "status", "attempts", "next_attempt_at", "locked_at", "lease_token", "sent_at", "failure_code", "created_at", "updated_at"],
   metadata_keys: ["id", "scope", "household_id", "envelope_version", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "version", "created_at", "updated_at"],
+  metadata_damage_sightings: ["id", "table_name", "column_name", "row_id", "first_seen_at"],
   mail_in_secrets: ["id", "kind", "ciphertext", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "created_by_user_id", "created_at", "updated_at"],
   mail_in_mailbox: ["singleton", "id", "host", "port", "account_user", "mailbox", "tls_server_name", "provider_profile", "auth_method", "trusted_recipient_header", "poll_seconds", "enabled", "verification_state", "verified_at", "password_secret_id", "alias_key_secret_id", "version", "created_at", "updated_at", "trusted_authserv_id"],
   mail_in_relays: ["user_id", "current_generation", "previous_generation", "previous_expires_at", "ingest_paused_at", "rotated_at", "version", "created_at", "updated_at"],
@@ -136,6 +137,7 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   // uniqueness, and migrations.test.ts asserts the singleton behaviour itself.
   metadata_keys_instance_unique: { table: "metadata_keys", columns: ["scope"], unique: true },
   metadata_keys_key_id_idx: { table: "metadata_keys", columns: ["key_id"], unique: false },
+  metadata_damage_sighting_value_unique: { table: "metadata_damage_sightings", columns: ["table_name", "column_name", "row_id"], unique: true },
   imap_attachment_processing_claim_idx: { table: "imap_ingestion_messages", columns: ["status", "attachment_processing_locked_at", "created_at"], unique: false },
   imap_staging_object_message_status_idx: { table: "imap_ingestion_staging_objects", columns: ["message_id", "status"], unique: false },
   imap_staging_object_created_idx: { table: "imap_ingestion_staging_objects", columns: ["status", "created_at"], unique: false },
@@ -241,6 +243,7 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   instance_authority_primary_user_id_users_id_fk: foreign("instance_authority", ["primary_user_id"], "users", ["id"], "restrict"),
   instance_maintenance_pkey: primary("instance_maintenance", ["singleton"]),
   metadata_keys_pkey: primary("metadata_keys", ["id"]),
+  metadata_damage_sightings_pkey: primary("metadata_damage_sightings", ["id"]),
   metadata_keys_household_id_households_id_fk: foreign("metadata_keys", ["household_id"], "households", ["id"], "cascade"),
   instance_maintenance_current_window_id_fk: foreign("instance_maintenance", ["current_window_id"], "maintenance_windows", ["id"], "no_action"),
   instance_contact_pkey: primary("instance_contact", ["singleton"]),

@@ -183,6 +183,10 @@
  * @property {string} [message]
  * @property {ItemProposal} [proposal]
  * @property {Record<string, { source: string, confidence: string }>} [fieldEvidence]
+ * @property {?{proposal?: string, fieldEvidence?: string}} [metadataStatus]
+ *   Read-only (ADR-0024, #941): why the extract is absent rather than empty --
+ *   `metadata_integrity_failed` for a draft that would not decrypt,
+ *   `metadata_locked` while the instance holds no usable encryption key.
  * @property {{ displayName?: string, sizeBytes?: number, scannedClean?: boolean }[]} [attachments]
  */
 
@@ -225,6 +229,7 @@
  * @property {string} [classification]
  * @property {string} [message]
  * @property {Record<string, { source: string, confidence: string }>} [fieldEvidence]
+ * @property {?{proposal?: string, fieldEvidence?: string}} [metadataStatus]
  */
 
 /**
@@ -689,6 +694,7 @@ function todayOf(workspace) {
  * @property {string} classification
  * @property {string} message
  * @property {boolean} canDiscard
+ * @property {?{proposal?: string, fieldEvidence?: string}} [metadataStatus]
  */
 
 /**
@@ -1013,7 +1019,7 @@ export async function commandContact(command) {
  * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox, contact, rotation] = await Promise.all([
+  const [workspace, session, users, mailbox, contact, rotation, metadata] = await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
@@ -1031,6 +1037,17 @@ export async function readAdminScreen() {
       .then(
         (/** @type {{ rotation?: { inProgress: boolean, startedAt: string | null, secondKeyLoaded: boolean } }} */ body) =>
           body.rotation ?? null,
+      )
+      .catch(() => null),
+    /* Locked and damaged Tier 1 metadata (#941), from the health route that
+       already answers for the document subsystem rather than a surface of its
+       own. Additive on the same terms as the rotation above: a route that
+       cannot answer means no cards, never a sunk screen, and an instance with
+       nothing wrong renders nothing at all. */
+    json(await fetch("/api/admin/documents/health", { credentials: "same-origin" }))
+      .then(
+        (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
+          body.health?.metadata ?? null,
       )
       .catch(() => null),
   ]);
@@ -1066,9 +1083,25 @@ export async function readAdminScreen() {
     mailbox,
     contact,
     rotation,
+    metadata,
     owners,
   };
 }
+
+/**
+ * The Tier 1 metadata section of GET /api/admin/documents/health (#941).
+ * Counts and one boolean: no table, column, row or household crosses this
+ * boundary, because per-occurrence detail belongs in the administrator
+ * diagnostics and this screen is the aggregate.
+ *
+ * @typedef {object} MetadataHealth
+ * @property {boolean} locked
+ * @property {number} lockedItems
+ * @property {number} lockedReceipts
+ * @property {number} damagedValues
+ * @property {number} damagedItems
+ * @property {number} damagedReceipts
+ */
 
 /**
  * The mail-machinery rows, as words rather than fields. Deliberately bounded:
@@ -1147,6 +1180,9 @@ export async function readItem(id) {
       return {
         ...suggestion,
         suggestion: true,
+        /* #941: the amend-then-accept card has to know when Orbit cannot read
+           the message it is offering to amend. */
+        metadataStatus: receipt?.metadataStatus ?? null,
         proposal: receipt?.proposal ?? {},
         attachmentCount: receipt?.attachmentCount ?? 0,
         today: new Date().toISOString().slice(0, 10),

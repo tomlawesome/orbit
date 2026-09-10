@@ -4,6 +4,7 @@
   import { resolve } from "$app/paths";
   import { mountItemSky } from "./sky.js";
   import { approveReceipt, dismissReceipt, readWorkspace } from "$lib/data/workspace.js";
+  import { LOCKED, evidenceReadable, fieldState, receiptWords, saveProblem } from "$lib/data/metadata-status.js";
   import "./item.css";
 
   /**
@@ -53,8 +54,20 @@
   let acceptArmedDismiss = $state(false);
   /** @type {string | null} */
   let acceptOpId = null;
+  /* #941: what Orbit cannot read about this message, if anything. A locked
+     proposal cannot be amended or accepted -- the whole card is a read of an
+     unreadable value -- while a damaged one has a real recovery path nothing
+     else on this screen has: the original is still in the member's mailbox. */
+  const unreadable = $derived(receiptWords(item?.metadataStatus));
+  /* Locked alone stops acceptance: the values are there and unreadable, so
+     nothing anyone types here is the message. A damaged proposal keeps every
+     action -- the fields are editable, and re-forwarding is the real repair. */
+  const proposalLocked = $derived(fieldState(item?.metadataStatus, "proposal") === LOCKED);
+  /* fieldEvidence damaged on its own loses the provenance, not the values, so
+     the from-document accents go and nothing else does. */
+  const evidenceShown = $derived(evidenceReadable(item?.metadataStatus));
   /** @param {string} field */
-  const marked = (field) => Boolean(item?.fieldEvidence?.[field]);
+  const marked = (field) => evidenceShown && Boolean(item?.fieldEvidence?.[field]);
 
   async function accept() {
     busy = true;
@@ -90,7 +103,7 @@
       /* Accepted: it is an item now, so it has a seat in the belt. */
       await goto(result.itemId ? resolve("/item/[id]", { id: result.itemId }) : resolve("/home"));
     } catch (error) {
-      problem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      problem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
     } finally {
       busy = false;
     }
@@ -157,8 +170,11 @@
       {#if (item.attachmentCount ?? 0) > 0}
         <div class="note">◆ {item.sourceDocument} will be attached on acceptance</div>
       {/if}
+      {#if unreadable}
+        <div class="note">{unreadable}</div>
+      {/if}
       <div class="save-row">
-        <button class="btn-primary" disabled={busy || !sform.title.trim()} onclick={accept}>
+        <button class="btn-primary" disabled={busy || proposalLocked || !sform.title.trim()} onclick={accept}>
           accept into orbit
         </button>
         <button class="btn-quiet" style="--act:var(--overdue);--act-text:var(--overdue-text)" disabled={busy} onclick={dismissSuggestion}>
