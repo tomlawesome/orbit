@@ -43,6 +43,8 @@ const HANDLER_NAMES = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 const EXPECTED_ROUTES = [
   "/api/admin/contact",
   "/api/admin/documents/health",
+  // Whether a document-KEK rotation is open and since when (#956).
+  "/api/admin/documents/rotation",
   "/api/admin/mailbox",
   "/api/admin/maintenance",
   "/api/admin/operations",

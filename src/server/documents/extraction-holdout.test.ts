@@ -23,6 +23,20 @@ import { proposalFromText } from "./suggestions";
 // ADR-0025 minimum of five runs: the heuristic is deterministic, so its
 // five runs are identical and minimum equals maximum. The repetition is
 // the shape a non-deterministic extractor will be measured in.
+//
+// Issue #939 (2026-09-10) changed the scoring the same way it changed the
+// tuning corpus's: a wrong value now costs more than a blank
+// (`WRONG_VALUE_PENALTY` in `extraction-scoring.ts`), and the printed line
+// below now carries a per-field breakdown (provider, reference, dates)
+// alongside the overall figure. Measurement only — this corpus and the
+// extractor were not touched for #939.
+//
+// Re-measured 2026-09-10 under that scoring: minimum of 5 runs 100.0%
+// (57/57) — provider 100.0% (13/13), reference 100.0% (12/12), dates
+// 100.0% (32/32). Still no floor, for the reasons above; still no wrong
+// values for the heuristic to be penalised on, which is why the number did
+// not move from its pre-#939 reading. Still the owner's to set a floor
+// against, once seen and held still across a few changes.
 
 const ADR_0025_MINIMUM_HOLDOUT_DOCUMENTS = 10;
 

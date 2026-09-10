@@ -1013,7 +1013,7 @@ export async function commandContact(command) {
  * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox, contact] = await Promise.all([
+  const [workspace, session, users, mailbox, contact, rotation] = await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
@@ -1024,6 +1024,15 @@ export async function readAdminScreen() {
       .catch(() => []),
     readMailboxSettings(),
     readContactSettings(),
+    /* An open document-key rotation (#956). Additive: a route that cannot
+       answer (fixture harness, older server) means no card, never a sunk
+       screen — and "no rotation open" renders as nothing at all. */
+    json(await fetch("/api/admin/documents/rotation", { credentials: "same-origin" }))
+      .then(
+        (/** @type {{ rotation?: { inProgress: boolean, startedAt: string | null, secondKeyLoaded: boolean } }} */ body) =>
+          body.rotation ?? null,
+      )
+      .catch(() => null),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   /* Real owner names where the members route answers (#453); the fixture's
@@ -1056,6 +1065,7 @@ export async function readAdminScreen() {
     relay: mailbox ? relayRowsOf(mailbox) : adminFixture.relay,
     mailbox,
     contact,
+    rotation,
     owners,
   };
 }

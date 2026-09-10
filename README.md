@@ -596,6 +596,13 @@ profile for authenticated household-lifecycle acceptance. Coverage is
 diagnostic while the database/API integration baseline is established; it is
 not an arbitrary release percentage.
 
+Every corpus committed to the repository is invented — real paperwork must
+never be committed. If you want to know how extraction does against your own
+real documents, [private local evaluation](docs/private-eval.md) runs
+entirely on your machine, against a directory you choose outside the repo,
+and prints only per-field and overall scores; it structurally refuses to run
+against anything inside the repository and never prints document content.
+
 The [v1 charter](docs/v1-charter.md) defines the supported release,
 [architecture and ADRs](docs/architecture.md) record durable system decisions,
 and the [quality strategy](docs/quality-strategy.md) defines test and CI

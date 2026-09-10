@@ -5,7 +5,10 @@ const mocks = vi.hoisted(() => ({
   config: {
     scanMode: "required",
     clamAv: { host: "private-scanner.internal", port: 3310, timeoutMs: 30_000 },
+    keyId: "live-current-key-id",
+    nextKeyId: null as string | null,
   },
+  recordRotationStarted: vi.fn(),
   getAuthConfig: vi.fn(),
   pingClamAv: vi.fn(),
   log: {
@@ -66,6 +69,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/server/documents/config", () => ({
   getDocumentConfig: () => mocks.config,
+}));
+
+vi.mock("@/server/documents/rewrap-worker", () => ({
+  recordRotationStarted: mocks.recordRotationStarted,
 }));
 
 vi.mock("@/server/documents/scanner", () => ({
@@ -573,5 +580,105 @@ describe("scanner readiness diagnostics", () => {
       reason: "scan_mode_disabled",
       action: "none",
     });
+  });
+});
+
+describe("kek rotation visibility at startup (#956)", () => {
+  let reportKekRotationInProgressNode: () => Promise<void>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mocks.renderedText.length = 0;
+    mocks.renderedJson.length = 0;
+    mocks.config.nextKeyId = null;
+    mocks.recordRotationStarted.mockReset();
+    resetAuthObservabilityForTests();
+    vi.resetModules();
+
+    const nodeModule = await import("./boot");
+    reportKekRotationInProgressNode = nodeModule.reportKekRotationInProgress;
+  });
+
+  afterEach(() => {
+    mocks.config.nextKeyId = null;
+  });
+
+  it("says nothing when no second key is loaded", async () => {
+    await expect(reportKekRotationInProgressNode()).resolves.toBeUndefined();
+
+    expect(mocks.recordRotationStarted).not.toHaveBeenCalled();
+    expect(mocks.log.warn).not.toHaveBeenCalled();
+    expect(mocks.log.info).not.toHaveBeenCalled();
+  });
+
+  it("records the start once and warns with how long the rotation has been open", async () => {
+    mocks.config.nextKeyId = "incoming-next-key-id";
+    const startedAt = new Date(Date.now() - 3 * 60 * 60 * 1_000);
+    mocks.recordRotationStarted.mockResolvedValue({
+      startedAt,
+      previousKeyId: "live-current-key-id",
+      nextKeyId: "incoming-next-key-id",
+    });
+
+    await expect(reportKekRotationInProgressNode()).resolves.toBeUndefined();
+
+    expect(mocks.recordRotationStarted).toHaveBeenCalledWith({
+      previousKeyId: "live-current-key-id",
+      nextKeyId: "incoming-next-key-id",
+    });
+    expect(mocks.log.warn).toHaveBeenCalledWith(expect.objectContaining({
+      event: "document.kek_rotation",
+      state: "starting",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+      durationMs: expect.any(Number),
+    }));
+    const [event] = mocks.log.warn.mock.calls[0] as [{ durationMs: number }];
+    expect(event.durationMs).toBeGreaterThanOrEqual(3 * 60 * 60 * 1_000);
+    /* What the operator actually sees names both keys and the remedy. */
+    const rendered = mocks.renderedText.join("\n");
+    expect(rendered).toContain("rotation in progress from key live-current-key-id to incoming-next-key-id");
+    expect(rendered).toContain("finish the rewrap and remove DOCUMENT_KEK_NEXT");
+  });
+
+  it("still warns, without a duration, when the started row cannot be written", async () => {
+    mocks.config.nextKeyId = "incoming-next-key-id";
+    mocks.recordRotationStarted.mockRejectedValue(new Error("database unavailable"));
+
+    await expect(reportKekRotationInProgressNode()).resolves.toBeUndefined();
+
+    expect(mocks.log.warn).toHaveBeenCalledWith({
+      event: "document.kek_rotation",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+    });
+    const inProgress = (mocks.log.warn.mock.calls as Array<[{ state: string; durationMs?: number }]>)
+      .map(([event]) => event)
+      .find((event) => event.state === "starting");
+    expect(inProgress).toBeDefined();
+    expect(inProgress?.durationMs).toBeUndefined();
+    expect(mocks.renderedText.join("\n")).toContain("rotation in progress from key live-current-key-id");
+  });
+
+  it("stays silent when document configuration itself is invalid — that path has its own reporting", async () => {
+    /* Scoped to this test's fresh module registry rather than a shared
+       mutable flag, so an earlier test's still-in-flight startup probe can
+       never observe a throwing config and log noise into someone else's
+       assertions. */
+    vi.resetModules();
+    vi.doMock("@/server/documents/config", () => ({
+      getDocumentConfig: () => { throw new Error("document configuration invalid"); },
+    }));
+    try {
+      const { reportKekRotationInProgress } = await import("./boot");
+      await expect(reportKekRotationInProgress()).resolves.toBeUndefined();
+
+      expect(mocks.recordRotationStarted).not.toHaveBeenCalled();
+      expect(mocks.log.warn).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@/server/documents/config");
+    }
   });
 });
