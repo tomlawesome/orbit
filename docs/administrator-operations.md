@@ -468,12 +468,17 @@ and none is a container setting.
   restarting the exact deployed image. Never place a credential in a command,
   screenshot, issue, log, or acceptance record.
 
-If the document key is replaced without rewrapping (a recovery-bundle import,
-or repair regenerating `document-kek`), the stored mailbox credential can no
-longer be decrypted. Mail-in reports `credential_locked`, polling stops, and
-an administrator re-enters the password on the same screen. A mailbox password
-is re-obtainable from the provider; documents are not, which is why this
-degradation is acceptable.
+If the document key is replaced **without** rewrapping — a recovery-bundle
+import, or repair regenerating `document-kek` when no document volume is
+retained — the stored mailbox credential can no longer be decrypted. Mail-in
+reports `credential_locked`, polling stops, and an administrator re-enters the
+password on the same screen. A mailbox password is re-obtainable from the
+provider; documents and Tier 1 metadata are not, which is why this degradation
+is acceptable for those two paths specifically: both are a wholesale key
+*replacement*, not a rotation, and neither carries the old key forward for a
+rewrap to use. An ordinary planned rotation is different — see "Rotating the
+document key-encryption key" below — and leaves every credential, document and
+Tier 1 field readable throughout.
 
 ### Exact-image mailbox acceptance
 
@@ -507,6 +512,59 @@ malformed or incomplete proof, and emits no raw provider material.
 `ORBIT_ACCEPTANCE_MODE=fake` is deterministic synthetic contract evidence for
 ordinary CI only. Its record is explicitly non-representative and cannot be
 used as live provider or release acceptance.
+
+## Rotating the document key-encryption key
+
+`DOCUMENT_KEK` wraps three populations: document encryption keys
+(`document_crypto`), the per-household Tier 1 metadata keys (`metadata_keys`,
+ADR-0024), and the mail-in mailbox credential and alias key (`mail_in_secrets`,
+ADR-0017). Rotating it is always an operator decision (#932) — nothing in
+Orbit rotates it automatically or on a schedule.
+
+1. Generate a fresh key and keep it out of the deployment directory until
+   step 3:
+   ```sh
+   openssl rand -hex 32 > /path/outside/the/deployment/next-document-kek
+   ```
+2. Run the rewrap worker with Orbit still on the **current** key. It reads
+   the live key exactly as the running application does and takes the next
+   key only from the file you give it:
+   ```sh
+   pnpm rewrap-kek --next-key-file /path/outside/the/deployment/next-document-kek
+   ```
+   It reports progress and keeps going until every `document_crypto`,
+   `metadata_keys` and `mail_in_secrets` row is wrapped under the next key,
+   resuming correctly if you stop it (Ctrl-C, a crash, a host reboot) and run
+   it again — every row it has not yet reached is still fully readable under
+   the current key, and every row it has already moved is fully readable
+   under the next one; a batch is one transaction, so a row is never left
+   half-migrated. It records one `document_kek_rotation_completed` audit
+   entry when it finishes.
+3. Only once it reports completion, replace the live secret and restart:
+   ```sh
+   mv /path/outside/the/deployment/next-document-kek .orbit-secrets/document-kek
+   docker compose --env-file .env-orbit restart orbit-app
+   ```
+   Orbit derives `DOCUMENT_KEK`'s id from the key bytes themselves, so a
+   restart after a completed rewrap always finds every row already on the key
+   it just loaded — nothing needs to know the id in advance.
+
+**The accepted trade-off.** Until step 3, Orbit keeps running on the current
+key exactly as before, and steps 1–2 need no maintenance window or downtime
+scheduling. But a row the worker has *already* moved to the next key is
+briefly unreadable to the still-current-keyed running application — the same
+`document_key_unavailable` / `metadata_locked` / `credential_locked` states a
+missing key produces — until step 3's restart, at which point every row
+becomes readable again at once because every row is by then on the same key.
+This is not corruption and nothing is lost; it is the cost of Orbit holding
+exactly one live key at a time. Run step 2 to completion promptly, and prefer
+a quiet period for it, to keep that window as short as practice allows.
+
+Recovery-bundle import and repair's `document-kek` regeneration remain
+wholesale key *replacements*, not rotations: neither carries the old key
+forward for a rewrap, so they still leave existing documents, Tier 1 fields
+and the mailbox credential unreadable under the new key (the paragraph above
+this section).
 
 ## Hostile document processor operation
 

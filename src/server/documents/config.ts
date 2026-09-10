@@ -45,6 +45,16 @@ export interface DocumentConfig {
   keyId: string;
 }
 
+/**
+ * The one place a document KEK's id is derived, so a rewrap operation (#932)
+ * computing the id of a candidate "next" key it was only just handed agrees,
+ * byte for byte, with what a running instance would derive from the same
+ * bytes once they became `DOCUMENT_KEK`.
+ */
+export function deriveDocumentKeyId(keyEncryptionKey: Buffer): string {
+  return createHash("sha256").update("orbit-document-kek-v1\0").update(keyEncryptionKey).digest("hex").slice(0, 24);
+}
+
 let cachedDocumentConfig: DocumentConfig | undefined;
 
 /**
@@ -82,7 +92,7 @@ export function getDocumentConfig(environment: NodeJS.ProcessEnv = process.env):
       timeoutMs: parsed.TIKA_TIMEOUT_MS,
     },
     keyEncryptionKey,
-    keyId: createHash("sha256").update("orbit-document-kek-v1\0").update(keyEncryptionKey).digest("hex").slice(0, 24),
+    keyId: deriveDocumentKeyId(keyEncryptionKey),
   };
 
   if (config.storageRoot === config.quarantineRoot) {
