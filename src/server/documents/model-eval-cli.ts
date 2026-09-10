@@ -42,10 +42,21 @@ export function adjudicationThreeWayExtractor(deadlineMs = MODEL_MAILBOX_DEADLIN
 }
 
 async function main(): Promise<void> {
+  // Optional first argument: how many repeats. ADR-0025 section 6's gate uses
+  // five and takes the minimum, which is the default. One repeat is for
+  // looking at a candidate's accuracy quickly while iterating -- it produces
+  // a number to read, never a number to gate on, because a single run cannot
+  // show the run-to-run variance the minimum exists to catch.
+  const requested = Number.parseInt(process.argv[2] ?? "", 10);
+  const runs = Number.isInteger(requested) && requested > 0 ? requested : undefined;
   const score = await scoreCorpusThreeWay(EXTRACTION_CORPUS, {
     heuristic: proposalFromText,
     threeWay: adjudicationThreeWayExtractor(),
+    runs,
   });
+  if (runs !== undefined && runs < 5) {
+    console.log(`(${runs} repeat${runs === 1 ? "" : "s"}, not the five the section 6 gate needs -- indicative only)\n`);
+  }
   console.log(formatThreeWayScore("tuning corpus", score));
   if (!score.model) {
     console.log(
