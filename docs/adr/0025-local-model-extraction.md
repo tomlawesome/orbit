@@ -392,8 +392,23 @@ The gate for the model path becoming the default where available:
   adjudicated accuracy over five runs exceeds the heuristics' hold-out
   accuracy by **at least 0.05** — that is the stated margin, measured where
   neither extractor was tuned;
-- on the tuning corpus, the model's minimum stays at or above
-  `ACCURACY_FLOOR`;
+- on the tuning corpus, the model's minimum stays at or above **its own
+  floor**, a separate constant from the heuristics' `ACCURACY_FLOOR`, set
+  the first time the model path is measured and recorded with the numbers
+  that set it (owner ruling, 2026-09-10).
+
+  Until #960 the two extractors shared one constant, because both could
+  attempt every point the corpus offered. They no longer can: the corpus now
+  scores the whole contract, the heuristics are forbidden from attempting
+  the four model-owned fields, and `ACCURACY_FLOOR` fell to 0.48 to track
+  the fraction of the contract the heuristics are permitted to cover. A bar
+  the heuristics clear without touching the model's fields asks nothing of
+  the model, which is the one extractor required to cover all of them — so
+  reusing that constant would have left this gate empty while still looking
+  like a gate.
+
+  The heuristics' floor keeps its own meaning unchanged: a ratchet on
+  regression in what they do attempt.
 - corpus ground truth is extended to the four fields and role-labelled
   dates first, so the gate judges the whole contract, not the easy quarter
   of it.
