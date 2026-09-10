@@ -57,13 +57,41 @@ describe("launcher install compatibility gate", () => {
 
     // The checkout's file over loopback: no repository-files URL, because
     // that would carry a job token the launcher's raw log could echo.
-    expect(job).toContain('ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="http://127.0.0.1:');
-    expect(job).toContain('"$CI_PROJECT_DIR/scripts/install.sh"');
+    expect(job).toContain('installer_base="http://127.0.0.1:');
+    expect(job).toContain('ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="$installer_base/scripts/install.sh"');
     expect(job).not.toContain("job_token");
     expect(job).not.toContain("CI_JOB_TOKEN");
     // The job must outlive the suite's own 30-minute limit.
     expect(job).toMatch(/timeout: 35m/u);
     expect(job).toContain("-timeout 30m");
+  });
+
+  it("serves the whole configuration tree the launcher stages, at the paths it derives (#957)", () => {
+    const job = launcherCompatJob();
+
+    // orbit-launcher's in-console configuration stages its own tree before
+    // install.sh runs, fetching these from bases it derives from the
+    // install-script URL (scriptSourceURLs in internal/deploy/configure.go).
+    // Serving install.sh alone made every one a 404, so the launcher fell
+    // back to the terminal hand-off: silently before strict mode existed
+    // (#926), as a hard stop after it (#957). Pinned here rather than left to
+    // the compat job, which takes twenty minutes to say so.
+    for (const served of [
+      "scripts/install.sh",
+      "scripts/configure.sh",
+      "scripts/configuration.sh",
+      "scripts/installer-ui.sh",
+    ]) {
+      expect(job).toContain(`["/${served}", "${served}"]`);
+    }
+    // The root file, one level up from the scripts directory — which is what
+    // the /scripts prefix on the install-script URL above exists to produce.
+    expect(job).toContain('["/.env-orbit.example", ".env-orbit.example"]');
+
+    // Checked before the suite starts, so a file that stops being served
+    // fails in seconds naming the file rather than after a full run naming
+    // the hand-off.
+    expect(job).toContain("did not serve $served_file byte for byte");
   });
 
   it("always runs on a merge request into main, the promotion gate", () => {

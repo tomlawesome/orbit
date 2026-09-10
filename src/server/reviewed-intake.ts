@@ -21,6 +21,7 @@ import { type HomeItem } from "@/lib/domain";
 import { workspaceItemSchema } from "@/lib/workspace";
 import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
+import { openMetadataReader } from "@/server/metadata/tier1";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
 
 const proposalFields = [
@@ -228,13 +229,19 @@ async function reviewedItemMatches(input: ReviewedIntakeApproval, itemId: string
       .where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt))).limit(1);
     const reminders = await getDb().select({ daysBefore: reminderRules.daysBefore }).from(reminderRules)
       .where(eq(reminderRules.itemId, itemId));
+    // Tier 1 (ADR-0024): the persisted row's own household decides the key.
+    // A damaged value reads as null here, so it can never compare equal to an
+    // expected value and the approval is treated as a conflict, not a match.
+    const metadata = await openMetadataReader(existing.householdId);
+    const persistedReference = metadata.text("items.reference", existing.id, { encrypted: existing.referenceEnc, plaintext: existing.reference });
+    const persistedNotes = metadata.text("items.notes", existing.id, { encrypted: existing.notesEnc, plaintext: existing.notes });
     const persisted = {
       id: existing.id,
       sectionId: existing.sectionId,
       title: existing.title,
       subtype: existing.subtype ?? undefined,
       provider: existing.provider ?? undefined,
-      reference: existing.reference ?? undefined,
+      reference: persistedReference.value ?? undefined,
       costMinor: existing.costMinor ?? undefined,
       currency: existing.currency,
       dueDate: event?.dueDate ?? existing.serviceDate ?? existing.renewalDate ?? undefined,
@@ -242,7 +249,7 @@ async function reviewedItemMatches(input: ReviewedIntakeApproval, itemId: string
       recurrenceMonths: existing.recurrenceMonths ?? undefined,
       reminderDays: reminders.map((row) => row.daysBefore).sort((left, right) => left - right),
       snoozedUntil: existing.snoozedUntil ?? undefined,
-      notes: existing.notes ?? undefined,
+      notes: persistedNotes.value ?? undefined,
       status: existing.status,
     };
     const comparableExpected = {

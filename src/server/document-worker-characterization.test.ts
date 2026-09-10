@@ -222,7 +222,10 @@ vi.mock("@/lib/logger", async () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
+vi.mock("@/server/documents/config", async (importActual) => ({
+  ...await importActual<typeof import("@/server/documents/config")>(),
+  getDocumentConfig: mocks.config,
+}));
 
 vi.mock("@/server/documents/crypto", () => ({
   decryptDocument: mocks.decryptDocument,
@@ -269,6 +272,8 @@ const documentConfig = {
   tika: { url: null, timeoutMs: 45_000 },
   keyEncryptionKey: Buffer.alloc(32, 1),
   keyId: "test-key-id",
+  nextKeyEncryptionKey: null,
+  nextKeyId: null,
 };
 
 /** The mutable world the default row responders read; each test tweaks a field. */
