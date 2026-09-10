@@ -183,7 +183,9 @@ describe("disagreement spends the second inference", () => {
     expect(result.passes).toBe(2);
     // provider: neither reading found "Northfield Energy Group" -- a genuinely new value.
     expect(result.proposal.provider).toBe("Northfield Energy Group");
-    expect(result.alternatives.provider).toBe("Northfield Gas & Energy Ltd");
+    // Both prior readings were rejected, so the reviewer is offered neither
+    // of them (owner ruling, 2026-09-10).
+    expect(result.alternatives.provider).toBeUndefined();
     // reference: endorses the blind reading over the heuristic's.
     expect(result.proposal.reference).toBe("NFEG-99");
     expect(result.alternatives.reference).toBe("NF-4471-22");
@@ -207,10 +209,10 @@ describe("disagreement spends the second inference", () => {
     expect(transport.requests[1].prompt).toContain('blind="Northfield Gas"');
     expect(transport.requests[1].prompt).toContain("BEGIN PRIOR READINGS");
     expect(result.proposal.provider).toBeUndefined();
-    // An "empty" outcome still offers the reviewer the more informative of
-    // the two prior readings as the secondary affordance -- the field is not
-    // left with nothing to show, only with no *primary* suggestion.
-    expect(result.alternatives.provider).toBe("Northfield Gas & Energy Ltd");
+    // An "empty" outcome rejects both prior readings, so nothing is offered
+    // back (owner ruling, 2026-09-10): the field carries no suggestion, and
+    // no secondary affordance either.
+    expect(result.alternatives.provider).toBeUndefined();
     expect(result.adjudicationFailure).toBeUndefined();
     expect(result.comparisons.find((entry) => entry.field === "provider")).toEqual({
       field: "provider",

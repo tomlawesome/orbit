@@ -291,14 +291,15 @@ export async function adjudicateProposal(args: {
     setComparisonOutcome(comparisons, field, outcome);
     candidate[field] = finalValue;
 
-    // The rejected validated value, only where one exists to reject. When a
-    // third value wins over both prior readings (or nothing does), only one
-    // slot is available to offer back to the reviewer; the heuristic
-    // reading is preferred as the more informative single alternative,
-    // falling back to the blind reading when the heuristic had nothing.
+    // The reading adjudication rejected, offered back to the reviewer -- but
+    // only where it endorsed one of the two. Where it rejected both, by
+    // proposing a value neither found or by returning the field empty, the
+    // reviewer is shown nothing at all (owner ruling, 2026-09-10): the
+    // system judged both readings wrong, so offering one back would invite
+    // the reviewer to pick a value it had already thrown out.
     const rejected = outcome === "endorsed_heuristic" ? blindValue
       : outcome === "endorsed_blind" ? heuristicValue
-      : heuristicValue ?? blindValue;
+      : undefined;
     if (rejected !== undefined) alternatives[field] = rejected;
   }
 
