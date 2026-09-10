@@ -47,7 +47,31 @@ Authenticated administrators use the bounded diagnostics surfaces together:
 | Required dependency | `/api/health` | `ready` or `degraded` only |
 | Configuration and provider | `/api/admin/operations` | configured state and allowlisted provider category |
 | Queue | `/api/admin/operations` | bounded status counts, safe failure category, attempts and timestamps |
-| Storage and document dependencies | `/api/admin/documents/health` | allowlisted encryption, storage, scanner, quota and worker state |
+| Storage and document dependencies | `/api/admin/documents/health` | allowlisted encryption, storage, scanner, model extraction, quota and worker state |
+
+### Model extraction (ADR-0025 section 5)
+
+`/api/admin/documents/health` carries a `modelExtraction` entry with three
+states, so an instance where every upload is quietly getting the heuristic
+suggestions alone does not look like a healthy one:
+
+- `not_configured` — the optional `ai` Compose profile is not running. This is
+  a design state, not a warning: most instances sit here for good, and it never
+  makes overall health degraded. The Compose profile is the only switch; there
+  is no in-app toggle.
+- `ready` — the model is answering, and recent attempts are mostly succeeding.
+- `unavailable` — the profile is configured but the model is not answering
+  (`unreachable`), or more than half of the recent attempts came back with
+  nothing (`failing`). This marks overall health degraded.
+
+The entry also reports the recent window as three counts — attempts, failures
+and, of those, how many lost the deadline race. A handful of timeouts with the
+status still `ready` is a host that is occasionally slow; `unreachable` is a
+model that is down. Nothing in the entry names a document, its content or the
+selected model: it is counts and a fixed vocabulary of reasons.
+
+Per upload, a model failure stays invisible to the person uploading: no error,
+no blocked flow, and the suggestions are simply the heuristic ones.
 
 The administrator routes remain session- and administrator-protected and
 non-cacheable. A degraded optional category is actionable independently and
