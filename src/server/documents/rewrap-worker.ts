@@ -17,18 +17,19 @@
  * key or the next one, never neither and never a mix of the two, because one
  * SQL statement changes `key_id` and the wrap columns together.
  *
- * This module takes both keys as explicit arguments rather than reading a
- * second key from configuration: `getDocumentConfig()` only ever holds one
- * KEK, and `src/server/metadata/crypto.ts`'s `rewrapMetadataKey` was already
- * built to be called this way. The operator-facing entry point is
- * `src/db/rewrap-kek.ts` (`pnpm rewrap-kek`), which supplies the current key
+ * This module takes both keys as explicit arguments rather than reading them
+ * from configuration: it is driven by one operator invocation
+ * (`src/db/rewrap-kek.ts`, `pnpm rewrap-kek`), which supplies the current key
  * from the live configuration and the next key from an operator-provided
- * file. See `docs/administrator-operations.md` for the procedure and its
- * accepted trade-off: until the whole rotation completes and the live KEK is
- * swapped over, a row already rewrapped to the next key is briefly
- * unreadable by the still-current-keyed running application, exactly as a
- * row not yet reached is unreadable once the swap happens. Nothing is ever
- * corrupted by this; the window just moves.
+ * file, and `src/server/metadata/crypto.ts`'s `rewrapMetadataKey` was already
+ * built to be called this way. The worker's shape does not depend on whether
+ * the running application also holds the next key: #954 (ADR-0024 decision 4)
+ * settled that the application separately loads `DOCUMENT_KEK_NEXT` for the
+ * duration of the rotation precisely so that a row this worker has already
+ * moved, and a row it has not reached yet, are both readable the whole time —
+ * genuinely online, no unreadable window. See `docs/administrator-operations.md`
+ * for the full procedure, including when the second key is supplied and
+ * removed.
  */
 import { randomUUID } from "node:crypto";
 import { and, eq, ne, sql } from "drizzle-orm";

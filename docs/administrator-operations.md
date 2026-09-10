@@ -521,16 +521,34 @@ ADR-0024), and the mail-in mailbox credential and alias key (`mail_in_secrets`,
 ADR-0017). Rotating it is always an operator decision (#932) — nothing in
 Orbit rotates it automatically or on a schedule.
 
-1. Generate a fresh key and keep it out of the deployment directory until
-   step 3:
+Rotation is genuinely online: for its duration the running application holds
+**both** the current key and the next one (`DOCUMENT_KEK_NEXT`, #954,
+ADR-0024 decision 4), so every row stays readable by its own stored key id
+regardless of whether the rewrap worker has reached it yet. No row is ever
+unreadable, and no maintenance window is needed at any step below.
+
+1. Generate a fresh key and place it where the rotation overlay expects it,
+   with owner-only permissions:
    ```sh
-   openssl rand -hex 32 > /path/outside/the/deployment/next-document-kek
+   openssl rand -hex 32 > .orbit-secrets/document-kek-next
+   chmod 0400 .orbit-secrets/document-kek-next
    ```
-2. Run the rewrap worker with Orbit still on the **current** key. It reads
-   the live key exactly as the running application does and takes the next
-   key only from the file you give it:
+2. Give the running application the next key *before* rewrapping anything,
+   using the `docker-compose.kek-rotation.yml` overlay:
    ```sh
-   pnpm rewrap-kek --next-key-file /path/outside/the/deployment/next-document-kek
+   docker compose --env-file .env-orbit \
+     -f docker-compose.yml -f docker-compose.kek-rotation.yml config --quiet
+   COMPOSE_FILE=docker-compose.yml:docker-compose.kek-rotation.yml \
+     bash scripts/deploy-container.sh --pull
+   ```
+   After this restart Orbit holds both keys: every existing row is still on
+   the current key and reads exactly as before, and a row the worker moves to
+   the next key from here on reads too, by its own key id, with nothing
+   locked at any point in between.
+3. Run the rewrap worker. It reads the current key exactly as the running
+   application does, and takes the next key only from the file you give it:
+   ```sh
+   pnpm rewrap-kek --next-key-file .orbit-secrets/document-kek-next
    ```
    It reports progress and keeps going until every `document_crypto`,
    `metadata_keys` and `mail_in_secrets` row is wrapped under the next key,
@@ -538,27 +556,30 @@ Orbit rotates it automatically or on a schedule.
    it again — every row it has not yet reached is still fully readable under
    the current key, and every row it has already moved is fully readable
    under the next one; a batch is one transaction, so a row is never left
-   half-migrated. It records one `document_kek_rotation_completed` audit
-   entry when it finishes.
-3. Only once it reports completion, replace the live secret and restart:
+   half-migrated, and step 2 means both states read successfully the whole
+   time. It records one `document_kek_rotation_completed` audit entry when it
+   finishes.
+4. Only once it reports completion, promote the next key to current and drop
+   the overlay:
    ```sh
-   mv /path/outside/the/deployment/next-document-kek .orbit-secrets/document-kek
-   docker compose --env-file .env-orbit restart orbit-app
+   mv .orbit-secrets/document-kek-next .orbit-secrets/document-kek
+   bash scripts/deploy-container.sh --pull
    ```
-   Orbit derives `DOCUMENT_KEK`'s id from the key bytes themselves, so a
-   restart after a completed rewrap always finds every row already on the key
-   it just loaded — nothing needs to know the id in advance.
+   Orbit derives `DOCUMENT_KEK`'s id from the key bytes themselves, so this
+   restart always finds every row already on the key it just loaded as
+   current — nothing needs to know the id in advance. Dropping the overlay
+   (by deploying with just `docker-compose.yml` again) removes
+   `DOCUMENT_KEK_NEXT`; with the rewrap already complete, no row depended on
+   it being there.
 
-**The accepted trade-off.** Until step 3, Orbit keeps running on the current
-key exactly as before, and steps 1–2 need no maintenance window or downtime
-scheduling. But a row the worker has *already* moved to the next key is
-briefly unreadable to the still-current-keyed running application — the same
-`document_key_unavailable` / `metadata_locked` / `credential_locked` states a
-missing key produces — until step 3's restart, at which point every row
-becomes readable again at once because every row is by then on the same key.
-This is not corruption and nothing is lost; it is the cost of Orbit holding
-exactly one live key at a time. Run step 2 to completion promptly, and prefer
-a quiet period for it, to keep that window as short as practice allows.
+Do not remove the overlay or delete `.orbit-secrets/document-kek-next` while
+any row is still wrapped under the next key and step 4 has not run — those
+rows need the next key held to stay readable. Before step 3 has moved
+anything, stopping is free: remove the overlay, redeploy with only
+`docker-compose.yml`, and delete the unused next-key file. Once step 3 has
+made any progress, the only safe way out is forward: finish steps 3–4 (the
+worker always resumes correctly), then, if the rotation itself was a
+mistake, start a fresh rotation back to the original key from there.
 
 Recovery-bundle import and repair's `document-kek` regeneration remain
 wholesale key *replacements*, not rotations: neither carries the old key

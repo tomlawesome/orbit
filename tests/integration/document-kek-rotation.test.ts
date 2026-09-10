@@ -3,9 +3,10 @@ import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { documentCrypto, documents, households, mailInSecrets, metadataKeys } from "@/db/schema";
-import { deriveDocumentKeyId, getDocumentConfig } from "@/server/documents/config";
+import { deriveDocumentKeyId, getDocumentConfig, keyEncryptionKeyFor, resetDocumentConfigForTests, type DocumentConfig } from "@/server/documents/config";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope, type DocumentEncryptionContext } from "@/server/documents/crypto";
 import { createWrappedMetadataKey, unwrapMetadataKey, type MetadataKeyContext } from "@/server/metadata/crypto";
+import { loadMetadataKey, resolveMetadataKey, resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { decryptMailInSecret, encryptMailInSecret, type MailInSecretContext, type MailInSecretEnvelope } from "@/server/mail-in/core/secret-crypto";
 import {
   rotationComplete,
@@ -271,6 +272,126 @@ describe("the KEK rewrap worker (#932, ADR-0017's contract, ADR-0024 decision 4)
       const envelope = await readDocumentEnvelope(planted.documentId);
       expect(envelope.keyId).toBe(keys.nextKeyId);
       expect(decryptDocument(planted.ciphertext, planted.context, envelope, keys.nextKek).equals(planted.plaintext)).toBe(true);
+    }
+
+    for (const planted of documentsPlanted) {
+      await getDb().delete(documentCrypto).where(eq(documentCrypto.documentId, planted.documentId));
+      await getDb().delete(documents).where(eq(documents.id, planted.documentId));
+    }
+    await getDb().delete(metadataKeys).where(eq(metadataKeys.householdId, householdOne));
+    await getDb().delete(metadataKeys).where(eq(metadataKeys.householdId, householdTwo));
+    for (const plantedSecret of secretsPlanted) {
+      await getDb().delete(mailInSecrets).where(eq(mailInSecrets.id, plantedSecret.secretId));
+    }
+    await getDb().delete(households).where(eq(households.id, householdOne));
+    await getDb().delete(households).where(eq(households.id, householdTwo));
+  });
+});
+
+describe("the running application holds both keys during a rotation (#954, ADR-0024 decision 4)", () => {
+  it("keeps every row in all three populations readable before, during and after a part-finished rotation, with no restart in between", async () => {
+    const householdOne = await plantHousehold("Dual-key test household 1");
+    const householdTwo = await plantHousehold("Dual-key test household 2");
+    const current = getDocumentConfig();
+    const originalDocumentKek = process.env.DOCUMENT_KEK;
+    const nextKek = randomBytes(32);
+    const nextHex = nextKek.toString("hex");
+    const keys: RotationKeys = { currentKek: current.keyEncryptionKey, currentKeyId: current.keyId, nextKek, nextKeyId: deriveDocumentKeyId(nextKek) };
+
+    const documentsPlanted = [
+      await plantDocument(householdOne, current.keyEncryptionKey, current.keyId),
+      await plantDocument(householdTwo, current.keyEncryptionKey, current.keyId),
+    ];
+    const keysPlanted = [
+      await plantMetadataKey(householdOne, current.keyEncryptionKey, current.keyId),
+      await plantMetadataKey(householdTwo, current.keyEncryptionKey, current.keyId),
+    ];
+    const secretsPlanted = [
+      await plantMailInSecret(current.keyEncryptionKey, current.keyId),
+      await plantMailInSecret(current.keyEncryptionKey, current.keyId),
+    ];
+
+    // Picks by each row's own key_id against whatever `config` holds —
+    // exactly the app-level selection this issue adds — then proves the
+    // result decrypts, using the same production functions the repository,
+    // metadata and mail-in modules call (`loadMetadataKey` is the real
+    // production entry point; the document and mail-in checks use
+    // `keyEncryptionKeyFor` directly, the same helper document-repository.ts
+    // and mailbox-config.ts now call).
+    async function assertEveryRowReadable(config: DocumentConfig): Promise<void> {
+      for (const planted of documentsPlanted) {
+        const envelope = await readDocumentEnvelope(planted.documentId);
+        const kek = keyEncryptionKeyFor(config, envelope.keyId);
+        expect(kek, `document ${planted.documentId} should be readable`).toBeDefined();
+        expect(decryptDocument(planted.ciphertext, planted.context, envelope, kek!).equals(planted.plaintext)).toBe(true);
+      }
+      for (const plantedKey of keysPlanted) {
+        const material = await loadMetadataKey("household", plantedKey.householdId);
+        expect(material, `metadata key for household ${plantedKey.householdId} should be readable`).toBeDefined();
+        expect(material!.dataKey.equals(plantedKey.dataKey)).toBe(true);
+      }
+      for (const plantedSecret of secretsPlanted) {
+        const row = await readSecretRow(plantedSecret.secretId);
+        const kek = keyEncryptionKeyFor(config, row.keyId);
+        expect(kek, `mail-in secret ${plantedSecret.secretId} should be readable`).toBeDefined();
+        const envelope = secretEnvelopeFromRow(row);
+        expect(decryptMailInSecret(row.ciphertext, plantedSecret.context, envelope, kek!).equals(plantedSecret.plaintext)).toBe(true);
+      }
+    }
+
+    try {
+      // Stage 1: before the rotation starts — the ordinary single-key state.
+      await assertEveryRowReadable(current);
+
+      // Stage 2: the operator's step 2 — the running application is given
+      // the next key. In production this is a container restart; here,
+      // setting the environment and resetting the process-cached config
+      // stands in for it, because nothing about the mechanism this test
+      // exercises depends on the process having actually restarted.
+      process.env.DOCUMENT_KEK_NEXT = nextHex;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      const dualKeyConfig = getDocumentConfig();
+      expect(dualKeyConfig.nextKeyId).toBe(keys.nextKeyId);
+
+      // Stage 3: midway — one cycle, one row per population claimed, so the
+      // rotation is genuinely split across both keys.
+      await runKekRotationCycle(keys, 1);
+      const midway = await rotationRemaining(keys);
+      expect(rotationComplete(midway)).toBe(false);
+      await assertEveryRowReadable(dualKeyConfig);
+
+      // A freshly minted metadata key still wraps only under the current
+      // key while both are held — exactly one key is ever the wrapping key
+      // for new writes, even mid-rotation.
+      const freshHousehold = await plantHousehold("Dual-key test household 3 (fresh write)");
+      const minted = await resolveMetadataKey("household", freshHousehold);
+      expect(minted.keyId).toBe(current.keyId);
+      await getDb().delete(metadataKeys).where(eq(metadataKeys.householdId, freshHousehold));
+      await getDb().delete(households).where(eq(households.id, freshHousehold));
+
+      // Stage 4: the rotation completes — still no restart, still readable.
+      const finished = await runKekRotationToCompletion(keys);
+      expect(rotationComplete(finished)).toBe(true);
+      await assertEveryRowReadable(dualKeyConfig);
+
+      // Stage 5: the operator's step 4 — promote the next key to current and
+      // drop the overlay. Every row, now uniformly on the (former) next key,
+      // stays readable under the single promoted key.
+      process.env.DOCUMENT_KEK = nextHex;
+      delete process.env.DOCUMENT_KEK_NEXT;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      const promotedConfig = getDocumentConfig();
+      expect(promotedConfig.nextKeyId).toBeNull();
+      expect(promotedConfig.keyId).toBe(keys.nextKeyId);
+      await assertEveryRowReadable(promotedConfig);
+    } finally {
+      if (originalDocumentKek === undefined) delete process.env.DOCUMENT_KEK;
+      else process.env.DOCUMENT_KEK = originalDocumentKek;
+      delete process.env.DOCUMENT_KEK_NEXT;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
     }
 
     for (const planted of documentsPlanted) {

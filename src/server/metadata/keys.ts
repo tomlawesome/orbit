@@ -1,7 +1,10 @@
 /**
  * Tier 1 metadata key resolution (ADR-0024 decision 1): one wrapped DEK per
  * household, plus one instance-scope DEK for mail-in receipts that have no
- * household yet, both wrapped under the existing `DOCUMENT_KEK`.
+ * household yet, both wrapped under the existing `DOCUMENT_KEK`. Reading picks
+ * by the row's own key id against every key the instance holds — during a
+ * rotation that is `DOCUMENT_KEK` and `DOCUMENT_KEK_NEXT` (#954, ADR-0024
+ * decision 4) — while minting a scope key always wraps under the current key.
  *
  * Unwrapped DEKs are cached in process. ADR-0024 permits this explicitly: the
  * KEK itself already lives in process memory, so the cache adds nothing to
@@ -12,7 +15,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { metadataKeys } from "@/db/schema";
 import { ENVELOPE_VERSION, type WrappedKey } from "@/server/documents/crypto";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, type DocumentConfig } from "@/server/documents/config";
 import {
   createWrappedMetadataKey,
   unwrapMetadataKey,
@@ -54,15 +57,9 @@ export function resetMetadataKeyCacheForTests(): void {
   unwrappedKeys.clear();
 }
 
-interface KeyEncryptionKey {
-  keyEncryptionKey: Buffer;
-  keyId: string;
-}
-
-function readKeyEncryptionKey(): KeyEncryptionKey | undefined {
+function readDocumentConfig(): DocumentConfig | undefined {
   try {
-    const config = getDocumentConfig();
-    return { keyEncryptionKey: config.keyEncryptionKey, keyId: config.keyId };
+    return getDocumentConfig();
   } catch {
     return undefined;
   }
@@ -70,7 +67,7 @@ function readKeyEncryptionKey(): KeyEncryptionKey | undefined {
 
 /** True when the instance holds a usable KEK. Callers use it to choose locked-not-damaged. */
 export function metadataCryptoAvailable(): boolean {
-  return readKeyEncryptionKey() !== undefined;
+  return readDocumentConfig() !== undefined;
 }
 
 function scopeCondition(scope: MetadataKeyScope, householdId: string | null) {
@@ -83,16 +80,20 @@ function unwrapRow(
   row: WrappedKey & { keyId: string },
   scope: MetadataKeyScope,
   householdId: string | null,
-  kek: KeyEncryptionKey,
+  config: DocumentConfig,
 ): MetadataKeyMaterial {
   const cached = unwrappedKeys.get(cacheKey(row.keyId, scope, householdId));
   if (cached) return { scope, householdId, keyId: row.keyId, dataKey: cached };
+  // The row's own `key_id` picks which held key unwraps it (#954, ADR-0024
+  // decision 4): a row the rewrap worker has not reached yet is still
+  // wrapped under the current key id, and one it has already moved is
+  // wrapped under the next key id — both are held for the duration of a
+  // rotation, so either is readable with no restart between them.
+  const keyEncryptionKey = keyEncryptionKeyFor(config, row.keyId);
+  if (!keyEncryptionKey) throw new MetadataKeyLockedError();
   let dataKey: Buffer;
   try {
-    // The row's own `key_id` goes into the AAD, not the instance's current
-    // one: a row the rewrap worker has not reached yet is still wrapped under
-    // the key id it was written with.
-    dataKey = unwrapMetadataKey(row, kek.keyEncryptionKey, { scope, householdId, keyId: row.keyId });
+    dataKey = unwrapMetadataKey(row, keyEncryptionKey, { scope, householdId, keyId: row.keyId });
   } catch {
     // A DEK that will not unwrap means the wrong KEK, not a damaged value:
     // locking is reversible when the right key comes back, and never
@@ -109,15 +110,15 @@ export async function loadMetadataKey(
   householdId: string | null,
   executor: MetadataExecutor = getDb(),
 ): Promise<MetadataKeyMaterial | undefined> {
-  const kek = readKeyEncryptionKey();
-  if (!kek) throw new MetadataKeyLockedError();
+  const config = readDocumentConfig();
+  if (!config) throw new MetadataKeyLockedError();
   const [row] = await executor.select({
     wrappedDek: metadataKeys.wrappedDek,
     wrapIv: metadataKeys.wrapIv,
     wrapAuthTag: metadataKeys.wrapAuthTag,
     keyId: metadataKeys.keyId,
   }).from(metadataKeys).where(scopeCondition(scope, householdId)).limit(1);
-  return row ? unwrapRow(row, scope, householdId, kek) : undefined;
+  return row ? unwrapRow(row, scope, householdId, config) : undefined;
 }
 
 /**
@@ -133,16 +134,19 @@ export async function resolveMetadataKey(
   const existing = await loadMetadataKey(scope, householdId, executor);
   if (existing) return existing;
 
-  const kek = readKeyEncryptionKey();
-  if (!kek) throw new MetadataKeyLockedError();
-  const context = { scope, householdId, keyId: kek.keyId };
-  const minted = createWrappedMetadataKey(kek.keyEncryptionKey, context);
+  const config = readDocumentConfig();
+  if (!config) throw new MetadataKeyLockedError();
+  // A freshly minted key always wraps under the current key — never the
+  // rotation-in-progress next one — so exactly one key is ever the wrapping
+  // key for new writes.
+  const context = { scope, householdId, keyId: config.keyId };
+  const minted = createWrappedMetadataKey(config.keyEncryptionKey, context);
   try {
     await executor.insert(metadataKeys).values({
       scope,
       householdId,
       envelopeVersion: ENVELOPE_VERSION,
-      keyId: kek.keyId,
+      keyId: config.keyId,
       ...minted.wrapped,
     }).onConflictDoNothing();
   } finally {

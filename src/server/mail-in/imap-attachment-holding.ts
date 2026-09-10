@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor } from "@/server/documents/config";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -115,9 +115,14 @@ export async function readHeldImapAttachment(
   owner: { recipientUserId: string; receiptId: string },
 ): Promise<Buffer> {
   const config = getDocumentConfig();
+  // Picks by the envelope's own key_id (#954): held attachments are
+  // short-lived, but not so short-lived that a rotation in progress can be
+  // assumed never to span one.
+  const holdingKek = keyEncryptionKeyFor(config, attachment.envelope.keyId);
+  if (!holdingKek) throw new Error("held attachment is wrapped under a key this instance does not hold");
   const ciphertext = await storage().readCiphertext(attachment.storageKey, attachment.sizeBytes + 64);
   try {
-    return decryptDocument(ciphertext, stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, config.keyEncryptionKey);
+    return decryptDocument(ciphertext, stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, holdingKek);
   } finally {
     ciphertext.fill(0);
   }
