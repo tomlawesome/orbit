@@ -38,18 +38,37 @@
 //    figures this scorer reports can go negative — that is intentional: a
 //    corpus dominated by wrong values should read as worse than a blank
 //    one, not floor at 0%.
-// 2. Per-field scores are reported alongside the overall figure: provider,
-//    reference, and dates (`FIELD_NAMES` below), summed across the whole
-//    corpus. A single aggregate hides which field is the hard one; this
-//    does not. Two more field categories exist in the design but have no
-//    ground truth yet and so are not reported here: role-labelled dates
-//    (`documentDateRoles`, `model-extraction.ts`) and the four fields the
-//    model path owns (`cost`, `subtype`, `scheduleKind`,
-//    `recurrenceMonths`, ADR-0025 section 7). ADR-0025 section 6 already
-//    sequences this: corpus ground truth grows to cover those fields
-//    first, which is corpus work and explicitly out of this issue's scope.
-//    When that ground truth exists, it plugs into the same `FieldName` /
-//    `FieldScore` shape this file establishes.
+// 2. Per-field scores are reported alongside the overall figure, summed
+//    across the whole corpus (`FIELD_NAMES` below). A single aggregate
+//    hides which field is the hard one; this does not.
+//
+// Issue #960 filled in the categories #939 could only sketch. The corpus
+// now carries ground truth for role-labelled dates and for the four fields
+// ADR-0025 section 7 gives the model path, so all eight categories are
+// scored: provider, reference, dates, dateRoles, subtype, cost,
+// scheduleKind and recurrence. The scoring rule itself did not change —
+// each declared expectation is one point, won, blank or wrong exactly as
+// before. Three details are worth stating, because they decide what the
+// number means:
+//
+//  - A field is scored only on documents whose ground truth DECLARES it,
+//    which is how provider and reference have always worked. Dates keep
+//    their extra rule: a document expecting none is worth a point for
+//    emitting none.
+//  - `cost` is one point for the amount AND its currency together. ADR-0025
+//    section 3 refuses a cost whose evidence carries no currency, so half a
+//    cost is not a partial credit, it is a value the contract would drop.
+//  - `subtype` is compared with case and whitespace runs ignored, because
+//    documents shout their headings ("HOME INSURANCE") and the measurement
+//    is whether the extractor found the right thing, not whether it copied
+//    the typography. Every other text field keeps its exact comparison.
+//
+// The heuristics attempt none of the five new categories, by the owner's
+// decision on #319, so they score a blank on every one of those points.
+// That is the measurement working: the corpus now judges the whole
+// contract rather than the quarter of it the heuristics ever tried, and the
+// floor in `extraction-accuracy.test.ts` is re-recorded against the larger
+// point total rather than the extractor being let off the new fields.
 
 import type { CorpusDocument } from "./extraction-corpus";
 
@@ -71,6 +90,12 @@ export interface ExtractedFields {
   dates: string[];
   provider?: string;
   reference?: string;
+  dateRoles?: Array<{ date: string; role: string }>;
+  subtype?: string;
+  costMinor?: number;
+  currency?: string;
+  recurrenceMonths?: number;
+  scheduleKind?: string;
 }
 
 /**
@@ -82,10 +107,26 @@ export type CorpusExtractor = (
   filename: string,
 ) => ExtractedFields | Promise<ExtractedFields>;
 
-/** The per-field categories this scorer can report against today's ground
- * truth. See the file header for the two categories not yet measurable. */
-export type FieldName = "provider" | "reference" | "dates";
-export const FIELD_NAMES: readonly FieldName[] = ["provider", "reference", "dates"];
+/** Every category the corpus can declare ground truth for. */
+export type FieldName =
+  | "provider"
+  | "reference"
+  | "dates"
+  | "dateRoles"
+  | "subtype"
+  | "cost"
+  | "scheduleKind"
+  | "recurrence";
+export const FIELD_NAMES: readonly FieldName[] = [
+  "provider",
+  "reference",
+  "dates",
+  "dateRoles",
+  "subtype",
+  "cost",
+  "scheduleKind",
+  "recurrence",
+];
 
 export interface FieldScore {
   earned: number;
@@ -117,11 +158,9 @@ interface FieldTotal {
 }
 
 function emptyFieldTotals(): Record<FieldName, FieldTotal> {
-  return {
-    provider: { earned: 0, possible: 0 },
-    reference: { earned: 0, possible: 0 },
-    dates: { earned: 0, possible: 0 },
-  };
+  const totals = {} as Record<FieldName, FieldTotal>;
+  for (const field of FIELD_NAMES) totals[field] = { earned: 0, possible: 0 };
+  return totals;
 }
 
 function buildFieldScores(totals: Record<FieldName, FieldTotal>): Record<FieldName, FieldScore> {
@@ -209,6 +248,45 @@ function classifyNoDatesExpected(extractedDates: string[]): Classification {
   return extractedDates.length === 0 ? "correct" : "wrong";
 }
 
+/** Case and whitespace runs ignored, per the file header's note on
+ * `subtype`. Nothing else is forgiven: a different phrase is still wrong. */
+function comparableSubtype(value: string): string {
+  return value.replace(/\s+/gu, " ").trim().toLowerCase();
+}
+
+function classifySubtype(expected: string, actual: string | undefined): Classification {
+  if (actual !== undefined && comparableSubtype(actual) === comparableSubtype(expected)) return "correct";
+  return actual === undefined ? "blank" : "wrong";
+}
+
+/** A cost is its amount and its currency together (ADR-0025 section 3). */
+function classifyCost(
+  expected: { costMinor: number; currency?: string },
+  extracted: ExtractedFields,
+): Classification {
+  if (extracted.costMinor === undefined) return "blank";
+  return extracted.costMinor === expected.costMinor && extracted.currency === expected.currency
+    ? "correct"
+    : "wrong";
+}
+
+function classifyNumber(expected: number, actual: number | undefined): Classification {
+  if (actual === expected) return "correct";
+  return actual === undefined ? "blank" : "wrong";
+}
+
+/** A role is a label ON a date, so it is judged the way an expected date
+ * is: missing from an extractor that produced no roles at all is a blank;
+ * missing from one that produced some is wrong. */
+function classifyExpectedDateRole(
+  expected: { date: string; role: string },
+  extractedRoles: Array<{ date: string; role: string }> | undefined,
+): Classification {
+  const roles = extractedRoles ?? [];
+  if (roles.some((label) => label.date === expected.date && label.role === expected.role)) return "correct";
+  return roles.length === 0 ? "blank" : "wrong";
+}
+
 interface DocumentScore {
   earned: number;
   possible: number;
@@ -265,6 +343,66 @@ function scoreDocument(document: CorpusDocument, extracted: ExtractedFields): Do
     if (classification !== "correct") {
       misses.push(
         `${name}: reference expected "${expected.reference}", got "${extracted.reference ?? "none"}" (${classification})`,
+      );
+    }
+  }
+
+  // The contract ADR-0025 section 7 gives the model path (#960).
+  for (const label of expected.dateRoles ?? []) {
+    possible += 1;
+    const classification = classifyExpectedDateRole(label, extracted.dateRoles);
+    earned += addPoint(fieldTotals, "dateRoles", classification);
+    if (classification !== "correct") {
+      const got = (extracted.dateRoles ?? []).find((entry) => entry.date === label.date)?.role ?? "none";
+      misses.push(
+        `${name}: date ${label.date} expected role "${label.role}", got "${got}" (${classification})`,
+      );
+    }
+  }
+  if (expected.subtype !== undefined) {
+    possible += 1;
+    const classification = classifySubtype(expected.subtype, extracted.subtype);
+    earned += addPoint(fieldTotals, "subtype", classification);
+    if (classification !== "correct") {
+      misses.push(
+        `${name}: subtype expected "${expected.subtype}", got "${extracted.subtype ?? "none"}" (${classification})`,
+      );
+    }
+  }
+  if (expected.costMinor !== undefined) {
+    possible += 1;
+    const classification = classifyCost(
+      { costMinor: expected.costMinor, currency: expected.currency },
+      extracted,
+    );
+    earned += addPoint(fieldTotals, "cost", classification);
+    if (classification !== "correct") {
+      const got = extracted.costMinor === undefined
+        ? "none"
+        : `${extracted.costMinor} ${extracted.currency ?? "no currency"}`;
+      misses.push(
+        `${name}: cost expected ${expected.costMinor} ${expected.currency ?? "no currency"}, got ${got} (${classification})`,
+      );
+    }
+  }
+  if (expected.scheduleKind !== undefined) {
+    possible += 1;
+    const classification = classifyScalar(expected.scheduleKind, extracted.scheduleKind);
+    earned += addPoint(fieldTotals, "scheduleKind", classification);
+    if (classification !== "correct") {
+      misses.push(
+        `${name}: schedule kind expected "${expected.scheduleKind}", got "${extracted.scheduleKind ?? "none"}" (${classification})`,
+      );
+    }
+  }
+  if (expected.recurrenceMonths !== undefined) {
+    possible += 1;
+    const classification = classifyNumber(expected.recurrenceMonths, extracted.recurrenceMonths);
+    earned += addPoint(fieldTotals, "recurrence", classification);
+    if (classification !== "correct") {
+      misses.push(
+        `${name}: recurrence expected ${expected.recurrenceMonths} months, ` +
+        `got ${extracted.recurrenceMonths ?? "none"} (${classification})`,
       );
     }
   }

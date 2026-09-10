@@ -1,13 +1,77 @@
 import { basename } from "node:path";
+import type { ScheduleKind } from "@/lib/domain";
 
 const MAX_EXTRACTED_CHARACTERS = 250_000;
 const unsafeFormatting = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/gu;
+const MAX_DATES = 12;
 
+/**
+ * The closed vocabulary of date roles (ADR-0025 section 3). A model labels
+ * every date it reports with one of these, and the application maps the
+ * roles onto the item's date slots. A role string outside the list is
+ * DROPPED with its date rather than coerced to `other`: "I do not recognise
+ * this label" is not the same statement as "this date is uninteresting",
+ * and silently turning one into the other invents a fact.
+ */
+export const documentDateRoles = [
+  "renewal",
+  "expiry",
+  "due",
+  "service",
+  "issued",
+  "start",
+  "other",
+] as const;
+export type DocumentDateRole = (typeof documentDateRoles)[number];
+
+export interface DocumentDateRoleLabel {
+  date: string;
+  role: DocumentDateRole;
+}
+
+/**
+ * Only a renewal or a service date is a scheduled event in Orbit's model
+ * (`scheduleKinds`, src/lib/domain.ts). Every other role labels a date the
+ * reviewer may still want, but produces no schedule kind.
+ */
+const SCHEDULE_KIND_BY_ROLE: Partial<Record<DocumentDateRole, ScheduleKind>> = {
+  renewal: "renewal",
+  service: "service",
+};
+
+/**
+ * ADR-0025 section 3: the four model-owned fields are validated to the
+ * bounds `src/lib/workspace.ts` already enforces on an item, so a proposal
+ * can never offer a reviewer a value the item schema would then refuse.
+ */
+export const MAX_SUBTYPE_CHARACTERS = 80;
+export const MAX_COST_MINOR = 100_000_000;
+export const MIN_RECURRENCE_MONTHS = 1;
+export const MAX_RECURRENCE_MONTHS = 120;
+
+/**
+ * What one document proposes, whatever produced it: the heuristics, a
+ * stored draft, or the model path. The first four fields are the ones the
+ * heuristics attempt. The rest are the model path's (ADR-0025 section 7,
+ * owner decision on #319): the heuristics never try them, so where the
+ * model is absent those slots are simply empty.
+ *
+ * `scheduleKind` and `scheduleDate` are DERIVED, never accepted from
+ * input — see `safeStoredDocumentProposal`.
+ */
 export interface DocumentProposal {
   title: string;
   provider?: string;
   reference?: string;
   dates: string[];
+  subtype?: string;
+  /** In minor units, and only ever present together with `currency`. */
+  costMinor?: number;
+  currency?: string;
+  recurrenceMonths?: number;
+  scheduleKind?: ScheduleKind;
+  scheduleDate?: string;
+  dateRoles: DocumentDateRoleLabel[];
 }
 
 export function safeDocumentPlainText(value: unknown, maximum: number): string | undefined {
@@ -301,6 +365,11 @@ function extractProvider(bounded: string): string | undefined {
   return undefined;
 }
 
+/**
+ * The heuristics, unchanged: they attempt title, provider, reference and
+ * dates and nothing else. The four model-owned fields and the date roles
+ * stay empty here by decision, not by omission (#319, owner 2026-08-13).
+ */
 export function proposalFromText(text: string, filename: string): DocumentProposal {
   const bounded = text.slice(0, MAX_EXTRACTED_CHARACTERS);
   return {
@@ -308,9 +377,65 @@ export function proposalFromText(text: string, filename: string): DocumentPropos
     provider: extractProvider(bounded),
     reference: safeDocumentPlainText(extractReference(bounded), 80),
     dates: extractDates(bounded),
+    dateRoles: [],
   };
 }
 
+const CURRENCY_CODE = /^[A-Z]{3}$/u;
+
+function boundedInteger(value: unknown, minimum: number, maximum: number): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum && value <= maximum
+    ? value
+    : undefined;
+}
+
+function knownDateRole(value: unknown): DocumentDateRole | undefined {
+  return typeof value === "string" && (documentDateRoles as readonly string[]).includes(value)
+    ? value as DocumentDateRole
+    : undefined;
+}
+
+/**
+ * A role survives only when its date did: roles are labels ON the proposed
+ * dates, so a role for a date that failed calendar validation, or for one
+ * the proposal does not carry at all, has nothing to label. One role per
+ * date, the first label winning, in the order they were proposed.
+ */
+function safeDateRoles(value: unknown, dates: string[]): DocumentDateRoleLabel[] {
+  if (!Array.isArray(value)) return [];
+  const labels: DocumentDateRoleLabel[] = [];
+  for (const entry of value.slice(0, MAX_DATES)) {
+    const record = entry && typeof entry === "object" ? entry as Record<string, unknown> : undefined;
+    if (!record) continue;
+    const date = validCalendarDate(record.date);
+    const role = knownDateRole(record.role);
+    if (!date || !role || !dates.includes(date)) continue;
+    if (labels.some((label) => label.date === date)) continue;
+    labels.push({ date, role });
+  }
+  return labels;
+}
+
+/**
+ * A cost is an amount AND the currency its evidence carried (ADR-0025
+ * section 3). The model never guesses a currency, so neither half is kept
+ * without the other: an amount with no currency is a number nobody can
+ * spend, and a currency with no amount says nothing at all.
+ */
+function safeCost(candidate: Record<string, unknown>): { costMinor: number; currency: string } | undefined {
+  const costMinor = boundedInteger(candidate.costMinor, 0, MAX_COST_MINOR);
+  const currency = typeof candidate.currency === "string" && CURRENCY_CODE.test(candidate.currency.trim())
+    ? candidate.currency.trim()
+    : undefined;
+  return costMinor !== undefined && currency !== undefined ? { costMinor, currency } : undefined;
+}
+
+/**
+ * The storage boundary every proposal passes, whatever produced it. It
+ * rebuilds a fresh object from an allowlist — so no key an extractor
+ * invented survives — and re-applies every bound `src/lib/workspace.ts`
+ * enforces on the item the reviewer will eventually save.
+ */
 export function safeStoredDocumentProposal(value: unknown, filename: string): DocumentProposal {
   const candidate = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const dates = Array.isArray(candidate.dates)
@@ -318,12 +443,31 @@ export function safeStoredDocumentProposal(value: unknown, filename: string): Do
       .map(validCalendarDate)
       .filter((date): date is string => Boolean(date))
       .filter((date, index, values) => values.indexOf(date) === index)
-      .slice(0, 12)
+      .slice(0, MAX_DATES)
     : [];
+  const dateRoles = safeDateRoles(candidate.dateRoles, dates);
+  // Derived, never emitted and never read back from the input: the schedule
+  // kind follows the first date whose role is a scheduled event, exactly as
+  // `src/lib/workspace.ts` reads an item — a schedule kind exists precisely
+  // when a scheduled date does. A `scheduleKind` in the input is ignored.
+  const scheduled = dateRoles.find((label) => SCHEDULE_KIND_BY_ROLE[label.role]);
+  const scheduleKind = scheduled ? SCHEDULE_KIND_BY_ROLE[scheduled.role] : undefined;
+  const cost = safeCost(candidate);
   return {
     title: safeDocumentPlainText(candidate.title, 100) ?? safeDocumentFilenameTitle(filename),
     provider: safeDocumentPlainText(candidate.provider, 100),
     reference: safeDocumentPlainText(candidate.reference, 80),
     dates,
+    subtype: safeDocumentPlainText(candidate.subtype, MAX_SUBTYPE_CHARACTERS),
+    costMinor: cost?.costMinor,
+    currency: cost?.currency,
+    // `workspaceItemSchema` refuses a recurrence without a schedule kind, so
+    // a recurrence with no scheduled date to repeat is dropped here too.
+    recurrenceMonths: scheduleKind
+      ? boundedInteger(candidate.recurrenceMonths, MIN_RECURRENCE_MONTHS, MAX_RECURRENCE_MONTHS)
+      : undefined,
+    scheduleKind,
+    scheduleDate: scheduled?.date,
+    dateRoles,
   };
 }

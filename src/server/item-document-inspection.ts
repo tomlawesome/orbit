@@ -7,7 +7,8 @@ import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
   proposalFromText,
   safeDocumentFilenameTitle,
-  safeDocumentPlainText,
+  safeStoredDocumentProposal,
+  type DocumentProposal,
 } from "@/server/documents/suggestions";
 import { classifyDocumentStructure, detectDocumentMediaType, type DocumentStructureReason } from "@/server/documents/validation";
 import { extractTextWithTika } from "@/server/documents/tika";
@@ -51,18 +52,32 @@ export interface ItemDocumentInspectionResult {
 
 const allowedSuggestionFields = new Set<ItemDocumentSuggestionField>(itemDocumentSuggestionFields);
 
-function validCalendarDate(value: unknown): string | undefined {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) return undefined;
-  const date = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return undefined;
-  return date.toISOString().slice(0, 10) === value ? value : undefined;
+/**
+ * A proposed cost, written the way the item's cost field takes it: major
+ * units, two decimals. The currency stays on the proposal rather than
+ * appearing here, because `itemDocumentSuggestionFields` has no currency
+ * slot and an item takes its currency from its household. Nothing is lost
+ * by that: a cost only ever reaches this point WITH the currency its
+ * evidence carried, since `safeStoredDocumentProposal` drops an amount that
+ * arrived without one (ADR-0025 section 3).
+ */
+function costSuggestion(proposal: DocumentProposal): string | undefined {
+  if (proposal.costMinor === undefined) return undefined;
+  return (proposal.costMinor / 100).toFixed(2);
 }
 
-function filenameTitle(filename: string): string | undefined {
-  return safeDocumentFilenameTitle(filename);
-}
-
-function buildSuggestions(filename: string, proposal: unknown): ItemDocumentSuggestion[] {
+/**
+ * The Add-item review surface. It offers all eight fields
+ * `itemDocumentSuggestionFields` declares (ADR-0025 section 7), and offers
+ * each one only when the proposal actually carried it — so where the model
+ * path is absent, the four model-owned slots are simply empty and the form
+ * shows what it always showed.
+ *
+ * The proposal is re-validated through `safeStoredDocumentProposal` rather
+ * than field by field here, so this surface can never show a reviewer a
+ * value the storage boundary would have refused.
+ */
+export function buildDocumentSuggestions(filename: string, proposal: unknown): ItemDocumentSuggestion[] {
   const suggestions: ItemDocumentSuggestion[] = [];
   const add = (
     field: ItemDocumentSuggestionField,
@@ -74,12 +89,22 @@ function buildSuggestions(filename: string, proposal: unknown): ItemDocumentSugg
     suggestions.push({ field, value, source, confidence });
   };
 
-  const candidate = proposal && typeof proposal === "object" ? proposal as Record<string, unknown> : {};
-  add("title", filenameTitle(filename), "filename", "high");
-  add("provider", safeDocumentPlainText(candidate.provider, 100), "document_text", "medium");
-  add("reference", safeDocumentPlainText(candidate.reference, 80), "document_text", "medium");
-  const dates = Array.isArray(candidate.dates) ? candidate.dates : [];
-  add("dueDate", validCalendarDate(dates.find((date) => validCalendarDate(date))), "document_text", "medium");
+  const safe = safeStoredDocumentProposal(proposal, filename);
+  add("title", safeDocumentFilenameTitle(filename), "filename", "high");
+  add("subtype", safe.subtype, "document_text", "medium");
+  add("provider", safe.provider, "document_text", "medium");
+  add("reference", safe.reference, "document_text", "medium");
+  add("cost", costSuggestion(safe), "document_text", "medium");
+  // The scheduled date when the roles named one, and otherwise the first
+  // date the document offered, exactly as this surface has always behaved.
+  add("dueDate", safe.scheduleDate ?? safe.dates[0], "document_text", "medium");
+  add("scheduleKind", safe.scheduleKind, "document_text", "medium");
+  add(
+    "recurrenceMonths",
+    safe.recurrenceMonths === undefined ? undefined : String(safe.recurrenceMonths),
+    "document_text",
+    "medium",
+  );
   return suggestions;
 }
 
@@ -127,7 +152,7 @@ export async function inspectItemDocument(input: {
         return {
           extracted: false,
           message: parserRecoveryMessage,
-          suggestions: buildSuggestions(input.filename, undefined),
+          suggestions: buildDocumentSuggestions(input.filename, undefined),
           attachmentDisposition: "attachable",
           reason: structureReason,
         };
@@ -195,7 +220,7 @@ export async function inspectItemDocument(input: {
       text = "";
       return {
         extracted,
-        suggestions: buildSuggestions(input.filename, proposal),
+        suggestions: buildDocumentSuggestions(input.filename, proposal),
         attachmentDisposition: "attachable",
         reason: structureReason,
         ...(message ? { message } : {}),
