@@ -1,7 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  MODEL_FAILURE_RATE_MIN_SAMPLES,
+  MODEL_FAILURE_RATE_THRESHOLD,
   MODEL_INTERACTIVE_DEADLINE_MS,
+  MODEL_SAMPLE_WINDOW,
+  modelExtractionWindow,
+  modelFailureRateExceeded,
   modelProposalFromText,
+  pingExtractionModel,
+  recordModelExtractionSample,
+  resetModelExtractionWindow,
   selectedExtractionModel,
   type ModelGenerateRequest,
   type ModelReply,
@@ -486,5 +494,107 @@ describe("a hostile document that tries to instruct the model", () => {
     expect(result.proposal.subtype?.length ?? 0).toBeLessThanOrEqual(80);
     expect(result.proposal.title).toBe("statement");
     expect(result.proposal.scheduleKind).toBeUndefined();
+  });
+});
+
+/**
+ * The health inputs of ADR-0025 section 5. Counts of outcomes only: an
+ * administrator learns that uploads are getting heuristics alone, and learns
+ * nothing about any document.
+ */
+describe("model extraction health inputs", () => {
+  afterEach(() => {
+    resetModelExtractionWindow();
+    vi.unstubAllGlobals();
+  });
+
+  it("records one sample per bounded request, successes and failures alike", async () => {
+    resetModelExtractionWindow();
+
+    await modelProposalFromText(POLICY_DOCUMENT, "policy.pdf", {
+      environment: MODEL_ENVIRONMENT,
+      transport: transportReturning(replyOf(envelopeOf(goodGeneratedObject()))),
+    });
+    await modelProposalFromText(POLICY_DOCUMENT, "policy.pdf", {
+      environment: MODEL_ENVIRONMENT,
+      transport: transportReturning(replyOf(Buffer.from("not json", "utf8"))),
+    });
+    await modelProposalFromText(POLICY_DOCUMENT, "policy.pdf", {
+      environment: MODEL_ENVIRONMENT,
+      transport: { async send() { throw new Error("connection refused"); } },
+    });
+
+    expect(modelExtractionWindow()).toEqual({ samples: 3, failures: 2, timeouts: 0 });
+  });
+
+  it("records nothing when no ai profile is configured", async () => {
+    resetModelExtractionWindow();
+
+    const result = await modelProposalFromText(POLICY_DOCUMENT, "policy.pdf", { environment: {} as NodeJS.ProcessEnv });
+
+    expect(result).toEqual({ status: "skipped", reason: "not_configured" });
+    expect(modelExtractionWindow()).toEqual({ samples: 0, failures: 0, timeouts: 0 });
+  });
+
+  it("keeps the window bounded to the most recent attempts", () => {
+    resetModelExtractionWindow();
+    for (let index = 0; index < MODEL_SAMPLE_WINDOW + 5; index += 1) recordModelExtractionSample("failed");
+    for (let index = 0; index < MODEL_SAMPLE_WINDOW; index += 1) recordModelExtractionSample("ready");
+
+    // The older failures have aged out; nothing accumulates without limit.
+    expect(modelExtractionWindow()).toEqual({ samples: MODEL_SAMPLE_WINDOW, failures: 0, timeouts: 0 });
+  });
+
+  it("crosses the failure-rate threshold in both directions", () => {
+    resetModelExtractionWindow();
+    const below = { samples: 10, failures: Math.floor(10 * MODEL_FAILURE_RATE_THRESHOLD), timeouts: 0 };
+    const above = { samples: 10, failures: below.failures + 1, timeouts: 0 };
+
+    expect(modelFailureRateExceeded(below)).toBe(false);
+    expect(modelFailureRateExceeded(above)).toBe(true);
+    // And back: the same window recovers as successes replace the failures.
+    expect(modelFailureRateExceeded({ samples: 10, failures: below.failures - 1, timeouts: 0 })).toBe(false);
+  });
+
+  it("treats too few samples as no evidence at all", () => {
+    expect(modelFailureRateExceeded({ samples: MODEL_FAILURE_RATE_MIN_SAMPLES - 1, failures: MODEL_FAILURE_RATE_MIN_SAMPLES - 1, timeouts: 0 })).toBe(false);
+    expect(modelFailureRateExceeded({ samples: MODEL_FAILURE_RATE_MIN_SAMPLES, failures: MODEL_FAILURE_RATE_MIN_SAMPLES, timeouts: 0 })).toBe(true);
+  });
+
+  it("counts a lost deadline as a failure and as a timeout, so slow reads differently from down", () => {
+    resetModelExtractionWindow();
+    recordModelExtractionSample("ready");
+    recordModelExtractionSample("timed_out");
+    recordModelExtractionSample("failed");
+
+    expect(modelExtractionWindow()).toEqual({ samples: 3, failures: 2, timeouts: 1 });
+  });
+
+  it("asks the fixed endpoint whether it is answering, and sends it no document text", async () => {
+    const fetched = vi.fn(async () => new Response("{\"models\":[]}", { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetched);
+
+    expect(await pingExtractionModel()).toBe(true);
+    const [url, init] = fetched.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://orbit-ollama:11434/api/tags");
+    expect(init.method).toBe("GET");
+    expect(init.redirect).toBe("error");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("reports a stopped or rejecting model as not answering", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("connection refused"); }));
+    expect(await pingExtractionModel()).toBe(false);
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+    expect(await pingExtractionModel()).toBe(false);
+  });
+
+  it("gives up on a probe that does not answer within its own deadline", async () => {
+    vi.stubGlobal("fetch", vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+    })));
+
+    expect(await pingExtractionModel({ deadlineMs: 5 })).toBe(false);
   });
 });

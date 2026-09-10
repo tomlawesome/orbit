@@ -26,6 +26,9 @@ import {
  */
 const MODEL_ENDPOINT = "http://orbit-ollama:11434/api/generate";
 
+/** The same fixed host, asked only whether it is answering (ADR-0025 section 5). */
+const MODEL_TAGS_ENDPOINT = "http://orbit-ollama:11434/api/tags";
+
 /** The only configurable part of the model path, per ADR-0025 section 2. */
 const MODEL_ENVIRONMENT_KEY = "OLLAMA_MODEL";
 
@@ -540,6 +543,7 @@ const LOG_REASON_BY_FAILURE = {
 } as const satisfies Record<ModelExtractionFailure, string>;
 
 function modelDegraded(reason: ModelExtractionFailure, startedAt: number): ModelExtractionResult {
+  recordModelExtractionSample(reason === "timed_out" ? "timed_out" : "failed");
   log.warn({
     event: "document.model_extraction",
     state: "degraded",
@@ -549,6 +553,99 @@ function modelDegraded(reason: ModelExtractionFailure, startedAt: number): Model
     durationMs: Math.max(0, Date.now() - startedAt),
   });
   return { status: "failed", reason };
+}
+
+/**
+ * Health inputs for `document-health` (ADR-0025 section 5). Each bounded
+ * request records one sample, so an administrator can see whether the model is
+ * answering without anything about a document being kept: these are counts of
+ * outcomes, never values, filenames or text.
+ */
+export type ModelExtractionSample = "ready" | "timed_out" | "failed";
+
+export interface ModelExtractionWindow {
+  samples: number;
+  failures: number;
+  timeouts: number;
+}
+
+/** How many recent attempts the failure rate is judged over. */
+export const MODEL_SAMPLE_WINDOW = 20;
+
+/**
+ * Above this share of failures the model is not usefully answering, so the
+ * entry turns `unavailable`. A host that loses the deadline race now and then
+ * stays below it, which is the difference an administrator needs to see
+ * between "occasionally slow" and "down".
+ */
+export const MODEL_FAILURE_RATE_THRESHOLD = 0.5;
+
+/** Below this many samples the rate is noise, so it never degrades health. */
+export const MODEL_FAILURE_RATE_MIN_SAMPLES = 5;
+
+const recentSamples: ModelExtractionSample[] = [];
+
+/** Records one bounded request's outcome. Counts only; nothing about the document. */
+export function recordModelExtractionSample(sample: ModelExtractionSample): void {
+  recentSamples.push(sample);
+  if (recentSamples.length > MODEL_SAMPLE_WINDOW) {
+    recentSamples.splice(0, recentSamples.length - MODEL_SAMPLE_WINDOW);
+  }
+}
+
+/** The recent sample window, as counts. */
+export function modelExtractionWindow(): ModelExtractionWindow {
+  let failures = 0;
+  let timeouts = 0;
+  for (const sample of recentSamples) {
+    if (sample !== "ready") failures += 1;
+    if (sample === "timed_out") timeouts += 1;
+  }
+  return { samples: recentSamples.length, failures, timeouts };
+}
+
+/** Clears the window. For tests and for a deliberate restart of the count. */
+export function resetModelExtractionWindow(): void {
+  recentSamples.length = 0;
+}
+
+/** Whether the recent window is failing above the threshold. */
+export function modelFailureRateExceeded(window: ModelExtractionWindow): boolean {
+  if (window.samples < MODEL_FAILURE_RATE_MIN_SAMPLES) return false;
+  return window.failures > window.samples * MODEL_FAILURE_RATE_THRESHOLD;
+}
+
+/** The readiness probe's own deadline, short enough for a health request. */
+export const MODEL_PING_DEADLINE_MS = 2_000;
+
+/**
+ * Asks the fixed endpoint whether it is answering, without sending it any
+ * document text. Same constant host as the generate path: readiness cannot be
+ * pointed anywhere configuration chooses (ADR-0025 section 2).
+ */
+export async function pingExtractionModel(options: { deadlineMs?: number } = {}): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.min(options.deadlineMs ?? MODEL_PING_DEADLINE_MS, MODEL_PING_DEADLINE_MS));
+  try {
+    const response = await fetch(MODEL_TAGS_ENDPOINT, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      redirect: "error",
+      signal: controller.signal,
+    });
+    const ready = response.status >= 200 && response.status < 300 && !response.redirected;
+    try {
+      await response.body?.cancel();
+    } catch {
+      // Readiness is the whole question; a discarded body's detail is not it.
+    }
+    return ready;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -622,6 +719,7 @@ export async function modelProposalFromText(
     const proposal = proposalFromModelObject(modelObjectFromEnvelope(read.bytes), filename, normalizedText);
     if (!proposal) return modelDegraded("malformed_response", startedAt);
 
+    recordModelExtractionSample("ready");
     // Counts and duration only. Model output is hostile-derived and never logged.
     log.info({
       event: "document.model_extraction",
