@@ -12,6 +12,13 @@ import { proposalFromText } from "./suggestions";
 // corpus of ADR-0025 are scored by the same code (#934).
 // The floor is a ratchet: raise it when extraction durably improves; never
 // lower it to make a change pass.
+//
+// Issue #939 (2026-09-10) changed how a point is lost, not what a point is:
+// a blank field still earns 0, but a wrong value now earns
+// `-WRONG_VALUE_PENALTY` (see `extraction-scoring.ts`), so a plausible wrong
+// value costs more than an honest blank. It also added the per-field
+// breakdown printed alongside the overall figure. Measurement only — this
+// corpus and the extractor were not touched for #939.
 
 // Measured 1.00 (78/78) on 2026-09-09, after the extractor learned the
 // harder corpus: hyphenated, year-first and two-digit-year numeric dates,
@@ -23,6 +30,17 @@ import { proposalFromText } from "./suggestions";
 // floor without an accompanying, recorded floor decision. Raised 0.9 -> 0.95
 // with that measurement; 0.95 still leaves about four points of the current
 // 78 free for the next batch of hard documents.
+//
+// Re-measured 1.00 (78/78) on 2026-09-10 under #939's wrong-costs-more
+// scoring: provider 100.0% (14/14), reference 100.0% (17/17), dates 100.0%
+// (47/47). The figure is unchanged because this corpus currently holds zero
+// wrong values for the heuristic to be penalised on — the penalty and the
+// floor are both restated here for the record, not because the number
+// moved. ACCURACY_FLOOR stays at 0.95: it was already a ratchet below a
+// measurement that has not fallen, and the new penalty makes a future
+// regression that turns a blank into a wrong guess cost the floor faster
+// than before, which is the point of raising it, not a reason to move it
+// now.
 //
 // This corpus is the TUNING set: improvement work reads it freely. The
 // hold-out set it is paired with (`extraction-holdout-corpus.ts`) is the

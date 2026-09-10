@@ -548,6 +548,18 @@ unreadable, and no maintenance window is needed at any step below.
    an uploaded document, a new household's Tier 1 key, a mailbox credential —
    is wrapped under the **next** key straight away (#955), so the rewrap in
    step 3 is chasing a fixed set of rows rather than a moving one.
+
+   From this restart the rotation is also visible until step 4 removes the
+   second key (#956): Orbit records one instance-level
+   `document_kek_rotation_started` audit entry naming both key ids — one per
+   rotation, however many restarts happen inside it — every startup logs a
+   `document.kek_rotation` line saying a rotation is in progress and for how
+   long, and the administration screen shows a "Document key rotation in
+   progress" card with how long it has been open. Orbit never refuses to
+   start over a long-open rotation — that would turn a slow rotation into an
+   outage — so this visibility is the whole guard: if the card or the log
+   line is still there tomorrow, the rotation was left unfinished, not
+   handled.
 3. Run the rewrap worker. It reads the current key exactly as the running
    application does, and takes the next key only from the file you give it:
    ```sh
