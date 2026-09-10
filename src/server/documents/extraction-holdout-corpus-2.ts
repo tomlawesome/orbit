@@ -250,7 +250,10 @@ Your next annual service is due to be booked between 01 October 2026 and 30 Nove
 To make any changes to your plan before it renews, call us on 0333 202 9091.`,
     expected: {
       dates: ["2026-09-19"],
-      provider: "WarmWorks Cover Plan",
+      // Owner ruling 2026-09-10: the provider is the company, WarmWorks.
+      // "WarmWorks Cover Plan" is the plan, and a not-unreasonable guess, but a
+      // lower-quality answer than the company name alone.
+      provider: "WarmWorks",
       reference: "WW-BLR-551209",
     },
   },
