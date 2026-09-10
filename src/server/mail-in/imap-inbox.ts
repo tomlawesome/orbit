@@ -6,7 +6,7 @@ import { documents, households, imapIngestionAttachments, imapIngestionMessages,
 import { purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { requestDocumentDeletion } from "@/server/document-repository";
 import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
-import { openMetadataReader, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/tier1";
+import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/server/workspace-access";
 import {
   reviewInboxState,
@@ -210,6 +210,7 @@ export async function listImapInbox(userId: string) {
       itemId: items.id,
       householdId: items.householdId,
       title: items.title,
+      titleEnc: items.titleEnc,
       itemStatus: items.status,
       messageId: imapIngestionMessages.id,
       filedAt,
@@ -236,6 +237,7 @@ export async function listImapInbox(userId: string) {
   // Tier 1 (ADR-0024): a receipt still without a household reads under the
   // instance key, which is the whole reason that scope exists.
   const metadataReaders = await openReceiptMetadataReaders(receipts.map((receipt) => receipt.householdId));
+  const filedReaders = await openMetadataReaders(filedRows.map((row) => row.householdId));
   return {
     receipts: receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => {
       const state = reviewInboxState(receipt.status, receipt.failureCode, {
@@ -267,10 +269,15 @@ export async function listImapInbox(userId: string) {
     // see even though their own mail created it.
     filed: filedRows.filter((row) => visibleHouseholdIds.has(row.householdId)).map((row): MailFiledItem => {
       const filedDocuments = (attachmentsByMessage.get(row.messageId) ?? []).filter((attachment) => attachment.status === "assigned");
+      // Tier 2 (#963): the item's household owns the title, so it decrypts
+      // under that household's key rather than the receipt's, which may be the
+      // instance scope. `filedReaders` holds one per household, not one per row.
+      const filedTitle = filedReaders.get(row.householdId)!
+        .text("items.title", row.itemId, { encrypted: row.titleEnc, plaintext: row.title });
       return {
         itemId: row.itemId,
         householdId: row.householdId,
-        title: row.title,
+        title: filedTitle.value ?? "",
         itemStatus: row.itemStatus,
         documentName: filedDocuments.length ? reviewAttachmentDisplayName(filedDocuments[0].displayName, filedDocuments[0].mediaType) : null,
         documentCount: filedDocuments.length,
@@ -322,8 +329,14 @@ export async function getImapReview(userId: string, receiptId: string, household
   const [householdSections, householdItems, attachments] = await Promise.all([
     getDb().select({ id: sections.id, name: sections.name }).from(sections)
       .where(and(eq(sections.householdId, householdId), eq(sections.visible, true), isNull(sections.archivedAt))).orderBy(asc(sections.position)),
-    getDb().select({ id: items.id, title: items.title, provider: items.provider, reference: items.reference, referenceEnc: items.referenceEnc, subtype: items.subtype })
-      .from(items).where(and(eq(items.householdId, householdId), inArray(items.status, ["active", "expired", "cancelled"]))).orderBy(asc(items.title)).limit(200),
+    // Tier 2 (#963) moved the ordering out of SQL: `items.title` is ciphertext,
+    // so ordering by it in the database would order by nothing meaningful. The
+    // rows come back in a stable creation order, are decrypted, and are sorted
+    // by title in the application — the decrypt-and-scan the tiering decision
+    // traded for. The 200 cap stands as the same safety bound it always was;
+    // at household scale it is never the thing that decides what is returned.
+    getDb().select({ id: items.id, title: items.title, titleEnc: items.titleEnc, provider: items.provider, providerEnc: items.providerEnc, reference: items.reference, referenceEnc: items.referenceEnc, subtype: items.subtype })
+      .from(items).where(and(eq(items.householdId, householdId), inArray(items.status, ["active", "expired", "cancelled"]))).orderBy(asc(items.createdAt), asc(items.id)).limit(200),
     getDb().select({
       id: imapIngestionAttachments.id,
       displayName: imapIngestionAttachments.displayName,
@@ -338,11 +351,16 @@ export async function getImapReview(userId: string, receiptId: string, household
   // values at household scale (ADR-0024 decision 2): it already reads every
   // item in the household, so the blind index would buy it nothing.
   const householdMetadata = await openMetadataReader(householdId);
-  const candidates = householdItems.flatMap((item) => {
-    const reason = findReviewedIntakeCandidateReason(metadata.proposal, {
+  const decryptedItems = householdItems
+    .map((item) => ({
       ...item,
+      title: householdMetadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title }).value ?? "",
+      provider: householdMetadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider }).value,
       reference: householdMetadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
-    });
+    }))
+    .sort((left, right) => left.title.localeCompare(right.title));
+  const candidates = decryptedItems.flatMap((item) => {
+    const reason = findReviewedIntakeCandidateReason(metadata.proposal, item);
     return reason ? [{ itemId: item.id, title: item.title, reason }] : [];
   }).slice(0, 10);
   return {

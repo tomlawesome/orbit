@@ -26,6 +26,7 @@ import {
   type RecipientWarningDays,
 } from "@/lib/preferences";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
+import { openMetadataReaders } from "@/server/metadata/fields";
 
 // Re-exported so every existing import of these from this module (the
 // dispatch worker) keeps working: the pure logic itself now lives in
@@ -75,6 +76,11 @@ export const notificationFailureCategories = [
   "recipient_preferences_disabled",
   "household_pending_deletion",
   "membership_removed",
+  /* #963: the item's name is Tier 2 ciphertext and would not decrypt — a
+     locked instance or a damaged value. Retried like any transient fault,
+     because both causes are repairable and neither justifies a nameless
+     reminder. */
+  "item_title_unreadable",
   "unknown",
 ] as const;
 
@@ -698,6 +704,7 @@ async function deliverClaimed(
       householdId: notificationDeliveries.householdId,
       email: users.email,
       title: items.title,
+      titleEnc: items.titleEnc,
       dueDate: dueEvents.dueDate,
       itemId: items.id,
       itemStatus: items.status,
@@ -745,6 +752,10 @@ async function deliverClaimed(
   const rulesByItem = new Map<string, typeof rules>();
   for (const rule of rules) rulesByItem.set(rule.itemId, [...(rulesByItem.get(rule.itemId) ?? []), rule]);
 
+  // Tier 2 (#963): one DEK unwrap per household in this batch, not one per
+  // delivery. The worker already runs with key access, which is what the
+  // tiering decision relied on.
+  const titleReaders = await openMetadataReaders(deliveries.map((delivery) => delivery.householdId));
   for (const delivery of deliveries) {
     const leaseToken = leaseTokens.get(delivery.id);
     if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
@@ -771,7 +782,18 @@ async function deliverClaimed(
         await cancelDelivery(db, delivery.id, leaseToken, now, "recipient_preferences_disabled");
         continue;
       }
-      const title = delivery.title.trim().slice(0, 160);
+      // Tier 2 (#963): the reminder worker holds key access, exactly as the
+      // tiering decision assumed, so the item's name decrypts here. A name it
+      // cannot read is not sent as an empty or invented one: the delivery is
+      // failed like any other transient fault, so it retries once the key or
+      // the value is repaired rather than mailing a nameless reminder.
+      const decryptedTitle = titleReaders.get(delivery.householdId)!
+        .text("items.title", delivery.itemId, { encrypted: delivery.titleEnc, plaintext: delivery.title });
+      if (!decryptedTitle.value) {
+        await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "item_title_unreadable", now, retryDelay);
+        continue;
+      }
+      const title = decryptedTitle.value.trim().slice(0, 160);
       const body = `${title} is due on ${delivery.dueDate}.`.slice(0, 320);
       const subject = `${title} is coming up`.slice(0, 180);
       const text = `Reminder: ${body}\nOpen Orbit to review it.`.slice(0, 500);

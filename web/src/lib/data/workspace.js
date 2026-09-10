@@ -49,11 +49,13 @@
  * @property {?string} [scheduleKind]   scheduleKinds
  * @property {?number} [recurrenceMonths]
  * @property {?number[]} [reminderDays]
- * @property {?{reference?: string, notes?: string}} [metadataStatus]
- *   Read-only (ADR-0024): why a Tier 1 field is absent rather than empty --
+ * @property {?{reference?: string, notes?: string, title?: string, provider?: string, costMinor?: string}} [metadataStatus]
+ *   Read-only (ADR-0024): why an encrypted field is absent rather than empty --
  *   `metadata_integrity_failed` for a value that would not decrypt,
  *   `metadata_locked` while the instance has no key. Never sent back; the
- *   `ITEM_FIELDS` allowlist in data/commands.js is what keeps it out.
+ *   `ITEM_FIELDS` allowlist in data/commands.js is what keeps it out. `title`
+ *   is the one required field that can be absent (#963): when it is, `title`
+ *   is the empty string and this says why.
  * @property {number} [version]         rides along for #424's writes
  * @property {string} [updatedAt]       ISO-8601, likewise
  * @property {number} [documentCount]   not a schema field; see above

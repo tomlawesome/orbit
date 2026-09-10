@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { items } from "@/db/schema";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import { importPortableArchive } from "@/server/portable-archive-repository";
-import { openMetadataReader } from "@/server/metadata/tier1";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
 const passphrase = "correct-horse-battery-staple";
@@ -83,8 +83,10 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     expect(result.importedItems).toBe(1);
     // Notes are Tier 1 now (ADR-0024): the import writes the envelope and
     // clears the plaintext, so the cap is asserted on the decrypted value.
+    // Found by its own encrypted notes rather than by title: `items.title` is
+    // Tier 2 ciphertext since #963, so a SQL equality on it matches nothing.
     const [stored] = await getDb().select({ id: items.id, notes: items.notes, notesEnc: items.notesEnc }).from(items)
-      .where(and(eq(items.householdId, fixture.household.id), eq(items.title, "Imported item")));
+      .where(and(eq(items.householdId, fixture.household.id), isNotNull(items.notesEnc)));
     expect(stored?.notes).toBeNull();
     const metadata = await openMetadataReader(fixture.household.id);
     expect(metadata.text("items.notes", stored.id, { encrypted: stored.notesEnc, plaintext: stored.notes }).value)

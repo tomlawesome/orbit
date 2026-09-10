@@ -83,6 +83,11 @@ async function plantRealEvent(fixture: IntegrationFixture): Promise<string> {
     kind: "renewal",
     dueDate: PLANTED_DUE_DATE,
   });
+  // The fixture's item is written straight to SQL and so is still plaintext,
+  // which is exactly the pre-backfill state the dual read is for (#963). A
+  // null here would mean that stopped being true, and this test would be
+  // asserting on nothing, so it fails loudly instead.
+  if (planted.title === null) throw new Error("planted item has no plaintext title");
   return planted.title;
 }
 

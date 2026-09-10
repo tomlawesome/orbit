@@ -1,8 +1,9 @@
 /**
- * The Tier 1 backfill (ADR-0024 decision 3), in the resumable-job mould of
- * ADR-0010.
+ * The encrypted-metadata backfill (ADR-0024 decision 3), in the resumable-job
+ * mould of ADR-0010. It covers Tier 1 (#931) and Tier 2 (#963) together, in
+ * one pass over each table, because both tiers share one key and one envelope.
  *
- * Migration 0040 cannot do this work: encrypting needs the key-encryption key,
+ * Migrations 0040 and 0041 cannot do this work: encrypting needs the key-encryption key,
  * which is an application secret and is not available to SQL. What the
  * migration guarantees is that every pre-existing row stays readable — the
  * plaintext column stands until this job replaces it — and what this job does
@@ -16,10 +17,10 @@
  */
 import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { imapIngestionMessages, items } from "@/db/schema";
+import { householdInvitations, imapIngestionMessages, items } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { MetadataKeyLockedError, resolveMetadataKey } from "@/server/metadata/keys";
-import { MetadataCipher, type MetadataExecutor } from "@/server/metadata/tier1";
+import { MetadataCipher, type MetadataExecutor } from "@/server/metadata/fields";
 
 /** Small enough that one transaction is short, large enough to drain quickly. */
 export const METADATA_BACKFILL_BATCH = 100;
@@ -27,11 +28,12 @@ export const METADATA_BACKFILL_BATCH = 100;
 export interface MetadataBackfillBatch {
   items: number;
   receipts: number;
+  invitations: number;
 }
 
 /** True when this batch converted nothing, so there is no more work. */
 export function backfillComplete(batch: MetadataBackfillBatch): boolean {
-  return batch.items === 0 && batch.receipts === 0;
+  return batch.items === 0 && batch.receipts === 0 && batch.invitations === 0;
 }
 
 async function cipherFor(
@@ -62,15 +64,25 @@ export async function runMetadataBackfillBatch(
     const ciphers = new Map<string, MetadataCipher>();
     let convertedItems = 0;
     let convertedReceipts = 0;
+    let convertedInvitations = 0;
 
+    // One pass converts both tiers of a row. Selecting on "any plaintext still
+    // present with its ciphertext missing" is what makes the job resumable
+    // without a cursor: what is left to do is a property of the rows.
     const itemRows = await transaction.select({
       id: items.id,
       householdId: items.householdId,
       reference: items.reference,
       notes: items.notes,
+      title: items.title,
+      provider: items.provider,
+      costMinor: items.costMinor,
     }).from(items).where(or(
       and(isNotNull(items.reference), isNull(items.referenceEnc)),
       and(isNotNull(items.notes), isNull(items.notesEnc)),
+      and(isNotNull(items.title), isNull(items.titleEnc)),
+      and(isNotNull(items.provider), isNull(items.providerEnc)),
+      and(isNotNull(items.costMinor), isNull(items.costMinorEnc)),
     )).limit(batchSize);
 
     for (const row of itemRows) {
@@ -81,10 +93,19 @@ export async function runMetadataBackfillBatch(
         referenceIndex: cipher.referenceIndex(row.reference),
         notes: null,
         notesEnc: cipher.encryptText("items.notes", row.id, row.notes),
+        title: null,
+        titleEnc: cipher.encryptText("items.title", row.id, row.title),
+        provider: null,
+        providerEnc: cipher.encryptText("items.provider", row.id, row.provider),
+        costMinor: null,
+        costMinorEnc: cipher.encryptNumber("items.cost_minor", row.id, row.costMinor),
       }).where(and(
         eq(items.id, row.id),
         isNull(items.referenceEnc),
         isNull(items.notesEnc),
+        isNull(items.titleEnc),
+        isNull(items.providerEnc),
+        isNull(items.costMinorEnc),
       )).returning({ id: items.id });
       convertedItems += updated.length;
     }
@@ -117,7 +138,35 @@ export async function runMetadataBackfillBatch(
       convertedReceipts += updated.length;
     }
 
-    return { items: convertedItems, receipts: convertedReceipts };
+    // Invitations (#963). Only open ones are converted: a redeemed or
+    // withdrawn row is spent, nothing reads its address again, and rewriting
+    // it would risk the partial unique index for no gain. The contract release
+    // clears the rest when it drops the column.
+    const invitationRows = await transaction.select({
+      id: householdInvitations.id,
+      householdId: householdInvitations.householdId,
+      email: householdInvitations.email,
+    }).from(householdInvitations).where(and(
+      isNotNull(householdInvitations.email),
+      isNull(householdInvitations.emailEnc),
+      isNull(householdInvitations.redeemedAt),
+      isNull(householdInvitations.revokedAt),
+    )).limit(batchSize);
+
+    for (const row of invitationRows) {
+      const cipher = await cipherFor(ciphers, row.householdId, transaction);
+      const updated = await transaction.update(householdInvitations).set({
+        email: null,
+        emailEnc: cipher.encryptText("household_invitations.email", row.id, row.email),
+        emailIndex: cipher.blindIndex("household_invitations.email", row.email),
+      }).where(and(
+        eq(householdInvitations.id, row.id),
+        isNull(householdInvitations.emailEnc),
+      )).returning({ id: householdInvitations.id });
+      convertedInvitations += updated.length;
+    }
+
+    return { items: convertedItems, receipts: convertedReceipts, invitations: convertedInvitations };
   });
 }
 

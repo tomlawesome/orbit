@@ -13,7 +13,7 @@ import { extractTextWithTika } from "@/server/documents/tika";
 import { detectDocumentMediaType, validateSupportedDocumentStructure } from "@/server/documents/validation";
 import { isDocumentContentReady, readDocumentDownload } from "@/server/document-repository";
 import { getDocumentConfig } from "@/server/documents/config";
-import { openMetadataReader, requireMetadataWriter } from "@/server/metadata/tier1";
+import { openMetadataReader, requireMetadataWriter } from "@/server/metadata/fields";
 import { acquireActiveHouseholdLock, validUuid } from "@/server/workspace-access";
 
 export { proposalFromText } from "@/server/documents/suggestions";
@@ -57,13 +57,20 @@ async function findDuplicates(householdId: string, documentId: string, proposal:
   // plaintext. The blind index exists for lookups that would otherwise have to
   // read every row, which this one does anyway.
   const metadata = await openMetadataReader(householdId);
-  const referenceOf = (item: (typeof householdItems)[number]): string | null =>
-    metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value;
+  // Tier 2 (#963) joins Tier 1 in the same pass: title and provider decrypt
+  // here too, so the comparisons below read exactly as they did on plaintext.
+  // A damaged or locked value reads as null and simply never matches.
+  const decrypted = householdItems.map((item) => ({
+    ...item,
+    title: metadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title }).value ?? "",
+    provider: metadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider }).value,
+    reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
+  }));
   const seen = new Map<string, DuplicateCandidate>();
   const sameHash = await getDb().select({ itemId: documents.itemId }).from(documents).where(and(eq(documents.householdId, householdId), eq(documents.contentSha256, document?.hash ?? "")));
-  for (const match of sameHash) if (match.itemId) seen.set(match.itemId, { itemId: match.itemId, title: householdItems.find((item) => item.id === match.itemId)?.title ?? "Existing item", reason: "document_hash" });
-  for (const item of householdItems) {
-    if (proposal.reference && referenceOf(item)?.toLowerCase() === proposal.reference.toLowerCase()) seen.set(item.id, { itemId: item.id, title: item.title, reason: "reference" });
+  for (const match of sameHash) if (match.itemId) seen.set(match.itemId, { itemId: match.itemId, title: decrypted.find((item) => item.id === match.itemId)?.title || "Existing item", reason: "document_hash" });
+  for (const item of decrypted) {
+    if (proposal.reference && item.reference?.toLowerCase() === proposal.reference.toLowerCase()) seen.set(item.id, { itemId: item.id, title: item.title, reason: "reference" });
     else if (proposal.provider && item.provider?.toLowerCase() === proposal.provider.toLowerCase() && item.title.toLowerCase() === proposal.title.toLowerCase()) seen.set(item.id, { itemId: item.id, title: item.title, reason: "provider_title" });
     else if (proposal.dates?.some((date) => [item.startDate, item.expiryDate, item.renewalDate, item.serviceDate].includes(date))) seen.set(item.id, { itemId: item.id, title: item.title, reason: "date_overlap" });
   }

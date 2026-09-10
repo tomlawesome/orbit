@@ -8,7 +8,7 @@ import { assignImapReceiptHousehold } from "@/server/mail-in/imap-inbox";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import { importPortableArchive, previewPortableImport } from "@/server/portable-archive-repository";
 import { runMetadataBackfillBatch } from "@/server/metadata/backfill";
-import { openMetadataReader } from "@/server/metadata/tier1";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
 const passphrase = "correct-horse-battery-staple";
@@ -148,7 +148,7 @@ describe("Tier 1 metadata is written and read encrypted (ADR-0024)", () => {
     // A key had to be minted for the other household for this to mean
     // anything; writing an item there is what mints it.
     const [otherSection] = await getDb().select({ id: items.sectionId }).from(items).where(eq(items.id, fixture.secondItem.id));
-    await writeItem({
+    const otherItemId = await writeItem({
       userId: fixture.users.secondOwner.id,
       householdId: fixture.secondHousehold.id,
       sectionId: otherSection.id,
@@ -163,8 +163,10 @@ describe("Tier 1 metadata is written and read encrypted (ADR-0024)", () => {
     // The same reference in two households produces unrelated digests, so
     // nothing correlates across the boundary.
     const [first] = await getDb().select({ referenceIndex: items.referenceIndex }).from(items).where(eq(items.id, itemId));
+    // Found by id, not by title: `items.title` is Tier 2 ciphertext since
+    // #963, so a SQL equality on it would match nothing.
     const second = await getDb().select({ referenceIndex: items.referenceIndex }).from(items)
-      .where(and(eq(items.householdId, fixture.secondHousehold.id), eq(items.title, "Other household item")));
+      .where(and(eq(items.householdId, fixture.secondHousehold.id), eq(items.id, otherItemId)));
     expect(second[0].referenceIndex).not.toBe(first.referenceIndex);
   });
 });
@@ -394,7 +396,7 @@ describe("the backfill converts rows that predate encryption (ADR-0024 decision 
 
     // Resumable and idempotent: a second run finds nothing left to do.
     const second = await runMetadataBackfillBatch(100);
-    expect(second).toEqual({ items: 0, receipts: 0 });
+    expect(second).toEqual({ items: 0, receipts: 0, invitations: 0 });
   });
 
   it("leaves an empty receipt draft alone rather than encrypting an empty object", async () => {
