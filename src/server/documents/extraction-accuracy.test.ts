@@ -42,10 +42,27 @@ import { proposalFromText } from "./suggestions";
 // than before, which is the point of raising it, not a reason to move it
 // now.
 //
+// Re-measured 1.00 (135/135) on 2026-09-10 after #937's second half retired
+// the 13 spent hold-out documents into this corpus: provider 100.0%
+// (27/27), reference 100.0% (29/29), dates 100.0% (79/79). The corpus grew
+// 23 -> 36 documents and 78 -> 135 points; the retired documents each earn
+// exactly what they earned in the hold-out (78 + 57 = 135, and each field
+// bucket adds up the same way), so nothing regressed and nothing was tuned
+// to make this number.
+//
+// ACCURACY_FLOOR raised 0.95 -> 0.97 with that measurement, and this is a
+// re-record rather than a ratchet on improved extraction: the extractor did
+// not get better, the corpus got bigger. 0.95 was chosen to leave "about
+// four points of the current 78" free for the next batch of hard documents;
+// against 135 points that same 0.95 leaves about seven, which is a looser
+// gate than the one that was agreed, arrived at by arithmetic rather than
+// by decision. 0.97 of 135 is 131, restoring the intended four points of
+// slack. The measurement itself has not moved from 1.00.
+//
 // This corpus is the TUNING set: improvement work reads it freely. The
-// hold-out set it is paired with (`extraction-holdout-corpus.ts`) is the
+// hold-out set it is paired with (`extraction-holdout-corpus-2.ts`) is the
 // one improvement work must not read, and it is reported without a floor.
-const ACCURACY_FLOOR = 0.95;
+const ACCURACY_FLOOR = 0.97;
 
 describe("extraction accuracy against the corpus (#319)", () => {
   it(`heuristic extraction stays at or above the ${ACCURACY_FLOOR} floor`, async () => {
