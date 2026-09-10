@@ -414,7 +414,12 @@ export interface RotationStart {
 }
 
 interface RotationStartRow {
-  createdAt: Date;
+  // A raw `execute` returns driver values, not Drizzle-mapped columns, so a
+  // timestamp arrives as the string Postgres sent rather than a Date. Typing
+  // it as Date here was what made `startedAt.toISOString()` throw, and the
+  // caller's catch then reported "no rotation open" -- the exact invisibility
+  // #956 exists to remove.
+  createdAt: Date | string;
   changes: { previousKeyId?: unknown; nextKeyId?: unknown };
 }
 
@@ -445,7 +450,7 @@ async function openRotationStartWith(executor: AuditExecutor): Promise<RotationS
   const row = (rows as unknown as RotationStartRow[])[0];
   if (!row) return null;
   return {
-    startedAt: row.createdAt,
+    startedAt: row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt),
     previousKeyId: typeof row.changes.previousKeyId === "string" ? row.changes.previousKeyId : "",
     nextKeyId: typeof row.changes.nextKeyId === "string" ? row.changes.nextKeyId : "",
   };
