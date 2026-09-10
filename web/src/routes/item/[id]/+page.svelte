@@ -10,6 +10,10 @@
     archiveCommand, completeCommand, nextDateAfter, rescheduleCommand,
     snoozeCommand, statusCommand, upsertCommand,
   } from "$lib/data/commands.js";
+  import {
+    DAMAGED, DAMAGED_PLACEHOLDER, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS,
+    fieldState, itemLocked, saveProblem,
+  } from "$lib/data/metadata-status.js";
   import { matchesOf, nearestMatchOf, reachableAt, stepFrom } from "./band.js";
   import { mountBelt } from "./belt.behaviour.js";
   import "./belt.css";
@@ -128,6 +132,15 @@
   let routerReady = false;
 
   const row = $derived(cardBody?.item ?? null);              /* the manifest row  */
+
+  /* #941: why a Tier 1 field is absent, when it is. Damaged means the stored
+     value is gone and retyping replaces it; locked means it is intact and
+     waiting for an administrator. `locked` is read at PANEL level, not field
+     level, because item.upsert is a full-row write: while the key is away
+     every edit to this item is refused, not just the two encrypted fields. */
+  const referenceState = $derived(fieldState(row?.metadataStatus, "reference"));
+  const notesState = $derived(fieldState(row?.metadataStatus, "notes"));
+  const locked = $derived(itemLocked(row?.metadataStatus));
   const record = $derived(cardBody?.kind === "item" ? cardBody.item.item : null); /* the raw item */
   /** @type {(days: number[]) => string} */
   const remindOf = (days) => days.map((d) => `${d}d`).join(" and ") + " before";
@@ -351,7 +364,10 @@
     } catch (error) {
       /* The seam throws WorkspaceError and nothing else carries a `code`,
          so this is the same two readings the line always made. */
-      problem = error instanceof Error ? error.message : String(error);
+      /* #941: the one refusal that gets the member's own words rather than
+         the server's is the locked 503 -- a panel opened before the key went
+         away and sent after it. Everything else keeps what the server said. */
+      problem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
       if (error instanceof WorkspaceError && error.code === "version_conflict") await invalidateAll();
     } finally {
       busy = false;
@@ -500,8 +516,16 @@
         {#if row.provider}
           <div class="kv"><span>provider</span><b>{row.provider}</b></div>
         {/if}
+        <!-- #941: the row renders on the marker as well as on the value. Both
+             states used to vanish behind a truthiness test, so a reference
+             Orbit could not read looked exactly like one nobody had entered. -->
         {#if row.reference}
           <div class="kv"><span>reference</span><b>{row.reference}</b></div>
+        {:else if referenceState === DAMAGED}
+          <div class="kv"><span>reference</span>
+            <b class="failed"><i aria-hidden="true"></i>{REFERENCE_WORDS[DAMAGED]}</b></div>
+        {:else if referenceState === LOCKED}
+          <div class="kv"><span>reference</span><b class="locked">{REFERENCE_WORDS[LOCKED]}</b></div>
         {/if}
         {#if row.remind.length}
           <div class="kv"><span>reminders</span><b>{remindOf(row.remind)}</b></div>
@@ -534,20 +558,24 @@
           <div class="panel" style="--act:var(--ok);--act-text:var(--ok-text)">
             <div class="row2">
               <div class="field"><label for="a-done">completed on</label>
-                <input id="a-done" type="date" bind:value={form.completedDate}></div>
+                <input id="a-done" type="date" bind:value={form.completedDate} disabled={locked}></div>
               {#if record.recurrenceMonths}
                 <div class="field"><label for="a-next">next orbit</label>
-                  <input id="a-next" type="date" bind:value={form.nextDate}></div>
+                  <input id="a-next" type="date" bind:value={form.nextDate} disabled={locked}></div>
               {/if}
             </div>
             <div class="row2">
               <div class="field mono"><label for="a-cost">actual cost</label>
-                <input id="a-cost" inputmode="decimal" bind:value={form.cost} placeholder="optional"></div>
+                <input id="a-cost" inputmode="decimal" bind:value={form.cost} placeholder="optional"
+                       disabled={locked}></div>
             </div>
             <div class="field"><label for="a-cnotes">notes</label>
-              <input id="a-cnotes" bind:value={form.notes} placeholder="optional"></div>
+              <input id="a-cnotes" bind:value={form.notes} placeholder="optional" disabled={locked}></div>
+            {#if locked}
+              <div class="note">{PANEL_LOCKED}</div>
+            {/if}
             <div class="save-row">
-              <button class="btn-primary" disabled={busy || !form.completedDate}
+              <button class="btn-primary" disabled={busy || locked || !form.completedDate}
                 onclick={() => run(() => completeCommand(record, {
                   completedDate: form.completedDate,
                   nextDate: form.nextDate || undefined,
@@ -584,27 +612,39 @@
         {/if}
 
         {#if panel === "edit"}
+          <!-- #941. Damaged: the input stays enabled and seeded empty, and its
+               placeholder says what saving will do -- the panel is where that
+               has to be visible, because a full-row upsert writes the field
+               whether or not it was touched, so a member saving past the
+               placeholder has decided. Locked: every input, not only the two
+               encrypted ones, because item.upsert is refused whole. -->
           <div class="panel" style="--act:var(--accent);--act-text:var(--accent-text)">
             <div class="field"><label for="e-title">title</label>
-              <input id="e-title" bind:value={form.title}></div>
+              <input id="e-title" bind:value={form.title} disabled={locked}></div>
             <div class="row2">
               <div class="field"><label for="e-provider">provider</label>
-                <input id="e-provider" bind:value={form.provider} placeholder="optional"></div>
+                <input id="e-provider" bind:value={form.provider} placeholder="optional" disabled={locked}></div>
               <div class="field"><label for="e-reference">reference</label>
-                <input id="e-reference" bind:value={form.reference} placeholder="optional"></div>
+                <input id="e-reference" bind:value={form.reference} disabled={locked}
+                       placeholder={referenceState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional"}></div>
             </div>
             <div class="row2">
               <div class="field mono"><label for="e-cost">cost</label>
-                <input id="e-cost" inputmode="decimal" bind:value={form.cost} placeholder="optional"></div>
+                <input id="e-cost" inputmode="decimal" bind:value={form.cost} placeholder="optional" disabled={locked}></div>
               <div class="field"><label for="e-due">due date</label>
-                <input id="e-due" type="date" bind:value={form.dueDate}></div>
+                <input id="e-due" type="date" bind:value={form.dueDate} disabled={locked}></div>
             </div>
             <div class="field"><label for="e-recur">orbital period (months)</label>
-              <input id="e-recur" inputmode="numeric" bind:value={form.recurrenceMonths} placeholder="optional"></div>
+              <input id="e-recur" inputmode="numeric" bind:value={form.recurrenceMonths} placeholder="optional"
+                     disabled={locked}></div>
             <div class="field"><label for="e-notes">notes</label>
-              <textarea id="e-notes" rows="3" bind:value={form.notes} placeholder="optional"></textarea></div>
+              <textarea id="e-notes" rows="3" bind:value={form.notes} disabled={locked}
+                        placeholder={notesState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional"}></textarea></div>
+            {#if locked}
+              <div class="note">{PANEL_LOCKED}</div>
+            {/if}
             <div class="save-row">
-              <button class="btn-primary" disabled={busy || !form.title?.trim()}
+              <button class="btn-primary" disabled={busy || locked || !form.title?.trim()}
                 onclick={() => run(() => upsertCommand(record, editsOf()))}>save changes</button>
               <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
             </div>
@@ -638,6 +678,9 @@
         {#if row.notes}
           <h3>notes</h3>
           <p>{row.notes}</p>
+        {:else if notesState}
+          <h3>notes</h3>
+          <p class={notesState === DAMAGED ? "failed" : "locked"}>{NOTES_WORDS[notesState]}</p>
         {/if}
 
         {#if row.docs.length}

@@ -521,7 +521,7 @@
               : "start time not recorded"}</span></div>
           <p class="rotationwords">
             {#if view.rotation.secondKeyLoaded}
-              Orbit is holding two document keys while the rotation runs. Every document stays readable —
+              Orbit is holding two encryption keys while the rotation runs. Every document stays readable —
               this is safe, but it is meant to be brief. Finish the procedure: run the rewrap, promote the
               new key, remove the old one — “Rotating the document key-encryption key” in the administrator
               guide has the steps.
@@ -532,6 +532,45 @@
             {/if}
           </p>
         </div>
+      {/if}
+
+      <!-- LOCKED AND DAMAGED TIER 1 METADATA (#941), in the slot the rotation
+           card above reserves for exactly this. Same composition, deliberately:
+           nothing when nothing is wrong, full width when something is, the
+           card's ordinary voice with an accent edge, and no buttons — restoring
+           a key is a shell procedure, not a click. Two cards rather than one
+           because the two states have nothing in common but the column they
+           sit in: one is intact data waiting for a key, the other is data that
+           is gone. The member sees neither number: a member gets the field in
+           front of them and what they can do about it, and this screen gets the
+           aggregate, so a missing key reads as one condition with one remedy. -->
+      {#if view.metadata}
+      {#if view.metadata.locked}
+        <div class="card wide rotation">
+          <div class="cardhead"><h2>Encrypted details are locked</h2></div>
+          <p class="rotationwords">
+            Orbit's encryption key is not available, so encrypted notes, references and mail-in
+            extracts can't be read or written — notes or references on {view.metadata.lockedItems}
+            items and {view.metadata.lockedReceipts} mail-in messages are affected, and item editing
+            is paused. The data is intact and unlocks the moment the key is restored. “Restoring the
+            document key-encryption key” in the administrator guide has the steps.
+          </p>
+        </div>
+      {/if}
+
+      {#if view.metadata.damagedValues > 0}
+        <div class="card wide rotation">
+          <div class="cardhead"><h2>Damaged encrypted details</h2></div>
+          <p class="rotationwords">
+            {view.metadata.damagedValues} values have failed their integrity check and can't be
+            recovered — notes or references on {view.metadata.damagedItems} items, and
+            {view.metadata.damagedReceipts} mail-in messages. Each occurrence is in the logs with its
+            row and column. Overwriting a damaged value repairs the record; a damaged mail-in message
+            can be re-forwarded. Counted as they're encountered, so the number can grow as items are
+            opened.
+          </p>
+        </div>
+      {/if}
       {/if}
 
       <div class="card">

@@ -404,7 +404,12 @@ export const items = pgTable("items", {
   id: uuid("id").primaryKey().defaultRandom(),
   householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
   sectionId: uuid("section_id").notNull().references(() => sections.id, { onDelete: "restrict" }),
-  title: text("title").notNull(),
+  /**
+   * Tier 2 metadata (ADR-0024, #963). Nullable since 0041: an encrypted row
+   * clears the plaintext, exactly as Tier 1 does, and `title_enc` carries the
+   * value. The column survives only until the contract release drops it.
+   */
+  title: text("title"),
   subtype: text("subtype"),
   provider: text("provider"),
   reference: text("reference"),
@@ -416,7 +421,21 @@ export const items = pgTable("items", {
    */
   referenceEnc: text("reference_enc"),
   referenceIndex: text("reference_index"),
+  /**
+   * Tier 2 metadata (ADR-0024, #963): the item's own name and the provider's
+   * name. No blind index sits beside either — nothing looks them up by exact
+   * match, so there is nothing for an index to serve and no equality to leak.
+   */
+  titleEnc: text("title_enc"),
+  providerEnc: text("provider_enc"),
   costMinor: integer("cost_minor"),
+  /**
+   * Tier 2 metadata (ADR-0024, #963): the cost, held as the decimal minor-unit
+   * integer rendered into the same `mdv1.` envelope every other value uses.
+   * Totals are summed application-side over decrypted values; nothing sums
+   * this column in SQL, and after 0041 nothing can.
+   */
+  costMinorEnc: text("cost_minor_enc"),
   currency: text("currency").notNull(),
   startDate: date("start_date"),
   expiryDate: date("expiry_date"),
@@ -513,6 +532,31 @@ export const metadataKeys = pgTable("metadata_keys", {
     "metadata_keys_scope_household_valid",
     sql`(${table.scope} = 'household' AND ${table.householdId} IS NOT NULL) OR (${table.scope} = 'instance' AND ${table.householdId} IS NULL)`,
   ),
+]);
+
+/**
+ * One Tier 1 value that failed its integrity check, the first time anything
+ * saw it fail (#941, ADR-0024 decision 5). Damage is only discoverable by
+ * decrypting, so without this record there is nothing for an administrator to
+ * count: a damaged note is found when somebody opens the item, and is then
+ * forgotten again as soon as the response is sent.
+ *
+ * Keyed exactly like the value's own content AAD — table, column, row — so a
+ * sighting names one value and never the row's other encrypted column. The row
+ * is deleted when that value is written over, which is the repair.
+ *
+ * Deliberately no foreign key: `row_id` addresses two different tables, so no
+ * single reference could cover it. The counts join the owning table instead,
+ * which is also what stops a receipt that has since burned up inflating them.
+ */
+export const metadataDamageSightings = pgTable("metadata_damage_sightings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tableName: text("table_name").notNull(),
+  columnName: text("column_name").notNull(),
+  rowId: uuid("row_id").notNull(),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("metadata_damage_sighting_value_unique").on(table.tableName, table.columnName, table.rowId),
 ]);
 
 /** Durable, idempotent worker jobs for document lifecycle operations. */
@@ -1026,7 +1070,13 @@ export const householdInvitations = pgTable("household_invitations", {
   householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
   /* Normalised at the seam (trimmed, lower-cased): the address the signed-in
      identity must match, so the comparison is made on stored bytes. */
-  email: text("email").notNull(),
+  /* Tier 2 metadata (ADR-0024, #963): nullable since 0041, because an
+     encrypted row clears it. `email_enc` carries the address and `email_index`
+     the per-household blind index that keeps "one open invitation per address"
+     a database rule rather than an application hope. */
+  email: text("email"),
+  emailEnc: text("email_enc"),
+  emailIndex: text("email_index"),
   role: membershipRole("role").notNull().default("member"),
   invitedByUserId: uuid("invited_by_user_id").references(() => users.id, { onDelete: "set null" }),
   tokenDigest: text("token_digest").notNull(),
@@ -1042,6 +1092,11 @@ export const householdInvitations = pgTable("household_invitations", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("household_invitation_open_once").on(table.householdId, table.email)
+    .where(sql`${table.redeemedAt} IS NULL AND ${table.revokedAt} IS NULL`),
+  /* The encrypted successor to the index above (ADR-0024 decision 2). Both
+     stand through the expand release: the plaintext one still constrains rows
+     the backfill has not reached, and this one constrains every row it has. */
+  uniqueIndex("household_invitation_open_once_index").on(table.householdId, table.emailIndex)
     .where(sql`${table.redeemedAt} IS NULL AND ${table.revokedAt} IS NULL`),
   /* Not partial: a spent token must still find its row, or a second visit to
      a used link would read as "no such invitation" instead of "already used". */

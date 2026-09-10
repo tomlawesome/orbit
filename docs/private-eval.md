@@ -8,7 +8,7 @@ prints a handful of numbers to your terminal, and writes nothing to disk
 itself.
 
 Every other extraction measurement in Orbit (`extraction-accuracy.test.ts`,
-`extraction-holdout.test.ts`) runs against invented documents committed to
+`extraction-holdout-2.test.ts`) runs against invented documents committed to
 the repository, because that is the only thing safe to share and run in CI.
 This tool exists because invented documents share blind spots with the code
 that invents them — real paperwork is the only way to find out whether
@@ -140,7 +140,7 @@ Private evaluation: 12 document(s)
   works or learns from what you feed it. [ADR-0025](adr/0025-local-model-extraction.md)
   rules out training on personal data, and this tool does not reopen that.
 - **Not a replacement for the committed hold-out corpus**
-  (`extraction-holdout-corpus.ts`), which stays as the shared, synthetic
+  (`extraction-holdout-corpus-2.ts`), which stays as the shared, synthetic
   measure CI can run. This tool is the opposite: private, local-only, never
   shared, and never run in CI (CI has no access to your paperwork, by
   design).

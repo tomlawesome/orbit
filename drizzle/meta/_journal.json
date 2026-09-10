@@ -288,6 +288,20 @@
       "when": 1788480000000,
       "tag": "0040_tier1_metadata_encryption",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1788566400000,
+      "tag": "0041_tier2_metadata_encryption",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1788652800000,
+      "tag": "0042_metadata_damage_sightings",
+      "breakpoints": true
     }
   ]
 }

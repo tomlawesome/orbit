@@ -1,5 +1,5 @@
 /**
- * Tier 1 metadata crypto (ADR-0024 decisions 1-3): pure functions only, no
+ * Metadata crypto (ADR-0024 decisions 1-3): pure functions only, no
  * database access, so the primitives can be tested without a connection.
  *
  * Like `src/server/mail-in/core/secret-crypto.ts`, this module adds AAD
@@ -25,12 +25,21 @@ export const METADATA_ENVELOPE_PREFIX = "mdv1";
 /** Which key protects a value: one DEK per household, plus one instance DEK for unattributed mail-in receipts. */
 export type MetadataKeyScope = "household" | "instance";
 
-/** The tables and columns Tier 1 covers. Bound into the content AAD, so a value cannot be replayed elsewhere. */
+/**
+ * The tables and columns encrypted metadata covers — Tier 1 (#931) and Tier 2
+ * (#963) together, because they share one key hierarchy, one envelope and one
+ * rewrap path. Bound into the content AAD, so a value cannot be replayed into
+ * another row or another column.
+ */
 export type MetadataColumn =
   | "items.notes"
   | "items.reference"
+  | "items.title"
+  | "items.provider"
+  | "items.cost_minor"
   | "imap_ingestion_messages.proposal"
-  | "imap_ingestion_messages.field_evidence";
+  | "imap_ingestion_messages.field_evidence"
+  | "household_invitations.email";
 
 /** Identifies exactly one value: which column, and which row of it. */
 export interface MetadataValueContext {
@@ -54,7 +63,7 @@ export class MetadataIntegrityError extends Error {
   readonly rowId: string;
 
   constructor(context: MetadataValueContext) {
-    super("Tier 1 metadata failed its integrity check");
+    super("Encrypted metadata failed its integrity check");
     this.name = "MetadataIntegrityError";
     this.column = context.column;
     this.rowId = context.rowId;
@@ -170,7 +179,8 @@ export function decryptMetadataValue(stored: string, dataKey: Buffer, context: M
 }
 
 /**
- * The one canonical comparison form for Tier 1 text (ADR-0024 decision 2),
+ * The one canonical comparison form for encrypted metadata text (ADR-0024
+ * decision 2),
  * promoted from `comparableText` in `mail-in/core/review-state.ts`: NFKC,
  * control characters to spaces, whitespace collapsed, trimmed, lowercased.
  * Punctuation is kept deliberately — stripping it would merge references that
