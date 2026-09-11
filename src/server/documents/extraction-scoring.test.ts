@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { CorpusDocument } from "./extraction-corpus";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import {
+  classifySubtype,
   formatThreeWayScore,
   scoreCorpusRepeated,
   scoreCorpusThreeWay,
@@ -10,6 +11,33 @@ import {
   type ThreeWayResult,
 } from "./extraction-scoring";
 import { proposalFromText, type DocumentProposal } from "./suggestions";
+
+// Owner decision 2026-09-11 (#989/#992): a page can support more than one
+// right subtype, so ground truth may carry a set of acceptable phrases
+// instead of one, and a match against any member of the set is correct.
+describe("classifySubtype accepts a set of acceptable phrases (#989/#992)", () => {
+  it("is correct when the actual value matches the second entry of the set", () => {
+    expect(classifySubtype(["Home insurance", "Buildings insurance"], "Buildings insurance")).toBe("correct");
+  });
+
+  it("ignores case and whitespace runs when matching against the set", () => {
+    expect(classifySubtype(["Home insurance", "Buildings insurance"], "  BUILDINGS   INSURANCE ")).toBe("correct");
+  });
+
+  it("is wrong when the actual value matches none of the set", () => {
+    expect(classifySubtype(["Home insurance", "Buildings insurance"], "Motor insurance")).toBe("wrong");
+  });
+
+  it("is blank when nothing was extracted, same as the single-string form", () => {
+    expect(classifySubtype(["Home insurance", "Buildings insurance"], undefined)).toBe("blank");
+  });
+
+  it("keeps the single-string form working unchanged", () => {
+    expect(classifySubtype("Home insurance", "Home insurance")).toBe("correct");
+    expect(classifySubtype("Home insurance", "Motor insurance")).toBe("wrong");
+    expect(classifySubtype("Home insurance", undefined)).toBe("blank");
+  });
+});
 
 // ADR-0025 section 6 / issue #959: the three-way measurement built on top of
 // the repeated-run harness `extraction-accuracy.test.ts` already exercises.

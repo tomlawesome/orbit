@@ -48,7 +48,11 @@ export interface CorpusExpectation {
   // welcome here.
   /** One role per expected date, in the order the document prints them. */
   dateRoles?: Array<{ date: string; role: DocumentDateRole }>;
-  subtype?: string;
+  /** What kind of thing the page is. Some pages genuinely support more than
+   * one right answer, so ground truth may carry a set of acceptable phrases
+   * instead of one; an extracted subtype is correct if it matches any of
+   * them (owner decision 2026-09-11, #989/#992). */
+  subtype?: string | string[];
   /** Minor units. Always declared together with `currency`, never alone. */
   costMinor?: number;
   currency?: string;

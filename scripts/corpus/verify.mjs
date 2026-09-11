@@ -58,9 +58,29 @@ for (const f of readdirSync(dir).filter((n) => n.endsWith(".truth.json")).sort()
   for (const iso of e.dates ?? []) {
     if (!dateForms(iso).some((form) => text.includes(form.toLowerCase()))) problems.push(`date ${iso} appears in no recognised printed form`);
   }
-  for (const field of ["provider", "reference", "subtype"]) {
+  for (const field of ["provider", "reference"]) {
     const v = e[field];
     if (v !== undefined && !text.includes(findable(v))) problems.push(`${field} "${v}" is not in the Tika text`);
+  }
+  // `subtype` may be one phrase or, per the owner's 2026-09-11 ruling
+  // (#989/#992), a set of phrases that are all acceptable answers for the
+  // page. Every declared phrase still has to be findable in the Tika text --
+  // that rule does not relax just because there is more than one of them --
+  // and the set itself has to be well-formed: non-empty, distinct, no blanks.
+  if (e.subtype !== undefined) {
+    const subtypes = Array.isArray(e.subtype) ? e.subtype : [e.subtype];
+    if (Array.isArray(e.subtype)) {
+      if (subtypes.length === 0) problems.push("subtype array is empty");
+      if (subtypes.some((s) => typeof s !== "string" || s.trim() === "")) {
+        problems.push("subtype array contains a blank or non-string entry");
+      }
+      if (new Set(subtypes).size !== subtypes.length) problems.push("subtype array contains duplicate entries");
+    }
+    for (const s of subtypes) {
+      if (typeof s === "string" && s.trim() !== "" && !text.includes(findable(s))) {
+        problems.push(`subtype "${s}" is not in the Tika text`);
+      }
+    }
   }
   if (e.costMinor !== undefined) {
     if (e.currency === undefined) problems.push("costMinor declared without currency");

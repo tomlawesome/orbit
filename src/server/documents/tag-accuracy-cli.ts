@@ -7,7 +7,7 @@
 //   node node_modules/tsx/dist/cli.mjs src/server/documents/tag-accuracy-cli.ts [--verbose]
 
 import { EXTRACTION_CORPUS, type CorpusDocument } from "./extraction-corpus";
-import { classifyProvider } from "./extraction-scoring";
+import { classifyProvider, formatSubtypeExpected } from "./extraction-scoring";
 import { sieve, type CandidateKind } from "./extraction-sieve";
 import type { TaggedCandidate } from "./extraction-stages";
 import { tagCandidates } from "./extraction-tags";
@@ -55,7 +55,13 @@ function rows(doc: CorpusDocument): Row[] {
   scalar("reference", "identifier", expected.reference, (c) => c.value.replace(/\s+/gu, "").toUpperCase() === (expected.reference ?? "").replace(/\s+/gu, "").toUpperCase());
   scalar("cost", "amount", expected.costMinor === undefined ? undefined : String(expected.costMinor), (c) => c.value === String(expected.costMinor) && c.currency === expected.currency);
   scalar("provider", "organisation", expected.provider, (c) => classifyProvider(expected.provider as string, c.value) === "correct");
-  scalar("subtype", "heading", expected.subtype, (c) => c.value.toLowerCase().includes((expected.subtype ?? "").toLowerCase()));
+  const subtypeCandidates = expected.subtype === undefined ? [] : Array.isArray(expected.subtype) ? expected.subtype : [expected.subtype];
+  scalar(
+    "subtype",
+    "heading",
+    expected.subtype === undefined ? undefined : formatSubtypeExpected(expected.subtype),
+    (c) => subtypeCandidates.some((wanted) => c.value.toLowerCase().includes(wanted.toLowerCase())),
+  );
   return out;
 }
 
