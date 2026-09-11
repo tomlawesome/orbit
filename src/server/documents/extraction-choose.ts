@@ -1,6 +1,15 @@
 // Stage 3 of the three-stage extraction shape (ADR-0026): one answer per
 // field, or none, from the tagged shortlist stage 2 hands over.
 //
+// Since the owner's correction of 2026-09-11 the rules in this file do two
+// jobs, and neither is having the last word. They RANK: every field's
+// shortlist is ordered by how well the sieves spoke for each candidate, and
+// the model picks from the top of it (`chooseFieldsWithModel`). They FALL
+// BACK: where there is no model to ask -- an attended run, no Ollama --
+// `chooseFields` answers by rule as it always did, which is what every
+// `eval:stages` number without `--model` measures. A rule never answers
+// alongside the model.
+//
 // The sieve is judged on recall and keeps everything; the choice is judged
 // on being right, and the scorer (`extraction-scoring.ts`) prices a
 // confident wrong value at twice a blank -- a blank prompts the reviewer to
@@ -16,14 +25,19 @@
 
 import {
   chooseCostWithModel,
-  chooseDateToActOnWithModel,
-  chooseMeaningFieldsWithModel,
+  chooseDatesWithModel,
   chooseProviderByRules,
-  type AmountChoice,
+  chooseProviderWithModel,
+  chooseRecurrenceWithModel,
+  chooseReferenceWithModel,
+  chooseSubtypeWithModel,
+  providerShortlistEntries,
+  subtypeShortlistEntries,
   type MeaningTransport,
 } from "./extraction-choose-meaning";
 import { AMOUNT_LABEL } from "./extraction-amount-sieves";
 import { DATE_RANGE, WORDS_BEFORE } from "./extraction-date-sieves";
+import { bestSupported, type ShortlistEntry } from "./extraction-shortlist";
 import type { CandidateKind } from "./extraction-sieve";
 import type { ExtractedFields } from "./extraction-scoring";
 import type { ChooseStage, TaggedCandidate } from "./extraction-stages";
@@ -569,15 +583,21 @@ function chooseCost(candidates: readonly TaggedCandidate[]): {
  * Shared with the model path, where a role the model supplied has to change
  * the schedule the same way one a rule supplied does.
  */
-function scheduleFrom(
+function scheduleKindFrom(
   dateRoles: ReadonlyArray<{ date: string; role: string }>,
-  candidates: readonly TaggedCandidate[],
-): { scheduleKind?: "renewal" | "service"; recurrenceMonths?: number } {
-  const scheduleKind = dateRoles.some((entry) => entry.role === "renewal")
+): "renewal" | "service" | undefined {
+  return dateRoles.some((entry) => entry.role === "renewal")
     ? "renewal"
     : dateRoles.some((entry) => entry.role === "service")
       ? "service"
       : undefined;
+}
+
+function scheduleFrom(
+  dateRoles: ReadonlyArray<{ date: string; role: string }>,
+  candidates: readonly TaggedCandidate[],
+): { scheduleKind?: "renewal" | "service"; recurrenceMonths?: number } {
+  const scheduleKind = scheduleKindFrom(dateRoles);
   // A cycle length is only ever a fact about a schedule. Without one there
   // is nothing for it to be the cycle of.
   const recurrenceMonths = scheduleKind === undefined ? undefined : chooseRecurrenceMonths(candidates);
@@ -604,60 +624,217 @@ export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
   };
 };
 
-/**
- * The figures the rules could not choose between, best-evidenced first,
- * each with the block it was printed in: what the model is asked about when
- * the rules leave the cost blank.
- */
-export function amountsWithoutAChoice(candidates: readonly TaggedCandidate[]): AmountChoice[] {
-  return rankedAmounts(candidates).map((claim) => {
-    const found = candidates.find((candidate) =>
-      candidate.kind === "amount" &&
-      candidate.value === claim.value &&
-      candidate.currency === claim.currency);
-    return {
-      value: claim.value,
-      ...(claim.currency === undefined ? {} : { currency: claim.currency }),
-      line: found?.line ?? "",
+// ------------------------------------------------- the shortlists, ranked
+//
+// One per field: the few candidates the sieves spoke best for, each with the
+// block it was printed in and the names of the sieves and tags that kept it.
+// The rules' own ordering is the rank, and the rank is all it is -- the
+// model picks (ADR-0026, amended 2026-09-11). What these are judged on is
+// `eval:shortlist`: how often the expected answer is among the entries.
+
+/** Three reasons is enough to say why a candidate is on the list; a fourth
+ * spends the excerpt without telling the model anything new. */
+const REASONS_SHOWN = 3;
+
+/** What a date's block and the sieves that read it say about it. */
+function dateEntry(candidates: readonly TaggedCandidate[], date: string): ShortlistEntry {
+  let support = 0;
+  let line = "";
+  const why: string[] = [];
+  for (const candidate of candidates) {
+    if (candidate.kind !== "date" || candidate.value !== date) continue;
+    if (!line || (!why.length && candidate.line.length > line.length)) line = candidate.line;
+    for (const tag of candidate.tags) {
+      const sieves = tag.sieves ?? [WORDS_BEFORE];
+      const stated = tag.trigger.trim() !== "";
+      if (tag.value === "other" || !isDateRole(tag.value)) {
+        // A sieve reading a date as nothing in particular is a reason to ask
+        // about it after the ones something spoke for.
+        if (stated) support -= sieves.length;
+        continue;
+      }
+      support += sieves.length * (stated ? (tag.strength ?? claimStrength(tag.trigger)) + 1 : 0);
+      const reason = `${tag.value}${stated ? ` from "${tag.trigger}"` : ""} by ${sieves.join(", ")}`;
+      if (stated && !why.includes(reason)) why.push(reason);
+    }
+  }
+  return { value: date, display: date, line, why: why.slice(0, REASONS_SHOWN), support };
+}
+
+/** Every date the sieve found, best-spoken-for first: the list the model is
+ * asked which of them the household must keep, and what each is for. */
+export function dateShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
+  return bestSupported(everyDate(candidates).map((date) => dateEntry(candidates, date)));
+}
+
+/** Every identifier the sieve found, the best-labelled first: the page's own
+ * label decides the order, and how often the page repeated it breaks ties.
+ * A number a checksum read as the company's own goes last. */
+export function referenceShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
+  const entries = new Map<string, ShortlistEntry>();
+  for (const candidate of candidates) {
+    if (candidate.kind !== "identifier") continue;
+    const held = entries.get(candidate.value) ?? {
+      value: candidate.value,
+      display: candidate.value,
+      line: candidate.line,
+      why: [] as string[],
+      support: 0,
     };
-  });
+    // Printed again is one more reason, whatever the label beside it says.
+    held.support += 1;
+    for (const tag of candidate.tags) {
+      const rank = REFERENCE_PREFERENCE.indexOf(tag.value);
+      const reason = `${tag.value}${tag.trigger.trim() ? ` from "${tag.trigger}"` : ""}`;
+      if (rank !== -1) {
+        held.support += (REFERENCE_PREFERENCE.length - rank) * 2;
+        if (!held.line) held.line = candidate.line;
+      } else if (tag.value === "company") {
+        // The organisation's own number -- a VAT or UTR the checksum
+        // recognised -- is never the household's reference.
+        held.support -= REFERENCE_PREFERENCE.length * 2;
+      } else {
+        continue;
+      }
+      if (!held.why.includes(reason)) held.why.push(reason);
+    }
+    entries.set(candidate.value, held);
+  }
+  return bestSupported([...entries.values()].map((entry) => ({
+    ...entry,
+    why: entry.why.length > 0 ? entry.why.slice(0, REASONS_SHOWN) : ["no label beside it"],
+  })));
+}
+
+/** The figure as the page would print it, which is how the model is asked
+ * about it and how its answer is read back. */
+function printedAmount(value: string, currency: string | undefined): string {
+  const symbol = currency === "GBP" ? "£" : currency === "EUR" ? "€" : currency === "USD" ? "$" : "";
+  return `${symbol}${(Number(value) / 100).toFixed(2)}`;
 }
 
 /**
- * The whole of stage 3 with the model available: the rules first, then the
- * questions they left open -- who the household deals with, what type
- * of thing this is, and which of the dates nothing could label is the one to
- * act on.
+ * Every figure the page prints with a currency, the best-spoken-for first.
  *
- * The model is never handed the page, only the shortlist and its blocks
- * (ADR-0026 stage 3), and every answer is refused unless the shortlist
- * carries it. Used by `stages-score-cli.ts` and `holdout-score-cli.ts` under
- * `--model`, so both measure the same pipeline.
+ * The rules' ranking, with nothing dropped: a figure a sieve read as last
+ * year's or as the rival beside the real one goes last rather than out, and
+ * a figure no sieve spoke for at all sits between the two. The cap is what
+ * shortens the list, not a rule.
+ */
+export function costShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
+  const entries: ShortlistEntry[] = [];
+  const seen = new Set<string>();
+  const blockFor = (value: string, currency: string | undefined) =>
+    candidates.find((candidate) =>
+      candidate.kind === "amount" && candidate.value === value && candidate.currency === currency);
+
+  for (const claim of amountClaims(candidates)) {
+    const key = `${claim.value} ${claim.currency}`;
+    seen.add(key);
+    const reading = claim.rank < AMOUNT_PREFERENCE.length ? AMOUNT_PREFERENCE[claim.rank] : "other";
+    entries.push({
+      value: claim.value,
+      display: printedAmount(claim.value, claim.currency),
+      ...(claim.currency === undefined ? {} : { currency: claim.currency }),
+      line: blockFor(claim.value, claim.currency)?.line ?? "",
+      why: [
+        `read as the ${reading} by: ${[...claim.sieves].join(", ")}`,
+        ...(claim.against.size > 0
+          ? [`read as last year's or the rival beside it by: ${[...claim.against].join(", ")}`]
+          : []),
+      ],
+      // Ruled out by the page's own words, so last -- but still on the list,
+      // because a rule that drops a candidate takes the choice off the model.
+      support: claim.ruledOut ? -1 : amountAgreement(claim) * 2 + claim.weight + (claim.labelStated ? 2 : 0),
+    });
+  }
+
+  for (const candidate of candidates) {
+    if (candidate.kind !== "amount" || !candidate.currency) continue;
+    const key = `${candidate.value} ${candidate.currency}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push({
+      value: candidate.value,
+      display: printedAmount(candidate.value, candidate.currency),
+      currency: candidate.currency,
+      line: candidate.line,
+      why: ["no sieve spoke for it"],
+      support: 0,
+    });
+  }
+
+  return bestSupported(entries);
+}
+
+/** Every period the page prints in a block a candidate sits in, the most
+ * often printed first: what the model is asked how long the thing runs for. */
+export function recurrenceShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
+  const entries = new Map<number, ShortlistEntry>();
+  for (const candidate of candidates) {
+    const months = cycleMonths(candidate.line);
+    if (months === undefined || months <= 0) continue;
+    const held = entries.get(months) ?? {
+      value: String(months),
+      display: `${months} months`,
+      line: candidate.line,
+      why: ["printed on this line"],
+      support: 0,
+    };
+    held.support += 1;
+    entries.set(months, held);
+  }
+  return bestSupported([...entries.values()]);
+}
+
+/**
+ * The whole of stage 3 with a model available: every field is the model's
+ * pick from its own shortlist (owner, 2026-09-11 -- "everything is supposed
+ * to go to the model for final choice").
+ *
+ * Five or six questions per document: the dates and their jobs in one call,
+ * then the reference, the cost, the provider, what type of thing this is,
+ * and -- only where the roles say there is a schedule to repeat -- how long
+ * it runs for. Each is a few hundred characters, the shortlist and its
+ * blocks, never the page (ADR-0026 stage 3). `none` is an allowed answer to
+ * every one of them, and an answer the shortlist does not carry leaves the
+ * field blank. No rule answers alongside: `chooseFields` above is the
+ * ranking behind these lists and the answer only where there is no model.
+ *
+ * Used by `stages-score-cli.ts` and `holdout-score-cli.ts` under `--model`,
+ * so both measure the same pipeline.
  */
 export async function chooseFieldsWithModel(
   candidates: readonly TaggedCandidate[],
   transport: MeaningTransport,
 ): Promise<ExtractedFields> {
-  const chosen = chooseFields(candidates);
-  const meaning = await chooseMeaningFieldsWithModel(candidates, chosen, transport);
+  const dateRoles = await chooseDatesWithModel(dateShortlistEntries(candidates), transport);
+  // Page order, as every other route reports dates.
+  const order = everyDate(candidates);
+  const dates = order.filter((date) => dateRoles.some((entry) => entry.date === date));
 
-  // The cost, where two figures were equally well spoken for. The model
-  // chooses between them and nothing else: the list is the sieves', and an
-  // answer outside it is refused.
-  const cost = chosen.costMinor === undefined
-    ? await chooseCostWithModel(amountsWithoutAChoice(candidates), transport)
-    : undefined;
+  const reference = await chooseReferenceWithModel(referenceShortlistEntries(candidates), transport);
+  const cost = await chooseCostWithModel(costShortlistEntries(candidates), transport);
+  const provider = await chooseProviderWithModel(providerShortlistEntries(candidates), transport);
+  const subtype = await chooseSubtypeWithModel(subtypeShortlistEntries(candidates), transport);
 
-  const decided = chosen.dateRoles ?? [];
-  const offered = datesWithoutARole(candidates, decided);
-  const picked = await chooseDateToActOnWithModel(candidates, offered, decided, transport);
-  const dateRoles = picked === undefined ? decided : [...decided, picked];
+  // Derived from the roles, exactly as the rules path derives them: a
+  // schedule is what the roles mean, not a separate question. The cycle
+  // length is a question, but only where there is a schedule for it to be
+  // the cycle of.
+  const scheduleKind = scheduleKindFrom(dateRoles);
+  const recurrenceMonths = scheduleKind === undefined
+    ? undefined
+    : await chooseRecurrenceWithModel(recurrenceShortlistEntries(candidates), transport);
 
   return {
-    ...chosen,
-    ...meaning,
-    ...(cost ?? {}),
+    dates,
     ...(dateRoles.length > 0 ? { dateRoles } : {}),
-    ...scheduleFrom(dateRoles, candidates),
+    ...(scheduleKind === undefined ? {} : { scheduleKind }),
+    ...(recurrenceMonths === undefined ? {} : { recurrenceMonths }),
+    ...(reference === undefined ? {} : { reference }),
+    ...(provider === undefined ? {} : { provider }),
+    ...(subtype === undefined ? {} : { subtype }),
+    ...(cost ?? {}),
   };
 }

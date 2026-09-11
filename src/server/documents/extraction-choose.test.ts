@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { chooseFields } from "./extraction-choose";
+import {
+  chooseFields,
+  chooseFieldsWithModel,
+  costShortlistEntries,
+  dateShortlistEntries,
+  recurrenceShortlistEntries,
+  referenceShortlistEntries,
+} from "./extraction-choose";
+import type { MeaningTransport } from "./extraction-choose-meaning";
 import type { CandidateKind } from "./extraction-sieve";
 import type { Tag, TagForKind, TaggedCandidate } from "./extraction-stages";
 
@@ -465,5 +473,124 @@ describe("the meaning-shaped fields", () => {
 
     expect(chosen.provider).toBe("Kestrel Mutual");
     expect(chosen.subtype).toBeUndefined();
+  });
+});
+
+describe("the shortlists stage 2 ranks for the model", () => {
+  it("offers every date, the ones sieves spoke for first", () => {
+    const entries = dateShortlistEntries([
+      candidate("date", "2026-02-02", ["other"]),
+      candidate("date", "2026-10-15", [
+        { value: "renewal", trigger: "Renewal date", sieves: ["words-before", "term-arithmetic"], strength: 2 },
+      ]),
+      candidate("date", "2026-10-15", [{ value: "renewal", trigger: "renews on" }]),
+    ]);
+
+    expect(entries.map((entry) => entry.value)).toEqual(["2026-10-15", "2026-02-02"]);
+    expect(entries[0].why.join(" ")).toContain(`renewal from "Renewal date" by words-before, term-arithmetic`);
+  });
+
+  it("offers every identifier, the best-labelled first and the company's own number last", () => {
+    const entries = referenceShortlistEntries([
+      candidate("identifier", "GB 442 8891 06", [{ value: "company", trigger: "VAT number" }]),
+      candidate("identifier", "8845 6120 33", [{ value: "other", trigger: "" }]),
+      candidate("identifier", "PN-88421-K", [{ value: "policy", trigger: "Policy number" }]),
+    ]);
+
+    expect(entries.map((entry) => entry.value)).toEqual(["PN-88421-K", "8845 6120 33", "GB 442 8891 06"]);
+  });
+
+  it("offers every figure with a currency, and keeps last year's on the list rather than dropping it", () => {
+    const entries = costShortlistEntries([
+      candidate("amount", "39900", [{ value: "previous", trigger: "last year", strength: 2 }], { currency: "GBP" }),
+      candidate("amount", "41299", [{ value: "total", trigger: "Total premium", strength: 2 }], { currency: "GBP" }),
+      candidate("amount", "50000", ["other"], { currency: "GBP" }),
+    ]);
+
+    expect(entries.map((entry) => entry.display)).toEqual(["£412.99", "£500.00", "£399.00"]);
+  });
+
+  it("offers every period the page prints beside a candidate", () => {
+    const entries = recurrenceShortlistEntries([
+      candidate("date", "2026-10-15", ["other"], { line: "Your 24-month contract ends 15 October 2026" }),
+      candidate("amount", "41299", ["total"], { line: "Annual premium £412.99", currency: "GBP" }),
+    ]);
+
+    expect(entries.map((entry) => entry.display)).toEqual(["24 months", "12 months"]);
+  });
+});
+
+describe("stage 3 with a model to ask", () => {
+  const shortlist = [
+    candidate("date", "2026-10-15", [{ value: "renewal", trigger: "Renewal date", strength: 2 }], {
+      line: "Renewal date 15 October 2026",
+    }),
+    candidate("identifier", "PN-88421-K", [{ value: "policy", trigger: "Policy number" }]),
+    candidate("amount", "41299", [{ value: "total", trigger: "Total premium", strength: 2 }], {
+      line: "Total premium £412.99 for the 12 months from renewal",
+      currency: "GBP",
+    }),
+    candidate("organisation", "Kestrel Mutual Insurance Ltd", [
+      { value: "provider", trigger: "your insurer is", sieves: ["language-fact", "contact-details"], strength: 2 },
+    ], { line: "your insurer is Kestrel Mutual Insurance Ltd" }),
+    candidate("heading", "Home Insurance Policy Schedule", [{ value: "title", trigger: "" }]),
+  ];
+
+  /** A transport that answers each field in the order they are asked. */
+  function fakeModel(...replies: string[]): MeaningTransport & { prompts: string[] } {
+    const prompts: string[] = [];
+    const transport = async (prompt: string): Promise<string> => {
+      prompts.push(prompt);
+      return replies[prompts.length - 1] ?? "none";
+    };
+    return Object.assign(transport, { prompts });
+  }
+
+  it("asks one question per field and takes every grounded answer", async () => {
+    const model = fakeModel("1 renewal", "1", "1", "1", "Home Insurance", "1");
+    const chosen = await chooseFieldsWithModel(shortlist, model);
+
+    // Dates and their roles in one call, then reference, cost, provider,
+    // subtype, and -- because the roles make a schedule -- how long it runs.
+    expect(model.prompts).toHaveLength(6);
+    expect(chosen).toEqual({
+      dates: ["2026-10-15"],
+      dateRoles: [{ date: "2026-10-15", role: "renewal" }],
+      scheduleKind: "renewal",
+      recurrenceMonths: 12,
+      reference: "PN-88421-K",
+      provider: "Kestrel Mutual Insurance Ltd",
+      subtype: "Home Insurance",
+      costMinor: 41299,
+      currency: "GBP",
+    });
+  });
+
+  it("leaves every field blank where the model answers none", async () => {
+    const model = fakeModel("none");
+    const chosen = await chooseFieldsWithModel(shortlist, model);
+
+    // No roles means no schedule, so the cycle length is not asked about.
+    expect(model.prompts).toHaveLength(5);
+    expect(chosen).toEqual({ dates: [] });
+  });
+
+  it("leaves every field blank where the model answers off the list", async () => {
+    const model = fakeModel(
+      "2026-12-25 renewal",
+      "VAT 442 8891 06",
+      "£99.00",
+      "Palisade Insurance Company plc",
+      "a letter about a house",
+    );
+    const chosen = await chooseFieldsWithModel(shortlist, model);
+
+    expect(chosen).toEqual({ dates: [] });
+  });
+
+  it("never answers from the rules once there is a model to ask", async () => {
+    // The rules would have answered every one of these.
+    expect(chooseFields(shortlist).provider).toBe("Kestrel Mutual Insurance Ltd");
+    expect(await chooseFieldsWithModel(shortlist, async () => "none")).toEqual({ dates: [] });
   });
 });
