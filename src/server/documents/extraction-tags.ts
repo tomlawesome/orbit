@@ -27,6 +27,11 @@ import {
   type DocumentDateRole,
 } from "./context-roles";
 import { runDateSieves, tagsFromVotes, type DateCandidate } from "./extraction-date-sieves";
+import {
+  providerTagsFromVotes,
+  runProviderSieves,
+  type OrganisationCandidate,
+} from "./extraction-provider-sieves";
 import type { Candidate, CandidateKind } from "./extraction-sieve";
 import type { Tag, TagForKind, TaggedCandidate, TagStage } from "./extraction-stages";
 import { validateChecksumIdentifier } from "./reference-checksums";
@@ -829,6 +834,39 @@ export function wordsBeforeAssignments(
 }
 
 /**
+ * The sieve's organisations with everything a provider sieve may read.
+ * Exported because the per-sieve report (`provider-sieve-report-cli.ts`)
+ * judges the sieves on the same input stage 2 gives them.
+ */
+export function organisationCandidatesOf(candidates: readonly Candidate[]): OrganisationCandidate[] {
+  return candidates
+    .filter((candidate) => candidate.kind === "organisation")
+    .map((candidate) => ({ value: candidate.value, index: candidate.index, line: candidate.line }));
+}
+
+/**
+ * The trigger table's tag for each organisation, in the same order --
+ * the language-fact sieve's reading, which `runProviderSieves` takes as its
+ * first vote. Exported for the same reason as `organisationCandidatesOf`.
+ */
+export function organisationLabels(
+  text: string,
+  candidates: readonly Candidate[],
+): Array<Tag<"organisation"> | undefined> {
+  const starts = candidates.filter((c) => c.kind === "organisation").map((c) => c.index);
+  const scopes = buildScopes(text, ORGANISATION_TRIGGERS, starts);
+  const labels = candidates.map((candidate) => {
+    if (candidate.kind !== "organisation") return null;
+    const start = candidate.index;
+    return labelTag(start, start + printedLength(text, candidate), scopes);
+  });
+  keepOneValuePerLabel(labels);
+  return labels
+    .filter((_, at) => candidates[at].kind === "organisation")
+    .map((label) => label?.tag as Tag<"organisation"> | undefined);
+}
+
+/**
  * Stage 2. Tags every candidate with what the page says it is, keeping the
  * order the sieve produced. Pure: no I/O, no mutation of its arguments.
  *
@@ -872,12 +910,30 @@ export const tagCandidates: TagStage = (text, candidates) => {
   });
   keepOneValuePerLabel(labels);
 
+  // The words beside an organisation are one way of reading it; the
+  // provider sieves are the others (ADR-0026 stage 2, owner 2026-09-11).
+  // Every one of them votes, none of them discards, and the votes become
+  // the organisation's tags.
+  const organisations = organisationCandidatesOf(candidates);
+  const organisationVotes = runProviderSieves(
+    text,
+    organisations,
+    candidates
+      .map((candidate, at) => ({ candidate, label: labels[at] }))
+      .filter((entry) => entry.candidate.kind === "organisation")
+      .map((entry) => entry.label?.tag as Tag<"organisation"> | undefined),
+  );
+  let nextOrganisation = 0;
+
   return candidates.map((candidate, at): TaggedCandidate => {
     const tags: Tag[] = [];
 
     if (candidate.kind === "date") {
       tags.push(...tagsFromVotes(dateVotes[nextDate]));
       nextDate += 1;
+    } else if (candidate.kind === "organisation") {
+      tags.push(...providerTagsFromVotes(organisationVotes[nextOrganisation]));
+      nextOrganisation += 1;
     } else {
       const label = labels[at];
       if (label) tags.push(label.tag);

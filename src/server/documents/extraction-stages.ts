@@ -47,6 +47,11 @@ export const ORGANISATION_TAGS = [
   "regulator",
   "installer",
   "subsidiary",
+  /** The company as the small print names it: the registered office, the
+   * company number, the VAT line. A legal entity is a fact about the
+   * organisation, and where the page also prints a trading name it is a
+   * reason against this being the name the household would use. */
+  "legal-entity",
   "other",
 ] as const;
 export type OrganisationTag = (typeof ORGANISATION_TAGS)[number];
@@ -62,6 +67,13 @@ export type TagForKind = {
   organisation: OrganisationTag;
   heading: HeadingTag;
 };
+
+/** How good a reason a sieve has: the scale every stage 2 sieve votes on
+ * and stage 3 scores a claim on. 2 the page says so in words, 1 a weaker
+ * reading that could still be right, 0 a default with nothing behind it. */
+export const STRENGTH_STATED = 2;
+export const STRENGTH_WEAK = 1;
+export const STRENGTH_GUESS = 0;
 
 export interface Tag<K extends CandidateKind = CandidateKind> {
   value: TagForKind[K];

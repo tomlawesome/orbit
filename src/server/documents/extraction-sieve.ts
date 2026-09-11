@@ -102,6 +102,13 @@ const ORGANISATION_TAIL =
   "Company|Partners|Partnership|Solutions|Networks|Mobile|Broadband|Telecom|Warranty|Cover|Direct|" +
   "Mutual|Pensions|Dental|Motoring|Installations|Windows|Electrical|Solar|Finance|Financial|" +
   "Building Society|Health|Healthcare|Fitness|Leisure|Licensing|Agency|Office|Department|Foundation";
+/** Whether a phrase carries one of the words above -- a company form, a
+ * public body, a trade. A name with none of them is a phrase the page set
+ * in capitals, which is most of what a letterhead rule finds. */
+export function hasOrganisationForm(value: string): boolean {
+  return new RegExp(`\\b(?:${ORGANISATION_TAIL})\\b`, "u").test(value);
+}
+
 const ORGANISATION_WORD = "(?:[A-Z][A-Za-z'’.-]*|&|of|and|for|the|de)";
 const ORGANISATION = new RegExp(
   `\\b((?:${ORGANISATION_WORD}\\s+){0,7}(?:${ORGANISATION_TAIL})(?:\\s+(?:${ORGANISATION_TAIL}))*)(?![A-Za-z])`,
