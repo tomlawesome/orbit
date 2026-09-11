@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  chooseDateToActOnWithModel,
   chooseMeaningFieldsWithModel,
   chooseProviderByRules,
   providerExcerpt,
@@ -373,5 +374,75 @@ describe("asking the model about what the rules could not settle", () => {
     const filled = await chooseMeaningFieldsWithModel(shortlist, {}, fakeModel('{"provider": null}', ""));
 
     expect(filled).toEqual({});
+  });
+});
+
+describe("asking the model which date the household must act on", () => {
+  const page = [
+    candidate("date", "2026-10-31", ["other"], "31 October 2026"),
+    candidate("date", "2026-11-19", ["other"], "MOT valid, expiry on record 19 November 2026"),
+    candidate("date", "2027-01-14", [{ value: "renewal", trigger: "valid to" }], "insurance valid to 14 January 2027"),
+  ];
+  const offered = ["2026-10-31", "2026-11-19"];
+  const decided = [{ date: "2027-01-14", role: "renewal" }];
+
+  it("asks about the dates no rule could label, with the line each was printed on", async () => {
+    const model = fakeModel('{"date_to_act_on": "2026-10-31", "what_it_is_for": "renewal"}');
+
+    const picked = await chooseDateToActOnWithModel(page, offered, decided, model);
+
+    expect(model.prompts).toHaveLength(1);
+    expect(model.prompts[0]).toContain('【template_start】{"date_to_act_on":"","what_it_is_for":""}【template_end】');
+    expect(model.prompts[0]).toContain("what_it_is_for must be one of: renewal, expiry, due, service, start, issued, none");
+    expect(model.prompts[0]).toContain('2026-10-31: "31 October 2026"');
+    expect(model.prompts[0]).toContain("Already understood, so not in question: 2027-01-14 (renewal)");
+    expect(picked).toEqual({ date: "2026-10-31", role: "renewal" });
+  });
+
+  it("reads an answer written the way the page printed it", async () => {
+    const picked = await chooseDateToActOnWithModel(
+      page,
+      offered,
+      decided,
+      fakeModel('{"date_to_act_on": "31 October 2026", "what_it_is_for": "due"}'),
+    );
+
+    expect(picked).toEqual({ date: "2026-10-31", role: "due" });
+  });
+
+  it("refuses a date that is not one of the ones offered", async () => {
+    const picked = await chooseDateToActOnWithModel(
+      page,
+      offered,
+      decided,
+      fakeModel('{"date_to_act_on": "2027-01-14", "what_it_is_for": "renewal"}'),
+    );
+
+    expect(picked).toBeUndefined();
+  });
+
+  it("refuses a job outside the vocabulary, and takes none as an answer", async () => {
+    const invented = await chooseDateToActOnWithModel(
+      page,
+      offered,
+      decided,
+      fakeModel('{"date_to_act_on": "2026-10-31", "what_it_is_for": "tax point"}'),
+    );
+    const nothing = await chooseDateToActOnWithModel(
+      page,
+      offered,
+      decided,
+      fakeModel('{"date_to_act_on": "2026-10-31", "what_it_is_for": "none"}'),
+    );
+
+    expect(invented).toBeUndefined();
+    expect(nothing).toBeUndefined();
+  });
+
+  it("does not ask at all when the rules labelled every date", async () => {
+    const model = fakeModel('{"date_to_act_on": "2026-10-31", "what_it_is_for": "renewal"}');
+
+    expect(await chooseDateToActOnWithModel(page, [], decided, model)).toBeUndefined();
+    expect(model.prompts).toHaveLength(0);
   });
 });

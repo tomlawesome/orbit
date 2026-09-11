@@ -14,7 +14,12 @@
 // Tika block it was found in, and its tags already carry the words that
 // justified them, so this stage only compares what stage 2 decided.
 
-import { chooseProviderByRules } from "./extraction-choose-meaning";
+import {
+  chooseDateToActOnWithModel,
+  chooseMeaningFieldsWithModel,
+  chooseProviderByRules,
+  type MeaningTransport,
+} from "./extraction-choose-meaning";
 import { DATE_RANGE, WORDS_BEFORE } from "./extraction-date-sieves";
 import type { CandidateKind } from "./extraction-sieve";
 import type { ExtractedFields } from "./extraction-scoring";
@@ -376,22 +381,36 @@ function chooseCost(candidates: readonly TaggedCandidate[]): {
  * blank: both are the model's to choose over the shortlist, which is the
  * same module's second half and is wired up by the caller.
  */
-export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
-  const { dates, dateRoles } = chooseDates(candidates);
-
-  // The same derivation `scripts/corpus/verify.mjs` applies to ground
-  // truth, so an extractor cannot disagree with the corpus about what its
-  // own roles mean: renewal wins because it is the one the household must
-  // act on.
+/**
+ * What the roles say about the schedule: the same derivation
+ * `scripts/corpus/verify.mjs` applies to ground truth, so an extractor
+ * cannot disagree with the corpus about what its own roles mean. Renewal
+ * wins because it is the one the household must act on.
+ *
+ * Shared with the model path, where a role the model supplied has to change
+ * the schedule the same way one a rule supplied does.
+ */
+function scheduleFrom(
+  dateRoles: ReadonlyArray<{ date: string; role: string }>,
+  candidates: readonly TaggedCandidate[],
+): { scheduleKind?: "renewal" | "service"; recurrenceMonths?: number } {
   const scheduleKind = dateRoles.some((entry) => entry.role === "renewal")
     ? "renewal"
     : dateRoles.some((entry) => entry.role === "service")
       ? "service"
       : undefined;
-
   // A cycle length is only ever a fact about a schedule. Without one there
   // is nothing for it to be the cycle of.
   const recurrenceMonths = scheduleKind === undefined ? undefined : chooseRecurrenceMonths(candidates);
+  return {
+    ...(scheduleKind === undefined ? {} : { scheduleKind }),
+    ...(recurrenceMonths === undefined ? {} : { recurrenceMonths }),
+  };
+}
+
+export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
+  const { dates, dateRoles } = chooseDates(candidates);
+  const { scheduleKind, recurrenceMonths } = scheduleFrom(dateRoles, candidates);
   const reference = chooseReference(candidates);
   const provider = chooseProviderByRules(candidates);
 
@@ -405,3 +424,34 @@ export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
     ...chooseCost(candidates),
   };
 };
+
+/**
+ * The whole of stage 3 with the model available: the rules first, then the
+ * three questions they left open -- who the household deals with, what type
+ * of thing this is, and which of the dates nothing could label is the one to
+ * act on.
+ *
+ * The model is never handed the page, only the shortlist and its blocks
+ * (ADR-0026 stage 3), and every answer is refused unless the shortlist
+ * carries it. Used by `stages-score-cli.ts` and `holdout-score-cli.ts` under
+ * `--model`, so both measure the same pipeline.
+ */
+export async function chooseFieldsWithModel(
+  candidates: readonly TaggedCandidate[],
+  transport: MeaningTransport,
+): Promise<ExtractedFields> {
+  const chosen = chooseFields(candidates);
+  const meaning = await chooseMeaningFieldsWithModel(candidates, chosen, transport);
+
+  const decided = chosen.dateRoles ?? [];
+  const offered = datesWithoutARole(candidates, decided);
+  const picked = await chooseDateToActOnWithModel(candidates, offered, decided, transport);
+  const dateRoles = picked === undefined ? decided : [...decided, picked];
+
+  return {
+    ...chosen,
+    ...meaning,
+    ...(dateRoles.length > 0 ? { dateRoles } : {}),
+    ...scheduleFrom(dateRoles, candidates),
+  };
+}
