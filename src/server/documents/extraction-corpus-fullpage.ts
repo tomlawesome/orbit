@@ -134,25 +134,25 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // Ground-truth notes:
     // - provider is Northgate Dental Plan Administration Ltd, the scheme administrator named only in the panel's small print and in the Direct Debit Guarantee wording. Aldermoor Dental Practice, named largest at the top of the panel as the masthead, is the practice where treatment happens, not the organisation the plan is with, so it is not the provider.
     // - reference is the membership number NDPA-208467, which is how the member's own record is filed with the administrator, not the plan product name (Aldermoor Complete Care Plan) or the administrator's company number (04471102) or the Direct Debit originator's identification number (934218), none of which a member would quote to identify their plan.
-    // - dates/dateRoles carry only the next check-up date (12 November 2026), role 'service', because that is the date this statement is driving the member toward. The statement prints six other dates -- the statement date (14 August 2026), the plan start date (1 March 2020), the last check-up (12 May 2026), the last hygienist visit (30 June 2026), the last payment taken (1 August 2026), the next payment due (1 September 2026), the plan renewal date (1 March 2027) and the fee price-list effective date (1 April 2026) -- none of which is the answer.
+    // - dates/dateRoles carry only the plan renewal date (1 March 2027), role 'renewal': Orbit tracks the plan, not the appointments (owner ruling 2026-09-11: 'The check up date is unrelated, Orbit is to track the plan!'; the truth previously tracked the next check-up, 12 November 2026, as 'service'). The statement prints seven other dates -- the statement date (14 August 2026), the plan start date (1 March 2020), the last check-up (12 May 2026), the next check-up (12 November 2026), the last hygienist visit (30 June 2026), the last payment taken (1 August 2026), the next payment due (1 September 2026) and the fee price-list effective date (1 April 2026) -- none of which is the answer.
     // - costMinor is 950 (the £9.50 monthly payment collected by Direct Debit), not the £114.00 plan-year value, not the practice's £62.00 private examination fee, not the £58.00 hygienist fee, and not the £1,000,000 worldwide dental trauma cover limit -- all printed on the same panel as rival amounts.
-    // - recurrenceMonths is 6, the interval between check-ups, which is the schedule this document actually drives (the next-check-up date above). The plan year is separately stated as running 12 months, and the payment is separately stated as taken every month; both are printed but describe the billing and membership-year cycles, not the check-up schedule, so neither is declared.
-    // - scheduleKind is 'service' because the tracked date and recurrence both describe the check-up appointment cycle, not a renewal/expiry event.
+    // - recurrenceMonths is 12, the plan year the page states as running 12 months: the cycle of the plan, not the 6-month check-up interval and not the monthly payment, both also printed.
+    // - scheduleKind is 'renewal' because the tracked date is when the plan year renews.
     name: "dental plan statement, three printed intervals and a hidden administrator",
     filename: "fullpage-dental-plan-statement.pdf",
     text: "Annual Plan Statement — Aldermoor Complete Care Plan  \n\nAldermoor Dental Practice \n\n14 Vicarage Lane, Wexbridge, WX4 2QP · 01926 552 019 \n\nDENTAL PLAN STATEMENT \n\nMr Callum Ashworth · 27 Beech Grove, Wexbridge, WX4 5RT \n\nStatement date 14 August 2026 · Membership number NDPA-208467 \n\nPlan Aldermoor Complete Care Plan Plan start date 1 March 2020 \n\nMonthly payment £9.50 Plan year value £114.00 \n\nLast payment taken 1 August 2026 Next payment due 1 September 2026 \n\nPlan renewal date 1 March 2027 Last check-up 12 May 2026 \n\nLast hygienist visit 30 June 2026 Next check-up due 12 November 2026 \n\nYour monthly payment is taken every month by Direct Debit. Your plan year runs for 12 months from your start date shown above, and \n\nrenews automatically unless you tell us otherwise. Check-ups fall due every 6 months, and one hygienist visit is included between \n\ncheck-ups. \n\nOutside the plan, a private examination at Aldermoor Dental Practice costs £62.00 and a hygienist session £58.00 (fees correct as at 1 \n\nApril 2026). Your plan also includes worldwide dental trauma cover up to £1,000,000. \n\nAldermoor Complete Care Plan is arranged for Aldermoor Dental Practice and administered on its behalf by Northgate Dental Plan Administration Ltd, PO Box 1156, \n\nNewbury Park, NP3 9ZZ, company number 04471102. The payments shown above are collected by Northgate Dental Plan Administration Ltd by Direct Debit. \n\nF O LD F O LD \n\nDIRECT Debit \n\nThe Direct Debit Guarantee \n\nThis Guarantee is offered by all banks and building societies that accept instructions to pay Direct Debits. \n\nIf there are any changes to the amount, date or frequency of your Direct Debit, Northgate Dental Plan Administration Ltd will notify you 10 working days in advance of your account being debited or as otherwise agreed. If you request Northgate Dental Plan Administration Ltd to collect a payment, confirmation of the amount and date will be given to you at the time of the request. \n\nIf an error is made in the payment of your Direct Debit, by Northgate Dental Plan Administration Ltd or your bank or building society, you are entitled to a full and immediate refund of the amount paid from your bank or building society. If you receive a refund you are not entitled to, you must pay it back when Northgate Dental Plan Administration Ltd asks you to. \n\nYou can cancel a Direct Debit at any time by simply contacting your bank or building society. Written confirmation may be required. Please also notify us. \n\nOriginator’s Identification Number 934218 · Northgate Dental Plan Administration Ltd · PO Box 1156, Newbury Park, NP3 9ZZ · Reference NDPA- \n\n208467\n",
     expected: {
-    dates: ["2026-11-12"],
+    dates: ["2027-03-01"],
     provider: "Northgate Dental Plan Administration Ltd",
     reference: "NDPA-208467",
     dateRoles: [
-      { date: "2026-11-12", role: "service" },
+      { date: "2027-03-01", role: "renewal" },
     ],
     subtype: "Dental plan statement",
     costMinor: 950,
     currency: "GBP",
-    recurrenceMonths: 6,
-    scheduleKind: "service",
+    recurrenceMonths: 12,
+    scheduleKind: "renewal",
     },
   },
   {
