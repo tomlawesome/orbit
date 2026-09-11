@@ -5,10 +5,12 @@
 // only where there is no model to ask.
 //
 // The shortlist is what the sieves kept. Several independent sieves read
-// each organisation first (`extraction-provider-sieves.ts`), and how well
-// they spoke for a name is the order the model sees it in. The language
-// facts among those sieves are these, and they state a fact about the words
-// on the page rather than about where something sits on it:
+// each organisation first (`extraction-provider-sieves.ts`); every name at
+// least one of them spoke for is then binned by word run
+// (`extraction-provider-runs.ts`), and how often a run is printed across
+// those names is the order the model sees it in. The language facts among
+// those sieves are these, and they state a fact about the words on the page
+// rather than about where something sits on it:
 //
 //   "X is a trading name of Y"   X is who the household deals with; Y, the
 //                                parent, is never the provider.
@@ -41,11 +43,10 @@
 // shortlist does not carry leaves the field blank.
 
 import {
-  bareName,
-  LANGUAGE_FACT,
-  PRINCIPAL_TAGS,
-  statesTheProvider,
-} from "./extraction-provider-sieves";
+  providerTaggedOrganisations,
+  providerWordRuns,
+} from "./extraction-provider-runs";
+import { LANGUAGE_FACT } from "./extraction-provider-sieves";
 import { classifyProvider } from "./extraction-scoring";
 import {
   bestSupported,
@@ -57,7 +58,7 @@ import {
   type EntryMatch,
   type ShortlistEntry,
 } from "./extraction-shortlist";
-import { STRENGTH_STATED, type Tag, type TaggedCandidate } from "./extraction-stages";
+import type { TaggedCandidate } from "./extraction-stages";
 import { locateDates, type DocumentDateRole } from "./suggestions";
 import subtypeTaxonomyJson from "./subtype-taxonomy.json";
 import { trimFieldValue } from "./value-trim";
@@ -69,19 +70,6 @@ function words(value: string): string[] {
 }
 
 // ---------------------------------------------------------------- provider
-
-/**
- * How many sieves have to agree before the rules answer at all.
- *
- * One sieve is one way of looking, and the hold-out says a single way of
- * looking is wrong about as often as it is right: the rules-only provider
- * scored below blank there on nothing but the words beside the name. Two
- * sieves agreeing is two different reasons -- the page says so AND the
- * household is told to write there, or the name is in the footer of every
- * sheet AND on the web address -- and where the page gives only one reason
- * the field stays blank for the model to answer (owner, 2026-09-11).
- */
-const AGREEING_SIEVES = 2;
 
 /**
  * Tags that say why an organisation is on the page, and it is never
@@ -218,220 +206,22 @@ function nameOf(candidate: TaggedCandidate, trigger: string): string | undefined
 }
 
 /**
- * One organisation on the page, and every sieve that spoke about it.
+ * The organisation the household's plan is with, where there is no model to
+ * ask, and nothing where the page is not plain about it.
  *
- * Candidates are grouped by the organisation they name, not by where they
- * were found: a name printed in the masthead, in the footer and beside "administered
- * by" is one organisation with three sieves behind it, not three names with
- * one each.
- */
-interface ProviderClaim {
-  name: string;
-  /** The sieves that read this as the organisation the household deals
-   * with (`Tag.sieves` on its `provider` tag). */
-  sieves: Set<string>;
-  /** The sieves that read it as something else the page had to name -- the
-   * registered legal entity behind a trading name, so far. */
-  against: Set<string>;
-  /** The best reason any of them had: 2 the page says so in words, 1 a
-   * weaker reading. Two weak readings agreeing -- a name repeated twice
-   * that is also printed as a heading -- is two guesses, not a fact. */
-  strength: number;
-  /** Whether the words beside the name said outright who the household
-   * deals with. */
-  stated: boolean;
-  /**
-   * How direct that statement was, as a rank in `PRINCIPAL_TAGS`: the page
-   * naming the provider outright beats it naming who administers the plan,
-   * which beats "on behalf of" -- a phrase every policy prints about its
-   * insurer as well as about the firm the household rings. Nothing stated
-   * at all ranks last.
-   */
-  principal: number;
-}
-
-/** The sieves behind a tag. A tag with no names is the words beside the
- * candidate, which is what every tag was before the sieves. */
-function sievesOf(tag: { sieves?: readonly string[] }): readonly string[] {
-  return tag.sieves ?? [LANGUAGE_FACT];
-}
-
-/**
- * Every organisation the page could mean, with the sieves for and against
- * it. Built from the same shortlist the model is shown, so the rules and
- * the model are choosing between the same names.
- */
-export function providerClaims(candidates: readonly TaggedCandidate[]): ProviderClaim[] {
-  // Read once, then counted, then grouped: how often the page printed a
-  // name is what says which cut of it to answer with, and that cannot be
-  // known until every candidate has been read.
-  const readings: Array<{ name: string; tag: Tag; forProvider: boolean }> = [];
-  for (const candidate of organisationsWorthAsking(candidates)) {
-    for (const tag of candidate.tags) {
-      const forProvider = tag.value === "provider" || statesTheProvider(tag.value, tag.trigger);
-      const againstProvider = tag.value === "legal-entity";
-      if (!forProvider && !againstProvider) continue;
-      const name = nameOf(candidate, tag.trigger) ?? nameOf(candidate, "");
-      if (name) readings.push({ name, tag, forProvider });
-    }
-  }
-
-  // How often the page printed each name exactly this way. The sieve cuts a
-  // name several ways and the page prints the real one most: "Bellward
-  // Warranty Administration Ltd" in every footer against one "Notify
-  // Bellward Warranty Administration Ltd" in a sentence.
-  const printings = new Map<string, number>();
-  for (const reading of readings) {
-    printings.set(comparable(reading.name), (printings.get(comparable(reading.name)) ?? 0) + 1);
-  }
-
-  const byOrganisation = new Map<string, ProviderClaim>();
-  for (const { name, tag, forProvider } of readings) {
-    const key = bareName(name);
-    const held = byOrganisation.get(key) ??
-      {
-        name,
-        sieves: new Set<string>(),
-        against: new Set<string>(),
-        strength: 0,
-        stated: false,
-        principal: PRINCIPAL_TAGS.length,
-      };
-    held.name = betterPrinting(held.name, name, printings);
-    for (const sieve of sievesOf(tag)) (forProvider ? held.sieves : held.against).add(sieve);
-    if (forProvider) {
-      held.strength = Math.max(held.strength, tag.strength ?? STRENGTH_STATED);
-      if (sievesOf(tag).includes(LANGUAGE_FACT)) {
-        held.stated = true;
-        const rank = PRINCIPAL_TAGS.indexOf(tag.value);
-        if (rank !== -1) held.principal = Math.min(held.principal, rank);
-      }
-    }
-    byOrganisation.set(key, held);
-  }
-  return mergeFragments([...byOrganisation.values()], printings);
-}
-
-/** The name's words, as the fragment test compares them: the leading
- * article and the trailing legal form off, so one printing of a name can be
- * recognised inside another. */
-function claimWords(name: string): string[] {
-  return bareName(name).split(" ").filter((word) => word.length > 0);
-}
-
-/** Whether `part` is printed inside `whole` as a run of whole words:
- * "Management Ltd" inside "Purbeck & Vane Property Management Ltd". */
-function isRunOf(part: readonly string[], whole: readonly string[]): boolean {
-  if (part.length === 0 || part.length >= whole.length) return false;
-  for (let at = 0; at + part.length <= whole.length; at += 1) {
-    if (part.every((word, i) => word === whole[at + i])) return true;
-  }
-  return false;
-}
-
-/**
- * Which of two printings of one name to answer with.
- *
- * How often the page printed it decides: a document repeats the name it is
- * from and cuts it badly once. Where two printings are equally common the
- * fuller one wins -- "Purbeck & Vane Property Management Ltd" over the
- * "Management Ltd" the sieve's pattern started late on -- and then the one
- * carrying a legal form, and then the shorter, which is how "ClearBourne
- * Water" beats the sieve's "ClearBourne Water Water".
- */
-function betterPrinting(left: string, right: string, printings: ReadonlyMap<string, number>): string {
-  const score = (name: string): number[] => [
-    printings.get(comparable(name)) ?? 0,
-    new Set(claimWords(name)).size,
-    endsWithLegalSuffix(name) ? 1 : 0,
-    -name.length,
-  ];
-  const [leftScore, rightScore] = [score(left), score(right)];
-  for (let at = 0; at < leftScore.length; at += 1) {
-    if (leftScore[at] !== rightScore[at]) return leftScore[at] > rightScore[at] ? left : right;
-  }
-  return left;
-}
-
-/**
- * The sieve cuts one printed name several ways -- "Hedgerow Home
- * Insurance", "Services Ltd", "Hedgerow Home Insurance Services Ltd" --
- * and every cut arrives here as a rival to the others.
- *
- * A cut printed inside a fuller name that the page prints at least as often
- * is that name, and its sieves belong to it. The other way round it is not
- * a fragment at all: "Bellward Warranty Administration Ltd" in six footers
- * against one "Notify Bellward Warranty Administration Ltd" in a sentence
- * is the name, and the longer printing is the sloppy cut -- so the short
- * name stands, with everything the sieves said about it.
- */
-function mergeFragments(
-  claims: readonly ProviderClaim[],
-  printings: ReadonlyMap<string, number>,
-): ProviderClaim[] {
-  const timesPrinted = (claim: ProviderClaim) => printings.get(comparable(claim.name)) ?? 0;
-  const absorbed = new Set<ProviderClaim>();
-  for (const claim of claims) {
-    const words = claimWords(claim.name);
-    const host = claims
-      .filter((other) =>
-        other !== claim && !absorbed.has(other) &&
-        isRunOf(words, claimWords(other.name)) &&
-        timesPrinted(other) >= timesPrinted(claim))
-      .sort((left, right) => timesPrinted(right) - timesPrinted(left))[0];
-    if (host === undefined) continue;
-    absorbed.add(claim);
-    host.name = betterPrinting(host.name, claim.name, printings);
-    for (const sieve of claim.sieves) host.sieves.add(sieve);
-    for (const sieve of claim.against) host.against.add(sieve);
-    host.strength = Math.max(host.strength, claim.strength);
-    host.stated = host.stated || claim.stated;
-    host.principal = Math.min(host.principal, claim.principal);
-  }
-  return claims.filter((claim) => !absorbed.has(claim));
-}
-
-/** How many independent reasons there are to call this the provider: the
- * sieves for it, less one where a sieve read it as the legal entity behind
- * a trading name the page also printed. */
-function agreement(claim: ProviderClaim): number {
-  return claim.sieves.size - (claim.against.size > 0 ? 1 : 0);
-}
-
-/**
- * The organisation the household's plan is with, where several sieves agree
- * it is, and nothing where they do not.
- *
- * Two sieves have to agree, and no other organisation may have as many:
- * where two names are equally well spoken for the page is ambiguous, and
- * stage 3's answer to ambiguity is silence. A wrong provider costs a point
- * where a blank costs nothing, and the blank is what the model is then
- * asked about.
+ * The bins rank; this is the only thing the rules do with them, and it is
+ * deliberately almost never: the top run may be answered only where it is
+ * the only run printed more than once, which is a page whose kept names
+ * repeat one thing and one thing alone (owner, 2026-09-11). Anywhere the
+ * page repeats a name in several cuts -- which is most pages -- two runs
+ * clear the line, and a blank goes to the model instead. A wrong provider
+ * costs a point where a blank costs nothing.
  */
 export function chooseProviderByRules(candidates: readonly TaggedCandidate[]): string | undefined {
-  const claims = providerClaims(candidates);
-  // Where the page states outright who the household deals with, no other
-  // name is in the running: a practice whose name is printed on every sheet
-  // does not outrank the administrator the page named, and where the stated
-  // name is the only reason there is, the field stays blank rather than
-  // taking the repeated one.
-  const stated = claims.filter((claim) => claim.stated);
-  // Among statements, the most direct is the one heard: "your supplier is",
-  // then who runs or sold the plan, then "on behalf of", which a policy
-  // prints about its insurer as readily as about the firm the household
-  // deals with.
-  const directest = Math.min(...stated.map((claim) => claim.principal));
-  const heard = stated.length > 0 ? stated.filter((claim) => claim.principal === directest) : claims;
-  const ranked = heard
-    .map((claim) => ({ claim, agreed: agreement(claim) }))
-    .sort((left, right) => right.agreed - left.agreed);
-  const best = ranked[0];
-  if (best === undefined || best.agreed < AGREEING_SIEVES) return undefined;
-  // Two weak readings are two guesses. At least one of the sieves that
-  // agreed has to have had the page's own words behind it.
-  if (best.claim.strength < STRENGTH_STATED) return undefined;
-  if (ranked.length > 1 && ranked[1].agreed >= best.agreed) return undefined;
-  return best.claim.name;
+  const repeated = providerWordRuns(providerTaggedOrganisations(candidates))
+    .filter((run) => run.count > 1);
+  if (repeated.length !== 1) return undefined;
+  return repeated[0].display;
 }
 
 // ------------------------------------------------------------------- model
@@ -566,8 +356,7 @@ export function chooserTransport(): MeaningTransport {
 
 /**
  * Every printing of every organisation the page could mean -- one entry per
- * place it was found, because how often a name is printed is evidence
- * (`providerClaims`) and the deduplicated shortlist below cannot see it.
+ * place it was found.
  *
  * Out go the bodies a page names for a reason other than being the
  * provider: the regulator, the underwriter, the installer, the parent
@@ -608,57 +397,65 @@ function providerNames(candidates: readonly TaggedCandidate[]): Array<{
 }
 
 /**
- * The provider shortlist: every organisation the sieves kept, best-spoken-for
- * first, each with the block it was printed in and the sieves that kept it.
+ * The provider shortlist: the word-run bins over the organisations stage 2
+ * spoke for, best first, each with its count, the form the page printed
+ * most, and the blocks the mentions behind it came from
+ * (`extraction-provider-runs.ts`, the owner's method of 2026-09-11).
  *
- * The rules' own ranking is the order (`agreement`, how direct the page's
- * statement was, how good a reason the best sieve had) and that is all the
- * rules do here: the model picks, or answers none.
+ * A run rather than a name, because the sieves cut one printed name a dozen
+ * ways and no rule about legal suffixes reliably puts the cuts back
+ * together. What the household's own organisation has, and a body named
+ * once does not, is its words repeated across every one of those cuts.
+ *
+ * Ranked by count, so the entries near the top are several readings of the
+ * same name -- which is the point: the model is choosing between the two or
+ * three organisations the page keeps saying, in the wordings it said them.
+ * The sieves and the words the page printed beside each mention ride along
+ * as evidence; they no longer order anything.
  */
 export function providerShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
-  const named = providerNames(candidates);
-  const blockFor = (name: string) => named.find((entry) => bareName(entry.name) === bareName(name));
-  const entries: ShortlistEntry[] = [];
-  const seen = new Set<string>();
+  const kept = providerTaggedOrganisations(candidates);
+  return providerWordRuns(kept).slice(0, SHORTLIST_LIMIT).map((run) => ({
+    value: run.display,
+    display: run.display,
+    line: runBlocks(run.mentions),
+    why: [`printed ${run.count} times across the names on this page`, ...runEvidence(run.mentions)],
+    support: run.count,
+  }));
+}
 
-  for (const claim of providerClaims(candidates)) {
-    const key = bareName(claim.name);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const found = blockFor(claim.name);
-    const labels = (found?.candidate.tags ?? [])
-      .map((tag) => tag.trigger.trim())
-      .filter((trigger) => trigger.length > 0 && trigger.length < 40);
-    entries.push({
-      value: claim.name,
-      display: claim.name,
-      line: found?.candidate.line ?? "",
-      why: [
-        `sieves: ${[...claim.sieves].join(", ")}`,
-        ...(labels.length > 0 ? [`the page says: ${labels.join("; ")}`] : []),
-        ...(claim.against.size > 0 ? [`read as the company behind the name by: ${[...claim.against].join(", ")}`] : []),
-      ],
-      support: agreement(claim) * 2 + claim.strength + (PRINCIPAL_TAGS.length - claim.principal),
-    });
+/** At most this many of a run's blocks, so one entry cannot fill the
+ * excerpt on its own. */
+const BLOCKS_PER_ENTRY = 3;
+
+/** The blocks a run's mentions were printed in, each once. */
+function runBlocks(mentions: readonly TaggedCandidate[]): string {
+  const blocks: string[] = [];
+  for (const mention of mentions) {
+    const line = mention.line.trim();
+    if (line && !blocks.includes(line)) blocks.push(line);
+    if (blocks.length === BLOCKS_PER_ENTRY) break;
   }
+  return blocks.join(" | ");
+}
 
-  // A name no sieve spoke for is still a name on the page, and the model may
-  // still be the one to recognise it. It goes last, which on a page with
-  // eight better-spoken-for names is off the end of the list.
-  for (const { name, candidate } of named) {
-    const key = bareName(name);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    entries.push({
-      value: name,
-      display: name,
-      line: candidate.line,
-      why: ["no sieve spoke for it"],
-      support: 0,
-    });
+/** What stage 2 said about the mentions a run came from: the sieves that
+ * kept them, and the words the page printed beside them. Evidence for the
+ * model, not a ranking (ADR-0026, amended 2026-09-11). */
+function runEvidence(mentions: readonly TaggedCandidate[]): string[] {
+  const sieves = new Set<string>();
+  const labels = new Set<string>();
+  for (const mention of mentions) {
+    for (const tag of mention.tags) {
+      for (const sieve of tag.sieves ?? [LANGUAGE_FACT]) sieves.add(sieve);
+      const trigger = tag.trigger.trim();
+      if (trigger.length > 0 && trigger.length < 40) labels.add(trigger);
+    }
   }
-
-  return bestSupported(entries);
+  return [
+    ...(sieves.size > 0 ? [`sieves: ${[...sieves].join(", ")}`] : []),
+    ...(labels.size > 0 ? [`the page says: ${[...labels].join("; ")}`] : []),
+  ];
 }
 
 /** The page's own words, as the subtype question may read them: what the
