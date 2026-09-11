@@ -65,7 +65,7 @@ function measure(doc: CorpusDocument, totals: Record<string, Tally>): void {
   }
   if (expected.reference !== undefined) {
     const wanted = expected.reference.replace(/\s+/gu, "").toUpperCase();
-    const hit = ofKind("identifier").some((c) => c.value.toUpperCase() === wanted);
+    const hit = ofKind("identifier").some((c) => c.value.replace(/\s+/gu, "").toUpperCase() === wanted);
     record(totals, "reference", doc, hit, expected.reference);
   }
   if (expected.subtype !== undefined) {

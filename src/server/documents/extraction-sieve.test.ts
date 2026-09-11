@@ -31,10 +31,10 @@ describe("the sieve keeps every candidate and chooses nothing", () => {
     ]);
   });
 
-  it("finds identifiers, including spaced digit groups compared without the spaces", () => {
+  it("finds identifiers, keeping the printed spacing of digit groups", () => {
     const values = of("identifier").map((c) => c.value);
     expect(values).toContain("MTR-8823-0145");
-    expect(values).toContain("7724665018");
+    expect(values).toContain("7724 6650 18");
   });
 
   it("finds every organisation named, whether in a letterhead, prose or capitals", () => {

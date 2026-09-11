@@ -87,7 +87,9 @@ function identifiers(text: string, blocks: Array<{ index: number; line: string }
   const found: Candidate[] = [];
   for (const match of text.matchAll(IDENTIFIER)) {
     const index = match.index ?? 0;
-    found.push({ kind: "identifier", value: match[0].replace(/\s+/gu, ""), index, line: blockAt(blocks, index) });
+    // The printed form is the value -- "7738 2204 91" is the reference as the
+    // page and the ground truth write it. Compare with spaces stripped.
+    found.push({ kind: "identifier", value: match[0].replace(/\s+/gu, " "), index, line: blockAt(blocks, index) });
   }
   return found;
 }
