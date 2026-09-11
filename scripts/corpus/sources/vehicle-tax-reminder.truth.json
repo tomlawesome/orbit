@@ -13,11 +13,24 @@
         "role": "renewal"
       }
     ],
-    "subtype": "Vehicle tax reminder",
+    "subtype": {
+      "kinds": [
+        "Tax",
+        "Licence",
+        "Bill"
+      ],
+      "qualifiers": [
+        "Vehicle tax",
+        "Motor"
+      ]
+    },
     "costMinor": 18000,
     "currency": "GBP",
     "recurrenceMonths": 12,
     "scheduleKind": "renewal"
   },
-  "notes": "reference is the registration document reference in the boxed strip (4471 8823 0519), not the registration mark LR69 KHM (printed largest, in its own heavy-ruled plate-style box, and repeated in the running header and counterfoil), the VIN (WVWZZZ1KZLW238841), or the Authority's own case reference (HVLA-2026-661452) — none of those are what a keeper would quote to renew. costMinor is the single 12 month rate (£180.00), not the 6 month rate (£99.00), the monthly Direct Debit rate or its 12-month total (£15.75 / £189.00), or the late-licensing penalty (£80, or up to £1,000 on conviction). dates holds only the current tax expiry (31 October 2026), role 'expiry', per the task spec; deliberately excluded as distractors: the MOT expiry (19 November 2026, chosen to fall within three weeks of the tax expiry so the two are easily swapped), date of first registration (14 March 2019), registered-keeper-since date (22 June 2021), the reminder's own issue date (04 September 2026), the insurance database check date (02 September 2026) and the separate policy-valid-to date it reports (14 January 2027), the 'already taxed since' cutoff (28 August 2026), the renewal window opening date (01 October 2026), the indicative first Direct Debit collection date (01 November 2026), the prior reminder date (04 August 2025), and the database-last-updated timestamp. scheduleKind is declared 'renewal' per the task spec even though the sole dateRole is 'expiry' rather than 'renewal' — flagging this as worth a second look, since it does not match the scheduleKind-from-roles convention used elsewhere in this corpus (renewal role -> renewal scheduleKind). The Authority's full name appears exactly once, in the header band; every other mention on the page (running header, footer, counterfoil) uses only the initials HVLA. The end date is roled 'renewal' rather than 'expiry' because the household must act again on it, which is the distinction this corpus draws: 'expiry' is reserved for a document that simply runs out (the MOT certificate), and verify.mjs derives scheduleKind from the role."
+  "notes": [
+    "reference is the registration document reference in the boxed strip (4471 8823 0519), not the registration mark LR69 KHM (printed largest, in its own heavy-ruled plate-style box, and repeated in the running header and counterfoil), the VIN (WVWZZZ1KZLW238841), or the Authority's own case reference (HVLA-2026-661452) — none of those are what a keeper would quote to renew. costMinor is the single 12 month rate (£180.00), not the 6 month rate (£99.00), the monthly Direct Debit rate or its 12-month total (£15.75 / £189.00), or the late-licensing penalty (£80, or up to £1,000 on conviction). dates holds only the current tax expiry (31 October 2026), role 'expiry', per the task spec; deliberately excluded as distractors: the MOT expiry (19 November 2026, chosen to fall within three weeks of the tax expiry so the two are easily swapped), date of first registration (14 March 2019), registered-keeper-since date (22 June 2021), the reminder's own issue date (04 September 2026), the insurance database check date (02 September 2026) and the separate policy-valid-to date it reports (14 January 2027), the 'already taxed since' cutoff (28 August 2026), the renewal window opening date (01 October 2026), the indicative first Direct Debit collection date (01 November 2026), the prior reminder date (04 August 2025), and the database-last-updated timestamp. scheduleKind is declared 'renewal' per the task spec even though the sole dateRole is 'expiry' rather than 'renewal' — flagging this as worth a second look, since it does not match the scheduleKind-from-roles convention used elsewhere in this corpus (renewal role -> renewal scheduleKind). The Authority's full name appears exactly once, in the header band; every other mention on the page (running header, footer, counterfoil) uses only the initials HVLA. The end date is roled 'renewal' rather than 'expiry' because the household must act again on it, which is the distinction this corpus draws: 'expiry' is reserved for a document that simply runs out (the MOT certificate), and verify.mjs derives scheduleKind from the role.",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Vehicle tax reminder')."
+  ]
 }

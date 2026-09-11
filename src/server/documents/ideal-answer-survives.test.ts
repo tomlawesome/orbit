@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { EXTRACTION_CORPUS } from "./extraction-corpus";
-import { classifySubtype } from "./extraction-scoring";
+import { EXTRACTION_CORPUS, type SubtypeSpec } from "./extraction-corpus";
+import { classifySubtype, isSubtypeSpec, subtypeAnswers } from "./extraction-scoring";
 import {
   comparableText,
   modelProposalFromText,
@@ -27,6 +27,15 @@ import { safeDocumentEvidence } from "./suggestions";
  */
 
 const MODEL_ENVIRONMENT = { OLLAMA_MODEL: "a-local-model:latest" } as NodeJS.ProcessEnv;
+
+/** A model reply can only offer one phrase. Ground truth may accept several
+ * (a literal set, #989/#992) or name taxonomy groups instead of phrases
+ * (#989); either way, the ideal reply offers a single concrete answer -- the
+ * first phrase of the set, or the first synonym of the first listed kind. */
+function firstSubtypePhrase(expected: string | string[] | SubtypeSpec): string {
+  if (isSubtypeSpec(expected)) return subtypeAnswers({ kinds: [expected.kinds[0]] })[0];
+  return Array.isArray(expected) ? expected[0] : expected;
+}
 
 // --- Copied from model-extraction.test.ts: the transport/envelope fakes
 // around the real modelProposalFromText path. Not reinvented here. ---
@@ -125,7 +134,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-appliance-warranty-certificate.pdf": {
     provider: "on behalf of the retailer by Bellward Warranty Administration Ltd of Norwich, and underwritten by Corvane Insurance plc, authorised and",
     reference: "WARRANTY CERTIFICATE Certificate No. EWC-2025-118823 This is to certify that the appliance described below, purchased from",
-    subtype: "Extended Warranty Certificate — Ashfield Domestic Appliances ASHFIELD DOMESTIC APPLIANCES BR IS TO L",
+    subtype: "Extended Warranty Certificate — Ashfield Domestic Appliances ASHFIELD DOMESTIC APPLIANCES",
     cost: { amount: "69.99", needle: "APPLIANCE £549.99 MANUFACTURER'S GUARANTEE 12 months parts & labour, ends 13 June 2026 EXTENDED WARRANTY PRICE PAID £69.99 (inc. IPT) EXCESS" },
     dates: [
       "and below, for a period of five years, commencing on 14 June 2026 and expiring on 13 June",
@@ -135,7 +144,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-breakdown-cover-renewal.pdf": {
     provider: "Milldown Motoring Club — Your Breakdown Cover Renewal MILLDOWN MOTORING CLUB Your breakdown",
     reference: "Prepared 2 September 2026 Membership MDC-4471-8823 THIS OFFER ENDS 30 SEPTEMBER 2026 Renew now and keep last year's",
-    subtype: "Milldown Motoring Club — Your Breakdown Cover Renewal MILLDOWN MOTORING CLUB Your breakdown cover renewal notice Prepared 2",
+    subtype: "as at 28 August 2026 and include Insurance Premium Tax where applicable. Prices may change at your next renewal.",
     cost: { amount: "84.99", needle: "LINE AND KEEP THIS CARD IN YOUR GLOVEBOX Choose your cover for the year ahead Your current cover Roadside Assist £84.99 per year · you paid" },
     recurrence: { months: 12, needle: "TO 04/11/2026 24HR: 0330 555 0198 Roadside & Recovery £129.99 or £11.99 a month Save £30 — renew" },
     dates: [
@@ -145,7 +154,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-broadband-contract.pdf": {
     provider: "Kestrel Broadband — Contract Summary and Terms Kestrel Broadband Contract Summary Order",
     reference: "number KB-771049-3 Order reference ORD-2026-0417726 Billing address Flat 2, 9 Thornfield Close, Marlcombe, Warwickshire,",
-    subtype: "Kestrel Broadband — Contract Summary and Terms Kestrel Broadband Contract Summary Order date 14 April 2026 Document",
+    subtype: "Kestrel Broadband — Contract Summary and Terms Kestrel Broadband Contract Summary Order date 14",
     cost: { amount: "34.99", needle: "2026 24-Month Fibre & Phone Contract Key contract information — Ofcom-format summary MONTHLY PRICE, MINIMUM TERM £34.99 per month, includes line" },
     recurrence: { months: 24, needle: "SPEED 502 Mbps average upload speed 74 Mbps MINIMUM TERM 24 months ends 21 April 2028 CUSTOMER AND" },
     dates: [
@@ -154,9 +163,9 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-car-insurance-renewal.pdf": {
-    provider: "Services Compensation Scheme. Meridian General Insurance Company plc is covered by the Financial Services Compensation Scheme. You may be",
+    provider: "renewal — policy MTR-8823-0145 Colworth & Drake Insurance Services Ltd — policy administration Document RNW/MTR/0926 — Page 1 of 3 COLWORTH &",
     reference: "Your motor insurance renewal — policy MTR-8823-0145 Colworth & Drake Insurance Services Ltd — policy administration",
-    subtype: "Your motor insurance renewal — policy MTR-8823-0145 Colworth & Drake Insurance Services Ltd — policy",
+    subtype: "Your motor insurance renewal — policy MTR-8823-0145 Colworth & Drake Insurance Services Ltd",
     cost: { amount: "612.40", needle: "you will need to arrange new insurance before driving the vehicle. YOUR RENEWAL PREMIUM ANNUAL PREMIUM, PAID IN FULL £612.40 Net premium £546.79 +" },
     dates: [
       "2018 Current period of insurance 15 October 2025 to 15 October 2026 Renewal period offered",
@@ -166,7 +175,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-council-tax-demand.pdf": {
     provider: "Precepting authority 2025/26 2026/27 Calderhythe District Council (district services) £298.61 £312.44 Wealdshire County Council £1,412.87",
     reference: "Pemberton COUNCIL TAX ACCOUNT NUMBER 8845612033 PROPERTY CHARGED 14 Sedge Close Marlpool Calderhythe CH3 7QD Valuation",
-    subtype: "Council Tax Demand Notice 2026/27 C ALDE RHYTHE COUNCIL TAX — BILLING AUTHORITY COUNCIL",
+    subtype: "Council Tax Demand Notice 2026/27 C ALDE RHYTHE COUNCIL TAX — BILLING AUTHORITY",
     cost: { amount: "2,159.07", needle: "Rescue Authority £78.04 £81.33 Marlpool Parish Council £39.80 £42.10 Total council tax charge for the year £2,056.30 £2,159.07 Pay by ten monthly" },
     recurrence: { months: 12, needle: "person(s) Mr D. Pemberton COUNCIL TAX ACCOUNT NUMBER 8845612033 PROPERTY CHARGED 14 Sedge Close" },
     dates: [
@@ -177,17 +186,17 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-dental-plan-statement.pdf": {
     provider: "and administered on its behalf by Northgate Dental Plan Administration Ltd, PO Box 1156, Newbury Park, NP3 9ZZ, company number 04471102. The",
     reference: "14 August 2026 · Membership number NDPA-208467 Plan Aldermoor Complete Care Plan Plan start date 1 March 2020 Monthly",
-    subtype: "Wexbridge, WX4 2QP · 01926 552 019 DENTAL PLAN STATEMENT Mr Callum Ashworth · 27 Beech Grove, Wexbridge, WX4 5RT Statement date",
+    subtype: "Annual Plan Statement — Aldermoor Complete Care Plan Aldermoor Dental Practice 14",
     cost: { amount: "9.50", needle: "2026 · Membership number NDPA-208467 Plan Aldermoor Complete Care Plan Plan start date 1 March 2020 Monthly payment £9.50 Plan year value £114.00" },
-    recurrence: { months: 6, needle: "unless you tell us otherwise. Check-ups fall due every 6 months, and one hygienist visit is included" },
+    recurrence: { months: 12, needle: "taken every month by Direct Debit. Your plan year runs for 12 months from your start date shown above, and" },
     dates: [
-      "Last hygienist visit 30 June 2026 Next check-up due 12 November 2026 Your monthly payment is",
+      "Next payment due 1 September 2026 Plan renewal date 1 March 2027 Last check-up 12 May",
     ],
   },
   "fullpage-electrical-condition-report.pdf": {
     provider: "· ISSUE 6 No. EICR-2026-071842 Thornleigh Electrical Contractors Ltd Page 1 of 12 ELECTRICAL INSTALLATION CONDITION REPORT for a domestic",
     reference: "Installation Condition Report — EICR-2026-071842 NATIONAL ELECTRICAL INSTALLERS REGISTER — DOMESTIC ELECTRICAL",
-    subtype: "Electrical Installation Condition Report — EICR-2026-071842 NATIONAL ELECTRICAL INSTALLERS REGISTER — DOMESTIC",
+    subtype: "SECTION D — PURPOSE AND EXTENT OF THE INSPECTION PURPOSE OF REPORT Change of tenancy — periodic condition report",
     recurrence: { months: 60, needle: "further inspected and tested at an interval not exceeding 60 months from the date of this inspection, or" },
     dates: [
       "REF. INS-22841 DATE(S) OF INSPECTION AND TESTING 02 September 2026 TIME ON SITE 09:15 to",
@@ -197,7 +206,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-energy-tariff-end.pdf": {
     provider: "Achebe Head of Customer Pricing, Kittiwake Energy Ltd Rosalind AchebeKittiwake Energy Ltd, registered in England & Wales No.",
     reference: "Norfolk NR14 9QP Account number: 7724 6650 18 8 September 2026 Dear Mr Voss, Thank you for being a Kittiwake Energy",
-    subtype: "scheme reference EOM/2026/774213. Tariff end notice, form TEN-11-26, issued automatically to customers whose fixed term",
+    subtype: "onto our standard variable tariff, unless you choose a new plan with us before then. If you would rather",
     cost: { amount: "1,284.00", needle: "and what we are able to offer you if you fix your prices again today. Your current plan, Kittiwake Fixed October 2024 £1,284.00 a year Our standard" },
     dates: [
       "runs. Based on our records, your fixed price ends on 14 November 2026, and from the next day",
@@ -206,16 +215,16 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-gas-safety-record.pdf": {
     provider: "Date of issue 03/08/2026 BUSINESS NAME Fenwick & Vale Gas Services Ltd GAS SAFE REGISTERED BUSINESS, REGISTRATION NUMBER 512864 BUSINESS",
     reference: "RECORD LANDLORD / DUTYHOLDER COPY No. GSR-2026-04471 CP12 Date of issue 03/08/2026 BUSINESS NAME Fenwick & Vale Gas Services",
-    subtype: "Landlord's Gas Safety Record — CP12 LANDLORD'S GAS SAFETY RECORD LANDLORD / DUTYHOLDER COPY No.",
+    subtype: "safe to use on the date shown DATE OF INSPECTION 03 August 2026 This record confirms only that the appliances listed",
     recurrence: { months: 12, needle: "safety or of efficient operation. This record is valid for 12 months from the date of inspection shown" },
     dates: [
       "safe to use on the date shown DATE OF INSPECTION 03 August 2026 This record confirms",
     ],
   },
   "fullpage-gym-membership-agreement.pdf": {
-    provider: "Fitness Club is a trading name of Cresswell Leisure Ltd, a company registered in England and Wales under company number",
+    provider: "Cresswell Fitness Club — Membership Agreement CFC Cresswell Fitness Club I NDEPENDENT HEALTH &",
     reference: "member (for office use) MEMBER COPY CFC-004821 Daniel Ostrowski 12 Vale Road, Bournholt, BH4 2LN 14 July 1988 01284",
-    subtype: "512 · desk@cresswellfitness.example GYM MEMBERSHIP AGREEMENT MEMBERSHIP NO. MEMBER DETAILS FULL NAME ADDRESS DATE OF BIRTH HOME",
+    subtype: "Cresswell Fitness Club — Membership Agreement CFC Cresswell Fitness Club I NDEPENDENT HEALTH & F I TNESS",
     cost: { amount: "42.50", needle: "ITEM AMOUNT Joining fee (payable on signing, non-refundable) £25.00 Monthly membership fee, collected by Direct Debit £42.50 Annual membership, paid" },
     recurrence: { months: 1, needle: "is due in January 2027. We will give you not less than 1 month's written notice of any increase, which" },
     dates: [
@@ -224,9 +233,9 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-home-insurance-schedule.pdf": {
-    provider: "Policy Schedule — Thornfield Assurance plc Thornfield Assurance plc — Policy schedule Policy TA-HH-7734291 — Page",
+    provider: "IN TE R M E DIA RY Intermediary Hedgerow Home Insurance Services Ltd Intermediary address 8 Silvermead Court, Oakenfold, Drewshire DR1 2LP",
     reference: "Assurance plc — Policy schedule Policy TA-HH-7734291 — Page 1 of 3 THORNFIELD ASSURANCE PLC Registered office: Thornfield",
-    subtype: "Policy Schedule — Thornfield Assurance plc Thornfield Assurance plc — Policy schedule",
+    subtype: "· This schedule, the statement of insurance and the policy booklet HB-14 together form your contract. POL ICY N UM",
     cost: { amount: "412.99", needle: "L PR E M IUM Net premium (excluding Insurance Premium Tax) £368.74 Insurance Premium Tax at 12% £44.25 Annual premium £412.99 Annual premium payable" },
     dates: [
       "R IOD Policy number TA-HH-7734291 Period of insurance 14 March 2026 to 14 March 2027 Renewal",
@@ -236,7 +245,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-life-cover-booklet.pdf": {
     provider: "Ashcombe Life Assurance plc — Life and Critical Illness Cover: Policy Booklet Life and Critical",
     reference: "Staffordshire, ST9 4LP Policy number ALA-662048-13 Type of policy Life cover policy, with critical illness cover",
-    subtype: "revised 14 January 2026 Policy type: Life cover policy (with optional critical illness cover) This booklet explains what is",
+    subtype: "booklet is, by itself, a contract of insurance. Your contract is made up of this booklet, your policy schedule, the",
     cost: { amount: "32.50", needle: "assured) Total permanent disability cover Not selected Premium frequency Monthly (paid every 1 month) Monthly premium £32.50 Annual premium (if" },
     dates: [
       "illness cover (accelerated) Policy start date 18 October 2026 Policy end date 17",
@@ -244,19 +253,19 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-mobile-airtime-plan.pdf": {
-    provider: "Fenwick Mobile is a trading name of Anglia Communications Networks Ltd, registered in England and Wales no. 07845213, and is a licensed",
+    provider: "Fenwick Mobile – Mobile Plan Summary | My Account Fenwick Mobile – Mobile Plan Summary",
     reference: "rise takes effect. Account number 7734 2210 91 · Mobile number 07700 900123 Fenwick Mobile is a trading name of Anglia",
     subtype: "Fenwick Mobile – Mobile Plan Summary | My Account Fenwick Mobile – Mobile Plan Summary | My Account",
     cost: { amount: "23.00", needle: "Your 30GB data allowance resets on 20 October 2026. YOUR PLAN SIM Only 30GB Flex £14.00/mo for your first 6 months £23.00/mo standard monthly" },
-    recurrence: { months: 1, needle: "NEXT BILL DATE 20 October 2026 in 39 days · collected 1 time each calendar month by Direct" },
+    recurrence: { months: 24, needle: "month 7 onward Plan started 20 March 2025 Minimum term 24 months — ends 20 March 2027 Data allowance" },
     dates: [
       "started 20 March 2025 Minimum term 24 months — ends 20 March 2027 Data allowance 30GB /",
     ],
   },
   "fullpage-mortgage-annual-statement.pdf": {
-    provider: "Home Loans is a trading name of Priorswood Bank plc. Priorswood Bank plc is registered in England and Wales under company",
+    provider: "Kelbridge Home Loans — Mortgage Annual Statement Kelbridge Home Loans Residential mortgage",
     reference: "STATEMENT DATE 06/04/2026 ACCOUNT 7738 2204 91 PAGE 1 OF 3 MORTGAGE ANNUAL STATEMENT For the statement period 1 April",
-    subtype: "Kelbridge Home Loans — Mortgage Annual Statement Kelbridge Home Loans Residential mortgage lending STATEMENT DATE",
+    subtype: "Kelbridge Home Loans — Mortgage Annual Statement Kelbridge Home Loans Residential mortgage lending",
     cost: { amount: "742.18", needle: "June 2049 (23 years remaining) OUTSTANDING BALANCE AT 31 MARCH 2026 £164,611.07 YOUR PAYMENTS CURRENT MONTHLY PAYMENT £742.18 Collected by direct" },
     recurrence: { months: 1, needle: "lending STATEMENT DATE 06/04/2026 ACCOUNT 7738 2204 91 PAGE 1 OF 3 MORTGAGE ANNUAL STATEMENT" },
     dates: [
@@ -266,7 +275,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-mot-certificate.pdf": {
     provider: "STATION AND TESTER 1. TEST STATION Calderwell Motor Services Ltd 2. VTS NUMBER V-441829 3. ADDRESS Unit 7, Brandmoor Industrial Estate,",
     reference: "— MOT test certificate Test number 1847 2205 9631 — Page 1 of 2 DVTA Driver & Vehicle Testing Authority Statutory",
-    subtype: "MOT Test Certificate VT20 Driver & Vehicle Testing Authority — MOT test certificate Test",
+    subtype: "2026 in accordance with the statutory inspection manual in force on that date, and that it met the prescribed",
     dates: [
       "time. E X PI RY D ATE 08 September 2027 Test date 09 September 2026 VEHICLE DETAILS 1.",
       "condition at any other time. E X PI RY D ATE 08 September 2027 Test date 09 September",
@@ -275,9 +284,8 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-pension-benefit-statement.pdf": {
     provider: "Marlestone Workplace Pensions Ltd — Annual Benefit Statement Marlestone Workplace Pensions Ltd",
     reference: "DATE 5 April 2026 PLAN NUMBER WPP-0077410-6 PAGE 1 OF 4 Annual Benefit Statement For the scheme year 6 April 2025",
-    subtype: "Marlestone Workplace Pensions Ltd — Annual Benefit Statement Marlestone Workplace Pensions Ltd Trustee-administered defined",
+    subtype: "Marlestone Workplace Pensions Ltd — Annual Benefit Statement Marlestone Workplace Pensions Ltd",
     cost: { amount: "215.42", needle: "3 for what your pension could be worth at your selected retirement date. Your contributions YOUR MONTHLY CONTRIBUTION £215.42 EMPLOYER'S MONTHLY" },
-    recurrence: { months: 12, needle: "4 Contributions received Contributions received during the 12 months of the scheme year, 6 April 2025 to 5" },
     dates: [
       "defined contribution pension scheme STATEMENT DATE 5 April 2026 PLAN NUMBER",
     ],
@@ -285,7 +293,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-pet-vaccination-card.pdf": {
     provider: "bring this card to every appointment Hawksmoor Cross Veterinary Centre 22 Thornfield Road, Bramcote St Giles, Wyvern DE7 4PL Telephone 01159",
     reference: "· Labrador Retriever · Microchip 977200005841236 Vaccination & health record · Page 1 of 2 Vaccination & Health Record",
-    subtype: "Vaccination & Health Record Bramble · Labrador Retriever · Microchip 977200005841236 Vaccination &",
+    subtype: "Vaccination & Health Record Bramble · Labrador Retriever · Microchip",
     dates: [
       "(DHPPi/L4 + kennel cough) NEXT VACCINATION DUE 18 May 2027 Book in the two weeks",
     ],
@@ -293,7 +301,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-service-charge-demand.pdf": {
     provider: "22 Petersgate Road Alderwick WX7 4LP Purbeck & Vane Property Management Ltd · Account TFC-014-2627 Page 1 of 4 Pu r beck & Vane Prop erty",
     reference: "14, Thornfield Court Account reference TFC-014-2627 · Lease reference TFC/14/LR-1998 · First instalment (1 of 2) We write",
-    subtype: "Service Charge Demand — Thornfield Court P&V Pur beck & Vane Pro p erty Management Ltd 14",
+    subtype: "Service Charge Demand — Thornfield Court P&V Pur beck & Vane Pro p erty Management Ltd",
     cost: { amount: "3,930.00", needle: "then falling due. Your apportioned share of the service charge budgeted for the development for that year is £3,930.00, as shown in the" },
     recurrence: { months: 12, needle: "This demand covers the service charge year running for a 12-month period from 1 April 2026 to 31" },
     dates: [
@@ -303,7 +311,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-solar-export-statement.pdf": {
     provider: "then- current default export tariff. Millbrook Energy Ltd is a licensed electricity supplier, registered in England & Wales No.",
     reference: "Export Statement GENERATION ACCOUNT SEG-4471-0932 STATEMENT PERIOD 01/04/2025 – 31/03/2026 STATEMENT DATE 24/04/2026 Mrs",
-    subtype: "Millbrook Energy — Solar Export Statement Millbrook Energy Solar Generation Team · Annual Solar Export Statement",
+    subtype: "Q2 25/26 Q3 25/26 Q4 25/26 Your export tariff explained Payments in this statement are calculated by multiplying the",
     cost: { amount: "343.64", needle: "payment, four quarters £361.64 Less: annual metering & data administration charge −£18.00 Total paid to you this year £343.64 Estimated total for" },
     recurrence: { months: 12, needle: "Export meter EM2205968 Export meter last verified 12 May 2022 Your quarterly export and" },
     dates: [
@@ -313,7 +321,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-travel-insurance-certificate.pdf": {
     provider: "Travel Insurance Certificate KESTREL TRAVEL INSURANCE SERVICES LTD Administrator of your annual multi-trip travel insurance policy",
     reference: "insurance policy Certificate number KTL/AMT/449108 ANNUAL MULTI-TRIP TRAVEL INSURANCE CERTIFICATE P OLIC YHOLD E R Mr",
-    subtype: "Annual Multi-Trip Travel Insurance Certificate KESTREL TRAVEL INSURANCE SERVICES LTD Administrator of your annual",
+    subtype: "Annual Multi-Trip Travel Insurance Certificate KESTREL TRAVEL INSURANCE SERVICES LTD Administrator of your",
     cost: { amount: "159.60", needle: "per incident £95.00 Premium excluding Insurance Premium Tax £133.00 Annual premium, including Insurance Premium Tax £159.60 Underwritten by Palisade" },
     recurrence: { months: 12, needle: "Canada, the Caribbean and Mexico P E RIOD OF INSURANC E 12 months, from 1 April 2026 to 1 April 2027 RE" },
     dates: [
@@ -334,7 +342,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-vehicle-tax-reminder.pdf": {
     provider: "Vehicle Tax Reminder Highways and Vehicle Licensing Authority Executive agency for vehicle registration and taxation · Northgate",
     reference: "A T IO N D O C U MEN T R EF ER EN C E 4471 8823 0519 C A S E R EF ER EN C E HVLA-2026-661452 R EG IS T R A T IO N MA R K",
-    subtype: "Vehicle Tax Reminder Highways and Vehicle Licensing Authority Executive agency for vehicle",
+    subtype: "Vehicle Tax Reminder Highways and Vehicle Licensing Authority Executive agency for",
     cost: { amount: "180.00", needle: "2026 RATE FOR THIS VEHICLE — TICK ONE AND PAY BY THE METHODS OVERLEAF PAYMENT OPTION AMOUNT ☐ Single 12 month payment £180.00 ☐ Single 6 month payment" },
     recurrence: { months: 12, needle: "PAY BY THE METHODS OVERLEAF PAYMENT OPTION AMOUNT ☐ Single 12 month payment £180.00 ☐ Single 6 month" },
     dates: [
@@ -342,9 +350,9 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-water-bill.pdf": {
-    provider: "ClearBourne Water is a trading name of Bourne Valley Water and Sewerage plc, registered in England and Wales, company number 04217743, registered",
+    provider: "ClearBourne Water — Water and Wastewater Bill ClearBourne Water Water and wastewater",
     reference: "region BILL DATE 09/06/2026 ACCOUNT 8847 2210 55 TARIFF CODE WV-M-04 PAGE 1 OF 2 Mr J Whitcombe 12 Silverdale Close",
-    subtype: "ClearBourne Water — Water and Wastewater Bill ClearBourne Water Water and wastewater services for the Bourne Valley",
+    subtype: "Water — Water and Wastewater Bill ClearBourne Water Water and wastewater services for the Bourne Valley",
     cost: { amount: "163.37", needle: "M-2291487 Supply type Metered, combined Direct debit Collecting 23/06/2026 AMOUNT NOW DUE Payment due by 30/06/2026 £163.37 METER READINGS ON YOUR" },
     dates: [
       "Collecting 23/06/2026 AMOUNT NOW DUE Payment due by 30/06/2026 £163.37 METER READINGS",
@@ -353,7 +361,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "fullpage-window-installation-guarantee.pdf": {
     provider: "Guarantee Issued by the National Fenestration Guarantee Scheme Ltd following notification of the work described below under the competent",
     reference: "and Insurance-Backed Guarantee — IBG-2026-337215 NFGS National Fenestration Guarantee Scheme Competent person scheme for",
-    subtype: "Certificate of Compliance and Insurance-Backed Guarantee — IBG-2026-337215 NFGS National Fenestration Guarantee Scheme Competent",
+    subtype: "of Compliance and Insurance-Backed Guarantee — IBG-2026-337215 NFGS National Fenestration Guarantee Scheme Competent",
     dates: [
       "SCHEME POLICY NO. GPS-0417-2261 Date of installation 14 March 2026 Guarantee expires 14",
       "Date of installation 14 March 2026 Guarantee expires 14 March 2036 Certificate of",
@@ -415,10 +423,7 @@ describe("an ideal model's reply survives modelProposalFromText's grounding and 
       }
       if (doc.expected.subtype !== undefined) {
         if (!evidence.subtype) throw new Error(`[${doc.filename}] expected.subtype set but no evidence.subtype needle`);
-        // Ground truth may carry a set of acceptable phrases (#989/#992); a
-        // model reply can only offer one, so the ideal reply offers the
-        // first and the check below accepts a match against any of them.
-        const subtypeAnswer = Array.isArray(doc.expected.subtype) ? doc.expected.subtype[0] : doc.expected.subtype;
+        const subtypeAnswer = firstSubtypePhrase(doc.expected.subtype);
         generated.subtype = { value: subtypeAnswer, evidence: span(doc.filename, evidence.subtype, normalizedText) };
       }
       if (doc.expected.costMinor !== undefined) {
@@ -480,7 +485,7 @@ describe("an ideal model's reply survives modelProposalFromText's grounding and 
       }
       if (doc.expected.subtype !== undefined && classifySubtype(doc.expected.subtype, proposal.subtype) !== "correct") {
         const evidenceSpan = (generated.subtype as { evidence: string }).evidence;
-        const subtypeAnswer = Array.isArray(doc.expected.subtype) ? doc.expected.subtype[0] : doc.expected.subtype;
+        const subtypeAnswer = firstSubtypePhrase(doc.expected.subtype);
         mismatches.push(
           `subtype: expected ${JSON.stringify(doc.expected.subtype)}, got ${JSON.stringify(proposal.subtype)} -- ` +
           textFieldDiagnosis(subtypeAnswer, evidenceSpan),

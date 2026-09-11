@@ -4,6 +4,7 @@ import { workspaceItemSchema } from "@/lib/workspace";
 import { buildDocumentSuggestions, itemDocumentSuggestionFields } from "@/server/item-document-inspection";
 import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
+import { isSubtypeSpec } from "./extraction-scoring";
 import {
   documentDateRoles,
   proposalFromText,
@@ -198,7 +199,10 @@ describe("corpus ground truth for the four fields is consistent with the contrac
     // A subtype the page does not print is not something any grounded
     // extractor could return. Ground truth may declare a set of acceptable
     // phrases (#989/#992); every member of the set must still be printed.
-    if (expected.subtype !== undefined) {
+    // That check does not apply to the taxonomy object form (#989): a kind
+    // such as "Insurance" need not be printed anywhere -- naming what type
+    // of thing the page is does not require the page to use that word.
+    if (expected.subtype !== undefined && !isSubtypeSpec(expected.subtype)) {
       const subtypes = Array.isArray(expected.subtype) ? expected.subtype : [expected.subtype];
       for (const subtype of subtypes) {
         expect(subtype.length).toBeLessThanOrEqual(80);

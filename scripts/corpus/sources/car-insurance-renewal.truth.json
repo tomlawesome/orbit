@@ -6,7 +6,7 @@
       "2026-10-15",
       "2027-10-15"
     ],
-    "provider": "Meridian General Insurance Company plc",
+    "provider": "Colworth & Drake Insurance Services Ltd",
     "reference": "MTR-8823-0145",
     "dateRoles": [
       {
@@ -18,10 +18,21 @@
         "role": "renewal"
       }
     ],
-    "subtype": "Motor insurance renewal",
+    "subtype": {
+      "kinds": [
+        "Insurance",
+        "Registration"
+      ],
+      "qualifiers": [
+        "Motor"
+      ]
+    },
     "costMinor": 61240,
     "currency": "GBP",
     "scheduleKind": "renewal"
   },
-  "notes": "dates: the renewal being offered runs 15 October 2026 to 15 October 2027 ('Renewal period offered', page 1, repeated in the page 2 running header); the end is roled 'renewal'. Ten other printed dates are deliberately not declared: notice date (3 Sep 2026), quote-generated date (28 Aug 2026), the reply-by date (24 Sep 2026, three weeks before the 15 Oct 2026 cover date and set in the largest type on page 1 — it is a deadline to respond, not a cover date), the no-claims-discount confirmation date (2 Sep 2026), the driving licence issue date (3 May 2011), the 2023 windscreen claim date (8 Jan 2023), the policy-wording reprint stamp (1 Apr 2026), the current/expiring period's start (15 Oct 2025), the vehicle's first-registration date (14 Mar 2018), and the insurer's PRA authorisation date (19 Jul 1999). provider: Meridian General Insurance Company plc is the underwriting insurer, named as a stylised wordmark ('MERIDIAN COVER') on page 1 and abbreviated ('MGIC') in every running footer, but only spelled out as its registered legal name in the page 3 small print, which is the form declared. Colworth & Drake Insurance Services Ltd, the broker that sends the notice and administers payment, is not the provider despite appearing first and largest on page 1. reference is the policy number MTR-8823-0145, printed beside the recipient's address on page 1 and repeated in every footer; the broker's own client reference (CD-CLI-33920) is a rival identifier for the same customer and is not declared. subtype is 'Motor insurance renewal', not 'Comprehensive' (the cover type printed on page 1) and not a manufacturer or scheme name. costMinor is the annual premium of £612.40 (net £546.79 + IPT £65.61), not the monthly instalment (£54.87) or the total payable if paying monthly (£661.81, which is higher than both and is itself a rival distractor, not the answer) — that ambiguity is tracked as #985. Also undeclared: last year's premium (£578.90) and the many per-section limits and excesses on page 2."
+  "notes": [
+    "dates: the renewal being offered runs 15 October 2026 to 15 October 2027 ('Renewal period offered', page 1, repeated in the page 2 running header); the end is roled 'renewal'. Ten other printed dates are deliberately not declared: notice date (3 Sep 2026), quote-generated date (28 Aug 2026), the reply-by date (24 Sep 2026, three weeks before the 15 Oct 2026 cover date and set in the largest type on page 1 — it is a deadline to respond, not a cover date), the no-claims-discount confirmation date (2 Sep 2026), the driving licence issue date (3 May 2011), the 2023 windscreen claim date (8 Jan 2023), the policy-wording reprint stamp (1 Apr 2026), the current/expiring period's start (15 Oct 2025), the vehicle's first-registration date (14 Mar 2018), and the insurer's PRA authorisation date (19 Jul 1999). provider is 'Colworth & Drake Insurance Services Ltd', not 'Meridian General Insurance Company plc': \"we can't call the underwriters directly, they won't deal with us. We deal with the company that sold us the policy.\" (owner, 2026-09-11, #989). reference is the policy number MTR-8823-0145, printed beside the recipient's address on page 1 and repeated in every footer; the broker's own client reference (CD-CLI-33920) is a rival identifier for the same customer and is not declared. subtype is 'Motor insurance renewal', not 'Comprehensive' (the cover type printed on page 1) and not a manufacturer or scheme name. costMinor is the annual premium of £612.40 (net £546.79 + IPT £65.61), not the monthly instalment (£54.87) or the total payable if paying monthly (£661.81, which is higher than both and is itself a rival distractor, not the answer) — that ambiguity is tracked as #985. Also undeclared: last year's premium (£578.90) and the many per-section limits and excesses on page 2.",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Motor insurance renewal')."
+  ]
 }

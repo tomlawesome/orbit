@@ -65,7 +65,11 @@
 //    Ground truth may also declare a SET of acceptable phrases rather than
 //    one, because a page can genuinely support more than one right answer
 //    (owner decision 2026-09-11, #989/#992); a match against any member of
-//    the set is correct.
+//    the set is correct. The current form of that ruling (#989) names
+//    taxonomy KIND and QUALIFIER groups from `subtype-taxonomy.json` rather
+//    than literal phrases; `subtypeAnswers` expands a document's declared
+//    groups into every phrase the taxonomy's combination rules accept, and
+//    that expansion is what gets matched against.
 //
 // The heuristics attempt none of the five new categories, by the owner's
 // decision on #319, so they score a blank on every one of those points.
@@ -74,9 +78,28 @@
 // floor in `extraction-accuracy.test.ts` is re-recorded against the larger
 // point total rather than the extractor being let off the new fields.
 
-import type { CorpusDocument } from "./extraction-corpus";
+import type { CorpusDocument, SubtypeSpec } from "./extraction-corpus";
 import { selectedExtractionModel } from "./model-extraction";
+import subtypeTaxonomyJson from "./subtype-taxonomy.json";
 import type { DocumentProposal } from "./suggestions";
+
+interface TaxonomyGroup {
+  name: string;
+  synonyms: string[];
+}
+
+interface SubtypeTaxonomy {
+  description: string;
+  kinds: TaxonomyGroup[];
+  qualifiers: TaxonomyGroup[];
+  combinations: {
+    patterns: string[];
+    standalone: string[];
+    notes: string[];
+  };
+}
+
+const SUBTYPE_TAXONOMY = subtypeTaxonomyJson as SubtypeTaxonomy;
 
 /** ADR-0025 section 6: five runs, and the minimum is the score. */
 export const SCORING_RUNS = 5;
@@ -269,20 +292,87 @@ function comparableSubtype(value: string): string {
   return value.replace(/\s+/gu, " ").trim().toLowerCase();
 }
 
-/** `expected` may be one phrase or a set of acceptable ones (owner decision
- * 2026-09-11, #989/#992): a page can genuinely support more than one right
- * answer, and an extracted subtype is correct if it matches any of them. */
-export function classifySubtype(expected: string | string[], actual: string | undefined): Classification {
-  if (actual === undefined) return "blank";
-  const candidates = Array.isArray(expected) ? expected : [expected];
-  const comparableActual = comparableSubtype(actual);
-  return candidates.some((candidate) => comparableSubtype(candidate) === comparableActual) ? "correct" : "wrong";
+/** True when `expected` names taxonomy groups (`{ kinds, qualifiers }`)
+ * rather than giving literal phrases directly. */
+export function isSubtypeSpec(expected: string | string[] | SubtypeSpec): expected is SubtypeSpec {
+  return typeof expected === "object" && !Array.isArray(expected);
 }
 
-/** Prints the expected subtype for humans: the one phrase, or every
- * acceptable phrase joined with " | " when ground truth allows more than
- * one. */
-export function formatSubtypeExpected(expected: string | string[]): string {
+function taxonomyGroup(groups: TaxonomyGroup[], name: string): TaxonomyGroup {
+  const group = groups.find((candidate) => candidate.name === name);
+  if (!group) throw new Error(`"${name}" is not a group in subtype-taxonomy.json`);
+  return group;
+}
+
+/**
+ * Expands a `{ kinds, qualifiers }` ground-truth spec of taxonomy group
+ * NAMES (owner decision 2026-09-11, #989: the accepted answers come from a
+ * generic taxonomy, not a per-page list) into every phrase
+ * `subtype-taxonomy.json`'s combination rules accept for it:
+ *  - every synonym of every listed kind ("{kind}"),
+ *  - every listed qualifier synonym followed by every listed kind synonym
+ *    ("{qualifier} {kind}"),
+ *  - every synonym of any listed qualifier the taxonomy allows to stand
+ *    alone, with no kind word.
+ */
+export function subtypeAnswers(spec: SubtypeSpec): string[] {
+  const kindGroups = spec.kinds.map((name) => taxonomyGroup(SUBTYPE_TAXONOMY.kinds, name));
+  const qualifierNames = spec.qualifiers ?? [];
+  const qualifierGroups = qualifierNames.map((name) => taxonomyGroup(SUBTYPE_TAXONOMY.qualifiers, name));
+  const answers: string[] = [];
+
+  for (const kind of kindGroups) answers.push(...kind.synonyms);
+
+  for (const qualifier of qualifierGroups) {
+    for (const kind of kindGroups) {
+      for (const qualifierSynonym of qualifier.synonyms) {
+        for (const kindSynonym of kind.synonyms) answers.push(`${qualifierSynonym} ${kindSynonym}`);
+      }
+    }
+  }
+
+  for (const name of qualifierNames) {
+    if (!SUBTYPE_TAXONOMY.combinations.standalone.includes(name)) continue;
+    answers.push(...taxonomyGroup(SUBTYPE_TAXONOMY.qualifiers, name).synonyms);
+  }
+
+  return answers;
+}
+
+/** Every literal phrase `expected` accepts, regardless of its form: one
+ * phrase, a set of them, or a taxonomy spec expanded via `subtypeAnswers`.
+ * For callers that need to search text for "any acceptable phrase" rather
+ * than classify one candidate at a time. */
+export function subtypeCandidatePhrases(expected: string | string[] | SubtypeSpec): string[] {
+  if (isSubtypeSpec(expected)) return subtypeAnswers(expected);
+  return Array.isArray(expected) ? expected : [expected];
+}
+
+/** `expected` may be one phrase, a set of acceptable phrases, or a
+ * `{ kinds, qualifiers }` taxonomy spec (owner decision 2026-09-11, #989/
+ * #992): a page can genuinely support more than one right answer, and an
+ * extracted subtype is correct if it matches any of them. */
+export function classifySubtype(
+  expected: string | string[] | SubtypeSpec,
+  actual: string | undefined,
+): Classification {
+  if (actual === undefined) return "blank";
+  const comparableActual = comparableSubtype(actual);
+  return subtypeCandidatePhrases(expected).some((candidate) => comparableSubtype(candidate) === comparableActual)
+    ? "correct"
+    : "wrong";
+}
+
+/** Prints the expected subtype for humans: the one phrase, every acceptable
+ * phrase joined with " | ", or the taxonomy group names for the object
+ * form (`kinds: A, B / qualifiers: C`) -- printing the names, not their
+ * expansion, because the expansion can run into the hundreds of phrases. */
+export function formatSubtypeExpected(expected: string | string[] | SubtypeSpec): string {
+  if (isSubtypeSpec(expected)) {
+    const kinds = `kinds: ${expected.kinds.join(", ")}`;
+    const qualifiers = expected.qualifiers?.length ? ` / qualifiers: ${expected.qualifiers.join(", ")}` : "";
+    return `${kinds}${qualifiers}`;
+  }
   return Array.isArray(expected) ? expected.join(" | ") : expected;
 }
 

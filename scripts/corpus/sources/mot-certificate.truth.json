@@ -18,13 +18,23 @@
         "role": "expiry"
       }
     ],
-    "subtype": "MOT test certificate"
+    "subtype": {
+      "kinds": [
+        "Inspection",
+        "Certificate"
+      ],
+      "qualifiers": [
+        "MOT",
+        "Motor"
+      ]
+    }
   },
   "notes": [
     "No cost is stated anywhere on the page. That is what this document tests: costMinor and currency are deliberately absent, and an extractor inventing an amount is wrong.",
     "Provider is the test station, not the issuing authority. The letterhead reads 'Driver & Vehicle Testing Authority', but the reminder-letter convention already in the corpus names the garage. The ampersand letterhead is left in place on purpose as a live example of #982.",
     "Test date and certificate issue date are the same day, so the day appears once with role 'issued', matching the MOT certificate already in the corpus.",
     "No scheduleKind: 'issued' and 'expiry' derive neither renewal nor service. Consistent with the existing MOT certificate entry.",
-    "Distractors left in deliberately: date of first use, date first registered, and the prior odometer-history test date."
+    "Distractors left in deliberately: date of first use, date first registered, and the prior odometer-history test date.",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'MOT test certificate')."
   ]
 }
