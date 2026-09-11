@@ -88,16 +88,19 @@ describe("a qualifier beside an amount", () => {
     expect(tagValues("PRICE PAID FOR APPLIANCE \n\n£549.99", "amount")).toEqual(["other"]);
   });
 
+  // The label is the first tag; an amount sieve reading the same figure a
+  // second way adds its own tag beside it (`extraction-amount-sieves.ts`),
+  // which is evidence for stage 3 rather than a different answer.
   it("reads the figure printed beside the real one as a rival", () => {
-    expect(tagValues("Estimated total for 2026/27 if generation is unchanged £355.00", "amount")).toEqual(["rival"]);
-    expect(tagValues("Total payable if paying monthly £442.34", "amount")).toEqual(["rival"]);
-    expect(tagValues("Annual premium (if selected instead) £351.00", "amount")).toEqual(["rival"]);
-    expect(tagValues("PAYMENT FROM 20 JUNE 2026 \n\n£891.47 per month", "amount")).toEqual(["rival"]);
-    expect(tagValues("£14.00/mo for your first 6 months", "amount")).toEqual(["rival"]);
+    expect(tagValues("Estimated total for 2026/27 if generation is unchanged £355.00", "amount")[0]).toBe("rival");
+    expect(tagValues("Total payable if paying monthly £442.34", "amount")[0]).toBe("rival");
+    expect(tagValues("Annual premium (if selected instead) £351.00", "amount")[0]).toBe("rival");
+    expect(tagValues("PAYMENT FROM 20 JUNE 2026 \n\n£891.47 per month", "amount")[0]).toBe("rival");
+    expect(tagValues("£14.00/mo for your first 6 months", "amount")[0]).toBe("rival");
   });
 
   it("keeps last year's figure out of this year's price", () => {
-    expect(tagValues("Last year your annual premium was £578.90", "amount")).toEqual(["previous"]);
+    expect(tagValues("Last year your annual premium was £578.90", "amount")[0]).toBe("previous");
   });
 });
 

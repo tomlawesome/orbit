@@ -26,6 +26,11 @@ import {
   type ContextRoleAssignment,
   type DocumentDateRole,
 } from "./context-roles";
+import {
+  amountTagsFromVotes,
+  runAmountSieves,
+  type AmountCandidate,
+} from "./extraction-amount-sieves";
 import { runDateSieves, tagsFromVotes, type DateCandidate } from "./extraction-date-sieves";
 import {
   providerTagsFromVotes,
@@ -116,6 +121,17 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   { value: "rival", direction: "forward", overrides: true, pattern: "from \\d{1,2} [A-Za-z]+ \\d{4}" },
   { value: "rival", direction: "backward", overrides: true, pattern: "from \\d{1,2} [A-Za-z]+ \\d{4}" },
   { value: "rival", direction: "backward", overrides: true, pattern: "for(?: your)? first \\d{1,2} months?" },
+  // An amount the page says is somebody else's, or is the household's
+  // added to somebody else's. Neither is what this household pays, and
+  // both are printed in the same box as the figure that is.
+  { value: "rival", direction: "forward", overrides: true,
+    pattern: "(?:employer|company|landlord|scheme|partner)'?s?(?: [a-z]+){0,2} (?:contribution|share|portion|payment|part|half)" },
+  { value: "rival", direction: "forward", overrides: true,
+    pattern: "combined(?: [a-z]+){0,2} (?:total|contribution|payment|amount)" },
+  // A figure the page rounds off is an illustration of something, not the
+  // price of anything: what a document costs is printed exactly.
+  { value: "rival", direction: "forward", overrides: true,
+    pattern: "(?:around|approximately|roughly)" },
   { value: "rival", direction: "forward", pattern: "if you take no action" },
   { value: "rival", direction: "forward", pattern: "upgrade(?:d)?(?: to)?" },
   { value: "rival", direction: "forward", pattern: "you could pay" },
@@ -834,6 +850,34 @@ export function wordsBeforeAssignments(
 }
 
 /**
+ * The sieve's amounts with everything an amount sieve may read: the value
+ * in minor units, its currency, where it is, how long it was printed, and
+ * its block. Exported for the same reason `dateCandidatesOf` is.
+ */
+export function amountCandidatesOf(text: string, candidates: readonly Candidate[]): AmountCandidate[] {
+  return candidates
+    .filter((candidate) => candidate.kind === "amount")
+    .map((candidate) => ({
+      value: candidate.value,
+      ...(candidate.currency === undefined ? {} : { currency: candidate.currency }),
+      index: candidate.index,
+      length: printedLength(text, candidate),
+      line: candidate.line,
+    }));
+}
+
+/**
+ * The trigger table's tag for each amount, in the same order: the label
+ * sieve's reading, which `runAmountSieves` takes as its first vote.
+ */
+export function amountLabels(
+  text: string,
+  candidates: readonly Candidate[],
+): Array<Tag<"amount"> | undefined> {
+  return labelsOfKind(text, candidates, "amount", AMOUNT_TRIGGERS) as Array<Tag<"amount"> | undefined>;
+}
+
+/**
  * The sieve's organisations with everything a provider sieve may read.
  * Exported because the per-sieve report (`provider-sieve-report-cli.ts`)
  * judges the sieves on the same input stage 2 gives them.
@@ -853,17 +897,27 @@ export function organisationLabels(
   text: string,
   candidates: readonly Candidate[],
 ): Array<Tag<"organisation"> | undefined> {
-  const starts = candidates.filter((c) => c.kind === "organisation").map((c) => c.index);
-  const scopes = buildScopes(text, ORGANISATION_TRIGGERS, starts);
+  return labelsOfKind(text, candidates, "organisation", ORGANISATION_TRIGGERS) as
+    Array<Tag<"organisation"> | undefined>;
+}
+
+/** One kind's candidates with the trigger table's tag for each, one label
+ * per value as `keepOneValuePerLabel` requires. */
+function labelsOfKind(
+  text: string,
+  candidates: readonly Candidate[],
+  kind: Exclude<CandidateKind, "date">,
+  triggers: readonly LabelTrigger[],
+): Array<Tag | undefined> {
+  const starts = candidates.filter((c) => c.kind === kind).map((c) => c.index);
+  const scopes = buildScopes(text, triggers, starts);
   const labels = candidates.map((candidate) => {
-    if (candidate.kind !== "organisation") return null;
+    if (candidate.kind !== kind) return null;
     const start = candidate.index;
     return labelTag(start, start + printedLength(text, candidate), scopes);
   });
   keepOneValuePerLabel(labels);
-  return labels
-    .filter((_, at) => candidates[at].kind === "organisation")
-    .map((label) => label?.tag as Tag<"organisation"> | undefined);
+  return labels.filter((_, at) => candidates[at].kind === kind).map((label) => label?.tag);
 }
 
 /**
@@ -914,6 +968,17 @@ export const tagCandidates: TagStage = (text, candidates) => {
   // provider sieves are the others (ADR-0026 stage 2, owner 2026-09-11).
   // Every one of them votes, none of them discards, and the votes become
   // the organisation's tags.
+  const amounts = amountCandidatesOf(text, candidates);
+  const amountVotes = runAmountSieves(
+    text,
+    amounts,
+    candidates
+      .map((candidate, at) => ({ candidate, label: labels[at] }))
+      .filter((entry) => entry.candidate.kind === "amount")
+      .map((entry) => entry.label?.tag as Tag<"amount"> | undefined),
+  );
+  let nextAmount = 0;
+
   const organisations = organisationCandidatesOf(candidates);
   const organisationVotes = runProviderSieves(
     text,
@@ -934,6 +999,9 @@ export const tagCandidates: TagStage = (text, candidates) => {
     } else if (candidate.kind === "organisation") {
       tags.push(...providerTagsFromVotes(organisationVotes[nextOrganisation]));
       nextOrganisation += 1;
+    } else if (candidate.kind === "amount") {
+      tags.push(...amountTagsFromVotes(amountVotes[nextAmount]));
+      nextAmount += 1;
     } else {
       const label = labels[at];
       if (label) tags.push(label.tag);
