@@ -286,6 +286,63 @@ So stage 3 is now one shape for every field.
    either. Both are stage 1 and 2 work, and this is the number that says
    so.
 
+## Amendment, 2026-09-11: word-run bins rank the provider shortlist
+
+The owner's prototype (`tmp/provider-word-bins.ts --stage2 --phrases`) put
+the correct provider in the top two bins on all six unseen hold-out pages
+(#989 note 16839). That method is now the provider shortlist's ranking
+(`extraction-provider-runs.ts`), copied as the owner wrote it:
+
+1. Stage 1's organisation candidates, kept where at least one stage 2 sieve
+   read them as the provider (any `provider` tag).
+2. **Describer words** are every word of every name and synonym in
+   `subtype-taxonomy.json` -- kinds and qualifiers -- plus a generic
+   company-form list (ltd, limited, plc, llp, co, company, group, the, of,
+   and, &, uk, for, a). Every other word is a **name word**.
+3. Every run of consecutive words across those mentions, case folded, is
+   counted where the run carries at least one name word. Ranked by count,
+   then the longer run first.
+
+The runs are the shortlist: the top eight, each shown with its count, the
+form the page printed most often, the blocks its mentions came from, and the
+sieves and labels that kept them as evidence. What rises is not a name a
+rule reconstructed but the words a page repeats -- the sieves cut one name a
+dozen ways, and every cut adds to the words they share.
+
+The describer list is the taxonomy and the company forms and nothing else.
+No word is added because a tuning document needed it (owner, 2026-09-11: the
+24 are samples of what a page could be, not a definition of one).
+
+Measured on the 24 the same day (`eval:shortlist`, which now reports where
+the provider answer sits among the runs):
+
+| | before | after |
+|---|---|---|
+| answer on the provider shortlist | 23/24 (95.8%) | 21/24 (87.5%) |
+| answer the top run | -- | 17/24 (70.8%) |
+| answer in the top two runs | -- | 18/24 (75.0%) |
+| mean entries | 7.1 | 7.8 |
+
+The three misses are all the same shape: the answer is a run, at rank nine
+to twelve, pushed off the eight by the shorter runs nested inside a rival
+name the page printed more often. A cut of eight spent on one name is the
+cost of ranking cuts rather than names, and the number to watch on the
+hold-out.
+
+The rules fallback -- the attended case, no model to ask -- takes the top
+run only where it is the only run printed more than once, and otherwise
+answers blank (owner, 2026-09-11). Because a repeated name of two words
+repeats every run inside it, that bar is cleared by almost no page:
+`eval:stages` without `--model` scores 75.1% -> 65.8% overall, provider
+75.0% -> 0.0%, every lost point a blank rather than a wrong value. On the
+hold-out the rules-only provider scored -16.7%, so silence is worth more
+there than the rules were.
+
+**Untried:** the same bins over the describer words rather than the name
+words are a possible subtype signal -- the words a page's organisations
+share with the taxonomy are what the page is about. Nothing has measured
+it.
+
 ## Alternatives rejected
 
 - **Widen the regexes field by field until the 24 pass.** This is the
