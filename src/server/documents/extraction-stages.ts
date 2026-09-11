@@ -72,6 +72,20 @@ export interface Tag<K extends CandidateKind = CandidateKind> {
    * `shape`: the candidate's own form says what it is (a checksum pass, a
    * capitalised letterhead line). */
   source: "label" | "shape";
+  /**
+   * The stage 2 sieves that agreed on this tag, strongest first
+   * (`extraction-date-sieves.ts`). Several sieves naming one role is a
+   * better reason than one, which is how stage 3 floats a date the page
+   * described three ways above one it barely described at all.
+   *
+   * Absent means the words beside the candidate were the only sieve that
+   * looked, which is what every tag was before dates grew more of them.
+   */
+  sieves?: readonly string[];
+  /** How good the reason is: 2 the page says so in words, 1 a weaker
+   * reading, 0 a default with nothing behind it. Absent means stage 3
+   * reads it off the trigger, as it always has. */
+  strength?: number;
 }
 
 export interface TaggedCandidate<K extends CandidateKind = CandidateKind> extends Candidate {
