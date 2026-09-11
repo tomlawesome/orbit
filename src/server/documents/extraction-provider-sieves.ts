@@ -548,9 +548,18 @@ export function providerTagsFromVotes(votes: readonly ProviderVote[]): Tag<"orga
     const strength = Math.max(...cast.map((vote) => vote.weight));
     const strongest = cast.find((vote) => vote.weight === strength) as ProviderVote;
     const names = PROVIDER_SIEVE_NAMES.filter((name) => cast.some((vote) => vote.sieve === name));
+    // Where the words beside the name were the only sieve that spoke, the
+    // tag is left exactly as stage 2 has always produced it: `sieves` and
+    // `strength` absent means "the label, as before".
+    const alone = names.length === 1 && names[0] === LANGUAGE_FACT;
     tags.push({
       strength,
-      tag: { value, trigger: strongest.trigger, source: "label", sieves: names, strength },
+      tag: {
+        value,
+        trigger: strongest.trigger,
+        source: "label",
+        ...(alone ? {} : { sieves: names, strength }),
+      },
     });
   }
 
