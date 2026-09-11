@@ -362,6 +362,9 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   Risk fields have no GitLab equivalent and nothing replaces them (owner,
   2026-09-04, #814): the milestone says what is scheduled and open/closed
   says what is done.
+- Document extraction: read #992 (extraction lessons, running record) before
+  touching `src/server/documents/extraction-*`; add an entry there when a
+  session learns something the next would otherwise relearn.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not
