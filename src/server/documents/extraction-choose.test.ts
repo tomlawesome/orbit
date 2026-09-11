@@ -463,7 +463,7 @@ describe("choosing the cost and its currency", () => {
 });
 
 describe("the meaning-shaped fields", () => {
-  it("leaves both to the model, having nothing repeated to fall back on", () => {
+  it("takes the one name the sieves kept, and leaves subtype to the model", () => {
     const chosen = chooseFields([
       candidate("organisation", "Kestrel Mutual", [
         { value: "provider", trigger: "your insurer", sieves: ["language-fact", "contact-details"] },
@@ -471,10 +471,10 @@ describe("the meaning-shaped fields", () => {
       candidate("heading", "HOME INSURANCE", [{ value: "title", trigger: "" }]),
     ]);
 
-    // The provider fallback answers only the one run a page repeats
-    // (`extraction-provider-runs.ts`); this page prints the name once.
-    // Subtype has no rules at all.
-    expect(chosen.provider).toBeUndefined();
+    // The fallback answers the run the page says most often
+    // (`extraction-provider-runs.ts`); here there is only the one. Subtype
+    // has no rules at all.
+    expect(chosen.provider).toBe("Kestrel Mutual");
     expect(chosen.subtype).toBeUndefined();
   });
 });
@@ -592,9 +592,8 @@ describe("stage 3 with a model to ask", () => {
   });
 
   it("never answers from the rules once there is a model to ask", async () => {
-    // The rules would have answered these.
-    expect(chooseFields(shortlist).costMinor).toBe(41299);
-    expect(chooseFields(shortlist).reference).toBe("PN-88421-K");
+    // The rules would have answered every one of these.
+    expect(chooseFields(shortlist).provider).toBe("Kestrel Mutual Insurance Ltd");
     expect(await chooseFieldsWithModel(shortlist, async () => "none")).toEqual({ dates: [] });
   });
 });

@@ -64,10 +64,27 @@ describe("which words may carry a run", () => {
 
 describe("counting the runs", () => {
   it("counts every run of words that carries a name word, and no other", () => {
-    // "millbrook energy" and its two single words, less "energy" alone --
-    // the taxonomy calls energy a kind of thing, not a name.
-    expect(runsOf([mention("Millbrook Energy")]))
-      .toEqual(["Millbrook Energy (1)", "Millbrook (1)"]);
+    // "millbrook energy" and "millbrook", less "energy" alone -- the
+    // taxonomy calls energy a kind of thing, not a name. The two are
+    // printed equally often, so the longer is the one that survives.
+    expect(runsOf([mention("Millbrook Energy")])).toEqual(["Millbrook Energy (1)"]);
+  });
+
+  it("folds a run into the longer run it sits inside where both are as common", () => {
+    // "colworth", "colworth &", "& drake" and "drake" say nothing the
+    // name they are cut from does not.
+    expect(runsOf([mention("Colworth & Drake"), mention("Colworth & Drake")]))
+      .toEqual(["Colworth & Drake (2)"]);
+  });
+
+  it("keeps a run the page prints more often than the name around it", () => {
+    const runs = providerWordRuns([
+      mention("Calderwell Motor Services Ltd"),
+      mention("Calderwell Motor Services Ltd"),
+      mention("Calderwell"),
+    ]);
+    expect(runs.map((run) => `${run.display} (${run.count})`))
+      .toEqual(["Calderwell (3)", "Calderwell Motor Services Ltd (2)"]);
   });
 
   it("adds up the runs across every mention, however the sieve cut them", () => {
@@ -76,12 +93,13 @@ describe("counting the runs", () => {
       mention("Millbrook Energy"),
       mention("your supplier is Millbrook Energy Ltd"),
     ]);
-    const millbrook = runs.find((run) => run.run === "millbrook");
-    const full = runs.find((run) => run.run === "millbrook energy ltd");
-    // Every cut carries the word, so the word outcounts the fullest cut of
-    // it -- which is the whole method: the repeated words rise.
-    expect(millbrook?.count).toBe(3);
-    expect(full?.count).toBe(2);
+    // Every cut carries the words the name shares, so what the three
+    // mentions have in common outcounts the fullest cut of it -- which is
+    // the whole method: the repeated words rise. "Millbrook" alone is as
+    // common as "Millbrook Energy", so it folds into it.
+    expect(runs.find((run) => run.run === "millbrook energy")?.count).toBe(3);
+    expect(runs.find((run) => run.run === "millbrook energy ltd")?.count).toBe(2);
+    expect(runs.some((run) => run.run === "millbrook")).toBe(false);
   });
 
   it("ignores case, so one name printed two ways is one bin", () => {
@@ -95,20 +113,12 @@ describe("counting the runs", () => {
   });
 
   it("keeps an ampersand as a word of its own, because names are built from it", () => {
-    const runs = providerWordRuns([mention("Fenwick & Vale Gas Services Ltd")]);
-    expect(runs.some((run) => run.run === "fenwick & vale")).toBe(true);
-  });
-
-  it("puts the most printed run first, and the longer run where two are level", () => {
     const runs = providerWordRuns([
-      mention("Calderwell Motor Services Ltd"),
-      mention("Calderwell Motor Services Ltd"),
-      mention("Calderwell"),
+      mention("Fenwick & Vale Gas Services Ltd"),
+      mention("Fenwick & Vale"),
     ]);
-    expect(runs[0].run).toBe("calderwell");
-    expect(runs[0].count).toBe(3);
-    // Level at two: the longest of them leads.
-    expect(runs[1].run).toBe("calderwell motor services ltd");
+    expect(runs[0].run).toBe("fenwick & vale");
+    expect(runs[0].count).toBe(2);
   });
 
   it("names each run the way the page printed it most often", () => {
@@ -125,9 +135,10 @@ describe("counting the runs", () => {
     const second = mention("Hedgerow Home Insurance", "Administered by Hedgerow Home Insurance");
     const other = mention("Thornfield Assurance plc", "Underwritten by Thornfield Assurance plc");
     const runs = providerWordRuns([first, second, other]);
-    const hedgerow = runs.find((run) => run.run === "hedgerow");
-    expect(hedgerow?.mentions).toEqual([first, second]);
-    expect(runs.find((run) => run.run === "thornfield")?.mentions).toEqual([other]);
+    expect(runs.find((run) => run.run === "hedgerow home insurance")?.mentions)
+      .toEqual([first, second]);
+    expect(runs.find((run) => run.run === "thornfield assurance plc")?.mentions)
+      .toEqual([other]);
   });
 
   it("says nothing about a page with no kept names", () => {

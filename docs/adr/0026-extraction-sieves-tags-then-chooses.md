@@ -302,6 +302,10 @@ the correct provider in the top two bins on all six unseen hold-out pages
 3. Every run of consecutive words across those mentions, case folded, is
    counted where the run carries at least one name word. Ranked by count,
    then the longer run first.
+4. A run printed exactly as often as a longer run containing it is folded
+   into it: "colworth &", "& drake" and "colworth" at ten are "colworth &
+   drake" at ten. Without that fold, eight places on a shortlist go to
+   eight cuts of one name.
 
 The runs are the shortlist: the top eight, each shown with its count, the
 form the page printed most often, the blocks its mentions came from, and the
@@ -318,25 +322,25 @@ the provider answer sits among the runs):
 
 | | before | after |
 |---|---|---|
-| answer on the provider shortlist | 23/24 (95.8%) | 21/24 (87.5%) |
+| answer on the provider shortlist | 23/24 (95.8%) | 23/24 (95.8%) |
 | answer the top run | -- | 17/24 (70.8%) |
-| answer in the top two runs | -- | 18/24 (75.0%) |
-| mean entries | 7.1 | 7.8 |
+| answer in the top two runs | -- | 22/24 (91.7%) |
+| mean entries | 7.1 | 5.7 |
 
-The three misses are all the same shape: the answer is a run, at rank nine
-to twelve, pushed off the eight by the shorter runs nested inside a rival
-name the page printed more often. A cut of eight spent on one name is the
-cost of ranking cuts rather than names, and the number to watch on the
-hold-out.
+The one miss is the one the ranking before it missed: a name stage 1 cut
+with the words after it ("Kelbridge Home Loans Standard Variable Rate"),
+which is stage 1 work.
 
 The rules fallback -- the attended case, no model to ask -- takes the top
-run only where it is the only run printed more than once, and otherwise
-answers blank (owner, 2026-09-11). Because a repeated name of two words
-repeats every run inside it, that bar is cleared by almost no page:
-`eval:stages` without `--model` scores 75.1% -> 65.8% overall, provider
-75.0% -> 0.0%, every lost point a blank rather than a wrong value. On the
-hold-out the rules-only provider scored -16.7%, so silence is worth more
-there than the rules were.
+run where the page printed it more often than anything else it printed, and
+answers blank where two runs are level (owner, 2026-09-11). On the 24,
+`eval:stages` without `--model` scores 75.1% -> 71.5% overall and provider
+75.0% -> 45.8%: 17 right, 6 wrong, 1 blank against the claim rules' 18
+right and 6 blank. Three of the six wrong answers are the right
+organisation under a shorter name -- "Colworth & Drake" for "Colworth &
+Drake Insurance Services Ltd" -- which is what ranking runs rather than
+names costs a route that has to answer with one. The model route does not
+pay it: the fuller name is on the same shortlist.
 
 **Untried:** the same bins over the describer words rather than the name
 words are a possible subtype signal -- the words a page's organisations
