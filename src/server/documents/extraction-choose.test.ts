@@ -110,6 +110,16 @@ describe("choosing dates and their roles", () => {
     expect(chosen.dateRoles).toBeUndefined();
   });
 
+  it("takes the role the page states most often when equal labels disagree", () => {
+    const chosen = chooseFields([
+      candidate("date", "2027-09-08", [{ value: "expiry", trigger: "EXPIRY DATE" }]),
+      candidate("date", "2027-09-08", [{ value: "expiry", trigger: "expiry date" }]),
+      candidate("date", "2027-09-08", [{ value: "service", trigger: "next test" }]),
+    ]);
+
+    expect(chosen.dateRoles).toEqual([{ date: "2027-09-08", role: "expiry" }]);
+  });
+
   it("returns no dates at all when there are no date candidates", () => {
     expect(chooseFields([])).toEqual({ dates: [] });
   });
@@ -146,6 +156,16 @@ describe("deriving the schedule kind from the roles kept", () => {
 });
 
 describe("reading the cycle length off the block a candidate sits in", () => {
+  it("reads a year however the page words it", () => {
+    const chosen = chooseFields([
+      candidate("date", "2027-03-31", [{ value: "renewal", trigger: "Charge for the year" }], {
+        line: "Total council tax charge for the year £2,159.07",
+      }),
+    ]);
+
+    expect(chosen.recurrenceMonths).toBe(12);
+  });
+
   const withLine = (line: string) =>
     chooseFields([candidate("date", "2026-06-01", [{ value: "renewal", trigger: "renewal date" }], { line })]);
 
