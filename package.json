@@ -20,6 +20,7 @@
     "eval:extraction": "node_modules/tsx/dist/cli.mjs src/server/documents/model-eval-cli.ts",
     "eval:sieve": "node_modules/tsx/dist/cli.mjs src/server/documents/sieve-recall-cli.ts",
     "eval:tags": "node_modules/tsx/dist/cli.mjs src/server/documents/tag-accuracy-cli.ts",
+    "eval:date-sieves": "node_modules/tsx/dist/cli.mjs src/server/documents/date-sieve-report-cli.ts",
     "eval:stages": "node_modules/tsx/dist/cli.mjs src/server/documents/stages-score-cli.ts",
     "eval:holdout": "node_modules/tsx/dist/cli.mjs src/server/documents/holdout-score-cli.ts",
     "test:coverage": "vitest run --coverage",

@@ -26,6 +26,7 @@ import {
   type ContextRoleAssignment,
   type DocumentDateRole,
 } from "./context-roles";
+import { runDateSieves, tagsFromVotes, type DateCandidate } from "./extraction-date-sieves";
 import type { Candidate, CandidateKind } from "./extraction-sieve";
 import type { Tag, TagForKind, TaggedCandidate, TagStage } from "./extraction-stages";
 import { validateChecksumIdentifier } from "./reference-checksums";
@@ -795,6 +796,39 @@ function applyTermEnds(
 }
 
 /**
+ * The sieve's dates with everything a date sieve may read: the value, where
+ * it is, how long it was printed, and its block. Exported because the
+ * per-sieve report (`date-sieve-report-cli.ts`) judges the sieves on the
+ * same input stage 2 gives them.
+ */
+export function dateCandidatesOf(text: string, candidates: readonly Candidate[]): DateCandidate[] {
+  return candidates
+    .filter((candidate) => candidate.kind === "date")
+    .map((candidate) => ({
+      value: candidate.value,
+      index: candidate.index,
+      length: printedLength(text, candidate),
+      line: candidate.line,
+    }));
+}
+
+/**
+ * The words-before sieve: ConText over the labels beside the dates, then the
+ * two corrections that read the block around the label rather than the label
+ * alone (`applyDateRanges`, `applyTermEnds`). One pass over all the dates at
+ * once, because a trigger's scope has to know where the next trigger is.
+ */
+export function wordsBeforeAssignments(
+  text: string,
+  dates: readonly DateCandidate[],
+): ContextRoleAssignment[] {
+  const assignments = assignContextRoleLabels(text, dates);
+  applyDateRanges(text, dates, assignments);
+  applyTermEnds(text, dates, assignments);
+  return assignments;
+}
+
+/**
  * Stage 2. Tags every candidate with what the page says it is, keeping the
  * order the sieve produced. Pure: no I/O, no mutation of its arguments.
  *
@@ -819,16 +853,11 @@ export const tagCandidates: TagStage = (text, candidates) => {
   // One ConText pass over all the dates at once, then consumed in order --
   // the date candidates keep their relative order, so a running cursor lines
   // each assignment up with the candidate it came from.
-  const dateSpans = candidates
-    .filter((candidate) => candidate.kind === "date")
-    .map((candidate) => ({
-      value: candidate.value,
-      index: candidate.index,
-      length: printedLength(text, candidate),
-    }));
-  const dateAssignments = assignContextRoleLabels(text, dateSpans);
-  applyDateRanges(text, dateSpans, dateAssignments);
-  applyTermEnds(text, dateSpans, dateAssignments);
+  const dates = dateCandidatesOf(text, candidates);
+  // The words before a date are one way of reading it; the sieves are the
+  // others (ADR-0026 stage 2, owner 2026-09-11). Every one of them votes,
+  // none of them discards, and the votes become the date's tags.
+  const dateVotes = runDateSieves(text, dates, wordsBeforeAssignments(text, dates));
   let nextDate = 0;
 
   const headingIndexes = candidates.filter((c) => c.kind === "heading").map((c) => c.index);
@@ -847,9 +876,8 @@ export const tagCandidates: TagStage = (text, candidates) => {
     const tags: Tag[] = [];
 
     if (candidate.kind === "date") {
-      const assignment = dateAssignments[nextDate];
+      tags.push(...tagsFromVotes(dateVotes[nextDate]));
       nextDate += 1;
-      tags.push({ value: assignment.role, trigger: assignment.trigger, source: "label" });
     } else {
       const label = labels[at];
       if (label) tags.push(label.tag);
