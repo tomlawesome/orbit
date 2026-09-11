@@ -20,7 +20,12 @@
 // strong tag -- a capitalised line says "this is shaped like a name", not
 // "this is the provider".
 
-import { assignContextRoleLabels, CONTEXT_TERMINATION_TERMS } from "./context-roles";
+import {
+  assignContextRoleLabels,
+  CONTEXT_TERMINATION_TERMS,
+  type ContextRoleAssignment,
+  type DocumentDateRole,
+} from "./context-roles";
 import type { Candidate, CandidateKind } from "./extraction-sieve";
 import type { Tag, TagForKind, TaggedCandidate, TagStage } from "./extraction-stages";
 import { validateChecksumIdentifier } from "./reference-checksums";
@@ -35,6 +40,11 @@ interface LabelTrigger<K extends CandidateKind = CandidateKind> {
   value: TagForKind[K];
   direction: "forward" | "backward";
   pattern: string;
+  /** Only a label when it is the entire block. Tika prints a form label as
+   * its own block ("Policy \n\nMTR-8823-0145"), which is the only place a
+   * bare word like "Policy" or "Reference" can be trusted to name a value
+   * rather than just appear in a sentence. */
+  labelBlockOnly?: true;
 }
 
 /**
@@ -48,13 +58,16 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   { value: "total", direction: "forward", pattern: "grand total" },
   { value: "total", direction: "forward", pattern: "total(?: amount| cost| price| charge| payable)?" },
   { value: "total", direction: "forward", pattern: "(?:renewal |annual |yearly )?premium(?: for the year)?" },
-  { value: "total", direction: "forward", pattern: "cost for the year" },
+  { value: "total", direction: "forward", pattern: "(?:total|charge|cost|price) for the year" },
+  { value: "total", direction: "forward", pattern: "price paid" },
+  { value: "total", direction: "forward", pattern: "(?:total|amount) (?:for|covering) the year" },
+  { value: "total", direction: "backward", pattern: "(?:per|a|each) (?:year|annum)" },
   { value: "total", direction: "backward", pattern: "in total" },
   { value: "total", direction: "backward", pattern: "is the total(?: cost| amount)?" },
   { value: "total", direction: "backward", pattern: "is your (?:renewal )?premium" },
 
   // due
-  { value: "due", direction: "forward", pattern: "amount due" },
+  { value: "due", direction: "forward", pattern: "amount (?:due|payable|to pay|outstanding)" },
   { value: "due", direction: "forward", pattern: "to pay" },
   { value: "due", direction: "forward", pattern: "balance (?:due|outstanding)" },
   { value: "due", direction: "forward", pattern: "please pay" },
@@ -122,10 +135,22 @@ const IDENTIFIER_TRIGGERS: readonly LabelTrigger<"identifier">[] = [
   { value: "company", direction: "forward", pattern: "unique taxpayer reference" },
   { value: "company", direction: "backward", pattern: "is our (?:vat|company) (?:registration|number)" },
 
+  // membership
+  { value: "customer", direction: "forward", pattern: "membership(?: number| no\\.?)" },
+
+  // Single words Tika prints as a block of their own, above the value. They
+  // assert nothing in running prose, so they carry `labelBlockOnly`.
+  { value: "policy", direction: "forward", pattern: "policy", labelBlockOnly: true },
+  { value: "account", direction: "forward", pattern: "account", labelBlockOnly: true },
+  { value: "customer", direction: "forward", pattern: "(?:customer|membership)", labelBlockOnly: true },
+  { value: "invoice", direction: "forward", pattern: "invoice", labelBlockOnly: true },
+  { value: "certificate", direction: "forward", pattern: "certificate", labelBlockOnly: true },
+
   // reference (generic -- declared last, see the note above)
   { value: "reference", direction: "forward", pattern: "(?:payment|quote|your) ref(?:erence)?(?: number| no\\.?)?" },
   { value: "reference", direction: "forward", pattern: "ref(?:erence)?(?: number| no\\.?)?" },
   { value: "reference", direction: "backward", pattern: "is your reference" },
+  { value: "reference", direction: "forward", pattern: "reference", labelBlockOnly: true },
 ];
 
 /**
@@ -219,10 +244,20 @@ function findSpans(text: string, pattern: RegExp): TextSpan[] {
 // cuts. The termination vocabulary is shared with `context-roles.ts` rather
 // than restated, so the two stages cannot drift apart.
 function findCuts(text: string): TextSpan[] {
-  const terminators = CONTEXT_TERMINATION_TERMS.length === 0
-    ? []
-    : findSpans(text, new RegExp(`\\b(?:${CONTEXT_TERMINATION_TERMS.join("|")})\\b`, "giu"));
-  return [...findSpans(text, SENTENCE_BREAK), ...terminators];
+  return [...findSpans(text, SENTENCE_BREAK), ...findTerminators(text)];
+}
+
+// The same list without the line breaks. A label-only block reaches across
+// the blank line into the block below it (see `buildScopes`), so that reach
+// has to be bounded by something a blank line is not: real punctuation, or a
+// termination term.
+function findHardCuts(text: string): TextSpan[] {
+  return [...findSpans(text, /[.!?]+(?=\s|$)|;/gu), ...findTerminators(text)];
+}
+
+function findTerminators(text: string): TextSpan[] {
+  if (CONTEXT_TERMINATION_TERMS.length === 0) return [];
+  return findSpans(text, new RegExp(`\\b(?:${CONTEXT_TERMINATION_TERMS.join("|")})\\b`, "giu"));
 }
 
 // The nearest cut at or after `from`, or the end of the text.
@@ -243,6 +278,62 @@ function cutBefore(cuts: readonly TextSpan[], to: number): number {
   return start;
 }
 
+// Tika's blocks, kept as raw offsets rather than the collapsed lines
+// `pageBlocks` returns, because scope arithmetic is done in page offsets.
+function blockSpans(text: string): TextSpan[] {
+  return findSpans(text, /[^\n]+/gu).filter((span) => text.slice(span.start, span.end).trim().length > 0);
+}
+
+function blockAround(blocks: readonly TextSpan[], index: number): TextSpan | null {
+  return blocks.find((block) => index >= block.start && index < block.end) ?? null;
+}
+
+// Nothing but spacing and punctuation between the trigger and its block's
+// edge: the block is the label and the value is somewhere else.
+function onlySpacing(text: string): boolean {
+  return text.replace(/[\s:.\-–—()£]/gu, "").length === 0;
+}
+
+// The block after a label-only block is where Tika put the value: "COUNCIL
+// TAX ACCOUNT NUMBER \n\n8845612033". The scope therefore ends at the end of
+// the first following block that holds a candidate of this kind, unless a
+// hard cut or another trigger stops it sooner.
+function blockEndAfter(
+  blocks: readonly TextSpan[],
+  from: number,
+  limit: number,
+  targets: readonly number[],
+): number | null {
+  for (const block of blocks) {
+    if (block.start < from) continue;
+    if (block.start >= limit) break;
+    if (targets.some((target) => target >= block.start && target < block.end && target < limit)) {
+      return Math.min(block.end, limit);
+    }
+  }
+  return null;
+}
+
+// The mirror: a label-only block sitting under the value it names ("£84.99
+// \n\nper year") reaches back to the start of the nearest preceding block
+// that holds a candidate of this kind.
+function blockStartBefore(
+  blocks: readonly TextSpan[],
+  to: number,
+  limit: number,
+  targets: readonly number[],
+): number | null {
+  for (let i = blocks.length - 1; i >= 0; i -= 1) {
+    const block = blocks[i];
+    if (block.end > to) continue;
+    if (block.end <= limit) break;
+    if (targets.some((target) => target >= block.start && target < block.end && target >= limit)) {
+      return Math.max(block.start, limit);
+    }
+  }
+  return null;
+}
+
 interface TriggerScope {
   value: TagForKind[CandidateKind];
   direction: "forward" | "backward";
@@ -259,29 +350,68 @@ interface TriggerScope {
   matchText: string;
 }
 
-function buildScopes(text: string, triggers: readonly LabelTrigger[]): TriggerScope[] {
+/**
+ * Every scope the table's triggers open over `text`. `targets` is where this
+ * kind's candidates start, needed only for the cross-block rule: a scope
+ * that leaves its own block has to know which block below or above it is the
+ * one holding the value.
+ */
+function buildScopes(
+  text: string,
+  triggers: readonly LabelTrigger[],
+  targets: readonly number[],
+): TriggerScope[] {
   const cuts = findCuts(text);
+  const hardCuts = findHardCuts(text);
+  const blocks = blockSpans(text);
   const scopes: TriggerScope[] = [];
 
+  // Collected first, because a trigger's reach across a block boundary stops
+  // at the next trigger, whichever row that came from.
+  const matches: Array<{ triggerOrder: number; trigger: LabelTrigger; start: number; end: number; text: string }> = [];
   triggers.forEach((trigger, triggerOrder) => {
     for (const match of text.matchAll(new RegExp(trigger.pattern, "giu"))) {
-      const matchStart = match.index ?? 0;
-      const matchEnd = matchStart + match[0].length;
-      const forward = trigger.direction === "forward";
-      const scopeStart = forward ? matchEnd : cutBefore(cuts, matchStart);
-      const scopeEnd = forward ? cutAfter(cuts, matchEnd) : matchStart;
-      scopes.push({
-        value: trigger.value,
-        direction: trigger.direction,
-        anchor: forward ? matchEnd : matchStart,
-        scopeStart,
-        scopeEnd,
-        triggerOrder,
-        matchStart,
-        matchText: match[0],
-      });
+      const start = match.index ?? 0;
+      matches.push({ triggerOrder, trigger, start, end: start + match[0].length, text: match[0] });
     }
   });
+  const triggerSpans: TextSpan[] = matches.map((match) => ({ start: match.start, end: match.end }));
+
+  for (const match of matches) {
+    const block = blockAround(blocks, match.start);
+    const nothingAfter = block !== null && onlySpacing(text.slice(match.end, block.end));
+    const nothingBefore = block !== null && onlySpacing(text.slice(block.start, match.start));
+
+    // A single-word label ("Policy", "Reference") is only a label when it is
+    // the whole block; in prose it is an ordinary word and asserts nothing.
+    if (match.trigger.labelBlockOnly && !(nothingBefore && nothingAfter)) continue;
+
+    const forward = match.trigger.direction === "forward";
+    let scopeStart = forward ? match.end : cutBefore(cuts, match.start);
+    let scopeEnd = forward ? cutAfter(cuts, match.end) : match.start;
+
+    if (forward && nothingAfter && block !== null) {
+      const limit = Math.min(cutAfter(hardCuts, match.end), cutAfter(triggerSpans, match.end));
+      const reach = blockEndAfter(blocks, block.end, limit, targets);
+      if (reach !== null) scopeEnd = Math.max(scopeEnd, reach);
+    }
+    if (!forward && nothingBefore && block !== null) {
+      const limit = Math.max(cutBefore(hardCuts, match.start), cutBefore(triggerSpans, match.start));
+      const reach = blockStartBefore(blocks, block.start, limit, targets);
+      if (reach !== null) scopeStart = Math.min(scopeStart, reach);
+    }
+
+    scopes.push({
+      value: match.trigger.value,
+      direction: match.trigger.direction,
+      anchor: forward ? match.end : match.start,
+      scopeStart,
+      scopeEnd,
+      triggerOrder: match.triggerOrder,
+      matchStart: match.start,
+      matchText: match.text,
+    });
+  }
 
   return scopes;
 }
@@ -374,6 +504,50 @@ function shapeTags(candidate: Candidate, firstHeadingIndex: number): Tag[] {
 }
 
 /**
+ * A printed date range -- "15 October 2025 to 15 October 2026", "from 14
+ * June 2026 until 13 June 2031". The connector is treated as one rule over
+ * a PAIR of dates rather than as trigger-table rows, because a row asserts
+ * one tag and this asserts two different ones: the first date starts the
+ * period, the second ends it.
+ */
+const RANGE_CONNECTOR = /^[\s(]*(?:to|until|till|through|up to|–|—|-)[\s)]*$/iu;
+
+interface DateSpan {
+  index: number;
+  length: number;
+}
+
+/**
+ * Rewrites the ConText assignments of any two adjacent dates joined by a
+ * range connector to `start` and `expiry`. A label that sits nearer than the
+ * connector keeps the date: "Renewal date: A to B" leaves A alone, because
+ * the range is only the weaker reading of what joins two dates.
+ */
+function applyDateRanges(
+  text: string,
+  spans: readonly DateSpan[],
+  assignments: ContextRoleAssignment[],
+): void {
+  for (let i = 0; i + 1 < spans.length; i += 1) {
+    const left = spans[i];
+    const right = spans[i + 1];
+    const gapStart = left.index + left.length;
+    const between = text.slice(gapStart, right.index);
+    if (!RANGE_CONNECTOR.test(between)) continue;
+
+    const connector = between.trim();
+    const connectorStart = gapStart + between.indexOf(connector);
+    const connectorEnd = connectorStart + connector.length;
+    const claim = (at: number, role: DocumentDateRole, distance: number) => {
+      if (assignments[at].distance <= distance) return;
+      assignments[at] = { role, trigger: connector, distance };
+    };
+    claim(i, "start", connectorStart - gapStart);
+    claim(i + 1, "expiry", right.index - connectorEnd);
+  }
+}
+
+/**
  * Stage 2. Tags every candidate with what the page says it is, keeping the
  * order the sieve produced. Pure: no I/O, no mutation of its arguments.
  *
@@ -384,26 +558,29 @@ function shapeTags(candidate: Candidate, firstHeadingIndex: number): Tag[] {
  * trigger, which is how a guess admits to being one.
  */
 export const tagCandidates: TagStage = (text, candidates) => {
+  // Where each kind's candidates start, so a label-only block knows which
+  // block below or above it holds the value it names.
+  const startsOf = (kind: CandidateKind) =>
+    candidates.filter((candidate) => candidate.kind === kind).map((candidate) => candidate.index);
   const scopesByKind: Record<Exclude<CandidateKind, "date">, TriggerScope[]> = {
-    amount: buildScopes(text, AMOUNT_TRIGGERS),
-    identifier: buildScopes(text, IDENTIFIER_TRIGGERS),
-    organisation: buildScopes(text, ORGANISATION_TRIGGERS),
-    heading: buildScopes(text, HEADING_TRIGGERS),
+    amount: buildScopes(text, AMOUNT_TRIGGERS, startsOf("amount")),
+    identifier: buildScopes(text, IDENTIFIER_TRIGGERS, startsOf("identifier")),
+    organisation: buildScopes(text, ORGANISATION_TRIGGERS, startsOf("organisation")),
+    heading: buildScopes(text, HEADING_TRIGGERS, startsOf("heading")),
   };
 
   // One ConText pass over all the dates at once, then consumed in order --
   // the date candidates keep their relative order, so a running cursor lines
   // each assignment up with the candidate it came from.
-  const dateAssignments = assignContextRoleLabels(
-    text,
-    candidates
-      .filter((candidate) => candidate.kind === "date")
-      .map((candidate) => ({
-        value: candidate.value,
-        index: candidate.index,
-        length: printedLength(text, candidate),
-      })),
-  );
+  const dateSpans = candidates
+    .filter((candidate) => candidate.kind === "date")
+    .map((candidate) => ({
+      value: candidate.value,
+      index: candidate.index,
+      length: printedLength(text, candidate),
+    }));
+  const dateAssignments = assignContextRoleLabels(text, dateSpans);
+  applyDateRanges(text, dateSpans, dateAssignments);
   let nextDate = 0;
 
   const headingIndexes = candidates.filter((c) => c.kind === "heading").map((c) => c.index);
