@@ -1,0 +1,26 @@
+{
+  "name": "appliance extended warranty certificate, cover start pinned to guarantee expiry",
+  "filename": "fullpage-appliance-warranty-certificate.pdf",
+  "expected": {
+    "dates": [
+      "2026-06-14",
+      "2031-06-13"
+    ],
+    "provider": "Bellward Warranty Administration Ltd",
+    "reference": "EWC-2025-118823",
+    "dateRoles": [
+      {
+        "date": "2026-06-14",
+        "role": "start"
+      },
+      {
+        "date": "2031-06-13",
+        "role": "expiry"
+      }
+    ],
+    "subtype": "Extended warranty certificate",
+    "costMinor": 6999,
+    "currency": "GBP"
+  },
+  "notes": "dates are the day the extended cover commences (14 June 2026) and the day it expires (13 June 2031), five years apart, both stated in the ceremonial paragraph and repeated in the terms. Three nearby dates are deliberately not declared: the date of purchase (14 June 2025), the date the manufacturer's 12-month guarantee ends (13 June 2026, one day before cover starts), and the date the certificate was issued (16 June 2025) -- a reader has to notice the extended cover starts the day after the guarantee lapses, not on the purchase date or the guarantee-end date itself, both of which are printed just as prominently. Also withheld: the appliance's date of manufacture (03/2025, not a full date so it never even reaches ISO form), the 14-day cancellation deadline (28 June 2025), the 30-day certificate-registration deadline (14 July 2025), the terms' effective-from date (01/03/2025), and the final claim-notification date (13 July 2031, 30 days after expiry and easily mistaken for a second expiry). provider is Bellward Warranty Administration Ltd, the claims administrator named as the contact throughout -- not Ashfield Domestic Appliances Ltd, the retailer, whose name is set far larger at the top of the page as the point-of-sale brand, and not Corvane Insurance plc, the underwriter named only once in the small print. reference is the warranty certificate number (EWC-2025-118823), which is also the number printed under the certificate title. costMinor is the £69.99 paid for the extended warranty itself, not the £549.99 price of the washing machine it covers (printed four times, always in a larger or bolder type than the warranty price), not the £60.00 excess payable per claim, and not either of the £549.99 or £1,099.98 claim-value ceilings. recurrenceMonths and scheduleKind are both omitted: a five-year warranty certificate does not recur and is not itself a serviced item -- it simply expires."
+}

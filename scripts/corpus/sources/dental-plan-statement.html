@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Annual Plan Statement — Aldermoor Complete Care Plan</title>
+<style>
+@font-face{font-family:"Corpus Clinic";src:url("../fonts/Saira.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Guarantee";src:url("../fonts/Tinos-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Clinic", sans-serif;
+    font-size: 9.5pt; line-height: 1.4; color: #000;
+  }
+  .page {
+    width: 210mm; height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always; background: #ffffff;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---- crop marks at the four corners of the panel ---- */
+  .cropmark { position: absolute; width: 5mm; height: 5mm; }
+  .cropmark.tl { top: 12mm; left: 12mm; border-top: 0.5pt solid #000; border-left: 0.5pt solid #000; }
+  .cropmark.tr { top: 12mm; right: 12mm; border-top: 0.5pt solid #000; border-right: 0.5pt solid #000; }
+  .cropmark.bl { top: 118mm; left: 12mm; border-bottom: 0.5pt solid #000; border-left: 0.5pt solid #000; }
+  .cropmark.br { top: 118mm; right: 12mm; border-bottom: 0.5pt solid #000; border-right: 0.5pt solid #000; }
+
+  /* ---- the panel: compliments-slip-sized content, high on the sheet ---- */
+  .panel {
+    position: absolute; top: 20mm; left: 20mm; width: 170mm; height: 101mm;
+    box-sizing: border-box;
+  }
+  .practice-name {
+    font-size: 17pt; font-weight: 700; color: #000; letter-spacing: 0.2px;
+    margin-bottom: 1mm;
+  }
+  .practice-contact { font-size: 8pt; color: #333; margin-bottom: 2.5mm; }
+  .panel-rule { border: none; border-top: 1pt solid #0369a1; margin: 0 0 2.5mm 0; }
+  .statement-head {
+    font-size: 8.5pt; font-weight: 700; color: #0369a1; text-transform: uppercase;
+    letter-spacing: 0.6px; margin-bottom: 1mm;
+  }
+  .statement-meta { font-size: 8pt; color: #333; margin-bottom: 3mm; }
+
+  .plan-grid {
+    display: grid; grid-template-columns: 1fr 1fr; column-gap: 6mm; row-gap: 0.8mm;
+    font-size: 8.6pt; margin-bottom: 2.5mm;
+  }
+  .plan-grid .row { display: flex; }
+  .plan-grid .lbl {
+    color: #0369a1; font-weight: 700; min-width: 30mm; flex-shrink: 0;
+  }
+  .plan-grid .val { color: #000; }
+  .plan-grid .row.answer .lbl, .plan-grid .row.answer .val { font-weight: 700; }
+
+  .panel-note {
+    font-size: 7.6pt; color: #222; line-height: 1.5; margin: 2mm 0;
+  }
+  .panel-fine {
+    font-size: 6.6pt; color: #444; line-height: 1.45; margin-top: 2mm;
+    border-top: 0.4pt solid #cdd4cf; padding-top: 1.5mm;
+  }
+
+  /* ---- fold line across the whole sheet, two thirds down ---- */
+  .foldline {
+    position: absolute; top: 198mm; left: 8mm; right: 8mm;
+    border-top: 0.75pt dashed #666;
+  }
+  .fold-tag {
+    position: absolute; top: 194.5mm; font-size: 6pt; letter-spacing: 1.5px;
+    color: #666; text-transform: uppercase;
+  }
+  .fold-tag.left { left: 9mm; }
+  .fold-tag.right { right: 9mm; }
+
+  /* ---- Direct Debit Guarantee, pasted-in wording, lower third ---- */
+  .ddbox {
+    position: absolute; top: 206mm; left: 20mm; right: 20mm; bottom: 16mm;
+    background: #f0f9ff; border: 0.6pt solid #0369a1; box-sizing: border-box;
+    padding: 6mm 8mm; font-family: "Corpus Guarantee", serif;
+  }
+  .ddbox .ddlogo {
+    display: inline-block; font-family: "Corpus Clinic", sans-serif;
+    font-weight: 700; font-size: 8pt; color: #fff; background: #0369a1;
+    padding: 1mm 2.5mm; letter-spacing: 0.4px; margin-bottom: 2.5mm;
+  }
+  .ddbox h2 {
+    font-size: 11pt; font-weight: 700; margin: 0 0 2.5mm 0; color: #000;
+  }
+  .ddbox p { margin: 0 0 2mm 0; font-size: 8.6pt; line-height: 1.42; text-align: left; }
+  .ddbox .ddsmall {
+    font-family: "Corpus Clinic", sans-serif; font-size: 6.4pt; color: #333;
+    margin-top: 2.5mm; line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="cropmark tl"></div>
+  <div class="cropmark tr"></div>
+  <div class="cropmark bl"></div>
+  <div class="cropmark br"></div>
+
+  <div class="panel">
+    <div class="practice-name">Aldermoor Dental Practice</div>
+    <div class="practice-contact">14 Vicarage Lane, Wexbridge, WX4&nbsp;2QP &middot; 01926 552 019</div>
+    <hr class="panel-rule">
+    <div class="statement-head">Dental Plan Statement</div>
+    <div class="statement-meta">
+      Mr Callum Ashworth &middot; 27 Beech Grove, Wexbridge, WX4&nbsp;5RT<br>
+      Statement date 14 August 2026 &middot; Membership number NDPA-208467
+    </div>
+
+    <div class="plan-grid">
+      <div class="row"><span class="lbl">Plan</span><span class="val">Aldermoor Complete Care Plan</span></div>
+      <div class="row"><span class="lbl">Plan start date</span><span class="val">1 March 2020</span></div>
+      <div class="row"><span class="lbl">Monthly payment</span><span class="val">&pound;9.50</span></div>
+      <div class="row"><span class="lbl">Plan year value</span><span class="val">&pound;114.00</span></div>
+      <div class="row"><span class="lbl">Last payment taken</span><span class="val">1 August 2026</span></div>
+      <div class="row"><span class="lbl">Next payment due</span><span class="val">1 September 2026</span></div>
+      <div class="row"><span class="lbl">Plan renewal date</span><span class="val">1 March 2027</span></div>
+      <div class="row"><span class="lbl">Last check-up</span><span class="val">12 May 2026</span></div>
+      <div class="row"><span class="lbl">Last hygienist visit</span><span class="val">30 June 2026</span></div>
+      <div class="row answer"><span class="lbl">Next check-up due</span><span class="val">12 November 2026</span></div>
+    </div>
+
+    <div class="panel-note">
+      Your monthly payment is taken every month by Direct Debit. Your plan year runs for 12 months
+      from your start date shown above, and renews automatically unless you tell us otherwise.
+      Check-ups fall due every 6 months, and one hygienist visit is included between check-ups.
+    </div>
+    <div class="panel-note">
+      Outside the plan, a private examination at Aldermoor Dental Practice costs &pound;62.00 and a
+      hygienist session &pound;58.00 (fees correct as at 1 April 2026). Your plan also includes
+      worldwide dental trauma cover up to &pound;1,000,000.
+    </div>
+
+    <div class="panel-fine">
+      Aldermoor Complete Care Plan is arranged for Aldermoor Dental Practice and administered on
+      its behalf by Northgate Dental Plan Administration Ltd, PO Box 1156, Newbury Park, NP3&nbsp;9ZZ,
+      company number 04471102. The payments shown above are collected by Northgate Dental Plan
+      Administration Ltd by Direct Debit.
+    </div>
+  </div>
+
+  <div class="foldline"></div>
+  <div class="fold-tag left">Fold</div>
+  <div class="fold-tag right">Fold</div>
+
+  <div class="ddbox">
+    <div class="ddlogo">DIRECT&nbsp;Debit</div>
+    <h2>The Direct Debit Guarantee</h2>
+    <p>This Guarantee is offered by all banks and building societies that accept instructions to
+    pay Direct Debits.</p>
+    <p>If there are any changes to the amount, date or frequency of your Direct Debit, Northgate
+    Dental Plan Administration Ltd will notify you 10 working days in advance of your account
+    being debited or as otherwise agreed. If you request Northgate Dental Plan Administration
+    Ltd to collect a payment, confirmation of the amount and date will be given to you at the
+    time of the request.</p>
+    <p>If an error is made in the payment of your Direct Debit, by Northgate Dental Plan
+    Administration Ltd or your bank or building society, you are entitled to a full and
+    immediate refund of the amount paid from your bank or building society. If you receive a
+    refund you are not entitled to, you must pay it back when Northgate Dental Plan
+    Administration Ltd asks you to.</p>
+    <p>You can cancel a Direct Debit at any time by simply contacting your bank or building
+    society. Written confirmation may be required. Please also notify us.</p>
+    <div class="ddsmall">
+      Originator&rsquo;s Identification Number 934218 &middot; Northgate Dental Plan Administration Ltd
+      &middot; PO Box 1156, Newbury Park, NP3&nbsp;9ZZ &middot; Reference NDPA-208467
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

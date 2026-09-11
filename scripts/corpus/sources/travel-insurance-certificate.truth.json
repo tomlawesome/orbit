@@ -1,0 +1,22 @@
+{
+  "name": "travel insurance certificate, trip-length digits and emergency numbers crowd the reference",
+  "filename": "fullpage-travel-insurance-certificate.pdf",
+  "expected": {
+    "dates": [
+      "2026-04-01",
+      "2027-04-01"
+    ],
+    "provider": "Kestrel Travel Insurance Services Ltd",
+    "reference": "KTL/AMT/449108",
+    "dateRoles": [
+      { "date": "2026-04-01", "role": "start" },
+      { "date": "2027-04-01", "role": "renewal" }
+    ],
+    "subtype": "Travel insurance certificate",
+    "costMinor": 15960,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": "dates: the period of insurance runs 1 April 2026 to 1 April 2027, printed together in the certificate panel and roled start/renewal. Twelve other printed dates are deliberately not declared: the certificate issue date (18 March 2026), the date continuous cover began three years earlier (1 April 2023), the medical screening completion date (11 January 2026) and its expiry (10 January 2027), the deadline to declare a change in health (1 December 2026), the worked trip-length example dates (3 June 2026 and 4 July 2026, illustrating the 31-day limit), the worked winter-sports example dates (5 January 2027 and 22 January 2027, illustrating the 17-day limit), the policy booklet's last-updated stamp (3 March 2026), the privacy notice review date (12 May 2026), and an illustrative claim-turnaround example (2 August 2025) — none of these is a date the policyholder would track, and several exist only to work through the 31-day/17-day trip-length rules in digits. provider is Kestrel Travel Insurance Services Ltd, the administrator named on the certificate as agent of the insurer and the business the customer actually bought from, not Palisade Insurance Company plc (the underwriter, named only in the small print) or Worldreach Assistance Ltd (the 24-hour assistance company, named on the emergency band and its own numbers). reference is the certificate number KTL/AMT/449108, distinguishable from the surrounding digits only by its label; the emergency assistance band and grid carry several longer, purely numeric rivals in the same neighbourhood (the assistance line 0345 646 0891, its dialled-from-abroad form +44 345 646 0891, the US/Canada toll-free 1 800 745 1102, the policy service line 0345 604 8817, the claims line 0345 604 2291, and the medical case reference format MCR-774512), none of which is declared. costMinor is £159.60, the annual premium including Insurance Premium Tax, printed as the bold total directly beneath the premium excluding tax (£133.00); the IPT amount itself (£26.60), the optional winter sports upgrade (£34.50) and the standard excess (£95.00) are printed alongside but are not the answer, and the many section limits and excesses in the table of benefits on page 2 are further undeclared rival amounts. recurrenceMonths is 12, printed in digits against the period of insurance ('12 months, from 1 April 2026 to 1 April 2027') and again against the medical screening validity period, so is not grounded on a single throwaway mention."
+}

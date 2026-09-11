@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Fenwick Mobile – Mobile Plan Summary | My Account</title>
+<style>
+@font-face{font-family:"Corpus Screen";src:url("../fonts/Manrope.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Screen", sans-serif; font-size: 9.5pt; color: #1a1a1a;
+    background: #ffffff;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    padding: 8mm 16mm 12mm 16mm; position: relative;
+    page-break-after: always;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---- browser print furniture ---- */
+  .browser-header {
+    display: flex; justify-content: space-between; gap: 6mm;
+    font-size: 7.4pt; color: #6b7280; padding-bottom: 1.6mm;
+    border-bottom: 0.5pt solid #cfd2d8; margin-bottom: 2.4mm;
+  }
+  .browser-header .ph-url { text-align: right; word-break: break-all; }
+
+  .browser-footer {
+    position: absolute; left: 16mm; right: 16mm; bottom: 6mm;
+    display: flex; justify-content: space-between;
+    font-size: 7.2pt; color: #6b7280; padding-top: 1.6mm;
+    border-top: 0.5pt solid #cfd2d8;
+  }
+
+  .cookie-remnant {
+    font-size: 6.8pt; color: #6b7280; background: #eceef1;
+    padding: 1.4mm 2.6mm; margin-bottom: 2mm; line-height: 1.4;
+  }
+  .cookie-link { text-decoration: underline; margin-left: 2mm; }
+
+  .breadcrumbs { font-size: 7.4pt; color: #6b7280; margin-bottom: 1.5mm; }
+
+  .page-actions { font-size: 7.6pt; color: #6b7280; margin-bottom: 3mm; }
+  .action-link { color: #c2185b; text-decoration: underline; }
+
+  h1.page-title {
+    font-size: 15pt; font-weight: 700; color: #c2185b; margin: 0 0 3mm 0;
+  }
+
+  /* ---- cards ---- */
+  .card {
+    background: #f5f5f7; border-radius: 3mm; padding: 3.2mm 6mm;
+    margin-bottom: 3mm; box-shadow: 0 1.2mm 2.4mm rgba(0,0,0,0.10);
+  }
+  .card-highlight { border: 0.9pt solid #c2185b; }
+  .card-label {
+    font-size: 7.2pt; text-transform: uppercase; letter-spacing: 0.6px;
+    color: #6b7280; font-weight: 700; margin-bottom: 1.4mm;
+  }
+  .card-big { font-size: 24pt; font-weight: 700; color: #1a1a1a; line-height: 1.05; }
+  .card-sub { font-size: 8.6pt; color: #6b7280; margin-top: 1mm; }
+  .card-foot { font-size: 7.8pt; color: #6b7280; margin-top: 2mm; }
+  .card-text { font-size: 9pt; line-height: 1.4; }
+
+  .plan-name { font-size: 12pt; font-weight: 700; margin-bottom: 2mm; }
+
+  .price-row { display: flex; gap: 8mm; margin-bottom: 2.5mm; }
+  .price-block { flex: 1; }
+  .price-discount { font-size: 21pt; font-weight: 700; color: #c2185b; }
+  .price-small { font-size: 13pt; font-weight: 700; color: #1a1a1a; }
+  .price-unit { font-size: 9pt; font-weight: 400; color: #6b7280; }
+  .price-note { font-size: 7.6pt; color: #6b7280; margin-top: 0.6mm; }
+
+  table.plan-table, table.rates-table { width: 100%; border-collapse: collapse; font-size: 8.6pt; }
+  table.plan-table td, table.rates-table td {
+    padding: 1mm 0; border-bottom: 0.5pt solid #dcdfe4;
+  }
+  table.plan-table td:first-child, table.rates-table td:first-child { color: #6b7280; }
+  table.plan-table td:last-child, table.rates-table td:last-child { text-align: right; font-weight: 600; }
+  table.plan-table tr:last-child td, table.rates-table tr:last-child td { border-bottom: none; }
+
+  .account-block { font-size: 8.4pt; color: #444; margin-bottom: 2.5mm; }
+
+  .legal-footer {
+    font-size: 6.8pt; color: #6b7280; line-height: 1.45; margin-top: 1.5mm;
+    padding-top: 2mm; border-top: 0.5pt solid #dcdfe4;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="browser-header">
+    <span class="ph-title">Fenwick Mobile – Mobile Plan Summary | My Account</span>
+    <span class="ph-url">myaccount.fenwickmobile.example/billing/2026-03/summary</span>
+  </div>
+
+  <div class="cookie-remnant">
+    We use cookies to personalise My Account and to measure how it&rsquo;s used.
+    <span class="cookie-link">Accept all</span><span class="cookie-link">Manage preferences</span>
+  </div>
+
+  <div class="breadcrumbs">Home &gt; My Account &gt; Billing &gt; Mobile Plan Summary</div>
+
+  <div class="page-actions"><span class="action-link">Print this page</span> &middot; <span class="action-link">Download PDF</span></div>
+
+  <h1 class="page-title">Mobile Plan Summary</h1>
+
+  <div class="card card-highlight">
+    <div class="card-label">Next bill date</div>
+    <div class="card-big">20 October 2026</div>
+    <div class="card-sub">in 39 days &middot; collected 1 time each calendar month by Direct Debit</div>
+    <div class="card-foot">Your 30GB data allowance resets on 20 October 2026.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Your plan</div>
+    <div class="plan-name">SIM Only 30GB Flex</div>
+    <div class="price-row">
+      <div class="price-block">
+        <div class="price-discount">&pound;14.00<span class="price-unit">/mo</span></div>
+        <div class="price-note">for your first 6 months</div>
+      </div>
+      <div class="price-block">
+        <div class="price-small">&pound;23.00<span class="price-unit">/mo</span></div>
+        <div class="price-note">standard monthly charge, from month 7 onward</div>
+      </div>
+    </div>
+    <table class="plan-table">
+      <tr><td>Plan started</td><td>20 March 2025</td></tr>
+      <tr><td>Minimum term</td><td>24 months &mdash; ends 20 March 2027</td></tr>
+      <tr><td>Data allowance</td><td>30GB / month</td></tr>
+      <tr><td>Calls &amp; texts</td><td>Unlimited UK minutes and texts</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Handset upgrade</div>
+    <div class="card-text">
+      Your upgrade window opens on <b>20 February 2027</b>, one month before your
+      current agreement completes, so you can order your next handset before
+      your minimum term ends.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Out-of-bundle rates</div>
+    <table class="rates-table">
+      <tr><td>Calls (out of bundle)</td><td>45p/min</td></tr>
+      <tr><td>Texts (out of bundle)</td><td>11p each</td></tr>
+      <tr><td>Extra data</td><td>&pound;6.00/GB</td></tr>
+      <tr><td>EU roaming</td><td>&pound;2.00/day</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Add-ons on this account</div>
+    <div class="card-text">International Calling Add-on &mdash; &pound;5.00/month, added automatically to your monthly bill.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Billing history</div>
+    <table class="rates-table">
+      <tr><td>Last bill &mdash; 20 September 2026</td><td>&pound;31.50</td></tr>
+      <tr><td>Previous bill &mdash; 20 August 2026</td><td>&pound;23.50</td></tr>
+    </table>
+    <div class="card-foot">Prices on this page are correct as of 1 September 2026 and may change; we&rsquo;ll always tell you before a price rise takes effect.</div>
+  </div>
+
+  <div class="account-block">
+    Account number 7734 2210 91 &middot; Mobile number 07700 900123
+  </div>
+
+  <div class="legal-footer">
+    Fenwick Mobile is a trading name of Anglia Communications Networks Ltd, registered
+    in England and Wales no. 07845213, and is a licensed mobile network operator
+    regulated by Ofcom. Registered office: 4 Redshank House, Ipswich Business Park,
+    Ipswich, IP3 9QT. &copy; 2026 Anglia Communications Networks Ltd.
+  </div>
+
+  <div class="browser-footer">
+    <span>Printed 11/09/2026, 14:32</span>
+    <span>1/1</span>
+  </div>
+</div>
+
+</body>
+</html>
