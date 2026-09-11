@@ -746,6 +746,78 @@ function groundedProvider(answer: string, candidates: readonly TaggedCandidate[]
   return undefined;
 }
 
+// ---------------------------------------------------------------- cost
+
+/** One of the figures the rules could not choose between, as the model is
+ * shown it: the amount as the page printed it, and the block it sat in. */
+export interface AmountChoice {
+  /** Minor units, as the sieve and the scorer compare them. */
+  value: string;
+  currency?: string;
+  /** The Tika block the figure was printed in. */
+  line: string;
+}
+
+/** The figure written the way the page would print it, which is how the
+ * model is asked about it and how its answer is read back. */
+function printedAmount(choice: AmountChoice): string {
+  const symbol = choice.currency === "GBP" ? "£" : choice.currency === "EUR" ? "€" : choice.currency === "USD" ? "$" : "";
+  return `${symbol}${(Number(choice.value) / 100).toFixed(2)}`;
+}
+
+/**
+ * The amounts the rules left open, with the words printed around each.
+ *
+ * The same bargain as `providerExcerpt`: the shortlist and its blocks, a
+ * few hundred characters, never the page.
+ */
+export function costExcerpt(offered: readonly AmountChoice[]): string {
+  const lines = offered.map((choice) =>
+    `${printedAmount(choice)}: "${choice.line.slice(0, BLOCK_LIMIT)}"`);
+  return excerptLines("Amounts printed on this page, with the line each was printed on:", lines);
+}
+
+function costInstruction(): string {
+  return [
+    "amount_this_document_costs must be one of the amounts listed below, written exactly as it is listed.",
+    "Choose what the household has to pay for the thing this document is about.",
+    "Answer none if none of them is that.",
+  ].join("\n");
+}
+
+/** The answer only if the list carries it: the figure has to BE one of the
+ * amounts offered, however the model wrote it. */
+function groundedAmount(answer: string, offered: readonly AmountChoice[]): AmountChoice | undefined {
+  const digits = /(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{2}))?/u.exec(answer.replace(/\s/gu, ""));
+  if (!digits) return undefined;
+  const minor = Number(digits[1].replace(/,/gu, "")) * 100 + (digits[2] === undefined ? 0 : Number(digits[2]));
+  return offered.find((choice) => Number(choice.value) === minor);
+}
+
+/**
+ * Which of the figures the rules could not choose between is what this
+ * document costs.
+ *
+ * One question per document over a handful of figures, never the page. An
+ * answer that is not one of them is refused and the field stays blank,
+ * which is what it already was.
+ */
+export async function chooseCostWithModel(
+  offered: readonly AmountChoice[],
+  transport: MeaningTransport,
+): Promise<{ costMinor: number; currency?: string } | undefined> {
+  if (offered.length < 2) return undefined;
+  const document = `${costInstruction()}\n\n${costExcerpt(offered)}`;
+  const raw = await transport(structuredPrompt({ amount_this_document_costs: "" }, document));
+  const answer = answerFrom(raw, "amount_this_document_costs");
+  const chosen = answer === undefined ? undefined : groundedAmount(answer, offered);
+  if (chosen === undefined) return undefined;
+  return {
+    costMinor: Number(chosen.value),
+    ...(chosen.currency === undefined ? {} : { currency: chosen.currency }),
+  };
+}
+
 // --------------------------------------------------------------- dates
 
 /**

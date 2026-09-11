@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  chooseCostWithModel,
   chooseDateToActOnWithModel,
   chooseMeaningFieldsWithModel,
   chooseProviderByRules,
@@ -489,6 +490,36 @@ describe("asking the model which date the household must act on", () => {
     const model = fakeModel('{"date_to_act_on": "2026-10-31", "what_it_is_for": "renewal"}');
 
     expect(await chooseDateToActOnWithModel(page, [], decided, model)).toBeUndefined();
+    expect(model.prompts).toHaveLength(0);
+  });
+});
+
+describe("asking the model which figure the document costs", () => {
+  const offered = [
+    { value: "15931", currency: "GBP", line: "Total charges for this period £159.31" },
+    { value: "16337", currency: "GBP", line: "Amount due £163.37" },
+  ];
+
+  it("asks over the figures and the line each was printed on, never the page", async () => {
+    const model = fakeModel('{"amount_this_document_costs": "£163.37"}');
+
+    const chosen = await chooseCostWithModel(offered, model);
+
+    expect(model.prompts[0]).toContain("【template_start】{\"amount_this_document_costs\":\"\"}【template_end】");
+    expect(model.prompts[0]).toContain("Amounts printed on this page");
+    expect(model.prompts[0]).toContain('£163.37: "Amount due £163.37"');
+    expect(chosen).toEqual({ costMinor: 16337, currency: "GBP" });
+  });
+
+  it("refuses a figure the list does not carry", async () => {
+    expect(await chooseCostWithModel(offered, fakeModel('{"amount_this_document_costs": "£412.99"}')))
+      .toBeUndefined();
+  });
+
+  it("asks nothing where there was never a choice to make", async () => {
+    const model = fakeModel('{"amount_this_document_costs": "£163.37"}');
+
+    expect(await chooseCostWithModel(offered.slice(0, 1), model)).toBeUndefined();
     expect(model.prompts).toHaveLength(0);
   });
 });

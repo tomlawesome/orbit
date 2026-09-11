@@ -392,6 +392,66 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.costMinor).toBeUndefined();
     expect(chosen.currency).toBeUndefined();
   });
+
+  it("takes the figure two sieves agree about over one a single sieve read", () => {
+    const chosen = chooseFields([
+      candidate("amount", "15931", [
+        { value: "total", trigger: "Total charges for this period", sieves: ["label"], strength: 2 },
+      ], { currency: "GBP" }),
+      candidate("amount", "16337", [
+        {
+          value: "due",
+          trigger: "Amount due",
+          sieves: ["label", "printed-throughout"],
+          strength: 2,
+        },
+      ], { currency: "GBP" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(16337);
+  });
+
+  it("answers from sieves alone where no label named the figure", () => {
+    const chosen = chooseFields([
+      candidate("amount", "215907", [
+        {
+          value: "total",
+          trigger: "2026/27",
+          sieves: ["column-period", "instalment-total"],
+          strength: 2,
+        },
+      ], { currency: "GBP" }),
+      candidate("amount", "31244", [
+        { value: "total", trigger: "2026/27", sieves: ["column-period"], strength: 2 },
+      ], { currency: "GBP" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(215907);
+  });
+
+  it("rules out a figure a sieve read in so many words as last year's", () => {
+    const chosen = chooseFields([
+      candidate("amount", "205630", [
+        { value: "total", trigger: "charge for the year", sieves: ["label"], strength: 2 },
+        { value: "previous", trigger: "2025/26", sieves: ["column-period"], strength: 2 },
+      ], { currency: "GBP" }),
+    ]);
+
+    expect(chosen.costMinor).toBeUndefined();
+  });
+
+  it("hears the monthly fee where nothing the page called a total earned a hearing", () => {
+    const chosen = chooseFields([
+      candidate("amount", "45900", [
+        { value: "total", trigger: "a year", sieves: ["period-adjacent"], strength: 1 },
+      ], { currency: "GBP" }),
+      candidate("amount", "4250", [
+        { value: "instalment", trigger: "Monthly membership fee", sieves: ["label"], strength: 2 },
+      ], { currency: "GBP" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(4250);
+  });
 });
 
 describe("the meaning-shaped fields", () => {
