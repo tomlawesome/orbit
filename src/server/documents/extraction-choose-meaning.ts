@@ -453,9 +453,10 @@ export type MeaningTransport = (question: string) => Promise<string>;
 const DEFAULT_MODEL = "hf.co/numind/NuExtract3-GGUF:Q4_K_M";
 const GENERATE_ENDPOINT = "http://orbit-ollama:11434/api/generate";
 const CHAT_ENDPOINT = "http://orbit-ollama:11434/api/chat";
-/** A shortlist is a few hundred characters, not a document: a call needing
- * longer than this has not understood the question. */
-const DEADLINE_MS = 60_000;
+/** A shortlist is a few hundred characters, not a document, but a CPU-only
+ * host under load takes its time; the unattended budget is five minutes a
+ * document over five or six calls. A call past this answers nothing. */
+const DEADLINE_MS = 120_000;
 /** Deterministic, as ADR-0025 requires: two runs over one shortlist give one
  * answer. */
 const MODEL_OPTIONS = { temperature: 0, seed: 20260910, num_ctx: 8192 };
@@ -486,7 +487,7 @@ export function structuredPrompt(template: Record<string, string>, document: str
 
 /** NuExtract 3 in its native structured mode, on the fixed endpoint of
  * ADR-0025. */
-export const nuextractTransport: MeaningTransport = async (question) => {
+export const nuextractTransport: MeaningTransport = (question) => answering(async () => {
   const response = await fetch(GENERATE_ENDPOINT, {
     signal: AbortSignal.timeout(DEADLINE_MS),
     method: "POST",
@@ -502,19 +503,48 @@ export const nuextractTransport: MeaningTransport = async (question) => {
   const body = await response.json() as { response?: string; error?: string };
   if (body.error) return "";
   return body.response ?? "";
+}, "");
+
+/** A call that fails, times out or is refused answers nothing: blank is an
+ * allowed answer for every field, and one slow question must not take the
+ * rest of the document with it. */
+async function answering(call: () => Promise<string>, fallback: string): Promise<string> {
+  try {
+    return await call();
+  } catch {
+    return fallback;
+  }
+}
+
+/** The shape any chat model is held to: one string per line of its answer,
+ * so a model that would rather explain itself cannot -- Ollama's grammar
+ * only lets the strings through. `replyLines` reads each as a line. */
+const CHAT_ANSWER_SHAPE = {
+  type: "object",
+  properties: { answer: { type: "array", items: { type: "string" }, minItems: 1 } },
+  required: ["answer"],
 };
 
 /** Any chat model Ollama is serving, asked the same plain-English question.
- * Nothing in the question is NuExtract-shaped, so the answer comes back as
- * a number or a word and `replyLines` reads it the same way. */
-export const ollamaChatTransport: MeaningTransport = async (question) => {
+ * Nothing in the question is NuExtract-shaped; the answer is pinned to
+ * `CHAT_ANSWER_SHAPE`, and thinking aloud is switched off where the model
+ * offers it, so what comes back is the number or word and nothing else. */
+export const ollamaChatTransport: MeaningTransport = (question) => answering(async () => {
   const response = await fetch(CHAT_ENDPOINT, {
     signal: AbortSignal.timeout(DEADLINE_MS),
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       model: chooserModel(),
-      messages: [{ role: "user", content: question }],
+      messages: [
+        {
+          role: "system",
+          content: 'Reply as JSON: {"answer": [...]}, one string per line of your answer, for example {"answer": ["2"]} or {"answer": ["none"]}. No explanation.',
+        },
+        { role: "user", content: question },
+      ],
+      think: false,
+      format: CHAT_ANSWER_SHAPE,
       stream: false,
       options: MODEL_OPTIONS,
     }),
@@ -522,7 +552,7 @@ export const ollamaChatTransport: MeaningTransport = async (question) => {
   const body = await response.json() as { message?: { content?: string }; error?: string };
   if (body.error) return "";
   return body.message?.content ?? "";
-};
+}, "");
 
 /**
  * The transport the evaluations use: NuExtract's native mode, unless
