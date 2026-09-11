@@ -8,19 +8,22 @@
 //   node node_modules/tsx/dist/cli.mjs src/server/documents/stages-score-cli.ts --model
 //   node node_modules/tsx/dist/cli.mjs src/server/documents/stages-score-cli.ts --dump <filename-part> <kind>
 //
-// Without `--model`, `provider` and `subtype` are whatever the rules over
-// the tags decide, and a date no sieve could label is offered with no role.
-// With it, the three questions the rules left open -- provider, subtype, and
-// which unlabelled date the household must act on -- are put to NuExtract 3
-// over the shortlist, which needs the Ollama container on
-// `orbit_orbit-document-processing`.
+// Without `--model`, every field is whatever the rules over the tags decide:
+// the attended case, and the fall-back where there is no model to ask.
+//
+// With it, every field is the model's pick from that field's shortlist --
+// dates and their roles in one call, then reference, cost, provider, subtype
+// and, where the roles make a schedule, how long it runs. Five or six calls
+// a document, each over a few hundred characters, which needs the Ollama
+// container on `orbit_orbit-document-processing`. Which model answers is
+// `EXTRACTION_CHOOSER_MODEL`, not this file (see `chooserTransport`).
 //
 // `--dump` prints every tagged candidate of one kind for one document, with
 // its tags and block, and skips untagged ones: the view for deciding
 // whether a miss is a tag or a choice.
 
 import { chooseFields, chooseFieldsWithModel } from "./extraction-choose";
-import { ollamaMeaningTransport } from "./extraction-choose-meaning";
+import { chooserTransport } from "./extraction-choose-meaning";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { formatRunScore, scoreCorpus } from "./extraction-scoring";
 import { sieve, type CandidateKind } from "./extraction-sieve";
@@ -48,7 +51,7 @@ async function main(): Promise<void> {
   const withModel = process.argv.includes("--model");
   const staged = await scoreCorpus(EXTRACTION_CORPUS, async (text) => {
     const tagged = tagCandidates(text, sieve(text));
-    return withModel ? chooseFieldsWithModel(tagged, ollamaMeaningTransport) : chooseFields(tagged);
+    return withModel ? chooseFieldsWithModel(tagged, chooserTransport()) : chooseFields(tagged);
   });
   console.log(formatRunScore(withModel ? "sieve+tag+choose+model" : "sieve+tag+choose", staged));
   const heuristics = await scoreCorpus(EXTRACTION_CORPUS, (text, filename) => proposalFromText(text, filename));
