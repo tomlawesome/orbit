@@ -22,6 +22,12 @@
 //    "installed by Z"            Z is named for a reason that is not being
 //                                the provider, ever.
 //
+// Subtype has no rules at all. It answers "what type of thing is this" --
+// insurance, a plan, a membership -- from the generic taxonomy in
+// `subtype-taxonomy.json` (owner, 2026-09-11), so the model is given the
+// shortlist and the taxonomy's own names to choose between, and an answer
+// that is not one of those names is refused.
+//
 // Nothing here reads where a block sits on the page, how it is capitalised,
 // or what a document title usually looks like. The 24 tuning documents are
 // samples of what a page could be, not a definition of one (owner,
@@ -33,6 +39,7 @@
 
 import { classifyProvider } from "./extraction-scoring";
 import type { TaggedCandidate } from "./extraction-stages";
+import subtypeTaxonomyJson from "./subtype-taxonomy.json";
 import { trimFieldValue } from "./value-trim";
 
 // ------------------------------------------------------------------ shared
@@ -285,13 +292,24 @@ function providerShortlist(candidates: readonly TaggedCandidate[]): Array<{
 /** At most this much excerpt: the shortlist and its blocks, never the page
  * (ADR-0026 stage 3). */
 const EXCERPT_LIMIT = 1_500;
+/** The subtype question needs a few hundred characters, not the shortlist
+ * entire: it is answered from what the page is about, not from its detail.
+ * The three parts have their own room inside it, so the headings cannot
+ * crowd out the names and the amounts. */
+const SUBTYPE_EXCERPT_LIMIT = 700;
+const HEADINGS_BUDGET = 380;
+const NAMES_BUDGET = 180;
+const AMOUNTS_BUDGET = 140;
+/** How many labelled amounts say what is being paid for before the rest are
+ * repetition. */
+const AMOUNTS_SHOWN = 4;
 /** Enough of a block to show what labelled a candidate, no more. */
 const BLOCK_LIMIT = 140;
 
-function excerptLines(heading: string, lines: readonly string[]): string {
+function excerptLines(heading: string, lines: readonly string[], limit = EXCERPT_LIMIT): string {
   let excerpt = heading;
   for (const line of lines) {
-    if (excerpt.length + line.length + 1 > EXCERPT_LIMIT) break;
+    if (excerpt.length + line.length + 1 > limit) break;
     excerpt += `\n${line}`;
   }
   return excerpt;
@@ -311,22 +329,122 @@ export function providerExcerpt(candidates: readonly TaggedCandidate[]): string 
   return excerptLines("Organisations named on this page:", lines);
 }
 
-/** The headings of the shortlist, the one stage 2 called the title first. */
+/**
+ * What the page is about, as the shortlist has it: the headings stage 2
+ * found, with the title first, then the organisations and the amounts. A
+ * heading says what the document calls itself, a name says what trade the
+ * sender is in and a labelled amount says what is being paid for -- which
+ * together are enough to say what type of thing the page is about, without
+ * the page.
+ */
 export function subtypeExcerpt(candidates: readonly TaggedCandidate[]): string {
   const headings = candidates.filter((candidate) => candidate.kind === "heading");
   const titleFirst = [
     ...headings.filter((candidate) => candidate.tags.some((tag) => tag.value === "title")),
     ...headings.filter((candidate) => !candidate.tags.some((tag) => tag.value === "title")),
   ];
-  const lines: string[] = [];
-  const seen = new Set<string>();
-  for (const candidate of titleFirst) {
-    const value = candidate.value.trim();
-    if (!value || seen.has(comparable(value))) continue;
-    seen.add(comparable(value));
-    lines.push(value.slice(0, BLOCK_LIMIT));
+
+  const amounts: string[] = [];
+  for (const candidate of candidates) {
+    if (candidate.kind !== "amount" || !candidate.currency) continue;
+    const labels = candidate.tags.map((tag) => tag.trigger.trim()).filter((trigger) => trigger.length > 0);
+    if (labels.length === 0 || amounts.length >= AMOUNTS_SHOWN) continue;
+    amounts.push(`${labels[0]} ${candidate.currency} ${(Number(candidate.value) / 100).toFixed(2)}`);
   }
-  return excerptLines("Headings printed on this page:", lines);
+  // Whole names, cut at a name and never mid-word: a half-written name
+  // tells the model nothing and invites it to finish the word itself.
+  const names: string[] = [];
+  let namesRoom = Math.min(NAMES_BUDGET, BLOCK_LIMIT) - "Named on the page: ".length;
+  for (const { name } of providerShortlist(candidates)) {
+    if (namesRoom - name.length - 2 < 0) break;
+    namesRoom -= name.length + 2;
+    names.push(name);
+  }
+
+  // Each kind gets its own room. A page with forty headings would otherwise
+  // spend the whole excerpt on them and never say who sent it or what is
+  // being paid for, which is half of what the question needs.
+  const lines = [
+    ...within(titleFirst.map((candidate) => candidate.value), HEADINGS_BUDGET),
+    ...(names.length > 0 ? within([`Named on the page: ${names.join(", ")}`], NAMES_BUDGET) : []),
+    ...(amounts.length > 0 ? within([`Amounts printed: ${amounts.join("; ")}`], AMOUNTS_BUDGET) : []),
+  ];
+  return excerptLines("What this page prints:", lines, SUBTYPE_EXCERPT_LIMIT);
+}
+
+/** As many distinct lines as fit in `budget`, each cut to a block's worth,
+ * in the order given. */
+function within(lines: readonly string[], budget: number): string[] {
+  const kept: string[] = [];
+  const seen = new Set<string>();
+  let used = 0;
+  for (const line of lines) {
+    const value = line.trim().slice(0, BLOCK_LIMIT);
+    if (!value || seen.has(comparable(value))) continue;
+    if (used + value.length + 1 > budget) break;
+    seen.add(comparable(value));
+    used += value.length + 1;
+    kept.push(value);
+  }
+  return kept;
+}
+
+// ------------------------------------------------------- subtype taxonomy
+
+interface TaxonomyGroup {
+  name: string;
+  synonyms: string[];
+}
+
+interface SubtypeTaxonomy {
+  kinds: TaxonomyGroup[];
+  qualifiers: TaxonomyGroup[];
+  combinations: { patterns: string[]; standalone: string[] };
+}
+
+const TAXONOMY = subtypeTaxonomyJson as SubtypeTaxonomy;
+
+/** The group whose name or any synonym the answer is, or nothing. Case and
+ * whitespace ignored, as the scorer ignores them. */
+function taxonomyGroupFor(groups: readonly TaxonomyGroup[], answer: string): TaxonomyGroup | undefined {
+  const wanted = comparable(answer);
+  if (!wanted) return undefined;
+  return groups.find((group) =>
+    comparable(group.name) === wanted || group.synonyms.some((synonym) => comparable(synonym) === wanted));
+}
+
+/**
+ * The two questions the model is asked, and the only answers it may give.
+ *
+ * The taxonomy's group names are the vocabulary: 51 kinds and 63
+ * qualifiers, short enough to print in the prompt, and the answer is
+ * refused unless it is one of them or one of their synonyms. A model that
+ * invents a type of document has not chosen from the list, and an invented
+ * answer is exactly what the field must not carry.
+ */
+function subtypeInstruction(): string {
+  const kinds = TAXONOMY.kinds.map((group) => group.name).join(", ");
+  const qualifiers = TAXONOMY.qualifiers.map((group) => group.name).join(", ");
+  return [
+    `kind_of_thing must be one of: ${kinds}.`,
+    `what_it_is_for must be one of: ${qualifiers}.`,
+  ].join("\n");
+}
+
+/**
+ * The answer composed the way the taxonomy combines its groups: a kind on
+ * its own, a qualifier in front of a kind, or -- for the qualifiers the
+ * taxonomy lets stand alone, "MOT", "Council tax" -- the qualifier by
+ * itself. Always the canonical group names, never the synonym the model
+ * happened to use, so the value reads the same whatever it answered.
+ */
+function composeSubtype(kind: string | undefined, qualifier: string | undefined): string | undefined {
+  const kindGroup = kind === undefined ? undefined : taxonomyGroupFor(TAXONOMY.kinds, kind);
+  const qualifierGroup = qualifier === undefined ? undefined : taxonomyGroupFor(TAXONOMY.qualifiers, qualifier);
+  if (kindGroup && qualifierGroup) return `${qualifierGroup.name} ${kindGroup.name}`;
+  if (kindGroup) return kindGroup.name;
+  if (qualifierGroup && TAXONOMY.combinations.standalone.includes(qualifierGroup.name)) return qualifierGroup.name;
+  return undefined;
 }
 
 /** The model may answer with a bare string, a JSON object matching the
@@ -373,19 +491,6 @@ function groundedProvider(answer: string, candidates: readonly TaggedCandidate[]
   return undefined;
 }
 
-function groundedSubtype(answer: string, candidates: readonly TaggedCandidate[]): string | undefined {
-  const wanted = comparable(answer);
-  if (!wanted) return undefined;
-  for (const candidate of candidates) {
-    if (candidate.kind !== "heading" || !comparable(candidate.value).includes(wanted)) continue;
-    // `value-trim` (#965) as it stands: the general clean-up of a picked
-    // value -- the label in front of it, the aside behind it -- applied to
-    // whatever the model chose. Nothing here is written for a title.
-    return trimFieldValue("subtype", answer.trim(), candidate.line);
-  }
-  return undefined;
-}
-
 export interface MeaningFields {
   provider?: string;
   subtype?: string;
@@ -395,7 +500,8 @@ export interface MeaningFields {
  * Asks the model about the meaning-shaped fields nothing has answered yet,
  * and about nothing else. A provider the page stated outright is not
  * re-asked: a printed label beside a name is better evidence than a model's
- * reading of the same excerpt.
+ * reading of the same excerpt. Subtype is always the model's, and always
+ * from the taxonomy's own vocabulary.
  */
 export async function chooseMeaningFieldsWithModel(
   candidates: readonly TaggedCandidate[],
@@ -413,11 +519,10 @@ export async function chooseMeaningFieldsWithModel(
   }
 
   if (chosen.subtype === undefined) {
-    const excerpt = subtypeExcerpt(candidates);
-    const raw = await transport(structuredPrompt({ document_title: "" }, excerpt));
-    const answer = answerFrom(raw, "document_title");
-    const grounded = answer === undefined ? undefined : groundedSubtype(answer, candidates);
-    if (grounded !== undefined) filled.subtype = grounded;
+    const document = `${subtypeInstruction()}\n\n${subtypeExcerpt(candidates)}`;
+    const raw = await transport(structuredPrompt({ kind_of_thing: "", what_it_is_for: "" }, document));
+    const composed = composeSubtype(answerFrom(raw, "kind_of_thing"), answerFrom(raw, "what_it_is_for"));
+    if (composed !== undefined) filled.subtype = composed;
   }
 
   return filled;
