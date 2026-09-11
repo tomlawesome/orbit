@@ -108,9 +108,11 @@ const RANGE_CONNECTOR_TRIGGER = /^[\s(]*(?:to|until|till|through|up to|–|—|-
  * so "Cover runs from A to B ... expiring on B" keeps B's printed label
  * instead of blanking the field over an argument with the connector.
  */
+const CONNECTOR_STRENGTH = 1;
+
 function claimStrength(trigger: string): number {
   if (trigger.trim() === "") return 0;
-  return RANGE_CONNECTOR_TRIGGER.test(trigger) ? 1 : 2;
+  return RANGE_CONNECTOR_TRIGGER.test(trigger) ? CONNECTOR_STRENGTH : 2;
 }
 
 function roleClaims(candidates: readonly TaggedCandidate[]): RoleClaim[] {
@@ -142,6 +144,19 @@ function chooseDates(candidates: readonly TaggedCandidate[]): {
   const dateRoles: Array<{ date: string; role: DocumentDateRole }> = [];
   for (const date of dates) {
     const forDate = claims.filter((claim) => claim.date === date);
+    // One date can close one printed period and open the next: a renewal
+    // notice prints the cover ending and the cover proposed from the same
+    // day. The two claims do not conflict, and the one the household acts
+    // on is the period beginning -- so a date a period starts at is a
+    // `start`, whatever the period it also ends is called.
+    const opensAPeriod = forDate.some(
+      (claim) => claim.role === "start" && claim.strength === CONNECTOR_STRENGTH,
+    );
+    const closesAPeriod = forDate.some((claim) => claim.role === "renewal" || claim.role === "expiry");
+    if (opensAPeriod && closesAPeriod) {
+      dateRoles.push({ date, role: "start" });
+      continue;
+    }
     // Only the best-evidenced claims are heard: a quoted label beats a range
     // connector, and both beat a tag with no trigger. Two claims of equal
     // strength disagreeing is the page itself being ambiguous -- keep the

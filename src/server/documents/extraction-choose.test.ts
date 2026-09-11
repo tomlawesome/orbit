@@ -110,6 +110,16 @@ describe("choosing dates and their roles", () => {
     expect(chosen.dateRoles).toBeUndefined();
   });
 
+  it("reads a date that ends one period and starts the next as the start", () => {
+    const chosen = chooseFields([
+      candidate("date", "2026-10-15", [{ value: "renewal", trigger: "to" }]),
+      candidate("date", "2026-10-15", [{ value: "renewal", trigger: "policy ends on" }]),
+      candidate("date", "2026-10-15", [{ value: "start", trigger: "to" }]),
+    ]);
+
+    expect(chosen.dateRoles).toEqual([{ date: "2026-10-15", role: "start" }]);
+  });
+
   it("takes the role the page states most often when equal labels disagree", () => {
     const chosen = chooseFields([
       candidate("date", "2027-09-08", [{ value: "expiry", trigger: "EXPIRY DATE" }]),
