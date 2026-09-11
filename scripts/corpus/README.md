@@ -71,6 +71,14 @@ documents got through because they were reviewed one PDF at a time.
 - **Every expected value is verified present**, not assumed. `verify.mjs`
   fails the build rather than letting a fixture claim something the page does
   not say.
+- **British, never American** (owner, 2026-09-11). Dates are `3 March 2026` or
+  `03/03/2026`, day before month; money is in pounds; spelling is `licence`,
+  `cheque`, `organisation`, `authorised`, `instalment`, `centre`; addresses
+  carry a postcode, not a state and a ZIP. An Americanism makes the fixture
+  measure something a real UK extractor will never meet. `verify.mjs` now fails
+  on the unambiguous markers, and the American date form `March 3, 2026` was
+  removed from the printed forms it accepts -- while it was there, a fixture
+  could have declared a date printed that way and passed.
 - **Each document is its own kind of object** — a government form, a carbon
   copy, a letter, a folded card, a marketing leaflet, a bulk-printed schedule.
   Varying colour and font alone produced six documents with one skeleton;
