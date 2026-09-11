@@ -29,3 +29,8 @@ scripts/corpus/sources/*.txt
 scripts/corpus/sources/*.png
 scripts/corpus/sources/index.html
 scripts/corpus/sources/contact-sheet.html
+scripts/corpus/holdout/*.pdf
+scripts/corpus/holdout/*.txt
+scripts/corpus/holdout/*.png
+scripts/corpus/holdout/index.html
+scripts/corpus/holdout/contact-sheet.html

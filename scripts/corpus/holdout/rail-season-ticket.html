@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cheddleton Rail — Season Ticket</title>
+<style>
+@font-face{font-family:"Corpus Ticket";src:url("../fonts/MartianMono.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Ticket Sans";src:url("../fonts/LibreFranklin.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; font-family: "Corpus Ticket Sans", sans-serif; color: #1a1a1a; }
+  .page {
+    width: 794px; height: 1123px; box-sizing: border-box; position: relative;
+    overflow: hidden; padding: 34px 46px; background: #fff;
+  }
+  .ticket {
+    font-family: "Corpus Ticket", monospace; border: 2px solid #222; padding: 14px 18px;
+    width: 660px; margin: 0 auto 16px auto; background: #fbfbf6;
+  }
+  .ticket .row { display: flex; justify-content: space-between; font-size: 12px; margin: 3px 0; letter-spacing: 0.5px; }
+  .ticket .title { font-size: 15px; font-weight: bold; letter-spacing: 2px; text-align: center; margin-bottom: 8px; }
+  .ticket .sep { border-top: 1px dashed #666; margin: 8px 0; }
+  .stripe {
+    height: 26px; margin-top: 10px;
+    background: repeating-linear-gradient(90deg, #111 0 3px, #444 3px 5px, #111 5px 8px);
+  }
+  .photocard { font-family: "Corpus Ticket", monospace; font-size: 11px; text-align: center; margin: 8px auto 20px auto;
+               width: 660px; border: 1px solid #999; padding: 6px 12px; background: #f2f2ec; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid #444; padding-bottom: 3px; margin: 16px 0 8px 0; }
+  .receipt p { font-size: 11px; line-height: 1.5; margin: 3px 0; }
+  table.priceline { width: 100%; border-collapse: collapse; font-size: 11px; margin: 6px 0 10px 0; }
+  table.priceline td { padding: 3px 4px; border-bottom: 1px solid #ddd; }
+  table.priceline td.amt { text-align: right; }
+  .small { font-size: 9px; line-height: 1.5; color: #333; }
+  .footerline { position: absolute; bottom: 16px; left: 46px; right: 46px; font-size: 8.5px; color: #666;
+                border-top: 1px solid #ccc; padding-top: 6px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="ticket">
+    <div class="title">ANNUAL SEASON TICKET</div>
+    <div class="row"><span>TICKET NO.</span><span>ST-0294817-6</span></div>
+    <div class="sep"></div>
+    <div class="row"><span>FROM</span><span>MILLBROOK CROSS</span></div>
+    <div class="row"><span>TO</span><span>FENWICK PARKWAY</span></div>
+    <div class="row"><span>ROUTE</span><span>ANY PERMITTED</span></div>
+    <div class="sep"></div>
+    <div class="row"><span>VALID FROM</span><span>01/09/2026</span></div>
+    <div class="row"><span>VALID UNTIL</span><span>31/08/2027</span></div>
+    <div class="row"><span>CLASS</span><span>STANDARD</span></div>
+    <div class="row"><span>RAILCARD</span><span>COASTWAY SAVER  RC-229104</span></div>
+    <div class="sep"></div>
+    <div class="row"><span>ISSUED BY</span><span>CHEDDLETON RAIL</span></div>
+    <div class="stripe"></div>
+  </div>
+
+  <div class="photocard">PHOTOCARD PC 552013847 &nbsp;&nbsp;—&nbsp;&nbsp; EXPIRES 14/02/2028</div>
+
+  <div class="receipt">
+    <h2>Ticket Office Receipt</h2>
+    <p>Issued at Millbrook Cross ticket office — till 4, agent ID 118.</p>
+    <p>Date of purchase: 24 August 2026.</p>
+    <p>Item: Annual Season Ticket, Millbrook Cross to Fenwick Parkway, Standard Class.</p>
+    <p>Railcard discount applied: Coastway Saver Railcard, code RC-229104.</p>
+
+    <table class="priceline">
+      <tr><td>Annual season ticket</td><td class="amt">£3,412.00</td></tr>
+      <tr><td>Equivalent monthly price (for comparison only)</td><td class="amt">£322.50</td></tr>
+      <tr><td>First class upgrade, per year, if purchased separately</td><td class="amt">£5,120.00</td></tr>
+      <tr><td>Refund administration fee (applies to any refund)</td><td class="amt">£10.00</td></tr>
+    </table>
+    <p>Payment method: debit card ending 4471. Amount charged today: £3,412.00.</p>
+
+    <h2>Conditions of Use</h2>
+    <p class="small">This ticket is issued subject to Cheddleton Rail's Conditions of Carriage and the rules of the
+    Interoperator Ticketing Council. It is not transferable and must be produced, together with your photocard,
+    whenever asked by railway staff. If your photocard is lost or damaged, a replacement must be obtained before
+    you travel; your photocard shown above expires separately from this season ticket.</p>
+    <p class="small">Claims for delay compensation must be submitted within 28 days of the date of travel affected,
+    quoting your season ticket number.</p>
+    <p class="small">Refunds on unused season tickets are calculated on a daily basis from the date the ticket is
+    returned, less the refund administration fee shown above.</p>
+  </div>
+
+  <div class="footerline">Cheddleton Rail. Lost photocards: 01632 960774. www.cheddletonrail.example</div>
+</div>
+</body>
+</html>

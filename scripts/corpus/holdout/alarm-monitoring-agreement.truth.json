@@ -1,0 +1,38 @@
+{
+  "name": "Intruder Alarm Monitoring Agreement",
+  "filename": "alarm-monitoring-agreement.pdf",
+  "expected": {
+    "dates": ["2026-03-02", "2027-03-02", "2028-03-01"],
+    "dateRoles": [
+      { "date": "2026-03-02", "role": "start" },
+      { "date": "2027-03-02", "role": "service" },
+      { "date": "2028-03-01", "role": "renewal" }
+    ],
+    "provider": "Northgate Home Security",
+    "reference": "NGS-CA-20456",
+    "subtype": { "kinds": ["Contract", "Maintenance contract"], "qualifiers": ["Security", "Home"] },
+    "costMinor": 2499,
+    "currency": "GBP",
+    "recurrenceMonths": 24,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "Start date 2026-03-02 is printed as 'Monitoring Start Date 02/03/2026' and repeated in the customer signature date.",
+    "Service date 2027-03-02 is printed as 'Annual Maintenance Visit Due 02/03/2027'.",
+    "Renewal/term-end date 2028-03-01 is printed within 'Minimum Term: 24 month minimum term, ending 01/03/2028'.",
+    "recurrenceMonths 24 is printed in digits as '24 month minimum term' — the length of the agreement, not the monthly billing cycle.",
+    "Provider is 'Northgate Home Security', the trading name in the header and footer strip — not the Alarm Receiving Centre or insurer named elsewhere.",
+    "Reference 'NGS-CA-20456' is printed as the Contract Number field and repeated in the footer strip.",
+    "costMinor 2499 is the 'Monthly Monitoring Charge... £24.99 per month' field.",
+    "Trap: the 'Installation Charge £199.00 — paid in full, receipt no. RCT-30442' is a rival, one-off cost already settled.",
+    "Trap: the 'Callout Charge (outside agreement) £65.00 + VAT per visit' is a rival recurring-looking cost.",
+    "Trap: the 'total payable over the 24 month minimum term of £599.76' is a rival aggregate cost figure.",
+    "Trap: 'Alarm Receiving Centre: Beacon Watch Monitoring Centre' is a rival organisation name.",
+    "Trap: 'Police URN: 1234567/26' is a rival reference number.",
+    "Trap: 'Insurer Requiring Monitoring: Hearthstone Home Insurance' is a rival organisation name.",
+    "Trap: the engineer 'D. Sutton — commissioning visit 28/02/2026' gives a rival name and a rival date close to the monitoring start.",
+    "Trap: 'Right to Cancel... up to and including 16/03/2026' is a rival date.",
+    "Trap: the keyholders 'Mrs Diane Whitlock — 07700 900142' and 'Mr Colin Whitlock — 07700 900873' are named with phone numbers as rival contacts.",
+    "Trap: 'Control Panel Manufactured 11/2025 — parts warranty ends 03/03/2027' gives a rival date one day after the true service date."
+  ]
+}

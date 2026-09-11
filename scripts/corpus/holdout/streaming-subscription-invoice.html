@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Your Northlight+ payment receipt</title>
+<style>
+@font-face{font-family:"Corpus Mail";src:url("../fonts/PlusJakartaSans.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; }
+  * { font-family: "Corpus Mail", sans-serif; }
+  .page {
+    width: 794px;
+    height: 1123px;
+    box-sizing: border-box;
+    position: relative;
+    overflow: hidden;
+    padding: 0;
+    background: #f2f3f5;
+    color: #202124;
+  }
+  .print-chrome { padding: 14px 28px 10px; font-size: 11px; color: #5f6368; border-bottom: 1px solid #dadce0; background: #fff; display: flex; justify-content: space-between; }
+  .mail-header { background: #fff; padding: 14px 28px 18px; border-bottom: 1px solid #dadce0; }
+  .mail-header table { border-collapse: collapse; font-size: 12.5px; }
+  .mail-header td { padding: 2px 0; vertical-align: top; }
+  .mail-header td.k { color: #5f6368; width: 60px; }
+  .mail-subject { font-size: 17px; font-weight: 400; margin: 0 0 8px; color: #202124; }
+
+  .mail-body { background: #fff; margin: 18px 60px; padding: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .brand-bar { background: #0b3d5c; color: #ffffff; padding: 22px 32px; }
+  .brand-name { font-size: 24px; font-weight: bold; letter-spacing: 1px; }
+  .body-content { padding: 26px 32px 10px; font-size: 13px; line-height: 1.55; }
+  .greeting { margin: 0 0 10px; }
+  .lede { margin: 0 0 16px; }
+
+  table.summary { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 18px; }
+  table.summary td { padding: 8px 4px; border-bottom: 1px solid #e8eaed; }
+  table.summary td.label { color: #5f6368; width: 45%; }
+  table.summary td.val { font-weight: bold; text-align: right; }
+  table.summary tr.total td { border-bottom: none; padding-top: 12px; font-size: 15px; }
+
+  .btn-wrap { text-align: center; margin: 18px 0 26px; }
+  .btn { display: inline-block; background: #1a73e8; color: #ffffff; padding: 11px 30px; border-radius: 4px; font-size: 13px; font-weight: bold; text-decoration: none; }
+
+  .fine-block { padding: 0 32px 22px; font-size: 11px; color: #5f6368; line-height: 1.6; border-top: 1px solid #e8eaed; margin-top: 4px; }
+  .fine-block p { margin: 10px 0 0; }
+
+  .mail-footer { padding: 16px 32px 22px; font-size: 10px; color: #9aa0a6; line-height: 1.6; }
+  .mail-footer a { color: #9aa0a6; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="print-chrome">
+    <span>mail.example/mail/u/0/#inbox/17c9f2a41d</span>
+    <span>1 of 1</span>
+  </div>
+
+  <div class="mail-header">
+    <div class="mail-subject">Your Northlight+ payment receipt</div>
+    <table>
+      <tr><td class="k">From:</td><td>Northlight+ &lt;billing@northlightplus.example&gt;</td></tr>
+      <tr><td class="k">To:</td><td>Priya Chandra &lt;priya.chandra83@mailbox.example&gt;</td></tr>
+      <tr><td class="k">Date:</td><td>3 August 2026, 09:14</td></tr>
+    </table>
+  </div>
+
+  <div class="mail-body">
+    <div class="brand-bar"><span class="brand-name">NORTHLIGHT+</span></div>
+    <div class="body-content">
+      <p class="greeting">Hi Priya,</p>
+      <p class="lede">Thanks for being a Northlight+ member. We've taken your monthly payment for your 12 month plan &mdash; here's your receipt.</p>
+
+      <table class="summary">
+        <tr><td class="label">Plan</td><td class="val">Northlight+ Standard (12 month plan)</td></tr>
+        <tr><td class="label">Account number</td><td class="val">NL-ACC-771049-2</td></tr>
+        <tr><td class="label">Payment date</td><td class="val">3 August 2026</td></tr>
+        <tr><td class="label">Plan renews on</td><td class="val">3 August 2027</td></tr>
+        <tr class="total"><td class="label">Amount charged</td><td class="val">£9.99</td></tr>
+      </table>
+
+      <div class="btn-wrap"><a class="btn" href="#">Manage your plan</a></div>
+    </div>
+
+    <div class="fine-block">
+      <p><strong>Invoice number:</strong> NL-INV-2208453 &nbsp;&middot;&nbsp; <strong>VAT registration:</strong> GB 234 5678 90</p>
+      <p>Your payment of £9.99 includes VAT of £1.67. This charge was billed by Meridian Payments Limited on behalf of Northlight+ and was taken from your debit card ending 4471 (expires 09/28) on 4 August 2026.</p>
+      <p>Paid monthly, your 12 month plan is equivalent to £119.88 a year. Fancy more channels? Northlight+ Ultra is available for £13.99 a month.</p>
+      <p>Quote code SUMMER26 before the offer ends 31 August 2026 to add a second screen at no extra cost.</p>
+      <p>Subscribed through the app store instead? Manage and cancel your plan via your device account settings rather than through Northlight+ directly.</p>
+      <p>Questions about this receipt? Contact our support team at support@northlight-help.example.</p>
+    </div>
+
+    <div class="mail-footer">
+      Northlight+ is a trading name of Northlight Media Group, 4 Aldergate House, Brentmoor, BM1 6QF.<br>
+      You're receiving this email because you have an active Northlight+ subscription. <a href="#">Unsubscribe from receipts</a> &nbsp;|&nbsp; <a href="#">Privacy policy</a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

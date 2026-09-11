@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Little Acorns Day Nursery - Invoice</title>
+<style>
+@font-face{font-family:"Corpus Nursery";src:url("../fonts/JosefinSans.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Nursery Serif";src:url("../fonts/Gelasio.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; font-family: "Corpus Nursery Serif", serif; color: #111; }
+  .page {
+    width: 794px; height: 1123px; box-sizing: border-box;
+    position: relative; overflow: hidden;
+    padding: 36px 44px;
+    background: #fff;
+  }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #2c6e49; padding-bottom: 10px; margin-bottom: 14px; }
+  .wordmark { font-family: "Corpus Nursery", sans-serif; }
+  .wordmark h1 { font-size: 22px; margin: 0; color: #2c6e49; }
+  .wordmark .tag { font-size: 10.5px; color: #555; margin-top: 2px; }
+  .addr { font-size: 11px; margin-top: 8px; line-height: 1.4; }
+  .grid {
+    font-family: "Corpus Nursery", sans-serif;
+    border: 1.5px solid #2c6e49; font-size: 11px;
+  }
+  .grid table { border-collapse: collapse; width: 240px; }
+  .grid td { padding: 4px 8px; border-bottom: 1px solid #cfe3d6; }
+  .grid td.k { color: #444; }
+  .grid td.v { text-align: right; font-weight: bold; }
+  .grid tr:last-child td { border-bottom: none; }
+
+  h2.section { font-family: "Corpus Nursery", sans-serif; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.3px; color: #2c6e49; border-bottom: 1px solid #2c6e49; padding-bottom: 3px; margin: 16px 0 8px 0; }
+
+  table.lines { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 6px; }
+  table.lines th { font-family: "Corpus Nursery", sans-serif; text-align: left; font-size: 10.5px; text-transform: uppercase; color: #444; border-bottom: 1.5px solid #2c6e49; padding: 4px 6px; }
+  table.lines td { padding: 5px 6px; border-bottom: 1px solid #ddd; }
+  table.lines td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .totals { width: 300px; margin-left: auto; font-size: 12.5px; margin-top: 4px; }
+  .totals table { width: 100%; border-collapse: collapse; }
+  .totals td { padding: 4px 6px; }
+  .totals td.amt { text-align: right; }
+  .totals tr.grand td { border-top: 2px solid #2c6e49; font-weight: bold; font-size: 14px; }
+
+  .notes { font-size: 10.5px; color: #333; margin-top: 12px; line-height: 1.5; }
+  .notes p { margin: 3px 0; }
+
+  .remit { font-family: "Corpus Nursery Serif", serif; margin-top: 16px; border: 1.5px dashed #888; padding: 10px 14px; font-size: 11px; }
+  .remit h3 { font-family: "Corpus Nursery", sans-serif; font-size: 11px; text-transform: uppercase; margin: 0 0 6px 0; }
+  .remit .cols { display: flex; gap: 24px; }
+  .remit .cols div { flex: 1; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="head">
+    <div class="wordmark">
+      <h1>Little Acorns Day Nursery</h1>
+      <div class="tag">part of the Bramblewood Childcare Group</div>
+      <div class="addr">
+        22 Orchard Lane, Bexdale BX3 7QL<br>
+        Tel: 01632 960774 &nbsp;|&nbsp; billing@littleacorns-bexdale.example<br>
+        Early years registration: EY-558214
+      </div>
+    </div>
+    <div class="grid">
+      <table>
+        <tr><td class="k">Invoice number</td><td class="v">INV-045821</td></tr>
+        <tr><td class="k">Account number</td><td class="v">1044829</td></tr>
+        <tr><td class="k">Invoice date</td><td class="v">02/09/2026</td></tr>
+        <tr><td class="k">Due date</td><td class="v">15/09/2026</td></tr>
+        <tr><td class="k">Child</td><td class="v">Freddie Marsh</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2 class="section">Fees for September 2026</h2>
+  <table class="lines">
+    <thead>
+      <tr><th>Description</th><th>Qty</th><th>Rate</th><th style="text-align:right">Amount</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Full day sessions (8:00&ndash;18:00), 18 days</td><td>18</td><td>&pound;68.50 / day</td><td class="amt">&pound;1,233.00</td></tr>
+      <tr><td>Funded hours credit (15 hrs/week government funding)</td><td>&ndash;</td><td>&ndash;</td><td class="amt">&minus;&pound;190.40</td></tr>
+      <tr><td>Balance brought forward from August 2026</td><td>&ndash;</td><td>&ndash;</td><td class="amt">&pound;45.00</td></tr>
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <table>
+      <tr><td>Subtotal</td><td class="amt">&pound;1,087.60</td></tr>
+      <tr class="grand"><td>Total payable</td><td class="amt">&pound;1,087.60</td></tr>
+    </table>
+  </div>
+
+  <div class="notes">
+    <p>Autumn term dates: 2 September 2026 to 18 December 2026.</p>
+    <p>Please note: fees will increase from 1 January 2027. Revised rates will be sent separately.</p>
+    <p>A late payment charge of &pound;25.00 applies to any balance left unpaid 7 days after the due date.</p>
+    <p>Registration fees (one-off, charged on enrolment) are non-refundable and are not included on this invoice.</p>
+    <p>Childcare vouchers: we accept salary-sacrifice childcare vouchers. Please ask your voucher provider to quote account number 1044829.</p>
+  </div>
+
+  <div class="remit">
+    <h3>Remittance advice</h3>
+    <div class="cols">
+      <div>
+        Pay to: Little Acorns Day Nursery<br>
+        Sort code: 40-51-62<br>
+        Account number: 20194837<br>
+        Reference: 1044829
+      </div>
+      <div>
+        Amount due: &pound;1,087.60<br>
+        Due date: 15 September 2026<br>
+        Please quote your account number 1044829 with all payments.
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
