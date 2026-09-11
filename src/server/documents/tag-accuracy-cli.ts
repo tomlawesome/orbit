@@ -52,7 +52,7 @@ function rows(doc: CorpusDocument): Row[] {
     const tags = tagsOf(matching);
     out.push({ field, doc: doc.filename, expected: wanted, tags, ok: matching.some((c) => c.tags.some((t) => ACCEPTABLE[field].includes(t.value))) });
   };
-  scalar("reference", "identifier", expected.reference, (c) => c.value.toUpperCase() === (expected.reference ?? "").replace(/\s+/gu, "").toUpperCase());
+  scalar("reference", "identifier", expected.reference, (c) => c.value.replace(/\s+/gu, "").toUpperCase() === (expected.reference ?? "").replace(/\s+/gu, "").toUpperCase());
   scalar("cost", "amount", expected.costMinor === undefined ? undefined : String(expected.costMinor), (c) => c.value === String(expected.costMinor) && c.currency === expected.currency);
   scalar("provider", "organisation", expected.provider, (c) => classifyProvider(expected.provider as string, c.value) === "correct");
   scalar("subtype", "heading", expected.subtype, (c) => c.value.toLowerCase().includes((expected.subtype ?? "").toLowerCase()));
