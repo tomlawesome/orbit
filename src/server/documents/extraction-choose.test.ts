@@ -10,7 +10,15 @@ import type { Tag, TagForKind, TaggedCandidate } from "./extraction-stages";
 
 type TagInput<K extends CandidateKind> =
   | TagForKind[K]
-  | { value: TagForKind[K]; trigger?: string; source?: "label" | "shape" };
+  | {
+    value: TagForKind[K];
+    trigger?: string;
+    source?: "label" | "shape";
+    /** What stage 2's date sieves record when more than one of them looked
+     * at a date (`extraction-date-sieves.ts`). */
+    sieves?: readonly string[];
+    strength?: number;
+  };
 
 let nextIndex = 0;
 
@@ -52,13 +60,41 @@ describe("choosing dates and their roles", () => {
     ]);
   });
 
-  it("drops a date nothing on the page explained", () => {
+  // Superseded on 2026-09-11 (owner): a rule never discards what the model
+  // could still choose, so a date nothing explained is offered without a
+  // role rather than dropped. It was the reason the hold-out lost half its
+  // dates -- stage 2 could not label them, so stage 3 never saw them.
+  it("keeps a date nothing on the page explained, and says nothing about it", () => {
     const chosen = chooseFields([
       candidate("date", "2026-01-02", ["other"]),
       candidate("date", "2026-03-04", [{ value: "expiry", trigger: "expires" }]),
     ]);
 
-    expect(chosen.dates).toEqual(["2026-03-04"]);
+    expect(chosen.dates).toEqual(["2026-01-02", "2026-03-04"]);
+    expect(chosen.dateRoles).toEqual([{ date: "2026-03-04", role: "expiry" }]);
+  });
+
+  it("offers a date only a guess spoke for, without the guess's role", () => {
+    const chosen = chooseFields([
+      candidate("date", "2026-01-02", [
+        { value: "issued", trigger: "printed 4 times across the document", sieves: ["printed-throughout"], strength: 0 },
+      ]),
+      candidate("date", "2026-03-04", [{ value: "expiry", trigger: "expires" }]),
+    ]);
+
+    expect(chosen.dates).toEqual(["2026-01-02", "2026-03-04"]);
+    expect(chosen.dateRoles).toEqual([{ date: "2026-03-04", role: "expiry" }]);
+  });
+
+  it("lets the role more sieves agree on beat one a single sieve reached", () => {
+    const chosen = chooseFields([
+      candidate("date", "2026-05-01", [
+        { value: "renewal", trigger: "12 months", sieves: ["term-arithmetic", "heading-above"], strength: 1 },
+        { value: "expiry", trigger: "Expiry", sieves: ["heading-above"], strength: 1 },
+      ]),
+    ]);
+
+    expect(chosen.dateRoles).toEqual([{ date: "2026-05-01", role: "renewal" }]);
   });
 
   it("prefers the role whose tag quoted the page over one that guessed", () => {
