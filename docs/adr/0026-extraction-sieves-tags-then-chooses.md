@@ -220,6 +220,72 @@ Measured on the 24 the same day: overall 67.9% -> 75.1%, provider 45.8%
 a blank rather than a wrong value, which is the point of the change: the
 hold-out is what will say whether the bet paid.
 
+## Amendment, 2026-09-11: the model chooses every field; rules rank and fall back
+
+Owner, on the hold-out: *"Everything is supposed to go to the model for
+final choice."* Measured on the 12 unseen pages, every field the rules
+answered alone got worse as more sieves were added -- provider -25%, cost
+-36% -- while subtype, the one field decided by the model from a shortlist,
+held at 66.7%. Sieves are shaped by the 24 pages however careful we are;
+the model is not.
+
+So stage 3 is now one shape for every field.
+
+1. **Stage 2 shrinks and ranks; it never answers.** Per field the sieves
+   hand over at most eight candidates, best-spoken-for first, each with the
+   Tika block it was printed in and the names of the sieves and tags that
+   kept it (`extraction-shortlist.ts`, and the builders in
+   `extraction-choose.ts` and `extraction-choose-meaning.ts`). Nothing is
+   discarded before the cap: a figure read as last year's, or a name no
+   sieve spoke for, goes to the bottom of its list rather than off it.
+
+2. **The model picks, and `none` is an answer.** One question per field:
+   the dates and their jobs in one call, then reference, cost, provider,
+   subtype, and -- where the roles make a schedule -- how long it runs.
+   Five or six calls a document, each a few hundred characters, within the
+   five-minute unattended budget. Only grounded answers count: a value on
+   the list, a role in the vocabulary. `scheduleKind` still derives from
+   the roles; subtype's shortlist is the taxonomy phrases the page's own
+   words support, so the model chooses between eight phrases rather than
+   51 kinds and 63 qualifiers.
+
+3. **The rules rank and fall back, and never both.** `chooseFields` is
+   unchanged and is what runs where there is no model to ask -- the
+   attended case, no Ollama. `npm run eval:stages` without `--model` scores
+   75.1% before and after this change, which is the point: that path did
+   not move.
+
+4. **The chooser is not tied to one model** (owner, same day: *"let a model
+   choose the most likely -- that does NOT have to be the NuExtract one"*).
+   Each question is plain English over a numbered list, answered with a
+   number or `none`, and the reply is parsed leniently and grounded against
+   the list. Two transports ship: NuExtract 3's native structured mode on
+   `/api/generate`, and a generic Ollama chat call on `/api/chat`. Which
+   model answers is `EXTRACTION_CHOOSER_MODEL`; setting it also selects the
+   chat transport. Only NuExtract is pulled on `orbit-ollama` today, so
+   swapping the chooser is that setting plus a model pull, never a code
+   change.
+
+5. **Stage 2's number is now shortlist recall** (`npm run eval:shortlist`):
+   how often the expected answer is among the entries handed to the model,
+   and how many entries there were. On the 24, 2026-09-11:
+
+   | field | answer on the shortlist | mean entries |
+   |---|---|---|
+   | dates | 35/35 (100%) | 7.0 |
+   | reference | 24/24 (100%) | 7.3 |
+   | cost | 19/19 (100%) | 5.2 |
+   | provider | 23/24 (95.8%) | 7.1 |
+   | subtype | 24/24 (100%) | 7.8 |
+   | recurrence | 11/14 (78.6%) | 1.3 |
+
+   The provider miss is a name stage 1 cut with the words after it
+   ("Kelbridge Home Loans Standard Variable Rate"). The recurrence misses
+   are periods the page writes in words ("monthly"), which stage 3's cycle
+   reader refuses by design; the rules-only path could not reach them
+   either. Both are stage 1 and 2 work, and this is the number that says
+   so.
+
 ## Alternatives rejected
 
 - **Widen the regexes field by field until the 24 pass.** This is the
