@@ -14,6 +14,7 @@
 // Tika block it was found in, and its tags already carry the words that
 // justified them, so this stage only compares what stage 2 decided.
 
+import { chooseProviderByRules } from "./extraction-choose-meaning";
 import type { CandidateKind } from "./extraction-sieve";
 import type { ExtractedFields } from "./extraction-scoring";
 import type { ChooseStage, TaggedCandidate } from "./extraction-stages";
@@ -281,9 +282,11 @@ function chooseCost(candidates: readonly TaggedCandidate[]): {
 }
 
 /**
- * Stage 3 of ADR-0026. `provider` and `subtype` are a later slice and stay
- * blank here rather than being guessed from the organisation and heading
- * candidates that stage 2 has already tagged.
+ * Stage 3 of ADR-0026. The rule-shaped fields are chosen here. Of the two
+ * meaning-shaped ones, `provider` takes the value where the page states it
+ * in so many words (`extraction-choose-meaning.ts`) and `subtype` is left
+ * blank: both are the model's to choose over the shortlist, which is the
+ * same module's second half and is wired up by the caller.
  */
 export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
   const { dates, dateRoles } = chooseDates(candidates);
@@ -302,6 +305,7 @@ export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
   // is nothing for it to be the cycle of.
   const recurrenceMonths = scheduleKind === undefined ? undefined : chooseRecurrenceMonths(candidates);
   const reference = chooseReference(candidates);
+  const provider = chooseProviderByRules(candidates);
 
   return {
     dates,
@@ -309,6 +313,7 @@ export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
     ...(scheduleKind === undefined ? {} : { scheduleKind }),
     ...(recurrenceMonths === undefined ? {} : { recurrenceMonths }),
     ...(reference === undefined ? {} : { reference }),
+    ...(provider === undefined ? {} : { provider }),
     ...chooseCost(candidates),
   };
 };

@@ -358,14 +358,14 @@ describe("choosing the cost and its currency", () => {
   });
 });
 
-describe("the fields a later slice fills in", () => {
-  it("leaves provider and subtype alone however the page is tagged", () => {
+describe("the meaning-shaped fields", () => {
+  it("takes the provider the page states, and leaves subtype to the model", () => {
     const chosen = chooseFields([
       candidate("organisation", "Kestrel Mutual", [{ value: "provider", trigger: "your insurer" }]),
       candidate("heading", "HOME INSURANCE", [{ value: "title", trigger: "" }]),
     ]);
 
-    expect(chosen.provider).toBeUndefined();
+    expect(chosen.provider).toBe("Kestrel Mutual");
     expect(chosen.subtype).toBeUndefined();
   });
 });

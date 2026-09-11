@@ -5,13 +5,20 @@
 // 2026-09-11); the hold-out judges.
 //
 //   node node_modules/tsx/dist/cli.mjs src/server/documents/stages-score-cli.ts
+//   node node_modules/tsx/dist/cli.mjs src/server/documents/stages-score-cli.ts --model
 //   node node_modules/tsx/dist/cli.mjs src/server/documents/stages-score-cli.ts --dump <filename-part> <kind>
+//
+// Without `--model`, `provider` and `subtype` are whatever the rules over
+// the tags decide. With it, the two fields the rules left blank are put to
+// NuExtract 3 over the shortlist -- which needs the Ollama container on
+// `orbit_orbit-document-processing`.
 //
 // `--dump` prints every tagged candidate of one kind for one document, with
 // its tags and block, and skips untagged ones: the view for deciding
 // whether a miss is a tag or a choice.
 
 import { chooseFields } from "./extraction-choose";
+import { chooseMeaningFieldsWithModel, ollamaMeaningTransport } from "./extraction-choose-meaning";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { formatRunScore, scoreCorpus } from "./extraction-scoring";
 import { sieve, type CandidateKind } from "./extraction-sieve";
@@ -36,8 +43,14 @@ async function main(): Promise<void> {
     dump(process.argv[dumpAt + 1], process.argv[dumpAt + 2] as CandidateKind);
     return;
   }
-  const staged = await scoreCorpus(EXTRACTION_CORPUS, (text) => chooseFields(tagCandidates(text, sieve(text))));
-  console.log(formatRunScore("sieve+tag+choose", staged));
+  const withModel = process.argv.includes("--model");
+  const staged = await scoreCorpus(EXTRACTION_CORPUS, async (text) => {
+    const tagged = tagCandidates(text, sieve(text));
+    const chosen = chooseFields(tagged);
+    if (!withModel) return chosen;
+    return { ...chosen, ...await chooseMeaningFieldsWithModel(tagged, chosen, ollamaMeaningTransport) };
+  });
+  console.log(formatRunScore(withModel ? "sieve+tag+choose+model" : "sieve+tag+choose", staged));
   const heuristics = await scoreCorpus(EXTRACTION_CORPUS, (text, filename) => proposalFromText(text, filename));
   console.log(formatRunScore("heuristics (one-shot)", heuristics));
 }
