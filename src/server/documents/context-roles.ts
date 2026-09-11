@@ -92,7 +92,7 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   { role: "renewal", direction: "forward", pattern: "due for renewal(?: on)?" },
   // UK contracts print the end of the tie-in as "minimum term", and the
   // household has to choose again when it arrives.
-  { role: "renewal", direction: "forward", pattern: "(?:minimum|initial|fixed)(?: \\d{1,2}[- ]month)? term" },
+  { role: "renewal", direction: "forward", pattern: "(?:minimum|initial|fixed)(?: \\d{1,2}[- ]month)? term\\b" },
   { role: "renewal", direction: "backward", pattern: "is your renewal date" },
   { role: "renewal", direction: "backward", pattern: "is when (?:your policy|this) renews" },
 
@@ -104,7 +104,7 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   { role: "expiry", direction: "forward", pattern: "valid (?:until|to|through)" },
   // "ends on" says a term stops there; whether that is an expiry or a
   // renewal is settled in `extraction-tags.ts` from the words around it.
-  { role: "expiry", direction: "forward", pattern: "(?:cover |policy |plan |contract |licence |membership |tariff |price )?(?:ends?|ending)(?: on)?" },
+  { role: "expiry", direction: "forward", pattern: "(?:cover |policy |plan |contract |licence |membership |tariff |price )?\\b(?:ends?|ending)\\b(?: on)?" },
   { role: "expiry", direction: "backward", pattern: "is the expiry date" },
   { role: "expiry", direction: "backward", pattern: "is when (?:your cover|this) expires" },
 

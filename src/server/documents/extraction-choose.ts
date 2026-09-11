@@ -154,7 +154,16 @@ function chooseDates(candidates: readonly TaggedCandidate[]): {
     // says `issued` and another names a job that date does -- the inspection,
     // the renewal -- the specific one is what the household needs.
     if (roles.size > 1 && roles.has("issued")) roles.delete("issued");
-    if (roles.size === 1) dateRoles.push({ date, role: [...roles][0] });
+    // Still arguing: the role the page states most often wins, the same way
+    // a reference printed in every footer wins. A page that says "expiry
+    // date" twice and mentions the next test once has said what the date is.
+    // Two roles claimed equally often remains an ambiguous page: blank.
+    const winner = [...roles]
+      .map((role) => ({ role, claims: considered.filter((claim) => claim.role === role).length }))
+      .sort((a, b) => b.claims - a.claims);
+    if (winner.length === 1 || (winner.length > 1 && winner[0].claims > winner[1].claims)) {
+      dateRoles.push({ date, role: winner[0].role });
+    }
   }
 
   return { dates, dateRoles };
@@ -169,7 +178,7 @@ const CYCLE_YEARS = /(\d{1,2})\s*-?\s*years?\b/iu;
 // The one word allowed to stand in for a figure, because pages print it far
 // more often than "12 months". "two years" gets no such treatment: spelled
 // numbers are where a misread becomes a wrong value.
-const CYCLE_ANNUAL = /\bannual(?:ly)?\b/iu;
+const CYCLE_ANNUAL = /\bannual(?:ly)?\b|\byearly\b|\b(?:per|a|each|every) (?:year|annum)\b|\bfor the year\b/iu;
 
 /**
  * How long the cycle is, in months, from the block a candidate was found
