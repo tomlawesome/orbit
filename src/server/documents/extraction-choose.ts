@@ -15,11 +15,14 @@
 // justified them, so this stage only compares what stage 2 decided.
 
 import {
+  chooseCostWithModel,
   chooseDateToActOnWithModel,
   chooseMeaningFieldsWithModel,
   chooseProviderByRules,
+  type AmountChoice,
   type MeaningTransport,
 } from "./extraction-choose-meaning";
+import { AMOUNT_LABEL } from "./extraction-amount-sieves";
 import { DATE_RANGE, WORDS_BEFORE } from "./extraction-date-sieves";
 import type { CandidateKind } from "./extraction-sieve";
 import type { ExtractedFields } from "./extraction-scoring";
@@ -47,6 +50,11 @@ const REFERENCE_PREFERENCE = ["reference", "certificate", "policy", "account", "
  * one win a page that prints no total.
  */
 const AMOUNT_PREFERENCE = ["total", "due", "instalment"];
+
+/** How many sieves have to agree before the rules name a cost that no
+ * label stated. One sieve is one way of looking, and a page prints thirty
+ * figures. */
+const AGREEING_AMOUNT_SIEVES = 2;
 
 /** The rank of a candidate's best tag in `preference`, or nothing when none
  * of its tags appear there. A candidate tagged both `total` and `rival` is
@@ -355,23 +363,194 @@ function chooseReference(candidates: readonly TaggedCandidate[]): string | undef
   return trimFieldValue("reference", winner.value, winner.line);
 }
 
+/**
+ * The amounts the page gave a reason to read as this document's cost, one
+ * entry per figure, with every sieve that spoke for or against it.
+ *
+ * `previous` (last year's figure) and `rival` (the upgrade tier, the exit
+ * fee, the employer's half) are reasons AGAINST rather than low-ranked
+ * reasons for: a page prints them to be read instead of the real number, so
+ * one of them cancels a reason for.
+ */
+interface AmountClaim {
+  value: string;
+  currency?: string;
+  /** Every sieve that read the figure as a cost of some kind. */
+  sieves: Set<string>;
+  against: Set<string>;
+  /** The strengths of those sieves added up, one reading per sieve: three
+   * sieves with the page's own words behind them is a better reason than
+   * three weak readings. Counted per sieve and not per printing, so a
+   * figure printed six times is not six reasons. */
+  weight: number;
+  /** Whether the trigger table named it in so many words -- the one sieve
+   * that can answer alone. */
+  labelStated: boolean;
+  /** Whether a sieve read it in so many words as last year's figure, or as
+   * the rival printed beside the real one. Such a figure is out of the
+   * running however much else agrees about it: the page printed it to be
+   * read instead of the answer. */
+  ruledOut: boolean;
+  /**
+   * What the best-evidenced reading says it is, as a rank in
+   * `AMOUNT_PREFERENCE`. Read off the tag the most sieves agreed on, not
+   * off the best tag any single sieve reached: one stray reading of a
+   * monthly figure as a total must not promote it to one.
+   */
+  rank: number;
+}
+
+/** Tags that are a reason against a figure being the cost. */
+const NOT_THE_COST = ["previous", "rival"];
+
+/** What one sieve said, kept at its best: a sieve that read the same
+ * figure twice has one opinion about it. */
+type SieveReadings = Map<string, number>;
+
+function record(readings: SieveReadings, sieve: string, strength: number): void {
+  readings.set(sieve, Math.max(readings.get(sieve) ?? 0, strength));
+}
+
+function totalStrength(readings: SieveReadings): number {
+  return [...readings.values()].reduce((sum, strength) => sum + strength, 0);
+}
+
+export function amountClaims(candidates: readonly TaggedCandidate[]): AmountClaim[] {
+  interface Working {
+    value: string;
+    currency?: string;
+    /** One set of readings per tag, so the best-evidenced tag can be read
+     * off at the end. */
+    byTag: Map<string, SieveReadings>;
+    against: SieveReadings;
+    labelStated: boolean;
+  }
+  const byValue = new Map<string, Working>();
+
+  for (const candidate of candidates) {
+    // ADR-0025 section 3 refuses a cost whose evidence carries no currency,
+    // and the scorer gives no half credit for one, so an amount without a
+    // symbol or code is not half an answer -- it is none.
+    if (candidate.kind !== "amount" || !candidate.currency) continue;
+    for (const tag of candidate.tags) {
+      const rank = AMOUNT_PREFERENCE.indexOf(tag.value);
+      const against = NOT_THE_COST.includes(tag.value);
+      if (rank === -1 && !against) continue;
+      const key = `${candidate.value} ${candidate.currency}`;
+      const held = byValue.get(key) ?? {
+        value: candidate.value,
+        currency: candidate.currency,
+        byTag: new Map<string, SieveReadings>(),
+        against: new Map() as SieveReadings,
+        labelStated: false,
+      };
+      const strength = tag.strength ?? claimStrength(tag.trigger);
+      const sieves = tag.sieves ?? [AMOUNT_LABEL];
+      if (against) {
+        for (const sieve of sieves) record(held.against, sieve, strength);
+      } else {
+        const readings = held.byTag.get(tag.value) ?? new Map() as SieveReadings;
+        for (const sieve of sieves) record(readings, sieve, strength);
+        held.byTag.set(tag.value, readings);
+        if (sieves.includes(AMOUNT_LABEL) && strength >= 2) held.labelStated = true;
+      }
+      byValue.set(key, held);
+    }
+  }
+
+  const claims: AmountClaim[] = [];
+  for (const working of byValue.values()) {
+    const readings: SieveReadings = new Map();
+    for (const perTag of working.byTag.values()) {
+      for (const [sieve, strength] of perTag) record(readings, sieve, strength);
+    }
+    // The reading the most sieves agreed on is what the figure is; where
+    // they are level, the stronger reading, and then the one the page's
+    // preference puts first.
+    const headline = [...working.byTag.entries()]
+      .map(([tag, perTag]) => ({ tag, sieves: perTag.size, weight: totalStrength(perTag) }))
+      .sort((left, right) =>
+        right.sieves - left.sieves ||
+        right.weight - left.weight ||
+        AMOUNT_PREFERENCE.indexOf(left.tag) - AMOUNT_PREFERENCE.indexOf(right.tag))[0];
+    claims.push({
+      value: working.value,
+      ...(working.currency === undefined ? {} : { currency: working.currency }),
+      sieves: new Set(readings.keys()),
+      against: new Set(working.against.keys()),
+      ruledOut: [...working.against.values()].some((strength) => strength >= 2),
+      weight: totalStrength(readings),
+      labelStated: working.labelStated,
+      rank: headline === undefined ? AMOUNT_PREFERENCE.length : AMOUNT_PREFERENCE.indexOf(headline.tag),
+    });
+  }
+  return claims;
+}
+
+/** How many independent reasons there are to call a figure the cost: the
+ * sieves for it, less the ones that read it as last year's or as the rival
+ * printed beside it. */
+function amountAgreement(claim: AmountClaim): number {
+  return claim.sieves.size - claim.against.size;
+}
+
+/** Whether the page gave reason enough to name this figure at all: two
+ * sieves agreeing, or the trigger table naming it in so many words. */
+function enoughReason(claim: AmountClaim): boolean {
+  return amountAgreement(claim) >= AGREEING_AMOUNT_SIEVES || claim.labelStated;
+}
+
+/**
+ * Claims worth offering: something spoke for the figure and nothing has
+ * cancelled it out. Ordered best first.
+ *
+ * What the thing costs is heard before what one payment of it costs: a
+ * page that prints a total and the twelve instalments it is paid in has
+ * answered the question with the total, and the instalments are how, not
+ * how much. So an instalment is only in the running where the page named
+ * no total and no amount due at all -- and within either group, the figure
+ * the most sieves agree about wins.
+ */
+export function rankedAmounts(candidates: readonly TaggedCandidate[]): AmountClaim[] {
+  const kept = amountClaims(candidates)
+    .filter((claim) => !claim.ruledOut && amountAgreement(claim) > 0);
+  // Only a total or an amount due the page really gave a reason for keeps
+  // the instalments out of the running: where the whole-price figures are
+  // all one weak reading, the monthly fee the page did name is the better
+  // answer -- it is what a gym membership costs.
+  const whole = kept.filter((claim) =>
+    claim.rank < AMOUNT_PREFERENCE.indexOf("instalment") && enoughReason(claim));
+  return (whole.length > 0 ? whole : kept).sort((left, right) =>
+    amountAgreement(right) - amountAgreement(left) ||
+    right.weight - left.weight ||
+    left.rank - right.rank);
+}
+
+/**
+ * What this document costs, where the page gives two reasons to believe it
+ * or one stated label, and nothing where it does not.
+ *
+ * Blank is the answer to a page that prints two equally well-spoken-for
+ * figures: a wrong cost costs a point where a blank costs nothing, and the
+ * blank is what the model is then asked about.
+ */
 function chooseCost(candidates: readonly TaggedCandidate[]): {
   costMinor?: number;
   currency?: string;
 } {
-  // ADR-0025 section 3 refuses a cost whose evidence carries no currency,
-  // and the scorer gives no half credit for one, so an amount without a
-  // symbol or code is not half an answer -- it is none. Such amounts are
-  // dropped before the ranking rather than after it: a figure in a
-  // transaction table that cannot be the answer should not be allowed to
-  // outrank, or tie with, one that can.
-  const priced = candidates.filter((candidate) => candidate.kind !== "amount" || candidate.currency);
-  const best = bestTagged(priced, "amount", AMOUNT_PREFERENCE);
-  if (best.length === 0) return {};
-  if (new Set(best.map((candidate) => candidate.value)).size > 1) return {};
-  const winner = best[0];
-  const minor = Number(winner.value);
-  return Number.isFinite(minor) ? { costMinor: minor, currency: winner.currency } : {};
+  const ranked = rankedAmounts(candidates);
+  const best = ranked[0];
+  if (best === undefined) return {};
+  if (!enoughReason(best)) return {};
+  const rival = ranked[1];
+  if (rival &&
+    amountAgreement(rival) === amountAgreement(best) &&
+    rival.weight === best.weight &&
+    rival.rank === best.rank) {
+    return {};
+  }
+  const minor = Number(best.value);
+  return Number.isFinite(minor) ? { costMinor: minor, currency: best.currency } : {};
 }
 
 /**
@@ -426,8 +605,27 @@ export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
 };
 
 /**
+ * The figures the rules could not choose between, best-evidenced first,
+ * each with the block it was printed in: what the model is asked about when
+ * the rules leave the cost blank.
+ */
+export function amountsWithoutAChoice(candidates: readonly TaggedCandidate[]): AmountChoice[] {
+  return rankedAmounts(candidates).map((claim) => {
+    const found = candidates.find((candidate) =>
+      candidate.kind === "amount" &&
+      candidate.value === claim.value &&
+      candidate.currency === claim.currency);
+    return {
+      value: claim.value,
+      ...(claim.currency === undefined ? {} : { currency: claim.currency }),
+      line: found?.line ?? "",
+    };
+  });
+}
+
+/**
  * The whole of stage 3 with the model available: the rules first, then the
- * three questions they left open -- who the household deals with, what type
+ * questions they left open -- who the household deals with, what type
  * of thing this is, and which of the dates nothing could label is the one to
  * act on.
  *
@@ -443,6 +641,13 @@ export async function chooseFieldsWithModel(
   const chosen = chooseFields(candidates);
   const meaning = await chooseMeaningFieldsWithModel(candidates, chosen, transport);
 
+  // The cost, where two figures were equally well spoken for. The model
+  // chooses between them and nothing else: the list is the sieves', and an
+  // answer outside it is refused.
+  const cost = chosen.costMinor === undefined
+    ? await chooseCostWithModel(amountsWithoutAChoice(candidates), transport)
+    : undefined;
+
   const decided = chosen.dateRoles ?? [];
   const offered = datesWithoutARole(candidates, decided);
   const picked = await chooseDateToActOnWithModel(candidates, offered, decided, transport);
@@ -451,6 +656,7 @@ export async function chooseFieldsWithModel(
   return {
     ...chosen,
     ...meaning,
+    ...(cost ?? {}),
     ...(dateRoles.length > 0 ? { dateRoles } : {}),
     ...scheduleFrom(dateRoles, candidates),
   };
