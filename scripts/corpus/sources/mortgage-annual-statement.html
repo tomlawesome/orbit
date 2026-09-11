@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Kelbridge Home Loans — Mortgage Annual Statement</title>
+<style>
+@font-face{font-family:"Corpus Retail";src:url("../fonts/Rubik.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Retail Mono";src:url("../fonts/Inconsolata.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Retail", sans-serif; font-size: 9pt; color: #23282d;
+    background: #fff;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always; background: #fff;
+    padding: 12mm 14mm 14mm 14mm;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  .mono { font-family: "Corpus Retail Mono", monospace; }
+
+  .masthead {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding-bottom: 3mm; border-bottom: 3px solid #8c1d40;
+  }
+  .brand { font-size: 16pt; font-weight: 700; color: #23282d; letter-spacing: 0.2px; }
+  .brand small { display: block; font-size: 7pt; font-weight: 400; color: #55595d; margin-top: 0.8mm; }
+  .runbox { font-family: "Corpus Retail Mono", monospace; font-size: 7.6pt; color: #23282d; text-align: right; line-height: 1.7; }
+  .runbox .k { color: #55595d; }
+
+  h1.doctitle {
+    font-size: 13.5pt; font-weight: 700; color: #23282d; text-transform: uppercase;
+    letter-spacing: 0.4px; margin: 5mm 0 1mm 0;
+  }
+  .docsub { font-size: 8.6pt; color: #44484c; margin-bottom: 4mm; }
+
+  h2 {
+    font-size: 10pt; font-weight: 700; color: #23282d; text-transform: uppercase;
+    letter-spacing: 0.4px; margin: 5mm 0 1.6mm 0; border-bottom: 1.4px solid #23282d;
+    padding-bottom: 0.9mm;
+  }
+
+  table.grid { width: 100%; border-collapse: collapse; font-size: 8.4pt; margin-bottom: 1mm; }
+  table.grid th, table.grid td { border: 0.75px solid #23282d; padding: 1.6mm 2.4mm; text-align: left; vertical-align: top; }
+  table.grid th { background: #ececea; font-weight: 700; width: 46%; }
+  table.grid td.num { font-family: "Corpus Retail Mono", monospace; text-align: right; }
+
+  .balance-panel {
+    display: flex; justify-content: space-between; align-items: center;
+    border: 1.4px solid #23282d; padding: 3.2mm 5mm; margin: 4mm 0;
+  }
+  .balance-panel .lab { font-size: 8.6pt; text-transform: uppercase; letter-spacing: 0.4px; color: #23282d; font-weight: 700; }
+  .balance-panel .amt { font-family: "Corpus Retail Mono", monospace; font-size: 18pt; font-weight: 700; color: #8c1d40; }
+
+  .twocol { display: flex; gap: 6mm; }
+  .twocol > div { flex: 1; }
+
+  .payrow { display: flex; gap: 4mm; margin: 3mm 0; }
+  .paybox { flex: 1; border: 0.75px solid #23282d; padding: 2.4mm 3.2mm; }
+  .paybox .lab { font-size: 7.4pt; text-transform: uppercase; letter-spacing: 0.3px; color: #55595d; }
+  .paybox .val { font-family: "Corpus Retail Mono", monospace; font-size: 12.5pt; font-weight: 700; color: #23282d; margin-top: 0.6mm; }
+  .paybox .sub { font-size: 7pt; color: #55595d; margin-top: 0.6mm; }
+
+  table.tx { width: 100%; border-collapse: collapse; font-family: "Corpus Retail Mono", monospace; font-size: 7.8pt; }
+  table.tx thead th {
+    font-family: "Corpus Retail", sans-serif; text-align: left; font-weight: 700; font-size: 7.4pt;
+    text-transform: uppercase; letter-spacing: 0.3px; border-bottom: 1.6px solid #23282d;
+    padding: 1.3mm 2mm; background: #ececea;
+  }
+  table.tx thead th.r { text-align: right; }
+  table.tx tbody td { padding: 1mm 2mm; border-bottom: 0.5px solid #b9bcbf; }
+  table.tx tbody td.r { text-align: right; }
+  table.tx tbody tr:nth-child(even) td { background: #f6f6f4; }
+
+  .footstrip {
+    position: absolute; left: 14mm; right: 14mm; bottom: 8mm;
+    display: flex; justify-content: space-between; font-size: 7pt; color: #55595d;
+    border-top: 0.75px solid #23282d; padding-top: 1.6mm;
+  }
+
+  .small { font-size: 7.4pt; line-height: 1.5; color: #23282d; }
+  .cols2 { column-count: 2; column-gap: 7mm; }
+  .cols2 p { margin: 0 0 2mm 0; }
+
+  table.erc { width: 100%; border-collapse: collapse; font-size: 8.2pt; margin-bottom: 2mm; }
+  table.erc th, table.erc td { border: 0.75px solid #23282d; padding: 1.5mm 2.4mm; text-align: left; }
+  table.erc th { background: #ececea; font-weight: 700; }
+  table.erc td.num { font-family: "Corpus Retail Mono", monospace; text-align: right; }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+  <div class="masthead">
+    <div class="brand">Kelbridge Home Loans
+      <small>Residential mortgage lending</small>
+    </div>
+    <div class="runbox">
+      <div><span class="k">STATEMENT DATE</span> 06/04/2026</div>
+      <div><span class="k">ACCOUNT</span> <span class="mono">7738 2204 91</span></div>
+      <div><span class="k">PAGE</span> 1 OF 3</div>
+    </div>
+  </div>
+
+  <h1 class="doctitle">Mortgage Annual Statement</h1>
+  <div class="docsub">For the statement period 1 April 2025 to 31 March 2026 &mdash; product held: Two Year Fixed 4.19%</div>
+
+  <table class="grid">
+    <tr><th>Mortgage account number</th><td class="mono">7738 2204 91</td></tr>
+    <tr><th>Borrower(s)</th><td>Mr D. Okafor and Mrs A. Okafor</td></tr>
+    <tr><th>Property charged</th><td>14 Sycamore Rise, Bramholt, Nottinghamshire, NG12 7QF</td></tr>
+    <tr><th>Original amount borrowed</th><td class="num">&pound;198,500.00</td></tr>
+    <tr><th>Current interest rate</th><td class="num">4.19% fixed</td></tr>
+    <tr><th>Mortgage term ends</th><td class="num">20 June 2049 (23 years remaining)</td></tr>
+  </table>
+
+  <div class="balance-panel">
+    <div class="lab">Outstanding balance at 31 March 2026</div>
+    <div class="amt mono">&pound;164,611.07</div>
+  </div>
+
+  <h2>Your payments</h2>
+  <div class="payrow">
+    <div class="paybox">
+      <div class="lab">Current monthly payment</div>
+      <div class="val">&pound;742.18</div>
+      <div class="sub">Collected by direct debit on the 1st of each month</div>
+    </div>
+    <div class="paybox">
+      <div class="lab">Payment from 20 June 2026</div>
+      <div class="val">&pound;891.47</div>
+      <div class="sub">Once your fixed rate ends and you move to our Standard Variable Rate</div>
+    </div>
+    <div class="paybox">
+      <div class="lab">Interest charged this statement year</div>
+      <div class="val">&pound;6,933.08</div>
+      <div class="sub">1 April 2025 to 31 March 2026</div>
+    </div>
+  </div>
+  <p class="small">Payments are collected 1 time each calendar month by direct debit from your nominated bank account. The interest rate applied to your mortgage last changed on 20 June 2024, when your current fixed rate began.</p>
+
+  <h2>Your current product</h2>
+  <table class="grid">
+    <tr><th>Product name</th><td>Two Year Fixed 4.19%</td></tr>
+    <tr><th>Fixed rate period</th><td>20 June 2024 to 19 June 2026</td></tr>
+    <tr><th>Early repayment charge if repaid in full today</th><td class="num">&pound;3,292.22</td></tr>
+  </table>
+  <p class="small">Full details of what happens when your fixed rate period ends, and the early repayment charges that may apply before then, are set out on page 3. A summary of transactions on your mortgage account during the statement period is set out on page 2.</p>
+
+  <div class="footstrip">
+    <span>Kelbridge Home Loans &middot; Account 7738 2204 91</span>
+    <span>Page 1 of 3</span>
+  </div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+  <div class="masthead">
+    <div class="brand">Kelbridge Home Loans
+      <small>Residential mortgage lending</small>
+    </div>
+    <div class="runbox">
+      <div><span class="k">STATEMENT DATE</span> 06/04/2026</div>
+      <div><span class="k">ACCOUNT</span> <span class="mono">7738 2204 91</span></div>
+      <div><span class="k">PAGE</span> 2 OF 3</div>
+    </div>
+  </div>
+
+  <h2>Transaction history &mdash; 1 April 2025 to 31 March 2026</h2>
+  <table class="tx">
+    <thead>
+      <tr><th>Date</th><th>Description</th><th class="r">Amount (&pound;)</th><th class="r">Balance (&pound;)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>01/04/2025</td><td>Interest charged</td><td class="r">+581.44</td><td class="r">167,103.59</td></tr>
+      <tr><td>01/04/2025</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">166,361.41</td></tr>
+      <tr><td>01/05/2025</td><td>Interest charged</td><td class="r">+580.88</td><td class="r">166,942.29</td></tr>
+      <tr><td>01/05/2025</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">166,200.11</td></tr>
+      <tr><td>15/05/2025</td><td>Overpayment received</td><td class="r">-500.00</td><td class="r">165,700.11</td></tr>
+      <tr><td>01/06/2025</td><td>Interest charged</td><td class="r">+578.57</td><td class="r">166,278.68</td></tr>
+      <tr><td>01/06/2025</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">165,536.50</td></tr>
+      <tr><td>01/07/2025</td><td>Interest charged</td><td class="r">+578.00</td><td class="r">166,114.50</td></tr>
+      <tr><td>01/07/2025</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">165,372.32</td></tr>
+      <tr><td>10/07/2025</td><td>Statement request fee</td><td class="r">+10.00</td><td class="r">165,382.32</td></tr>
+      <tr><td>01/08/2025</td><td>Interest charged</td><td class="r">+577.46</td><td class="r">165,959.78</td></tr>
+      <tr><td>01/08/2025</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">165,217.60</td></tr>
+      <tr><td>01/09/2025</td><td>Interest charged</td><td class="r">+576.88</td><td class="r">165,794.48</td></tr>
+      <tr><td>01/09/2025</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">165,052.30</td></tr>
+      <tr><td>01/09/2025</td><td>Buildings insurance premium</td><td class="r">+412.00</td><td class="r">165,464.30</td></tr>
+      <tr><td>01/10/2025</td><td>Interest charged</td><td class="r">+577.75</td><td class="r">166,042.05</td></tr>
+      <tr><td>01/10/2025</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">165,299.87</td></tr>
+      <tr><td>01/10/2025</td><td>Annual mortgage account fee</td><td class="r">+90.00</td><td class="r">165,389.87</td></tr>
+      <tr><td>01/11/2025</td><td>Interest charged</td><td class="r">+577.49</td><td class="r">165,967.36</td></tr>
+      <tr><td>01/11/2025</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">165,225.18</td></tr>
+      <tr><td>01/12/2025</td><td>Interest charged</td><td class="r">+576.91</td><td class="r">165,802.09</td></tr>
+      <tr><td>01/12/2025</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">165,059.91</td></tr>
+      <tr><td>05/12/2025</td><td>Direct debit returned fee</td><td class="r">+25.00</td><td class="r">165,084.91</td></tr>
+      <tr><td>01/01/2026</td><td>Interest charged</td><td class="r">+576.42</td><td class="r">165,661.33</td></tr>
+      <tr><td>01/01/2026</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">164,919.15</td></tr>
+      <tr><td>20/01/2026</td><td>CHAPS transfer fee</td><td class="r">+25.00</td><td class="r">164,944.15</td></tr>
+      <tr><td>01/02/2026</td><td>Interest charged</td><td class="r">+575.93</td><td class="r">165,520.08</td></tr>
+      <tr><td>01/02/2026</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">164,777.90</td></tr>
+      <tr><td>01/03/2026</td><td>Interest charged</td><td class="r">+575.35</td><td class="r">165,353.25</td></tr>
+      <tr><td>01/03/2026</td><td>Monthly mortgage payment</td><td class="r">-742.18</td><td class="r">164,611.07</td></tr>
+    </tbody>
+  </table>
+  <p class="small" style="margin-top:2mm;">This transaction history covers your mortgage account only and does not include payments made towards any linked buildings or life insurance policies unless collected through this account, as shown above.</p>
+
+  <div class="footstrip">
+    <span>Kelbridge Home Loans &middot; Account 7738 2204 91</span>
+    <span>Page 2 of 3</span>
+  </div>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page">
+  <div class="masthead">
+    <div class="brand">Kelbridge Home Loans
+      <small>Residential mortgage lending</small>
+    </div>
+    <div class="runbox">
+      <div><span class="k">STATEMENT DATE</span> 06/04/2026</div>
+      <div><span class="k">ACCOUNT</span> <span class="mono">7738 2204 91</span></div>
+      <div><span class="k">PAGE</span> 3 OF 3</div>
+    </div>
+  </div>
+
+  <h2>Your rate in detail</h2>
+  <table class="grid">
+    <tr><th>Product</th><td>Two Year Fixed 4.19%</td></tr>
+    <tr><th>Fixed rate applies from</th><td class="num">20 June 2024 to 19 June 2026</td></tr>
+    <tr><th>Rate you revert to</th><td>Kelbridge Home Loans Standard Variable Rate, currently 7.49%</td></tr>
+    <tr><th>Payment from 20 June 2026</th><td class="num">&pound;891.47 per month</td></tr>
+  </table>
+  <p class="small">Around 8 weeks before your fixed rate period ends we will write to you separately with the new deals available to you. If you do nothing, your mortgage will move automatically onto our Standard Variable Rate from 20 June 2026 and your payment will change to the amount shown above.</p>
+
+  <h2>Early repayment charges</h2>
+  <table class="erc">
+    <thead><tr><th>Period</th><th>Charge if you repay during this period</th></tr></thead>
+    <tbody>
+      <tr><td>20 June 2024 to 19 June 2025</td><td class="num">3% of the amount repaid</td></tr>
+      <tr><td>20 June 2025 to 19 June 2026</td><td class="num">2% of the amount repaid</td></tr>
+      <tr><td>From 20 June 2026 onwards</td><td class="num">Nil</td></tr>
+    </tbody>
+  </table>
+  <p class="small">Based on your balance at 31 March 2026, a full repayment made today would attract a charge of &pound;3,292.22. Early repayment charges apply to the full calendar month in which you repay, so no early repayment charge will apply to a repayment made on or after 1 July 2026.</p>
+
+  <h2>Regulatory information</h2>
+  <div class="small cols2">
+    <p><b>Kelbridge Home Loans</b> is a trading name of <b>Priorswood Bank plc</b>. Priorswood Bank plc is registered in England and Wales under company number 05391847. Registered office: 2 Foundry Court, Trentham Business Park, Trentham, ST4 8QW.</p>
+    <p>Priorswood Bank plc is authorised by the Prudential Regulation Authority and regulated by the Financial Conduct Authority and the Prudential Regulation Authority. Financial Services Register number 204879. You can check this on the Financial Services Register at fca.org.uk/register or by calling 0800 111 6768.</p>
+    <p>If you are unhappy with any aspect of the service you have received, please write to our Customer Relations team at the registered office address above. If we cannot resolve your complaint, you may be entitled to refer it to the Financial Ombudsman Service, free of charge, within six months of our final response.</p>
+    <p>Eligible deposits with Priorswood Bank plc are protected by the Financial Services Compensation Scheme (FSCS). This mortgage account itself is not a deposit and is not covered by the FSCS depositor protection scheme.</p>
+    <p>Your home may be repossessed if you do not keep up repayments on your mortgage. If you are having difficulty making your payments, please contact us as soon as possible; we may be able to help.</p>
+    <p>Priorswood Bank plc processes personal data in accordance with its privacy notice, available at kelbridgehomeloans.example/privacy or by post on request to the registered office address above. This statement is issued for information only and does not constitute a redemption statement; if you require a figure to repay your mortgage in full, please request a redemption statement separately.</p>
+  </div>
+
+  <div class="footstrip">
+    <span>Priorswood Bank plc &middot; Company no. 05391847</span>
+    <span>Page 3 of 3</span>
+  </div>
+</div>
+
+</body>
+</html>

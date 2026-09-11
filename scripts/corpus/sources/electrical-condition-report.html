@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Electrical Installation Condition Report — EICR-2026-071842</title>
+<style>
+@font-face{font-family:"Corpus Trade";src:url("../fonts/Barlow-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Trade Mono";src:url("../fonts/AnonymousPro-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Trade", sans-serif; font-size: 7.6pt; color: #000;
+    background: #fffef8;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    padding: 7mm 8mm 11mm 8mm; position: relative; page-break-after: always;
+    background: #fffef8;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  .schemebar {
+    display: flex; justify-content: space-between; font-size: 6pt; color: #2b4a6f;
+    border-bottom: 1px solid #2b4a6f; padding-bottom: 0.9mm; margin-bottom: 1.2mm;
+    text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .padstrip {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: "Corpus Trade Mono", monospace; font-size: 6.8pt; color: #000;
+    margin-bottom: 1.4mm;
+  }
+  .padstrip b { color: #2b4a6f; }
+
+  .titlebar {
+    background: #2b4a6f; color: #fffef8; padding: 1.4mm 2.2mm; font-size: 10.5pt;
+    font-weight: 700; letter-spacing: 0.2px; text-transform: uppercase; margin-bottom: 1.2mm;
+  }
+  .titlebar.small { font-size: 9pt; }
+  .subtitle { font-size: 6.4pt; color: #2b4a6f; margin-bottom: 1.8mm; line-height: 1.35; }
+
+  h2 {
+    font-size: 6.6pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+    color: #fffef8; background: #2b4a6f; padding: 0.7mm 1.6mm; margin: 2mm 0 0.9mm 0;
+  }
+  h3 {
+    font-size: 6.4pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.2px;
+    color: #2b4a6f; margin: 1.6mm 0 0.6mm 0;
+  }
+
+  .cellgrid { display: flex; flex-wrap: wrap; border: 1px solid #2b4a6f; border-bottom: none; margin-bottom: 1mm; }
+  .cell { box-sizing: border-box; border-right: 1px solid #2b4a6f; border-bottom: 1px solid #2b4a6f; padding: 0.7mm 1.6mm 0.9mm 1.6mm; flex: 1 1 33%; }
+  .cell.w50 { flex-basis: 50%; }
+  .cell.w100 { flex-basis: 100%; }
+  .lbl { font-family: "Corpus Trade", sans-serif; font-size: 5.3pt; text-transform: uppercase; letter-spacing: 0.15px; color: #2b4a6f; }
+  .v { font-family: "Corpus Trade Mono", monospace; font-size: 7.2pt; display: block; margin-top: 0.3mm; line-height: 1.3; }
+
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1.3mm; }
+  th {
+    background: #eceff3; color: #2b4a6f; font-family: "Corpus Trade", sans-serif;
+    font-size: 5pt; text-transform: uppercase; letter-spacing: 0.05px; padding: 0.6mm 0.9mm;
+    border: 1px solid #2b4a6f; text-align: left; font-weight: 700;
+  }
+  td {
+    font-family: "Corpus Trade Mono", monospace; font-size: 6.1pt; padding: 0.55mm 0.9mm;
+    border: 1px solid #2b4a6f; vertical-align: top; color: #000;
+  }
+  td.lab { font-family: "Corpus Trade", sans-serif; font-size: 6.1pt; }
+  td.center { text-align: center; }
+  td.unused { background: #eceff3; color: #2b4a6f; text-align: center; }
+
+  .tick {
+    display: inline-block; width: 2.6mm; height: 2.6mm; line-height: 2.3mm;
+    border: 1px solid #2b4a6f; text-align: center; font-family: "Corpus Trade Mono", monospace;
+    font-size: 5.8pt; font-weight: 700; background: #fffef8;
+  }
+  .tick.empty { background: #eceff3; }
+
+  .fine { font-size: 5.8pt; line-height: 1.32; color: #000; margin-bottom: 1mm; }
+  .fine b { color: #2b4a6f; }
+
+  .runfoot {
+    position: absolute; left: 8mm; right: 8mm; bottom: 3.5mm; font-size: 5.4pt; color: #2b4a6f;
+    border-top: 1px solid #2b4a6f; padding-top: 0.6mm; display: flex; justify-content: space-between;
+    font-family: "Corpus Trade Mono", monospace;
+  }
+
+  .cols2 { column-count: 2; column-gap: 5mm; font-size: 5.9pt; line-height: 1.34; color: #000; }
+  .cols2 p { margin: 0 0 1.6mm 0; }
+  .cols2 h3 { break-after: avoid-column; }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 1 of 12</span></div>
+  <div class="titlebar">Electrical Installation Condition Report</div>
+  <div class="subtitle">for a domestic electrical installation, issued under the National Wiring Safety Code (NWSC-18) and the rules of the National Electrical Installers Register scheme</div>
+
+  <h2>Section A &mdash; Client ordering this report</h2>
+  <div class="cellgrid">
+    <div class="cell w50"><div class="lbl">Client name</div><div class="v">Priorswood Lettings &amp; Property Management</div></div>
+    <div class="cell w50"><div class="lbl">Client address</div><div class="v">21 Fenchurch Row, Bramholt, BR2 4JQ</div></div>
+    <div class="cell w50"><div class="lbl">Nature of client&rsquo;s interest</div><div class="v">Managing agent, instructed on behalf of the landlord</div></div>
+    <div class="cell w50"><div class="lbl">Date this report requested</div><div class="v">18 August 2026</div></div>
+  </div>
+
+  <h2>Section B &mdash; Landlord and occupier</h2>
+  <div class="cellgrid">
+    <div class="cell w50"><div class="lbl">Landlord</div><div class="v">Mr N. Castellan</div></div>
+    <div class="cell w50"><div class="lbl">Landlord&rsquo;s correspondence address</div><div class="v">14 Overstone Gardens, Milbrook, ML5 2QF</div></div>
+    <div class="cell w50"><div class="lbl">Occupier</div><div class="v">Ms H. Adeyemi-Prosser</div></div>
+    <div class="cell w50"><div class="lbl">Tenancy start date</div><div class="v">01 July 2023</div></div>
+  </div>
+
+  <h2>Section C &mdash; Details of the installation</h2>
+  <div class="cellgrid">
+    <div class="cell w100"><div class="lbl">Address of the installation</div><div class="v">6 Ashworth Terrace, Bramholt, BR14 6QS</div></div>
+    <div class="cell w50"><div class="lbl">Description of premises</div><div class="v">Domestic &mdash; mid-terrace house, 3 bedrooms</div></div>
+    <div class="cell w50"><div class="lbl">Estimated age of installation</div><div class="v">Circa 1998 (approx. 28 years)</div></div>
+    <div class="cell w100"><div class="lbl">Evidence of additions/alterations</div><div class="v">Kitchen ring and one socket circuit rewired circa 2014; no records of who carried this out</div></div>
+    <div class="cell w100"><div class="lbl">Records available to the inspector</div><div class="v">Previous EICR dated 14 March 2021 supplied by the client; no earlier records held</div></div>
+  </div>
+
+  <h2>Section D &mdash; Purpose and extent of the inspection</h2>
+  <div class="cellgrid">
+    <div class="cell w100"><div class="lbl">Purpose of report</div><div class="v">Change of tenancy &mdash; periodic condition report requested ahead of a new letting</div></div>
+    <div class="cell w100"><div class="lbl">Agreed limitations</div><div class="v">Underfloor and roof-space cabling not exposed or accessed; electric shower circuit tested at reduced voltage as isolation of the fixed installation for full insulation resistance testing could not be agreed with the occupier</div></div>
+    <div class="cell w50"><div class="lbl">Limitations agreed with</div><div class="v">Priorswood Lettings &amp; Property Management</div></div>
+    <div class="cell w50"><div class="lbl">Limitations agreed on</div><div class="v">18 August 2026</div></div>
+  </div>
+
+  <h2>Section E &mdash; Contractor and inspector</h2>
+  <div class="cellgrid">
+    <div class="cell w50"><div class="lbl">Contractor</div><div class="v">Thornleigh Electrical Contractors Ltd</div></div>
+    <div class="cell w50"><div class="lbl">Company registration no.</div><div class="v">07741820</div></div>
+    <div class="cell w100"><div class="lbl">Contractor address</div><div class="v">Unit 9, Caldervale Business Park, Bramholt, BR3 7TE &middot; 01924 556 217 &middot; office@thornleighelectrical.example</div></div>
+    <div class="cell w50"><div class="lbl">NEIR scheme enrolment no.</div><div class="v">NEIR/DOM/48217</div></div>
+    <div class="cell w50"><div class="lbl">Scheme registration valid to</div><div class="v">30 April 2027</div></div>
+    <div class="cell w50"><div class="lbl">Inspector</div><div class="v">S. Marchetti, Qualified Supervisor</div></div>
+    <div class="cell w50"><div class="lbl">Inspector&rsquo;s NEIR ref.</div><div class="v">INS-22841</div></div>
+    <div class="cell w50"><div class="lbl">Date(s) of inspection and testing</div><div class="v">02 September 2026</div></div>
+    <div class="cell w50"><div class="lbl">Time on site</div><div class="v">09:15 to 15:40</div></div>
+  </div>
+  <div class="fine">This report is based on an inspection and testing of the fixed electrical installation only. It does not extend to portable appliances, extra-low-voltage systems installed by others, or to any part of the installation not accessible on the date shown above without unreasonable damage to the fabric of the building.</div>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 1 of 12</span></div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 2 of 12</span></div>
+  <div class="titlebar small">Summary of the condition of the installation and assessment</div>
+
+  <h2>Overall assessment of the installation</h2>
+  <div class="cellgrid">
+    <div class="cell w100"><div class="lbl">Assessment</div><div class="v" style="font-size:10pt;font-weight:bold;">UNSATISFACTORY</div></div>
+  </div>
+  <div class="fine">This assessment is given because one or more observations classified C1 (danger present) or C2 (potentially dangerous) have been identified during this inspection &mdash; see the observations recorded on pages 3 and 4, and the attached schedules of inspection and test results on pages 5 to 11.</div>
+
+  <h2>Summary of classification codes recorded</h2>
+  <table>
+    <thead><tr><th>Code</th><th>Meaning</th><th>No. recorded</th></tr></thead>
+    <tbody>
+      <tr><td class="lab">C1</td><td class="lab">Danger present. Risk of injury. Immediate remedial action required</td><td class="center">1</td></tr>
+      <tr><td class="lab">C2</td><td class="lab">Potentially dangerous. Urgent remedial action required</td><td class="center">4</td></tr>
+      <tr><td class="lab">C3</td><td class="lab">Improvement recommended</td><td class="center">6</td></tr>
+      <tr><td class="lab">FI</td><td class="lab">Further investigation required without delay</td><td class="center">1</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Recommendation for next inspection</h2>
+  <div class="fine">Taking into account the type of installation and equipment, its use and the frequency of maintenance intended, and the result of this inspection, it is recommended that this installation is further inspected and tested at an interval not exceeding <b>60 months</b> from the date of this inspection, or sooner if any C1 or C2 item recorded above is not remedied in the meantime, whichever is sooner.</div>
+  <div class="cellgrid">
+    <div class="cell w50"><div class="lbl">Recommended interval</div><div class="v">60 months</div></div>
+    <div class="cell w50"><div class="lbl">Recommended date of next inspection</div><div class="v">02 September 2031</div></div>
+  </div>
+
+  <h2>Declaration and report issue</h2>
+  <div class="cellgrid">
+    <div class="cell w50"><div class="lbl">Report completed by</div><div class="v">S. Marchetti</div></div>
+    <div class="cell w50"><div class="lbl">Date report signed</div><div class="v">03 September 2026</div></div>
+    <div class="cell w50"><div class="lbl">Date report issued to client</div><div class="v">04 September 2026</div></div>
+    <div class="cell w50"><div class="lbl">Copies issued to</div><div class="v">Priorswood Lettings &amp; Property Management; landlord&rsquo;s file</div></div>
+  </div>
+  <div class="fine">This is an <b>Electrical installation condition report</b> and is issued in respect of, and describes the condition of, the fixed electrical installation only, as found at the date of inspection shown on page 1. It is not a certificate of compliance with any current standard beyond that date, and should be read together with the observations at pages 3 and 4 and the full schedules of inspection and test results that follow at pages 5 to 11.</div>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 2 of 12</span></div>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 3 of 12</span></div>
+  <div class="titlebar small">Observations and recommendations for action (1 of 2)</div>
+  <div class="fine">Numbering continues from the schedule of inspections at page 11, item references are given where an observation corresponds to a numbered inspection item. Classification codes: C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation required.</div>
+
+  <table>
+    <thead><tr><th style="width:5%;">Item</th><th style="width:17%;">Location / circuit</th><th>Observation</th><th style="width:8%;">Code</th><th style="width:13%;">Reg. ref.</th></tr></thead>
+    <tbody>
+      <tr><td class="center lab">1</td><td class="lab">Consumer unit DB1, hallway</td><td class="lab">Live conductor of circuit 7 (immersion heater) found with insulation damaged and copper exposed inside the enclosure, in contact with earthed metal casework.</td><td class="center lab">C1</td><td class="lab">NWSC-18 526.5</td></tr>
+      <tr><td class="center lab">2</td><td class="lab">Bathroom, first floor</td><td class="lab">No supplementary bonding present between exposed metal pipework and the earthing terminal, and RCD protection on all circuits serving the location could not be confirmed.</td><td class="center lab">C2</td><td class="lab">NWSC-18 701.415.2</td></tr>
+      <tr><td class="center lab">3</td><td class="lab">Kitchen ring final, circuit 1</td><td class="lab">Socket-outlet fitted adjacent to the sink bowl, within 300mm of the tap, undamaged but not suitably located for its intended use.</td><td class="center lab">C2</td><td class="lab">NWSC-18 512.2</td></tr>
+      <tr><td class="center lab">4</td><td class="lab">DB1, circuit 9 (garden office)</td><td class="lab">No RCD protection provided for the buried cable run to the detached garden office, laid at less than 450mm depth without additional mechanical protection.</td><td class="center lab">C2</td><td class="lab">NWSC-18 522.8.10</td></tr>
+      <tr><td class="center lab">5</td><td class="lab">Main earthing terminal, understair cupboard</td><td class="lab">Main protective bonding conductor to the gas installation pipe measured 6mm&sup2; where 10mm&sup2; is required for this size of supply.</td><td class="center lab">C2</td><td class="lab">NWSC-18 544.1.1</td></tr>
+      <tr><td class="center lab">6</td><td class="lab">Consumer unit DB1</td><td class="lab">Circuits were not identified with an adequate description on the circuit chart at the time of inspection; a corrected chart has since been provided, see page 6.</td><td class="center lab">C3</td><td class="lab">NWSC-18 514.9.1</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">Continued at page 4, items 7 to 12.</div>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 3 of 12</span></div>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 4 of 12</span></div>
+  <div class="titlebar small">Observations and recommendations for action (2 of 2)</div>
+
+  <table>
+    <thead><tr><th style="width:5%;">Item</th><th style="width:17%;">Location / circuit</th><th>Observation</th><th style="width:8%;">Code</th><th style="width:13%;">Reg. ref.</th></tr></thead>
+    <tbody>
+      <tr><td class="center lab">7</td><td class="lab">Loft space</td><td class="lab">Cable supporting several lighting points fixed with insufficient clips over a run of approximately 4m; sagging but not damaged.</td><td class="center lab">C3</td><td class="lab">NWSC-18 522.8.5</td></tr>
+      <tr><td class="center lab">8</td><td class="lab">Living room, circuit 2</td><td class="lab">Socket-outlet faceplate cracked at one corner; terminals not exposed and connections found tight on inspection.</td><td class="center lab">C3</td><td class="lab">NWSC-18 621.2</td></tr>
+      <tr><td class="center lab">9</td><td class="lab">Outbuilding sub-board DB2</td><td class="lab">RCD test-button function label missing from the enclosure door; the device itself tested and operated correctly.</td><td class="center lab">C3</td><td class="lab">NWSC-18 514.1</td></tr>
+      <tr><td class="center lab">10</td><td class="lab">Front porch light</td><td class="lab">Light fitting corroded at the fixing point; the luminaire functions correctly and remains adequately supported.</td><td class="center lab">C3</td><td class="lab">NWSC-18 522.8.5</td></tr>
+      <tr><td class="center lab">11</td><td class="lab">Airing cupboard</td><td class="lab">Cable to the immersion heater not adequately identified where it passes close to the cylinder thermostat.</td><td class="center lab">C3</td><td class="lab">NWSC-18 514.9.1</td></tr>
+      <tr><td class="center lab">12</td><td class="lab">Loft space, near circuit 9 junction box</td><td class="lab">A suspected additional lighting point, not shown on the circuit chart, appears spliced into the junction box for circuit 9. Extent could not be established without further investigation and partial removal of loft insulation.</td><td class="center lab">FI</td><td class="lab">NWSC-18 132.16</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">All items above are also referenced against the relevant line of the schedule of inspections at page 11. Remedial work for items classified C1 and C2 should be carried out as a matter of urgency by a competent person; items classified C3 are recommended but not urgent.</div>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 4 of 12</span></div>
+</div>
+
+<!-- PAGE 5 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 5 of 12</span></div>
+  <div class="titlebar small">Supply characteristics, earthing arrangements and test instruments</div>
+
+  <h2>Supply characteristics and earthing arrangements</h2>
+  <table>
+    <thead><tr><th>Nominal voltage</th><th>Frequency</th><th>No. of phases</th><th>PFC at origin</th><th>Ze (measured)</th><th>Ze (by enquiry)</th><th>Means of earthing</th></tr></thead>
+    <tbody><tr><td>230V</td><td>50Hz</td><td>1</td><td>1.24kA</td><td>0.31&Omega;</td><td>0.35&Omega;</td><td>PME (TN-C-S)</td></tr></tbody>
+  </table>
+  <table>
+    <thead><tr><th>Main protective bonding &mdash; water</th><th>Gas</th><th>Oil</th><th>Structural steel</th><th>Other</th><th>Main switch</th></tr></thead>
+    <tbody><tr><td>10mm&sup2;</td><td>6mm&sup2; &mdash; see item 5</td><td>n/a</td><td>n/a</td><td>n/a</td><td>100A DP, understair cupboard</td></tr></tbody>
+  </table>
+
+  <h2>Distribution board DB1 &mdash; details</h2>
+  <table>
+    <thead><tr><th>Location</th><th>Manufacturer / type</th><th>No. of ways</th><th>RCD1 rating/type</th><th>RCD2 rating/type</th><th>Main switch rating</th></tr></thead>
+    <tbody><tr><td>Hallway understair cupboard</td><td>Crestwood Type CU12M</td><td>12</td><td>30/A</td><td>30/A</td><td>100A</td></tr></tbody>
+  </table>
+  <div class="fine">Split-load consumer unit, ways 1-6 protected by RCD1, ways 7-10 protected by RCD2, ways 11-12 spare. Full circuit schedule at pages 6 and 7.</div>
+
+  <h2>Distribution board DB2 &mdash; details (garden office / garage sub-main)</h2>
+  <table>
+    <thead><tr><th>Location</th><th>Manufacturer / type</th><th>No. of ways</th><th>Fed from</th><th>RCD rating/type</th><th>Main switch rating</th></tr></thead>
+    <tbody><tr><td>Garden office, wall-mounted</td><td>Crestwood Type CU6S</td><td>6</td><td>DB1 way 9, via SWA</td><td>30/AC</td><td>40A</td></tr></tbody>
+  </table>
+
+  <h2>Test instruments used for this inspection</h2>
+  <table>
+    <thead><tr><th>Instrument</th><th>Make / model</th><th>Serial no.</th><th>Last calibrated</th><th>Calibration due</th></tr></thead>
+    <tbody>
+      <tr><td>Multifunction installation tester</td><td>Duxbury MFT7500</td><td>DX-771402</td><td>15/01/2026</td><td>15/01/2027</td></tr>
+      <tr><td>Insulation resistance tester</td><td>Duxbury IR500</td><td>DX-550291</td><td>03/11/2025</td><td>03/11/2026</td></tr>
+      <tr><td>Earth loop / continuity tester</td><td>Halden EFT-2</td><td>HD-229981</td><td>20/03/2026</td><td>20/03/2027</td></tr>
+      <tr><td>RCD tester</td><td>Halden RCD-Pro</td><td>HD-114420</td><td>08/08/2025</td><td>08/08/2026</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">All instruments were within their calibration due date at the time of this inspection. Calibration certificates for each instrument are held on file by Thornleigh Electrical Contractors Ltd and are available to the client on request.</div>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 5 of 12</span></div>
+</div>
+
+<!-- PAGE 6 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 6 of 12</span></div>
+  <div class="titlebar small">Circuit schedule &mdash; DB1 (1 of 2): description, conductors, continuity</div>
+
+  <table>
+    <thead><tr>
+      <th style="width:5%;">Way</th><th>Circuit description</th><th>Wiring type</th><th>Pts</th><th>CSA L/cpc mm&sup2;</th><th>OCPD type</th><th>OCPD/RCD A/mA</th><th>r1 &Omega;</th><th>rn &Omega;</th><th>r2 &Omega;</th><th>R1+R2 &Omega;</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="center">1</td><td class="lab">Ring final &mdash; kitchen sockets</td><td class="lab">T&amp;E, clipped direct</td><td class="center">12</td><td class="center">2.5/1.5</td><td class="center">MCB B</td><td class="center">32/30</td><td class="center">0.42</td><td class="center">0.39</td><td class="center">0.68</td><td class="center">1.10</td></tr>
+      <tr><td class="center">2</td><td class="lab">Ring final &mdash; ground floor sockets</td><td class="lab">T&amp;E, clipped direct</td><td class="center">12</td><td class="center">2.5/1.5</td><td class="center">MCB B</td><td class="center">32/30</td><td class="center">0.38</td><td class="center">0.35</td><td class="center">0.61</td><td class="center">0.99</td></tr>
+      <tr><td class="center">3</td><td class="lab">Ring final &mdash; first floor sockets</td><td class="lab">T&amp;E, clipped direct</td><td class="center">10</td><td class="center">2.5/1.5</td><td class="center">MCB B</td><td class="center">32/30</td><td class="center">0.51</td><td class="center">0.48</td><td class="center">0.79</td><td class="center">1.30</td></tr>
+      <tr><td class="center">4</td><td class="lab">Radial &mdash; cooker</td><td class="lab">T&amp;E, clipped direct</td><td class="center">1</td><td class="center">6.0/2.5</td><td class="center">MCB B</td><td class="center">32/30</td><td class="center">0.18</td><td class="center">&mdash;</td><td class="center">0.29</td><td class="center">0.47</td></tr>
+      <tr><td class="center">5</td><td class="lab">Lighting &mdash; ground floor</td><td class="lab">T&amp;E, clipped direct</td><td class="center">8</td><td class="center">1.5/1.0</td><td class="center">MCB B</td><td class="center">6/30</td><td class="center">0.64</td><td class="center">&mdash;</td><td class="center">1.05</td><td class="center">1.69</td></tr>
+      <tr><td class="center">6</td><td class="lab">Lighting &mdash; first floor</td><td class="lab">T&amp;E, clipped direct</td><td class="center">7</td><td class="center">1.5/1.0</td><td class="center">MCB B</td><td class="center">6/30</td><td class="center">0.71</td><td class="center">&mdash;</td><td class="center">1.16</td><td class="center">1.87</td></tr>
+      <tr><td class="center">7</td><td class="lab">Radial &mdash; immersion heater</td><td class="lab">T&amp;E, clipped direct</td><td class="center">1</td><td class="center">2.5/1.5</td><td class="center">MCB B</td><td class="center">16/30</td><td class="center">0.33</td><td class="center">&mdash;</td><td class="center">0.55</td><td class="center">0.88</td></tr>
+      <tr><td class="center">8</td><td class="lab">Radial &mdash; electric shower</td><td class="lab">T&amp;E, clipped direct</td><td class="center">1</td><td class="center">10.0/4.0</td><td class="center">RCBO B</td><td class="center">40/30</td><td class="center">0.09</td><td class="center">&mdash;</td><td class="center">0.15</td><td class="center">0.24</td></tr>
+      <tr><td class="center">9</td><td class="lab">Radial &mdash; garden office (SWA to DB2)</td><td class="lab">SWA, clipped direct</td><td class="center">1</td><td class="center">6.0/2.5</td><td class="center">RCBO B</td><td class="center">32/30</td><td class="center">0.61</td><td class="center">&mdash;</td><td class="center">1.02</td><td class="center">1.63</td></tr>
+      <tr><td class="center">10</td><td class="lab">Radial &mdash; smoke/heat alarms</td><td class="lab">T&amp;E, clipped direct</td><td class="center">5</td><td class="center">1.5/1.0</td><td class="center">MCB B</td><td class="center">6/30</td><td class="center">0.44</td><td class="center">&mdash;</td><td class="center">0.73</td><td class="center">1.17</td></tr>
+      <tr><td class="center">11</td><td class="unused">spare way</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td></tr>
+      <tr><td class="center">12</td><td class="unused">spare way</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">Continuity of protective conductors (r2) and ring continuity (r1, rn, r2) measured in ohms at the distribution board with the supply disconnected, per NWSC-18 Chapter 64. Continued overleaf with insulation resistance, earth fault loop impedance and RCD results for the same ways.</div>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 6 of 12</span></div>
+</div>
+
+<!-- PAGE 7 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 7 of 12</span></div>
+  <div class="titlebar small">Circuit schedule &mdash; DB1 (2 of 2): insulation resistance, loop impedance, RCD</div>
+
+  <table>
+    <thead><tr>
+      <th style="width:5%;">Way</th><th>IR L-L M&Omega;</th><th>IR L-E M&Omega;</th><th>IR L-N M&Omega;</th><th>Zs max/measured &Omega;</th><th>Polarity</th><th>RCD trip 1x/5x ms</th><th>Comment</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="center">1</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">1.15/0.34</td><td class="center">&check;</td><td class="center">18/9</td><td class="lab">&mdash;</td></tr>
+      <tr><td class="center">2</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">1.15/0.31</td><td class="center">&check;</td><td class="center">18/9</td><td class="lab">Item 3</td></tr>
+      <tr><td class="center">3</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">1.15/0.44</td><td class="center">&check;</td><td class="center">18/9</td><td class="lab">&mdash;</td></tr>
+      <tr><td class="center">4</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">1.15/0.28</td><td class="center">&check;</td><td class="center">18/9</td><td class="lab">&mdash;</td></tr>
+      <tr><td class="center">5</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">7.28/1.02</td><td class="center">&check;</td><td class="center">22/11</td><td class="lab">&mdash;</td></tr>
+      <tr><td class="center">6</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">7.28/1.14</td><td class="center">&check;</td><td class="center">22/11</td><td class="lab">&mdash;</td></tr>
+      <tr><td class="center">7</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">2.87/0.71</td><td class="center">&check;</td><td class="center">22/11</td><td class="lab">Item 1 &mdash; C1</td></tr>
+      <tr><td class="center">8</td><td class="center">198</td><td class="center">156</td><td class="center">&gt;999</td><td class="center">1.09/0.22</td><td class="center">&check;</td><td class="center">22/11</td><td class="lab">Tested at reduced voltage, see page 1</td></tr>
+      <tr><td class="center">9</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">1.15/0.58</td><td class="center">&check;</td><td class="center">22/11</td><td class="lab">Item 4 &mdash; C2</td></tr>
+      <tr><td class="center">10</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">&gt;999</td><td class="center">7.28/0.95</td><td class="center">&check;</td><td class="center">22/11</td><td class="lab">&mdash;</td></tr>
+      <tr><td class="center">11</td><td class="unused">spare</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td></tr>
+      <tr><td class="center">12</td><td class="unused">spare</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">Insulation resistance tested at 500V d.c. between live conductors and between live conductors and earth, per NWSC-18 Chapter 64, and recorded as &gt;999M&Omega; where the instrument reading exceeded its display range. Zs shown as tabulated maximum permitted value against measured value at the point furthest from the origin. RCD trip times measured at 1x and 5x rated residual operating current I&Delta;n.</div>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 7 of 12</span></div>
+</div>
+
+<!-- PAGE 8 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 8 of 12</span></div>
+  <div class="titlebar small">Circuit schedule &mdash; DB2 (garden office / garage sub-main)</div>
+
+  <div class="fine">Zs measured at the origin of DB2 (fed from DB1 way 9): 0.58&Omega;. Prospective fault current at DB2 origin: 0.68kA. No independent earth electrode is installed; earthing at DB2 is by the SWA armour and cpc back to DB1, PME arrangement as recorded at page 5.</div>
+
+  <table>
+    <thead><tr>
+      <th style="width:5%;">Way</th><th>Circuit description</th><th>Wiring type</th><th>Pts</th><th>CSA L/cpc mm&sup2;</th><th>OCPD/RCD A/mA</th><th>r1/r2 &Omega;</th><th>IR L-E M&Omega;</th><th>Zs max/measured &Omega;</th><th>RCD trip 1x/5x ms</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="center">1</td><td class="lab">Sockets &mdash; office</td><td class="lab">T&amp;E, clipped direct</td><td class="center">6</td><td class="center">2.5/1.5</td><td class="center">20/30</td><td class="center">0.31/0.52</td><td class="center">&gt;999</td><td class="center">1.15/0.72</td><td class="center">24/12</td></tr>
+      <tr><td class="center">2</td><td class="lab">Lighting &mdash; office &amp; garage</td><td class="lab">T&amp;E, clipped direct</td><td class="center">4</td><td class="center">1.5/1.0</td><td class="center">6/30</td><td class="center">0.48/0.79</td><td class="center">&gt;999</td><td class="center">7.28/1.55</td><td class="center">24/12</td></tr>
+      <tr><td class="center">3</td><td class="lab">Radial &mdash; garage power tools socket</td><td class="lab">T&amp;E, clipped direct</td><td class="center">1</td><td class="center">4.0/1.5</td><td class="center">32/30</td><td class="center">0.22/0.37</td><td class="center">&gt;999</td><td class="center">1.15/0.61</td><td class="center">24/12</td></tr>
+      <tr><td class="center">4</td><td class="unused">spare way</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td></tr>
+      <tr><td class="center">5</td><td class="unused">spare way</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td></tr>
+      <tr><td class="center">6</td><td class="unused">spare way</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td><td class="unused">&mdash;</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">All ways at DB2 protected by the single 30/AC device fitted at this board. Polarity confirmed correct on all three active ways. See item 9 (page 4) regarding the missing test-button label on this enclosure.</div>
+
+  <h3>Functional testing at DB2</h3>
+  <table>
+    <thead><tr><th>Test</th><th>Result</th><th>Date tested</th></tr></thead>
+    <tbody>
+      <tr><td class="lab">RCD test button operated correctly</td><td class="center">Yes</td><td class="center">02/09/2026</td></tr>
+      <tr><td class="lab">Main switch operated correctly</td><td class="center">Yes</td><td class="center">02/09/2026</td></tr>
+    </tbody>
+  </table>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 8 of 12</span></div>
+</div>
+
+<!-- PAGE 9 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 9 of 12</span></div>
+  <div class="titlebar small">Additional test data &mdash; ring continuity and voltage drop</div>
+
+  <h2>Ring final circuit continuity &mdash; sample readings at socket-outlets</h2>
+  <table>
+    <thead><tr><th style="width:6%;">Way</th><th>Sample point</th><th>r1 &Omega;</th><th>rn &Omega;</th><th>r2 &Omega;</th></tr></thead>
+    <tbody>
+      <tr><td class="center">1</td><td class="lab">Kitchen, socket nearest DB1</td><td class="center">0.11</td><td class="center">0.10</td><td class="center">0.18</td></tr>
+      <tr><td class="center">1</td><td class="lab">Kitchen, socket mid-run (worktop)</td><td class="center">0.21</td><td class="center">0.19</td><td class="center">0.34</td></tr>
+      <tr><td class="center">1</td><td class="lab">Kitchen, socket furthest point (utility)</td><td class="center">0.21</td><td class="center">0.20</td><td class="center">0.34</td></tr>
+      <tr><td class="center">1</td><td class="lab">Kitchen, spur to washing machine</td><td class="center">0.24</td><td class="center">0.22</td><td class="center">0.38</td></tr>
+      <tr><td class="center">2</td><td class="lab">Hallway, socket nearest DB1</td><td class="center">0.10</td><td class="center">0.09</td><td class="center">0.16</td></tr>
+      <tr><td class="center">2</td><td class="lab">Living room, mid-run</td><td class="center">0.19</td><td class="center">0.18</td><td class="center">0.30</td></tr>
+      <tr><td class="center">2</td><td class="lab">Dining room, furthest point</td><td class="center">0.19</td><td class="center">0.17</td><td class="center">0.31</td></tr>
+      <tr><td class="center">3</td><td class="lab">Landing, socket nearest DB1</td><td class="center">0.13</td><td class="center">0.12</td><td class="center">0.20</td></tr>
+      <tr><td class="center">3</td><td class="lab">Bedroom 1, mid-run</td><td class="center">0.26</td><td class="center">0.24</td><td class="center">0.40</td></tr>
+      <tr><td class="center">3</td><td class="lab">Bedroom 3, furthest point</td><td class="center">0.26</td><td class="center">0.24</td><td class="center">0.40</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">End-to-end readings taken with the ring temporarily broken at the board confirmed r1 = 0.51&Omega;, rn = 0.48&Omega;, r2 = 0.79&Omega; for way 3, consistent with the figure recorded at page 6.</div>
+
+  <h2>Voltage drop calculation &mdash; circuit furthest from origin</h2>
+  <table>
+    <thead><tr><th>Circuit</th><th>Design current A</th><th>Cable length m</th><th>mV/A/m</th><th>Calculated drop V</th><th>Permitted drop V</th></tr></thead>
+    <tbody>
+      <tr><td class="lab">Way 8 &mdash; electric shower</td><td class="center">39</td><td class="center">14</td><td class="center">2.60</td><td class="center">1.42</td><td class="center">11.50</td></tr>
+      <tr><td class="lab">Way 9 &mdash; garden office feeder</td><td class="center">28</td><td class="center">22</td><td class="center">1.15</td><td class="center">0.71</td><td class="center">11.50</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Earth electrode</h2>
+  <div class="fine">Not applicable. The installation is supplied under a PME (TN-C-S) arrangement, per page 5, and no independent earth electrode is fitted or required.</div>
+
+  <h2>Functional testing at DB1</h2>
+  <table>
+    <thead><tr><th>Test</th><th>Result</th><th>Date tested</th></tr></thead>
+    <tbody>
+      <tr><td class="lab">RCD1 test button operated correctly</td><td class="center">Yes</td><td class="center">02/09/2026</td></tr>
+      <tr><td class="lab">RCD2 test button operated correctly</td><td class="center">Yes</td><td class="center">02/09/2026</td></tr>
+      <tr><td class="lab">Main switch operated correctly</td><td class="center">Yes</td><td class="center">02/09/2026</td></tr>
+      <tr><td class="lab">Smoke/heat alarm interlink function</td><td class="center">Yes, all 5 points sounded</td><td class="center">02/09/2026</td></tr>
+    </tbody>
+  </table>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 9 of 12</span></div>
+</div>
+
+<!-- PAGE 10 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 10 of 12</span></div>
+  <div class="titlebar small">RCD summary and combined earth fault loop impedance recap</div>
+
+  <h2>RCD / RCBO device summary</h2>
+  <table>
+    <thead><tr><th>Board</th><th>Device</th><th>Rated A</th><th>I&Delta;n mA</th><th>Type</th><th>Trip 1xI&Delta;n ms</th><th>Trip 5xI&Delta;n ms</th><th>Test button</th></tr></thead>
+    <tbody>
+      <tr><td class="lab">DB1</td><td class="lab">RCD1 (ways 1-6)</td><td class="center">80</td><td class="center">30</td><td class="center">A</td><td class="center">18</td><td class="center">9</td><td class="center">Pass</td></tr>
+      <tr><td class="lab">DB1</td><td class="lab">RCD2 (ways 7-10)</td><td class="center">80</td><td class="center">30</td><td class="center">A</td><td class="center">22</td><td class="center">11</td><td class="center">Pass</td></tr>
+      <tr><td class="lab">DB2</td><td class="lab">Main RCD (all ways)</td><td class="center">40</td><td class="center">30</td><td class="center">AC</td><td class="center">24</td><td class="center">12</td><td class="center">Pass</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">Maximum permitted disconnection time for a 30mA RCD at 5xI&Delta;n is 40ms; all three devices disconnect well within tolerance. Test button operation confirms the mechanical trip mechanism only and does not replace periodic testing with a calibrated instrument.</div>
+
+  <h2>Combined earth fault loop impedance recap, all circuits</h2>
+  <table>
+    <thead><tr><th style="width:8%;">Board</th><th style="width:8%;">Way</th><th>Description</th><th>Zs max/measured &Omega;</th><th>Disconnection compliant</th></tr></thead>
+    <tbody>
+      <tr><td class="lab">DB1</td><td class="center">1</td><td class="lab">Ring &mdash; kitchen</td><td class="center">1.15/0.34</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB1</td><td class="center">2</td><td class="lab">Ring &mdash; ground floor</td><td class="center">1.15/0.31</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB1</td><td class="center">3</td><td class="lab">Ring &mdash; first floor</td><td class="center">1.15/0.44</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB1</td><td class="center">4</td><td class="lab">Radial &mdash; cooker</td><td class="center">1.15/0.28</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB1</td><td class="center">5</td><td class="lab">Lighting &mdash; ground floor</td><td class="center">7.28/1.02</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB1</td><td class="center">6</td><td class="lab">Lighting &mdash; first floor</td><td class="center">7.28/1.14</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB1</td><td class="center">7</td><td class="lab">Radial &mdash; immersion heater</td><td class="center">2.87/0.71</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB1</td><td class="center">8</td><td class="lab">Radial &mdash; electric shower</td><td class="center">1.09/0.22</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB1</td><td class="center">9</td><td class="lab">Radial &mdash; garden office feeder</td><td class="center">1.15/0.58</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB1</td><td class="center">10</td><td class="lab">Radial &mdash; smoke/heat alarms</td><td class="center">7.28/0.95</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB2</td><td class="center">1</td><td class="lab">Sockets &mdash; office</td><td class="center">1.15/0.72</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB2</td><td class="center">2</td><td class="lab">Lighting &mdash; office &amp; garage</td><td class="center">7.28/1.55</td><td class="center">Yes</td></tr>
+      <tr><td class="lab">DB2</td><td class="center">3</td><td class="lab">Radial &mdash; garage power tools</td><td class="center">1.15/0.61</td><td class="center">Yes</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">Verification of prospective fault current: measured PFC at the origin 1.24kA against the lowest rated breaking capacity of any protective device fitted, 6kA on all devices &mdash; adequacy confirmed.</div>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 10 of 12</span></div>
+</div>
+
+<!-- PAGE 11 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>Thornleigh Electrical Contractors Ltd</span><span>Page 11 of 12</span></div>
+  <div class="titlebar small">Schedule of inspections</div>
+  <div class="fine">Outcome recorded against each item: &check; satisfactory, C1/C2/C3 as classified at pages 3-4, N/V not verified, N/A not applicable. One column only is marked per item.</div>
+
+  <table>
+    <thead><tr><th style="width:60%;">Item</th><th class="center" style="width:8%;">&check;</th><th class="center" style="width:8%;">C1</th><th class="center" style="width:8%;">C2</th><th class="center" style="width:8%;">C3</th><th class="center" style="width:8%;">N/V</th></tr></thead>
+    <tbody>
+      <tr><td class="lab">1.1 Service cable condition and support</td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">1.2 Condition of service head and metering</td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">2.1 Presence and condition of main earthing conductor</td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">2.2 Main protective bonding, water service</td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">2.3 Main protective bonding, gas service (item 5)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">3.1 Consumer unit DB1, enclosure and labelling</td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">3.2 Consumer unit DB1, circuit chart accuracy (item 6)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">3.3 Condition of conductors within DB1 (item 1)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">3.4 Sub-board DB2, enclosure and labelling (item 9)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">4.1 Cables adequately supported throughout (item 7)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">4.2 Accessories, condition of faceplates (item 8)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">4.3 Socket-outlet positioning near water source (item 3)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">4.4 RCD protection for buried/outdoor cables (item 4)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">4.5 Identification of unrecorded circuits (item 12)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td></tr>
+      <tr><td class="lab">5.1 Supplementary bonding, bathroom (item 2)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">5.2 Suitability of accessories in bathroom zones</td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">6.1 Condition of light fittings (item 10)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">6.2 Identification of cables at appliance connections (item 11)</td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td></tr>
+      <tr><td class="lab">6.3 Smoke and heat alarm provision</td><td class="center"><span class="tick">X</span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td><td class="center"><span class="tick empty"></span></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Declaration</h2>
+  <div class="fine">I/we, being the person(s) responsible for the inspection and testing of the electrical installation particulars of which are described above, having exercised reasonable skill and care when carrying out the inspection and testing, hereby declare that the information in this report, including the observations at pages 3-4 and the schedules above, provides an accurate assessment of the condition of the electrical installation, taking into account the extent and limitations recorded in Section D at page 1.</div>
+  <div class="cellgrid">
+    <div class="cell w50"><div class="lbl">Inspection carried out on</div><div class="v">02 September 2026</div></div>
+    <div class="cell w50"><div class="lbl">Next inspection recommended by</div><div class="v">02 September 2031</div></div>
+    <div class="cell w50"><div class="lbl">Signed</div><div class="v">S. Marchetti</div></div>
+    <div class="cell w50"><div class="lbl">For and on behalf of</div><div class="v">Thornleigh Electrical Contractors Ltd</div></div>
+  </div>
+
+  <div class="runfoot"><span>Thornleigh Electrical Contractors Ltd &middot; Report EICR-2026-071842 &middot; 6 Ashworth Terrace, Bramholt</span><span>Page 11 of 12</span></div>
+</div>
+
+<!-- PAGE 12 -->
+<div class="page">
+  <div class="schemebar"><span>National Electrical Installers Register — Domestic Electrical Installation Condition Report</span><span>Form ECR-1(D) &middot; Issue 6</span></div>
+  <div class="padstrip"><span>No. <b>EICR-2026-071842</b></span><span>National Electrical Installers Register</span><span>Page 12 of 12</span></div>
+  <div class="titlebar small">Guidance notes issued by the National Electrical Installers Register</div>
+
+  <div class="cols2">
+    <h3>About this report</h3>
+    <p>This report has been prepared with reference to the National Wiring Safety Code (NWSC-18), Amendment 3, which came into force on 28 September 2024 and supersedes Amendment 2 issued in 2018. Reports completed before that date, including any previous report for this installation, may have been assessed against an earlier edition of the code and should not be assumed to use the same classification thresholds.</p>
+
+    <h3>What the classification codes mean</h3>
+    <p><b>C1 &mdash; Danger present.</b> Risk of injury. Immediate remedial action is required. Where a C1 observation is recorded, the contractor carrying out the inspection should, wherever practicable, make the installation safe before leaving site.</p>
+    <p><b>C2 &mdash; Potentially dangerous.</b> Urgent remedial action is required. A C2 observation does not present an immediate danger but could do so if left unaddressed.</p>
+    <p><b>C3 &mdash; Improvement recommended.</b> The item observed does not meet the current edition of the wiring code but does not by itself justify an unsatisfactory assessment.</p>
+    <p><b>FI &mdash; Further investigation required without delay.</b> Used where the inspector could not, within the extent and limitations of the inspection, determine whether an observed condition is dangerous.</p>
+
+    <h3>What to do with this report</h3>
+    <p>Any items classified C1 or C2 should be attended to by a competent person as a matter of urgency, and in any event before this installation is next occupied by a new tenant. Items classified C3 should be considered for improvement at a convenient time. This report, once any necessary remedial work has been completed and confirmed, does not need to be reissued; a separate minor works certificate or electrical installation certificate should instead be obtained for the remedial work itself and kept alongside this report.</p>
+
+    <h3>Retention of this report</h3>
+    <p>The client and the landlord should each retain a copy of this report, together with the schedules that form part of it, until it is superseded by a later report. A copy should be provided to the occupier of the installation and, where the property is let, to any new tenant before they take up occupation.</p>
+
+    <h3>Checking a contractor&rsquo;s registration</h3>
+    <p>The enrolment of a contractor with the National Electrical Installers Register can be checked using the scheme enrolment number shown on page 1, by contacting the scheme office below. A contractor whose registration has lapsed since a report was issued does not invalidate that report, but should be checked before further work is instructed from the same firm.</p>
+
+    <h3>About the scheme</h3>
+    <p>The National Electrical Installers Register is a certification scheme for electrical contractors working on domestic and commercial installations. It is independent of, and separate from, both the contractor named on page 1 and any letting or managing agent named in this report. The scheme sets the model form on which this report is printed and audits enrolled contractors against the National Wiring Safety Code.</p>
+    <p>National Electrical Installers Register, NEIR House, 4 Somerville Court, Bostwick, BW1 4RE. Telephone 0300 456 7890. Website neir.example.org. Registered charity number CHY-441882.</p>
+    <p>These guidance notes, version 6, were issued on 01 April 2024 and are reprinted on the reverse of every report issued on this form. &copy; National Electrical Installers Register 2024. Reproduction of this form by an enrolled contractor for the purpose of issuing reports is permitted; reproduction for any other purpose requires the scheme&rsquo;s written consent.</p>
+  </div>
+
+  <div class="runfoot"><span>National Electrical Installers Register &middot; Form ECR-1(D) Issue 6 &middot; Report EICR-2026-071842</span><span>Page 12 of 12</span></div>
+</div>
+
+</body>
+</html>

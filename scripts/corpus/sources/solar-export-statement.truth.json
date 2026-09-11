@@ -1,0 +1,23 @@
+{
+  "name": "solar export statement, sixteen quarterly dates around one tariff-end renewal date",
+  "filename": "fullpage-solar-export-statement.pdf",
+  "expected": {
+    "dates": [
+      "2027-03-31"
+    ],
+    "provider": "Millbrook Energy Ltd",
+    "reference": "SEG-4471-0932",
+    "dateRoles": [
+      {
+        "date": "2027-03-31",
+        "role": "renewal"
+      }
+    ],
+    "subtype": "Solar export statement",
+    "costMinor": 34364,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": "The only tracked date is 31 March 2027, when the household's export tariff agreement ends, stated once mid-paragraph in the page 2 tariff terms ('...ends on 31 March 2027'). It sits one line after the unrelated RPI rate-review date (1 October 2026) and is never tabulated or emphasised. The four quarterly blocks on page 1 each carry a period start, a period end, a reading date and a payment date (sixteen dates in total) plus a rate; none is the answer, and the Quarter 4 period end (31 March 2026) is deliberately one calendar year before the answer to bait a same-day-and-month match. Also excluded: the installation commissioning date (18 June 2019), the export meter's last verification date (12 May 2022) and its stated future validity date (12 May 2032), the statement date (24 April 2026), the RPI rate-review date (1 October 2026), and the tariff agreement's own start date (1 April 2023). costMinor is the annual summary's net 'Total paid to you this year' (£343.64), not the gross four-quarter sum before the metering charge (£361.64), not any individual quarterly payment (£108.45 / £146.57 / £55.95 / £50.67), and not the estimated 2026/27 total (£355.00, explicitly a forecast). Meter readings are printed as seven-digit decimal register values (e.g. 018942.6 kWh) and export rates as p/kWh figures (15.72p, 16.05p); none resembles the money answer. provider is Millbrook Energy Ltd, the retail brand named in the header wordmark and small print, not Cheswick Metering Services Ltd, the wholly owned subsidiary named in the small print that actually calculates and administers the generation payments. reference is the generation account number (SEG-4471-0932) rather than either meter's serial number (GM7734215, EM2205968) or the MCS installation reference (2019/A/48871)."
+}

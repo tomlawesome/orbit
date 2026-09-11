@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Milldown Motoring Club — Your Breakdown Cover Renewal</title>
+<style>
+@font-face{font-family:"Corpus Motor";src:url("../fonts/Cabin.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Motor Slab";src:url("../fonts/ZillaSlab-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: "Corpus Motor", sans-serif; font-size: 10.5pt; color: #111; background: #fff; line-height: 1.5; letter-spacing: 0.15px; }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always; background: #fff;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---- shapes used in place of a logo/icons ---- */
+  .badge-ring { display: inline-block; width: 9mm; height: 9mm; border: 2.6px solid #023047; border-radius: 50%; vertical-align: middle; position: relative; }
+  .badge-ring::after { content: ""; position: absolute; top: 1.6mm; left: 1.6mm; width: 3.4mm; height: 3.4mm; background: #023047; border-radius: 50%; }
+  .tickmark { display: inline-block; width: 3.4mm; height: 3.4mm; position: relative; margin-right: 2mm; vertical-align: middle; }
+  .tickmark::before { content: ""; position: absolute; left: 0.3mm; top: 1.3mm; width: 1.5mm; height: 0.65mm; background: #2a7a2a; transform: rotate(45deg); }
+  .tickmark::after { content: ""; position: absolute; left: 0.9mm; top: 0.2mm; width: 2.6mm; height: 0.65mm; background: #2a7a2a; transform: rotate(-45deg); }
+  .crossmark { display: inline-block; width: 3.2mm; height: 3.2mm; position: relative; margin-right: 2mm; vertical-align: middle; }
+  .crossmark::before, .crossmark::after { content: ""; position: absolute; top: 1.4mm; left: 0; width: 3.2mm; height: 0.6mm; background: #9a9a9a; }
+  .crossmark::before { transform: rotate(45deg); }
+  .crossmark::after { transform: rotate(-45deg); }
+
+  /* ---- yellow band ---- */
+  .yband { background: #ffb703; color: #111; padding: 5mm 13mm; }
+  .yband .toprow { display: flex; justify-content: space-between; align-items: center; }
+  .yband .brand { font-size: 21pt; font-weight: 700; letter-spacing: 0.4px; }
+  .yband .brand .badge-ring { margin-right: 3mm; }
+  .yband .doctag { text-align: right; font-size: 7.6pt; line-height: 1.6; font-weight: 700; }
+  .yband .offer { font-size: 26pt; font-weight: 700; line-height: 1.1; margin-top: 3mm; letter-spacing: 0.2px; }
+  .yband .offer small { display: block; font-size: 11pt; font-weight: 700; margin-top: 1.5mm; }
+
+  .body-pad { padding: 3mm 13mm 1mm 13mm; }
+
+  .lede { font-size: 10.4pt; line-height: 1.6; margin-bottom: 2.4mm; }
+  .lede b { color: #023047; }
+
+  /* ---- membership card mock, to be cut out ---- */
+  .cutwrap { text-align: center; margin: 2mm 0 2.6mm 0; }
+  .cutcaption { font-size: 7.4pt; font-weight: 700; letter-spacing: 1px; color: #023047; text-transform: uppercase; margin-bottom: 1.6mm; }
+  .cutline { border-top: 1.6px dashed #023047; position: relative; width: 100%; margin-bottom: -1mm; }
+  .card {
+    display: inline-block; width: 92mm; min-height: 46mm; box-sizing: border-box;
+    background: #023047; color: #fff; border-radius: 3mm; padding: 3.6mm 6mm;
+    text-align: left; position: relative; margin-top: 2.4mm;
+  }
+  .card .crow { display: flex; justify-content: space-between; align-items: center; }
+  .card .cbrand { font-size: 12.5pt; font-weight: 700; letter-spacing: 0.5px; }
+  .card .ctier { font-size: 7.6pt; background: #ffb703; color: #111; font-weight: 700; padding: 0.8mm 2.4mm; border-radius: 3mm; letter-spacing: 0.4px; }
+  .card .cname { font-size: 12pt; font-weight: 700; margin-top: 4mm; letter-spacing: 0.5px; }
+  .card .cnum { font-size: 11pt; margin-top: 2mm; letter-spacing: 1.6px; }
+  .card .cfoot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 3mm; font-size: 7.2pt; letter-spacing: 0.3px; }
+  .card .cfoot .valid b { font-size: 8.6pt; display: block; letter-spacing: 0.3px; }
+  .card .stripe { position: absolute; left: 0; right: 0; bottom: 15mm; height: 6mm; background: rgba(0,0,0,0.35); }
+
+  h2 {
+    font-size: 12pt; font-weight: 700; margin: 3mm 0 2mm 0; color: #023047;
+    letter-spacing: 0.4px; border-bottom: 2.6px solid #023047; padding-bottom: 1.2mm;
+  }
+
+  /* ---- three-tier comparison ---- */
+  .tiers { display: flex; gap: 4mm; align-items: flex-start; margin-bottom: 3mm; }
+  .tier { flex: 1; border: 1.4px solid #023047; border-radius: 2mm; padding: 3mm 3.5mm; box-sizing: border-box; }
+  .tier.popular { background: #023047; color: #fff; padding-top: 6mm; position: relative; box-shadow: 0 2mm 4mm rgba(2,48,71,0.35); }
+  .tier .badgepop { position: absolute; top: -4mm; left: 50%; transform: translateX(-50%); background: #ffb703; color: #111; font-size: 7.4pt; font-weight: 700; letter-spacing: 0.6px; padding: 1.4mm 4mm; border-radius: 4mm; white-space: nowrap; }
+  .tier .tagcurrent { display: inline-block; font-size: 6.6pt; font-weight: 700; color: #023047; border: 1px solid #023047; border-radius: 3mm; padding: 0.6mm 2.2mm; letter-spacing: 0.3px; margin-bottom: 2mm; }
+  .tier .tname { font-size: 10.5pt; font-weight: 700; letter-spacing: 0.3px; margin-bottom: 1.5mm; }
+  .tier .twas { font-size: 8.6pt; text-decoration: line-through; opacity: 0.75; }
+  .tier .tprice { font-size: 19pt; font-weight: 700; letter-spacing: 0.2px; }
+  .tier .tpermonth { font-size: 7.8pt; margin-top: 0.6mm; }
+  .tier .tsave { font-size: 7.6pt; font-weight: 700; margin-top: 1.6mm; color: #ffb703; }
+  .tier ul { list-style: none; margin: 2mm 0 0 0; padding: 0; font-size: 7.6pt; line-height: 1.65; }
+  .tier ul li { display: flex; align-items: flex-start; }
+
+  .upgradebox { border: 1.6px solid #ffb703; background: #fff8e6; border-radius: 2mm; padding: 2.4mm 4mm; font-size: 8.4pt; line-height: 1.5; margin: 2.4mm 0 2mm 0; display: flex; align-items: center; gap: 3mm; }
+  .upgradebox .badge-ring { flex: none; }
+  .upgradebox b { color: #023047; }
+
+  .testimonial { font-family: "Corpus Motor Slab", serif; font-size: 12.5pt; line-height: 1.4; color: #023047; text-align: center; margin: 2mm 12mm 0 12mm; font-style: italic; }
+  .testimonial .attrib { font-family: "Corpus Motor", sans-serif; font-size: 8.4pt; font-style: normal; color: #444; margin-top: 2.4mm; letter-spacing: 0.3px; }
+
+  .yfooter { background: #ffb703; color: #111; font-size: 7.4pt; padding: 2.6mm 13mm; display: flex; justify-content: space-between; align-items: center; position: absolute; left: 0; right: 0; bottom: 0; font-weight: 700; }
+
+  /* ---- page 2 ---- */
+  .bband { background: #023047; color: #fff; padding: 4mm 13mm; display: flex; justify-content: space-between; align-items: center; font-size: 8pt; font-weight: 700; letter-spacing: 0.4px; }
+  .p2-pad { padding: 3.5mm 13mm 0 13mm; }
+  .covergrid { display: flex; gap: 6mm; }
+  .covergrid > div { flex: 1; }
+  .covergrid ul { list-style: none; margin: 0; padding: 0; font-size: 9pt; line-height: 1.85; }
+  .covergrid ul li { display: flex; align-items: flex-start; }
+  .stripbox { border-left: 5px solid #ffb703; background: #fafafa; padding: 2.2mm 4mm; font-size: 8.2pt; line-height: 1.5; margin: 2.6mm 0; }
+
+  .small { font-size: 6.9pt; line-height: 1.45; color: #333; }
+  .small h3 { font-size: 8pt; color: #023047; margin: 3mm 0 1mm 0; letter-spacing: 0.3px; }
+  .smallcols { column-count: 2; column-gap: 7mm; }
+  .smallcols p { margin: 0 0 1.8mm 0; }
+
+  .cutline2 { border-top: 1.8px dashed #023047; margin: 5mm 13mm 0 13mm; position: relative; }
+  .cutline2 .scissors { position: absolute; left: -3mm; top: -2.6mm; font-size: 9pt; color: #023047; background: #fff; padding: 0 1mm; }
+  .slip { margin: 3mm 13mm 6mm 13mm; border: 1.6px solid #023047; border-radius: 2mm; padding: 4mm 5mm; }
+  .slip .stitle { font-size: 10pt; font-weight: 700; color: #023047; letter-spacing: 0.3px; margin-bottom: 2.4mm; }
+  .sliprow { display: flex; gap: 6mm; font-size: 8.2pt; }
+  .sliprow > div { flex: 1; }
+  .slip .lbl { font-size: 6.8pt; text-transform: uppercase; letter-spacing: 0.4px; color: #666; font-weight: 700; }
+  .slip .val { font-size: 9.4pt; margin-top: 0.6mm; margin-bottom: 2.4mm; }
+  .slip .payopts { font-size: 7.8pt; margin-top: 1.5mm; }
+  .slip .payopts span { margin-right: 5mm; }
+  .slip .box { display: inline-block; width: 3mm; height: 3mm; border: 1px solid #333; margin-right: 1.4mm; vertical-align: middle; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="yband">
+    <div class="toprow">
+      <div class="brand"><span class="badge-ring"></span>MILLDOWN MOTORING CLUB</div>
+      <div class="doctag">Your breakdown cover renewal notice<br>Prepared 2 September 2026<br>Membership MDC-4471-8823</div>
+    </div>
+    <div class="offer">THIS OFFER ENDS 30 SEPTEMBER 2026
+      <small>Renew now and keep last year's benefits at this year's price — plus the chance to upgrade below</small>
+    </div>
+  </div>
+
+  <div class="body-pad">
+    <p class="lede">Dear Mr Ashworth,<br><br>
+      Your Milldown membership has kept you moving for years, and it's nearly time to renew again.
+      We've kept your <b>Roadside Assist</b> cover exactly as it is, so all you need to do is renew —
+      or use this letter to move up a level before the price goes up. <b>To keep your cover running
+      without a break, please renew by 14 October 2026.</b> Your replacement card is ready to cut out
+      below.</p>
+
+    <div class="cutwrap">
+      <div class="cutcaption">✂ cut along the dashed line and keep this card in your glovebox</div>
+      <div class="cutline"></div>
+      <div class="card">
+        <div class="stripe"></div>
+        <div class="crow">
+          <div class="cbrand">MILLDOWN</div>
+          <div class="ctier">ROADSIDE ASSIST</div>
+        </div>
+        <div class="cname">J. ASHWORTH</div>
+        <div class="cnum">MDC&nbsp;4471&nbsp;8823</div>
+        <div class="cfoot">
+          <div class="valid">MEMBER SINCE 2018<br><b>VALID TO 04/11/2026</b></div>
+          <div>24HR: 0330 555 0198</div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Choose your cover for the year ahead</h2>
+    <div class="tiers">
+      <div class="tier">
+        <span class="tagcurrent">Your current cover</span>
+        <div class="tname">Roadside Assist</div>
+        <div class="tprice">&pound;84.99</div>
+        <div class="tpermonth">per year &middot; you paid &pound;74.99 last year</div>
+        <ul>
+          <li><span class="tickmark"></span>Roadside repair, any vehicle you're in</li>
+          <li><span class="tickmark"></span>Unlimited call-outs</li>
+          <li><span class="crossmark"></span>Recovery to a garage</li>
+          <li><span class="crossmark"></span>Home start</li>
+          <li><span class="crossmark"></span>Onward travel &amp; overnight cover</li>
+        </ul>
+      </div>
+      <div class="tier popular">
+        <div class="badgepop">MOST POPULAR</div>
+        <div class="tname">Roadside &amp; Recovery</div>
+        <div class="twas">was &pound;159.99</div>
+        <div class="tprice">&pound;129.99</div>
+        <div class="tpermonth">or &pound;11.99 a month</div>
+        <div class="tsave">Save &pound;30 — renew before 5 October 2026</div>
+        <ul>
+          <li><span class="tickmark"></span>Roadside repair, any vehicle you're in</li>
+          <li><span class="tickmark"></span>Unlimited call-outs</li>
+          <li><span class="tickmark"></span>Recovery to a garage, home or a destination</li>
+          <li><span class="crossmark"></span>Home start</li>
+          <li><span class="crossmark"></span>Onward travel &amp; overnight cover</li>
+        </ul>
+      </div>
+      <div class="tier">
+        <div class="tname">Roadside, Recovery &amp; At Home</div>
+        <div class="tprice">&pound;169.99</div>
+        <div class="tpermonth">per year &middot; or &pound;15.99 a month</div>
+        <ul>
+          <li><span class="tickmark"></span>Roadside repair, any vehicle you're in</li>
+          <li><span class="tickmark"></span>Unlimited call-outs</li>
+          <li><span class="tickmark"></span>Recovery to a garage, home or a destination</li>
+          <li><span class="tickmark"></span>Home start</li>
+          <li><span class="tickmark"></span>Onward travel &amp; overnight cover</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="upgradebox"><span class="badge-ring"></span>
+      <div><b>Just in — add Home Start for &pound;19.99 a year.</b> Nearly a third of call-outs happen
+      right outside the front door. Add it to any renewal by calling the number below, or tick the
+      box on your payment slip overleaf.</div>
+    </div>
+
+    <div class="testimonial">
+      &ldquo;They reached me within twenty minutes on the coldest morning of the year and had me back
+      on the road before the school run.&rdquo;
+      <div class="attrib">— Mrs D. Farrow, Milldown member since 2011 &middot; review given June 2026</div>
+    </div>
+  </div>
+
+  <div class="yfooter">
+    <span>Milldown Motoring Club &middot; PO Box 4471, Bristol, BS99 7ZZ</span>
+    <span>Page 1 of 2</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="bband">
+    <span>MILLDOWN MOTORING CLUB — YOUR RENEWAL</span>
+    <span>Membership MDC-4471-8823 &middot; Page 2 of 2</span>
+  </div>
+
+  <div class="p2-pad">
+    <h2>What's covered with Roadside Assist</h2>
+    <div class="covergrid">
+      <div>
+        <ul>
+          <li><span class="tickmark"></span>Roadside repair for the vehicle named on your membership</li>
+          <li><span class="tickmark"></span>Unlimited call-outs across the year</li>
+          <li><span class="tickmark"></span>Cover for you as a driver in any car, as a named benefit</li>
+          <li><span class="tickmark"></span>Advice line open 24 hours a day, every day</li>
+        </ul>
+      </div>
+      <div>
+        <ul>
+          <li><span class="crossmark"></span>Towing to a garage or your home address</li>
+          <li><span class="crossmark"></span>A replacement vehicle while yours is repaired</li>
+          <li><span class="crossmark"></span>Call-outs if your car won't start at home</li>
+          <li><span class="crossmark"></span>Onward travel if you can't be fixed at the roadside</li>
+        </ul>
+      </div>
+    </div>
+    <div class="stripbox">
+      Milldown attended over 410,000 roadside call-outs last year, with an average arrival time of
+      34 minutes. Members who added Recovery cover were rescued from the roadside 60% more often
+      than those on Roadside Assist alone — see the upgrade offer on the facing page.
+    </div>
+
+    <h2>Terms you should know</h2>
+    <div class="small">
+      <div class="smallcols">
+        <p><b>Who provides this cover.</b> Milldown Motoring Club, of PO Box 4471, Bristol, BS99 7ZZ,
+        arranges and administers this membership. Roadside assistance under this agreement is
+        provided and underwritten by Castlebridge Assistance Underwriting Ltd, registered in England
+        and Wales, company number 07741820, registered office Unit 7 Farrow Point, Bellingham Road,
+        Preswick, Lancashire, PR4 8QJ. Castlebridge Assistance Underwriting Ltd is authorised and
+        regulated by the Financial Conduct Authority, firm reference number 559214.</p>
+        <p><b>Renewal.</b> Your current annual membership period began on 4 November 2025 and this
+        letter offers the twelve months that follow it. Membership renews annually unless you tell
+        us otherwise at least 14 days before your card's valid-to date. There is no fixed contract
+        term beyond each twelve-month period.</p>
+        <p><b>Price.</b> The prices on the facing page are correct as at 28 August 2026 and include
+        Insurance Premium Tax where applicable. Prices may change at your next renewal. Paying
+        monthly costs more over a year than paying annually.</p>
+        <p><b>Cancelling.</b> You may cancel within 14 days of renewing for a full refund provided you
+        have not made a claim. After that, refunds are given for full remaining months only, less a
+        &pound;5 administration charge.</p>
+        <p><b>Changes to cover.</b> You can move between Roadside Assist, Roadside &amp; Recovery and
+        Roadside, Recovery &amp; At Home at any time; the new price applies from your next payment.</p>
+        <p><b>Complaints.</b> Write to the Membership Services Manager at the address above. If we
+        cannot resolve things, you may refer your complaint to the Financial Ombudsman Service.</p>
+        <p>These terms and conditions were last updated on 3 March 2026 and replace all earlier
+        versions. Milldown Motoring Club is a trading name used since 1974. Registered in England
+        and Wales, company number 05512207.</p>
+        <p><b>Data and awards.</b> Our data protection policy was last reviewed on 1 February 2026;
+        a copy is available on request. Milldown was voted the UK's most trusted breakdown provider
+        by Driver Weekly readers, an award received on 12 May 2026.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="cutline2"><span class="scissors">&#9986;</span></div>
+  <div class="slip">
+    <div class="stitle">Renewal payment slip — return with your payment</div>
+    <div class="sliprow">
+      <div>
+        <div class="lbl">Membership number</div>
+        <div class="val">MDC-4471-8823</div>
+        <div class="lbl">Name</div>
+        <div class="val">Mr J. Ashworth</div>
+      </div>
+      <div>
+        <div class="lbl">Amount due (Roadside Assist, 12 months)</div>
+        <div class="val">&pound;84.99</div>
+        <div class="lbl">Offer code (quote when paying by phone)</div>
+        <div class="val">MDC-7734-1102</div>
+      </div>
+      <div>
+        <div class="lbl">Home Start add-on</div>
+        <div class="val"><span class="box"></span> add for &pound;19.99</div>
+        <div class="lbl">Signature</div>
+        <div class="val">&nbsp;</div>
+      </div>
+    </div>
+    <div class="payopts">
+      <span><span class="box"></span> Cheque enclosed, payable to Milldown Motoring Club</span>
+      <span><span class="box"></span> Card</span>
+      <span><span class="box"></span> Direct Debit</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -85,6 +85,42 @@ const DOCS = {
     faces: [FACE("Corpus Booklet", "CrimsonPro.ttf"), FACE("Corpus Booklet Sans", "IBMPlexSans.ttf")],
     swap: [[/"Liberation Serif", serif/g, '"Corpus Booklet", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Booklet Sans", sans-serif']],
   },
+
+  // Retail bank print: a neutral geometric sans with a narrow mono for the
+  // figure columns.
+  "mortgage-annual-statement.html": {
+    faces: [FACE("Corpus Retail", "Rubik.ttf"), FACE("Corpus Retail Mono", "Inconsolata.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Retail", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Retail Mono", monospace']],
+  },
+  // A trade certification pad: plain grotesque labels, a plain fixed-width
+  // fill. Nothing about a test certificate is designed.
+  "electrical-condition-report.html": {
+    faces: [FACE("Corpus Trade", "Barlow-Regular.ttf", "400"), FACE("Corpus Trade Mono", "AnonymousPro-Regular.ttf", "400")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Trade", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Trade Mono", monospace']],
+  },
+  // Direct mail: a warm humanist sans, testimonial in a slab.
+  "breakdown-cover-renewal.html": {
+    faces: [FACE("Corpus Motor", "Cabin.ttf"), FACE("Corpus Motor Slab", "ZillaSlab-Regular.ttf", "400")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Motor", sans-serif'], [/"Liberation Serif", serif/g, '"Corpus Motor Slab", serif']],
+  },
+  // A near-empty confirmation: a book serif set large, the licence panel in a
+  // condensed sans that looks municipal.
+  "tv-licence-confirmation.html": {
+    faces: [FACE("Corpus Licence", "Lora.ttf"), FACE("Corpus Licence Sans", "Oswald.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Licence", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Licence Sans", sans-serif']],
+  },
+  // A form filled in at a desk: printed contract in a plain sans, the blanks
+  // in a marker hand. The mismatch is the whole look.
+  "gym-membership-agreement.html": {
+    faces: [FACE("Corpus Club", "Mulish.ttf"), FACE("Corpus Hand Fill", "Caveat.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Club", sans-serif'], [/"Liberation Serif", serif/g, '"Corpus Hand Fill", serif']],
+  },
+  // Generation data: an old-style serif against a typewriter mono, a pairing
+  // nothing else in the corpus uses.
+  "solar-export-statement.html": {
+    faces: [FACE("Corpus Export", "Alegreya.ttf"), FACE("Corpus Export Mono", "CutiveMono-Regular.ttf", "400")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Export", serif'], [/"Liberation Mono", monospace/g, '"Corpus Export Mono", monospace']],
+  },
 };
 
 for (const [file, { faces, swap }] of Object.entries(DOCS)) {
