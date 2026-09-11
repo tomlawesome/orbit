@@ -1,0 +1,28 @@
+{
+  "name": "council tax demand, ten-instalment schedule and dual-year precepts against a single year total",
+  "filename": "fullpage-council-tax-demand.pdf",
+  "expected": {
+    "dates": [
+      "2026-04-01",
+      "2027-03-31"
+    ],
+    "provider": "Calderhythe District Council",
+    "reference": "8845612033",
+    "dateRoles": [
+      {
+        "date": "2026-04-01",
+        "role": "start"
+      },
+      {
+        "date": "2027-03-31",
+        "role": "renewal"
+      }
+    ],
+    "subtype": "Council tax demand",
+    "costMinor": 215907,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": "dates is the first and last day of the charge period printed in the header ('Charge for the year 1 April 2026 to 31 March 2027'), roled start and expiry; the ten instalment due dates (15th of each month, April 2026 to January 2027, printed twice over in the schedule table as dd/mm/yyyy) are all excluded even though they are the densest, most date-like block on the page. Also excluded: the notice issue date (10 March 2026), the budget-setting meeting date (25 February 2026), the valuation list effective date (1 April 1993), the 1991 capital value basis date (1 April 1991, printed twice), the banding appeal deadline (10 September 2026), the direct debit first-collection date and single-payment deadline (15 April 2026, same calendar date as instalment 1 but a separate mention), and the second-homes discount withdrawal date (1 April 2024). costMinor is the total council tax charge for 2026/27 (GBP 2,159.07) printed as the bold total row of the charge breakdown table, not last year's total (GBP 2,056.30), not either individual precept figure, not the regular monthly instalment (GBP 215.91) or the different final instalment (GBP 215.88), and not the single-payment total after the prompt payment allowance (GBP 2,137.48, itself distinct from the GBP 21.59 allowance deducted to reach it). provider is Calderhythe District Council, the billing authority that issues and collects the demand, declared under that full name in the small print, and not any of the four precepting authorities (Wealdshire County Council, Wealdshire Police and Crime Commissioner, Wealdshire Fire and Rescue Authority, Marlpool Parish Council) whose amounts it also collects, nor the recovery contractor named in the small print for enforcement action (Halsworth Compliance Services Ltd, contract reference HCS/CT/2244). reference is the council tax account number 8845612033, which is what the liable person quotes when paying or querying the account, not the property reference CH-14-SC-2261 or the recovery contractor's contract reference. recurrenceMonths is 12 because the charge is levied for a 12-month financial year and a further demand follows for the next year; scheduleKind is renewal rather than service because this is a periodic charge, not a service visit. The end date is roled 'renewal' rather than 'expiry' because the household must act again on it, which is the distinction this corpus draws: 'expiry' is reserved for a document that simply runs out (the MOT certificate), and verify.mjs derives scheduleKind from the role."
+}

@@ -33,6 +33,20 @@ fonts=(
   "ofl/ebgaramond|EBGaramond-Italic%5Bwght%5D.ttf|OFL-1.1"
   "ofl/nunito|Nunito%5Bwght%5D.ttf|OFL-1.1"
   "ofl/spacegrotesk|SpaceGrotesk%5Bwght%5D.ttf|OFL-1.1"
+  # --- added for the 18 further documents (#986) ---
+  "ofl/ptserif|PT_Serif-Web-Regular.ttf|OFL-1.1"
+  "ofl/ptserif|PT_Serif-Web-Bold.ttf|OFL-1.1"
+  "ofl/ibmplexsans|IBMPlexSans%5Bwdth,wght%5D.ttf|OFL-1.1"
+  "ofl/librebaskerville|LibreBaskerville%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/publicsans|PublicSans%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/firasans|FiraSans-Regular.ttf|OFL-1.1"
+  "ofl/firasans|FiraSans-Bold.ttf|OFL-1.1"
+  "ofl/firamono|FiraMono-Regular.ttf|OFL-1.1"
+  "ofl/sharetechmono|ShareTechMono-Regular.ttf|OFL-1.1"
+  "ofl/worksans|WorkSans%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/jetbrainsmono|JetBrainsMono%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/crimsonpro|CrimsonPro%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/karla|Karla%5Bwght%5D.ttf|OFL-1.1"
 )
 
 : > LICENCES.txt
@@ -55,7 +69,9 @@ for entry in "${fonts[@]}"; do
 done
 
 # One copy of the licence text per family directory used.
-for d in ptsans ptmono sourceserif4 courierprime archivonarrow ebgaramond nunito spacegrotesk; do
+for d in ptsans ptmono sourceserif4 courierprime archivonarrow ebgaramond nunito spacegrotesk \
+         ptserif ibmplexsans librebaskerville publicsans firasans firamono sharetechmono \
+         worksans jetbrainsmono crimsonpro karla; do
   curl -sSLf --max-time 30 -o "OFL-$d.txt" "$base/ofl/$d/OFL.txt" 2>/dev/null || true
 done
 
