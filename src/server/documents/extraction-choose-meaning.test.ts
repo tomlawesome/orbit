@@ -25,12 +25,14 @@ function candidate<K extends CandidateKind>(
   value: string,
   tags: Array<TagInput<K>>,
   line?: string,
+  currency?: string,
 ): TaggedCandidate<K> {
   return {
     kind,
     value,
     index: nextIndex++,
     line: line ?? value,
+    ...(currency === undefined ? {} : { currency }),
     tags: tags.map((tag): Tag<K> =>
       typeof tag === "string"
         ? { value: tag, trigger: "", source: "label" }
@@ -231,18 +233,22 @@ describe("the excerpt the model is asked about", () => {
     expect(excerpt).toContain("Kestrel Travel Insurance Services Ltd");
   });
 
-  it("puts the heading stage 2 called the title first", () => {
+  it("prints the headings, then the names and the labelled amounts", () => {
     const excerpt = subtypeExcerpt([
       candidate("heading", "SCHEDULE OF COVER", ["section"]),
       candidate("heading", "Policy Schedule — Thornfield Assurance plc", ["title"]),
       candidate("organisation", "Thornfield Assurance plc", ["other"]),
+      candidate("amount", "41299", [{ value: "total", trigger: "Total premium" }], "Total premium £412.99", "GBP"),
     ]);
 
-    expect(excerpt.split("\n").slice(0, 2)).toEqual([
-      "Headings printed on this page:",
+    expect(excerpt.split("\n")).toEqual([
+      "What this page prints:",
       "Policy Schedule — Thornfield Assurance plc",
+      "SCHEDULE OF COVER",
+      "Named on the page: Thornfield Assurance plc",
+      "Amounts printed: Total premium GBP 412.99",
     ]);
-    expect(excerpt).toContain("SCHEDULE OF COVER");
+    expect(excerpt.length).toBeLessThanOrEqual(700);
   });
 });
 
@@ -253,8 +259,8 @@ describe("asking the model about what the rules could not settle", () => {
     candidate("heading", "Council Tax Demand Notice 2026/27", ["title"]),
   ];
 
-  it("asks only about the field the rules left blank", async () => {
-    const model = fakeModel('{"document_title": "Council Tax Demand Notice"}');
+  it("asks only about the field the rules left blank, from the taxonomy's own words", async () => {
+    const model = fakeModel('{"kind_of_thing": "Tax", "what_it_is_for": "Council tax"}');
 
     const filled = await chooseMeaningFieldsWithModel(
       shortlist,
@@ -263,9 +269,57 @@ describe("asking the model about what the rules could not settle", () => {
     );
 
     expect(model.prompts).toHaveLength(1);
-    expect(model.prompts[0]).toContain('【template_start】{"document_title":""}【template_end】');
-    expect(model.prompts[0]).toContain("Headings printed on this page:");
-    expect(filled).toEqual({ subtype: "Council Tax Demand Notice" });
+    expect(model.prompts[0]).toContain('【template_start】{"kind_of_thing":"","what_it_is_for":""}【template_end】');
+    expect(model.prompts[0]).toContain("kind_of_thing must be one of: Insurance, Plan,");
+    expect(model.prompts[0]).toContain("what_it_is_for must be one of: Motor, Driving,");
+    expect(model.prompts[0]).toContain("What this page prints:");
+    expect(filled).toEqual({ subtype: "Council tax Tax" });
+  });
+
+  it("composes what the page is with the taxonomy's own group names, not the words the model used", async () => {
+    const filled = await chooseMeaningFieldsWithModel(
+      shortlist,
+      { provider: "Calderhythe District Council" },
+      fakeModel('{"kind_of_thing": "Cover", "what_it_is_for": "Car"}'),
+    );
+
+    expect(filled.subtype).toBe("Motor Insurance");
+  });
+
+  it("keeps the kind alone when what it is for is not a taxonomy qualifier", async () => {
+    const filled = await chooseMeaningFieldsWithModel(
+      shortlist,
+      { provider: "Calderhythe District Council" },
+      fakeModel('{"kind_of_thing": "Statement", "what_it_is_for": "the second quarter"}'),
+    );
+
+    expect(filled.subtype).toBe("Statement");
+  });
+
+  it("takes a qualifier on its own only where the taxonomy lets it stand alone", async () => {
+    const standalone = await chooseMeaningFieldsWithModel(
+      shortlist,
+      { provider: "Calderhythe District Council" },
+      fakeModel('{"kind_of_thing": "", "what_it_is_for": "MOT"}'),
+    );
+    expect(standalone.subtype).toBe("MOT");
+
+    const notStandalone = await chooseMeaningFieldsWithModel(
+      shortlist,
+      { provider: "Calderhythe District Council" },
+      fakeModel('{"kind_of_thing": "", "what_it_is_for": "Dental"}'),
+    );
+    expect(notStandalone.subtype).toBeUndefined();
+  });
+
+  it("refuses a kind the taxonomy does not carry", async () => {
+    const filled = await chooseMeaningFieldsWithModel(
+      shortlist,
+      { provider: "Calderhythe District Council" },
+      fakeModel('{"kind_of_thing": "Council tax demand notice", "what_it_is_for": "Council tax"}'),
+    );
+
+    expect(filled.subtype).toBe("Council tax");
   });
 
   it("renders the template's own structured prompt for the provider", async () => {
@@ -295,30 +349,24 @@ describe("asking the model about what the rules could not settle", () => {
     expect(filled.provider).toBeUndefined();
   });
 
-  it("refuses a title no heading prints, and accepts one printed inside a heading", async () => {
-    const rewritten = await chooseMeaningFieldsWithModel(
-      shortlist,
-      { provider: "Calderhythe District Council" },
-      fakeModel('{"document_title": "Annual council tax bill"}'),
-    );
-    expect(rewritten.subtype).toBeUndefined();
-
-    const quoted = await chooseMeaningFieldsWithModel(
-      shortlist,
-      { provider: "Calderhythe District Council" },
-      fakeModel('{"document_title": "Council Tax Demand"}'),
-    );
-    expect(quoted.subtype).toBe("Council Tax Demand");
-  });
-
-  it("reads a bare string reply as well as a template-shaped one", async () => {
+  it("leaves subtype blank when the model answers with words of its own", async () => {
     const filled = await chooseMeaningFieldsWithModel(
       shortlist,
       { provider: "Calderhythe District Council" },
-      fakeModel("Council Tax Demand Notice"),
+      fakeModel('{"kind_of_thing": "Annual demand notice", "what_it_is_for": "living here"}'),
     );
 
-    expect(filled.subtype).toBe("Council Tax Demand Notice");
+    expect(filled.subtype).toBeUndefined();
+  });
+
+  it("reads a bare string reply as the kind it names", async () => {
+    const filled = await chooseMeaningFieldsWithModel(
+      shortlist,
+      { provider: "Calderhythe District Council" },
+      fakeModel("Tax"),
+    );
+
+    expect(filled.subtype).toBe("Tax");
   });
 
   it("leaves the field blank when the model answers with nothing", async () => {
