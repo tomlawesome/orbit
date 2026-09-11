@@ -108,6 +108,65 @@ describe("dates", () => {
   });
 });
 
+describe("a label Tika put in a block of its own", () => {
+  it("reaches forward across the block boundary to the value below it", () => {
+    const council = "COUNCIL TAX ACCOUNT NUMBER \n\n8845612033";
+    expect(tagValues(council, "identifier")).toContain("account");
+    const warranty = "EXTENDED WARRANTY PRICE PAID \n\n£69.99 (inc. IPT)";
+    expect(tagValues(warranty, "amount")).toContain("total");
+  });
+
+  it("reaches backward to the value above it", () => {
+    const cover = ["Your current cover", "Roadside Assist", "£84.99", "per year"].join(" \n\n");
+    const tag = candidate(cover, "amount").tags[0];
+    expect(tag).toEqual({ value: "total", trigger: "per year", source: "label" });
+  });
+
+  it("stops at the first block below that holds a candidate of its kind", () => {
+    const page = ["Policy number", "MTR-8823-0145", "Account number", "7724665018"].join(" \n\n");
+    const identifiers = tagged(page).filter((c) => c.kind === "identifier");
+    expect(identifiers.map((c) => [c.value, c.tags[0].value])).toEqual([
+      ["MTR-8823-0145", "policy"],
+      ["7724665018", "account"],
+    ]);
+  });
+
+  it("trusts a bare one-word label only when it is the whole block", () => {
+    expect(tagValues("Policy \n\nMTR-8823-0145", "identifier")).toEqual(["policy"]);
+    expect(tagValues("Membership \n\nWX-4471-B", "identifier")).toEqual(["customer"]);
+    expect(tagValues("Your policy covers item AB-12345 at home", "identifier")).toEqual(["other"]);
+  });
+});
+
+describe("a date range", () => {
+  const roles = (text: string) =>
+    tagged(text)
+      .filter((c) => c.kind === "date")
+      .map((c) => c.tags[0].value);
+
+  it("starts at the first date and expires at the second", () => {
+    expect(roles("Current period of insurance 15 October 2025 to 15 October 2026")).toEqual([
+      "start",
+      "expiry",
+    ]);
+    expect(roles("Charge for the year 1 April 2026 to 31 March 2027")).toEqual(["start", "expiry"]);
+    expect(roles("cover from 14 June 2026 until 13 June 2031")).toEqual(["start", "expiry"]);
+  });
+
+  it("gives way to a label that sits nearer than the connector", () => {
+    expect(roles("15 October 2025 to 15 October 2026 is your renewal date")).toEqual([
+      "start",
+      "renewal",
+    ]);
+  });
+
+  it("names the connector as the trigger", () => {
+    const text = "Current period of insurance 15 October 2025 to 15 October 2026";
+    const first = tagged(text).find((c) => c.kind === "date");
+    expect(first?.tags[0]).toEqual({ value: "start", trigger: "to", source: "label" });
+  });
+});
+
 describe("the stage's contract", () => {
   const page = [
     "Your motor insurance renewal",

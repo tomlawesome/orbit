@@ -306,6 +306,10 @@ export interface ContextRoleAssignment {
   /** The trigger's own words, verbatim from the text, or `""` when the date
    * fell outside every scope and took the default role. */
   trigger: string;
+  /** How far the winning trigger's anchor sat from the date, in characters,
+   * or `Infinity` for the default -- so a caller with evidence of its own
+   * can tell whether that evidence sits nearer than this one did. */
+  distance: number;
 }
 
 /**
@@ -321,7 +325,7 @@ export function assignContextRoleLabels(
 
   return dates.map((date) => {
     const covering = scopes.filter((scope) => date.index >= scope.scopeStart && date.index < scope.scopeEnd);
-    if (covering.length === 0) return { role: "other", trigger: "" };
+    if (covering.length === 0) return { role: "other", trigger: "", distance: Number.POSITIVE_INFINITY };
 
     covering.sort((a, b) => {
       const distanceA = anchorDistance(date, a);
@@ -331,7 +335,11 @@ export function assignContextRoleLabels(
       return a.matchStart - b.matchStart;
     });
 
-    return { role: covering[0].role, trigger: covering[0].matchText };
+    return {
+      role: covering[0].role,
+      trigger: covering[0].matchText,
+      distance: anchorDistance(date, covering[0]),
+    };
   });
 }
 
