@@ -63,6 +63,13 @@ fonts=(
   "ofl/caveat|Caveat%5Bwght%5D.ttf|OFL-1.1"
   "ofl/mulish|Mulish%5Bwght%5D.ttf|OFL-1.1"
   "ofl/asap|Asap%5Bwdth,wght%5D.ttf|OFL-1.1"
+  "ofl/arvo|Arvo-Regular.ttf|OFL-1.1"
+  "ofl/domine|Domine%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/saira|Saira%5Bwdth,wght%5D.ttf|OFL-1.1"
+  "ofl/manrope|Manrope%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/vollkorn|Vollkorn%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/tinos|Tinos-Regular.ttf|OFL-1.1"
+  "ofl/cormorantgaramond|CormorantGaramond%5Bwght%5D.ttf|OFL-1.1"
 )
 
 : > LICENCES.txt
@@ -89,7 +96,8 @@ for d in ptsans ptmono sourceserif4 courierprime archivonarrow ebgaramond nunito
          ptserif ibmplexsans librebaskerville publicsans firasans firamono sharetechmono \
          worksans jetbrainsmono crimsonpro karla \
          spectral cabin rubik bitter lora oswald anonymouspro cutivemono \
-         inconsolata zillaslab alegreya barlow caveat mulish asap; do
+         inconsolata zillaslab alegreya barlow caveat mulish asap \
+         arvo domine saira manrope vollkorn tinos cormorantgaramond; do
   curl -sSLf --max-time 30 -o "OFL-$d.txt" "$base/ofl/$d/OFL.txt" 2>/dev/null || true
 done
 
