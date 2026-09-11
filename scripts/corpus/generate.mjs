@@ -6,12 +6,25 @@
 // change the fixture.
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
+import { corpusDir, positional } from "./corpus-dir.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-const dir = process.argv[2] ?? resolve(HERE, "sources");
-const out = process.argv[3] ?? resolve(HERE, "../../src/server/documents/extraction-corpus-fullpage.ts");
+// The first positional argument still names the corpus directory, as it
+// always did; `--dir` does the same job for the scripts that never took one.
+const dir = positional[0] ?? corpusDir;
+// Which corpus this is decides the module written and the constant exported.
+// The hold-out is a separate module on purpose: it is scored, never added to
+// `EXTRACTION_CORPUS`, so nothing tuning against the 24 can read it.
+const HOLDOUT = basename(dir) !== "sources";
+const out = positional[1] ?? resolve(
+  HERE,
+  HOLDOUT
+    ? "../../src/server/documents/extraction-holdout-fullpage.ts"
+    : "../../src/server/documents/extraction-corpus-fullpage.ts",
+);
+const exportName = positional[2] ?? (HOLDOUT ? "EXTRACTION_HOLDOUT_FULLPAGE" : "FULL_PAGE_CORPUS");
 
 const entries = readdirSync(dir).filter((f) => f.endsWith(".truth.json")).sort().map((f) => {
   const base = f.replace(/\.truth\.json$/, "");
@@ -42,29 +55,40 @@ ${lines.join("\n")}
   },`;
 });
 
-writeFileSync(out, `// GENERATED FILE — do not edit by hand.
+const preamble = HOLDOUT
+  ? `// GENERATED FILE — do not edit by hand.
+//
+// The HOLD-OUT set (#986): full-page documents written after the extractor
+// was tuned, by someone who had not read the 24 in \`scripts/corpus/sources/\`.
+// They are the generalisation measurement, so they are deliberately NOT part
+// of \`EXTRACTION_CORPUS\`: nothing tuning against the 24 pulls them in, and
+// tuning against these would destroy the only unseen number the project has.
+//
+// Score them with \`npm run eval:holdout\`. Regenerate with:
+//
+//   node scripts/corpus/generate.mjs --dir holdout
+//`
+  : `// GENERATED FILE — do not edit by hand.
 //
 // Full-page extraction fixtures for #981. Regenerate with:
 //
 //   node scripts/corpus/generate.mjs
-//
+//`;
+
+writeFileSync(out, `${preamble}
 // Each document was written as HTML, rendered to PDF with Playwright at A4,
 // and parsed with the real Tika using the request in \`tika.ts\`. The \`text\`
 // below is Tika's output byte for byte — escapes, flattened table columns,
 // repeated page headers and all. That is the point: the fixture is what
 // production actually sees, not a tidied version of it.
 //
-// The originals live in \`scripts/corpus/sources/\`. Never edit \`text\` here;
-// edit the HTML and regenerate, so the fixture and the document it came from
-// cannot drift apart.
-//
-// These six replace nothing. They sit alongside the short documents in
-// \`extraction-corpus.ts\`, which remain useful for exactly the labelled,
-// single-fact cases they cover.
+// The originals live in \`${`scripts/corpus/${basename(dir)}/`}\`. Never edit
+// \`text\` here; edit the HTML and regenerate, so the fixture and the document
+// it came from cannot drift apart.
 
 import type { CorpusDocument } from "./extraction-corpus";
 
-export const FULL_PAGE_CORPUS: CorpusDocument[] = [
+export const ${exportName}: CorpusDocument[] = [
 ${entries.join("\n")}
 ];
 `);

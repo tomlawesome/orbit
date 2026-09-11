@@ -70,6 +70,28 @@ fonts=(
   "ofl/vollkorn|Vollkorn%5Bwght%5D.ttf|OFL-1.1"
   "ofl/tinos|Tinos-Regular.ttf|OFL-1.1"
   "ofl/cormorantgaramond|CormorantGaramond%5Bwght%5D.ttf|OFL-1.1"
+  # --- added for the 12 hold-out documents (#986 step 8) ---
+  "ofl/literata|Literata%5Bopsz,wght%5D.ttf|OFL-1.1"
+  "ofl/librefranklin|LibreFranklin%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/faustina|Faustina%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/inter|Inter%5Bopsz,wght%5D.ttf|OFL-1.1"
+  "ofl/newsreader|Newsreader%5Bopsz,wght%5D.ttf|OFL-1.1"
+  "ofl/spacemono|SpaceMono-Regular.ttf|OFL-1.1"
+  "ofl/spacemono|SpaceMono-Bold.ttf|OFL-1.1"
+  "ofl/archivo|Archivo%5Bwdth,wght%5D.ttf|OFL-1.1"
+  "ofl/sourcecodepro|SourceCodePro%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/martianmono|MartianMono%5Bwdth,wght%5D.ttf|OFL-1.1"
+  "ofl/epilogue|Epilogue%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/redhatdisplay|RedHatDisplay%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/plusjakartasans|PlusJakartaSans%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/josefinsans|JosefinSans%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/gelasio|Gelasio%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/sourcesans3|SourceSans3%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/petrona|Petrona%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/dmserifdisplay|DMSerifDisplay-Regular.ttf|OFL-1.1"
+  # A ballpoint hand, for a carbonless pad filled in on a doorstep.
+  "ofl/kalam|Kalam-Regular.ttf|OFL-1.1"
+  "ofl/kalam|Kalam-Bold.ttf|OFL-1.1"
 )
 
 : > LICENCES.txt
@@ -97,7 +119,10 @@ for d in ptsans ptmono sourceserif4 courierprime archivonarrow ebgaramond nunito
          worksans jetbrainsmono crimsonpro karla \
          spectral cabin rubik bitter lora oswald anonymouspro cutivemono \
          inconsolata zillaslab alegreya barlow caveat mulish asap \
-         arvo domine saira manrope vollkorn tinos cormorantgaramond; do
+         arvo domine saira manrope vollkorn tinos cormorantgaramond \
+         literata librefranklin faustina inter newsreader spacemono archivo \
+         sourcecodepro martianmono epilogue redhatdisplay plusjakartasans \
+         josefinsans gelasio sourcesans3 petrona dmserifdisplay kalam; do
   curl -sSLf --max-time 30 -o "OFL-$d.txt" "$base/ofl/$d/OFL.txt" 2>/dev/null || true
 done
 

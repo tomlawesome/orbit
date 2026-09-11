@@ -1,12 +1,10 @@
 import { chromium } from "@playwright/test";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-const HERE = dirname(fileURLToPath(import.meta.url));
-const dir = resolve(HERE, "sources");
+import { corpusDir, positional } from "./corpus-dir.mjs";
+const dir = corpusDir;
 
 const b = await chromium.launch();
 const p = await b.newPage();
-await p.goto(`file://${dir}/${process.argv[2]}`, { waitUntil: "networkidle" });
+await p.goto(`file://${dir}/${positional[0]}`, { waitUntil: "networkidle" });
 // A4 at 96dpi. A .page using min-height rather than height GROWS instead of
 // overflowing, so scrollHeight matches the box and the old check read 0px
 // while the page silently spilled onto an extra sheet. Measure against A4,
