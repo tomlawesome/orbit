@@ -60,6 +60,43 @@ describe("a label beside the candidate", () => {
   });
 });
 
+describe("a qualifier beside an amount", () => {
+  it("beats the plain label it contains, however much nearer that label sits", () => {
+    expect(tagValues("Net premium (excluding Insurance Premium Tax) £368.74", "amount")).toEqual(["other"]);
+    expect(tagValues("Premium excluding Insurance Premium Tax £133.00", "amount")).toEqual(["other"]);
+    expect(tagValues("Insurance Premium Tax at 12% £44.25", "amount")).toEqual(["other"]);
+    expect(tagValues("Annual premium, including Insurance Premium Tax £159.60", "amount")).toEqual(["total"]);
+  });
+
+  it("reads a cover limit, an excess and a deposit as none of the household's price", () => {
+    expect(tagValues("Motor legal expenses cover Up to £100,000 per claim", "amount")).toEqual(["other"]);
+    expect(tagValues("Compulsory excess £150", "amount")).toEqual(["other"]);
+    expect(tagValues("Deposit, collected on or after 14 March 2026 £37.99", "amount")).toEqual(["other"]);
+    expect(tagValues("PRICE PAID FOR APPLIANCE \n\n£549.99", "amount")).toEqual(["other"]);
+  });
+
+  it("reads the figure printed beside the real one as a rival", () => {
+    expect(tagValues("Estimated total for 2026/27 if generation is unchanged £355.00", "amount")).toEqual(["rival"]);
+    expect(tagValues("Total payable if paying monthly £442.34", "amount")).toEqual(["rival"]);
+    expect(tagValues("Annual premium (if selected instead) £351.00", "amount")).toEqual(["rival"]);
+    expect(tagValues("PAYMENT FROM 20 JUNE 2026 \n\n£891.47 per month", "amount")).toEqual(["rival"]);
+    expect(tagValues("£14.00/mo for your first 6 months", "amount")).toEqual(["rival"]);
+  });
+
+  it("keeps last year's figure out of this year's price", () => {
+    expect(tagValues("Last year your annual premium was £578.90", "amount")).toEqual(["previous"]);
+  });
+});
+
+describe("how a page prices a plan", () => {
+  it("reads the monthly charge as an instalment, and a bare fee as the price", () => {
+    expect(tagValues("£23.00/mo standard monthly charge", "amount")).toEqual(["instalment"]);
+    expect(tagValues("Monthly membership fee, collected by Direct Debit £42.50", "amount")).toEqual(["instalment"]);
+    expect(tagValues("Fee £182.00", "amount")).toEqual(["total"]);
+    expect(tagValues("Joining fee (payable on signing, non-refundable) £25.00", "amount")).toEqual(["other"]);
+  });
+});
+
 describe("a candidate no trigger reaches", () => {
   it("falls back to the kind's `other` and says it has no trigger", () => {
     const tag = candidate("The figure of £42.00 appears at the foot", "amount").tags[0];
