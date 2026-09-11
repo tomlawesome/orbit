@@ -73,10 +73,10 @@ function fakeModel(...replies: string[]): MeaningTransport & { prompts: string[]
 }
 
 describe("the provider the rules fall back on with no model to ask", () => {
-  // The bins rank the shortlist; this is all the rules do with them, and
-  // the bar is deliberately one almost no page clears (owner, 2026-09-11
-  // -- the top run, only where it is the only run printed more than once).
-  it("answers the one run the kept names repeat", () => {
+  // The bins rank the shortlist; this is all the rules do with them -- the
+  // top run, and only where the page printed it more often than anything
+  // else it printed (owner, 2026-09-11).
+  it("answers the run the kept names say most often", () => {
     expect(chooseProviderByRules([
       candidate("organisation", "Calderwell", [
         { value: "provider", trigger: "your supplier is", sieves: AGREED },
@@ -87,26 +87,23 @@ describe("the provider the rules fall back on with no model to ask", () => {
     ])).toBe("Calderwell");
   });
 
-  it("says nothing where the kept names repeat more than one run", () => {
-    // "Millbrook Energy Ltd" twice repeats "millbrook", "millbrook energy"
-    // and "millbrook energy ltd": three runs above one, so the field is
-    // left for the model.
+  it("says nothing where two names are printed as often as each other", () => {
     expect(chooseProviderByRules([
       candidate("organisation", "Millbrook Energy Ltd", [
         { value: "provider", trigger: "your supplier is", sieves: AGREED },
       ], "your supplier is Millbrook Energy Ltd"),
-      candidate("organisation", "Millbrook Energy Ltd", [
-        { value: "provider", trigger: "printed 2 times", sieves: ["printed-throughout"] },
-      ], "Millbrook Energy Ltd, Bellhaven"),
+      candidate("organisation", "Hedgerow Services Ltd", [
+        { value: "provider", trigger: "printed 1 time", sieves: ["printed-throughout"] },
+      ], "Hedgerow Services Ltd, Bellhaven"),
     ])).toBeUndefined();
   });
 
-  it("says nothing where no name is printed twice at all", () => {
+  it("answers the whole name where the page prints one name only once", () => {
     expect(chooseProviderByRules([
       candidate("organisation", "Hedgerow Home Insurance Services Ltd", [
         { value: "provider", trigger: "Intermediary", sieves: AGREED },
       ], "Intermediary Hedgerow Home Insurance Services Ltd"),
-    ])).toBeUndefined();
+    ])).toBe("Hedgerow Home Insurance Services Ltd");
   });
 
   it("counts only the organisations a sieve read as the provider", () => {
@@ -146,18 +143,20 @@ describe("the shortlist the model is shown", () => {
     const excerpt = shortlistExcerpt("Organisations named on this page:", entries);
 
     // The run both mentions of the administrator carry leads, ahead of the
-    // name printed once -- and the count, the sieves and the blocks are
-    // what the model is shown about it.
+    // names printed once -- and the count, the sieves and the blocks are
+    // what the model is shown about it. The fragments of that run are
+    // folded into it, so the names printed once keep their places.
     expect(entries[0].value).toBe("Colworth & Drake");
     expect(entries[0].support).toBe(2);
     expect(excerpt).toContain("1. Colworth & Drake");
     expect(excerpt).toContain("printed 2 times across the names on this page");
     expect(excerpt).toContain("sieves: language-fact, printed-throughout");
     expect(excerpt).toContain("Administered by");
-    // Eight is the cap, and the runs of the name printed twice fill it:
-    // the name printed once is off the end of the list.
-    expect(entries).toHaveLength(8);
-    expect(entries.map((entry) => entry.value)).not.toContain("Meridian");
+    expect(entries.map((entry) => entry.value)).toEqual([
+      "Colworth & Drake",
+      "Colworth & Drake Insurance Services Ltd",
+      "Meridian General Insurance Company plc",
+    ]);
     expect(excerpt.length).toBeLessThanOrEqual(1_500);
   });
 
@@ -236,13 +235,12 @@ describe("asking a model to choose the provider", () => {
         { value: "provider", trigger: "your supplier is", sieves: AGREED },
       ], "your supplier is Millbrook Energy Ltd"),
     ]);
-    // Every run of the name is its own entry, so a model writing out a
-    // shorter one is choosing that entry, not a loose spelling of the
-    // longest.
+    // One mention is one run, the whole name, so a model writing it out
+    // without the legal form is still choosing that entry.
     expect(await chooseProviderWithModel(named, fakeModel("Millbrook Energy Ltd")))
       .toBe("Millbrook Energy Ltd");
     expect(await chooseProviderWithModel(named, fakeModel("Millbrook Energy")))
-      .toBe("Millbrook Energy");
+      .toBe("Millbrook Energy Ltd");
   });
 
   it("takes none for an answer", async () => {

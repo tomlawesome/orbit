@@ -142,6 +142,15 @@ function bestPrinting(spellings: ReadonlyMap<string, number>): string {
   return best;
 }
 
+/** Whether `part` is printed inside `whole` as a run of whole words. */
+function isRunOf(part: readonly string[], whole: readonly string[]): boolean {
+  if (part.length >= whole.length) return false;
+  for (let at = 0; at + part.length <= whole.length; at += 1) {
+    if (part.every((word, i) => word === whole[at + i])) return true;
+  }
+  return false;
+}
+
 /**
  * The word-run bins over the mentions the caller kept, best first.
  *
@@ -150,6 +159,13 @@ function bestPrinting(spellings: ReadonlyMap<string, number>): string {
  * longer run, then by the order they were first seen -- the owner's
  * ordering, which puts the fullest form of a repeated name at the top and
  * its fragments under it.
+ *
+ * A run printed exactly as often as a longer run containing it is that
+ * longer run and nothing else, so it is dropped (owner, 2026-09-11):
+ * "colworth &", "& drake" and "colworth" at ten fold into "colworth &
+ * drake" at ten. Without that, eight places on a shortlist go to eight
+ * cuts of one name, and the answer is pushed off the end by a rival the
+ * page printed once more.
  *
  * Pure: the same mentions always give the same bins, and nothing here reads
  * the page, the document or where anything sits on it.
@@ -182,11 +198,18 @@ export function providerWordRuns<M extends ProviderMention>(
     }
   }
 
-  return [...bins.values()]
+  const ranked = [...bins.values()]
     .sort((left, right) =>
       right.count - left.count ||
       right.run.length - left.run.length ||
-      left.order - right.order)
+      left.order - right.order);
+
+  const words = new Map(ranked.map((bin) => [bin.run, bin.run.split(" ")]));
+  return ranked
+    .filter((bin) => !ranked.some((other) =>
+      other !== bin &&
+      other.count === bin.count &&
+      isRunOf(words.get(bin.run) as string[], words.get(other.run) as string[])))
     .map((bin) => ({
       run: bin.run,
       display: bestPrinting(bin.spellings),

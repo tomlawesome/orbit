@@ -209,19 +209,18 @@ function nameOf(candidate: TaggedCandidate, trigger: string): string | undefined
  * The organisation the household's plan is with, where there is no model to
  * ask, and nothing where the page is not plain about it.
  *
- * The bins rank; this is the only thing the rules do with them, and it is
- * deliberately almost never: the top run may be answered only where it is
- * the only run printed more than once, which is a page whose kept names
- * repeat one thing and one thing alone (owner, 2026-09-11). Anywhere the
- * page repeats a name in several cuts -- which is most pages -- two runs
- * clear the line, and a blank goes to the model instead. A wrong provider
- * costs a point where a blank costs nothing.
+ * The bins rank; this is the only thing the rules do with them. The top run
+ * is answered only where the page printed it more often than anything else
+ * it printed -- where two runs are level the page is naming two things as
+ * loudly as each other, and stage 3's answer to that is silence (owner,
+ * 2026-09-11). A wrong provider costs a point where a blank costs nothing.
  */
 export function chooseProviderByRules(candidates: readonly TaggedCandidate[]): string | undefined {
-  const repeated = providerWordRuns(providerTaggedOrganisations(candidates))
-    .filter((run) => run.count > 1);
-  if (repeated.length !== 1) return undefined;
-  return repeated[0].display;
+  const runs = providerWordRuns(providerTaggedOrganisations(candidates));
+  const [top, next] = runs;
+  if (top === undefined) return undefined;
+  if (next !== undefined && next.count >= top.count) return undefined;
+  return top.display;
 }
 
 // ------------------------------------------------------------------- model
