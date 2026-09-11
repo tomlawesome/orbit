@@ -275,6 +275,12 @@ describe("a date that bounds a term without saying which kind", () => {
     expect(roles("Expiry date 08 September 2027")).toEqual(["expiry"]);
   });
 
+  it("renews at the end of a contract's minimum term", () => {
+    expect(roles("Minimum term 24 months — ends 20 March 2027")).toEqual(["renewal"]);
+    expect(roles("Minimum term ends 21 April 2028")).toEqual(["renewal"]);
+    expect(roles("your membership will end on 2 March 2027 and continue monthly")).toEqual(["renewal"]);
+  });
+
   it("says nothing when the period belongs to the organisation", () => {
     expect(roles("SCHEME REGISTRATION VALID TO 30 April 2027")).toEqual(["other"]);
     expect(roles("Registered with the Gas Safe Register, valid to 30 April 2027")).toEqual(["other"]);

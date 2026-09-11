@@ -90,14 +90,21 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   { role: "renewal", direction: "forward", pattern: "renews? on" },
   { role: "renewal", direction: "forward", pattern: "date of renewal" },
   { role: "renewal", direction: "forward", pattern: "due for renewal(?: on)?" },
+  // UK contracts print the end of the tie-in as "minimum term", and the
+  // household has to choose again when it arrives.
+  { role: "renewal", direction: "forward", pattern: "(?:minimum|initial|fixed)(?: \\d{1,2}[- ]month)? term" },
   { role: "renewal", direction: "backward", pattern: "is your renewal date" },
   { role: "renewal", direction: "backward", pattern: "is when (?:your policy|this) renews" },
 
   // expiry
   { role: "expiry", direction: "forward", pattern: "expiry date" },
-  { role: "expiry", direction: "forward", pattern: "expires on" },
+  { role: "expiry", direction: "forward", pattern: "expir(?:es|ing|ed)(?: on)?" },
+  // The stated end of a policy or plan that runs to a date years away.
+  { role: "expiry", direction: "forward", pattern: "(?:policy|cover|plan|contract) end date" },
   { role: "expiry", direction: "forward", pattern: "valid (?:until|to|through)" },
-  { role: "expiry", direction: "forward", pattern: "cover ends on" },
+  // "ends on" says a term stops there; whether that is an expiry or a
+  // renewal is settled in `extraction-tags.ts` from the words around it.
+  { role: "expiry", direction: "forward", pattern: "(?:cover |policy |plan |contract |licence |membership |tariff |price )?(?:ends?|ending)(?: on)?" },
   { role: "expiry", direction: "backward", pattern: "is the expiry date" },
   { role: "expiry", direction: "backward", pattern: "is when (?:your cover|this) expires" },
 
@@ -112,6 +119,9 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   // service
   { role: "service", direction: "forward", pattern: "service due" },
   { role: "service", direction: "forward", pattern: "next service" },
+  { role: "service", direction: "forward", pattern: "next (?:vaccination|booster|check-?up|appointment|visit|test|inspection|examination)(?: recommended)?(?: due| by)?" },
+  { role: "service", direction: "forward", pattern: "date\\(?s?\\)? of inspection(?: and testing)?" },
+  { role: "service", direction: "forward", pattern: "inspect(?:ed|ion)(?: carried out)?(?: on)?" },
   { role: "service", direction: "forward", pattern: "service date" },
   { role: "service", direction: "forward", pattern: "serviced on" },
   { role: "service", direction: "backward", pattern: "is your next service date" },
@@ -120,6 +130,8 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   { role: "issued", direction: "forward", pattern: "date of issue" },
   { role: "issued", direction: "forward", pattern: "issued on" },
   { role: "issued", direction: "forward", pattern: "issue date" },
+  // What a statement, bill or certificate calls its own date.
+  { role: "issued", direction: "forward", pattern: "(?:statement|bill|invoice|notice|test|certificate|document|report) (?:date|issued)" },
   { role: "issued", direction: "backward", pattern: "is the date of issue" },
   { role: "issued", direction: "backward", pattern: "is when this was issued" },
 
@@ -130,6 +142,8 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   { role: "start", direction: "forward", pattern: "cover starts" },
   { role: "start", direction: "forward", pattern: "policy started" },
   { role: "start", direction: "forward", pattern: "commencing" },
+  { role: "start", direction: "forward", pattern: "(?:service|contract|cover|policy|plan|tenancy|membership) start" },
+  { role: "start", direction: "forward", pattern: "date of installation" },
   { role: "start", direction: "backward", pattern: "is your start date" },
   { role: "start", direction: "backward", pattern: "is when (?:your cover|this) (?:begins|starts)" },
 ] as const satisfies readonly ContextRoleTrigger[];
@@ -248,10 +262,31 @@ function anchorDistance(date: LocatedDate, scope: TriggerScope): number {
     : Math.abs(scope.anchor - (date.index + date.length));
 }
 
+// Punctuation and spacing only: the label is the whole line, so whatever it
+// names is printed somewhere else.
+function onlySpacing(text: string): boolean {
+  return text.replace(/[\s:.\-–—()]/gu, "").length === 0;
+}
+
+/**
+ * The end of the first non-empty line after `from`, or `null` when there is
+ * none. A form label is printed as a line of its own with its value on the
+ * line below ("NEXT VACCINATION DUE" / "18 May 2027"), and a scope that
+ * stopped dead at the line break could never reach such a date.
+ */
+function nextLineEndAfter(text: string, from: number): number | null {
+  const rest = text.slice(from);
+  const match = /[^\S\r\n]*[\r\n]+\s*[^\r\n]+/u.exec(rest);
+  return match && match.index === 0 ? from + match[0].length : null;
+}
+
 function buildTriggerScopes(text: string): TriggerScope[] {
   const breaks = findSentenceBreaks(text);
   const terminators = findTerminators(text);
   const scopes: TriggerScope[] = [];
+  // The same boundary as `breaks` without the line breaks, for the one case
+  // that has to cross one.
+  const hardBreaks = breaks.filter((brk) => /[.!?;]/u.test(text.slice(brk.start, brk.end)));
 
   CONTEXT_ROLE_TRIGGERS.forEach((trigger, triggerOrder) => {
     const regex = new RegExp(trigger.pattern, "giu");
@@ -260,10 +295,21 @@ function buildTriggerScopes(text: string): TriggerScope[] {
       const matchEnd = matchStart + match[0].length;
       if (trigger.direction === "forward") {
         const scopeStart = matchEnd;
-        const scopeEnd = Math.min(
+        let scopeEnd = Math.min(
           sentenceEndAfter(breaks, scopeStart),
           terminatorEndingAfter(terminators, scopeStart),
         );
+        // A label that ends its own line reaches the line below it, unless
+        // real punctuation or a termination term intervenes.
+        const lineEnd = text.indexOf("\n", matchEnd);
+        if (lineEnd !== -1 && onlySpacing(text.slice(matchEnd, lineEnd))) {
+          const reach = nextLineEndAfter(text, matchEnd);
+          const limit = Math.min(
+            sentenceEndAfter(hardBreaks, scopeStart),
+            terminatorEndingAfter(terminators, scopeStart),
+          );
+          if (reach !== null) scopeEnd = Math.max(scopeEnd, Math.min(reach, limit));
+        }
         scopes.push({
           role: trigger.role,
           direction: trigger.direction,
