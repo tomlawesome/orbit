@@ -13,6 +13,13 @@
 // what it costs: a list of eight is a choice, a list of forty is extraction
 // again.
 //
+// Provider also reports where on the list the answer is. Its entries are
+// word-run bins (`extraction-provider-runs.ts`), ranked by how often the
+// run was printed across the names stage 2 kept, so the rank is what the
+// ranking is judged on: the owner's six-for-six hold-out result was the
+// answer in the top two bins, and this says how the same method does on
+// the 24.
+
 // No model is called. This reads the shortlists themselves.
 
 import {
@@ -47,6 +54,15 @@ interface FieldTally {
 const FIELDS = ["dates", "reference", "cost", "provider", "subtype", "recurrence"] as const;
 type Field = (typeof FIELDS)[number];
 
+/** Where the provider answer sat among the runs, over the documents that
+ * have one. */
+interface RankTally {
+  first: number;
+  firstTwo: number;
+  onList: number;
+  wanted: number;
+}
+
 function emptyTallies(): Record<Field, FieldTally> {
   const tallies = {} as Record<Field, FieldTally>;
   for (const field of FIELDS) tallies[field] = { found: 0, wanted: 0, entries: 0, lists: 0, misses: [] };
@@ -59,6 +75,7 @@ const percent = (part: number, whole: number): string =>
 function main(): void {
   const showMisses = process.argv.includes("--misses");
   const tallies = emptyTallies();
+  const providerRank: RankTally = { first: 0, firstTwo: 0, onList: 0, wanted: 0 };
 
   const count = (
     field: Field,
@@ -100,10 +117,19 @@ function main(): void {
     }], name);
 
     const providers = providerShortlistEntries(tagged);
+    const providerAt = expected.provider === undefined
+      ? -1
+      : providers.findIndex((entry) =>
+        classifyProvider(expected.provider as string, entry.value) === "correct");
+    if (expected.provider !== undefined) {
+      providerRank.wanted += 1;
+      if (providerAt === 0) providerRank.first += 1;
+      if (providerAt >= 0 && providerAt <= 1) providerRank.firstTwo += 1;
+      if (providerAt >= 0) providerRank.onList += 1;
+    }
     count("provider", providers, expected.provider === undefined ? [] : [{
       wanted: expected.provider,
-      on: providers.some((entry) =>
-        classifyProvider(expected.provider as string, entry.value) === "correct"),
+      on: providerAt >= 0,
     }], name);
 
     const subtypes = subtypeShortlistEntries(tagged);
@@ -126,6 +152,12 @@ function main(): void {
     const rate = `${found}/${wanted} (${percent(found, wanted)})`;
     console.log(`${field.padEnd(12)} ${rate.padEnd(24)} ${(entries / lists).toFixed(1)}`);
   }
+  const { first, firstTwo, onList, wanted } = providerRank;
+  console.log("\nprovider, where the answer sits among the runs");
+  console.log(`  top-1    ${first}/${wanted} (${percent(first, wanted)})`);
+  console.log(`  top-2    ${firstTwo}/${wanted} (${percent(firstTwo, wanted)})`);
+  console.log(`  on list  ${onList}/${wanted} (${percent(onList, wanted)})`);
+
   const misses = FIELDS.flatMap((field) => tallies[field].misses);
   if (showMisses && misses.length > 0) console.log(`\nmisses:\n- ${misses.join("\n- ")}`);
   else if (misses.length > 0) console.log(`\n${misses.length} misses; --misses names them`);
