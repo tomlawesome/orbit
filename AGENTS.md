@@ -299,6 +299,25 @@ such block. Run `node --test scripts/lockfile-no-pnpm-exe.test.mjs` before
 committing a lockfile change — discard the diff if it fails, never commit it.
 CI activates 12.3.4 through corepack, so it never sees this (#884, #901).
 
+## Only ten fonts exist on this host, and the rest fail silently
+
+Rendering anything to PDF or an image — a mockup, a test document, a
+screenshot — uses the host's fonts. Only these are installed:
+
+    Bitstream Charter   Courier 10 Pitch   Liberation Serif
+    Liberation Sans     Liberation Mono    FreeSerif
+    FreeSans            FreeMono           Loma
+    WenQuanYi Zen Hei
+
+Anything else falls back with no warning. Ask for Helvetica, Arial, Georgia
+or Times New Roman and you get a substitute, and nothing tells you.
+
+This is not cosmetic. Six extraction-corpus documents were built in parallel
+to look deliberately unlike each other, every one specified a font from that
+uninstalled list, and all six rendered in the same face — the variety was
+requested but never existed (#981, 2026-09-11). Check with `fc-list : family`
+rather than assuming a common font is present.
+
 ## The demo stack is disposable
 
 The demo deployment (`compose/docker-compose.demo.yml`) carries only test data, so
