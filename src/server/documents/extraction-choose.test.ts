@@ -397,7 +397,9 @@ describe("choosing the cost and its currency", () => {
 describe("the meaning-shaped fields", () => {
   it("takes the provider the page states, and leaves subtype to the model", () => {
     const chosen = chooseFields([
-      candidate("organisation", "Kestrel Mutual", [{ value: "provider", trigger: "your insurer" }]),
+      candidate("organisation", "Kestrel Mutual", [
+        { value: "provider", trigger: "your insurer", sieves: ["language-fact", "contact-details"] },
+      ]),
       candidate("heading", "HOME INSURANCE", [{ value: "title", trigger: "" }]),
     ]);
 

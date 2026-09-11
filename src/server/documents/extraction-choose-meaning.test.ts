@@ -17,7 +17,21 @@ import type { Tag, TagForKind, TaggedCandidate } from "./extraction-stages";
 
 type TagInput<K extends CandidateKind> =
   | TagForKind[K]
-  | { value: TagForKind[K]; trigger?: string; source?: "label" | "shape" };
+  | {
+    value: TagForKind[K];
+    trigger?: string;
+    source?: "label" | "shape";
+    /** The stage 2 sieves that agreed on the tag. Absent means the words
+     * beside the candidate were the only sieve that looked, which is what
+     * every tag was before stage 2 grew more of them. */
+    sieves?: string[];
+    strength?: number;
+  };
+
+/** Two sieves agreeing, which is what stage 3 now needs before it answers
+ * at all: the words beside the name, and the name printed throughout the
+ * document (ADR-0026 stage 2, owner 2026-09-11). */
+const AGREED = ["language-fact", "printed-throughout"];
 
 let nextIndex = 0;
 
@@ -58,7 +72,7 @@ describe("choosing the provider where the page states it", () => {
     const line = "Fenwick Mobile is a trading name of Anglia Communications Networks Ltd, registered in England.";
     expect(chooseProviderByRules([
       candidate("organisation", "Fenwick Mobile", [
-        { value: "provider", trigger: "is a trading name of" },
+        { value: "provider", trigger: "is a trading name of", sieves: AGREED },
       ], line),
       candidate("organisation", "of Anglia Communications Networks Ltd", [
         { value: "subsidiary", trigger: "a trading name of" },
@@ -85,7 +99,7 @@ describe("choosing the provider where the page states it", () => {
         { value: "on-behalf-of", trigger: "on behalf of" },
       ], line),
       candidate("organisation", "Hedgerow Home Insurance Services Ltd", [
-        { value: "administrator", trigger: "arranged by" },
+        { value: "administrator", trigger: "arranged by", sieves: AGREED },
       ], line),
     ])).toBe("Hedgerow Home Insurance Services Ltd");
   });
@@ -94,7 +108,7 @@ describe("choosing the provider where the page states it", () => {
     const line = "Intermediary Hedgerow Home Insurance Services Ltd";
     expect(chooseProviderByRules([
       candidate("organisation", "Hedgerow Home Insurance Services Ltd", [
-        { value: "administrator", trigger: "Intermediary" },
+        { value: "administrator", trigger: "Intermediary", sieves: AGREED },
       ], line),
     ])).toBe("Hedgerow Home Insurance Services Ltd");
   });
@@ -106,7 +120,7 @@ describe("choosing the provider where the page states it", () => {
         { value: "underwriter", trigger: "Underwritten by" },
       ], line),
       candidate("organisation", "Bellward Warranty Administration Ltd", [
-        { value: "administrator", trigger: "administered by" },
+        { value: "administrator", trigger: "administered by", sieves: AGREED },
       ], line),
     ])).toBe("Bellward Warranty Administration Ltd");
   });
@@ -124,7 +138,7 @@ describe("choosing the provider where the page states it", () => {
     const line = "R. Thackeray, licence 745231 · for and on behalf of Fenwick & Vale Gas Services Ltd";
     expect(chooseProviderByRules([
       candidate("organisation", "of Fenwick & Vale Gas Services Ltd", [
-        { value: "on-behalf-of", trigger: "on behalf of" },
+        { value: "on-behalf-of", trigger: "on behalf of", sieves: AGREED },
       ], line),
     ])).toBe("Fenwick & Vale Gas Services Ltd");
   });
@@ -133,7 +147,7 @@ describe("choosing the provider where the page states it", () => {
     const signature = "FOR AND ON BEHALF OF Thornleigh Electrical Contractors Ltd";
     expect(chooseProviderByRules([
       candidate("organisation", "FOR AND ON BEHALF OF Thornleigh Electrical", [
-        { value: "on-behalf-of", trigger: "ON BEHALF OF" },
+        { value: "on-behalf-of", trigger: "ON BEHALF OF", sieves: AGREED },
       ], signature),
     ])).toBe("Thornleigh Electrical Contractors Ltd");
   });
@@ -152,7 +166,7 @@ describe("choosing the provider where the page states it", () => {
         { value: "administrator", trigger: "Intermediary" },
       ], "UN DE RWR ITIN G"),
       candidate("organisation", "Intermediary Hedgerow Home Insurance Services Ltd", [
-        { value: "administrator", trigger: "Intermediary" },
+        { value: "administrator", trigger: "Intermediary", sieves: AGREED },
       ], "Intermediary Hedgerow Home Insurance Services Ltd"),
     ])).toBe("Hedgerow Home Insurance Services Ltd");
   });
@@ -254,9 +268,15 @@ describe("the excerpt the model is asked about", () => {
 });
 
 describe("asking the model about what the rules could not settle", () => {
+  // One sieve kept each name and no second agreed, which is exactly when
+  // the rules leave the field to the model.
   const shortlist = [
-    candidate("organisation", "Calderhythe District Council", ["other"], "issued by Calderhythe District Council"),
-    candidate("organisation", "Wealdshire County Council", ["other"], "Wealdshire County Council £1,412.87"),
+    candidate("organisation", "Calderhythe District Council", [
+      { value: "provider", trigger: "printed 4 times", sieves: ["printed-throughout"] },
+    ], "issued by Calderhythe District Council"),
+    candidate("organisation", "Wealdshire County Council", [
+      { value: "provider", trigger: "printed 2 times", sieves: ["printed-throughout"] },
+    ], "Wealdshire County Council £1,412.87"),
     candidate("heading", "Council Tax Demand Notice 2026/27", ["title"]),
   ];
 
@@ -340,6 +360,32 @@ describe("asking the model about what the rules could not settle", () => {
     const filled = await chooseMeaningFieldsWithModel(shortlist, {}, model);
 
     expect(filled.provider).toBe("Calderhythe District Council Ltd");
+  });
+
+  it("refuses a pick no sieve kept, however plainly the shortlist carries it", async () => {
+    const nothingKept = [
+      candidate("organisation", "Calderhythe District Council", ["other"], "Calderhythe District Council"),
+      candidate("organisation", "Wealdshire County Council", ["other"], "Wealdshire County Council"),
+    ];
+    const model = fakeModel('{"provider": "Wealdshire County Council"}', "");
+
+    const filled = await chooseMeaningFieldsWithModel(nothingKept, {}, model);
+
+    expect(filled.provider).toBeUndefined();
+  });
+
+  it("takes a pick that is the one name several sieves agreed about", async () => {
+    const agreed = [
+      candidate("organisation", "Calderhythe District Council", [
+        { value: "provider", trigger: "printed 6 times", sieves: AGREED },
+      ], "Calderhythe District Council · Council Tax Section"),
+      candidate("organisation", "Wealdshire County Council", ["other"], "Wealdshire County Council"),
+    ];
+    const model = fakeModel('{"provider": "Calderhythe District Council"}', "");
+
+    const filled = await chooseMeaningFieldsWithModel(agreed, {}, model);
+
+    expect(filled.provider).toBe("Calderhythe District Council");
   });
 
   it("refuses a provider the shortlist does not carry", async () => {
