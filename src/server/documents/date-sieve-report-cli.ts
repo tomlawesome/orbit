@@ -8,6 +8,10 @@
 //                   sieve spoke for at all -- a sieve that never keeps an
 //                   answer is a sieve doing nothing
 //   role right      of those, how many it named correctly
+//   only this one   of those, how many no other sieve kept. This is the
+//                   number that says whether a sieve earns its place: a
+//                   sieve that only ever agrees with the words before the
+//                   date adds nothing the words before the date did not
 //   candidates      how many of every date on every page it spoke for; a
 //                   sieve that keeps nearly all of them is not sieving
 //   ms              what it costs over the whole corpus
@@ -36,6 +40,7 @@ const verbose = process.argv.includes("--verbose");
 interface Tally {
   answersKept: number;
   roleRight: number;
+  onlyOne: number;
   candidatesKept: number;
   ms: number;
 }
@@ -50,7 +55,7 @@ function keeps(vote: DateVote): boolean {
 
 function main(): void {
   const tallies = new Map<string, Tally>(
-    NAMES.map((name) => [name, { answersKept: 0, roleRight: 0, candidatesKept: 0, ms: 0 }]),
+    NAMES.map((name) => [name, { answersKept: 0, roleRight: 0, onlyOne: 0, candidatesKept: 0, ms: 0 }]),
   );
   let answers = 0;
   let candidates = 0;
@@ -93,6 +98,7 @@ function main(): void {
         if (cast.length === 0) continue;
         (tallies.get(name) as Tally).answersKept += 1;
         if (cast.some((vote) => vote.role === expected.role)) (tallies.get(name) as Tally).roleRight += 1;
+        if (forAnswer.every((vote) => vote.sieve === name)) (tallies.get(name) as Tally).onlyOne += 1;
       }
     }
   }
@@ -100,7 +106,10 @@ function main(): void {
   console.log(
     `date sieves over ${EXTRACTION_CORPUS.length} documents: ${answers} dated answers, ${candidates} date candidates\n`,
   );
-  console.log(`${"sieve".padEnd(20)}${"answers kept".padEnd(15)}${"role right".padEnd(14)}${"candidates kept".padEnd(20)}ms`);
+  console.log(
+    `${"sieve".padEnd(20)}${"answers kept".padEnd(15)}${"role right".padEnd(14)}` +
+      `${"only this one".padEnd(15)}${"candidates kept".padEnd(20)}ms`,
+  );
   for (const name of NAMES) {
     const tally = tallies.get(name) as Tally;
     const share = candidates === 0 ? 0 : Math.round((tally.candidatesKept / candidates) * 100);
@@ -108,6 +117,7 @@ function main(): void {
       name.padEnd(20) +
         `${tally.answersKept}/${answers}`.padEnd(15) +
         `${tally.roleRight}/${answers}`.padEnd(14) +
+        `${tally.onlyOne}`.padEnd(15) +
         `${tally.candidatesKept}/${candidates} (${share}%)`.padEnd(20) +
         tally.ms.toFixed(0),
     );

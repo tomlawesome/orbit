@@ -145,6 +145,41 @@ to a regex chain.
 - The 36 short documents and hold-out corpus 2 stay retired (owner,
   2026-09-11): a page with six date-like strings has nothing to sieve.
 
+## Amendment, 2026-09-11: several sieves per field, and no rule discards
+
+Owner, on the hold-out result (dates 50%, dateRoles 25%, against a stage 1
+that finds 100% of the dates): "generalisation is the king", and stage 2 is
+about being creative -- several independent sieves per field, each a
+different way of looking at a candidate. A candidate several sieves keep
+rises; one only a single sieve keeps sinks. **Rules never discard what the
+model could still choose.**
+
+Two things change from the decision above.
+
+1. Stage 2 is no longer one trigger table per kind. For dates it is a set of
+   named sieves (`extraction-date-sieves.ts`) -- the words before, the words
+   after, the column heading above, the arithmetic between two dates and a
+   printed term, repetition across the document, position relative to the
+   document's own date -- each voting a role, the words that justified it,
+   and how good a reason that is. Votes merge into tags by role, so a tag
+   records which sieves agreed (`Tag.sieves`) and how strong the best of them
+   was (`Tag.strength`). `npm run eval:date-sieves` judges them one at a
+   time: answers kept, roles right, answers no other sieve kept, candidates
+   kept, milliseconds.
+
+2. Stage 3 keeps every date. Dates the rules can label are labelled as
+   before; the rest are offered with no role and, where the model is
+   available, put to it as one question over the shortlist -- which of these
+   is the date the household must act on, and what for -- grounded the same
+   way provider and subtype are.
+
+Measured on the 24 the same day: overall 65.8% -> 67.9%, dates 88.6% ->
+100%, dateRoles unchanged at 88.6%. All of that gain is (2): on the 24 no
+new sieve keeps an answer the words before the date did not already keep, so
+the sieves are redundancy there by construction. They are a bet on pages
+nobody has seen, where the words-before sieve is exactly what fails, and the
+hold-out is what will say whether the bet paid.
+
 ## Alternatives rejected
 
 - **Widen the regexes field by field until the 24 pass.** This is the
