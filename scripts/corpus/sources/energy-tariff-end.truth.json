@@ -13,7 +13,19 @@
         "role": "renewal"
       }
     ],
-    "subtype": "Tariff end notice",
+    "subtype": {
+      "kinds": [
+        "Tariff",
+        "Contract",
+        "Plan",
+        "Utility"
+      ],
+      "qualifiers": [
+        "Energy",
+        "Gas",
+        "Electricity"
+      ]
+    },
     "costMinor": 128400,
     "currency": "GBP",
     "scheduleKind": "renewal"
@@ -297,6 +309,7 @@
     "o",
     "l",
     "e",
-    "."
+    ".",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Tariff end notice')."
   ]
 }

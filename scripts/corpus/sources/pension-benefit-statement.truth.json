@@ -13,7 +13,17 @@
         "role": "issued"
       }
     ],
-    "subtype": "Annual benefit statement",
+    "subtype": {
+      "kinds": [
+        "Pension",
+        "Statement",
+        "Investment",
+        "Savings"
+      ],
+      "qualifiers": [
+        "Pension"
+      ]
+    },
     "costMinor": 21542,
     "currency": "GBP"
   },
@@ -927,6 +937,7 @@
     " ",
     "t",
     "o",
-    "."
+    ".",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Annual benefit statement')."
   ]
 }

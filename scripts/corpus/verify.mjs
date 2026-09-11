@@ -7,6 +7,13 @@ import { dirname, resolve } from "node:path";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const dir = resolve(HERE, "sources");
 
+// The generic taxonomy `subtype` object-form ground truth names groups from
+// (owner decision 2026-09-11, #989): the accepted answers come from here,
+// not a per-page list, so a declared group name has to actually exist in it.
+const taxonomy = JSON.parse(readFileSync(resolve(HERE, "../../src/server/documents/subtype-taxonomy.json"), "utf8"));
+const kindNames = new Set(taxonomy.kinds.map((k) => k.name));
+const qualifierNames = new Set(taxonomy.qualifiers.map((q) => q.name));
+
 
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -62,23 +69,41 @@ for (const f of readdirSync(dir).filter((n) => n.endsWith(".truth.json")).sort()
     const v = e[field];
     if (v !== undefined && !text.includes(findable(v))) problems.push(`${field} "${v}" is not in the Tika text`);
   }
-  // `subtype` may be one phrase or, per the owner's 2026-09-11 ruling
-  // (#989/#992), a set of phrases that are all acceptable answers for the
-  // page. Every declared phrase still has to be findable in the Tika text --
-  // that rule does not relax just because there is more than one of them --
-  // and the set itself has to be well-formed: non-empty, distinct, no blanks.
+  // `subtype` may be one phrase, a set of phrases (#989/#992), or -- the
+  // current form of the ruling (#989) -- a `{ kinds, qualifiers }` object
+  // naming groups from the generic taxonomy rather than literal phrases. The
+  // object form is not a printed-title claim (a kind such as "Insurance"
+  // need not appear on the page at all), so it drops the "findable in the
+  // Tika text" check entirely; that check still applies to the string and
+  // array forms, which do assert something was printed.
   if (e.subtype !== undefined) {
-    const subtypes = Array.isArray(e.subtype) ? e.subtype : [e.subtype];
-    if (Array.isArray(e.subtype)) {
-      if (subtypes.length === 0) problems.push("subtype array is empty");
-      if (subtypes.some((s) => typeof s !== "string" || s.trim() === "")) {
-        problems.push("subtype array contains a blank or non-string entry");
+    if (typeof e.subtype === "object" && !Array.isArray(e.subtype)) {
+      const kinds = e.subtype.kinds ?? [];
+      const qualifiers = e.subtype.qualifiers ?? [];
+      if (!Array.isArray(kinds) || kinds.length === 0) problems.push("subtype.kinds must be a non-empty array");
+      for (const name of kinds) {
+        if (!kindNames.has(name)) problems.push(`subtype.kinds "${name}" is not a kind in subtype-taxonomy.json`);
       }
-      if (new Set(subtypes).size !== subtypes.length) problems.push("subtype array contains duplicate entries");
-    }
-    for (const s of subtypes) {
-      if (typeof s === "string" && s.trim() !== "" && !text.includes(findable(s))) {
-        problems.push(`subtype "${s}" is not in the Tika text`);
+      if (e.subtype.qualifiers !== undefined && !Array.isArray(qualifiers)) problems.push("subtype.qualifiers must be an array");
+      for (const name of qualifiers) {
+        if (!qualifierNames.has(name)) problems.push(`subtype.qualifiers "${name}" is not a qualifier in subtype-taxonomy.json`);
+      }
+    } else {
+      // The older literal-phrase forms: every declared phrase still has to
+      // be findable in the Tika text, and a set has to be well-formed --
+      // non-empty, distinct, no blanks.
+      const subtypes = Array.isArray(e.subtype) ? e.subtype : [e.subtype];
+      if (Array.isArray(e.subtype)) {
+        if (subtypes.length === 0) problems.push("subtype array is empty");
+        if (subtypes.some((s) => typeof s !== "string" || s.trim() === "")) {
+          problems.push("subtype array contains a blank or non-string entry");
+        }
+        if (new Set(subtypes).size !== subtypes.length) problems.push("subtype array contains duplicate entries");
+      }
+      for (const s of subtypes) {
+        if (typeof s === "string" && s.trim() !== "" && !text.includes(findable(s))) {
+          problems.push(`subtype "${s}" is not in the Tika text`);
+        }
       }
     }
   }

@@ -9,6 +9,14 @@ import type { DocumentDateRole } from "./suggestions";
 import type { ScheduleKind } from "@/lib/domain";
 import { FULL_PAGE_CORPUS } from "./extraction-corpus-fullpage";
 
+/** Ground truth for `subtype` naming taxonomy groups by NAME rather than
+ * literal phrases (owner decision 2026-09-11, #989). `qualifiers` is
+ * optional: a kind can be declared on its own. */
+export interface SubtypeSpec {
+  kinds: string[];
+  qualifiers?: string[];
+}
+
 export interface CorpusExpectation {
   // ISO dates that a correct extraction should surface (order-free).
   dates: string[];
@@ -48,11 +56,14 @@ export interface CorpusExpectation {
   // welcome here.
   /** One role per expected date, in the order the document prints them. */
   dateRoles?: Array<{ date: string; role: DocumentDateRole }>;
-  /** What kind of thing the page is. Some pages genuinely support more than
-   * one right answer, so ground truth may carry a set of acceptable phrases
-   * instead of one; an extracted subtype is correct if it matches any of
-   * them (owner decision 2026-09-11, #989/#992). */
-  subtype?: string | string[];
+  /** What kind of thing the page is. The accepted answers come from the
+   * generic taxonomy in `subtype-taxonomy.json`, not a per-page list (owner
+   * decision 2026-09-11, #989): ground truth names taxonomy KIND and
+   * QUALIFIER groups, and `subtypeAnswers` in `extraction-scoring.ts`
+   * expands them into every phrase the taxonomy's combination rules accept.
+   * The older plain string or array of literal phrases is still accepted
+   * (#989/#992), matched exactly rather than expanded. */
+  subtype?: string | string[] | SubtypeSpec;
   /** Minor units. Always declared together with `currency`, never alone. */
   costMinor?: number;
   currency?: string;

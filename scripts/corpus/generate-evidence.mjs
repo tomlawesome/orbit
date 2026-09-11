@@ -7,6 +7,21 @@ import { dirname, resolve } from "node:path";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const dir = resolve(HERE, "sources");
 
+// `subtype` ground truth can name taxonomy groups instead of a literal
+// phrase (owner decision 2026-09-11, #989). There is nothing to search a
+// printed page for in that case -- a kind such as "Insurance" need not be
+// printed at all -- so this proposes evidence for the one phrase the
+// "ideal reply" tests actually use: the first synonym of the first kind.
+const taxonomy = JSON.parse(readFileSync(resolve(HERE, "../../src/server/documents/subtype-taxonomy.json"), "utf8"));
+const kindByName = new Map(taxonomy.kinds.map((k) => [k.name, k]));
+function subtypeSearchPhrase(subtype) {
+  if (subtype === undefined) return undefined;
+  if (typeof subtype === "object" && !Array.isArray(subtype)) {
+    const kind = kindByName.get(subtype.kinds?.[0]);
+    return kind?.synonyms?.[0];
+  }
+  return Array.isArray(subtype) ? subtype[0] : subtype;
+}
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const collapse = (s) => s.replace(/\s+/gu, " ").trim();
@@ -43,14 +58,15 @@ for (const f of readdirSync(dir).filter((n) => n.endsWith(".truth.json")).sort()
   const lines = [`  ${JSON.stringify(truth.filename)}: {`];
   const miss = [];
   for (const field of ["provider", "reference", "subtype"]) {
-    if (!e[field]) continue;
+    const value = field === "subtype" ? subtypeSearchPhrase(e.subtype) : e[field];
+    if (!value) continue;
     // Case is presentation, so find it however the page prints it.
     const flat = unescape_(text).toLowerCase();
-    const idx = flat.indexOf(unescape_(collapse(e[field])).toLowerCase());
+    const idx = flat.indexOf(unescape_(collapse(value)).toLowerCase());
     // Map the position back: each stripped backslash shifted everything left.
     let real = 0, seen = 0;
     while (real < text.length && seen < idx) { if (!(text[real] === "\\" && /[&*_`#\[\]<>|~]/u.test(text[real + 1] ?? ""))) seen++; real++; }
-    const len = collapse(e[field]).length + (unescape_(collapse(e[field])).length !== collapse(e[field]).length ? 0 : 0);
+    const len = collapse(value).length + (unescape_(collapse(value)).length !== collapse(value).length ? 0 : 0);
     const w = idx === -1 ? null : window(text, text.slice(real, real + len + 2).replace(/\s+$/u, ""));
     if (w) lines.push(`    ${field}: ${JSON.stringify(w)},`);
     else miss.push(field);

@@ -11,7 +11,7 @@
 // will be choosing from.
 
 import { EXTRACTION_CORPUS, type CorpusDocument } from "./extraction-corpus";
-import { classifyProvider, classifySubtype, formatSubtypeExpected } from "./extraction-scoring";
+import { classifyProvider, classifySubtype, formatSubtypeExpected, subtypeCandidatePhrases } from "./extraction-scoring";
 import { sieve, type Candidate, type CandidateKind } from "./extraction-sieve";
 
 interface Tally {
@@ -69,12 +69,13 @@ function measure(doc: CorpusDocument, totals: Record<string, Tally>): void {
     record(totals, "reference", doc, hit, expected.reference);
   }
   if (expected.subtype !== undefined) {
-    const wanted = Array.isArray(expected.subtype) ? expected.subtype : [expected.subtype];
+    const expectedSubtype = expected.subtype;
+    const wanted = subtypeCandidatePhrases(expectedSubtype);
     const hit = ofKind("heading").some(
-      (c) => classifySubtype(expected.subtype as string | string[], c.value) === "correct"
+      (c) => classifySubtype(expectedSubtype, c.value) === "correct"
         || wanted.some((w) => c.value.toLowerCase().includes(w.toLowerCase())),
     );
-    record(totals, "subtype", doc, hit, formatSubtypeExpected(expected.subtype));
+    record(totals, "subtype", doc, hit, formatSubtypeExpected(expectedSubtype));
   }
   if (expected.costMinor !== undefined) {
     const hit = ofKind("amount").some(

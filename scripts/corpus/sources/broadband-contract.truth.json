@@ -18,7 +18,19 @@
         "role": "renewal"
       }
     ],
-    "subtype": "Contract summary and terms",
+    "subtype": {
+      "kinds": [
+        "Contract",
+        "Subscription",
+        "Plan",
+        "Tariff",
+        "Utility",
+        "Service"
+      ],
+      "qualifiers": [
+        "Broadband"
+      ]
+    },
     "costMinor": 3499,
     "currency": "GBP",
     "recurrenceMonths": 24,
@@ -31,8 +43,7 @@
     "Distractors left in deliberately and excluded from dates[]: order date 14 April 2026, document-issued date 15 April 2026, cooling-off deadline 28 April 2026, the 1 April annual price-rise date, the Direct Debit collection day, and the 24 contract-month numbers (1-24) in the exit-fee table, which are month indices, not dates.",
     "Provider is given as the trading name 'Kestrel Broadband' (the letterhead brand and what the customer would call it), not the legal entity 'Alderway Communications Ltd', though both appear verbatim in the document.",
     "Reference is the order reference ORD-2026-0417726 rather than the account number KB-771049-3; both are printed and either would be a defensible choice, but the order reference is what the document itself repeats in every running header.",
-    "Subtype corrected: the original ground truth said 'Broadband and phone contract', which the document never prints. The page prints 'Contract Summary and Terms', matching the existing corpus convention of taking the subtype from the document's own heading ('Service agreement' on broadband-agreement).",
-    "The richer heading '24-MONTH FIBRE & PHONE CONTRACT' was deliberately NOT used as the subtype: Tika escapes the ampersand (#982), so the field would score wrong for a reason that has nothing to do with extraction. The ampersand stays in the document text as a live example of that defect. Revisit once #982 lands.",
-    "2028-04-21 is role 'renewal', not 'expiry', because this document says the contract renews automatically on a rolling basis at that point. The existing broadband-agreement entry uses 'expiry' because its document only says 'Minimum term ends'. The rule: label what the page says happens, not what kind of document it is."
+    "2028-04-21 is role 'renewal', not 'expiry', because this document says the contract renews automatically on a rolling basis at that point. The existing broadband-agreement entry uses 'expiry' because its document only says 'Minimum term ends'. The rule: label what the page says happens, not what kind of document it is.",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Contract summary and terms')."
   ]
 }
