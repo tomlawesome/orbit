@@ -121,14 +121,26 @@ interface DocEvidence {
  * model" this test stands in for: one that always quotes real text.
  */
 const EVIDENCE: Record<string, DocEvidence> = {
-  // --- Full-page documents (#981) ---------------------------------------
-  //
-  // Needles here are cut from the real Tika output by
-  // `scripts/corpus/generate-evidence.mjs`, not written by hand, so they
-  // quote the page exactly as production sees it -- including broken words
-  // like `Pu r beck` and `E X PI RY D ATE`, which is what CSS letter-spacing
-  // does to a PDF's text layer. Real letterspaced headings extract this way;
-  // it is a genuine difficulty, not damage.
+  "fullpage-appliance-warranty-certificate.pdf": {
+    provider: "on behalf of the retailer by Bellward Warranty Administration Ltd of Norwich, and underwritten by Corvane Insurance plc, authorised and",
+    reference: "WARRANTY CERTIFICATE Certificate No. EWC-2025-118823 This is to certify that the appliance described below, purchased from",
+    subtype: "Extended Warranty Certificate — Ashfield Domestic Appliances ASHFIELD DOMESTIC APPLIANCES BR IS TO L",
+    cost: { amount: "69.99", needle: "APPLIANCE £549.99 MANUFACTURER'S GUARANTEE 12 months parts & labour, ends 13 June 2026 EXTENDED WARRANTY PRICE PAID £69.99 (inc. IPT) EXCESS" },
+    dates: [
+      "and below, for a period of five years, commencing on 14 June 2026 and expiring on 13 June",
+      "years, commencing on 14 June 2026 and expiring on 13 June 2031. Authorised signatory,",
+    ],
+  },
+  "fullpage-breakdown-cover-renewal.pdf": {
+    provider: "Milldown Motoring Club — Your Breakdown Cover Renewal MILLDOWN MOTORING CLUB Your breakdown",
+    reference: "Prepared 2 September 2026 Membership MDC-4471-8823 THIS OFFER ENDS 30 SEPTEMBER 2026 Renew now and keep last year's",
+    subtype: "Milldown Motoring Club — Your Breakdown Cover Renewal MILLDOWN MOTORING CLUB Your breakdown cover renewal notice Prepared 2",
+    cost: { amount: "84.99", needle: "LINE AND KEEP THIS CARD IN YOUR GLOVEBOX Choose your cover for the year ahead Your current cover Roadside Assist £84.99 per year · you paid" },
+    recurrence: { months: 12, needle: "TO 04/11/2026 24HR: 0330 555 0198 Roadside & Recovery £129.99 or £11.99 a month Save £30 — renew" },
+    dates: [
+      "J. ASHWORTH MDC 4471 8823 MEMBER SINCE 2018 VALID TO 04/11/2026 24HR: 0330 555 0198",
+    ],
+  },
   "fullpage-broadband-contract.pdf": {
     provider: "Kestrel Broadband — Contract Summary and Terms Kestrel Broadband Contract Summary Order",
     reference: "number KB-771049-3 Order reference ORD-2026-0417726 Billing address Flat 2, 9 Thornfield Close, Marlcombe, Warwickshire,",
@@ -140,6 +152,56 @@ const EVIDENCE: Record<string, DocEvidence> = {
       "upload speed 74 Mbps MINIMUM TERM 24 months ends 21 April 2028 CUSTOMER AND ACCOUNT",
     ],
   },
+  "fullpage-car-insurance-renewal.pdf": {
+    provider: "Services Compensation Scheme. Meridian General Insurance Company plc is covered by the Financial Services Compensation Scheme. You may be",
+    reference: "Your motor insurance renewal — policy MTR-8823-0145 Colworth & Drake Insurance Services Ltd — policy administration",
+    subtype: "Your motor insurance renewal — policy MTR-8823-0145 Colworth & Drake Insurance Services Ltd — policy",
+    cost: { amount: "612.40", needle: "you will need to arrange new insurance before driving the vehicle. YOUR RENEWAL PREMIUM ANNUAL PREMIUM, PAID IN FULL £612.40 Net premium £546.79 +" },
+    dates: [
+      "2018 Current period of insurance 15 October 2025 to 15 October 2026 Renewal period offered",
+      "2026 Renewal period offered 15 October 2026 to 15 October 2027 No claims discount 7",
+    ],
+  },
+  "fullpage-council-tax-demand.pdf": {
+    provider: "Precepting authority 2025/26 2026/27 Calderhythe District Council (district services) £298.61 £312.44 Wealdshire County Council £1,412.87",
+    reference: "Pemberton COUNCIL TAX ACCOUNT NUMBER 8845612033 PROPERTY CHARGED 14 Sedge Close Marlpool Calderhythe CH3 7QD Valuation",
+    subtype: "Council Tax Demand Notice 2026/27 C ALDE RHYTHE COUNCIL TAX — BILLING AUTHORITY COUNCIL",
+    cost: { amount: "2,159.07", needle: "Rescue Authority £78.04 £81.33 Marlpool Parish Council £39.80 £42.10 Total council tax charge for the year £2,056.30 £2,159.07 Pay by ten monthly" },
+    recurrence: { months: 12, needle: "person(s) Mr D. Pemberton COUNCIL TAX ACCOUNT NUMBER 8845612033 PROPERTY CHARGED 14 Sedge Close" },
+    dates: [
+      "COUNCIL TAX DEMAND NOTICE Charge for the year 1 April 2026 to 31 March 2027 Notice",
+      "TAX DEMAND NOTICE Charge for the year 1 April 2026 to 31 March 2027 Notice issued 10 March",
+    ],
+  },
+  "fullpage-dental-plan-statement.pdf": {
+    provider: "and administered on its behalf by Northgate Dental Plan Administration Ltd, PO Box 1156, Newbury Park, NP3 9ZZ, company number 04471102. The",
+    reference: "14 August 2026 · Membership number NDPA-208467 Plan Aldermoor Complete Care Plan Plan start date 1 March 2020 Monthly",
+    subtype: "Wexbridge, WX4 2QP · 01926 552 019 DENTAL PLAN STATEMENT Mr Callum Ashworth · 27 Beech Grove, Wexbridge, WX4 5RT Statement date",
+    cost: { amount: "9.50", needle: "2026 · Membership number NDPA-208467 Plan Aldermoor Complete Care Plan Plan start date 1 March 2020 Monthly payment £9.50 Plan year value £114.00" },
+    recurrence: { months: 6, needle: "unless you tell us otherwise. Check-ups fall due every 6 months, and one hygienist visit is included" },
+    dates: [
+      "Last hygienist visit 30 June 2026 Next check-up due 12 November 2026 Your monthly payment is",
+    ],
+  },
+  "fullpage-electrical-condition-report.pdf": {
+    provider: "· ISSUE 6 No. EICR-2026-071842 Thornleigh Electrical Contractors Ltd Page 1 of 12 ELECTRICAL INSTALLATION CONDITION REPORT for a domestic",
+    reference: "Installation Condition Report — EICR-2026-071842 NATIONAL ELECTRICAL INSTALLERS REGISTER — DOMESTIC ELECTRICAL",
+    subtype: "Electrical Installation Condition Report — EICR-2026-071842 NATIONAL ELECTRICAL INSTALLERS REGISTER — DOMESTIC",
+    recurrence: { months: 60, needle: "further inspected and tested at an interval not exceeding 60 months from the date of this inspection, or" },
+    dates: [
+      "REF. INS-22841 DATE(S) OF INSPECTION AND TESTING 02 September 2026 TIME ON SITE 09:15 to",
+      "60 months RECOMMENDED DATE OF NEXT INSPECTION 02 September 2031 DECLARATION AND REPORT",
+    ],
+  },
+  "fullpage-energy-tariff-end.pdf": {
+    provider: "Achebe Head of Customer Pricing, Kittiwake Energy Ltd Rosalind AchebeKittiwake Energy Ltd, registered in England & Wales No.",
+    reference: "Norfolk NR14 9QP Account number: 7724 6650 18 8 September 2026 Dear Mr Voss, Thank you for being a Kittiwake Energy",
+    subtype: "scheme reference EOM/2026/774213. Tariff end notice, form TEN-11-26, issued automatically to customers whose fixed term",
+    cost: { amount: "1,284.00", needle: "and what we are able to offer you if you fix your prices again today. Your current plan, Kittiwake Fixed October 2024 £1,284.00 a year Our standard" },
+    dates: [
+      "runs. Based on our records, your fixed price ends on 14 November 2026, and from the next day",
+    ],
+  },
   "fullpage-gas-safety-record.pdf": {
     provider: "Date of issue 03/08/2026 BUSINESS NAME Fenwick & Vale Gas Services Ltd GAS SAFE REGISTERED BUSINESS, REGISTRATION NUMBER 512864 BUSINESS",
     reference: "RECORD LANDLORD / DUTYHOLDER COPY No. GSR-2026-04471 CP12 Date of issue 03/08/2026 BUSINESS NAME Fenwick & Vale Gas Services",
@@ -147,6 +209,17 @@ const EVIDENCE: Record<string, DocEvidence> = {
     recurrence: { months: 12, needle: "safety or of efficient operation. This record is valid for 12 months from the date of inspection shown" },
     dates: [
       "safe to use on the date shown DATE OF INSPECTION 03 August 2026 This record confirms",
+    ],
+  },
+  "fullpage-gym-membership-agreement.pdf": {
+    provider: "Fitness Club is a trading name of Cresswell Leisure Ltd, a company registered in England and Wales under company number",
+    reference: "member (for office use) MEMBER COPY CFC-004821 Daniel Ostrowski 12 Vale Road, Bournholt, BH4 2LN 14 July 1988 01284",
+    subtype: "512 · desk@cresswellfitness.example GYM MEMBERSHIP AGREEMENT MEMBERSHIP NO. MEMBER DETAILS FULL NAME ADDRESS DATE OF BIRTH HOME",
+    cost: { amount: "42.50", needle: "ITEM AMOUNT Joining fee (payable on signing, non-refundable) £25.00 Monthly membership fee, collected by Direct Debit £42.50 Annual membership, paid" },
+    recurrence: { months: 1, needle: "is due in January 2027. We will give you not less than 1 month's written notice of any increase, which" },
+    dates: [
+      "771 903 07700 900 442 d.ostrowski@mailbox.example 02 March 2026 Anna Ostrowski, 07700",
+      "from your start date. Your minimum term will end on 2 March 2027 , after which your",
     ],
   },
   "fullpage-home-insurance-schedule.pdf": {
@@ -159,6 +232,36 @@ const EVIDENCE: Record<string, DocEvidence> = {
       "TA-HH-7734291 Period of insurance 14 March 2026 to 14 March 2027 Renewal date 14 March",
     ],
   },
+  "fullpage-life-cover-booklet.pdf": {
+    provider: "Ashcombe Life Assurance plc — Life and Critical Illness Cover: Policy Booklet Life and Critical",
+    reference: "Staffordshire, ST9 4LP Policy number ALA-662048-13 Type of policy Life cover policy, with critical illness cover",
+    subtype: "revised 14 January 2026 Policy type: Life cover policy (with optional critical illness cover) This booklet explains what is",
+    cost: { amount: "32.50", needle: "assured) Total permanent disability cover Not selected Premium frequency Monthly (paid every 1 month) Monthly premium £32.50 Annual premium (if" },
+    dates: [
+      "illness cover (accelerated) Policy start date 18 October 2026 Policy end date 17",
+      "Policy start date 18 October 2026 Policy end date 17 October 2046 Policy term 20 years Sum",
+    ],
+  },
+  "fullpage-mobile-airtime-plan.pdf": {
+    provider: "Fenwick Mobile is a trading name of Anglia Communications Networks Ltd, registered in England and Wales no. 07845213, and is a licensed",
+    reference: "rise takes effect. Account number 7734 2210 91 · Mobile number 07700 900123 Fenwick Mobile is a trading name of Anglia",
+    subtype: "Fenwick Mobile – Mobile Plan Summary | My Account Fenwick Mobile – Mobile Plan Summary | My Account",
+    cost: { amount: "23.00", needle: "Your 30GB data allowance resets on 20 October 2026. YOUR PLAN SIM Only 30GB Flex £14.00/mo for your first 6 months £23.00/mo standard monthly" },
+    recurrence: { months: 1, needle: "NEXT BILL DATE 20 October 2026 in 39 days · collected 1 time each calendar month by Direct" },
+    dates: [
+      "started 20 March 2025 Minimum term 24 months — ends 20 March 2027 Data allowance 30GB /",
+    ],
+  },
+  "fullpage-mortgage-annual-statement.pdf": {
+    provider: "Home Loans is a trading name of Priorswood Bank plc. Priorswood Bank plc is registered in England and Wales under company",
+    reference: "STATEMENT DATE 06/04/2026 ACCOUNT 7738 2204 91 PAGE 1 OF 3 MORTGAGE ANNUAL STATEMENT For the statement period 1 April",
+    subtype: "Kelbridge Home Loans — Mortgage Annual Statement Kelbridge Home Loans Residential mortgage lending STATEMENT DATE",
+    cost: { amount: "742.18", needle: "June 2049 (23 years remaining) OUTSTANDING BALANCE AT 31 MARCH 2026 £164,611.07 YOUR PAYMENTS CURRENT MONTHLY PAYMENT £742.18 Collected by direct" },
+    recurrence: { months: 1, needle: "lending STATEMENT DATE 06/04/2026 ACCOUNT 7738 2204 91 PAGE 1 OF 3 MORTGAGE ANNUAL STATEMENT" },
+    dates: [
+      "Year Fixed 4.19% Fixed rate period 20 June 2024 to 19 June 2026 Early repayment charge",
+    ],
+  },
   "fullpage-mot-certificate.pdf": {
     provider: "STATION AND TESTER 1. TEST STATION Calderwell Motor Services Ltd 2. VTS NUMBER V-441829 3. ADDRESS Unit 7, Brandmoor Industrial Estate,",
     reference: "— MOT test certificate Test number 1847 2205 9631 — Page 1 of 2 DVTA Driver & Vehicle Testing Authority Statutory",
@@ -166,6 +269,16 @@ const EVIDENCE: Record<string, DocEvidence> = {
     dates: [
       "time. E X PI RY D ATE 08 September 2027 Test date 09 September 2026 VEHICLE DETAILS 1.",
       "condition at any other time. E X PI RY D ATE 08 September 2027 Test date 09 September",
+    ],
+  },
+  "fullpage-pension-benefit-statement.pdf": {
+    provider: "Marlestone Workplace Pensions Ltd — Annual Benefit Statement Marlestone Workplace Pensions Ltd",
+    reference: "DATE 5 April 2026 PLAN NUMBER WPP-0077410-6 PAGE 1 OF 4 Annual Benefit Statement For the scheme year 6 April 2025",
+    subtype: "Marlestone Workplace Pensions Ltd — Annual Benefit Statement Marlestone Workplace Pensions Ltd Trustee-administered defined",
+    cost: { amount: "215.42", needle: "3 for what your pension could be worth at your selected retirement date. Your contributions YOUR MONTHLY CONTRIBUTION £215.42 EMPLOYER'S MONTHLY" },
+    recurrence: { months: 12, needle: "4 Contributions received Contributions received during the 12 months of the scheme year, 6 April 2025 to 5" },
+    dates: [
+      "defined contribution pension scheme STATEMENT DATE 5 April 2026 PLAN NUMBER",
     ],
   },
   "fullpage-pet-vaccination-card.pdf": {
@@ -186,332 +299,103 @@ const EVIDENCE: Record<string, DocEvidence> = {
       "the service charge year running from 1 April 2026 to 31 March 2027. This demand is issued",
     ],
   },
-
-  "policy-schedule.pdf": {
-    provider: "Provider: Acme Cover Ltd",
-    reference: "Policy number: HI-9284712",
-    subtype: "HOME INSURANCE — SCHEDULE OF COVER",
+  "fullpage-solar-export-statement.pdf": {
+    provider: "then- current default export tariff. Millbrook Energy Ltd is a licensed electricity supplier, registered in England & Wales No.",
+    reference: "Export Statement GENERATION ACCOUNT SEG-4471-0932 STATEMENT PERIOD 01/04/2025 – 31/03/2026 STATEMENT DATE 24/04/2026 Mrs",
+    subtype: "Millbrook Energy — Solar Export Statement Millbrook Energy Solar Generation Team · Annual Solar Export Statement",
+    cost: { amount: "343.64", needle: "payment, four quarters £361.64 Less: annual metering & data administration charge −£18.00 Total paid to you this year £343.64 Estimated total for" },
+    recurrence: { months: 12, needle: "Export meter EM2205968 Export meter last verified 12 May 2022 Your quarterly export and" },
     dates: [
-      "Period of insurance: 02/10/2025 to 02/10/2026",
-      "Renewal date: 02/10/2026",
+      "1 April 2023 for a fixed term of 4 years and ends on 31 March 2027. Shortly before your",
     ],
   },
-  "mot-certificate.pdf": {
-    subtype: "MOT TEST CERTIFICATE",
+  "fullpage-travel-insurance-certificate.pdf": {
+    provider: "Travel Insurance Certificate KESTREL TRAVEL INSURANCE SERVICES LTD Administrator of your annual multi-trip travel insurance policy",
+    reference: "insurance policy Certificate number KTL/AMT/449108 ANNUAL MULTI-TRIP TRAVEL INSURANCE CERTIFICATE P OLIC YHOLD E R Mr",
+    subtype: "Annual Multi-Trip Travel Insurance Certificate KESTREL TRAVEL INSURANCE SERVICES LTD Administrator of your annual",
+    cost: { amount: "159.60", needle: "per incident £95.00 Premium excluding Insurance Premium Tax £133.00 Annual premium, including Insurance Premium Tax £159.60 Underwritten by Palisade" },
+    recurrence: { months: 12, needle: "Canada, the Caribbean and Mexico P E RIOD OF INSURANC E 12 months, from 1 April 2026 to 1 April 2027 RE" },
     dates: [
-      "Expiry date: 28 August 2026",
-      "Issued: 29 August 2025 at Hartswood Garage",
+      "and Mexico P E RIOD OF INSURANC E 12 months, from 1 April 2026 to 1 April 2027 RE NE",
+      "E RIOD OF INSURANC E 12 months, from 1 April 2026 to 1 April 2027 RE NE WAL D ATE — C OV E",
     ],
   },
-  "boiler-service-invoice.pdf": {
-    provider: "Supplier: British Gas",
-    reference: "Invoice ref: INV-88213",
-    subtype: "INVOICE — ANNUAL BOILER SERVICE",
-    cost: { amount: "120.00", needle: "Amount due: £120.00" },
+  "fullpage-tv-licence-confirmation.pdf": {
+    provider: "contact us using the address below. Colefield Broadcast Licensing Authority Limited · Confirmation issued 10 March 2026 · Enquiries 0300 555 0148",
+    reference: "Television Licence Licence number CBL-774-2091 Valid from 1 April 2026 Valid to 31 March 2027 Fee £182.00 £45.50 by",
+    subtype: "Television Licence Confirmation COLEF I ELD L ICENSING Television Licence Licence number",
+    cost: { amount: "182.00", needle: "I ELD L ICENSING Television Licence Licence number CBL-774-2091 Valid from 1 April 2026 Valid to 31 March 2027 Fee £182.00 £45.50 by quarterly" },
+    recurrence: { months: 12, needle: "or record programmes as they are broadcast. It runs for 12 months from the start date shown in the panel" },
     dates: [
-      "Service completed 04.09.2025.",
-      "Next service due 04.09.2026.",
+      "number CBL-774-2091 Valid from 1 April 2026 Valid to 31 March 2027 Fee £182.00 £45.50 by",
     ],
   },
-  "car-insurance-renewal.pdf": {
-    provider: "Your insurer: Shield Motor Insurance",
-    reference: "Your reference: SM-2291-X",
-    subtype: "Your car insurance is due for renewal on September 14, 2026.",
-    cost: { amount: "642.18", needle: "Annual premium £642.18" },
+  "fullpage-vehicle-tax-reminder.pdf": {
+    provider: "Vehicle Tax Reminder Highways and Vehicle Licensing Authority Executive agency for vehicle registration and taxation · Northgate",
+    reference: "A T IO N D O C U MEN T R EF ER EN C E 4471 8823 0519 C A S E R EF ER EN C E HVLA-2026-661452 R EG IS T R A T IO N MA R K",
+    subtype: "Vehicle Tax Reminder Highways and Vehicle Licensing Authority Executive agency for vehicle",
+    cost: { amount: "180.00", needle: "2026 RATE FOR THIS VEHICLE — TICK ONE AND PAY BY THE METHODS OVERLEAF PAYMENT OPTION AMOUNT ☐ Single 12 month payment £180.00 ☐ Single 6 month payment" },
+    recurrence: { months: 12, needle: "PAY BY THE METHODS OVERLEAF PAYMENT OPTION AMOUNT ☐ Single 12 month payment £180.00 ☐ Single 6 month" },
     dates: [
-      "Your car insurance is due for renewal on September 14, 2026.",
+      "S IN C E 22 June 2021 C U R R EN T T A X EX P IR ES 31 October 2026 MO T EX P IR ES 19",
     ],
   },
-  "energy-bill.pdf": {
-    reference: "Account no: 300481292",
-    subtype: "ENERGY STATEMENT",
-    cost: { amount: "163.90", needle: "Total: £163.90" },
+  "fullpage-water-bill.pdf": {
+    provider: "ClearBourne Water is a trading name of Bourne Valley Water and Sewerage plc, registered in England and Wales, company number 04217743, registered",
+    reference: "region BILL DATE 09/06/2026 ACCOUNT 8847 2210 55 TARIFF CODE WV-M-04 PAGE 1 OF 2 Mr J Whitcombe 12 Silverdale Close",
+    subtype: "ClearBourne Water — Water and Wastewater Bill ClearBourne Water Water and wastewater services for the Bourne Valley",
+    cost: { amount: "163.37", needle: "M-2291487 Supply type Metered, combined Direct debit Collecting 23/06/2026 AMOUNT NOW DUE Payment due by 30/06/2026 £163.37 METER READINGS ON YOUR" },
     dates: [
-      "Billing period 2026-06-01 to 30/06/2026",
-      "Billing period 2026-06-01 to 30/06/2026",
-      "Payment due by 21/07/2026",
+      "Collecting 23/06/2026 AMOUNT NOW DUE Payment due by 30/06/2026 £163.37 METER READINGS",
     ],
   },
-  "warranty-dishwasher.pdf": {
-    subtype: "WARRANTY CERTIFICATE",
+  "fullpage-window-installation-guarantee.pdf": {
+    provider: "Guarantee Issued by the National Fenestration Guarantee Scheme Ltd following notification of the work described below under the competent",
+    reference: "and Insurance-Backed Guarantee — IBG-2026-337215 NFGS National Fenestration Guarantee Scheme Competent person scheme for",
+    subtype: "Certificate of Compliance and Insurance-Backed Guarantee — IBG-2026-337215 NFGS National Fenestration Guarantee Scheme Competent",
     dates: [
-      "Warranty valid until 3rd March 2027.",
-    ],
-  },
-  "tv-licence.pdf": {
-    reference: "Licence number: TVL-04482913",
-    subtype: "Your TV Licence",
-    cost: { amount: "169.50", needle: "A colour licence costs £169.50 a year." },
-    dates: [
-      "Expires: 30 Nov 2026",
-    ],
-  },
-  "home-emergency-cover.pdf": {
-    reference: "Quote reference HS-77120 when you call.",
-    dates: [
-      "Your cover began on\n12 January 2026 and runs until 11 January 2027 unless renewed.",
-      "Your cover began on\n12 January 2026 and runs until 11 January 2027 unless renewed.",
-    ],
-  },
-  "chimney-sweep-receipt.pdf": {
-    cost: { amount: "90", needle: "J. Marsh & Son. 12/10/2025. £90 cash." },
-    dates: [
-      "J. Marsh & Son. 12/10/2025. £90 cash.",
-    ],
-  },
-  "council-tax.pdf": {
-    reference: "Account reference: 55018824",
-    subtype: "COUNCIL TAX DEMAND 2026/27",
-    dates: [
-      "First instalment due 01/04/2026, final instalment 01/01/2027.",
-      "First instalment due 01/04/2026, final instalment 01/01/2027.",
-    ],
-  },
-  "pet-insurance.pdf": {
-    provider: "Insurer - PawGuard",
-    reference: "Policy no. PG881122",
-    subtype: "PET INSURANCE CERTIFICATE",
-    dates: [
-      "Cover start 15/02/2026 — renews automatically 15/02/2027",
-      "Cover start 15/02/2026 — renews automatically 15/02/2027",
-    ],
-  },
-  "smoke-alarm-manual.pdf": {},
-  "water-statement.pdf": {
-    provider: "Provider: Clearspring Water Ltd",
-    reference: "Account number: CW-0099-4471",
-    subtype: "CLEARSPRING WATER — STATEMENT OF ACCOUNT",
-    dates: [
-      "Charges for the period 2026-04-01 to 2027-03-31.",
-      "Charges for the period 2026-04-01 to 2027-03-31.",
-      "Your next statement is due 2026-10-01. Balance carried forward £0.00.",
-    ],
-  },
-  "mot-reminder.pdf": {
-    provider: "Sent 12 August 2026 by Hartswood Garage Services, Westhaven.",
-    dates: [
-      "Sent 12 August 2026 by Hartswood Garage Services, Westhaven.",
-      "Our records show your vehicle was last tested on 28 August 2025.",
-      "The certificate on file expires 28 August 2026. Book early to avoid a lapse.",
-    ],
-  },
-  "council-tax-demand.pdf": {
-    provider: "BOROUGH OF WESTHAVEN",
-    reference: "Council tax reference 8802 5514 9",
-    subtype: "COUNCIL TAX DEMAND NOTICE 2027/28",
-    dates: [
-      "Issued 09 March 2027",
-      "Ten instalments are payable from 1 April 2027 to 1 January 2028.",
-      "Ten instalments are payable from 1 April 2027 to 1 January 2028.",
-    ],
-  },
-  "broadband-agreement.pdf": {
-    provider: "Supplier: Northgate Fibre Ltd",
-    reference: "Customer account 4471-8820-3390",
-    subtype: "NORTHGATE FIBRE — SERVICE AGREEMENT",
-    dates: [
-      "Service start date 2 October 2026. Minimum term ends 31-03-2028.",
-      "Service start date 2 October 2026. Minimum term ends 31-03-2028.",
-    ],
-  },
-  "life-cover-statement.pdf": {
-    provider: "Provider: Acorn Mutual Assurance Society",
-    reference: "Plan number LC/2291/443",
-    subtype: "ACORN MUTUAL — LIFE COVER STATEMENT",
-    dates: [
-      "Your plan started on 06/05/24 and the premium is fixed for life.",
-      "The next annual review is 6 May 2027.",
-    ],
-  },
-  "buildings-renewal.pdf": {
-    provider: "Insurer: Northern Shire Mutual Insurance Society",
-    reference: "Policy: NSM 44/22910",
-    subtype: "NORTHERN SHIRE MUTUAL — BUILDINGS COVER",
-    cost: {
-      amount: "412.00",
-      needle: "from 22 Feb 2027 for a further twelve months at £412.00.",
-    },
-    dates: [
-      "Quotation prepared 04 Feb 2027",
-      "Your current policy expires 21 Feb 2027. If you do nothing we will renew it\nfrom 22 Feb 2027 for a further twelve months at £412.00.",
-      "Your current policy expires 21 Feb 2027. If you do nothing we will renew it\nfrom 22 Feb 2027 for a further twelve months at £412.00.",
-    ],
-  },
-  "thermostat-quick-start.pdf": {},
-  "gym-membership.pdf": {
-    provider: "Provider: Riverbank Leisure Club",
-    reference: "Membership number: RLC-7781-22",
-    subtype: "RIVERBANK LEISURE CLUB — MEMBERSHIP AGREEMENT",
-    dates: [
-      "Signed at the club on 24 September 2026.",
-      "Your twelve-month membership begins on the 1st of October 2026 and ends on\nthe 30th of September 2027. One calendar month's notice applies.",
-      "Your twelve-month membership begins on the 1st of October 2026 and ends on\nthe 30th of September 2027. One calendar month's notice applies.",
-    ],
-  },
-  "contents-renewal-invitation.pdf": {
-    provider: "Insurer: Kestrel Mutual (administered by Faircross Broking Ltd)",
-    reference: "Policy number 88-2291-KM",
-    subtype: "RENEWAL INVITATION — CONTENTS INSURANCE",
-    cost: { amount: "318.40", needle: "Please check your details before 23 September 2026. New premium £318.40." },
-    dates: [
-      "Your cover ends on 30-09-2026 and the new policy year starts 01-10-2026.",
-      "Your cover ends on 30-09-2026 and the new policy year starts 01-10-2026.",
-      "Please check your details before 23 September 2026. New premium £318.40.",
-    ],
-  },
-  "roofing-agreement.pdf": {
-    provider: "Supplier: Fairweather Roofing Ltd",
-    reference: "Agreement reference FR/2026/0418",
-    subtype: "FAIRWEATHER ROOFING — MAINTENANCE AGREEMENT",
-    dates: [
-      "Signed 18 April 2026 at Westhaven.",
-      "Annual inspection due 2026/07/15, with a second visit on 2027/01/20 if the\nfirst identifies work.",
-      "Annual inspection due 2026/07/15, with a second visit on 2027/01/20 if the\nfirst identifies work.",
-    ],
-  },
-  "dental-plan.pdf": {
-    provider: "Provider: Brightmoor Dental Care Ltd",
-    reference: "Membership number: BDC-771244",
-    subtype: "BRIGHTMOOR DENTAL PLAN",
-    cost: { amount: "18.50", needle: "Payments of £18.50 are collected on the 1st of each month." },
-    dates: [
-      "Your plan renews on 1 December 2026.",
-    ],
-  },
-  "holdout-buildings-contents-schedule.pdf": {
-    provider: "Larkfield Mutual Insurance",
-    reference: "Policy LKM/44-12-8890",
-    subtype: "SCHEDULE OF INSURANCE — BUILDINGS AND CONTENTS",
-    cost: {
-      amount: "412.66",
-      needle: "Premium         £412.66, payable as 12 monthly instalments of £34.39",
-    },
-    dates: [
-      "Cover starts    1 February 2026",
-      "Cover ends      31 January 2027",
-    ],
-  },
-  "holdout-mot-certificate.pdf": {
-    provider: "Issued by Cobbledown Motors, VTS 74129",
-    reference: "Test number         4471 8802 5590",
-    subtype: "MOT TEST CERTIFICATE                                          VT20",
-    dates: [
-      "Test date           14.02.2026",
-      "Expiry date         13.02.2027",
-    ],
-  },
-  "holdout-council-tax.pdf": {
-    provider: "MELBURY BOROUGH COUNCIL",
-    reference: "Account number   MB-8827441",
-    subtype: "Council Tax Demand Notice 2026/27",
-    cost: { amount: "1,381.62", needle: "Amount to pay                                              £1,381.62" },
-    dates: [
-      "Date of issue    12 March 2026",
-      "Charge for the period 1 April 2026 to 31 March 2027         £1,842.15",
-      "Charge for the period 1 April 2026 to 31 March 2027         £1,842.15",
-      "Payable by 10 monthly instalments. The first instalment is due on\n1 April 2026 and the final instalment is due on 1 January 2027.",
-    ],
-  },
-  "holdout-broadband-order.pdf": {
-    provider: "Ferngate Broadband",
-    reference: "Account number  FG 5512 8830 41",
-    subtype: "Your package    Ferngate Fibre 500 with unlimited calls",
-    cost: { amount: "38.00", needle: "Monthly price   £38.00 for the first 18 months, then our standard price" },
-    dates: [
-      "We'll switch you over on the 3rd of June 2026. Your new router should\narrive a couple of days before that, and there is nothing you need to do\non the day.",
-      "Prices change each April in line with inflation plus 3.9%. The first\nchange will apply from 1 April 2027.",
-      "Your 14-day cancellation period runs from the day you placed the order,\n27 May 2026.",
-    ],
-  },
-  "holdout-water-bill.pdf": {
-    provider: "WEXLEY WATER",
-    reference: "Customer   Ms A Quilliam                 Account 55 214 887 3",
-    cost: { amount: "389.46", needle: "Total now due                                            £389.46" },
-    dates: [
-      "Charges for the period 3 December 2025 to 4 June 2026",
-      "Charges for the period 3 December 2025 to 4 June 2026",
-      "Please pay by 30/06/26. If you pay by Direct Debit we will collect on or\njust after 15/07/26.",
-      "Please pay by 30/06/26. If you pay by Direct Debit we will collect on or\njust after 15/07/26.",
-    ],
-  },
-  "holdout-gas-safety-record.pdf": {
-    provider: "ASHCOMBE GAS SERVICES — GAS SAFETY RECORD",
-    reference: "Certificate no. AGS-2026-0442",
-    subtype: "ASHCOMBE GAS SERVICES — GAS SAFETY RECORD",
-    recurrence: { months: 12, needle: "Next inspection due within 12 months of the date above." },
-    dates: [
-      "Inspected    9 September 2026",
-    ],
-  },
-  "holdout-appliance-warranty.pdf": {
-    provider: "MARROW & FINCH",
-    reference: "Plan reference   W-0099-2841",
-    subtype: "Extended warranty confirmation",
-    dates: [
-      "Purchased        2026/03/09 at our Northmoor store",
-      "Cover            5 years parts and labour, expiring 2031/03/08",
-    ],
-  },
-  "holdout-pet-insurance-renewal.pdf": {
-    provider: "Pinfold Pet Insurance",
-    reference: "Policy number 8841-QP-77",
-    cost: {
-      amount: "31.44",
-      needle: "Your new premium is £31.44 a month, up from £28.90. We have written to\nyou at least 21 days before renewal, as the rules require.",
-    },
-    dates: [
-      "Your policy for Biscuit (Border Terrier) is due to renew on 1st October\n2026. Cover under your current policy ends at midnight on 30th September\n2026.",
-      "Your policy for Biscuit (Border Terrier) is due to renew on 1st October\n2026. Cover under your current policy ends at midnight on 30th September\n2026.",
-      "If you would rather not renew, tell us before 24 September 2026.",
-    ],
-  },
-  "holdout-mobile-airtime.pdf": {
-    provider: "QUILLET MOBILE",
-    reference: "Account\nnumber           QM-4471-0088-2",
-    subtype: "Airtime plan summary",
-    dates: [
-      "Plan started     18\nAugust 2025",
-      "Minimum term ends 17 August 2027",
-    ],
-  },
-  "holdout-tariff-label.pdf": {
-    provider: "TRELLIS ENERGY — TARIFF INFORMATION LABEL",
-    subtype: "Tariff name             Trellis Fixed Saver",
-  },
-  "holdout-structural-warranty.pdf": {
-    provider: "STONEPATH STRUCTURAL GUARANTEES LIMITED",
-    reference: "Certificate number   SP/NH/118420",
-    subtype: "Certificate of Insurance — New Home Warranty",
-    dates: [
-      "Structural insurance period   20 May 2024 to 20 May 2034",
-      "Structural insurance period   20 May 2024 to 20 May 2034",
-    ],
-  },
-  "holdout-heating-plan.pdf": {
-    provider: "Halverston Home Cover",
-    reference: "Plan number      HHC 60 4471 22",
-    subtype: "Boiler and heating plan — annual statement",
-    cost: { amount: "26.50", needle: "Monthly payment  £26.50, collected on or around the 4th" },
-    dates: [
-      "Plan year        01 Jul 26 – 30 Jun 27",
-      "Plan year        01 Jul 26 – 30 Jun 27",
-      "Last year's visit: an engineer attended on Thu 11 Sep 2025 and passed the\nboiler as serviced. This year's service is not yet booked — book online\nor call us.",
-      "We wrote to you about this plan on 03 June 2026.",
-    ],
-  },
-  "holdout-imported-warranty-card.pdf": {
-    provider: "VANTERRA APPLIANCES",
-    reference: "Registration ref   VA-UK-778120",
-    subtype: "Limited warranty card (UK edition)",
-    dates: [
-      "Date of purchase   03/15/2026  (mm/dd/yyyy)",
-      "Warranty expires   03/15/2028  (mm/dd/yyyy)",
+      "SCHEME POLICY NO. GPS-0417-2261 Date of installation 14 March 2026 Guarantee expires 14",
+      "Date of installation 14 March 2026 Guarantee expires 14 March 2036 Certificate of",
     ],
   },
 };
 
+/**
+ * Documents whose answers sit past `INPUT_CHARACTER_BUDGET`, so no model --
+ * however good -- can quote them. `safeDocumentEvidence` keeps the head and
+ * drops the tail, silently.
+ *
+ * This is not a test being excused. It is #981's point 4 made into an
+ * assertion: the budget had never once fired, because the longest document in
+ * the old corpus was 668 characters. The life cover booklet is 26,939
+ * characters with its policy schedule on page 13, exactly where a real
+ * twenty-page policy puts it, and the extractor cannot see that page at all.
+ *
+ * The expectation is inverted rather than skipped, so this list cannot quietly
+ * grow and cannot quietly become wrong: raise the budget, or window the input
+ * instead of truncating it, and the entry below starts failing and tells you
+ * to remove it.
+ */
+const ANSWERS_PAST_THE_INPUT_BUDGET = new Set(["fullpage-life-cover-booklet.pdf"]);
+
+describe("the input budget silently truncates a long document's answers (#981)", () => {
+  for (const filename of ANSWERS_PAST_THE_INPUT_BUDGET) {
+    it(`${filename}: its evidence is unquotable, because the budget cut the page it is on`, () => {
+      const doc = EXTRACTION_CORPUS.find((d) => d.filename === filename);
+      expect(doc, `${filename} is no longer in the corpus -- drop it from the list`).toBeDefined();
+      const full = doc!.text;
+      const truncated = safeDocumentEvidence(full, INPUT_CHARACTER_BUDGET);
+      expect(full.length).toBeGreaterThan(INPUT_CHARACTER_BUDGET);
+      const needle = collapseWhitespace(EVIDENCE[filename]!.reference!);
+      expect(collapseWhitespace(full)).toContain(needle);
+      expect(truncated).not.toContain(needle);
+    });
+  }
+});
+
 describe("an ideal model's reply survives modelProposalFromText's grounding and validation (#965)", () => {
   for (const doc of EXTRACTION_CORPUS) {
+    if (ANSWERS_PAST_THE_INPUT_BUDGET.has(doc.filename)) continue;
     it(`grounds every expected field of "${doc.name}" (${doc.filename})`, async () => {
       const evidence = EVIDENCE[doc.filename];
       if (!evidence) {
