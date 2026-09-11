@@ -229,11 +229,20 @@ function withoutLegalSuffix(name: string): string {
  * only at the end. Everything else still has to match exactly, so a genuinely
  * different name ("Direct Debit" for a water company) is still wrong. */
 function classifyProvider(expected: string, actual: string | undefined): Classification {
-  if (actual === expected) return "correct";
-  if (actual !== undefined && withoutLegalSuffix(actual) === withoutLegalSuffix(expected)) {
+  if (actual === undefined) return "blank";
+  // Case and whitespace runs ignored, as `comparableSubtype` already does.
+  // Owner ruling 2026-09-11: "All caps is an acceptable answer... the valuable
+  // part is the extraction of the correct information." A letterhead printed
+  // WEXLEY WATER is read correctly by any extractor copying verbatim, and
+  // scoring it wrong -- and since #939 charging it the wrong-value penalty --
+  // measures typography rather than extraction. Presentation is a
+  // post-processing concern, not an accuracy one.
+  const comparable = (value: string) => value.replace(/\s+/gu, " ").trim().toLowerCase();
+  if (comparable(actual) === comparable(expected)) return "correct";
+  if (comparable(withoutLegalSuffix(actual)) === comparable(withoutLegalSuffix(expected))) {
     return "correct";
   }
-  return actual === undefined ? "blank" : "wrong";
+  return "wrong";
 }
 
 /** An expected date missing from an extractor that returned nothing at all
