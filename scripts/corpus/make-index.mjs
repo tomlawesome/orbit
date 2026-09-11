@@ -1,10 +1,8 @@
 // Build an index page over the rendered corpus so the owner can page through
 // the PDFs and see, next to each, what it is meant to test.
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-const HERE = dirname(fileURLToPath(import.meta.url));
-const dir = resolve(HERE, "sources");
+import { corpusDir } from "./corpus-dir.mjs";
+const dir = corpusDir;
 
 
 const rows = readdirSync(dir).filter((f) => f.endsWith(".pdf")).sort().map((pdf) => {

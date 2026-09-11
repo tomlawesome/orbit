@@ -1,13 +1,10 @@
 // Render every sources/*.html to a sibling PDF, A4, backgrounds on.
 import { readdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-const HERE = dirname(fileURLToPath(import.meta.url));
-const dir = resolve(HERE, "sources");
+import { corpusDir, positional } from "./corpus-dir.mjs";
+const dir = corpusDir;
 
-
-const only = process.argv[2];
+const only = positional[0];
 const files = readdirSync(dir).filter((f) => f.endsWith(".html") && !["index.html","contact-sheet.html"].includes(f)).filter((f) => !only || f === only);
 const b = await chromium.launch();
 for (const f of files) {

@@ -3,10 +3,8 @@
 // got through.
 import { readdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-const HERE = dirname(fileURLToPath(import.meta.url));
-const dir = resolve(HERE, "sources");
+import { corpusDir } from "./corpus-dir.mjs";
+const dir = corpusDir;
 
 
 const b = await chromium.launch();

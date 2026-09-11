@@ -12,7 +12,12 @@
 // That is the point: the fixture is what production actually sees.
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 
-const dir = process.env.CORPUS_DIR ?? "/data";
+// This one cannot import `corpus-dir.mjs`: it runs inside a container with
+// only itself mounted, and the corpus arrives as a volume. The directory is
+// whichever one was mounted at /data -- `sources` or `holdout` -- and
+// `--dir`/`CORPUS_DIR` override it for a run outside a container.
+const dirFlag = process.argv.indexOf("--dir");
+const dir = (dirFlag !== -1 ? process.argv[dirFlag + 1] : undefined) ?? process.env.CORPUS_DIR ?? "/data";
 const url = process.env.TIKA_URL ?? "http://orbit-tika:9998";
 
 for (const f of readdirSync(dir).filter((n) => n.endsWith(".pdf")).sort()) {

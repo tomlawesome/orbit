@@ -4,8 +4,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { corpusDir } from "./corpus-dir.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
-const dir = resolve(HERE, "sources");
+const dir = corpusDir;
 
 // The generic taxonomy `subtype` object-form ground truth names groups from
 // (owner decision 2026-09-11, #989): the accepted answers come from here,

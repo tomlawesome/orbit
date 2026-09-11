@@ -9,10 +9,11 @@
 // truth, and a face that changed per render would change what Tika emits and
 // silently invalidate it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-const HERE = dirname(fileURLToPath(import.meta.url));
-const dir = resolve(HERE, "sources");
+import { corpusDir, positional } from "./corpus-dir.mjs";
+const dir = corpusDir;
+// An optional filename limits the run to one document, so a document being
+// written in parallel with another is not touched mid-write.
+const only = positional[0];
 
 
 const FACE = (family, file, weight = "100 900", style = "normal") =>
@@ -156,9 +157,88 @@ const DOCS = {
     faces: [FACE("Corpus Scheme", "Domine.ttf"), FACE("Corpus Scheme Sans", "PublicSans.ttf")],
     swap: [[/"Liberation Serif", serif/g, '"Corpus Scheme", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Scheme Sans", sans-serif']],
   },
+
+  // ---- the 12 hold-out documents (#986 step 8) ----
+  //
+  // Twenty new faces, so the hold-out shares no character map with the 24
+  // it is scored against: a fault that only shows up in one font encoding
+  // would otherwise be tuned away on the 24 and never met again.
+
+  // Bulk-printed pet insurance: a screen-first book serif with a grotesque
+  // for the benefit tables.
+  "pet-insurance-schedule.html": {
+    faces: [FACE("Corpus Pet", "Literata.ttf"), FACE("Corpus Pet Sans", "LibreFranklin.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Pet", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Pet Sans", sans-serif']],
+  },
+  // A mailmerge letter with a tear-off payment slip: a newspaper serif over
+  // a neutral UI sans.
+  "boiler-service-plan-letter.html": {
+    faces: [FACE("Corpus Boiler", "Faustina.ttf"), FACE("Corpus Boiler Sans", "Inter.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Boiler", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Boiler Sans", sans-serif']],
+  },
+  // A letting agent's contract: a text serif for the clauses, a typewriter
+  // mono for the particulars typed into the schedule.
+  "tenancy-agreement.html": {
+    faces: [FACE("Corpus Tenancy", "Newsreader.ttf"), FACE("Corpus Tenancy Mono", "SpaceMono-Regular.ttf", "400"), FACE("Corpus Tenancy Mono", "SpaceMono-Bold.ttf", "700")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Tenancy", serif'], [/"Liberation Mono", monospace/g, '"Corpus Tenancy Mono", monospace']],
+  },
+  // A regulated credit agreement: a grotesque for the boxed wording, a code
+  // mono for the payment figures.
+  "car-finance-agreement.html": {
+    faces: [FACE("Corpus Finance", "Archivo.ttf"), FACE("Corpus Finance Mono", "SourceCodePro.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Finance", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Finance Mono", monospace']],
+  },
+  // A ticket-office print: a wide machine mono on the ticket itself, a sans
+  // for the receipt beneath it.
+  "rail-season-ticket.html": {
+    faces: [FACE("Corpus Ticket", "MartianMono.ttf"), FACE("Corpus Ticket Sans", "LibreFranklin.ttf")],
+    swap: [[/"Liberation Mono", monospace/g, '"Corpus Ticket", monospace'], [/"Liberation Sans", sans-serif/g, '"Corpus Ticket Sans", sans-serif']],
+  },
+  // Council print: a display sans for the permit panel, a mono for the
+  // vehicle and permit numbers.
+  "residents-parking-permit.html": {
+    faces: [FACE("Corpus Permit", "RedHatDisplay.ttf"), FACE("Corpus Permit Mono", "SpaceMono-Regular.ttf", "400"), FACE("Corpus Permit Mono", "SpaceMono-Bold.ttf", "700")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Permit", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Permit Mono", monospace']],
+  },
+  // A printed e-mail: one screen sans at every size, as the mail client set
+  // it.
+  "streaming-subscription-invoice.html": {
+    faces: [FACE("Corpus Mail", "PlusJakartaSans.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Mail", sans-serif']],
+  },
+  // Nursery stationery: a light geometric display sans over a book serif.
+  "nursery-fees-invoice.html": {
+    faces: [FACE("Corpus Nursery", "JosefinSans.ttf"), FACE("Corpus Nursery Serif", "Gelasio.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Nursery", sans-serif'], [/"Liberation Serif", serif/g, '"Corpus Nursery Serif", serif']],
+  },
+  // A control panel printed from a browser: a contemporary sans with a code
+  // mono for nameservers and record IDs.
+  "domain-hosting-renewal.html": {
+    faces: [FACE("Corpus Host", "Epilogue.ttf"), FACE("Corpus Host Mono", "SourceCodePro.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Host", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Host Mono", monospace']],
+  },
+  // A government-scheme certificate: a plain public-sector sans, ratings and
+  // figures in a mono.
+  "energy-performance-certificate.html": {
+    faces: [FACE("Corpus EPC", "SourceSans3.ttf"), FACE("Corpus EPC Mono", "SpaceMono-Regular.ttf", "400"), FACE("Corpus EPC Mono", "SpaceMono-Bold.ttf", "700")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus EPC", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus EPC Mono", monospace']],
+  },
+  // A carbonless pad filled in on a doorstep: a pre-printed serif against a
+  // ballpoint hand.
+  "alarm-monitoring-agreement.html": {
+    faces: [FACE("Corpus Alarm", "Petrona.ttf"), FACE("Corpus Ballpoint", "Kalam-Regular.ttf", "400"), FACE("Corpus Ballpoint", "Kalam-Bold.ttf", "700")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Alarm", serif'], [/"Bitstream Charter", serif/g, '"Corpus Ballpoint", cursive']],
+  },
+  // Direct-mail protection selling: a high-contrast display serif for the
+  // headlines, a neutral sans for the illustration tables.
+  "critical-illness-quote.html": {
+    faces: [FACE("Corpus Quote", "DMSerifDisplay-Regular.ttf", "400"), FACE("Corpus Quote Sans", "Inter.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Quote", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Quote Sans", sans-serif']],
+  },
 };
 
 for (const [file, { faces, swap }] of Object.entries(DOCS)) {
+  if (only && file !== only) continue;
   const path = `${dir}/${file}`;
   // Documents arrive in waves, so the table lists files that may not be
   // written yet. A missing one is not an error; it is simply not built.
