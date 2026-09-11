@@ -160,9 +160,16 @@ to a regex chain.
 
 ## Open for the owner
 
-1. Subtype ground truth for `energy-tariff-end`: the phrase "Tariff end
-   notice" is printed only inside a footer sentence, added earlier so the
-   value would be literal. The page's printed title is "your fixed price
-   is coming to an end". The convention says subtype is the printed title;
-   either the truth changes or the sieve learns to read footer form names.
-   Left as the one recorded miss until ruled on.
+1. Resolved 2026-09-11 (owner): `subtype` means "what type of thing is
+   this" — insurance, service, plan — matching the app's own field
+   (`src/lib/demo-data.ts`), not the document's printed title. The
+   printed-title convention the corpus truths were written to is
+   withdrawn; the truths are being rewritten to a short vocabulary of
+   kinds (#989), and stage 3 chooses subtype by classification from that
+   vocabulary rather than by copying a heading. The `energy-tariff-end`
+   footer question falls away with it.
+
+2. The 24 documents are samples of what real pages could look like, not a
+   definition of them (owner, 2026-09-11, quoted on #989). Sieves and bins
+   key on language and value shape; never on where something sits on
+   these pages or how many of the 24 behave a certain way.
