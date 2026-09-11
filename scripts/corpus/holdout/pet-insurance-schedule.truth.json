@@ -1,0 +1,38 @@
+{
+  "name": "Thornbury Pet Cover — Policy Schedule",
+  "filename": "pet-insurance-schedule.pdf",
+  "expected": {
+    "dates": ["2026-04-01", "2027-04-01"],
+    "dateRoles": [
+      { "date": "2026-04-01", "role": "start" },
+      { "date": "2027-04-01", "role": "renewal" }
+    ],
+    "provider": "Thornbury Pet Cover",
+    "reference": "TPC-2026-0447182",
+    "subtype": { "kinds": ["Insurance"], "qualifiers": ["Pet"] },
+    "costMinor": 28764,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "Cover starts 1 April 2026 ('Cover starts: 1 April 2026') -- dateRoles start.",
+    "Renewal date 1 April 2027 ('Your renewal date is 1 April 2027') -- dateRoles renewal.",
+    "recurrenceMonths 12 printed as 'This is a 12 month policy.'",
+    "provider is the trading name that sells and administers ('THORNBURY PET COVER' banner), not the parent it is a trading name of and not the underwriter.",
+    "reference is the policy number 'TPC-2026-0447182'.",
+    "costMinor is the annual premium 'Annual premium (paid in full): £287.64.'",
+    "subtype Insurance/Pet from the 'Thornbury Pet Cover' pet insurance schedule content.",
+    "Trap: cover end date 31 March 2027 printed as 'Cover ends: 31 March 2027', a plausible wrong renewal/expiry date.",
+    "Trap: direct debit collection date 'collected by direct debit on the 1st of each month'.",
+    "Trap: pet's date of birth '14 June 2019', a plausible wrong start date.",
+    "Trap: microchip date '2 July 2019', another plausible wrong date.",
+    "Trap: 14-day cooling-off period ('You have a 14-day cooling-off period'), a rival number to recurrenceMonths.",
+    "Trap: vet fee limit '£7,500', a plausible wrong costMinor.",
+    "Trap: excess 'An excess of £95 applies per condition'.",
+    "Trap: monthly instalment price '£26.15' and the higher 'Total payable if you pay monthly: £313.80', both rival amounts to the annual premium.",
+    "Trap: separate quotation reference 'Q-8820193', a rival reference.",
+    "Trap: parent 'Millbrace Insurance Services Limited' and underwriter 'Coldharbour Insurance Limited', both rival providers.",
+    "Trap: company number '04471829' and VAT number 'GB 774 4471 82', rival reference-shaped numbers."
+  ]
+}

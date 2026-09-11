@@ -1,0 +1,34 @@
+{
+  "name": "Cheddleton Rail — Annual Season Ticket",
+  "filename": "rail-season-ticket.pdf",
+  "expected": {
+    "dates": ["2026-09-01", "2027-08-31"],
+    "dateRoles": [
+      { "date": "2026-09-01", "role": "start" },
+      { "date": "2027-08-31", "role": "expiry" }
+    ],
+    "provider": "Cheddleton Rail",
+    "reference": "ST-0294817-6",
+    "subtype": { "kinds": ["Season ticket"], "qualifiers": ["Transport"] },
+    "costMinor": 341200,
+    "currency": "GBP"
+  },
+  "notes": [
+    "Ticket valid from 01/09/2026 ('VALID FROM 01/09/2026') -- dateRoles start.",
+    "Ticket valid until 31/08/2027 ('VALID UNTIL 31/08/2027') -- dateRoles expiry.",
+    "No scheduleKind or recurrenceMonths declared: an annual season ticket does not print a recurring instalment count.",
+    "provider is the issuing train operator 'ISSUED BY CHEDDLETON RAIL', who would be contacted.",
+    "reference is the season ticket number 'ST-0294817-6'.",
+    "costMinor is the price paid, 'Annual season ticket £3,412.00'.",
+    "subtype Season ticket/Transport from the annual rail season ticket content.",
+    "Trap: date of purchase 'Date of purchase: 24 August 2026', a plausible wrong start date.",
+    "Trap: photocard number 'PHOTOCARD PC 552013847' with its own different expiry 'EXPIRES 14/02/2028'.",
+    "Trap: delay compensation line 'Claims for delay compensation must be submitted within 28 days'.",
+    "Trap: equivalent monthly price '£322.50', a rival amount to the annual cost.",
+    "Trap: first class upgrade price '£5,120.00 per year', another rival amount.",
+    "Trap: refund administration fee '£10.00', another rival amount.",
+    "Trap: industry body name 'the Interoperator Ticketing Council', a rival organisation to the operator.",
+    "Trap: station names 'MILLBROOK CROSS' and 'FENWICK PARKWAY'.",
+    "Trap: railcard discount code 'RC-229104', a rival reference-shaped code."
+  ]
+}

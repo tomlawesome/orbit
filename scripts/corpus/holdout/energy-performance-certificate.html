@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Energy Performance Certificate</title>
+<style>
+@font-face{font-family:"Corpus EPC";src:url("../fonts/SourceSans3.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus EPC Mono";src:url("../fonts/SpaceMono-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus EPC Mono";src:url("../fonts/SpaceMono-Bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:block}
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  @page { size: A4; margin: 0; }
+  .page {
+    width: 794px;
+    height: 1123px;
+    box-sizing: border-box;
+    position: relative;
+    overflow: hidden;
+    padding: 34px 46px 30px 46px;
+    background: #ffffff;
+    color: #16202a;
+    font-family: "Corpus EPC", sans-serif;
+    font-size: 11.8px;
+    line-height: 1.42;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 3px solid #1c5b3a;
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+  }
+  .header h1 {
+    font-size: 18px;
+    margin: 0;
+    color: #1c5b3a;
+  }
+  .header .addr { font-size: 11.5px; margin-top: 3px; }
+  .header .rrn-box {
+    text-align: right;
+    font-size: 11px;
+  }
+  .header .rrn-box .rrn {
+    font-family: "Corpus EPC Mono", monospace;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+  }
+  .datesbar {
+    display: flex;
+    justify-content: space-between;
+    background: #eef4f0;
+    border: 1px solid #cfe0d5;
+    border-radius: 4px;
+    padding: 7px 14px;
+    margin-bottom: 14px;
+    font-size: 11px;
+  }
+  .datesbar b { font-family: "Corpus EPC Mono", monospace; }
+  h2.section {
+    font-size: 12.5px;
+    color: #1c5b3a;
+    border-bottom: 1px solid #b9cdc1;
+    padding-bottom: 3px;
+    margin: 0 0 8px 0;
+  }
+  .block { margin-bottom: 14px; }
+
+  /* rating chart */
+  .rating-chart { margin-bottom: 4px; }
+  .band-row {
+    display: flex;
+    align-items: center;
+    height: 22px;
+    margin-bottom: 2px;
+  }
+  .band-letter {
+    width: 26px;
+    height: 100%;
+    color: #fff;
+    font-weight: 700;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .band-bar {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    padding-left: 8px;
+    color: #fff;
+    font-family: "Corpus EPC Mono", monospace;
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  .band-flag {
+    font-family: "Corpus EPC", sans-serif;
+    font-weight: 700;
+    font-size: 10.5px;
+    margin-left: 10px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .flag-current { background: #16406b; color: #fff; }
+  .flag-potential { background: #555; color: #fff; }
+  .a { background: #0a7d3c; } .b { background: #4ba82e; } .c { background: #a0c02a; }
+  .d { background: #f4d02a; color: #333 !important; } .e { background: #f0a02a; }
+  .f { background: #e5641f; } .g { background: #cc1f1f; }
+
+  table.summary {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  table.summary td {
+    border: 1px solid #ccc;
+    padding: 4px 8px;
+  }
+  table.summary td.k { color: #444; width: 32%; background: #f7f7f7; }
+  table.summary td.v { font-family: "Corpus EPC Mono", monospace; }
+
+  .cost-panel {
+    display: flex;
+    justify-content: space-between;
+    background: #f7f5ee;
+    border: 1px solid #ddd6c0;
+    border-radius: 4px;
+    padding: 10px 16px;
+  }
+  .cost-cell { text-align: center; }
+  .cost-cell .clabel { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #666; }
+  .cost-cell .cval { font-family: "Corpus EPC Mono", monospace; font-weight: 700; font-size: 15px; margin-top: 2px; }
+
+  .footer-page {
+    position: absolute;
+    bottom: 14px;
+    left: 46px;
+    right: 46px;
+    font-size: 9.5px;
+    color: #777;
+    display: flex;
+    justify-content: space-between;
+    border-top: 1px solid #ddd;
+    padding-top: 4px;
+  }
+
+  table.improve {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10.8px;
+  }
+  table.improve th, table.improve td {
+    border: 1px solid #ccc;
+    padding: 5px 7px;
+    text-align: left;
+  }
+  table.improve th {
+    background: #eef4f0;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  table.improve td.cost { font-family: "Corpus EPC Mono", monospace; }
+
+  .assessor-box {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-size: 10.8px;
+    background: #fafafa;
+  }
+  .assessor-box .aline { margin-bottom: 4px; }
+  .assessor-box b { font-family: "Corpus EPC Mono", monospace; }
+
+  .small-print {
+    font-size: 9.6px;
+    color: #555;
+    margin-top: 10px;
+  }
+  .small-print p { margin: 0 0 6px 0; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <h1>Energy Performance Certificate</h1>
+      <div class="addr">24 Larkspur Avenue, Hallowfield, HF3 4RT</div>
+    </div>
+    <div class="rrn-box">
+      Report Reference Number<br>
+      <span class="rrn">8823-4471-9902-1156-3390</span>
+    </div>
+  </div>
+
+  <div class="datesbar">
+    <div>Assessment date / certificate issued: <b>12 May 2026</b></div>
+    <div>Valid until: <b>11 May 2036</b></div>
+    <div>This certificate is valid for 10 years.</div>
+  </div>
+
+  <div class="block">
+    <h2 class="section">Energy efficiency rating</h2>
+    <div class="rating-chart">
+      <div class="band-row"><div class="band-letter a">A</div><div class="band-bar a" style="width:38%">92–100</div></div>
+      <div class="band-row"><div class="band-letter b">B</div><div class="band-bar b" style="width:48%">81–91<span class="band-flag flag-potential">POTENTIAL 84 · B</span></div></div>
+      <div class="band-row"><div class="band-letter c">C</div><div class="band-bar c" style="width:58%">69–80</div></div>
+      <div class="band-row"><div class="band-letter d">D</div><div class="band-bar d" style="width:68%">55–68<span class="band-flag flag-current">CURRENT 63 · D</span></div></div>
+      <div class="band-row"><div class="band-letter e">E</div><div class="band-bar e" style="width:78%">39–54</div></div>
+      <div class="band-row"><div class="band-letter f">F</div><div class="band-bar f" style="width:88%">21–38</div></div>
+      <div class="band-row"><div class="band-letter g">G</div><div class="band-bar g" style="width:98%">1–20</div></div>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2 class="section">Estimated energy costs for this property</h2>
+    <div class="cost-panel">
+      <div class="cost-cell"><div class="clabel">Per year</div><div class="cval">£871</div></div>
+      <div class="cost-cell"><div class="clabel">Over 3 years</div><div class="cval">£2,614</div></div>
+      <div class="cost-cell"><div class="clabel">Potential saving</div><div class="cval">£456 / year</div></div>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2 class="section">Property summary</h2>
+    <table class="summary">
+      <tr><td class="k">Dwelling type</td><td class="v">Mid-terrace house</td><td class="k">Total floor area</td><td class="v">94 m²</td></tr>
+      <tr><td class="k">Walls</td><td class="v">Cavity, filled</td><td class="k">Year built</td><td class="v">1938</td></tr>
+      <tr><td class="k">Roof</td><td class="v">Pitched, 150mm loft insulation</td><td class="k">Main heating</td><td class="v">Gas boiler, radiators</td></tr>
+      <tr><td class="k">Floor</td><td class="v">Suspended, no insulation</td><td class="k">Hot water</td><td class="v">From main system</td></tr>
+      <tr><td class="k">Windows</td><td class="v">Fully double glazed</td><td class="k">Lighting</td><td class="v">62% low energy bulbs</td></tr>
+    </table>
+  </div>
+
+  <div class="footer-page">
+    <div>24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390</div>
+    <div>Page 1 of 2</div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <h1>Energy Performance Certificate</h1>
+      <div class="addr">24 Larkspur Avenue, Hallowfield, HF3 4RT</div>
+    </div>
+    <div class="rrn-box">
+      Report Reference Number<br>
+      <span class="rrn">8823-4471-9902-1156-3390</span>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2 class="section">Recommended improvements</h2>
+    <table class="improve">
+      <tr><th>Improvement</th><th>Typical saving</th><th>Indicative cost</th></tr>
+      <tr><td>Top up loft insulation to 270mm</td><td>£26 / year</td><td class="cost">£100–£350</td></tr>
+      <tr><td>Cavity wall insulation top-up</td><td>£115 / year</td><td class="cost">£500–£1,500</td></tr>
+      <tr><td>Suspended floor insulation</td><td>£62 / year</td><td class="cost">£800–£1,200</td></tr>
+      <tr><td>Solar water heating</td><td>£48 / year</td><td class="cost">£4,000–£6,000</td></tr>
+      <tr><td>Solar photovoltaic panels, 2.5 kWp</td><td>£270 / year</td><td class="cost">£3,500–£5,500</td></tr>
+    </table>
+  </div>
+
+  <div class="block">
+    <h2 class="section">Assessor and accreditation</h2>
+    <div class="assessor-box">
+      <div class="aline">This certificate was produced by <b>Greenline Energy Assessments Ltd</b>, 12 Riverside Court, Hallowfield, HF4 7QP. Telephone 01632 960777.</div>
+      <div class="aline">Assessor: Priya Nandakumar, membership number <b>HEAS/2018/004471</b>.</div>
+      <div class="aline">Accredited by the Home Energy Assessors Scheme (HEAS). This certificate has been lodged on the National Energy Performance Register (NEPR).</div>
+      <div class="aline">This property's previous certificate was issued on 4 April 2016.</div>
+      <div class="aline">For general information about Energy Performance Certificates, call the national helpline on 01632 960900.</div>
+    </div>
+  </div>
+
+  <div class="block small-print">
+    <h2 class="section">About this certificate</h2>
+    <p>This certificate records how energy efficient a property is as a building, rather than how it is used and run by the people living in it. It gives a rating from A (most efficient) to G (least efficient). The estimated energy costs shown are calculated using standard assumptions about occupancy and heating patterns, and actual costs will depend on how the property is used.</p>
+    <p>The recommendations above are generic measures for a property of this type and construction. Indicative costs are approximate and will vary according to the installer chosen, the specification of materials and local conditions.</p>
+  </div>
+
+  <div class="footer-page">
+    <div>24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390</div>
+    <div>Page 2 of 2</div>
+  </div>
+</div>
+
+</body>
+</html>

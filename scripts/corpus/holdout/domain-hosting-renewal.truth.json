@@ -1,0 +1,37 @@
+{
+  "name": "Foxglove Hosting — Domain Renewal",
+  "filename": "domain-hosting-renewal.pdf",
+  "expected": {
+    "dates": ["2019-01-18", "2027-01-18"],
+    "dateRoles": [
+      { "date": "2019-01-18", "role": "start" },
+      { "date": "2027-01-18", "role": "renewal" }
+    ],
+    "provider": "Foxglove Hosting",
+    "reference": "ACC-3348217",
+    "subtype": { "kinds": ["Domain", "Subscription"], "qualifiers": ["Domain"] },
+    "costMinor": 1299,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "Registered on 18 January 2019 ('Registered on 18 January 2019') -- dateRoles start.",
+    "Renews on 18 January 2027 ('Renews on 18 January 2027') -- dateRoles renewal.",
+    "recurrenceMonths 12 printed as 'This domain renews every 12 months.'",
+    "provider is the control-panel operator 'Foxglove Hosting', the registrar/hosting company.",
+    "reference is the customer account number 'ACC-3348217'.",
+    "costMinor is the plain domain renewal price 'Domain renewal (12 months) £12.99', not the VAT-inclusive total.",
+    "subtype Domain+Subscription/Domain from the domain renewal control-panel content.",
+    "Trap: hosting plan's own price and different renewal date 'Business Hosting Plan — £89.99 per year, renews 2 November 2026'.",
+    "Trap: SSL certificate expiry 'Foxglove Domain SSL — expires 5 December 2026'.",
+    "Trap: VAT-inclusive basket total 'Total due today £15.59', a rival amount to the plain renewal price.",
+    "Trap: invoice number 'INV-2027-004471', a rival reference.",
+    "Trap: domain ID 'D4471982-EXPL', another rival reference.",
+    "Trap: DNS TTL '3600'.",
+    "Trap: '60 days after registration or transfer' transfer restriction.",
+    "Trap: price rising at next renewal 'From 18 January 2028 this domain is expected to renew at £14.99', a rival future date and amount.",
+    "Trap: promotional price ending date 'Promotional price of £9.99 was available until 1 October 2026'.",
+    "No password, API key or EPP/auth code is printed on this document."
+  ]
+}

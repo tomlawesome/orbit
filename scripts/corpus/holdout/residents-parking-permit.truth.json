@@ -1,0 +1,31 @@
+{
+  "name": "Residents' parking permit",
+  "filename": "residents-parking-permit.pdf",
+  "expected": {
+    "dates": ["2026-07-01", "2027-06-30"],
+    "dateRoles": [
+      { "date": "2026-07-01", "role": "start" },
+      { "date": "2027-06-30", "role": "expiry" }
+    ],
+    "provider": "Marchford Borough Council",
+    "reference": "RP-2026-118824",
+    "subtype": { "kinds": ["Parking permit", "Permit"], "qualifiers": ["Parking", "Council"] },
+    "costMinor": 4500,
+    "currency": "GBP"
+  },
+  "notes": [
+    "Declared start date: the permit panel's 'Valid from 01/07/2026'.",
+    "Declared expiry date: the permit panel's 'Expires 30/06/2027'.",
+    "Declared provider: 'MARCHFORD BOROUGH COUNCIL — PARKING SERVICES', named throughout the permit and covering notice.",
+    "Declared reference: the permit panel's 'Permit number RP-2026-118824'.",
+    "Declared cost: the permit panel's 'Annual permit fee paid: £45.00' — costMinor 4500, currency GBP.",
+    "Trap: 'We received your application on 14 June 2026 and your permit was issued on 22 June 2026' are processing dates, not the validity window.",
+    "Trap: the vehicle details table's 'Vehicle tax due 01/09/2026' and 'MOT expiry 14/03/2027' are vehicle dates, not permit dates.",
+    "Trap: 'A second permit for another vehicle at this household costs £90.00 per year' prices a different permit.",
+    "Trap: 'A book of 20 visitor permits... costs £25.00' prices a different product entirely.",
+    "Trap: 'Penalty Charge Notice of £70, reduced to £35 if paid within 14 days' is a fine, not the permit fee.",
+    "Trap: 'Zone F restrictions operate Monday to Saturday, 8:30am to 6:30pm' is the zone's operating hours, not part of the permit's own dates.",
+    "Trap: 'Permits... are printed and posted on the council's behalf by Northgate Civic Services Ltd' names a contractor, not the issuing provider.",
+    "Trap: 'issued on production of a Council Tax bill dated 3 June 2026' is a proof-of-residency document with its own date."
+  ]
+}
