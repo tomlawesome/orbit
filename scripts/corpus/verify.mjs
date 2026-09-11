@@ -12,6 +12,11 @@ const dir = resolve(HERE, "sources");
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 // The printed forms a UK document may legitimately use for one ISO date.
+// `March 3, 2026` is deliberately absent: it is the American form, and while
+// it was accepted here a fixture could have declared a date printed that way
+// and passed. These documents are British household paper; an Americanism
+// makes the fixture measure something a real UK extractor never meets
+// (owner, 2026-09-11).
 function dateForms(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   const mi = m - 1, dd = String(d).padStart(2, "0"), mm = String(m).padStart(2, "0");
@@ -19,7 +24,7 @@ function dateForms(iso) {
     `${dd}/${mm}/${y}`, `${d}/${m}/${y}`, `${dd}-${mm}-${y}`, `${dd}.${mm}.${y}`,
     `${d} ${MONTHS[mi]} ${y}`, `${dd} ${MONTHS[mi]} ${y}`,
     `${d} ${MONTHS[mi].slice(0, 3)} ${y}`, `${dd} ${MONTHS[mi].slice(0, 3)} ${y}`,
-    `${MONTHS[mi]} ${d}, ${y}`, `${d}${["st","nd","rd"][((d%100-20)%10||d%100)-1]||"th"} ${MONTHS[mi]} ${y}`,
+    `${d}${["st","nd","rd"][((d%100-20)%10||d%100)-1]||"th"} ${MONTHS[mi]} ${y}`,
     iso,
   ];
 }
@@ -73,6 +78,23 @@ for (const f of readdirSync(dir).filter((n) => n.endsWith(".truth.json")).sort()
   }
   const derived = roles.some((r) => r.role === "renewal") ? "renewal" : roles.some((r) => r.role === "service") ? "service" : undefined;
   if (e.scheduleKind !== derived) problems.push(`scheduleKind is ${e.scheduleKind ?? "(absent)"} but the roles derive ${derived ?? "(none)"}`);
+
+  // House style: British, not American. Conservative markers only -- a gas
+  // `meter` and a `licensed` supplier are both correct British English, so
+  // neither appears here.
+  const americanisms = [
+    [/\$\d/u, "a dollar amount"],
+    [/\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}\b/u, "an American date (Month D, YYYY)"],
+    [/\bzip ?code\b/iu, "a ZIP code"],
+    [/\b(?:color|colour?ed by|favor|favorite|neighborhood|apartment|sidewalk|routing number|social security)\b/iu, "American vocabulary"],
+    [/\b(?:organiz|authoriz|recogniz|apologiz|itemiz|final­iz|finaliz|custom­iz|customiz)(?:e|es|ed|ing|ation|ations)\b/iu, "an -ize spelling"],
+    [/\bcancel(?:ed|ing)\b/iu, "a single-l cancelation spelling"],
+    [/\b(?:center|centers|liter|liters)\b/iu, "an American spelling"],
+  ];
+  for (const [pattern, what] of americanisms) {
+    const hit = normalise(raw).match(pattern);
+    if (hit) problems.push(`contains ${what}: ${JSON.stringify(hit[0])}`);
+  }
 
   const dateLike = (raw.match(/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b|\b\d{1,2} (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{4}\b/gu) ?? []).length;
   console.log(`\n${base}  ${text.length} chars, ${dateLike} date-like strings, ${(e.dates ?? []).length} of them answers`);
