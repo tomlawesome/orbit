@@ -43,7 +43,12 @@
 // is as far as position goes.
 
 import { CONTEXT_TERMINATION_TERMS, type ContextRoleAssignment } from "./context-roles";
-import type { Tag } from "./extraction-stages";
+import {
+  STRENGTH_GUESS,
+  STRENGTH_STATED,
+  STRENGTH_WEAK,
+  type Tag,
+} from "./extraction-stages";
 import type { DocumentDateRole } from "./suggestions";
 
 /** A date the sieve found, with everything a stage 2 sieve may read: its
@@ -79,9 +84,7 @@ export interface DateSieve {
   read: (text: string, candidate: DateCandidate, all: readonly DateCandidate[]) => DateVote[];
 }
 
-export const STRENGTH_STATED = 2;
-export const STRENGTH_WEAK = 1;
-export const STRENGTH_GUESS = 0;
+export { STRENGTH_GUESS, STRENGTH_STATED, STRENGTH_WEAK };
 
 // ------------------------------------------------------------ date arithmetic
 
