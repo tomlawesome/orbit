@@ -15,13 +15,13 @@
 // set, one fixed miss at a time. `--misses` prints them for the owner, who
 // is not the one tuning.
 //
-// `--model` behaves exactly as it does in `stages-score-cli.ts`: the
-// questions the rules leave open -- provider, subtype, and which unlabelled
-// date the household must act on -- go to NuExtract 3 over the shortlist,
-// which needs the Ollama container on `orbit_orbit-document-processing`.
+// `--model` behaves exactly as it does in `stages-score-cli.ts`: every field
+// is the model's pick from that field's shortlist, five or six calls a
+// document, which needs the Ollama container on
+// `orbit_orbit-document-processing`.
 
 import { chooseFields, chooseFieldsWithModel } from "./extraction-choose";
-import { ollamaMeaningTransport } from "./extraction-choose-meaning";
+import { chooserTransport } from "./extraction-choose-meaning";
 import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
 import { formatRunScore, scoreCorpus, type RunScore } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
@@ -38,7 +38,7 @@ async function main(): Promise<void> {
   const withModel = process.argv.includes("--model");
   const staged = await scoreCorpus(EXTRACTION_HOLDOUT_FULLPAGE, async (text) => {
     const tagged = tagCandidates(text, sieve(text));
-    return withModel ? chooseFieldsWithModel(tagged, ollamaMeaningTransport) : chooseFields(tagged);
+    return withModel ? chooseFieldsWithModel(tagged, chooserTransport()) : chooseFields(tagged);
   });
   console.log(formatRunScore(withModel ? "hold-out: sieve+tag+choose+model" : "hold-out: sieve+tag+choose", forPrinting(staged)));
   const heuristics = await scoreCorpus(EXTRACTION_HOLDOUT_FULLPAGE, (text, filename) => proposalFromText(text, filename));
