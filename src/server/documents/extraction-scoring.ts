@@ -174,7 +174,7 @@ function buildFieldScores(totals: Record<FieldName, FieldTotal>): Record<FieldNa
   return scores;
 }
 
-type Classification = "correct" | "blank" | "wrong";
+export type Classification = "correct" | "blank" | "wrong";
 
 /** A correct value earns its point; a blank earns nothing; a wrong value
  * earns `-WRONG_VALUE_PENALTY` (issue #939, see the file header). */
@@ -228,7 +228,7 @@ function withoutLegalSuffix(name: string): string {
  * Deliberately narrow: only ONE trailing company-form word is optional, and
  * only at the end. Everything else still has to match exactly, so a genuinely
  * different name ("Direct Debit" for a water company) is still wrong. */
-function classifyProvider(expected: string, actual: string | undefined): Classification {
+export function classifyProvider(expected: string, actual: string | undefined): Classification {
   if (actual === undefined) return "blank";
   // Case and whitespace runs ignored, as `comparableSubtype` already does.
   // Owner ruling 2026-09-11: "All caps is an acceptable answer... the valuable
@@ -265,7 +265,7 @@ function comparableSubtype(value: string): string {
   return value.replace(/\s+/gu, " ").trim().toLowerCase();
 }
 
-function classifySubtype(expected: string, actual: string | undefined): Classification {
+export function classifySubtype(expected: string, actual: string | undefined): Classification {
   if (actual !== undefined && comparableSubtype(actual) === comparableSubtype(expected)) return "correct";
   return actual === undefined ? "blank" : "wrong";
 }

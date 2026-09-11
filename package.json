@@ -18,6 +18,7 @@
     "test:web-pdfjs": "node scripts/web-pdfjs-runtime-check.mjs",
     "acceptance:mailbox": "node scripts/acceptance-mailbox.mjs",
     "eval:extraction": "node_modules/tsx/dist/cli.mjs src/server/documents/model-eval-cli.ts",
+    "eval:sieve": "node_modules/tsx/dist/cli.mjs src/server/documents/sieve-recall-cli.ts",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
     "orbit": "node_modules/tsx/dist/cli.mjs src/cli/orbit.ts",
