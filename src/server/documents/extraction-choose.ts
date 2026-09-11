@@ -15,6 +15,7 @@
 // justified them, so this stage only compares what stage 2 decided.
 
 import { chooseProviderByRules } from "./extraction-choose-meaning";
+import { DATE_RANGE, WORDS_BEFORE } from "./extraction-date-sieves";
 import type { CandidateKind } from "./extraction-sieve";
 import type { ExtractedFields } from "./extraction-scoring";
 import type { ChooseStage, TaggedCandidate } from "./extraction-stages";
@@ -91,6 +92,10 @@ interface RoleClaim {
   role: DocumentDateRole;
   /** How good the page's reason for this role is -- see `claimStrength`. */
   strength: number;
+  /** The stage 2 sieves that agreed on it. Several sieves reading a date
+   * different ways and reaching the same answer is a better reason than one
+   * of them alone (ADR-0026 stage 2, owner 2026-09-11). */
+  sieves: readonly string[];
 }
 
 /** A connector is what a range rule quotes when it reads "A to B": it says
@@ -122,36 +127,105 @@ function roleClaims(candidates: readonly TaggedCandidate[]): RoleClaim[] {
     if (candidate.kind !== "date") continue;
     for (const tag of candidate.tags) {
       // `other` means stage 2 found a date but nothing saying what it was
-      // for. It is not a role, and a date that only has one is not a date
-      // this document is about.
+      // for. It is not a role -- though, since ADR-0026's date sieves, it is
+      // no longer a reason to drop the date either (see `chooseDates`).
       if (tag.value === "other" || !isDateRole(tag.value)) continue;
-      claims.push({ date: candidate.value, role: tag.value, strength: claimStrength(tag.trigger) });
+      claims.push({
+        date: candidate.value,
+        role: tag.value,
+        strength: tag.strength ?? claimStrength(tag.trigger),
+        // A tag with no sieve names came from the words beside the date --
+        // which is the range connector when that is what it quoted.
+        sieves: tag.sieves ??
+          [claimStrength(tag.trigger) === CONNECTOR_STRENGTH ? DATE_RANGE : WORDS_BEFORE],
+      });
     }
   }
   return claims;
 }
 
-/** The date this document is about, and what each is for. Stage 2 preserves
- * page order, so first-seen order is page order. */
+/**
+ * Whether a date nothing could label is still offered as a date.
+ *
+ * Rules never discard what the model could still choose (owner,
+ * 2026-09-11), so an unlabelled date is always offered to the model where
+ * there is one. Without the model it is offered as a date with no role,
+ * which is measurably better on the 24 than dropping it: a date the page
+ * prints and the extractor withholds is scored as a wrong answer, while a
+ * date offered with no role costs nothing it was not already costing.
+ */
+const OFFER_UNLABELLED_DATES = true;
+
+/** Every distinct date the sieve found, in page order. */
+function everyDate(candidates: readonly TaggedCandidate[]): string[] {
+  const dates: string[] = [];
+  for (const candidate of candidates) {
+    if (candidate.kind === "date" && !dates.includes(candidate.value)) dates.push(candidate.value);
+  }
+  return dates;
+}
+
+/**
+ * The dates stage 3's rules could not put a job to: what the model is asked
+ * about (`extraction-choose-meaning.ts`), and what is offered role-less
+ * without it. Ordered by how many sieves spoke for the date at all, so a
+ * date several sieves noticed is asked about before one nothing noticed.
+ */
+export function datesWithoutARole(
+  candidates: readonly TaggedCandidate[],
+  decided: ReadonlyArray<{ date: string }>,
+): string[] {
+  const spokenFor = (date: string) => {
+    let sieves = 0;
+    for (const candidate of candidates) {
+      if (candidate.kind !== "date" || candidate.value !== date) continue;
+      for (const tag of candidate.tags) {
+        if (tag.trigger.trim() === "") continue;
+        // An `other` tag is a sieve saying this date is NOT one to act on,
+        // which is a reason to ask about it last rather than first.
+        sieves += (tag.value === "other" ? -1 : 1) * (tag.sieves?.length ?? 1);
+      }
+    }
+    return sieves;
+  };
+  return everyDate(candidates)
+    .filter((date) => !decided.some((entry) => entry.date === date))
+    .map((date, order) => ({ date, order, sieves: spokenFor(date) }))
+    .sort((left, right) => right.sieves - left.sieves || left.order - right.order)
+    .map((entry) => entry.date);
+}
+
+/**
+ * The dates this document is about, and what each is for. Stage 2 preserves
+ * page order, so first-seen order is page order.
+ *
+ * A date whose role the rules settle is chosen as it always was. A date they
+ * cannot -- because no sieve spoke for it, or only a guess did -- is no
+ * longer dropped: the sieve found it on the page, and a rule that throws it
+ * away takes the choice off the model that could still have made it.
+ */
 function chooseDates(candidates: readonly TaggedCandidate[]): {
   dates: string[];
   dateRoles: Array<{ date: string; role: DocumentDateRole }>;
 } {
   const claims = roleClaims(candidates);
 
-  const dates: string[] = [];
-  for (const claim of claims) if (!dates.includes(claim.date)) dates.push(claim.date);
+  const claimed: string[] = [];
+  for (const claim of claims) if (!claimed.includes(claim.date)) claimed.push(claim.date);
 
   const dateRoles: Array<{ date: string; role: DocumentDateRole }> = [];
-  for (const date of dates) {
+  for (const date of claimed) {
     const forDate = claims.filter((claim) => claim.date === date);
     // One date can close one printed period and open the next: a renewal
     // notice prints the cover ending and the cover proposed from the same
     // day. The two claims do not conflict, and the one the household acts
     // on is the period beginning -- so a date a period starts at is a
     // `start`, whatever the period it also ends is called.
+    // A printed connector, specifically: the page drew the period. A sieve
+    // that worked the period out by arithmetic has not seen the page say so,
+    // and must not turn a stated "your price ends on this date" into a start.
     const opensAPeriod = forDate.some(
-      (claim) => claim.role === "start" && claim.strength === CONNECTOR_STRENGTH,
+      (claim) => claim.role === "start" && claim.sieves.includes(DATE_RANGE),
     );
     const closesAPeriod = forDate.some((claim) => claim.role === "renewal" || claim.role === "expiry");
     if (opensAPeriod && closesAPeriod) {
@@ -163,6 +237,11 @@ function chooseDates(candidates: readonly TaggedCandidate[]): {
     // strength disagreeing is the page itself being ambiguous -- keep the
     // date, say nothing about what it is for.
     const best = Math.max(...forDate.map((claim) => claim.strength));
+    // A guess is not an answer. A sieve that reached a role with nothing
+    // behind it -- a date repeated in a footer, say -- counts towards
+    // agreement with a sieve that did have a reason, and towards keeping the
+    // date, but on its own it names nothing.
+    if (best < CONNECTOR_STRENGTH) continue;
     const considered = forDate.filter((claim) => claim.strength === best);
     const roles = new Set(considered.map((claim) => claim.role));
     // Every document carries a date of issue, so `issued` is the role a date
@@ -170,19 +249,28 @@ function chooseDates(candidates: readonly TaggedCandidate[]): {
     // says `issued` and another names a job that date does -- the inspection,
     // the renewal -- the specific one is what the household needs.
     if (roles.size > 1 && roles.has("issued")) roles.delete("issued");
-    // Still arguing: the role the page states most often wins, the same way
-    // a reference printed in every footer wins. A page that says "expiry
-    // date" twice and mentions the next test once has said what the date is.
-    // Two roles claimed equally often remains an ambiguous page: blank.
+    // Still arguing: the role the most sieves agree on wins -- several ways
+    // of looking at one date reaching one answer is the whole point of
+    // having several (ADR-0026 stage 2). Where they are level, the role the
+    // page states most often wins, the same way a reference printed in every
+    // footer wins. Level on both is an ambiguous page: blank.
     const winner = [...roles]
-      .map((role) => ({ role, claims: considered.filter((claim) => claim.role === role).length }))
-      .sort((a, b) => b.claims - a.claims);
-    if (winner.length === 1 || (winner.length > 1 && winner[0].claims > winner[1].claims)) {
-      dateRoles.push({ date, role: winner[0].role });
-    }
+      .map((role) => {
+        const mine = considered.filter((claim) => claim.role === role);
+        const sieves = new Set(mine.flatMap((claim) => claim.sieves));
+        return { role, sieves: sieves.size, claims: mine.length };
+      })
+      .sort((a, b) => b.sieves - a.sieves || b.claims - a.claims);
+    const clear = winner.length === 1 ||
+      winner[0].sieves > winner[1].sieves ||
+      (winner[0].sieves === winner[1].sieves && winner[0].claims > winner[1].claims);
+    if (clear) dateRoles.push({ date, role: winner[0].role });
   }
 
-  return { dates, dateRoles };
+  const leftovers = OFFER_UNLABELLED_DATES ? datesWithoutARole(candidates, dateRoles) : [];
+  // Page order, whichever way a date got here.
+  const kept = new Set([...claimed, ...leftovers]);
+  return { dates: everyDate(candidates).filter((date) => kept.has(date)), dateRoles };
 }
 
 // "12 months", "every 6 months", "24-month". `months?\b` cannot match
