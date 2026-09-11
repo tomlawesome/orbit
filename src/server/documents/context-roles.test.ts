@@ -98,6 +98,39 @@ describe("overlap resolution: nearest trigger wins", () => {
   });
 });
 
+describe("a label printed on a line of its own", () => {
+  it("reaches the date on the line below it", () => {
+    const text = "NEXT VACCINATION DUE \n\n18 May 2027 Book in the two weeks before this date.";
+    expect(assignContextRoles(text, [dateAt(text, "18 May 2027")])).toEqual(["service"]);
+  });
+
+  it("does not reach past real punctuation", () => {
+    const text = "Renewal date: see the schedule. \n\nIssued on 4 May 2026";
+    expect(assignContextRoles(text, [dateAt(text, "4 May 2026")])).toEqual(["issued"]);
+  });
+
+  it("leaves a date two lines below it alone", () => {
+    const text = "EXPIRY DATE \n\n08 September 2027 \n\n14 September 2024";
+    const roles = assignContextRoles(text, [dateAt(text, "08 September 2027"), dateAt(text, "14 September 2024")]);
+    expect(roles).toEqual(["expiry", "other"]);
+  });
+});
+
+describe("the labels household paper prints beside its dates", () => {
+  const roleOf = (text: string, needle: string) => assignContextRoles(text, [dateAt(text, needle)])[0];
+
+  it("reads the end of a term, an inspection, a statement date and a start", () => {
+    expect(roleOf("Minimum term ends 21 April 2028", "21 April 2028")).toBe("expiry");
+    expect(roleOf("commencing on 14 June 2026 and expiring on 13 June 2031", "13 June 2031")).toBe("expiry");
+    expect(roleOf("Policy end date 17 October 2046", "17 October 2046")).toBe("expiry");
+    expect(roleOf("NEXT INSPECTION RECOMMENDED BY 02 September 2031", "02 September 2031")).toBe("service");
+    expect(roleOf("DATE(S) OF INSPECTION AND TESTING 02 September 2026", "02 September 2026")).toBe("service");
+    expect(roleOf("STATEMENT DATE 5 April 2026", "5 April 2026")).toBe("issued");
+    expect(roleOf("Service start (activation) 22 April 2026", "22 April 2026")).toBe("start");
+    expect(roleOf("Date of installation 14 March 2026", "14 March 2026")).toBe("start");
+  });
+});
+
 describe("default role", () => {
   it("assigns 'other' when no trigger governs the date", () => {
     const text = "We received your letter on 1 October 2026 regarding your account.";

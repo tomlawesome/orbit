@@ -687,12 +687,13 @@ const ORGANISATION_PERIOD = /scheme registration|registered with|accreditation|a
  * term -- cover, a contract, a membership, a tariff, a charge year -- rolls
  * onto something and has to be acted on again, which is `renewal`.
  */
-const RUNS_OUT = /guarantee|warrant(?:y|ies)|certificat|expir/iu;
+const RUNS_OUT = /\b(?:guarantee|warranty|certificate)\b|expir/iu;
 
 /** Trigger words that only say a date bounds a period, without saying what
  * kind of period: the range connectors and the validity labels. What such a
  * date means depends on the term around it (see `termEndRole`). */
-const TERM_END_TRIGGER = /^(?:valid (?:to|until|through)|to|until|till|through|up to|–|—|-)$/iu;
+const TERM_END_TRIGGER =
+  /^(?:(?:cover |policy |plan |contract |licence |membership |tariff |price )?(?:ends?|ending)(?: on)?|valid (?:to|until|through)|to|until|till|through|up to|–|—|-)$/iu;
 
 interface DateSpan {
   index: number;
