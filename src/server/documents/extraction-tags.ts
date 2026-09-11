@@ -244,9 +244,13 @@ const IDENTIFIER_TRIGGERS: readonly LabelTrigger<"identifier">[] = [
  * behind the brand, the regulator in the small print.
  */
 const ORGANISATION_TRIGGERS: readonly LabelTrigger<"organisation">[] = [
-  // administrator
+  // administrator -- and, for insurance, the firm that sold the policy.
+  // The household can only ring the seller: the underwriter behind it does
+  // not deal with them (owner, 2026-09-11).
   { value: "administrator", direction: "forward", pattern: "(?:policy )?administered by" },
   { value: "administrator", direction: "forward", pattern: "arranged by" },
+  { value: "administrator", direction: "forward", pattern: "sold (?:to you )?by" },
+  { value: "administrator", direction: "forward", pattern: "(?:your )?(?:intermediary|broker)" },
   { value: "administrator", direction: "forward", pattern: "managed by" },
   { value: "administrator", direction: "backward", pattern: "administers (?:your|this) (?:policy|cover|account)" },
   { value: "administrator", direction: "backward", pattern: "is the administrator" },
@@ -288,6 +292,11 @@ const ORGANISATION_TRIGGERS: readonly LabelTrigger<"organisation">[] = [
   { value: "provider", direction: "forward", pattern: "your (?:provider|supplier|energy supplier) is" },
   { value: "provider", direction: "forward", pattern: "your account is with" },
   { value: "provider", direction: "forward", pattern: "trading as" },
+  // "X is a trading name of Y": the household's account is with X, the name
+  // on the paper, and not with the parent behind it (owner, 2026-09-11).
+  // The forward row below tags Y `subsidiary`, which the chooser reads as
+  // never the provider; this backward row names X.
+  { value: "provider", direction: "backward", pattern: "is a trading (?:name|style) of" },
   { value: "provider", direction: "backward", pattern: "is your (?:provider|supplier|energy supplier)" },
   { value: "provider", direction: "backward", pattern: "supplies your" },
 ];
