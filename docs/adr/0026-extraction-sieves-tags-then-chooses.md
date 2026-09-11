@@ -261,10 +261,13 @@ So stage 3 is now one shape for every field.
    number or `none`, and the reply is parsed leniently and grounded against
    the list. Two transports ship: NuExtract 3's native structured mode on
    `/api/generate`, and a generic Ollama chat call on `/api/chat`. Which
-   model answers is `EXTRACTION_CHOOSER_MODEL`; setting it also selects the
-   chat transport. Only NuExtract is pulled on `orbit-ollama` today, so
-   swapping the chooser is that setting plus a model pull, never a code
-   change.
+   model answers is the evaluation's own `--chooser-model <name>` flag;
+   naming one also selects the chat transport. Only NuExtract is pulled on
+   `orbit-ollama` today, so swapping the chooser is that flag plus a model
+   pull, never a code change. The flag is read by the evaluation CLIs
+   alone: the library takes the name as an argument and reads no
+   environment variable, so the application's configuration contract (#292)
+   stays a list of what the application itself reads.
 
 5. **Stage 2's number is now shortlist recall** (`npm run eval:shortlist`):
    how often the expected answer is among the entries handed to the model,

@@ -15,8 +15,8 @@
 // dates and their roles in one call, then reference, cost, provider, subtype
 // and, where the roles make a schedule, how long it runs. Five or six calls
 // a document, each over a few hundred characters, which needs the Ollama
-// container on `orbit_orbit-document-processing`. Which model answers is
-// `EXTRACTION_CHOOSER_MODEL`, not this file (see `chooserTransport`).
+// container on `orbit_orbit-document-processing`. `--chooser-model <name>`
+// sends the questions to another model instead of NuExtract.
 //
 // `--dump` prints every tagged candidate of one kind for one document, with
 // its tags and block, and skips untagged ones: the view for deciding
@@ -29,6 +29,16 @@ import { formatRunScore, scoreCorpus } from "./extraction-scoring";
 import { sieve, type CandidateKind } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
 import { proposalFromText } from "./suggestions";
+
+/** Which model answers the questions, named on the command line:
+ * `--chooser-model <name>` sends them to that model over Ollama's generic
+ * chat call, and naming nothing leaves them with NuExtract's native mode.
+ * A flag rather than an environment variable, so the application's
+ * configuration contract stays the application's. */
+function chooserModelNamed(): string | undefined {
+  const at = process.argv.indexOf("--chooser-model");
+  return at === -1 ? undefined : process.argv[at + 1];
+}
 
 function dump(filePart: string, kind: CandidateKind): void {
   const doc = EXTRACTION_CORPUS.find((d) => d.filename.includes(filePart));
@@ -51,7 +61,9 @@ async function main(): Promise<void> {
   const withModel = process.argv.includes("--model");
   const staged = await scoreCorpus(EXTRACTION_CORPUS, async (text) => {
     const tagged = tagCandidates(text, sieve(text));
-    return withModel ? chooseFieldsWithModel(tagged, chooserTransport()) : chooseFields(tagged);
+    return withModel
+      ? chooseFieldsWithModel(tagged, chooserTransport(chooserModelNamed()))
+      : chooseFields(tagged);
   });
   console.log(formatRunScore(withModel ? "sieve+tag+choose+model" : "sieve+tag+choose", staged));
   const heuristics = await scoreCorpus(EXTRACTION_CORPUS, (text, filename) => proposalFromText(text, filename));
