@@ -250,13 +250,6 @@ const DEADLINE_MS = 120_000;
  * answer. */
 const MODEL_OPTIONS = { temperature: 0, seed: 20260910, num_ctx: 8192 };
 
-/** Which model the chooser asks. `EXTRACTION_CHOOSER_MODEL` names another
- * one without touching this file. */
-export function chooserModel(): string {
-  const named = process.env.EXTRACTION_CHOOSER_MODEL?.trim();
-  return named ? named : DEFAULT_MODEL;
-}
-
 /**
  * NuExtract 3's own structured-mode prompt, rendered here because Ollama's
  * template cannot reach the template variable. Tag for tag the model's
@@ -282,7 +275,7 @@ export const nuextractTransport: MeaningTransport = (question) => answering(asyn
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      model: chooserModel(),
+      model: DEFAULT_MODEL,
       prompt: structuredPrompt({ answer: "" }, question),
       raw: true,
       stream: false,
@@ -318,39 +311,42 @@ const CHAT_ANSWER_SHAPE = {
  * Nothing in the question is NuExtract-shaped; the answer is pinned to
  * `CHAT_ANSWER_SHAPE`, and thinking aloud is switched off where the model
  * offers it, so what comes back is the number or word and nothing else. */
-export const ollamaChatTransport: MeaningTransport = (question) => answering(async () => {
-  const response = await fetch(CHAT_ENDPOINT, {
-    signal: AbortSignal.timeout(DEADLINE_MS),
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: chooserModel(),
-      messages: [
-        {
-          role: "system",
-          content: 'Reply as JSON: {"answer": [...]}, one string per line of your answer, for example {"answer": ["2"]} or {"answer": ["none"]}. No explanation.',
-        },
-        { role: "user", content: question },
-      ],
-      think: false,
-      format: CHAT_ANSWER_SHAPE,
-      stream: false,
-      options: MODEL_OPTIONS,
-    }),
-  });
-  const body = await response.json() as { message?: { content?: string }; error?: string };
-  if (body.error) return "";
-  return body.message?.content ?? "";
-}, "");
+export const ollamaChatTransport = (model: string): MeaningTransport =>
+  (question) => answering(async () => {
+    const response = await fetch(CHAT_ENDPOINT, {
+      signal: AbortSignal.timeout(DEADLINE_MS),
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: 'Reply as JSON: {"answer": [...]}, one string per line of your answer, for example {"answer": ["2"]} or {"answer": ["none"]}. No explanation.',
+          },
+          { role: "user", content: question },
+        ],
+        think: false,
+        format: CHAT_ANSWER_SHAPE,
+        stream: false,
+        options: MODEL_OPTIONS,
+      }),
+    });
+    const body = await response.json() as { message?: { content?: string }; error?: string };
+    if (body.error) return "";
+    return body.message?.content ?? "";
+  }, "");
 
 /**
- * The transport the evaluations use: NuExtract's native mode, unless
- * `EXTRACTION_CHOOSER_MODEL` names another model, in which case the generic
- * chat call carries it. Swapping the chooser is that setting and nothing
- * else.
+ * The transport the evaluations use: NuExtract's native mode by default,
+ * and the generic chat call carrying whatever model an evaluation named on
+ * its command line (`--chooser-model`). Swapping the chooser is that flag
+ * and nothing else; nothing in this file reads the environment, so the
+ * app's configuration contract stays the app's.
  */
-export function chooserTransport(): MeaningTransport {
-  return process.env.EXTRACTION_CHOOSER_MODEL?.trim() ? ollamaChatTransport : nuextractTransport;
+export function chooserTransport(modelName?: string): MeaningTransport {
+  const named = modelName?.trim();
+  return named ? ollamaChatTransport(named) : nuextractTransport;
 }
 
 /**

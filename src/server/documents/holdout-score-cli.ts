@@ -28,6 +28,16 @@ import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
 import { proposalFromText } from "./suggestions";
 
+/** Which model answers the questions, named on the command line:
+ * `--chooser-model <name>` sends them to that model over Ollama's generic
+ * chat call, and naming nothing leaves them with NuExtract's native mode.
+ * A flag rather than an environment variable, so the application's
+ * configuration contract stays the application's. */
+function chooserModelNamed(): string | undefined {
+  const at = process.argv.indexOf("--chooser-model");
+  return at === -1 ? undefined : process.argv[at + 1];
+}
+
 const showMisses = process.argv.includes("--misses");
 
 /** `formatRunScore` prints whatever misses it is given, so the default run
@@ -38,7 +48,9 @@ async function main(): Promise<void> {
   const withModel = process.argv.includes("--model");
   const staged = await scoreCorpus(EXTRACTION_HOLDOUT_FULLPAGE, async (text) => {
     const tagged = tagCandidates(text, sieve(text));
-    return withModel ? chooseFieldsWithModel(tagged, chooserTransport()) : chooseFields(tagged);
+    return withModel
+      ? chooseFieldsWithModel(tagged, chooserTransport(chooserModelNamed()))
+      : chooseFields(tagged);
   });
   console.log(formatRunScore(withModel ? "hold-out: sieve+tag+choose+model" : "hold-out: sieve+tag+choose", forPrinting(staged)));
   const heuristics = await scoreCorpus(EXTRACTION_HOLDOUT_FULLPAGE, (text, filename) => proposalFromText(text, filename));
