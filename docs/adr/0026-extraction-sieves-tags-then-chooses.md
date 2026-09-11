@@ -180,6 +180,46 @@ the sieves are redundancy there by construction. They are a bet on pages
 nobody has seen, where the words-before sieve is exactly what fails, and the
 hold-out is what will say whether the bet paid.
 
+## Amendment, 2026-09-11: the same treatment for provider and cost
+
+The hold-out said what one way of looking is worth: provider scored
+-16.7% on rules alone and -41.7% with the model, and cost -27.3%. Both
+would have scored higher blank. So the shape the dates got is now the
+shape all three have.
+
+1. **Several sieves per field.** `extraction-provider-sieves.ts` reads an
+   organisation six ways -- the language fact beside it, an e-mail domain
+   or web address sharing a distinctive word or its initials, a block
+   inviting contact, the name printed throughout, a letter frame, a
+   masthead -- plus one reading a name's own words as a reason against
+   (ombudsman, compensation scheme, underwriting company).
+   `extraction-amount-sieves.ts` reads a figure seven ways: the label, the
+   clause after it, the column heading above it, which period's column it
+   is in, the period word beside it, repetition, and whether it is what
+   the printed instalments add up to. `npm run eval:provider-sieves` and
+   `npm run eval:amount-sieves` judge them one at a time, as
+   `eval:date-sieves` does.
+
+2. **Agreement, not the first rule that fires.** The rules answer a
+   provider only where two sieves agree, no other organisation is as well
+   spoken for, and one of the agreeing sieves had the page's own words
+   behind it; where the page states outright who the household deals with,
+   only stated names are heard. Cost is the same with one exception: a
+   single label that named the figure in so many words may answer alone.
+   A figure a sieve reads as last year's, or as the rival beside the real
+   one, is out of the running whatever else agrees.
+
+3. **The model chooses only from what the sieves kept.** Its provider pick
+   counts where at least one sieve read the same name, or where it picked
+   the one name several sieves agreed about; otherwise blank. Cost joins
+   provider, subtype and the unlabelled dates as a question put to it over
+   a shortlist and its blocks.
+
+Measured on the 24 the same day: overall 67.9% -> 75.1%, provider 45.8%
+-> 75.0%, cost 63.2% -> 100%. Every remaining provider miss on the 24 is
+a blank rather than a wrong value, which is the point of the change: the
+hold-out is what will say whether the bet paid.
+
 ## Alternatives rejected
 
 - **Widen the regexes field by field until the 24 pass.** This is the
