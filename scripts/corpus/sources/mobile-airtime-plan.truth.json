@@ -16,7 +16,7 @@
     "subtype": "Mobile plan summary",
     "costMinor": 2300,
     "currency": "GBP",
-    "recurrenceMonths": 1,
+    "recurrenceMonths": 24,
     "scheduleKind": "renewal"
   },
   "notes": [
@@ -24,6 +24,6 @@
     "dates and dateRoles carry only 20 March 2027, when the 24-month minimum term ends. The page prints many other dates that a careful reader would not track as the document's governing date: the plan start date (20 March 2025), the next bill date shown in the largest type on the page with a day countdown (20 October 2026), the same date repeated as the data allowance reset date, the handset upgrade window opening one month early (20 February 2027, deliberately close to but not the same as the term end), the last two bill dates (20 September 2026, 20 August 2026), a 'prices correct as of' stamp (1 September 2026), the year-month segment in the printed URL (2026-03), the copyright year, and the browser's own printed-on timestamp in the footer (11/09/2026, 14:32), which is the last date on the page and is a full print timestamp, not a plan date.",
     "costMinor is the standard monthly plan charge of £23.00, which applies from month 7 onward. It is not the discounted £14.00/month introductory rate for the first 6 months (shown larger, in the brand colour), not the out-of-bundle rates (45p/min calls, 11p/text, £6.00/GB data, £2.00/day roaming), not the £5.00/month international add-on, and not last month's total bill of £31.50 (which blends the plan charge with add-on and usage charges) or the previous bill of £23.50.",
     "reference is the account number 7734 2210 91, not the mobile number 07700 900123 printed alongside it, since the account number is what the customer would quote when contacting the operator.",
-    "recurrenceMonths is 1 because billing is monthly; scheduleKind is 'renewal' because the tracked date is when the minimum term completes and the contract rolls onto its next arrangement, not a service event."
+    "recurrenceMonths is 24, the printed minimum term ('Minimum term 24 months — ends 20 March 2027'): the cycle of the thing, not the monthly billing (corrected 2026-09-11; the value was 1, which measured payment frequency and contradicted the broadband contract's 24). scheduleKind is 'renewal' because the tracked date is when the minimum term completes and the contract rolls onto its next arrangement, not a service event."
   ]
 }
