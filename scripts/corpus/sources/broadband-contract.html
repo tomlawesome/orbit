@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Kestrel Broadband — Contract Summary and Terms</title>
+<style>
+@font-face{font-family:"Corpus Brand Narrow";src:url("../fonts/ArchivoNarrow.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Brand";src:url("../fonts/SpaceGrotesk.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: "Corpus Brand", sans-serif; font-size: 9pt; color: #141414; background: #fff; }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always; background: #fff;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---- page-1 marketing banner ---- */
+  .banner { background: #d6006e; color: #fff; padding: 9mm 13mm 8mm 13mm; }
+  .banner .brandrow { display: flex; justify-content: space-between; align-items: flex-start; }
+  .banner .brandname { font-size: 20pt; font-weight: 700; letter-spacing: -0.4px; }
+  .banner .doctag { text-align: right; font-size: 7.6pt; line-height: 1.55; }
+  .banner .headline { font-size: 27pt; font-weight: 700; line-height: 1.05; margin-top: 6mm; letter-spacing: -0.6px; }
+  .banner .subhead { font-size: 9.5pt; margin-top: 2.4mm; }
+  .banner .taglegal { font-size: 6.7pt; line-height: 1.5; margin-top: 5mm; max-width: 165mm; opacity: 0.95; }
+
+  .body-pad { padding: 6mm 13mm 16mm 13mm; }
+
+  /* ---- key facts row (page 1) ---- */
+  .keyfacts { display: flex; gap: 5mm; margin: 6mm 0 7mm 0; }
+  .keyfacts > div { flex: 1; border: 1.4px solid #d6006e; border-top: 5px solid #d6006e; padding: 4mm 3mm 3.4mm 3mm; text-align: center; }
+  .kf-icon { margin: 0 auto 2.4mm auto; width: 11mm; height: 11mm; }
+  .kf-label { font-size: 6.6pt; text-transform: uppercase; letter-spacing: 0.5px; color: #6b6b6b; font-weight: 700; }
+  .kf-value { font-size: 18pt; font-weight: 700; color: #141414; margin-top: 1mm; line-height: 1.05; }
+  .kf-sub { font-size: 6.5pt; color: #666; margin-top: 1mm; }
+
+  .icon-circle { border: 2.2px solid #d6006e; border-radius: 50%; width: 11mm; height: 11mm; box-sizing: border-box; }
+  .icon-circle::after { content: ""; display: block; width: 4mm; height: 4mm; background: #d6006e; border-radius: 50%; margin: 3.2mm auto 0 auto; }
+  .icon-bars { display: flex; align-items: flex-end; justify-content: center; gap: 1.3mm; height: 11mm; }
+  .icon-bars span { display: block; width: 2.4mm; background: #d6006e; }
+  .icon-bars span:nth-child(1) { height: 35%; }
+  .icon-bars span:nth-child(2) { height: 65%; }
+  .icon-bars span:nth-child(3) { height: 100%; }
+  .icon-chevron { width: 11mm; height: 11mm; position: relative; }
+  .icon-chevron::before { content: ""; position: absolute; top: 2mm; left: 3mm; width: 6mm; height: 6mm; border-top: 2.2px solid #d6006e; border-right: 2.2px solid #d6006e; transform: rotate(45deg); }
+
+  h2 {
+    font-size: 11.5pt; font-weight: 700; margin: 4mm 0 2mm 0; color: #d6006e;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 2.4px solid #141414; padding-bottom: 1.2mm;
+  }
+  .fieldgrid { display: flex; gap: 6mm; }
+  .fieldgrid > div { flex: 1; }
+  .fields { font-size: 8pt; line-height: 1.6; border: 1px solid #141414; padding: 3mm; background: #fff; }
+  .fields b { display: inline-block; min-width: 38mm; color: #d6006e; }
+
+  .pullbox { border-left: 5px solid #d6006e; background: #fdf0f6; padding: 2.4mm 4mm; font-size: 7.8pt; line-height: 1.5; margin-bottom: 2.6mm; }
+
+  .subprice { display: flex; gap: 4mm; margin-bottom: 4mm; }
+  .subprice > div { flex: 1; border: 1px solid #141414; padding: 2.6mm; text-align: center; }
+  .subprice .lbl { font-size: 6.6pt; text-transform: uppercase; letter-spacing: 0.4px; color: #6b6b6b; }
+  .subprice .val { font-size: 12.5pt; font-weight: 700; color: #d6006e; margin-top: 0.8mm; }
+  .subprice .sub { font-size: 6.4pt; color: #666; margin-top: 0.5mm; }
+
+  table.std { width: 100%; border-collapse: collapse; font-size: 7.7pt; margin-bottom: 2mm; }
+  table.std th { background: #141414; color: #fff; text-align: left; padding: 1.3mm 2mm; font-size: 6.8pt; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase; }
+  table.std td { padding: 1.2mm 2mm; border-bottom: 0.75px solid #ddd; vertical-align: top; }
+  table.std tr:nth-child(even) td { background: #fbf3f7; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+
+  .fine { font-size: 6.7pt; color: #555; line-height: 1.35; margin-bottom: 1.3mm; }
+  .small { font-size: 7.7pt; color: #222; line-height: 1.55; text-align: justify; }
+  .cols2 { column-count: 2; column-gap: 7mm; }
+  .cols2 p { margin: 0 0 1.8mm 0; }
+  .sig { border-bottom: 1px solid #141414; height: 7mm; margin: 2mm 0 1mm 0; }
+
+  /* ---- running header for pages 2 & 3 ---- */
+  .runhead {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 7.2pt; font-weight: 700; color: #d6006e; text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 2.4px solid #141414; padding: 6mm 13mm 2.2mm 13mm;
+  }
+  .content { padding: 2.5mm 13mm 5mm 13mm; }
+
+  /* ---- footer strip, every page ---- */
+  .footstrip {
+    background: #141414; color: #fff; font-size: 6.7pt;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 2mm 13mm; margin-top: 2mm;
+  }
+
+  /* ---- last-page legal table: deliberately plain ---- */
+  .etc-note { font-size: 7.3pt; color: #222; line-height: 1.4; margin-bottom: 1.6mm; }
+  table.legal { font-family: "Corpus Brand Narrow", sans-serif; width: 100%; border-collapse: collapse; font-size: 6.5pt; color: #141414; margin-bottom: 2mm; }
+  table.legal th { border: 0.75px solid #141414; padding: 0.35mm 1.5mm; font-weight: 700; text-align: right; background: #fff; }
+  table.legal td { border: 0.75px solid #767676; padding: 0.3mm 1.5mm; text-align: right; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="banner">
+    <div class="brandrow">
+      <div class="brandname">Kestrel Broadband</div>
+      <div class="doctag">
+        Contract Summary<br>
+        Order date 14 April 2026<br>
+        Document issued 15 April 2026
+      </div>
+    </div>
+    <div class="headline">24-Month Fibre &amp; Phone Contract</div>
+    <div class="subhead">Key contract information — Ofcom-format summary</div>
+    <div class="taglegal">
+      A trading name of Alderway Communications Ltd &middot; Registered office: Unit 14 Bracken
+      Business Park, Sowerby Lane, Halford, Merseyside, HL6 2QF<br>
+      Registered in England and Wales, company number 08847215 &middot; VAT registration number
+      GB 234 5566 12<br>
+      Customer services 0330 660 4192 &middot; kestrelbroadband.example &middot; Regulated under
+      Ofcom's General Conditions of Entitlement
+    </div>
+  </div>
+
+  <div class="body-pad">
+    <div class="keyfacts">
+      <div>
+        <div class="kf-icon icon-circle"></div>
+        <div class="kf-label">Monthly price, minimum term</div>
+        <div class="kf-value">&pound;34.99</div>
+        <div class="kf-sub">per month, includes line rental</div>
+      </div>
+      <div>
+        <div class="kf-icon icon-bars"><span></span><span></span><span></span></div>
+        <div class="kf-label">Average download speed</div>
+        <div class="kf-value">502 Mbps</div>
+        <div class="kf-sub">average upload speed 74 Mbps</div>
+      </div>
+      <div>
+        <div class="kf-icon icon-chevron"></div>
+        <div class="kf-label">Minimum term</div>
+        <div class="kf-value">24 months</div>
+        <div class="kf-sub">ends 21 April 2028</div>
+      </div>
+    </div>
+
+    <h2>Customer and account</h2>
+    <div class="fieldgrid">
+      <div class="fields">
+        <div><b>Account holder</b> Ms Priya Nandakumar</div>
+        <div><b>Account number</b> KB-771049-3</div>
+        <div><b>Order reference</b> ORD-2026-0417726</div>
+        <div><b>Billing address</b> Flat 2, 9 Thornfield Close,</div>
+        <div style="padding-left:38mm;">Marlcombe, Warwickshire, CV9 7QL</div>
+      </div>
+      <div class="fields">
+        <div><b>Installation address</b> Flat 2, 9 Thornfield Close,</div>
+        <div style="padding-left:38mm;">Marlcombe, Warwickshire, CV9 7QL</div>
+        <div><b>Service start (activation)</b> 22 April 2026</div>
+        <div><b>Minimum term</b> 24 months</div>
+        <div><b>Minimum term ends</b> 21 April 2028</div>
+      </div>
+    </div>
+
+    <h2>Your package</h2>
+    <div class="pullbox">
+      <b>Kestrel Fibre 500 &amp; Talk</b> — fibre broadband with an average download speed of 502
+      Mbps and an average upload speed of 74 Mbps, plus a standard landline with inclusive
+      evening and weekend UK calls. Contract length: <b>24 months</b>. After your minimum term
+      your contract continues and renews automatically on a rolling 30-day basis at the
+      out-of-contract price shown below, unless you tell us to change or leave.
+    </div>
+
+    <div class="subprice">
+      <div>
+        <div class="lbl">Monthly price during minimum term</div>
+        <div class="val">&pound;34.99</div>
+        <div class="sub">per month, includes line rental</div>
+      </div>
+      <div>
+        <div class="lbl">Price after minimum term ends</div>
+        <div class="val">&pound;46.99</div>
+        <div class="sub">per month, from 22 April 2028 billing cycle</div>
+      </div>
+      <div>
+        <div class="lbl">Router delivery / activation</div>
+        <div class="val">&pound;4.99</div>
+        <div class="sub">one-off, added to first bill</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footstrip">
+    <span>Kestrel Broadband &middot; Company no. 08847215 &middot; VAT GB 234 5566 12</span>
+    <span>Account KB-771049-3 &middot; Page 1 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="runhead">
+    <span>Kestrel Broadband — Contract Summary</span>
+    <span>Order reference ORD-2026-0417726 — Page 2 of 3</span>
+  </div>
+
+  <div class="content">
+    <div style="display:flex; gap:7mm;">
+      <div style="flex:1.1;">
+        <h2>What makes up your monthly price</h2>
+        <table class="std">
+          <thead>
+            <tr><th>Component</th><th>Description</th><th class="num">Monthly amount</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Broadband</td><td>Kestrel Fibre 500 service charge</td><td class="num">&pound;15.00</td></tr>
+            <tr><td>Line rental</td><td>Standard landline, number retained or newly allocated</td><td class="num">&pound;19.99</td></tr>
+            <tr><td><b>Total during minimum term</b></td><td></td><td class="num"><b>&pound;34.99</b></td></tr>
+          </tbody>
+        </table>
+        <div class="fine">
+          Prices shown include VAT at the prevailing rate. Your first bill may be a different amount
+          because it covers a part month from your activation date plus the router delivery charge.
+        </div>
+      </div>
+      <div style="flex:0.9;">
+        <h2>Price changes</h2>
+        <div class="pullbox">
+          Each year on 1 April, during and after your minimum term, we increase all our advertised
+          prices, including your monthly price, by the Consumer Price Index rate of inflation
+          published by the Office for National Statistics in the preceding January, <b>plus 3.9%</b>.
+          We will write to you at least 30 days before any in-contract price rise takes effect. If
+          CPI is 0% or negative, only the 3.9% element applies. This is separate from, and additional
+          to, the out-of-contract price shown on page 1, which already reflects prior annual
+          increases.
+        </div>
+      </div>
+    </div>
+
+    <h2>Other charges that may apply</h2>
+    <table class="std">
+      <thead>
+        <tr><th>Charge</th><th>When it applies</th><th class="num">Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Router delivery / activation</td><td>One-off, on your first bill</td><td class="num">&pound;4.99</td></tr>
+        <tr><td>Engineer home visit</td><td>Where a visit beyond standard self-install is needed</td><td class="num">&pound;65.00</td></tr>
+        <tr><td>Missed engineer appointment</td><td>No access or cancellation inside 24 hours</td><td class="num">&pound;25.00</td></tr>
+        <tr><td>Paper billing</td><td>Per bill, if you opt out of paperless billing</td><td class="num">&pound;1.50</td></tr>
+        <tr><td>Non-Direct Debit payment</td><td>Per payment, if you do not pay by Direct Debit</td><td class="num">&pound;3.00</td></tr>
+        <tr><td>Calls to UK mobiles (out of bundle)</td><td>Per minute, plus connection charge below</td><td class="num">15p/min</td></tr>
+        <tr><td>Call connection charge</td><td>Per call, all out-of-bundle calls</td><td class="num">19p</td></tr>
+        <tr><td>International calls</td><td>Per minute, destination-dependent, from</td><td class="num">20p/min</td></tr>
+        <tr><td>Directory enquiries (1471/118 services)</td><td>Per call, provider-set</td><td class="num">from &pound;1.10</td></tr>
+      </tbody>
+    </table>
+    <div class="fine">
+      Evening and weekend calls to other UK landlines and to Kestrel mobile numbers are included
+      in your package at no extra charge. All other call types are billed as shown above and
+      appear as itemised charges on your monthly statement.
+    </div>
+
+    <h2>Your right to cancel — 14-day cooling-off period</h2>
+    <div class="pullbox">
+      You have 14 calendar days from the day after this order was placed on 14 April 2026 to
+      cancel this contract without giving any reason and without charge, under the Consumer
+      Contracts Regulations 2013. This cooling-off period ends on 28 April 2026. If you ask us
+      to begin the service before the cooling-off period ends and you then cancel, you may be
+      asked to pay for the service provided up to the date you cancelled. To cancel, contact
+      customer services on 0330 660 4192 or write to the registered office address on page 1
+      quoting your order reference ORD-2026-0417726.
+    </div>
+
+    <h2>Speed guarantee</h2>
+    <div class="pullbox">
+      We estimate your download speed range at 380&ndash;590 Mbps, with a guaranteed minimum
+      download speed of 220 Mbps at your installation address, in line with Ofcom's voluntary
+      Broadband Speeds Code of Practice. If your speed falls below the guaranteed minimum and we
+      cannot fix this within 30 days of you reporting it, you have the right to leave your
+      contract within the following 30 days without paying an early termination charge. This
+      right does not apply to temporary or scheduled network slowdowns, or to issues caused by
+      your in-home wiring or equipment.
+    </div>
+  </div>
+
+  <div class="footstrip">
+    <span>Kestrel Broadband &middot; Company no. 08847215 &middot; VAT GB 234 5566 12</span>
+    <span>Account KB-771049-3 &middot; Page 2 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="runhead">
+    <span>Kestrel Broadband — Contract Summary</span>
+    <span>Order reference ORD-2026-0417726 — Page 3 of 3</span>
+  </div>
+
+  <div class="content">
+    <h2>Complaints code of practice</h2>
+    <div class="pullbox">
+      If something goes wrong, contact customer services first on 0330 660 4192 or via
+      kestrelbroadband.example/complaints. We aim to resolve most complaints within 10 working
+      days. If your complaint is not resolved within 8 weeks, or we agree it is deadlocked
+      sooner, we will issue a deadlock letter and you may refer the matter, free of charge, to
+      our independent Alternative Dispute Resolution scheme, CISAS (Communications and Internet
+      Services Adjudication Scheme). Full details are set out in our Complaints Code of Practice,
+      available at kestrelbroadband.example/complaints-code or by post on request.
+    </div>
+
+    <h2>Other things you should know</h2>
+    <div class="small cols2">
+      <p><b>Contract renewal.</b> Around 10 to 40 days before your minimum term ends on
+      21 April 2028, we will write to you with your options, including the best deals we can
+      offer you at that time. If you do nothing, your contract continues on a rolling monthly
+      basis at the after-minimum-term price shown on page 1.</p>
+
+      <p><b>Payment.</b> Charges are collected by Direct Debit on or around the 3rd of each
+      month, in advance for line rental and broadband and in arrears for call charges.</p>
+
+      <p><b>Equipment.</b> The router remains the property of Alderway Communications Ltd and
+      must be returned within 14 days of the contract ending. A non-return charge of &pound;40.00
+      applies if it is not returned in working condition.</p>
+
+      <p><b>Moving home.</b> You can normally take your contract with you if you move within our
+      coverage area, at no extra charge and without restarting your minimum term. A new
+      engineer visit charge may apply at the new address if one is needed.</p>
+
+      <p><b>Fair use.</b> This package is for normal residential use. There is no data cap, but
+      a fair use policy applies to prevent abuse that affects other customers.</p>
+
+      <p><b>Network maintenance.</b> We may need to interrupt your service for planned
+      maintenance. Where possible we will give at least 48 hours' notice by email or text.</p>
+    </div>
+
+    <h2>Early termination charges</h2>
+    <div class="etc-note">
+      If you end this contract before your minimum term ends on <b>21 April 2028</b>, an early
+      termination charge applies. It is calculated from the contract month you are in when you
+      give notice, and reflects the monthly charges you would otherwise have paid for the rest
+      of your minimum term, less an early-settlement reduction. The table below shows the charge
+      that applies if you leave during each contract month. This charge is separate from, and is
+      not, your ordinary monthly price of &pound;34.99 shown on page 1.
+    </div>
+    <div style="display:flex; gap:4mm;">
+      <table class="legal" style="flex:1;">
+        <thead>
+          <tr><th>Contract month</th><th>Months remaining on minimum term</th><th>Early termination charge (inc. VAT)</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>24</td><td>&pound;806.17</td></tr>
+          <tr><td>2</td><td>23</td><td>&pound;772.58</td></tr>
+          <tr><td>3</td><td>22</td><td>&pound;738.99</td></tr>
+          <tr><td>4</td><td>21</td><td>&pound;705.40</td></tr>
+          <tr><td>5</td><td>20</td><td>&pound;671.81</td></tr>
+          <tr><td>6</td><td>19</td><td>&pound;638.22</td></tr>
+          <tr><td>7</td><td>18</td><td>&pound;604.63</td></tr>
+          <tr><td>8</td><td>17</td><td>&pound;571.04</td></tr>
+          <tr><td>9</td><td>16</td><td>&pound;537.45</td></tr>
+          <tr><td>10</td><td>15</td><td>&pound;503.86</td></tr>
+          <tr><td>11</td><td>14</td><td>&pound;470.27</td></tr>
+          <tr><td>12</td><td>13</td><td>&pound;436.68</td></tr>
+        </tbody>
+      </table>
+      <table class="legal" style="flex:1;">
+        <thead>
+          <tr><th>Contract month</th><th>Months remaining on minimum term</th><th>Early termination charge (inc. VAT)</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>13</td><td>12</td><td>&pound;403.08</td></tr>
+          <tr><td>14</td><td>11</td><td>&pound;369.49</td></tr>
+          <tr><td>15</td><td>10</td><td>&pound;335.90</td></tr>
+          <tr><td>16</td><td>9</td><td>&pound;302.31</td></tr>
+          <tr><td>17</td><td>8</td><td>&pound;268.72</td></tr>
+          <tr><td>18</td><td>7</td><td>&pound;235.13</td></tr>
+          <tr><td>19</td><td>6</td><td>&pound;201.54</td></tr>
+          <tr><td>20</td><td>5</td><td>&pound;167.95</td></tr>
+          <tr><td>21</td><td>4</td><td>&pound;134.36</td></tr>
+          <tr><td>22</td><td>3</td><td>&pound;100.77</td></tr>
+          <tr><td>23</td><td>2</td><td>&pound;67.18</td></tr>
+          <tr><td>24</td><td>1</td><td>&pound;33.59</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="fine">
+      Charges are recalculated to the nearest contract month from the date we receive your valid
+      notice to leave, and are added to your final bill. No early termination charge applies if
+      you leave during your 14-day cooling-off period, or if you are moving to an address we
+      cannot serve.
+    </div>
+
+    <h2>Order confirmation</h2>
+    <div class="pullbox">
+      By signing below, or by continuing to use the service after your cooling-off period ends,
+      you confirm you have read and accept this contract summary and the full terms and
+      conditions supplied with it.
+      <div class="sig"></div>
+      Signature of account holder &mdash; Ms Priya Nandakumar, account KB-771049-3
+      <div class="fine" style="margin-top:1.5mm;">
+        A copy of the full terms and conditions, the price list and this contract summary was
+        sent to the email address held on your account on 15 April 2026 and remains available
+        at kestrelbroadband.example/myaccount at any time during your contract.
+      </div>
+    </div>
+  </div>
+
+  <div class="footstrip">
+    <span>Kestrel Broadband &middot; Company no. 08847215 &middot; VAT GB 234 5566 12</span>
+    <span>Account KB-771049-3 &middot; Page 3 of 3</span>
+  </div>
+</div>
+
+</body>
+</html>

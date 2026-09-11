@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Landlord's Gas Safety Record — CP12</title>
+<style>
+@font-face{font-family:"Corpus Typewriter";src:url("../fonts/CourierPrime-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Typewriter";src:url("../fonts/CourierPrime-Bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Condensed";src:url("../fonts/ArchivoNarrow.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Condensed", sans-serif;
+    font-size: 8pt; color: #000; background: #d9d9d2;
+  }
+  .page {
+    width: 210mm; height: 297mm; box-sizing: border-box;
+    padding: 6mm 7mm 6mm 7mm; position: relative; page-break-after: always;
+    background: #fdfbe8;
+  }
+  .page:last-child { page-break-after: auto; }
+  .sheet {
+    border: 2.2px solid #000; height: 100%; box-sizing: border-box;
+    padding: 2.4mm 3mm 3mm 3mm; position: relative;
+  }
+
+  .v { font-family: "Corpus Typewriter", monospace; }
+  .lbl {
+    font-family: "Corpus Condensed", sans-serif; font-weight: 700;
+    font-size: 6pt; letter-spacing: -0.5px; text-transform: uppercase; color: #000;
+  }
+
+  .topbar {
+    display: flex; justify-content: space-between; align-items: stretch;
+    background: #000; color: #fff; margin-bottom: 1.4mm;
+  }
+  .topbar .bannertitle {
+    padding: 1.6mm 2.2mm; font-size: 12.5pt; font-weight: 700; letter-spacing: -0.6px;
+    text-transform: uppercase;
+  }
+  .topbar .copyflash {
+    background: #000; color: #fff; border-left: 2px solid #fff;
+    padding: 1.6mm 2.8mm; font-size: 8pt; font-weight: 700; letter-spacing: -0.4px;
+    text-transform: uppercase; text-align: right; white-space: nowrap;
+  }
+
+  .padstrip {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 1.6px solid #000; padding-bottom: 1mm; margin-bottom: 1.6mm;
+  }
+  .padstrip .serial { font-family: "Corpus Typewriter", monospace; font-size: 8.2pt; color: #a01919; font-weight: 700; }
+  .padstrip .formcode { font-size: 10pt; font-weight: 700; letter-spacing: -0.5px; }
+  .padstrip .issue { font-family: "Corpus Typewriter", monospace; font-size: 7.6pt; }
+
+  h2 {
+    font-size: 7.4pt; font-weight: 700; letter-spacing: -0.3px; text-transform: uppercase;
+    background: #000; color: #fff; margin: 2.4mm 0 1mm 0; padding: 0.9mm 1.6mm;
+  }
+
+  .cellgrid { display: flex; flex-wrap: wrap; border: 1.5px solid #000; border-bottom: none; }
+  .cell {
+    box-sizing: border-box; border-right: 1px solid #000; border-bottom: 1px solid #000;
+    padding: 0.8mm 1.4mm 1mm 1.4mm; flex: 1 1 33%;
+  }
+  .cell.w50 { flex-basis: 50%; }
+  .cell.w100 { flex-basis: 100%; }
+  .cell .v { display: block; font-size: 7.8pt; margin-top: 0.4mm; line-height: 1.3; }
+
+  .passline {
+    border: 2px solid #000; display: flex; justify-content: space-between; align-items: center;
+    padding: 1.4mm 2mm; margin: 1.6mm 0 1.8mm 0;
+  }
+  .passline .verdict { font-size: 12pt; font-weight: 700; letter-spacing: -0.5px; }
+  .passline .verdict .tick { margin-right: 1.4mm; }
+  .passline .rhs { text-align: right; }
+  .passline .rhs .v { font-size: 10pt; font-weight: 700; }
+  .fine { font-size: 6.4pt; line-height: 1.35; color: #000; }
+  .fine.pad { margin: 0.8mm 0 1.4mm 0; }
+
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1mm; }
+  th {
+    background: #000; color: #fff; text-align: left; padding: 0.9mm 1.2mm;
+    font-size: 5.8pt; font-weight: 700; letter-spacing: -0.3px; text-transform: uppercase;
+  }
+  td {
+    padding: 0.9mm 1.2mm; border: 1px solid #000; vertical-align: top;
+    font-family: "Corpus Typewriter", monospace; font-size: 7.2pt;
+  }
+  td.num { text-align: right; white-space: nowrap; }
+  td.center { text-align: center; }
+
+  .tick {
+    display: inline-block; width: 2.8mm; height: 2.8mm; line-height: 2.6mm;
+    border: 1.2px solid #000; text-align: center; vertical-align: middle;
+    font-family: "Corpus Typewriter", monospace; font-size: 6.6pt; font-weight: 700;
+    background: #fff;
+  }
+
+  .warnbox { border: 1.6px solid #000; padding: 1.4mm 2mm; font-size: 7.2pt; margin-bottom: 1.4mm; }
+  .warnbox .v { display: inline; }
+  .warnbox .tick { margin: 0 1mm 0 3mm; }
+
+  .stampgrid { display: flex; gap: 3mm; }
+  .stamp {
+    flex: 1; border: 1.5px solid #000; padding: 1.6mm 2mm; font-size: 6.8pt; line-height: 1.4;
+  }
+  .stamp .v { font-size: 7.2pt; }
+  .sigline { border-bottom: 1px solid #000; height: 6mm; margin: 1.6mm 0 0.8mm 0; }
+  .siglbl { font-size: 6pt; letter-spacing: -0.3px; text-transform: uppercase; font-weight: 700; }
+
+  .small { font-size: 6.2pt; line-height: 1.32; column-count: 3; column-gap: 3.5mm; }
+  .small p { margin: 0 0 1.6mm 0; }
+  .small b { font-family: "Corpus Condensed", sans-serif; letter-spacing: -0.3px; }
+
+  .runfoot {
+    position: absolute; left: 3mm; right: 3mm; bottom: 1.4mm; font-size: 6pt;
+    border-top: 1px solid #000; padding-top: 0.8mm; display: flex; justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+<div class="sheet">
+  <div class="topbar">
+    <div class="bannertitle">Landlord's Gas Safety Record</div>
+    <div class="copyflash">Landlord / Dutyholder Copy</div>
+  </div>
+  <div class="padstrip">
+    <span class="serial">No. GSR-2026-04471</span>
+    <span class="formcode">CP12</span>
+    <span class="issue">Date of issue 03/08/2026</span>
+  </div>
+
+  <div class="cellgrid">
+    <div class="cell w50">
+      <div class="lbl">Business name</div>
+      <div class="v">Fenwick &amp; Vale Gas Services Ltd</div>
+    </div>
+    <div class="cell w50">
+      <div class="lbl">Gas Safe registered business, registration number</div>
+      <div class="v">512864</div>
+    </div>
+    <div class="cell w100">
+      <div class="lbl">Business address</div>
+      <div class="v">Unit 4, Bridgewater Trading Estate, Calderbeck, Wynmouth WY7 2QN &middot; Telephone 01947 552 118 &middot; office@fenwickvale.example</div>
+    </div>
+  </div>
+
+  <div class="fine" style="margin-top:1.2mm;">Record of a gas safety check under the Gas Safety (Installation and Use) Regulations 1998</div>
+
+  <div class="passline">
+    <div>
+      <div class="verdict"><span class="tick">X</span>RESULT: SATISFACTORY</div>
+      <div style="font-size:6.8pt; margin-top:0.6mm;">
+        Certificate <span class="v">GSR-2026-04471</span> &middot; Property below inspected and found safe to use on the date shown
+      </div>
+    </div>
+    <div class="rhs">
+      <div class="lbl">Date of inspection</div>
+      <div class="v">03 August 2026</div>
+    </div>
+  </div>
+  <div class="fine pad">
+    This record confirms only that the appliances listed were safe to use on the day of
+    inspection. It is not a guarantee of future safety or of efficient operation. This record is
+    valid for 12 months from the date of inspection shown above.
+  </div>
+
+  <h2>Engineer and business details</h2>
+  <div class="cellgrid">
+    <div class="cell w50">
+      <div class="lbl">Engineer name</div>
+      <div class="v">Mr R. Thackeray</div>
+    </div>
+    <div class="cell w50">
+      <div class="lbl">Gas Safe licence no.</div>
+      <div class="v">745231</div>
+    </div>
+    <div class="cell w50">
+      <div class="lbl">Business name</div>
+      <div class="v">Fenwick &amp; Vale Gas Services Ltd</div>
+    </div>
+    <div class="cell w50">
+      <div class="lbl">Business registration</div>
+      <div class="v">512864</div>
+    </div>
+    <div class="cell w50">
+      <div class="lbl">Business address</div>
+      <div class="v">Unit 4, Bridgewater Trading Estate, Calderbeck, Wynmouth WY7 2QN</div>
+    </div>
+    <div class="cell w50">
+      <div class="lbl">Telephone</div>
+      <div class="v">01947 552 118</div>
+    </div>
+    <div class="cell w100">
+      <div class="lbl">Certificate no.</div>
+      <div class="v">GSR-2026-04471</div>
+    </div>
+  </div>
+
+  <h2>Landlord and property details</h2>
+  <div class="cellgrid">
+    <div class="cell w50">
+      <div class="lbl">Landlord name</div>
+      <div class="v">Mr D. Okafor</div>
+    </div>
+    <div class="cell w50">
+      <div class="lbl">Landlord address</div>
+      <div class="v">9 Aldermoor Close, Wynmouth WY4 8RT</div>
+    </div>
+    <div class="cell w50">
+      <div class="lbl">Property inspected</div>
+      <div class="v">Flat 2, 14 Sycamore Court, Wynmouth WY2 5LB</div>
+    </div>
+    <div class="cell w50">
+      <div class="lbl">Date of inspection</div>
+      <div class="v">03 August 2026</div>
+    </div>
+  </div>
+
+  <h2>Appliances tested</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Location</th>
+        <th>Appliance type</th>
+        <th>Make</th>
+        <th>Model</th>
+        <th>Flue type</th>
+        <th class="num">Op. pressure</th>
+        <th>Safety device</th>
+        <th>Combustion analyser</th>
+        <th>Result</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Kitchen</td>
+        <td>Combination boiler</td>
+        <td>Worcester Bosch</td>
+        <td>Greenstar 30i Combi</td>
+        <td>Room-sealed</td>
+        <td class="num">20.1 mbar</td>
+        <td>FSD pass</td>
+        <td>CO 12 ppm, CO&#8322; 8.9%, ratio 0.0013</td>
+        <td class="center"><span class="tick">X</span> PASS</td>
+      </tr>
+      <tr>
+        <td>Living room</td>
+        <td>Inset gas fire</td>
+        <td>Valor</td>
+        <td>Petrus Illumia</td>
+        <td>Balanced flue</td>
+        <td class="num">20.0 mbar</td>
+        <td>FSD pass</td>
+        <td>CO 8 ppm, CO&#8322; 6.1%, ratio 0.0013</td>
+        <td class="center"><span class="tick">X</span> PASS</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="fine">
+    Combustion analyser readings are recorded as measured by the engineer's calibrated
+    analyser at the flue outlet. A CO:CO&#8322; ratio above 0.004 would require the appliance to
+    be classified as At Risk; both appliances above are well within tolerance.
+  </div>
+
+  <h2>Defects and remedial action</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Appliance</th>
+        <th>Defect observed</th>
+        <th>Remedial action recommended</th>
+        <th>Classification</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Kitchen boiler</td>
+        <td>Sealant around the flue terminal on the external wall is beginning to perish.</td>
+        <td>Re-seal the flue terminal at the next routine visit; not required before continued use.</td>
+        <td>Not to current standard, advisory only</td>
+      </tr>
+      <tr>
+        <td>Living room fire</td>
+        <td>No defects observed.</td>
+        <td>None required.</td>
+        <td>&mdash;</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="warnbox">
+    <b class="lbl">Warning notice issued:</b>
+    <span class="tick">X</span> No
+    <span class="v">Neither appliance was found to be At Risk or Immediately
+    Dangerous, so no appliance was disconnected and no warning notice was issued to the
+    landlord or occupier.</span>
+  </div>
+
+  <div class="runfoot">
+    <span>Fenwick &amp; Vale Gas Services Ltd &middot; Certificate GSR-2026-04471 &middot; 14 Sycamore Court, Flat 2</span>
+    <span>Page 1 of 2</span>
+  </div>
+</div>
+</div>
+
+<div class="page">
+<div class="sheet">
+  <div class="padstrip">
+    <span class="serial">No. GSR-2026-04471</span>
+    <span class="formcode">CP12 &middot; page 2</span>
+    <span class="issue">Fenwick &amp; Vale Gas Services Ltd</span>
+  </div>
+
+  <h2>Safety device and installation checks</h2>
+  <table>
+    <thead>
+      <tr><th>Check</th><th>Applies to</th><th>Result</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Flame supervision device (FSD)</td><td>Both appliances</td><td class="center"><span class="tick">X</span> PASS</td></tr>
+      <tr><td>Sealed system expansion vessel and pressure</td><td>Kitchen boiler</td><td class="center"><span class="tick">X</span> PASS</td></tr>
+      <tr><td>Room thermostat and boiler controls</td><td>Kitchen boiler</td><td class="center"><span class="tick">X</span> PASS</td></tr>
+      <tr><td>Flue flow and spillage test</td><td>Both appliances</td><td class="center"><span class="tick">X</span> PASS</td></tr>
+      <tr><td>Case seal and door seal condition</td><td>Living room fire</td><td class="center"><span class="tick">X</span> PASS</td></tr>
+      <tr><td>Gas tightness test of installation pipework</td><td>Whole installation</td><td class="center"><span class="tick">X</span> PASS</td></tr>
+      <tr><td>Visual inspection of pipework and jointing</td><td>Whole installation</td><td class="center"><span class="tick">X</span> PASS</td></tr>
+      <tr><td>Emergency control valve, accessible and labelled</td><td>Meter cupboard, hallway</td><td class="center"><span class="tick">X</span> PASS</td></tr>
+      <tr><td>Adequacy of ventilation to each appliance</td><td>Both appliances</td><td class="center"><span class="tick">X</span> PASS</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">
+    A gas tightness test was carried out on the whole installation and no leaks were detected.
+    Ventilation was assessed as adequate for both appliances as installed; no permanent vents
+    were found blocked or obstructed.
+  </div>
+
+  <h2>Certification and signatures</h2>
+  <div class="stampgrid">
+    <div class="stamp">
+      <span class="v">I certify that the gas appliances and installation pipework listed above were
+      inspected on <b>03 August 2026</b> in accordance with the Gas Safety (Installation
+      and Use) Regulations 1998, and found to be as recorded.</span>
+      <div class="sigline"></div>
+      <div class="siglbl">Signature of engineer</div>
+      <div class="v" style="font-size:6.6pt;">R. Thackeray, Gas Safe licence 745231 &middot; for and on behalf of
+      Fenwick &amp; Vale Gas Services Ltd, registration 512864 &middot; Signed 03 August 2026</div>
+    </div>
+    <div class="stamp">
+      <span class="v">A copy of this record has been issued to the person named below, receiving it on
+      behalf of the landlord and tenant.</span>
+      <div class="sigline"></div>
+      <div class="siglbl">Signature of receiving person</div>
+      <div class="v" style="font-size:6.6pt;">Ms K. Adeyemi, letting agent for Mr D. Okafor &middot; Received 03 August 2026</div>
+    </div>
+  </div>
+
+  <h2>The landlord's duty — small print</h2>
+  <div class="small">
+    <p><b>Annual check.</b> Regulation 36 of the Gas Safety (Installation and Use) Regulations
+    1998 requires a landlord to have every gas appliance and flue in a rented property checked
+    for safety by a Gas Safe registered engineer within 12 months of installation and at
+    intervals of no more than 12 months thereafter. This record is valid for 12 months from the
+    date of inspection shown above, and the landlord is responsible for arranging the next
+    check in good time.</p>
+
+    <p><b>Copies to tenants.</b> A copy of this record, or the relevant parts of it, must be
+    given to each existing tenant of the property within 28 days of the check, and to any new
+    tenant before they move in. A copy has been provided as recorded in the signature block
+    above.</p>
+
+    <p><b>Record retention.</b> The landlord must retain this record, and the two preceding
+    records where they exist, for at least 2 years from the date of this check. Records should
+    be kept safely and produced on request to the local authority or to the Health and Safety
+    Executive.</p>
+
+    <p><b>Access for the check.</b> A landlord may need to take reasonable steps, including
+    legal advice, to obtain access to the property if a tenant unreasonably refuses entry for
+    the annual check. Refusal by a tenant does not remove the landlord's duty to have the check
+    carried out.</p>
+
+    <p><b>Scope of this record.</b> This record covers only the gas appliances, flues and
+    pipework owned by the landlord and present at the property on the date of inspection. It
+    does not cover appliances owned and installed by the tenant, gas supply pipework beyond the
+    meter which is the supplier's responsibility, or electrical safety.</p>
+
+    <p><b>Checking this engineer.</b> The engineer's Gas Safe registration can be checked using
+    the licence number shown above. A registered engineer must carry a Gas Safe ID card and
+    should be asked to show it before work begins.</p>
+  </div>
+
+  <div class="runfoot">
+    <span>Fenwick &amp; Vale Gas Services Ltd &middot; Certificate GSR-2026-04471 &middot; 14 Sycamore Court, Flat 2</span>
+    <span>Page 2 of 2</span>
+  </div>
+</div>
+</div>
+
+</body>
+</html>

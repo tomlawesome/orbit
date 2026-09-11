@@ -1,0 +1,25 @@
+{
+  "name": "pet vaccination card, vial expiry dates as distractors",
+  "filename": "fullpage-pet-vaccination-card.pdf",
+  "expected": {
+    "dates": [
+      "2027-05-18"
+    ],
+    "provider": "Hawksmoor Cross Veterinary Centre",
+    "reference": "977200005841236",
+    "dateRoles": [
+      {
+        "date": "2027-05-18",
+        "role": "service"
+      }
+    ],
+    "subtype": "Health record",
+    "scheduleKind": "service"
+  },
+  "notes": [
+    "Chose role 'service' over 'due' for the next-vaccination date: it denotes the next scheduled veterinary appointment/procedure (like the gas-safety-record precedent, where an inspection date keeps the 'service' role whether past or future), not a payment or response deadline, which is what the corpus otherwise uses 'due' for. scheduleKind follows as 'service' per the derivation rule (omit unless a date is renewal/service). Excluded from dates/dateRoles: all eleven vial batch expiry dates (the deliberate trap — shelf-life of the medicine, not an action date), the six worming/flea dates and their word-only 'monthly'/'every 3 months' intervals, the card issue date, the animal's date of birth and spay date, and the historical vaccination-given dates — none of these is what a careful owner would act on. reference is the microchip number (verbatim, stable) rather than the client account number or any vaccine batch. recurrenceMonths omitted: the annual booster interval is stated only in words ('annual booster'), never in digits, so the digits-in-evidence rule blocks it. costMinor/currency omitted: no fee is stated anywhere on the card, only the insurance cover limit, which is not a cost being charged.",
+    "Subtype corrected: 'Pet vaccination card' is not printed anywhere. The page prints 'HEALTH CARD', which is used instead. 'Vaccination & Health Record' was avoided for the #982 ampersand reason.",
+    "The card's small print used to explain that the vial expiry column was not actionable. That sentence was removed: a real card does not narrate its own trap, and leaving it in handed the extractor the answer.",
+    "Subtype changed again after the card was rebuilt as a folded card: the 'HEALTH CARD' heading no longer exists on the page. The card now prints 'Vaccination & Health Record', so 'Health record' is used — the longest printed phrase that avoids the ampersand #982 breaks."
+  ]
+}

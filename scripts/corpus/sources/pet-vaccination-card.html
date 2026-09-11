@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Vaccination &amp; Health Record</title>
+<style>
+@font-face{font-family:"Corpus Friendly";src:url("../fonts/Nunito.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Hand";src:url("../fonts/EBGaramond-Italic.ttf") format("truetype");font-weight:100 900;font-style:italic;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: "Corpus Friendly", sans-serif; font-size: 9pt; color: #201f1a; background: #ffffff; }
+
+  :root { --teal: #0f6b6b; --amber: #a8630f; --amberlight: #e8a33d; }
+
+  .page {
+    width: 210mm; height: 297mm; box-sizing: border-box;
+    padding: 9mm 13mm 9mm 13mm; position: relative; page-break-after: always;
+    background: #ffffff;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  .runhead {
+    display: flex; justify-content: space-between; font-size: 7pt; color: var(--teal);
+    border-bottom: 1px solid var(--teal); padding-bottom: 1.4mm; margin-bottom: 2.5mm;
+  }
+  .runfoot {
+    position: absolute; left: 13mm; right: 13mm; bottom: 5mm; font-size: 6.6pt; color: #666;
+    border-top: 1px solid #ccc; padding-top: 1.4mm;
+    display: flex; justify-content: space-between;
+  }
+
+  h2::before {
+    content: ""; display: inline-block; width: 4.2mm; height: 4.2mm; margin-right: 1.8mm;
+    vertical-align: middle;
+    background-image:
+      radial-gradient(circle at 50% 68%, var(--amberlight) 0 1.2mm, transparent 1.2mm),
+      radial-gradient(circle at 27% 46%, var(--amberlight) 0 0.65mm, transparent 0.65mm),
+      radial-gradient(circle at 42% 29%, var(--amberlight) 0 0.65mm, transparent 0.65mm),
+      radial-gradient(circle at 60% 27%, var(--amberlight) 0 0.65mm, transparent 0.65mm),
+      radial-gradient(circle at 75% 42%, var(--amberlight) 0 0.6mm, transparent 0.6mm);
+  }
+  h2 {
+    font-size: 9.6pt; font-weight: 700; color: var(--teal); margin: 3.2mm 0 1.6mm 0;
+    display: flex; align-items: center; border-bottom: 1px solid var(--teal); padding-bottom: 0.8mm;
+  }
+
+  /* ---------- page 1: folded card on the top half, rest blank ---------- */
+  .foldline {
+    position: absolute; left: 0; right: 0; top: 94mm; border-top: 1.4px dashed var(--teal);
+  }
+  .foldline .lbl {
+    position: absolute; left: 13mm; top: -3.6mm; font-size: 6.6pt; color: var(--teal);
+    background: #fff; padding: 0 1.5mm; letter-spacing: 0.4px;
+  }
+  .cutline {
+    position: absolute; top: 9mm; height: 85mm; left: 202mm; border-left: 1.4px dashed var(--amber);
+  }
+  .cutline .lbl {
+    position: absolute; top: -4mm; left: -2.2mm; font-size: 8pt; color: var(--amber);
+  }
+
+  .card {
+    width: 184mm; height: 64mm; margin-top: 4mm; border: 1.4px solid var(--teal); box-sizing: border-box;
+  }
+  .card-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 2.6mm 4mm; border-bottom: 1px dashed var(--amber);
+  }
+  .card-head .t { font-size: 11pt; font-weight: 700; color: var(--teal); }
+  .card-head .s { font-size: 7pt; color: #555; }
+  .card-body { display: flex; height: calc(100% - 10mm); }
+  .card-body .panel { flex: 0.92; padding: 2.6mm 4mm; box-sizing: border-box; font-size: 8.2pt; line-height: 1.5; }
+  .card-body .left { border-right: 1.4px dashed var(--teal); flex: 1.08; }
+  .card-body .rule { border: none; border-top: 1px solid #ddd; margin: 1.6mm 0; }
+  .card-body .lbl { font-size: 6.6pt; text-transform: uppercase; letter-spacing: 0.5px; color: var(--teal); font-weight: 700; }
+  .card-body .pname { font-size: 13pt; font-weight: 700; color: var(--teal); }
+  .card-body .right { text-align: center; display: flex; flex-direction: column; justify-content: flex-start; }
+  .card-body .right .verdict { font-size: 9.4pt; font-weight: 700; color: var(--teal); }
+  .card-body .right .duelbl { font-size: 7.4pt; text-transform: uppercase; letter-spacing: 0.6px; color: var(--amber); margin-top: 2.4mm; }
+  .card-body .right .dueval { font-size: 22pt; font-weight: 700; color: var(--amber); margin-top: 1mm; }
+  .card-body .right .fine { font-size: 6.8pt; color: #666; margin-top: 2mm; }
+
+  /* ---------- shared plain boxes (no fills, no rounded corners) ---------- */
+  .plainrow { display: flex; gap: 4mm; margin-bottom: 1mm; }
+  .plainrow > div { flex: 1; border: 1px solid #999; padding: 2mm 3mm; font-size: 7.8pt; line-height: 1.55; box-sizing: border-box; }
+  .plainrow .hd { font-size: 6.8pt; text-transform: uppercase; letter-spacing: 0.5px; color: var(--teal); font-weight: 700; border-bottom: 1px solid var(--teal); margin-bottom: 1mm; padding-bottom: 0.6mm; }
+  .plainrow b { color: var(--teal); }
+
+  /* ---------- record grid (logbook table) ---------- */
+  .gridwrap { position: relative; }
+  table.record { width: 100%; border-collapse: collapse; font-size: 6.6pt; }
+  table.record th {
+    text-align: left; font-size: 6.4pt; font-weight: 700; color: #fff; background: var(--teal);
+    padding: 0.9mm 1.3mm; border: 1px solid var(--teal);
+  }
+  table.record td { padding: 0.9mm 1.3mm; border: 1px solid #999; vertical-align: top; }
+  table.record tr:nth-child(even) td { background: #f4f4f2; }
+  .initials { font-family: "Corpus Hand", serif; font-style: italic; font-size: 7.4pt; }
+
+  .stamp {
+    position: absolute; border: 1.6px solid rgba(168,99,15,0.6); color: rgba(168,99,15,0.65);
+    font-weight: 700; font-size: 9pt; letter-spacing: 2px; padding: 0.8mm 4mm;
+    background: rgba(255,255,255,0.35); transform: rotate(-8deg); pointer-events: none;
+  }
+
+  table.soft { width: 100%; border-collapse: collapse; font-size: 7.6pt; }
+  table.soft th { text-align: left; font-size: 6.8pt; font-weight: 700; color: #fff; background: var(--teal); padding: 1mm 1.8mm; border: 1px solid var(--teal); }
+  table.soft td { padding: 1.1mm 1.8mm; border: 1px solid #999; vertical-align: top; }
+  table.soft tr:nth-child(even) td { background: #f4f4f2; }
+
+  .fine { font-size: 6.8pt; color: #555; line-height: 1.5; margin-top: 1mm; }
+  .cols2 { column-count: 2; column-gap: 7mm; font-size: 7.6pt; line-height: 1.5; color: #201f1a; }
+  .cols2 p { margin: 0 0 2mm 0; }
+  .cols2 b { color: var(--teal); }
+  .note { border: 1px solid var(--amber); padding: 2.6mm 3.6mm; font-size: 7.8pt; line-height: 1.55; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="runhead">
+    <span>Bramble &middot; Labrador Retriever &middot; Microchip 977200005841236</span>
+    <span>Vaccination &amp; health record &middot; Page 1 of 2</span>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="t">Vaccination &amp; Health Record</span>
+      <span class="s">Please bring this card to every appointment</span>
+    </div>
+    <div class="card-body">
+      <div class="panel left">
+        <div><b>Hawksmoor Cross Veterinary Centre</b></div>
+        <div style="font-size:7pt; color:#555; margin-top:0.8mm;">
+          22 Thornfield Road, Bramcote St Giles, Wyvern DE7 4PL<br>
+          Telephone 01159 887 240 &middot; reception@hawksmoorcrossvets.example<br>
+          RCVS Practice Registration PSS-22841 &middot; VAT registration GB 442 8871 09
+        </div>
+        <hr class="rule">
+        <div class="pname">Bramble</div>
+        <div style="font-size:7.4pt; margin-top:0.6mm;">
+          Labrador Retriever &middot; born 02 June 2022<br>
+          Microchip 977200005841236
+        </div>
+        <hr class="rule">
+        <div style="font-size:7.2pt;">Card issued 18 May 2026 &middot; Client account HCV-008842</div>
+      </div>
+      <div class="panel right">
+        <div class="verdict">Vaccination status: up to date</div>
+        <div style="font-size:7.4pt; margin-top:1.4mm;">Last given <b>18 May 2026</b><br>Annual booster (DHPPi/L4 + kennel cough)</div>
+        <div class="duelbl">Next vaccination due</div>
+        <div class="dueval">18 May 2027</div>
+        <div class="fine">Book in the two weeks before this date.<br>Keep this card safe &mdash; replacements cost a small fee.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foldline"><span class="lbl">&#9986; &nbsp;fold&nbsp; &mdash; &nbsp;&nbsp; &mdash; &nbsp;&nbsp; &mdash; &nbsp;&nbsp; &mdash;</span></div>
+  <div class="cutline"><span class="lbl">&#9986;</span></div>
+</div>
+
+<div class="page">
+  <div class="runhead">
+    <span>Bramble &middot; Labrador Retriever &middot; Microchip 977200005841236</span>
+    <span>Vaccination &amp; health record &middot; Page 2 of 2</span>
+  </div>
+
+  <div class="plainrow">
+    <div>
+      <div class="hd">Owner</div>
+      <div><b>Name</b> Mr Callum Ashworth</div>
+      <div><b>Address</b> 9 Ferndale Grove, Bramcote St Giles, Wyvern DE7 4RS</div>
+      <div><b>Tel</b> 01159 220 671 &middot; <b>Email</b> c.ashworth@example.co.uk</div>
+      <div><b>Account</b> HCV-008842</div>
+    </div>
+    <div>
+      <div class="hd">Animal</div>
+      <div><b>Species</b> Canine (dog) &middot; <b>Breed</b> Labrador Retriever &middot; <b>Colour</b> Black</div>
+      <div><b>Sex</b> Female &middot; <b>Neutered</b> Yes &mdash; spayed 14 March 2024</div>
+      <div><b>Date of birth</b> 02 June 2022</div>
+      <div><b>Microchip</b> 977200005841236</div>
+    </div>
+    <div>
+      <div class="hd">Insurer</div>
+      <div><b>Pet insurer</b> Meadowbrook Pet Assurance</div>
+      <div><b>Policy number</b> MPA-6620-317</div>
+      <div><b>Cover</b> Lifetime, &pound;4,000 per condition</div>
+      <div style="margin-top:1.4mm;"><b>Vet</b> Dr Priya Nandra BVetMed MRCVS, RCVS 4471982</div>
+    </div>
+  </div>
+
+  <h2>Vaccination history &mdash; full record</h2>
+  <div class="gridwrap">
+    <table class="record">
+      <thead>
+        <tr>
+          <th style="width:16mm;">Date given</th>
+          <th>Vaccine / component</th>
+          <th style="width:17mm;">Batch / serial</th>
+          <th style="width:13mm;">Vial expiry</th>
+          <th style="width:20mm;">Route &amp; site</th>
+          <th style="width:9mm;">Vet</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>14 Jul 2022</td><td>Primary course, dose 1 &mdash; distemper, hepatitis, parvovirus, parainfluenza (DHPPi)</td><td>VN2201A</td><td>03/2024</td><td>SC, left shoulder</td><td class="initials">PN</td></tr>
+        <tr><td>04 Aug 2022</td><td>Primary course, dose 2 &mdash; DHPPi + Leptospirosis (L4)</td><td>VN2209C</td><td>11/2023</td><td>SC, left shoulder</td><td class="initials">PN</td></tr>
+        <tr><td>04 Aug 2022</td><td>Kennel cough (Bordetella bronchiseptica) &mdash; primary dose</td><td>KC0871</td><td>09/2023</td><td>IN, left nostril</td><td class="initials">PN</td></tr>
+        <tr><td>18 May 2023</td><td>Annual booster &mdash; DHPPi + Leptospirosis (L4)</td><td>VN2304G</td><td>04/2025</td><td>SC, right shoulder</td><td class="initials">PN</td></tr>
+        <tr><td>18 May 2023</td><td>Kennel cough booster</td><td>KC1102</td><td>01/2025</td><td>IN, left nostril</td><td class="initials">AR</td></tr>
+        <tr><td>18 May 2024</td><td>Annual booster &mdash; DHPPi + Leptospirosis (L4)</td><td>VN2405D</td><td>03/2026</td><td>SC, left shoulder</td><td class="initials">PN</td></tr>
+        <tr><td>18 May 2024</td><td>Kennel cough booster</td><td>KC1349</td><td>11/2025</td><td>IN, left nostril</td><td class="initials">PN</td></tr>
+        <tr><td>18 May 2025</td><td>Annual booster &mdash; DHPPi + Leptospirosis (L4)</td><td>VN2503H</td><td>02/2027</td><td>SC, right shoulder</td><td class="initials">PN</td></tr>
+        <tr><td>18 May 2025</td><td>Kennel cough booster</td><td>KC1588</td><td>10/2026</td><td>IN, left nostril</td><td class="initials">AR</td></tr>
+        <tr><td>18 May 2026</td><td>Annual booster &mdash; DHPPi + Leptospirosis (L4)</td><td>VN2604K</td><td>01/2028</td><td>SC, left shoulder</td><td class="initials">PN</td></tr>
+        <tr><td>18 May 2026</td><td>Kennel cough booster</td><td>KC1822</td><td>09/2027</td><td>IN, left nostril</td><td class="initials">PN</td></tr>
+      </tbody>
+    </table>
+    <div class="stamp" style="top:16mm; left:38mm; width:80mm; text-align:center;">GIVEN</div>
+    <div class="stamp" style="top:44mm; left:90mm; width:70mm; text-align:center;">GIVEN</div>
+  </div>
+  <div class="fine">
+    Vial expiry dates are recorded from the label of the vaccine vial used at each visit, for
+    traceability, and reflect the manufacturer&rsquo;s shelf life of that batch.
+  </div>
+
+  <h2>Worming and flea treatment history</h2>
+  <table class="soft">
+    <thead>
+      <tr>
+        <th style="width:22mm;">Date given</th>
+        <th>Product</th>
+        <th style="width:22mm;">Batch no.</th>
+        <th>Treats</th>
+        <th style="width:26mm;">Next due (approx.)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>14 Jul 2022</td><td>Panacur oral wormer</td><td>PF-77201</td><td>Roundworm, whipworm</td><td>Every 3 months</td></tr>
+      <tr><td>04 Aug 2022</td><td>Advocate spot-on</td><td>AD-40982</td><td>Fleas, mites, lungworm</td><td>Monthly</td></tr>
+      <tr><td>21 Oct 2023</td><td>Milbemax tablet</td><td>MB-22107</td><td>Tapeworm, roundworm</td><td>Every 3 months</td></tr>
+      <tr><td>09 Apr 2024</td><td>NexGard Spectra chewable</td><td>NG-58813</td><td>Fleas, ticks, worms</td><td>Monthly</td></tr>
+      <tr><td>03 Mar 2025</td><td>Advocate spot-on</td><td>AD-61204</td><td>Fleas, mites, lungworm</td><td>Monthly</td></tr>
+      <tr><td>16 Feb 2026</td><td>Milbemax tablet</td><td>MB-30976</td><td>Tapeworm, roundworm</td><td>Every 3 months</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">
+    Worming and flea treatments are recorded here for reference. Frequency shown is the
+    practice&rsquo;s general recommendation, not a scheduled reminder date.
+  </div>
+
+  <h2>Insurance</h2>
+  <div class="note">
+    Bramble is insured with Meadowbrook Pet Assurance, policy MPA-6620-317, lifetime cover at
+    &pound;4,000 per condition per year. Please tell reception before treatment if you intend to
+    claim, so an estimate can be sent directly to your insurer where the policy allows it. This
+    practice is not responsible for any shortfall between the fee charged and the amount your
+    insurer pays.
+  </div>
+
+  <h2>About this record &mdash; course and boosters</h2>
+  <div class="cols2">
+    <p><b>Primary course.</b> Puppies normally receive two injections, three to four weeks
+    apart, from around eight weeks of age, followed by a first booster around twelve months
+    later. Bramble&rsquo;s primary course was completed with the doses of 14 July and
+    4 August 2022 shown above.</p>
+
+    <p><b>Annual boosters.</b> After the primary course, distemper/hepatitis/parvovirus/
+    parainfluenza and leptospirosis cover is maintained with an annual booster. Kennel cough
+    cover is also given annually and is recommended before boarding, training classes or
+    shows.</p>
+
+    <p><b>Vial batch and expiry.</b> Each row above records the batch number and shelf-life
+    expiry date printed on the vial actually used, as required for veterinary medicine
+    traceability.</p>
+
+    <p><b>Missed boosters.</b> If a booster is given significantly later than the due date,
+    the vet may recommend restarting the primary course rather than treating it as a simple
+    top-up. Please book before the due date shown on the card overleaf wherever possible.</p>
+
+    <p><b>Boarding and travel.</b> Kennels, catteries and some travel schemes require proof of
+    an in-date kennel cough vaccination, normally given or boosted within the twelve months
+    before boarding. Bring this card with you when booking.</p>
+
+    <p><b>Keeping this card.</b> This card is Bramble&rsquo;s record of vaccinations given by
+    this practice. If Bramble is treated elsewhere, please ask the other practice to record
+    details here or to send us a copy for our records.</p>
+  </div>
+
+  <div class="runfoot">
+    <span>Hawksmoor Cross Veterinary Centre &middot; Bramble &middot; Microchip 977200005841236</span>
+    <span>Page 2 of 2</span>
+  </div>
+</div>
+
+</body>
+</html>

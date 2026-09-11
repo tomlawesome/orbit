@@ -1,0 +1,21 @@
+{
+  "name": "gas safety record, interval in digits and no next date",
+  "filename": "fullpage-gas-safety-record.pdf",
+  "expected": {
+    "dates": [
+      "2026-08-03"
+    ],
+    "provider": "Fenwick & Vale Gas Services Ltd",
+    "reference": "GSR-2026-04471",
+    "dateRoles": [
+      {
+        "date": "2026-08-03",
+        "role": "service"
+      }
+    ],
+    "subtype": "Gas safety record",
+    "recurrenceMonths": 12,
+    "scheduleKind": "service"
+  },
+  "notes": "Date of inspection, date of issue and the engineer's/receiving person's signature dates are all the same calendar day (03 August 2026), as is normal CP12 practice, so only one ISO date exists on the page and it is labelled once as role 'service'; the issued/signed labels are not treated as separate dateRoles entries since they share the one underlying date. The document never prints a next-inspection or expiry date anywhere (including the running header/footer) — only the digit interval '12 months' in the passband and small print — so recurrenceMonths=12 is declared but no next date is added to `dates`. No cost is stated anywhere on the document, so costMinor/currency are omitted."
+}

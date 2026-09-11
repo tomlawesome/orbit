@@ -1,0 +1,32 @@
+{
+  "name": "home insurance schedule, premium among many amounts",
+  "filename": "fullpage-home-insurance-schedule.pdf",
+  "expected": {
+    "dates": [
+      "2026-03-14",
+      "2027-03-14"
+    ],
+    "provider": "Thornfield Assurance plc",
+    "reference": "TA-HH-7734291",
+    "dateRoles": [
+      {
+        "date": "2026-03-14",
+        "role": "start"
+      },
+      {
+        "date": "2027-03-14",
+        "role": "renewal"
+      }
+    ],
+    "subtype": "Policy schedule",
+    "costMinor": 41299,
+    "currency": "GBP",
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "Declared only the renewal date (14 March 2027), matching the task-specified shape; the date of issue (20 February 2026) and period-of-insurance start (14 March 2026) are printed on the schedule but left out of `dates`, even though a sibling corpus entry ('home insurance schedule, labelled fields') does surface a period start as a `start` role — flagging this as the judgement call most worth a second look. costMinor is the 'Annual premium' total (£412.99, net premium plus IPT) rather than the net-of-tax figure, since that is the line a policyholder would read as what they actually owe for the year; net premium, IPT, sums insured, excesses, optional-extra prices, and all monthly-instalment/APR/total-payable-if-monthly figures were left undeclared as distractors per the costMinor rule. provider is the underwriting insurer (Thornfield Assurance plc) rather than the intermediary (Hedgerow Home Insurance Services Ltd) that arranges the policy. reference is the policy number rather than the separate schedule reference (SCH-2027-4417).",
+    "Period start 2026-03-14 added. The page prints 'Period of insurance 14 March 2026 to 14 March 2027', and the existing 'home insurance schedule, labelled fields' corpus entry declares both ends of the period. The agent that wrote this file declared only the renewal date and flagged the inconsistency; the existing convention wins.",
+    "The date of issue (20 February 2026) is deliberately NOT declared, matching the same existing entry.",
+    "Subtype changed from 'Home insurance' to 'Policy schedule'. 'Home insurance' appears nowhere as the document's own title — its only occurrence is inside the intermediary's company name, 'Hedgerow Home Insurance Services Ltd', 16% into the page. Grounding a subtype on that would be grounding it on the wrong company. The page titles itself 'Policy Schedule — Thornfield Assurance plc'."
+  ]
+}
