@@ -1,0 +1,23 @@
+{
+  "name": "tv licence confirmation, sparsest document, three identically-styled dates and no context words",
+  "filename": "fullpage-tv-licence-confirmation.pdf",
+  "expected": {
+    "dates": [
+      "2027-03-31"
+    ],
+    "provider": "Colefield Broadcast Licensing Authority Limited",
+    "reference": "CBL-774-2091",
+    "dateRoles": [
+      {
+        "date": "2027-03-31",
+        "role": "renewal"
+      }
+    ],
+    "subtype": "Television licence",
+    "costMinor": 18200,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": "Valid from (1 April 2026) and valid to (31 March 2027) are printed adjacent in the panel in identical sans-serif style with no hierarchy between them; only valid to is the answer, since that is the last day the licence covers, and it alone gets role 'renewal'. The footer's issue date (10 March 2026) is styled as plain prose text in the same day-month-year form as the two panel dates, making three date-like strings in total against one answer. The fee row prints the annual fee (£182.00) beside the quarterly Direct Debit amount (£45.50) with nothing marking either as the yearly total; costMinor is the first figure, £182.00, because that is the licence's own cost, not the payment instalment. Colefield Broadcast Licensing Authority Limited is named twice only: as the shortened wordmark 'COLEFIELD LICENSING' in the logo block, and in full in the single footer line, which is also the form declared as provider so it matches literally. recurrenceMonths=12 comes from 'It runs for 12 months' in the prose, the only place a number of months is stated; scheduleKind is 'renewal' because the tracked date is the licence's own renewal point, not a service visit."
+}

@@ -47,6 +47,22 @@ fonts=(
   "ofl/jetbrainsmono|JetBrainsMono%5Bwght%5D.ttf|OFL-1.1"
   "ofl/crimsonpro|CrimsonPro%5Bwght%5D.ttf|OFL-1.1"
   "ofl/karla|Karla%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/spectral|Spectral-Regular.ttf|OFL-1.1"
+  "ofl/cabin|Cabin%5Bwdth,wght%5D.ttf|OFL-1.1"
+  "ofl/rubik|Rubik%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/bitter|Bitter%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/lora|Lora%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/oswald|Oswald%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/anonymouspro|AnonymousPro-Regular.ttf|OFL-1.1"
+  "ofl/cutivemono|CutiveMono-Regular.ttf|OFL-1.1"
+  "ofl/inconsolata|Inconsolata%5Bwdth,wght%5D.ttf|OFL-1.1"
+  "ofl/zillaslab|ZillaSlab-Regular.ttf|OFL-1.1"
+  "ofl/alegreya|Alegreya%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/barlow|Barlow-Regular.ttf|OFL-1.1"
+  # A marker hand, for the values written into a form at a desk.
+  "ofl/caveat|Caveat%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/mulish|Mulish%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/asap|Asap%5Bwdth,wght%5D.ttf|OFL-1.1"
 )
 
 : > LICENCES.txt
@@ -71,7 +87,9 @@ done
 # One copy of the licence text per family directory used.
 for d in ptsans ptmono sourceserif4 courierprime archivonarrow ebgaramond nunito spacegrotesk \
          ptserif ibmplexsans librebaskerville publicsans firasans firamono sharetechmono \
-         worksans jetbrainsmono crimsonpro karla; do
+         worksans jetbrainsmono crimsonpro karla \
+         spectral cabin rubik bitter lora oswald anonymouspro cutivemono \
+         inconsolata zillaslab alegreya barlow caveat mulish asap; do
   curl -sSLf --max-time 30 -o "OFL-$d.txt" "$base/ofl/$d/OFL.txt" 2>/dev/null || true
 done
 

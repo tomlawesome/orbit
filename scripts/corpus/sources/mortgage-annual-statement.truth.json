@@ -1,0 +1,33 @@
+{
+  "name": "mortgage annual statement, renewal date buried between a 30-row transaction table and a wall of regulatory text",
+  "filename": "fullpage-mortgage-annual-statement.pdf",
+  "expected": {
+    "dates": [
+      "2026-06-19"
+    ],
+    "provider": "Priorswood Bank plc",
+    "reference": "7738 2204 91",
+    "dateRoles": [
+      {
+        "date": "2026-06-19",
+        "role": "renewal"
+      }
+    ],
+    "subtype": "Mortgage annual statement",
+    "costMinor": 74218,
+    "currency": "GBP",
+    "recurrenceMonths": 1,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "The only tracked date is 19 June 2026, the last day of the current fixed rate period, printed on page 1 ('Fixed rate period: 20 June 2024 to 19 June 2026') and again on page 3 in the rate-detail table and the early repayment charge schedule. It is the date the household must act on (choose a new deal or fall onto the reversion rate), which is why it is roled 'renewal' rather than 'expiry'.",
+    "The 30-row transaction history on page 2 is the densest date block on the page: every one of its rows carries its own dd/mm/yyyy date (interest charges and payments on the 1st of each month, plus an overpayment, a statement fee, an insurance premium, an account fee, a returned-payment fee and a transfer fee scattered through the year). None of these 30 dates is an answer.",
+    "Also excluded from `dates`: the statement period start and end (1 April 2025 / 31 March 2026), the statement date (6 April 2026), the date the mortgage term ends (20 June 2049, decades away), the date the rate last changed (20 June 2024, when the current fixed deal began) and the date early repayment charges stop applying (1 July 2026, deliberately printed 12 days after the true fixed-rate-end answer because charges run to the end of the calendar month) -- all texture a careful human would not report as the document's governing date.",
+    "costMinor is the current monthly payment, £742.18, shown in the 'Your payments' panel on page 1. The payment the account moves to once the fixed rate ends, £891.47, is printed immediately beside it on page 1 and again on page 3, and is not the answer.",
+    "Other money on the page that is not the answer: the outstanding balance (£164,611.07, in the accent-coloured balance panel), the interest charged over the statement year (£6,933.08), the early repayment charge if the mortgage were repaid today (£3,292.22, repeated on page 3) and the original amount borrowed (£198,500.00).",
+    "provider is the legal entity from the page 3 regulatory block, Priorswood Bank plc, company number 05391847 -- not the trading name 'Kelbridge Home Loans' used in the masthead, footer and throughout the document.",
+    "The product name 'Two Year Fixed 4.19%' is printed prominently on pages 1 and 3 but is not the subtype; subtype is the plain description printed as the document's title, 'Mortgage Annual Statement'.",
+    "reference is the mortgage account number, 7738 2204 91, printed in the header of every page and in the account details table -- the only account-shaped number on the document.",
+    "recurrenceMonths is 1 because the payment is monthly, printed in digits on page 1 ('collected 1 time each calendar month'). scheduleKind is 'renewal' to match the single dateRole."
+  ]
+}
