@@ -512,16 +512,82 @@ function shapeTags(candidate: Candidate, firstHeadingIndex: number): Tag[] {
  */
 const RANGE_CONNECTOR = /^[\s(]*(?:to|until|till|through|up to|–|—|-)[\s)]*$/iu;
 
+/**
+ * Words that say the period a range describes is the household's own term:
+ * what they are covered by, signed up to, or charged for. Read from the
+ * words the block prints BEFORE the range, which is where UK paper puts the
+ * label ("Period of insurance 14 March 2026 to 14 March 2027", "for the
+ * service charge year running from 1 April 2026 to 31 March 2027"). A
+ * printed duration ("12 months, from ...", "for a period of 5 years") says
+ * the same thing without a noun.
+ */
+const TERM_LEAD =
+  /period of (?:insurance|cover)|cover|polic(?:y|ies)|contract|agreement|membership|licen[cs]e|tariff|guarantee|warrant(?:y|ies)|tenancy|term|charge for the year|fixed rate|\d{1,3}\s*-?\s*(?:month|year)s?/iu;
+
+/**
+ * Words that say the period is a window the page is REPORTING on rather
+ * than a term the household holds: a statement period, a billing period, a
+ * quarter, a transaction history, a year already ended. Nothing in such a
+ * range is a date the household acts on, so no role is asserted at all --
+ * these ranges are the bulk of the date-like strings on a statement, and
+ * calling them starts and expiries is how a page of table rows turns into a
+ * page of wrong answers. Checked after `TERM_LEAD`, and beats it.
+ */
+const REPORTING_LEAD = /statement|billing|transaction|quarter|reading|scheme year|year ended|summary|history/iu;
+
+/**
+ * The period belongs to the organisation, not the household: an installer's
+ * trade-scheme registration, an accreditation. Its dates are facts about the
+ * company in the same way its VAT number is.
+ */
+const ORGANISATION_PERIOD = /scheme registration|registered with|accreditation|accredited by/iu;
+
+/**
+ * A term that simply runs out when it ends, so its last date is an `expiry`
+ * and not a `renewal`: a guarantee, a warranty, a certificate, or any period
+ * the page itself calls an expiry. Everything else the household holds for a
+ * term -- cover, a contract, a membership, a tariff, a charge year -- rolls
+ * onto something and has to be acted on again, which is `renewal`.
+ */
+const RUNS_OUT = /guarantee|warrant(?:y|ies)|certificat|expir/iu;
+
+/** Trigger words that only say a date bounds a period, without saying what
+ * kind of period: the range connectors and the validity labels. What such a
+ * date means depends on the term around it (see `termEndRole`). */
+const TERM_END_TRIGGER = /^(?:valid (?:to|until|through)|to|until|till|through|up to|–|—|-)$/iu;
+
 interface DateSpan {
   index: number;
   length: number;
 }
 
+function blockTextAround(text: string, index: number): { block: string; lead: string } {
+  const start = text.lastIndexOf("\n", index) + 1;
+  const end = text.indexOf("\n", index);
+  return {
+    block: text.slice(start, end === -1 ? text.length : end),
+    lead: text.slice(start, index),
+  };
+}
+
+/** `expiry` when the period runs out, `renewal` when it has to be taken
+ * again. Decided from the block the date sits in, not from the document, so
+ * a certificate that also prints a contract term gets both right. */
+function termEndRole(block: string): DocumentDateRole {
+  return RUNS_OUT.test(block) ? "expiry" : "renewal";
+}
+
 /**
  * Rewrites the ConText assignments of any two adjacent dates joined by a
- * range connector to `start` and `expiry`. A label that sits nearer than the
- * connector keeps the date: "Renewal date: A to B" leaves A alone, because
- * the range is only the weaker reading of what joins two dates.
+ * range connector to `start` and the end role its term deserves. A label
+ * that sits nearer than the connector keeps the date: "Renewal date: A to B"
+ * leaves A alone, because the range is only the weaker reading of what joins
+ * two dates.
+ *
+ * A range asserts nothing unless the words before it say which period it is
+ * (`TERM_LEAD`, and not `REPORTING_LEAD`). Two dates side by side are a
+ * period on any page that prints a table; only the label says whether the
+ * household's cover, or last quarter's meter reads, is what the period is.
  */
 function applyDateRanges(
   text: string,
@@ -535,6 +601,11 @@ function applyDateRanges(
     const between = text.slice(gapStart, right.index);
     if (!RANGE_CONNECTOR.test(between)) continue;
 
+    const { block, lead } = blockTextAround(text, left.index);
+    if (!TERM_LEAD.test(lead)) continue;
+    if (REPORTING_LEAD.test(lead)) continue;
+    if (ORGANISATION_PERIOD.test(block)) continue;
+
     const connector = between.trim();
     const connectorStart = gapStart + between.indexOf(connector);
     const connectorEnd = connectorStart + connector.length;
@@ -543,8 +614,36 @@ function applyDateRanges(
       assignments[at] = { role, trigger: connector, distance };
     };
     claim(i, "start", connectorStart - gapStart);
-    claim(i + 1, "expiry", right.index - connectorEnd);
+    claim(i + 1, termEndRole(block), right.index - connectorEnd);
   }
+}
+
+/**
+ * Two corrections a trigger table cannot make, because both depend on the
+ * block around the trigger rather than on the trigger's own words:
+ *
+ * - "Valid to 31 March 2027" on a licence is a date the household renews;
+ *   the same words under a guarantee are a date that simply runs out.
+ * - "Scheme registration valid to 30 April 2027" is the contractor's
+ *   registration, not the household's anything, so it gets no role.
+ */
+function applyTermEnds(
+  text: string,
+  spans: readonly DateSpan[],
+  assignments: ContextRoleAssignment[],
+): void {
+  spans.forEach((span, at) => {
+    const assignment = assignments[at];
+    if (assignment.role === "other") return;
+    const { block } = blockTextAround(text, span.index);
+    if (ORGANISATION_PERIOD.test(block)) {
+      assignments[at] = { role: "other", trigger: "", distance: Number.POSITIVE_INFINITY };
+      return;
+    }
+    if (assignment.role !== "expiry") return;
+    if (!TERM_END_TRIGGER.test(assignment.trigger.trim())) return;
+    assignments[at] = { ...assignment, role: termEndRole(block) };
+  });
 }
 
 /**
@@ -581,6 +680,7 @@ export const tagCandidates: TagStage = (text, candidates) => {
     }));
   const dateAssignments = assignContextRoleLabels(text, dateSpans);
   applyDateRanges(text, dateSpans, dateAssignments);
+  applyTermEnds(text, dateSpans, dateAssignments);
   let nextDate = 0;
 
   const headingIndexes = candidates.filter((c) => c.kind === "heading").map((c) => c.index);
