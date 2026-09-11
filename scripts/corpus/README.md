@@ -25,23 +25,29 @@ From the repository root, with the `orbit-tika` container running:
 # 1. Typefaces. Not committed -- see "Fonts" below.
 bash scripts/corpus/fetch-fonts.sh
 
-# 2. HTML -> PDF, A4, backgrounds on.
+# 2. Give each document its typeface. MUST come before rendering: a document
+#    written against the placeholder stacks and measured there will spill once
+#    its real face goes in. Libre Baskerville put the energy letter 49px over
+#    A4 on a page that measured clean the moment before.
+node scripts/corpus/apply-fonts.mjs
+
+# 3. HTML -> PDF, A4, backgrounds on.
 node scripts/corpus/render.mjs
 
-# 3. No page may spill past A4.
+# 4. No page may spill past A4.
 for f in scripts/corpus/sources/*.html; do node scripts/corpus/measure.mjs "$(basename "$f")"; done
 
-# 4. PDF -> text, through the REAL Tika. No host port is published, so this
+# 5. PDF -> text, through the REAL Tika. No host port is published, so this
 #    runs on Orbit's document-processing network.
 docker run --rm --network orbit_orbit-document-processing \
   -v "$PWD/scripts/corpus/sources:/data" \
   -v "$PWD/scripts/corpus/tika.mjs:/app/tika.mjs:ro" \
   node:26-alpine node /app/tika.mjs
 
-# 5. Every declared value must be findable in what Tika produced.
+# 6. Every declared value must be findable in what Tika produced.
 node scripts/corpus/verify.mjs
 
-# 6. Write the TypeScript module, and the evidence needles the
+# 7. Write the TypeScript module, and the evidence needles the
 #    ideal-answer test needs.
 node scripts/corpus/generate.mjs
 node scripts/corpus/generate-evidence.mjs   # paste into ideal-answer-survives.test.ts

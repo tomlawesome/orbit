@@ -8,7 +8,7 @@
 // The assignment is FIXED, not random: the corpus text is committed ground
 // truth, and a face that changed per render would change what Tika emits and
 // silently invalidate it.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -49,10 +49,49 @@ const DOCS = {
     faces: [FACE("Corpus Brand", "SpaceGrotesk.ttf")],
     swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Brand", sans-serif']],
   },
+
+  // ---- the 18 further documents (#986) ----
+
+  // Bulk-printed motor insurance: a workhorse newspaper serif, tables in a
+  // neutral grotesque.
+  "car-insurance-renewal.html": {
+    faces: [FACE("Corpus Bulk", "PT_Serif-Web-Regular.ttf", "400"), FACE("Corpus Bulk", "PT_Serif-Web-Bold.ttf", "700"), FACE("Corpus Bulk Sans", "IBMPlexSans.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Bulk", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Bulk Sans", sans-serif']],
+  },
+  // A mailmerge letter: a high-contrast book face, as printed correspondence.
+  "energy-tariff-end.html": {
+    faces: [FACE("Corpus Post", "LibreBaskerville.ttf"), FACE("Corpus Post Sans", "PublicSans.ttf")],
+    swap: [[/"Bitstream Charter", serif/g, '"Corpus Post", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Post Sans", sans-serif']],
+  },
+  // Municipal bulk print: a humanist sans with its matching mono for the
+  // instalment column.
+  "council-tax-demand.html": {
+    faces: [FACE("Corpus Civic", "FiraSans-Regular.ttf", "400"), FACE("Corpus Civic", "FiraSans-Bold.ttf", "700"), FACE("Corpus Civic Mono", "FiraMono-Regular.ttf", "400")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Civic", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Civic Mono", monospace']],
+  },
+  // Continuous stationery: a squared-off terminal mono doing the figures.
+  "water-bill.html": {
+    faces: [FACE("Corpus Line Printer", "ShareTechMono-Regular.ttf", "400"), FACE("Corpus Utility", "WorkSans.ttf")],
+    swap: [[/"Liberation Mono", monospace/g, '"Corpus Line Printer", monospace'], [/"Liberation Sans", sans-serif/g, '"Corpus Utility", sans-serif']],
+  },
+  // A government form: tiny pre-printed labels against a machine-filled mono.
+  "vehicle-tax-reminder.html": {
+    faces: [FACE("Corpus Official", "Karla.ttf"), FACE("Corpus Official Mono", "JetBrainsMono.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Official", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Official Mono", monospace']],
+  },
+  // A saddle-stitched terms booklet: an old-style text face set small in two
+  // columns, headings in a grotesque.
+  "life-cover-booklet.html": {
+    faces: [FACE("Corpus Booklet", "CrimsonPro.ttf"), FACE("Corpus Booklet Sans", "IBMPlexSans.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Booklet", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Booklet Sans", sans-serif']],
+  },
 };
 
 for (const [file, { faces, swap }] of Object.entries(DOCS)) {
   const path = `${dir}/${file}`;
+  // Documents arrive in waves, so the table lists files that may not be
+  // written yet. A missing one is not an error; it is simply not built.
+  if (!existsSync(path)) { console.log(`${file}: not written yet, skipped`); continue; }
   let s = readFileSync(path, "utf8");
   if (s.includes("@font-face")) { console.log(`${file}: already has @font-face, skipped`); continue; }
   let n = 0;

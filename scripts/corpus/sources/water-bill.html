@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>ClearBourne Water — Water and Wastewater Bill</title>
+<style>
+@font-face{font-family:"Corpus Line Printer";src:url("../fonts/ShareTechMono-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Utility";src:url("../fonts/WorkSans.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Utility", sans-serif; font-size: 9pt; color: #1a1a1a;
+    background: #fbfbf7;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always; background: #fbfbf7;
+    padding: 8mm 12mm 12mm 16mm;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  .mono { font-family: "Corpus Line Printer", monospace; }
+
+  /* ---- sideways document code up the left margin ---- */
+  .sidecode {
+    position: absolute; left: 2.5mm; top: 20mm; height: 250mm; width: 6mm;
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font-family: "Corpus Line Printer", monospace; font-size: 7pt; letter-spacing: 1.5px;
+    color: #1b3a6b; white-space: nowrap; overflow: hidden;
+  }
+
+  /* ---- header band, repeats on every page like a line-printer run ---- */
+  .runhead {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    border-bottom: 2pt solid #1b3a6b; padding-bottom: 2mm; margin-bottom: 3mm;
+  }
+  .brand { font-size: 17pt; font-weight: 700; color: #1b3a6b; letter-spacing: 0.5px; }
+  .brand small { display: block; font-size: 7.6pt; font-weight: 400; color: #333; letter-spacing: 0.2px; }
+  .runbox {
+    font-family: "Corpus Line Printer", monospace; font-size: 7.6pt; color: #1a1a1a;
+    text-align: right; line-height: 1.55; border: 0.8pt solid #1b3a6b; padding: 1.6mm 2.4mm;
+  }
+  .runbox .k { color: #1b3a6b; }
+
+  h2 {
+    font-family: "Corpus Utility", sans-serif; font-size: 10.5pt; color: #1b3a6b;
+    letter-spacing: 0.5px; text-transform: uppercase; margin: 5mm 0 1.5mm 0;
+    border-bottom: 0.8pt solid #1b3a6b; padding-bottom: 0.8mm;
+  }
+
+  .toprow { display: flex; gap: 8mm; margin-bottom: 2mm; }
+  .address {
+    font-size: 9pt; line-height: 1.5;
+  }
+  .keyfacts {
+    font-family: "Corpus Line Printer", monospace; font-size: 8.4pt; line-height: 1.9;
+    border: 0.8pt solid #1b3a6b; padding: 2.2mm 3mm; min-width: 82mm;
+  }
+  .keyfacts .row { display: flex; justify-content: space-between; }
+  .keyfacts .lab { color: #1b3a6b; }
+
+  .duebox {
+    margin: 3mm 0; padding: 2.6mm 3.5mm; border: 1.4pt solid #1b3a6b;
+    display: flex; justify-content: space-between; align-items: baseline;
+    background: #eef2f8;
+  }
+  .duebox .lab { font-size: 9.5pt; font-weight: 700; color: #1b3a6b; text-transform: uppercase; letter-spacing: 0.4px; }
+  .duebox .amt { font-family: "Corpus Line Printer", monospace; font-size: 15pt; font-weight: 700; color: #1a1a1a; }
+  .duebox .when { font-family: "Corpus Line Printer", monospace; font-size: 9.5pt; }
+
+  /* ---- fixed-width tables, printer-style, columns not quite matching heads ---- */
+  table.linetab { width: 100%; border-collapse: collapse; font-family: "Corpus Line Printer", monospace; font-size: 8.2pt; margin-bottom: 1mm; }
+  table.linetab thead th {
+    text-align: left; font-weight: 700; font-size: 7.6pt; letter-spacing: 0.6px;
+    color: #1b3a6b; padding: 0.8mm 2mm 0.8mm 5mm; border-bottom: 1.2pt solid #1b3a6b;
+    font-family: "Corpus Utility", sans-serif; text-transform: uppercase;
+  }
+  table.linetab thead th.r { text-align: right; padding-right: 4mm; }
+  table.linetab tbody td { padding: 0.9mm 2mm 0.9mm 2mm; border-bottom: 0.4pt dotted #999; }
+  table.linetab tbody td.r { text-align: right; padding-right: 3mm; }
+  table.linetab tbody tr.tot td { border-top: 1pt solid #1b3a6b; border-bottom: none; font-weight: 700; padding-top: 1.4mm; }
+
+  .balance-block { font-family: "Corpus Line Printer", monospace; font-size: 8.4pt; width: 92mm; margin: 2mm 0 0 auto; }
+  .balance-block .ln { display: flex; justify-content: space-between; padding: 0.7mm 0; }
+  .balance-block .ln.now { border-top: 1pt solid #1b3a6b; font-weight: 700; margin-top: 1mm; padding-top: 1.4mm; }
+
+  .perf {
+    border: none; border-top: 1.3pt dashed #1b3a6b; margin: 5mm 0 2mm 0; position: relative;
+  }
+  .perf-label {
+    position: absolute; top: -2.6mm; left: 50%; transform: translateX(-50%);
+    background: #fbfbf7; font-size: 6.6pt; color: #555; padding: 0 2mm; letter-spacing: 1px;
+    font-family: "Corpus Line Printer", monospace;
+  }
+  .stub { display: flex; justify-content: space-between; font-family: "Corpus Line Printer", monospace; font-size: 8pt; }
+  .stub .col { line-height: 1.7; }
+  .stub .k { color: #1b3a6b; }
+  .barcode { font-size: 15pt; letter-spacing: -1px; font-family: "Corpus Line Printer", monospace; color: #1a1a1a; }
+
+  .foot { position: absolute; left: 16mm; right: 12mm; bottom: 6mm; font-size: 6.8pt; color: #555;
+    display: flex; justify-content: space-between; font-family: "Corpus Line Printer", monospace; }
+
+  /* ---- chart ---- */
+  .chartwrap { border: 0.8pt solid #1b3a6b; padding: 3mm 4mm 2mm 4mm; margin-bottom: 3mm; }
+  .chart { display: flex; align-items: flex-end; height: 46mm; gap: 2mm; border-bottom: 1pt solid #1b3a6b; padding-left: 2mm; }
+  .bar-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; width: 12mm; }
+  .bar { width: 8mm; background: #7ba7d4; }
+  .bar-val { font-family: "Corpus Line Printer", monospace; font-size: 6.2pt; color: #1a1a1a; margin-bottom: 0.5mm; }
+  .chart-axis { display: flex; gap: 2mm; padding-left: 2mm; margin-top: 1mm; }
+  .axis-lab { width: 12mm; text-align: center; font-family: "Corpus Line Printer", monospace; font-size: 6.2pt; color: #333; }
+
+  .payopts { display: flex; gap: 6mm; margin-bottom: 3mm; }
+  .payopt { flex: 1; border: 0.7pt solid #999; padding: 2mm 3mm; font-size: 8.2pt; line-height: 1.5; }
+  .payopt b { color: #1b3a6b; }
+
+  table.tariff { width: 100%; border-collapse: collapse; font-family: "Corpus Line Printer", monospace; font-size: 8pt; margin-bottom: 2mm; }
+  table.tariff th { text-align: left; font-family: "Corpus Utility", sans-serif; font-size: 7.4pt; text-transform: uppercase; color: #1b3a6b; border-bottom: 1pt solid #1b3a6b; padding: 1mm 2mm; }
+  table.tariff th.r, table.tariff td.r { text-align: right; }
+  table.tariff td { padding: 0.9mm 2mm; border-bottom: 0.4pt dotted #999; }
+
+  .smallprint { font-size: 6.8pt; line-height: 1.5; color: #333; column-count: 2; column-gap: 6mm; margin-top: 3mm; }
+  .smallprint p { margin: 0 0 2mm 0; }
+  .smallprint b { color: #1b3a6b; }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+  <div class="sidecode">FORM WB2-QTLY&nbsp;&nbsp;&nbsp;ACCT 8847 2210 55&nbsp;&nbsp;&nbsp;RUN 0426-114&nbsp;&nbsp;&nbsp;PRINTED AT DEPOT 7&nbsp;&nbsp;&nbsp;FORM WB2-QTLY&nbsp;&nbsp;&nbsp;ACCT 8847 2210 55</div>
+
+  <div class="runhead">
+    <div class="brand">ClearBourne Water
+      <small>Water and wastewater services for the Bourne Valley region</small>
+    </div>
+    <div class="runbox">
+      <div><span class="k">BILL DATE</span> 09/06/2026</div>
+      <div><span class="k">ACCOUNT</span> 8847 2210 55</div>
+      <div><span class="k">TARIFF CODE</span> WV-M-04</div>
+      <div><span class="k">PAGE</span> 1 OF 2</div>
+    </div>
+  </div>
+
+  <div class="toprow">
+    <div class="address">
+      Mr J Whitcombe<br>
+      12 Silverdale Close<br>
+      Marchford<br>
+      Wexbridge<br>
+      WX9 2QP
+    </div>
+    <div class="keyfacts">
+      <div class="row"><span class="lab">Billing period</span><span>01/03/2026 &ndash; 31/05/2026</span></div>
+      <div class="row"><span class="lab">Days in period</span><span>91</span></div>
+      <div class="row"><span class="lab">Meter serial</span><span>M-2291487</span></div>
+      <div class="row"><span class="lab">Supply type</span><span>Metered, combined</span></div>
+      <div class="row"><span class="lab">Direct debit</span><span>Collecting 23/06/2026</span></div>
+    </div>
+  </div>
+
+  <div class="duebox">
+    <div>
+      <div class="lab">Amount now due</div>
+      <div class="when">Payment due by 30/06/2026</div>
+    </div>
+    <div class="amt">&pound;163.37</div>
+  </div>
+
+  <h2>Meter readings on your account</h2>
+  <table class="linetab">
+    <thead>
+      <tr><th>Reading date</th><th class="r">Reading (m&sup3;)</th><th>Type</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>28/05/24</td><td class="r">3812</td><td>A &ndash; actual read</td></tr>
+      <tr><td>27/08/24</td><td class="r">3855</td><td>E &ndash; estimated</td></tr>
+      <tr><td>26/11/24</td><td class="r">3901</td><td>A &ndash; actual read</td></tr>
+      <tr><td>25/02/25</td><td class="r">3939</td><td>E &ndash; estimated</td></tr>
+      <tr><td>27/05/25</td><td class="r">3986</td><td>A &ndash; actual read</td></tr>
+      <tr><td>26/08/25</td><td class="r">4021</td><td>E &ndash; estimated</td></tr>
+      <tr><td>25/11/25</td><td class="r">4067</td><td>A &ndash; actual read</td></tr>
+      <tr><td>24/02/26</td><td class="r">4102</td><td>E &ndash; estimated</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:7.2pt;color:#555;margin:0 0 3mm 0;">A meter reading dated 24/02/26 was carried forward to open this period; the closing read of 4137 used to calculate the charges below is an estimate, based on your average daily use, pending our next visit.</p>
+
+  <h2>Charges for this period (01/03/2026 &ndash; 31/05/2026)</h2>
+  <table class="linetab">
+    <thead>
+      <tr><th>Charge</th><th class="r">Quantity</th><th class="r">Rate</th><th class="r">Amount</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Water standing charge</td><td class="r">91 days</td><td class="r">21.23p/day</td><td class="r">&pound;19.32</td></tr>
+      <tr><td>Water supply, volumetric</td><td class="r">35 m&sup3;</td><td class="r">&pound;1.5842/m&sup3;</td><td class="r">&pound;55.45</td></tr>
+      <tr><td>Wastewater standing charge</td><td class="r">91 days</td><td class="r">25.13p/day</td><td class="r">&pound;22.87</td></tr>
+      <tr><td>Wastewater, volumetric</td><td class="r">35 m&sup3;</td><td class="r">&pound;1.7621/m&sup3;</td><td class="r">&pound;61.67</td></tr>
+      <tr class="tot"><td>Total charges for this period</td><td class="r"></td><td class="r"></td><td class="r">&pound;159.31</td></tr>
+    </tbody>
+  </table>
+
+  <div class="balance-block">
+    <div class="ln"><span>Total charges for this period</span><span>&pound;159.31</span></div>
+    <div class="ln"><span>Balance brought forward</span><span>&pound;14.06</span></div>
+    <div class="ln"><span>Payment received 20/05/2026, thank you</span><span>&minus;&pound;10.00</span></div>
+    <div class="ln now"><span>Amount now due</span><span>&pound;163.37</span></div>
+  </div>
+
+  <hr class="perf"><span class="perf-label">DETACH HERE &middot; PAYMENT ADVICE</span>
+
+  <div class="stub">
+    <div class="col">
+      <div><span class="k">Account</span> 8847 2210 55</div>
+      <div><span class="k">Name</span> Mr J Whitcombe</div>
+      <div><span class="k">Amount due</span> &pound;163.37</div>
+      <div><span class="k">Pay by</span> 30/06/2026</div>
+    </div>
+    <div class="col barcode">|&#8202;||&#8202;|||&#8202;|&#8202;||||&#8202;|&#8202;|||&#8202;||&#8202;|&#8202;||||&#8202;|</div>
+  </div>
+
+  <div class="foot"><span>ClearBourne Water &middot; WB2-QTLY &middot; run 0426-114</span><span>Page 1 of 2</span></div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+  <div class="sidecode">FORM WB2-QTLY&nbsp;&nbsp;&nbsp;ACCT 8847 2210 55&nbsp;&nbsp;&nbsp;RUN 0426-114&nbsp;&nbsp;&nbsp;PRINTED AT DEPOT 7&nbsp;&nbsp;&nbsp;FORM WB2-QTLY&nbsp;&nbsp;&nbsp;ACCT 8847 2210 55</div>
+
+  <div class="runhead">
+    <div class="brand">ClearBourne Water
+      <small>Water and wastewater services for the Bourne Valley region</small>
+    </div>
+    <div class="runbox">
+      <div><span class="k">BILL DATE</span> 09/06/2026</div>
+      <div><span class="k">ACCOUNT</span> 8847 2210 55</div>
+      <div><span class="k">TARIFF CODE</span> WV-M-04</div>
+      <div><span class="k">PAGE</span> 2 OF 2</div>
+    </div>
+  </div>
+
+  <h2>Your consumption history</h2>
+  <div class="chartwrap">
+    <div class="chart">
+      <div class="bar-col"><div class="bar-val">31</div><div class="bar" style="height:52%"></div></div>
+      <div class="bar-col"><div class="bar-val">29</div><div class="bar" style="height:48%"></div></div>
+      <div class="bar-col"><div class="bar-val">27</div><div class="bar" style="height:45%"></div></div>
+      <div class="bar-col"><div class="bar-val">33</div><div class="bar" style="height:55%"></div></div>
+      <div class="bar-col"><div class="bar-val">38</div><div class="bar" style="height:63%"></div></div>
+      <div class="bar-col"><div class="bar-val">44</div><div class="bar" style="height:73%"></div></div>
+      <div class="bar-col"><div class="bar-val">47</div><div class="bar" style="height:78%"></div></div>
+      <div class="bar-col"><div class="bar-val">45</div><div class="bar" style="height:75%"></div></div>
+      <div class="bar-col"><div class="bar-val">36</div><div class="bar" style="height:60%"></div></div>
+      <div class="bar-col"><div class="bar-val">32</div><div class="bar" style="height:53%"></div></div>
+      <div class="bar-col"><div class="bar-val">30</div><div class="bar" style="height:50%"></div></div>
+      <div class="bar-col"><div class="bar-val">35</div><div class="bar" style="height:58%"></div></div>
+    </div>
+    <div class="chart-axis">
+      <div class="axis-lab">Jun 2025</div>
+      <div class="axis-lab">Jul 2025</div>
+      <div class="axis-lab">Aug 2025</div>
+      <div class="axis-lab">Sep 2025</div>
+      <div class="axis-lab">Oct 2025</div>
+      <div class="axis-lab">Nov 2025</div>
+      <div class="axis-lab">Dec 2025</div>
+      <div class="axis-lab">Jan 2026</div>
+      <div class="axis-lab">Feb 2026</div>
+      <div class="axis-lab">Mar 2026</div>
+      <div class="axis-lab">Apr 2026</div>
+      <div class="axis-lab">May 2026</div>
+    </div>
+    <p style="font-size:6.8pt;color:#555;margin:1.5mm 0 0 0;">Monthly consumption in cubic metres, estimated for months without an actual meter read. Based on this trend, we estimate your annual charge for 2027/28 at &pound;654.90 if your usage and current tariffs remain unchanged.</p>
+  </div>
+
+  <h2>How to pay</h2>
+  <div class="payopts">
+    <div class="payopt"><b>Direct debit</b><br>Already set up on this account. We will collect &pound;163.37 on 23/06/2026. No action needed.</div>
+    <div class="payopt"><b>Online or by phone</b><br>Pay at pay.clearbournewater.example or call 0345 604 8822, quoting account 8847 2210 55.</div>
+    <div class="payopt"><b>By post</b><br>Send a cheque payable to &ldquo;ClearBourne Water&rdquo; with the payment advice from page 1 to the address in the small print.</div>
+  </div>
+
+  <h2>Your tariff explained</h2>
+  <p style="font-size:8.2pt;line-height:1.5;margin:0 0 2mm 0;">Your charges are made up of a fixed standing charge, which covers the cost of maintaining pipes and connections regardless of use, and a volumetric charge for each cubic metre of water you use and return as wastewater. Current unit rates for tariff WV-M-04 are shown below. New unit rates are published each spring and take effect from 1 April; your next tariff change takes effect on 01/04/2027 and we will write to you separately beforehand.</p>
+  <table class="tariff">
+    <thead><tr><th>Charge</th><th class="r">Standing charge</th><th class="r">Unit rate</th></tr></thead>
+    <tbody>
+      <tr><td>Water supply</td><td class="r">21.23p/day</td><td class="r">&pound;1.5842/m&sup3;</td></tr>
+      <tr><td>Wastewater removal</td><td class="r">25.13p/day</td><td class="r">&pound;1.7621/m&sup3;</td></tr>
+    </tbody>
+  </table>
+
+  <div class="smallprint">
+    <p><b>ClearBourne Water</b> is a trading name of <b>Bourne Valley Water and Sewerage plc</b>, registered in England and Wales, company number 04217743, registered office Mill Race House, 4 Aldergate Business Park, Wexbridge, WX3 9TL. Bourne Valley Water and Sewerage plc is appointed as the water and sewerage undertaker for the Bourne Valley area under the Water Industry Act 1991.</p>
+    <p>If your account falls into arrears we may recover the debt through the county court, and in some circumstances this may affect your credit record. If you are struggling to pay, contact us before the due date; we offer WaterSure and payment matching schemes to eligible customers, and can arrange an alternative payment plan.</p>
+    <p>Your bill is calculated using either an actual meter reading or an estimate based on your recent history, as shown against each reading above. If a reading is estimated, we will correct your account once we obtain an actual reading, which may result in a higher or lower charge on a future bill.</p>
+    <p>This bill and any dispute arising from it are governed by our Charges Scheme and Codes of Practice, copies of which are available on request or at clearbournewater.example/charges. If you remain unhappy with how we have handled a complaint, you may refer it to the Consumer Council for Water (CCW), free of charge. Ofwat is the economic regulator for the water industry in England and Wales.</p>
+    <p>Leaflet ref. WB2/BILL/2026 &middot; layout revision 03/2019 &middot; printed on recycled stock. Calls to 0345 numbers cost no more than calls to standard geographic numbers.</p>
+  </div>
+
+  <div class="foot"><span>ClearBourne Water &middot; WB2-QTLY &middot; run 0426-114</span><span>Page 2 of 2</span></div>
+</div>
+
+</body>
+</html>

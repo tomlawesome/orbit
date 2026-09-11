@@ -1,0 +1,27 @@
+{
+  "name": "water bill, meter readings table as the date trap",
+  "filename": "fullpage-water-bill.pdf",
+  "expected": {
+    "dates": [
+      "2026-06-30"
+    ],
+    "provider": "Bourne Valley Water and Sewerage plc",
+    "reference": "8847 2210 55",
+    "dateRoles": [
+      {
+        "date": "2026-06-30",
+        "role": "due"
+      }
+    ],
+    "subtype": "Water bill",
+    "costMinor": 16337,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates/dateRoles carry only the payment due date, 30/06/2026. Everything else datelike is deliberately excluded: the billing period (01/03/2026-31/05/2026, printed prominently in the key-facts box), the bill/run date (09/06/2026), the direct debit collection date (23/06/2026), the tariff-change date (01/04/2027), the payment-received date (20/05/2026), the eight meter-reading dates in the readings table (28/05/24 through 24/02/26, the only dd/mm/yy strings on the page), the twelve month/year labels on the consumption chart's x-axis (Jun 2025-May 2026), and the small-print layout-revision stamp (03/2019).",
+    "provider is the legal name from the small print, 'Bourne Valley Water and Sewerage plc' (with company number 04217743), not the trading name 'ClearBourne Water' used everywhere else on the page including the masthead and footer.",
+    "reference is the customer account number 8847 2210 55, printed in the header run-box, up the sideways left-margin document code on both pages, and again on the payment-advice stub -- not the meter serial number M-2291487.",
+    "costMinor is the amount now due, £163.37 (16337p), shown in the boxed 'amount now due' banner, the balance block and the payment stub. It is not the total charges for the period (£159.31, itemised in the charge table and repeated as the first line of the balance block), not the balance brought forward (£14.06), not the payment received (-£10.00), and not the estimated annual charge quoted under the consumption chart for 2027/28 (£654.90). Amount now due = 159.31 + 14.06 - 10.00 = 163.37.",
+    "scheduleKind is omitted: this is a bill, not a renewal or a service record. recurrenceMonths is also omitted; the quarterly billing cycle is a billing frequency, not a stated renewal/service interval."
+  ]
+}
