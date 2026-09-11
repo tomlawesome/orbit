@@ -51,14 +51,49 @@ function fakeModel(...replies: string[]): MeaningTransport & { prompts: string[]
 }
 
 describe("choosing the provider where the page states it", () => {
-  it("takes the legal entity a brand is a trading name of, not the brand", () => {
+  it("takes the brand a plan is held with, not the parent behind it", () => {
     const line = "Fenwick Mobile is a trading name of Anglia Communications Networks Ltd, registered in England.";
     expect(chooseProviderByRules([
-      candidate("organisation", "Fenwick Mobile", ["other"], "Fenwick Mobile – Mobile Plan Summary"),
+      candidate("organisation", "Fenwick Mobile", [
+        { value: "provider", trigger: "is a trading name of" },
+      ], line),
       candidate("organisation", "of Anglia Communications Networks Ltd", [
         { value: "subsidiary", trigger: "a trading name of" },
       ], line),
-    ])).toBe("Anglia Communications Networks Ltd");
+    ])).toBe("Fenwick Mobile");
+  });
+
+  it("never answers with the parent when the page names no brand in front of it", () => {
+    const line = "A trading name of Alderway Communications Ltd · Registered office: Unit 14";
+    expect(chooseProviderByRules([
+      candidate("organisation", "of Alderway Communications Ltd", [
+        { value: "subsidiary", trigger: "A trading name of" },
+      ], line),
+    ])).toBeUndefined();
+  });
+
+  it("takes the firm that sold the policy over the underwriter behind it", () => {
+    const line = "Underwritten by Cambrian Re on behalf of Thornfield Assurance plc · arranged by Hedgerow Home Insurance Services Ltd";
+    expect(chooseProviderByRules([
+      candidate("organisation", "Cambrian Re Insurance Company Ltd", [
+        { value: "underwriter", trigger: "Underwritten by" },
+      ], line),
+      candidate("organisation", "of Thornfield Assurance plc", [
+        { value: "on-behalf-of", trigger: "on behalf of" },
+      ], line),
+      candidate("organisation", "Hedgerow Home Insurance Services Ltd", [
+        { value: "administrator", trigger: "arranged by" },
+      ], line),
+    ])).toBe("Hedgerow Home Insurance Services Ltd");
+  });
+
+  it("reads the intermediary as the firm the household deals with", () => {
+    const line = "Intermediary Hedgerow Home Insurance Services Ltd";
+    expect(chooseProviderByRules([
+      candidate("organisation", "Hedgerow Home Insurance Services Ltd", [
+        { value: "administrator", trigger: "Intermediary" },
+      ], line),
+    ])).toBe("Hedgerow Home Insurance Services Ltd");
   });
 
   it("takes the administrator, who is who the household deals with", () => {
@@ -108,6 +143,17 @@ describe("choosing the provider where the page states it", () => {
     ])).toBeUndefined();
   });
 
+  it("ignores print the reader's eye joins up but Tika does not", () => {
+    expect(chooseProviderByRules([
+      candidate("organisation", "UN DE RWR ITIN G", [
+        { value: "administrator", trigger: "Intermediary" },
+      ], "UN DE RWR ITIN G"),
+      candidate("organisation", "Intermediary Hedgerow Home Insurance Services Ltd", [
+        { value: "administrator", trigger: "Intermediary" },
+      ], "Intermediary Hedgerow Home Insurance Services Ltd"),
+    ])).toBe("Hedgerow Home Insurance Services Ltd");
+  });
+
   it("ignores a phrase that has not finished", () => {
     const line = "ClearBourne Water is a trading name of Bourne Valley Water and";
     expect(chooseProviderByRules([
@@ -133,12 +179,12 @@ describe("choosing the provider where the page states it", () => {
 
   it("says nothing when the page states two different principals", () => {
     expect(chooseProviderByRules([
-      candidate("organisation", "Alderway Communications Ltd", [
-        { value: "subsidiary", trigger: "a trading name of" },
-      ], "Kestrel is a trading name of Alderway Communications Ltd, in England"),
-      candidate("organisation", "Marchfield Holdings Ltd", [
-        { value: "subsidiary", trigger: "a trading name of" },
-      ], "Also a trading name of Marchfield Holdings Ltd, in England"),
+      candidate("organisation", "Colworth & Drake Insurance Services Ltd", [
+        { value: "administrator", trigger: "administered by" },
+      ], "administered by Colworth & Drake Insurance Services Ltd"),
+      candidate("organisation", "Marchfield Broking Ltd", [
+        { value: "administrator", trigger: "arranged by" },
+      ], "arranged by Marchfield Broking Ltd"),
     ])).toBeUndefined();
   });
 
@@ -174,10 +220,14 @@ describe("the excerpt the model is asked about", () => {
       candidate("organisation", "Palisade Insurance Company plc", [
         { value: "underwriter", trigger: "Underwritten by" },
       ], "Underwritten by Palisade Insurance Company plc"),
+      candidate("organisation", "of Marchfield Holdings Ltd", [
+        { value: "subsidiary", trigger: "a trading name of" },
+      ], "Kestrel Travel is a trading name of Marchfield Holdings Ltd"),
       candidate("organisation", "Kestrel Travel Insurance Services Ltd", ["other"]),
     ]);
 
     expect(excerpt).not.toContain("Palisade");
+    expect(excerpt).not.toContain("Marchfield");
     expect(excerpt).toContain("Kestrel Travel Insurance Services Ltd");
   });
 

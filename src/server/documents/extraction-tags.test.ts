@@ -44,6 +44,19 @@ describe("a label beside the candidate", () => {
     expect(tagValues("Making a claim continued", "heading")).toContain("section");
   });
 
+  it("names the brand in front of a trading-name sentence, and the parent behind it", () => {
+    const line = "Fenwick Mobile is a trading name of Anglia Communications Networks Ltd";
+    expect(tagValues(line, "organisation", "Fenwick")).toContain("provider");
+    expect(tagValues(line, "organisation", "of Anglia")).toContain("subsidiary");
+  });
+
+  it("reads the firm that sold or arranged a policy as one the household deals with", () => {
+    const arranged = "Underwritten by MERIDIAN COVER · arranged by Colworth & Drake Insurance Services Ltd";
+    expect(tagValues(arranged, "organisation", "Colworth")).toContain("administrator");
+    const sold = "Intermediary Hedgerow Home Insurance Services Ltd";
+    expect(tagValues(sold, "organisation", "Intermediary Hedgerow")).toContain("administrator");
+  });
+
   it("quotes the words that justified the tag, verbatim", () => {
     const tag = candidate("Renewal premium £612.40", "amount").tags[0];
     expect(tag).toEqual({ value: "total", trigger: "Renewal premium", source: "label" });

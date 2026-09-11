@@ -7,10 +7,12 @@
 // they state a fact about the language on the page rather than about where
 // something sits on it:
 //
-//   "X is a trading name of Y"   Y is the legal entity the household's
-//                                account is held by; X is a brand.
-//   "administered by Y"          Y runs the plan, so Y is who the
-//                                household deals with.
+//   "X is a trading name of Y"   X is who the household deals with; Y, the
+//                                parent, is never the provider.
+//   "administered by Y",         Y runs or sold the plan, so Y is who the
+//   "arranged by Y", "sold by    household deals with. For insurance that
+//   Y", "your broker is Y"       is always the seller: the underwriter
+//                                behind it will not deal with them.
 //   "provided by Y", "your
 //    supplier is Y", "trading
 //    as Y"                       the page says so outright.
@@ -49,32 +51,35 @@ function words(value: string): string[] {
 /**
  * The tags that say who the household deals with, best evidence first.
  *
- * - `provider`: the page said so outright.
- * - `subsidiary`: "X is a trading name of Y" -- the contract is with Y.
- * - `administrator`: the body that runs the plan is the one the household
- *   writes to and pays, which is what this field means.
- * - `on-behalf-of`: the principal a signature was given for.
+ * - `provider`: the page said so outright, which includes the brand in
+ *   front of "is a trading name of".
+ * - `administrator`: the body that runs or sold the plan is the one the
+ *   household writes to and pays, which is what this field means.
+ * - `on-behalf-of`: the principal a signature was given for, heard last
+ *   because it also fits an insurer ("underwritten by A on behalf of B"),
+ *   which is never who the household deals with.
  *
- * `underwriter`, `regulator` and `installer` are absent deliberately: each
- * names a body a page is obliged to mention, none of which the household
- * holds an account with.
+ * `underwriter`, `regulator`, `installer` and `subsidiary` are absent
+ * deliberately: each names a body a page is obliged to mention, none of
+ * which the household holds an account with.
  */
-const PRINCIPAL_TAGS = ["provider", "subsidiary", "administrator", "on-behalf-of"];
+const PRINCIPAL_TAGS = ["provider", "administrator", "on-behalf-of"];
 
 /**
- * Which `administrator` trigger is evidence of a provider. "Administered
- * by" says who runs the household's plan. "Managed by" and "arranged by"
- * describe someone else's job -- who runs an investment fund, who sold the
- * policy -- and neither says the household deals with them.
+ * Which `administrator` trigger is evidence of a provider: the words for
+ * running or selling the household's own plan. "Managed by" is not among
+ * them -- it says who runs an investment fund inside the plan, which the
+ * household has no dealings with.
  */
-const ADMINISTERS = /administer/iu;
+const SELLS_OR_ADMINISTERS = /administer|arrang|sold by|intermediary|broker/iu;
 
 /**
  * Tags that say why an organisation is on the page, and it is never
- * because the household deals with it. A candidate the page labels only
- * these ways is dropped before the model sees the shortlist.
+ * because the household deals with it -- including `subsidiary`, the
+ * parent behind a trading name. A candidate the page labels only these
+ * ways is dropped before the model sees the shortlist.
  */
-const NEVER_THE_PROVIDER = ["regulator", "underwriter", "installer"];
+const NEVER_THE_PROVIDER = ["regulator", "underwriter", "installer", "subsidiary"];
 
 const LEGAL_SUFFIXES = ["ltd", "ltd.", "limited", "plc", "plc.", "llp", "cic", "llc", "inc", "inc."];
 
@@ -96,6 +101,13 @@ const PERSON_INITIALS = /\b[A-Z]\.\s*(?:[A-Z]\.\s*)?[A-Z][a-z]/u;
 /** A word no name ends on: the phrase carries on somewhere this candidate
  * does not. */
 const UNFINISHED = /^(?:and|&|of|the|for|to|with|by|a|an)$/iu;
+/**
+ * A word that is one letter. Tika reads letter-spaced print as words --
+ * "UN DE RWR ITIN G" for a heading set wide -- and whatever those letters
+ * spell, they are not a name anyone could ring. `&` is a word of its own in
+ * real names, so only letters count.
+ */
+const LETTER_BY_LETTER = /(?:^|\s)[A-Za-z](?=\s|$)/u;
 
 /**
  * A candidate that cannot be a provider whatever the page says about it: a
@@ -106,6 +118,7 @@ function unusableName(value: string): boolean {
   const parts = words(value);
   if (parts.length < 2) return true;
   if (PERSON_TITLE.test(value) || PERSON_INITIALS.test(value)) return true;
+  if (LETTER_BY_LETTER.test(value)) return true;
   return UNFINISHED.test(parts[parts.length - 1]);
 }
 
@@ -162,7 +175,7 @@ function nameOf(candidate: TaggedCandidate, trigger: string): string | undefined
  * household deals with. */
 function statesTheProvider(tagValue: string, trigger: string): boolean {
   if (!PRINCIPAL_TAGS.includes(tagValue)) return false;
-  return tagValue === "administrator" ? ADMINISTERS.test(trigger) : true;
+  return tagValue === "administrator" ? SELLS_OR_ADMINISTERS.test(trigger) : true;
 }
 
 /**
