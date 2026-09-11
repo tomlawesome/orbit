@@ -1,14 +1,14 @@
-// Stage 3 of ADR-0026 for the two meaning-shaped fields: `provider` and
-// `subtype`. Every other field stage 3 decides is a rule over a tag
-// (`extraction-choose.ts`); these two go to the model, over the shortlist
-// stage 1 found and stage 2 labelled.
+// Stage 3 of ADR-0026 with the model available: the model chooses EVERY
+// field, from a shortlist the sieves shrank and ranked (owner, 2026-09-11 --
+// "everything is supposed to go to the model for final choice"). The rules
+// in this file and in `extraction-choose.ts` rank the shortlist and answer
+// only where there is no model to ask.
 //
-// The model is the chooser, but only over what the sieves kept. Several
-// independent sieves read each organisation first
-// (`extraction-provider-sieves.ts`); the rules answer where two of them
-// agree, and the model's pick counts only where at least one did. The
-// language facts among those sieves are these, and they state a fact about
-// the words on the page rather than about where something sits on it:
+// The shortlist is what the sieves kept. Several independent sieves read
+// each organisation first (`extraction-provider-sieves.ts`), and how well
+// they spoke for a name is the order the model sees it in. The language
+// facts among those sieves are these, and they state a fact about the words
+// on the page rather than about where something sits on it:
 //
 //   "X is a trading name of Y"   X is who the household deals with; Y, the
 //                                parent, is never the provider.
@@ -27,38 +27,42 @@
 //
 // Subtype has no rules at all. It answers "what type of thing is this" --
 // insurance, a plan, a membership -- from the generic taxonomy in
-// `subtype-taxonomy.json` (owner, 2026-09-11), so the model is given the
-// shortlist and the taxonomy's own names to choose between, and an answer
-// that is not one of those names is refused.
+// `subtype-taxonomy.json` (owner, 2026-09-11). Its shortlist is the handful
+// of taxonomy phrases the page's own words support, so the model chooses
+// between eight phrases rather than between 51 kinds and 63 qualifiers.
 //
 // Nothing here reads where a block sits on the page, how it is capitalised,
 // or what a document title usually looks like. The 24 tuning documents are
 // samples of what a page could be, not a definition of one (owner,
 // 2026-09-11), so a rule that would not hold on a page nobody has seen does
-// not belong in this file. Where the page states none of the facts above,
-// the field goes to the model with the shortlist and its blocks -- a few
-// hundred characters, never the page (ADR-0026 stage 3) -- and the answer
-// is taken only if the shortlist carries it.
+// not belong in this file. Every field goes to the model with its shortlist
+// and the blocks -- a few hundred characters, never the page (ADR-0026
+// stage 3) -- `none` is always an allowed answer, and an answer the
+// shortlist does not carry leaves the field blank.
 
 import {
   bareName,
   LANGUAGE_FACT,
   PRINCIPAL_TAGS,
-  sameOrganisation as samePrintedOrganisation,
   statesTheProvider,
 } from "./extraction-provider-sieves";
 import { classifyProvider } from "./extraction-scoring";
+import {
+  bestSupported,
+  comparable,
+  entryChosen,
+  replyLines,
+  shortlistExcerpt,
+  SHORTLIST_LIMIT,
+  type EntryMatch,
+  type ShortlistEntry,
+} from "./extraction-shortlist";
 import { STRENGTH_STATED, type Tag, type TaggedCandidate } from "./extraction-stages";
 import { locateDates, type DocumentDateRole } from "./suggestions";
 import subtypeTaxonomyJson from "./subtype-taxonomy.json";
 import { trimFieldValue } from "./value-trim";
 
 // ------------------------------------------------------------------ shared
-
-/** Case and whitespace runs ignored -- the comparison the scorer makes. */
-function comparable(value: string): string {
-  return value.replace(/\s+/gu, " ").trim().toLowerCase();
-}
 
 function words(value: string): string[] {
   return value.trim().split(/\s+/u).filter((word) => word.length > 0);
@@ -430,46 +434,45 @@ export function chooseProviderByRules(candidates: readonly TaggedCandidate[]): s
   return best.claim.name;
 }
 
-/**
- * Whether the model's pick is one the sieves also kept.
- *
- * The model picks confidently and, on paper nobody has seen, wrongly: on
- * the hold-out it cost more than answering blank. So its answer counts only
- * where at least one sieve read the same name as the provider, or where the
- * page gave exactly one name several sieves agreed about and the model
- * chose that one. Otherwise the field stays blank (owner, 2026-09-11).
- */
-export function modelPickIsGrounded(
-  answer: string,
-  candidates: readonly TaggedCandidate[],
-): boolean {
-  const claims = providerClaims(candidates);
-  const picked = claims.find((claim) => samePrintedOrganisation(claim.name, answer));
-  if (picked && picked.sieves.size >= 1) return true;
-  const agreed = claims.filter((claim) => agreement(claim) >= AGREEING_SIEVES);
-  return agreed.length === 1 && samePrintedOrganisation(agreed[0].name, answer);
-}
-
 // ------------------------------------------------------------------- model
 
 /**
- * How the model is reached: a function rather than a URL, so a test can
- * answer without a container and the endpoint stays in one place. Takes the
- * rendered prompt, returns the model's raw reply.
+ * How a model is reached: a function rather than a URL, so a test can answer
+ * without a container, and so stage 3 is not tied to one model (owner,
+ * 2026-09-11: "let *a* model choose the most likely -- that does NOT have to
+ * be the NuExtract one"). Takes the plain-English question, returns the
+ * model's raw reply, which `replyLines` reads whatever shape it is in.
  */
-export type MeaningTransport = (prompt: string) => Promise<string>;
+export type MeaningTransport = (question: string) => Promise<string>;
 
-const MODEL = "hf.co/numind/NuExtract3-GGUF:Q4_K_M";
-const ENDPOINT = "http://orbit-ollama:11434/api/generate";
+/**
+ * The model both transports use unless a setting names another. It is the
+ * only model pulled on `orbit-ollama` today, so swapping the chooser is a
+ * setting and a `docker exec ollama pull`, never a code change.
+ */
+const DEFAULT_MODEL = "hf.co/numind/NuExtract3-GGUF:Q4_K_M";
+const GENERATE_ENDPOINT = "http://orbit-ollama:11434/api/generate";
+const CHAT_ENDPOINT = "http://orbit-ollama:11434/api/chat";
 /** A shortlist is a few hundred characters, not a document: a call needing
  * longer than this has not understood the question. */
 const DEADLINE_MS = 60_000;
+/** Deterministic, as ADR-0025 requires: two runs over one shortlist give one
+ * answer. */
+const MODEL_OPTIONS = { temperature: 0, seed: 20260910, num_ctx: 8192 };
+
+/** Which model the chooser asks. `EXTRACTION_CHOOSER_MODEL` names another
+ * one without touching this file. */
+export function chooserModel(): string {
+  const named = process.env.EXTRACTION_CHOOSER_MODEL?.trim();
+  return named ? named : DEFAULT_MODEL;
+}
 
 /**
  * NuExtract 3's own structured-mode prompt, rendered here because Ollama's
- * template cannot reach the template variable (the same reason
- * `tmp/nuextract-score.ts` renders it). Tag for tag the model's native
- * format, posted with `raw: true`.
+ * template cannot reach the template variable. Tag for tag the model's
+ * native format, posted with `raw: true`. The question goes in as the
+ * document and the answer comes back as one field, so the same
+ * plain-English question serves both transports.
  */
 export function structuredPrompt(template: Record<string, string>, document: string): string {
   return "<|im_start|>user\n" +
@@ -481,25 +484,55 @@ export function structuredPrompt(template: Record<string, string>, document: str
     "<|im_start|>assistant\n<think>\n\n</think>\n\n";
 }
 
-/** The fixed endpoint of ADR-0025, deterministic (`temperature 0`, a fixed
- * seed) so two runs over one shortlist give one answer. */
-export const ollamaMeaningTransport: MeaningTransport = async (prompt) => {
-  const response = await fetch(ENDPOINT, {
+/** NuExtract 3 in its native structured mode, on the fixed endpoint of
+ * ADR-0025. */
+export const nuextractTransport: MeaningTransport = async (question) => {
+  const response = await fetch(GENERATE_ENDPOINT, {
     signal: AbortSignal.timeout(DEADLINE_MS),
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      model: MODEL,
-      prompt,
+      model: chooserModel(),
+      prompt: structuredPrompt({ answer: "" }, question),
       raw: true,
       stream: false,
-      options: { temperature: 0, seed: 20260910, num_ctx: 8192 },
+      options: MODEL_OPTIONS,
     }),
   });
   const body = await response.json() as { response?: string; error?: string };
   if (body.error) return "";
   return body.response ?? "";
 };
+
+/** Any chat model Ollama is serving, asked the same plain-English question.
+ * Nothing in the question is NuExtract-shaped, so the answer comes back as
+ * a number or a word and `replyLines` reads it the same way. */
+export const ollamaChatTransport: MeaningTransport = async (question) => {
+  const response = await fetch(CHAT_ENDPOINT, {
+    signal: AbortSignal.timeout(DEADLINE_MS),
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: chooserModel(),
+      messages: [{ role: "user", content: question }],
+      stream: false,
+      options: MODEL_OPTIONS,
+    }),
+  });
+  const body = await response.json() as { message?: { content?: string }; error?: string };
+  if (body.error) return "";
+  return body.message?.content ?? "";
+};
+
+/**
+ * The transport the evaluations use: NuExtract's native mode, unless
+ * `EXTRACTION_CHOOSER_MODEL` names another model, in which case the generic
+ * chat call carries it. Swapping the chooser is that setting and nothing
+ * else.
+ */
+export function chooserTransport(): MeaningTransport {
+  return process.env.EXTRACTION_CHOOSER_MODEL?.trim() ? ollamaChatTransport : nuextractTransport;
+}
 
 /**
  * Every printing of every organisation the page could mean -- one entry per
@@ -529,119 +562,189 @@ function organisationsWorthAsking(candidates: readonly TaggedCandidate[]): Tagge
  * single word, a phrase the sieve cut mid-flow. What is left is a handful
  * of real names, which is the choice the model is asked to make.
  */
-function providerShortlist(candidates: readonly TaggedCandidate[]): Array<{
+function providerNames(candidates: readonly TaggedCandidate[]): Array<{
   name: string;
   candidate: TaggedCandidate;
 }> {
-  const shortlist: Array<{ name: string; candidate: TaggedCandidate }> = [];
+  const named: Array<{ name: string; candidate: TaggedCandidate }> = [];
   const seen = new Set<string>();
   for (const candidate of organisationsWorthAsking(candidates)) {
     const name = nameOf(candidate, "");
     if (!name || seen.has(comparable(name))) continue;
     seen.add(comparable(name));
-    shortlist.push({ name, candidate });
+    named.push({ name, candidate });
   }
-  return shortlist;
-}
-
-/** At most this much excerpt: the shortlist and its blocks, never the page
- * (ADR-0026 stage 3). */
-const EXCERPT_LIMIT = 1_500;
-/** The subtype question needs a few hundred characters, not the shortlist
- * entire: it is answered from what the page is about, not from its detail.
- * The three parts have their own room inside it, so the headings cannot
- * crowd out the names and the amounts. */
-const SUBTYPE_EXCERPT_LIMIT = 700;
-const HEADINGS_BUDGET = 380;
-const NAMES_BUDGET = 180;
-const AMOUNTS_BUDGET = 140;
-/** How many labelled amounts say what is being paid for before the rest are
- * repetition. */
-const AMOUNTS_SHOWN = 4;
-/** Enough of a block to show what labelled a candidate, no more. */
-const BLOCK_LIMIT = 140;
-
-function excerptLines(heading: string, lines: readonly string[], limit = EXCERPT_LIMIT): string {
-  let excerpt = heading;
-  for (const line of lines) {
-    if (excerpt.length + line.length + 1 > limit) break;
-    excerpt += `\n${line}`;
-  }
-  return excerpt;
-}
-
-/** The organisations of the shortlist, each with what the page called it
- * and the block it was found in, deduplicated. */
-export function providerExcerpt(candidates: readonly TaggedCandidate[]): string {
-  const lines: string[] = [];
-  for (const { name, candidate } of providerShortlist(candidates)) {
-    const labels = candidate.tags
-      .map((tag) => tag.trigger.trim())
-      .filter((trigger) => trigger.length > 0 && trigger.length < 40);
-    const label = labels.length > 0 ? ` (the page says: ${labels.join("; ")})` : "";
-    lines.push(`${name}${label}: "${candidate.line.slice(0, BLOCK_LIMIT)}"`);
-  }
-  return excerptLines("Organisations named on this page:", lines);
+  return named;
 }
 
 /**
- * What the page is about, as the shortlist has it: the headings stage 2
- * found, with the title first, then the organisations and the amounts. A
- * heading says what the document calls itself, a name says what trade the
- * sender is in and a labelled amount says what is being paid for -- which
- * together are enough to say what type of thing the page is about, without
- * the page.
+ * The provider shortlist: every organisation the sieves kept, best-spoken-for
+ * first, each with the block it was printed in and the sieves that kept it.
+ *
+ * The rules' own ranking is the order (`agreement`, how direct the page's
+ * statement was, how good a reason the best sieve had) and that is all the
+ * rules do here: the model picks, or answers none.
  */
-export function subtypeExcerpt(candidates: readonly TaggedCandidate[]): string {
+export function providerShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
+  const named = providerNames(candidates);
+  const blockFor = (name: string) => named.find((entry) => bareName(entry.name) === bareName(name));
+  const entries: ShortlistEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const claim of providerClaims(candidates)) {
+    const key = bareName(claim.name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const found = blockFor(claim.name);
+    const labels = (found?.candidate.tags ?? [])
+      .map((tag) => tag.trigger.trim())
+      .filter((trigger) => trigger.length > 0 && trigger.length < 40);
+    entries.push({
+      value: claim.name,
+      display: claim.name,
+      line: found?.candidate.line ?? "",
+      why: [
+        `sieves: ${[...claim.sieves].join(", ")}`,
+        ...(labels.length > 0 ? [`the page says: ${labels.join("; ")}`] : []),
+        ...(claim.against.size > 0 ? [`read as the company behind the name by: ${[...claim.against].join(", ")}`] : []),
+      ],
+      support: agreement(claim) * 2 + claim.strength + (PRINCIPAL_TAGS.length - claim.principal),
+    });
+  }
+
+  // A name no sieve spoke for is still a name on the page, and the model may
+  // still be the one to recognise it. It goes last, which on a page with
+  // eight better-spoken-for names is off the end of the list.
+  for (const { name, candidate } of named) {
+    const key = bareName(name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push({
+      value: name,
+      display: name,
+      line: candidate.line,
+      why: ["no sieve spoke for it"],
+      support: 0,
+    });
+  }
+
+  return bestSupported(entries);
+}
+
+/** The page's own words, as the subtype question may read them: what the
+ * document calls itself, who it is from, and what its labelled figures are
+ * for. Never the page -- only the blocks stage 1 kept. */
+function subtypeEvidence(candidates: readonly TaggedCandidate[]): Array<{ text: string; line: string }> {
+  const evidence: Array<{ text: string; line: string }> = [];
   const headings = candidates.filter((candidate) => candidate.kind === "heading");
   const titleFirst = [
     ...headings.filter((candidate) => candidate.tags.some((tag) => tag.value === "title")),
     ...headings.filter((candidate) => !candidate.tags.some((tag) => tag.value === "title")),
   ];
-
-  const amounts: string[] = [];
+  for (const heading of titleFirst) evidence.push({ text: heading.value, line: heading.line });
+  for (const { name, candidate } of providerNames(candidates)) {
+    evidence.push({ text: name, line: candidate.line });
+  }
   for (const candidate of candidates) {
-    if (candidate.kind !== "amount" || !candidate.currency) continue;
-    const labels = candidate.tags.map((tag) => tag.trigger.trim()).filter((trigger) => trigger.length > 0);
-    if (labels.length === 0 || amounts.length >= AMOUNTS_SHOWN) continue;
-    amounts.push(`${labels[0]} ${candidate.currency} ${(Number(candidate.value) / 100).toFixed(2)}`);
+    if (candidate.kind !== "amount") continue;
+    for (const tag of candidate.tags) {
+      const trigger = tag.trigger.trim();
+      if (trigger) evidence.push({ text: trigger, line: candidate.line });
+    }
   }
-  // Whole names, cut at a name and never mid-word: a half-written name
-  // tells the model nothing and invites it to finish the word itself.
-  const names: string[] = [];
-  let namesRoom = Math.min(NAMES_BUDGET, BLOCK_LIMIT) - "Named on the page: ".length;
-  for (const { name } of providerShortlist(candidates)) {
-    if (namesRoom - name.length - 2 < 0) break;
-    namesRoom -= name.length + 2;
-    names.push(name);
-  }
-
-  // Each kind gets its own room. A page with forty headings would otherwise
-  // spend the whole excerpt on them and never say who sent it or what is
-  // being paid for, which is half of what the question needs.
-  const lines = [
-    ...within(titleFirst.map((candidate) => candidate.value), HEADINGS_BUDGET),
-    ...(names.length > 0 ? within([`Named on the page: ${names.join(", ")}`], NAMES_BUDGET) : []),
-    ...(amounts.length > 0 ? within([`Amounts printed: ${amounts.join("; ")}`], AMOUNTS_BUDGET) : []),
-  ];
-  return excerptLines("What this page prints:", lines, SUBTYPE_EXCERPT_LIMIT);
+  return evidence;
 }
 
-/** As many distinct lines as fit in `budget`, each cut to a block's worth,
- * in the order given. */
-function within(lines: readonly string[], budget: number): string[] {
-  const kept: string[] = [];
-  const seen = new Set<string>();
-  let used = 0;
-  for (const line of lines) {
-    const value = line.trim().slice(0, BLOCK_LIMIT);
-    if (!value || seen.has(comparable(value))) continue;
-    if (used + value.length + 1 > budget) break;
-    seen.add(comparable(value));
-    used += value.length + 1;
-    kept.push(value);
+/** How many of each taxonomy group survive into the combinations, so a page
+ * mentioning four trades does not produce sixty-three phrases. */
+const TOP_TAXONOMY_GROUPS = 4;
+/** Places kept for a bare kind, so "Insurance" is still on the list when
+ * the page also says "home" often enough to fill it with combinations. */
+const BARE_KIND_SLOTS = 3;
+
+interface TaxonomyHit {
+  group: TaxonomyGroup;
+  /** How many of the page's own phrases carried one of the group's words. */
+  hits: number;
+  /** The first block one was found in. */
+  line: string;
+  /** The word the page actually printed. */
+  printed: string;
+}
+
+/** Which taxonomy groups the page's own words support, most-supported
+ * first. A word counts once per phrase it appears in, so a heading naming
+ * the trade twice is one reason and not two. */
+function taxonomyHits(
+  groups: readonly TaxonomyGroup[],
+  evidence: ReadonlyArray<{ text: string; line: string }>,
+): TaxonomyHit[] {
+  const found: TaxonomyHit[] = [];
+  for (const group of groups) {
+    let hits = 0;
+    let line = "";
+    let printed = "";
+    for (const phrase of evidence) {
+      const synonym = group.synonyms.find((word) =>
+        new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\b`, "iu").test(phrase.text));
+      if (synonym === undefined) continue;
+      hits += 1;
+      if (!line) {
+        line = phrase.line;
+        printed = synonym;
+      }
+    }
+    if (hits > 0) found.push({ group, hits, line, printed });
   }
-  return kept;
+  return found.sort((left, right) => right.hits - left.hits);
+}
+
+/**
+ * The subtype shortlist: the taxonomy phrases the page's own words support,
+ * best-supported first.
+ *
+ * The taxonomy has 51 kinds and 63 qualifiers, and asking a model to choose
+ * between 3,000 phrases is asking it to write one. So the page's own words
+ * -- the headings, the names, what the figures are labelled -- pick a
+ * handful of groups, the taxonomy's combination rules compose them, and the
+ * model chooses between those or answers none.
+ */
+export function subtypeShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
+  const evidence = subtypeEvidence(candidates);
+  const kinds = taxonomyHits(TAXONOMY.kinds, evidence).slice(0, TOP_TAXONOMY_GROUPS);
+  const qualifiers = taxonomyHits(TAXONOMY.qualifiers, evidence).slice(0, TOP_TAXONOMY_GROUPS);
+
+  const entry = (value: string, hit: TaxonomyHit, support: number, why: string[]): ShortlistEntry => ({
+    value,
+    display: value,
+    line: hit.line,
+    why,
+    support,
+  });
+
+  const bare = kinds.map((kind) =>
+    entry(kind.group.name, kind, kind.hits, [`the page prints "${kind.printed}"`]));
+  const composed: ShortlistEntry[] = [];
+  for (const qualifier of qualifiers) {
+    for (const kind of kinds) {
+      composed.push(entry(
+        `${qualifier.group.name} ${kind.group.name}`,
+        kind,
+        kind.hits + qualifier.hits,
+        [`the page prints "${qualifier.printed}" and "${kind.printed}"`],
+      ));
+    }
+    if (!TAXONOMY.combinations.standalone.includes(qualifier.group.name)) continue;
+    composed.push(entry(
+      qualifier.group.name,
+      qualifier,
+      qualifier.hits,
+      [`the page prints "${qualifier.printed}"`],
+    ));
+  }
+
+  const reserved = bestSupported(bare, BARE_KIND_SLOTS);
+  return bestSupported([...reserved, ...bestSupported(composed, SHORTLIST_LIMIT - reserved.length)]);
 }
 
 // ------------------------------------------------------- subtype taxonomy
@@ -659,285 +762,239 @@ interface SubtypeTaxonomy {
 
 const TAXONOMY = subtypeTaxonomyJson as SubtypeTaxonomy;
 
-/** The group whose name or any synonym the answer is, or nothing. Case and
- * whitespace ignored, as the scorer ignores them. */
-function taxonomyGroupFor(groups: readonly TaxonomyGroup[], answer: string): TaxonomyGroup | undefined {
-  const wanted = comparable(answer);
-  if (!wanted) return undefined;
-  return groups.find((group) =>
-    comparable(group.name) === wanted || group.synonyms.some((synonym) => comparable(synonym) === wanted));
-}
+// --------------------------------------------------- asking a model to pick
 
 /**
- * The two questions the model is asked, and the only answers it may give.
- *
- * The taxonomy's group names are the vocabulary: 51 kinds and 63
- * qualifiers, short enough to print in the prompt, and the answer is
- * refused unless it is one of them or one of their synonyms. A model that
- * invents a type of document has not chosen from the list, and an invented
- * answer is exactly what the field must not carry.
+ * What one question says: the field's own name for what is being chosen,
+ * and the heading over the list.
  */
-function subtypeInstruction(): string {
-  const kinds = TAXONOMY.kinds.map((group) => group.name).join(", ");
-  const qualifiers = TAXONOMY.qualifiers.map((group) => group.name).join(", ");
-  return [
-    `kind_of_thing must be one of: ${kinds}.`,
-    `what_it_is_for must be one of: ${qualifiers}.`,
+interface ShortlistQuestion {
+  /** The one thing being chosen, in the household's words. */
+  asks: string;
+  /** What the list is, printed above it. */
+  heading: string;
+}
+
+/** Every question ends the same way, because every field may answer none
+ * (ADR-0026, amended 2026-09-11). */
+const HOW_TO_ANSWER =
+  "Answer with the number of one entry from the list, and nothing else. Answer none if none of them is it.";
+
+/**
+ * One field's question, put to the model over its shortlist.
+ *
+ * Plain English and a numbered list, so any model can answer and any
+ * transport can carry it: the reply is read leniently (`entryChosen`) and
+ * grounded against the list, so an answer that is not on it leaves the
+ * field blank.
+ */
+export async function pickFromShortlist(
+  question: ShortlistQuestion,
+  entries: readonly ShortlistEntry[],
+  transport: MeaningTransport,
+  match: EntryMatch = {},
+): Promise<ShortlistEntry | undefined> {
+  if (entries.length === 0) return undefined;
+  const asked = [
+    question.asks,
+    HOW_TO_ANSWER,
+    "",
+    shortlistExcerpt(question.heading, entries),
   ].join("\n");
-}
-
-/**
- * The answer composed the way the taxonomy combines its groups: a kind on
- * its own, a qualifier in front of a kind, or -- for the qualifiers the
- * taxonomy lets stand alone, "MOT", "Council tax" -- the qualifier by
- * itself. Always the canonical group names, never the synonym the model
- * happened to use, so the value reads the same whatever it answered.
- */
-function composeSubtype(kind: string | undefined, qualifier: string | undefined): string | undefined {
-  const kindGroup = kind === undefined ? undefined : taxonomyGroupFor(TAXONOMY.kinds, kind);
-  const qualifierGroup = qualifier === undefined ? undefined : taxonomyGroupFor(TAXONOMY.qualifiers, qualifier);
-  if (kindGroup && qualifierGroup) return `${qualifierGroup.name} ${kindGroup.name}`;
-  if (kindGroup) return kindGroup.name;
-  if (qualifierGroup && TAXONOMY.combinations.standalone.includes(qualifierGroup.name)) return qualifierGroup.name;
-  return undefined;
-}
-
-/** The model may answer with a bare string, a JSON object matching the
- * template, or a one-element array of either. */
-function answerFrom(raw: string, field: string): string | undefined {
-  const text = raw.trim();
-  if (!text) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return text;
-  }
-  const pick = (value: unknown): string | undefined => {
-    if (typeof value === "string") return value.trim() || undefined;
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        const found = pick(entry);
-        if (found !== undefined) return found;
-      }
-      return undefined;
-    }
-    if (value && typeof value === "object" && field in value) {
-      return pick((value as Record<string, unknown>)[field]);
-    }
-    return undefined;
-  };
-  return pick(parsed);
-}
-
-/**
- * The model's answer, only if the shortlist carries it.
- *
- * A provider must BE one of the organisations the sieve found, compared the
- * way the scorer compares providers; a title must be printed inside one of
- * the heading blocks. Anything else -- a name assembled out of the page, a
- * title rewritten into better English -- is refused and the field stays
- * blank (ADR-0025 section 3).
- */
-function groundedProvider(answer: string, candidates: readonly TaggedCandidate[]): string | undefined {
-  for (const { name, candidate } of providerShortlist(candidates)) {
-    if (sameOrganisation(name, answer)) return trimFieldValue("provider", answer.trim(), candidate.line);
+  const raw = await transport(asked);
+  for (const line of replyLines(raw)) {
+    const chosen = entryChosen(line, entries, match);
+    if (chosen) return chosen;
+    if (comparable(line).startsWith("none")) return undefined;
   }
   return undefined;
 }
 
-// ---------------------------------------------------------------- cost
-
-/** One of the figures the rules could not choose between, as the model is
- * shown it: the amount as the page printed it, and the block it sat in. */
-export interface AmountChoice {
-  /** Minor units, as the sieve and the scorer compare them. */
-  value: string;
-  currency?: string;
-  /** The Tika block the figure was printed in. */
-  line: string;
-}
-
-/** The figure written the way the page would print it, which is how the
- * model is asked about it and how its answer is read back. */
-function printedAmount(choice: AmountChoice): string {
-  const symbol = choice.currency === "GBP" ? "£" : choice.currency === "EUR" ? "€" : choice.currency === "USD" ? "$" : "";
-  return `${symbol}${(Number(choice.value) / 100).toFixed(2)}`;
-}
+// ---------------------------------------------------------------- provider
 
 /**
- * The amounts the rules left open, with the words printed around each.
- *
- * The same bargain as `providerExcerpt`: the shortlist and its blocks, a
- * few hundred characters, never the page.
+ * Which of the organisations the sieves kept is the one the household deals
+ * with. The pick is trimmed against the block it was printed in, as every
+ * chosen value is (`value-trim`, #965).
  */
-export function costExcerpt(offered: readonly AmountChoice[]): string {
-  const lines = offered.map((choice) =>
-    `${printedAmount(choice)}: "${choice.line.slice(0, BLOCK_LIMIT)}"`);
-  return excerptLines("Amounts printed on this page, with the line each was printed on:", lines);
+export async function chooseProviderWithModel(
+  entries: readonly ShortlistEntry[],
+  transport: MeaningTransport,
+): Promise<string | undefined> {
+  const chosen = await pickFromShortlist(
+    {
+      asks: "Which of these organisations does this household hold the thing with -- who they pay, " +
+        "who writes to them? Not the regulator, the underwriter or the installer.",
+      heading: "Organisations named on this page, with the line each was printed on:",
+    },
+    entries,
+    transport,
+    { matches: (answer, entry) => sameOrganisation(entry.value, answer) },
+  );
+  return chosen === undefined ? undefined : trimFieldValue("provider", chosen.value, chosen.line);
 }
 
-function costInstruction(): string {
-  return [
-    "amount_this_document_costs must be one of the amounts listed below, written exactly as it is listed.",
-    "Choose what the household has to pay for the thing this document is about.",
-    "Answer none if none of them is that.",
-  ].join("\n");
+// ----------------------------------------------------------------- subtype
+
+/** Which of the taxonomy phrases the page's words support is what this
+ * document is about. The phrases are the taxonomy's own group names, so the
+ * answer reads the same whichever page produced it. */
+export async function chooseSubtypeWithModel(
+  entries: readonly ShortlistEntry[],
+  transport: MeaningTransport,
+): Promise<string | undefined> {
+  const chosen = await pickFromShortlist(
+    {
+      asks: "What type of thing is this document about -- an insurance policy, a service plan, " +
+        "a membership? Choose the description that fits it best.",
+      heading: "Descriptions the words on this page support:",
+    },
+    entries,
+    transport,
+  );
+  return chosen?.value;
 }
 
-/** The answer only if the list carries it: the figure has to BE one of the
- * amounts offered, however the model wrote it. */
-function groundedAmount(answer: string, offered: readonly AmountChoice[]): AmountChoice | undefined {
+// -------------------------------------------------------------- reference
+
+/** Which of the identifiers the page prints is the one the household would
+ * quote. Compared without its spaces, because a page prints "7738 2204 91"
+ * and a model repeats it "7738220491". */
+export async function chooseReferenceWithModel(
+  entries: readonly ShortlistEntry[],
+  transport: MeaningTransport,
+): Promise<string | undefined> {
+  const bare = (value: string) => value.replace(/[\s-]/gu, "").toLowerCase();
+  const chosen = await pickFromShortlist(
+    {
+      asks: "Which of these numbers is the reference this household would quote for their own " +
+        "account, policy or membership? Not the company's own registration, VAT or regulator number.",
+      heading: "Numbers printed on this page, with the line each was printed on:",
+    },
+    entries,
+    transport,
+    { matches: (answer, entry) => bare(answer) === bare(entry.value) },
+  );
+  return chosen === undefined ? undefined : trimFieldValue("reference", chosen.value, chosen.line);
+}
+
+// -------------------------------------------------------------------- cost
+
+/** The figure inside an answer, in minor units: "£84.99", "84.99" and
+ * "GBP 84.99" are one answer. */
+function minorUnits(answer: string): number | undefined {
   const digits = /(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{2}))?/u.exec(answer.replace(/\s/gu, ""));
   if (!digits) return undefined;
-  const minor = Number(digits[1].replace(/,/gu, "")) * 100 + (digits[2] === undefined ? 0 : Number(digits[2]));
-  return offered.find((choice) => Number(choice.value) === minor);
+  return Number(digits[1].replace(/,/gu, "")) * 100 + (digits[2] === undefined ? 0 : Number(digits[2]));
 }
 
-/**
- * Which of the figures the rules could not choose between is what this
- * document costs.
- *
- * One question per document over a handful of figures, never the page. An
- * answer that is not one of them is refused and the field stays blank,
- * which is what it already was.
- */
+/** Which of the figures printed on the page is what the thing costs. */
 export async function chooseCostWithModel(
-  offered: readonly AmountChoice[],
+  entries: readonly ShortlistEntry[],
   transport: MeaningTransport,
 ): Promise<{ costMinor: number; currency?: string } | undefined> {
-  if (offered.length < 2) return undefined;
-  const document = `${costInstruction()}\n\n${costExcerpt(offered)}`;
-  const raw = await transport(structuredPrompt({ amount_this_document_costs: "" }, document));
-  const answer = answerFrom(raw, "amount_this_document_costs");
-  const chosen = answer === undefined ? undefined : groundedAmount(answer, offered);
+  const chosen = await pickFromShortlist(
+    {
+      asks: "Which of these amounts is what the household pays for the thing this document is " +
+        "about? Not an excess, a sum insured, a rival price or last year's figure.",
+      heading: "Amounts printed on this page, with the line each was printed on:",
+    },
+    entries,
+    transport,
+    { matches: (answer, entry) => minorUnits(answer) === Number(entry.value) },
+  );
   if (chosen === undefined) return undefined;
-  return {
-    costMinor: Number(chosen.value),
-    ...(chosen.currency === undefined ? {} : { currency: chosen.currency }),
-  };
+  const minor = Number(chosen.value);
+  if (!Number.isFinite(minor)) return undefined;
+  return { costMinor: minor, ...(chosen.currency === undefined ? {} : { currency: chosen.currency }) };
+}
+
+// -------------------------------------------------------------- recurrence
+
+/** Which of the periods the page prints is how long this thing runs for,
+ * in months. */
+export async function chooseRecurrenceWithModel(
+  entries: readonly ShortlistEntry[],
+  transport: MeaningTransport,
+): Promise<number | undefined> {
+  const chosen = await pickFromShortlist(
+    {
+      asks: "How long does the thing this document is about run for before it comes round again? " +
+        "Choose the period the page prints for the thing itself, not how often it is paid for.",
+      heading: "Periods printed on this page, with the line each was printed on:",
+    },
+    entries,
+    transport,
+    { matches: (answer, entry) => /\d+/u.exec(answer)?.[0] === entry.value },
+  );
+  if (chosen === undefined) return undefined;
+  const months = Number(chosen.value);
+  return Number.isInteger(months) && months > 0 ? months : undefined;
 }
 
 // --------------------------------------------------------------- dates
-
-/**
- * The dates the rules could not put a job to, with the words printed around
- * each, and the ones they could as context.
- *
- * This is the same bargain as `providerExcerpt`: the shortlist and its
- * blocks, a few hundred characters, never the page. The already-decided
- * dates are shown because the question is which of the REST the household
- * must act on, and a page whose renewal is already known is asking about
- * something else.
- */
-export function dateChoiceExcerpt(
-  candidates: readonly TaggedCandidate[],
-  offered: readonly string[],
-  decided: ReadonlyArray<{ date: string; role: string }>,
-): string {
-  const lines: string[] = [];
-  for (const date of offered) {
-    const found = candidates.find((candidate) => candidate.kind === "date" && candidate.value === date);
-    lines.push(`${date}: "${(found?.line ?? "").slice(0, BLOCK_LIMIT)}"`);
-  }
-  const excerpt = excerptLines("Dates printed on this page, with the line each was printed on:", lines);
-  if (decided.length === 0) return excerpt;
-  const already = decided.map((entry) => `${entry.date} (${entry.role})`).join(", ");
-  return `${excerpt}\n\nAlready understood, so not in question: ${already}`;
-}
 
 /** The jobs a date can have, as the household would say them, plus the
  * answer that says none of them. `other` is left out on purpose: it is what
  * the pipeline records when nothing is known, not something to choose. */
 const DATE_ROLE_CHOICES = ["renewal", "expiry", "due", "service", "start", "issued", "none"] as const;
 
-function dateInstruction(): string {
-  return [
-    "date_to_act_on must be one of the dates listed below, written exactly as it is listed.",
-    `what_it_is_for must be one of: ${DATE_ROLE_CHOICES.join(", ")}.`,
-    "Answer none if the page gives the household nothing to do.",
-  ].join("\n");
-}
-
-/** The answer only if the shortlist carries it: the date has to BE one of
- * the dates offered, however the model wrote it, and the job has to be one
- * of the words it was given. Anything else leaves the field blank. */
-function groundedDate(answer: string, offered: readonly string[]): string | undefined {
-  const written = answer.trim();
-  const direct = offered.find((date) => written.includes(date));
-  if (direct) return direct;
-  // The model may answer in the page's own words ("31 October 2026"), so the
-  // same locator the sieve used reads it back to an ISO date.
-  const read = locateDates(written).map((entry) => entry.value);
-  return offered.find((date) => read.includes(date));
-}
-
-function groundedRole(answer: string | undefined): DocumentDateRole | undefined {
-  const wanted = comparable(answer ?? "");
-  const role = DATE_ROLE_CHOICES.find((choice) => choice === wanted);
+/** The role a line names, or nothing. A word outside the vocabulary is not
+ * an answer, and `none` is the model saying this date has no job. */
+function roleNamed(line: string): DocumentDateRole | undefined {
+  const said = comparable(line);
+  const role = DATE_ROLE_CHOICES.find((choice) =>
+    choice !== "none" && new RegExp(`\\b${choice}\\b`, "u").test(said));
   return role === undefined || role === "none" ? undefined : role;
 }
 
+/** Whether an answer is one of the offered dates written some other way:
+ * the model may answer "31 October 2026" where the list says 2026-10-31. */
+function saysTheDate(answer: string, entry: ShortlistEntry): boolean {
+  if (answer.includes(entry.value)) return true;
+  return locateDates(answer).some((found) => found.value === entry.value);
+}
+
 /**
- * Which of the dates nothing could label is the one the household must act
- * on, and what for.
+ * Every date this document is about and what each is for, chosen from the
+ * shortlist in one call.
  *
- * One question per document, not one per date: the page has one answer, and
- * asking about forty dates one at a time invites forty answers. An
- * ungrounded reply -- a date not on the list, a job outside the vocabulary
- * -- is refused, and the dates stay as they were: offered, with no role.
+ * One question, not one per date: the page is one thing, and asking forty
+ * times invites forty answers. The reply is a line per date -- its number
+ * and its job -- and every line is grounded twice over: the date has to be
+ * one of the ones offered and the job one of the words it was given.
+ * Anything else is dropped, and a document the model says nothing about
+ * comes back with no dates, which is an allowed answer.
  */
-export async function chooseDateToActOnWithModel(
-  candidates: readonly TaggedCandidate[],
-  offered: readonly string[],
-  decided: ReadonlyArray<{ date: string; role: string }>,
+export async function chooseDatesWithModel(
+  entries: readonly ShortlistEntry[],
   transport: MeaningTransport,
-): Promise<{ date: string; role: DocumentDateRole } | undefined> {
-  if (offered.length === 0) return undefined;
-  const document = `${dateInstruction()}\n\n${dateChoiceExcerpt(candidates, offered, decided)}`;
-  const raw = await transport(structuredPrompt({ date_to_act_on: "", what_it_is_for: "" }, document));
-  const answer = answerFrom(raw, "date_to_act_on");
-  const date = answer === undefined ? undefined : groundedDate(answer, offered);
-  const role = groundedRole(answerFrom(raw, "what_it_is_for"));
-  return date === undefined || role === undefined ? undefined : { date, role };
-}
+): Promise<Array<{ date: string; role: DocumentDateRole }>> {
+  if (entries.length === 0) return [];
+  const asked = [
+    "Which of these dates does this household need to keep, and what is each one for?",
+    `Answer one line per date: the date's number from the list, then what it is for, like "3 renewal".`,
+    `What it is for must be one of: ${DATE_ROLE_CHOICES.join(", ")}.`,
+    "Leave out every date the household does not need. Answer none if there are none.",
+    "",
+    shortlistExcerpt("Dates printed on this page, with the line each was printed on:", entries),
+  ].join("\n");
+  const raw = await transport(asked);
 
-export interface MeaningFields {
-  provider?: string;
-  subtype?: string;
-}
-
-/**
- * Asks the model about the meaning-shaped fields nothing has answered yet,
- * and about nothing else. A provider the page stated outright is not
- * re-asked: a printed label beside a name is better evidence than a model's
- * reading of the same excerpt. Subtype is always the model's, and always
- * from the taxonomy's own vocabulary.
- */
-export async function chooseMeaningFieldsWithModel(
-  candidates: readonly TaggedCandidate[],
-  chosen: MeaningFields,
-  transport: MeaningTransport,
-): Promise<MeaningFields> {
-  const filled: MeaningFields = {};
-
-  if (chosen.provider === undefined) {
-    const excerpt = providerExcerpt(candidates);
-    const raw = await transport(structuredPrompt({ provider: "" }, excerpt));
-    const answer = answerFrom(raw, "provider");
-    const grounded = answer === undefined ? undefined : groundedProvider(answer, candidates);
-    // Grounded in the shortlist is not enough: the pick also has to be one
-    // the sieves kept (`modelPickIsGrounded`). A confident pick nothing on
-    // the page spoke for is what scored below blank on the hold-out.
-    if (grounded !== undefined && modelPickIsGrounded(grounded, candidates)) filled.provider = grounded;
+  const chosen: Array<{ date: string; role: DocumentDateRole }> = [];
+  for (const line of replyLines(raw)) {
+    const role = roleNamed(line);
+    if (role === undefined) continue;
+    // The role word is read off first and taken out of the way: "3 renewal"
+    // and "renewal 3" both mean the third entry, and a role word carrying a
+    // digit would otherwise be read as one.
+    const entry = entryChosen(line.replace(new RegExp(role, "giu"), " "), entries, {
+      matches: saysTheDate,
+      matchesFirst: true,
+    });
+    if (entry === undefined) continue;
+    if (chosen.some((held) => held.date === entry.value)) continue;
+    chosen.push({ date: entry.value, role });
   }
-
-  if (chosen.subtype === undefined) {
-    const document = `${subtypeInstruction()}\n\n${subtypeExcerpt(candidates)}`;
-    const raw = await transport(structuredPrompt({ kind_of_thing: "", what_it_is_for: "" }, document));
-    const composed = composeSubtype(answerFrom(raw, "kind_of_thing"), answerFrom(raw, "what_it_is_for"));
-    if (composed !== undefined) filled.subtype = composed;
-  }
-
-  return filled;
+  return chosen;
 }

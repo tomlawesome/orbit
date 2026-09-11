@@ -2,14 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   chooseCostWithModel,
-  chooseDateToActOnWithModel,
-  chooseMeaningFieldsWithModel,
+  chooseDatesWithModel,
   chooseProviderByRules,
-  providerExcerpt,
-  subtypeExcerpt,
+  chooseProviderWithModel,
+  chooseRecurrenceWithModel,
+  chooseReferenceWithModel,
+  chooseSubtypeWithModel,
+  providerShortlistEntries,
+  subtypeShortlistEntries,
   type MeaningTransport,
 } from "./extraction-choose-meaning";
 import type { CandidateKind } from "./extraction-sieve";
+import { shortlistExcerpt, type ShortlistEntry } from "./extraction-shortlist";
 import type { Tag, TagForKind, TaggedCandidate } from "./extraction-stages";
 
 // Stage 3 never reads the page, so these shortlists are built by hand: the
@@ -214,27 +218,32 @@ describe("choosing the provider where the page states it", () => {
   });
 });
 
-describe("the excerpt the model is asked about", () => {
-  it("names each organisation once, with its label and its block, inside the limit", () => {
+describe("the shortlist the model is shown", () => {
+  it("numbers each organisation once, with the sieves that kept it and its block", () => {
     const block = "Administered by Colworth & Drake Insurance Services Ltd, of Bellhaven.";
-    const excerpt = providerExcerpt([
+    const entries = providerShortlistEntries([
       candidate("organisation", "Colworth & Drake Insurance Services Ltd", [
-        { value: "administrator", trigger: "Administered by" },
+        { value: "administrator", trigger: "Administered by", sieves: AGREED },
       ], block),
       candidate("organisation", "Colworth & Drake Insurance Services Ltd", ["other"], block),
       candidate("organisation", "Meridian General Insurance Company plc", ["other"]),
     ]);
+    const excerpt = shortlistExcerpt("Organisations named on this page:", entries);
 
-    expect(excerpt).toContain("Organisations named on this page:");
+    // One entry per organisation, whatever the page repeats, best first --
+    // and the name nothing spoke for is still offered, below it.
+    expect(entries.map((held) => held.value)).toEqual([
+      "Colworth & Drake Insurance Services Ltd",
+      "Meridian General Insurance Company plc",
+    ]);
+    expect(excerpt).toContain("1. Colworth & Drake Insurance Services Ltd");
+    expect(excerpt).toContain("2. Meridian General Insurance Company plc");
     expect(excerpt).toContain("Administered by");
-    expect(excerpt).toContain("Meridian General Insurance Company plc");
-    // One line per organisation, whatever the page repeats.
-    expect(excerpt.split("\n")).toHaveLength(3);
     expect(excerpt.length).toBeLessThanOrEqual(1_500);
   });
 
   it("leaves out the bodies a page names for some other reason", () => {
-    const excerpt = providerExcerpt([
+    const entries = providerShortlistEntries([
       candidate("organisation", "Palisade Insurance Company plc", [
         { value: "underwriter", trigger: "Underwritten by" },
       ], "Underwritten by Palisade Insurance Company plc"),
@@ -244,282 +253,228 @@ describe("the excerpt the model is asked about", () => {
       candidate("organisation", "Kestrel Travel Insurance Services Ltd", ["other"]),
     ]);
 
-    expect(excerpt).not.toContain("Palisade");
-    expect(excerpt).not.toContain("Marchfield");
-    expect(excerpt).toContain("Kestrel Travel Insurance Services Ltd");
+    expect(entries.map((entry) => entry.value)).toEqual(["Kestrel Travel Insurance Services Ltd"]);
   });
 
-  it("prints the headings, then the names and the labelled amounts", () => {
-    const excerpt = subtypeExcerpt([
-      candidate("heading", "SCHEDULE OF COVER", ["section"]),
-      candidate("heading", "Policy Schedule — Thornfield Assurance plc", ["title"]),
+  it("offers the taxonomy phrases the page's own words support, and no more", () => {
+    const entries = subtypeShortlistEntries([
+      candidate("heading", "Home Insurance Policy Schedule", ["title"]),
       candidate("organisation", "Thornfield Assurance plc", ["other"]),
       candidate("amount", "41299", [{ value: "total", trigger: "Total premium" }], "Total premium £412.99", "GBP"),
     ]);
 
-    expect(excerpt.split("\n")).toEqual([
-      "What this page prints:",
-      "Policy Schedule — Thornfield Assurance plc",
-      "SCHEDULE OF COVER",
-      "Named on the page: Thornfield Assurance plc",
-      "Amounts printed: Total premium GBP 412.99",
-    ]);
-    expect(excerpt.length).toBeLessThanOrEqual(700);
+    expect(entries.length).toBeLessThanOrEqual(8);
+    expect(entries.map((entry) => entry.value)).toContain("Home Insurance");
+    expect(entries.map((entry) => entry.value)).toContain("Insurance");
+    // The page never says "boiler", "mobile" or "tenancy", so the taxonomy's
+    // other sixty qualifiers are not on the list.
+    expect(entries.some((entry) => entry.value.includes("Boiler"))).toBe(false);
   });
 });
 
-describe("asking the model about what the rules could not settle", () => {
-  // One sieve kept each name and no second agreed, which is exactly when
-  // the rules leave the field to the model.
-  const shortlist = [
+/** A shortlist entry as stage 3 hands it over. */
+function entry(value: string, line: string, currency?: string, display = value): ShortlistEntry {
+  return {
+    value,
+    display,
+    ...(currency === undefined ? {} : { currency }),
+    line,
+    why: ["sieves: label"],
+    support: 1,
+  };
+}
+
+describe("asking a model to choose the provider", () => {
+  const shortlist = providerShortlistEntries([
     candidate("organisation", "Calderhythe District Council", [
       { value: "provider", trigger: "printed 4 times", sieves: ["printed-throughout"] },
     ], "issued by Calderhythe District Council"),
     candidate("organisation", "Wealdshire County Council", [
       { value: "provider", trigger: "printed 2 times", sieves: ["printed-throughout"] },
     ], "Wealdshire County Council £1,412.87"),
-    candidate("heading", "Council Tax Demand Notice 2026/27", ["title"]),
-  ];
+  ]);
 
-  it("asks only about the field the rules left blank, from the taxonomy's own words", async () => {
-    const model = fakeModel('{"kind_of_thing": "Tax", "what_it_is_for": "Council tax"}');
-
-    const filled = await chooseMeaningFieldsWithModel(
-      shortlist,
-      { provider: "Calderhythe District Council" },
-      model,
-    );
+  it("asks in plain English over a numbered list, with none allowed", async () => {
+    const model = fakeModel("1");
+    await chooseProviderWithModel(shortlist, model);
 
     expect(model.prompts).toHaveLength(1);
-    expect(model.prompts[0]).toContain('【template_start】{"kind_of_thing":"","what_it_is_for":""}【template_end】');
-    expect(model.prompts[0]).toContain("kind_of_thing must be one of: Insurance, Plan,");
-    expect(model.prompts[0]).toContain("what_it_is_for must be one of: Motor, Driving,");
-    expect(model.prompts[0]).toContain("What this page prints:");
-    expect(filled).toEqual({ subtype: "Council tax Tax" });
+    expect(model.prompts[0]).toContain("Which of these organisations does this household hold the thing with");
+    expect(model.prompts[0]).toContain("Answer none if none of them is it.");
+    expect(model.prompts[0]).toContain("1. Calderhythe District Council");
+    expect(model.prompts[0]).toContain("2. Wealdshire County Council");
+    // The shortlist and its blocks, never the page.
+    expect(model.prompts[0].length).toBeLessThanOrEqual(1_800);
   });
 
-  it("composes what the page is with the taxonomy's own group names, not the words the model used", async () => {
-    const filled = await chooseMeaningFieldsWithModel(
-      shortlist,
-      { provider: "Calderhythe District Council" },
-      fakeModel('{"kind_of_thing": "Cover", "what_it_is_for": "Car"}'),
-    );
-
-    expect(filled.subtype).toBe("Motor Insurance");
+  it("takes the entry the model numbered", async () => {
+    expect(await chooseProviderWithModel(shortlist, fakeModel("2"))).toBe("Wealdshire County Council");
   });
 
-  it("keeps the kind alone when what it is for is not a taxonomy qualifier", async () => {
-    const filled = await chooseMeaningFieldsWithModel(
-      shortlist,
-      { provider: "Calderhythe District Council" },
-      fakeModel('{"kind_of_thing": "Statement", "what_it_is_for": "the second quarter"}'),
-    );
-
-    expect(filled.subtype).toBe("Statement");
+  it("takes the name written out, legal suffix aside", async () => {
+    const named = providerShortlistEntries([
+      candidate("organisation", "Millbrook Energy Ltd", [
+        { value: "provider", trigger: "your supplier is", sieves: AGREED },
+      ], "your supplier is Millbrook Energy Ltd"),
+    ]);
+    expect(await chooseProviderWithModel(named, fakeModel("Millbrook Energy"))).toBe("Millbrook Energy Ltd");
   });
 
-  it("takes a qualifier on its own only where the taxonomy lets it stand alone", async () => {
-    const standalone = await chooseMeaningFieldsWithModel(
-      shortlist,
-      { provider: "Calderhythe District Council" },
-      fakeModel('{"kind_of_thing": "", "what_it_is_for": "MOT"}'),
-    );
-    expect(standalone.subtype).toBe("MOT");
-
-    const notStandalone = await chooseMeaningFieldsWithModel(
-      shortlist,
-      { provider: "Calderhythe District Council" },
-      fakeModel('{"kind_of_thing": "", "what_it_is_for": "Dental"}'),
-    );
-    expect(notStandalone.subtype).toBeUndefined();
+  it("takes none for an answer", async () => {
+    expect(await chooseProviderWithModel(shortlist, fakeModel("none"))).toBeUndefined();
   });
 
-  it("refuses a kind the taxonomy does not carry", async () => {
-    const filled = await chooseMeaningFieldsWithModel(
-      shortlist,
-      { provider: "Calderhythe District Council" },
-      fakeModel('{"kind_of_thing": "Council tax demand notice", "what_it_is_for": "Council tax"}'),
-    );
-
-    expect(filled.subtype).toBe("Council tax");
+  it("refuses a name the shortlist does not carry", async () => {
+    expect(await chooseProviderWithModel(shortlist, fakeModel("Ravensmere Borough Council"))).toBeUndefined();
+    expect(await chooseProviderWithModel(shortlist, fakeModel("9"))).toBeUndefined();
   });
 
-  it("renders the template's own structured prompt for the provider", async () => {
-    const model = fakeModel('{"provider": "Calderhythe District Council"}', "");
-
-    const filled = await chooseMeaningFieldsWithModel(shortlist, {}, model);
-
-    expect(model.prompts[0]).toContain("【task】structured");
-    expect(model.prompts[0]).toContain('【template_start】{"provider":""}【template_end】');
-    expect(model.prompts[0]).toContain("Organisations named on this page:");
-    expect(filled.provider).toBe("Calderhythe District Council");
-  });
-
-  it("accepts an answer that is one of the candidates, legal suffix aside", async () => {
-    const model = fakeModel('{"provider": "Calderhythe District Council Ltd"}', "");
-
-    const filled = await chooseMeaningFieldsWithModel(shortlist, {}, model);
-
-    expect(filled.provider).toBe("Calderhythe District Council Ltd");
-  });
-
-  it("refuses a pick no sieve kept, however plainly the shortlist carries it", async () => {
-    const nothingKept = [
-      candidate("organisation", "Calderhythe District Council", ["other"], "Calderhythe District Council"),
-      candidate("organisation", "Wealdshire County Council", ["other"], "Wealdshire County Council"),
-    ];
-    const model = fakeModel('{"provider": "Wealdshire County Council"}', "");
-
-    const filled = await chooseMeaningFieldsWithModel(nothingKept, {}, model);
-
-    expect(filled.provider).toBeUndefined();
-  });
-
-  it("takes a pick that is the one name several sieves agreed about", async () => {
-    const agreed = [
-      candidate("organisation", "Calderhythe District Council", [
-        { value: "provider", trigger: "printed 6 times", sieves: AGREED },
-      ], "Calderhythe District Council · Council Tax Section"),
-      candidate("organisation", "Wealdshire County Council", ["other"], "Wealdshire County Council"),
-    ];
-    const model = fakeModel('{"provider": "Calderhythe District Council"}', "");
-
-    const filled = await chooseMeaningFieldsWithModel(agreed, {}, model);
-
-    expect(filled.provider).toBe("Calderhythe District Council");
-  });
-
-  it("refuses a provider the shortlist does not carry", async () => {
-    const model = fakeModel('{"provider": "Calderhythe Borough Council"}', "");
-
-    const filled = await chooseMeaningFieldsWithModel(shortlist, {}, model);
-
-    expect(filled.provider).toBeUndefined();
-  });
-
-  it("leaves subtype blank when the model answers with words of its own", async () => {
-    const filled = await chooseMeaningFieldsWithModel(
-      shortlist,
-      { provider: "Calderhythe District Council" },
-      fakeModel('{"kind_of_thing": "Annual demand notice", "what_it_is_for": "living here"}'),
-    );
-
-    expect(filled.subtype).toBeUndefined();
-  });
-
-  it("reads a bare string reply as the kind it names", async () => {
-    const filled = await chooseMeaningFieldsWithModel(
-      shortlist,
-      { provider: "Calderhythe District Council" },
-      fakeModel("Tax"),
-    );
-
-    expect(filled.subtype).toBe("Tax");
-  });
-
-  it("leaves the field blank when the model answers with nothing", async () => {
-    const filled = await chooseMeaningFieldsWithModel(shortlist, {}, fakeModel('{"provider": null}', ""));
-
-    expect(filled).toEqual({});
-  });
-});
-
-describe("asking the model which date the household must act on", () => {
-  const page = [
-    candidate("date", "2026-10-31", ["other"], "31 October 2026"),
-    candidate("date", "2026-11-19", ["other"], "MOT valid, expiry on record 19 November 2026"),
-    candidate("date", "2027-01-14", [{ value: "renewal", trigger: "valid to" }], "insurance valid to 14 January 2027"),
-  ];
-  const offered = ["2026-10-31", "2026-11-19"];
-  const decided = [{ date: "2027-01-14", role: "renewal" }];
-
-  it("asks about the dates no rule could label, with the line each was printed on", async () => {
-    const model = fakeModel('{"date_to_act_on": "2026-10-31", "what_it_is_for": "renewal"}');
-
-    const picked = await chooseDateToActOnWithModel(page, offered, decided, model);
-
-    expect(model.prompts).toHaveLength(1);
-    expect(model.prompts[0]).toContain('【template_start】{"date_to_act_on":"","what_it_is_for":""}【template_end】');
-    expect(model.prompts[0]).toContain("what_it_is_for must be one of: renewal, expiry, due, service, start, issued, none");
-    expect(model.prompts[0]).toContain('2026-10-31: "31 October 2026"');
-    expect(model.prompts[0]).toContain("Already understood, so not in question: 2027-01-14 (renewal)");
-    expect(picked).toEqual({ date: "2026-10-31", role: "renewal" });
-  });
-
-  it("reads an answer written the way the page printed it", async () => {
-    const picked = await chooseDateToActOnWithModel(
-      page,
-      offered,
-      decided,
-      fakeModel('{"date_to_act_on": "31 October 2026", "what_it_is_for": "due"}'),
-    );
-
-    expect(picked).toEqual({ date: "2026-10-31", role: "due" });
-  });
-
-  it("refuses a date that is not one of the ones offered", async () => {
-    const picked = await chooseDateToActOnWithModel(
-      page,
-      offered,
-      decided,
-      fakeModel('{"date_to_act_on": "2027-01-14", "what_it_is_for": "renewal"}'),
-    );
-
-    expect(picked).toBeUndefined();
-  });
-
-  it("refuses a job outside the vocabulary, and takes none as an answer", async () => {
-    const invented = await chooseDateToActOnWithModel(
-      page,
-      offered,
-      decided,
-      fakeModel('{"date_to_act_on": "2026-10-31", "what_it_is_for": "tax point"}'),
-    );
-    const nothing = await chooseDateToActOnWithModel(
-      page,
-      offered,
-      decided,
-      fakeModel('{"date_to_act_on": "2026-10-31", "what_it_is_for": "none"}'),
-    );
-
-    expect(invented).toBeUndefined();
-    expect(nothing).toBeUndefined();
-  });
-
-  it("does not ask at all when the rules labelled every date", async () => {
-    const model = fakeModel('{"date_to_act_on": "2026-10-31", "what_it_is_for": "renewal"}');
-
-    expect(await chooseDateToActOnWithModel(page, [], decided, model)).toBeUndefined();
+  it("asks nothing where the sieves kept no name at all", async () => {
+    const model = fakeModel("1");
+    expect(await chooseProviderWithModel([], model)).toBeUndefined();
     expect(model.prompts).toHaveLength(0);
   });
 });
 
-describe("asking the model which figure the document costs", () => {
-  const offered = [
-    { value: "15931", currency: "GBP", line: "Total charges for this period £159.31" },
-    { value: "16337", currency: "GBP", line: "Amount due £163.37" },
+describe("asking a model what type of thing this is", () => {
+  const shortlist = subtypeShortlistEntries([
+    candidate("heading", "Home Insurance Policy Schedule", ["title"]),
+  ]);
+
+  it("takes the phrase the model numbered, in the taxonomy's own words", async () => {
+    const chosen = await chooseSubtypeWithModel(shortlist, fakeModel("1"));
+    expect(shortlist.map((held) => held.value)).toContain(chosen);
+  });
+
+  it("takes the phrase written out", async () => {
+    expect(await chooseSubtypeWithModel(shortlist, fakeModel("Home Insurance"))).toBe("Home Insurance");
+  });
+
+  it("leaves the field blank when the model answers with words of its own", async () => {
+    expect(await chooseSubtypeWithModel(shortlist, fakeModel("a letter about a house"))).toBeUndefined();
+  });
+
+  it("takes none for an answer", async () => {
+    expect(await chooseSubtypeWithModel(shortlist, fakeModel("none"))).toBeUndefined();
+  });
+});
+
+describe("asking a model which number is the household's reference", () => {
+  const shortlist = [
+    entry("PN-88421-K", "Policy number PN-88421-K"),
+    entry("7738 2204 91", "Customer reference 7738 2204 91"),
+  ];
+
+  it("takes the entry the model numbered", async () => {
+    expect(await chooseReferenceWithModel(shortlist, fakeModel("2"))).toBe("7738 2204 91");
+  });
+
+  it("reads a reference the model wrote without its spaces", async () => {
+    expect(await chooseReferenceWithModel(shortlist, fakeModel("7738220491"))).toBe("7738 2204 91");
+  });
+
+  it("refuses a number the list does not carry, and takes none", async () => {
+    expect(await chooseReferenceWithModel(shortlist, fakeModel("VAT 442 8891 06"))).toBeUndefined();
+    expect(await chooseReferenceWithModel(shortlist, fakeModel("none"))).toBeUndefined();
+  });
+});
+
+describe("asking a model which figure the document costs", () => {
+  const shortlist = [
+    entry("41299", "Total premium £412.99", "GBP", "£412.99"),
+    entry("3441", "Monthly instalment £34.41", "GBP", "£34.41"),
   ];
 
   it("asks over the figures and the line each was printed on, never the page", async () => {
-    const model = fakeModel('{"amount_this_document_costs": "£163.37"}');
+    const model = fakeModel("1");
+    const chosen = await chooseCostWithModel(shortlist, model);
 
-    const chosen = await chooseCostWithModel(offered, model);
-
-    expect(model.prompts[0]).toContain("【template_start】{\"amount_this_document_costs\":\"\"}【template_end】");
-    expect(model.prompts[0]).toContain("Amounts printed on this page");
-    expect(model.prompts[0]).toContain('£163.37: "Amount due £163.37"');
-    expect(chosen).toEqual({ costMinor: 16337, currency: "GBP" });
+    expect(model.prompts[0]).toContain("1. £412.99");
+    expect(model.prompts[0]).toContain("Total premium £412.99");
+    expect(chosen).toEqual({ costMinor: 41299, currency: "GBP" });
   });
 
-  it("refuses a figure the list does not carry", async () => {
-    expect(await chooseCostWithModel(offered, fakeModel('{"amount_this_document_costs": "£412.99"}')))
-      .toBeUndefined();
+  it("reads a figure the model wrote out", async () => {
+    expect(await chooseCostWithModel(shortlist, fakeModel("£34.41"))).toEqual({
+      costMinor: 3441,
+      currency: "GBP",
+    });
   });
 
-  it("asks nothing where there was never a choice to make", async () => {
-    const model = fakeModel('{"amount_this_document_costs": "£163.37"}');
+  it("refuses a figure the list does not carry, and takes none", async () => {
+    expect(await chooseCostWithModel(shortlist, fakeModel("£99.00"))).toBeUndefined();
+    expect(await chooseCostWithModel(shortlist, fakeModel("none"))).toBeUndefined();
+  });
+});
 
-    expect(await chooseCostWithModel(offered.slice(0, 1), model)).toBeUndefined();
-    expect(model.prompts).toHaveLength(0);
+describe("asking a model how long the thing runs for", () => {
+  const shortlist = [
+    { ...entry("24", "24-month contract"), display: "24 months" },
+    { ...entry("12", "12 months from the start date"), display: "12 months" },
+  ];
+
+  it("takes the period the model numbered", async () => {
+    expect(await chooseRecurrenceWithModel(shortlist, fakeModel("1"))).toBe(24);
+  });
+
+  it("reads a period the model wrote out", async () => {
+    expect(await chooseRecurrenceWithModel(shortlist, fakeModel("12 months"))).toBe(12);
+  });
+
+  it("refuses a period the list does not carry, and takes none", async () => {
+    expect(await chooseRecurrenceWithModel(shortlist, fakeModel("36 months"))).toBeUndefined();
+    expect(await chooseRecurrenceWithModel(shortlist, fakeModel("none"))).toBeUndefined();
+  });
+});
+
+describe("asking a model which dates the household must keep", () => {
+  const shortlist = [
+    entry("2026-10-31", "Your cover ends on 31 October 2026"),
+    entry("2025-11-01", "Cover started 1 November 2025"),
+    entry("2026-09-04", "Printed 4 September 2026"),
+  ];
+
+  it("asks one question over every date, with the job vocabulary and none allowed", async () => {
+    const model = fakeModel("1 renewal");
+    const kept = await chooseDatesWithModel(shortlist, model);
+
+    expect(model.prompts).toHaveLength(1);
+    expect(model.prompts[0]).toContain("what is each one for");
+    expect(model.prompts[0]).toContain("renewal, expiry, due, service, start, issued, none");
+    expect(model.prompts[0]).toContain("1. 2026-10-31");
+    expect(kept).toEqual([{ date: "2026-10-31", role: "renewal" }]);
+  });
+
+  it("reads a line per date, and keeps the page's order of what it was given", async () => {
+    expect(await chooseDatesWithModel(shortlist, fakeModel("1 renewal\n2 start\n3 issued"))).toEqual([
+      { date: "2026-10-31", role: "renewal" },
+      { date: "2025-11-01", role: "start" },
+      { date: "2026-09-04", role: "issued" },
+    ]);
+  });
+
+  it("reads a date written the way the page printed it", async () => {
+    expect(await chooseDatesWithModel(shortlist, fakeModel("31 October 2026 renewal"))).toEqual([
+      { date: "2026-10-31", role: "renewal" },
+    ]);
+  });
+
+  it("reads a structured model's JSON reply the same way", async () => {
+    const reply = '[{"date": "1", "what_it_is_for": "renewal"}, {"date": "2", "what_it_is_for": "start"}]';
+    expect(await chooseDatesWithModel(shortlist, fakeModel(reply))).toEqual([
+      { date: "2026-10-31", role: "renewal" },
+      { date: "2025-11-01", role: "start" },
+    ]);
+  });
+
+  it("drops a job outside the vocabulary and a date the list does not carry", async () => {
+    expect(await chooseDatesWithModel(shortlist, fakeModel("1 invoiced\n9 renewal\n2 expiry"))).toEqual([
+      { date: "2025-11-01", role: "expiry" },
+    ]);
+  });
+
+  it("takes none for an answer", async () => {
+    expect(await chooseDatesWithModel(shortlist, fakeModel("none"))).toEqual([]);
+    expect(await chooseDatesWithModel([], fakeModel("1 renewal"))).toEqual([]);
   });
 });
