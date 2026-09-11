@@ -287,6 +287,16 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.costMinor).toBe(20000);
   });
 
+  it("ignores a figure with no currency rather than letting it outrank one that has", () => {
+    const chosen = chooseFields([
+      candidate("amount", "41200", [{ value: "total", trigger: "premium" }], { line: "insurance premium +412.00" }),
+      candidate("amount", "74218", [{ value: "instalment", trigger: "MONTHLY PAYMENT" }], { currency: "GBP" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(74218);
+    expect(chosen.currency).toBe("GBP");
+  });
+
   it("never takes last year's premium or the upgrade tier beside it", () => {
     const chosen = chooseFields([
       candidate("amount", "58810", [{ value: "previous", trigger: "last year you paid" }], { currency: "GBP" }),

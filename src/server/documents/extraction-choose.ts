@@ -241,14 +241,17 @@ function chooseCost(candidates: readonly TaggedCandidate[]): {
   costMinor?: number;
   currency?: string;
 } {
-  const best = bestTagged(candidates, "amount", AMOUNT_PREFERENCE);
+  // ADR-0025 section 3 refuses a cost whose evidence carries no currency,
+  // and the scorer gives no half credit for one, so an amount without a
+  // symbol or code is not half an answer -- it is none. Such amounts are
+  // dropped before the ranking rather than after it: a figure in a
+  // transaction table that cannot be the answer should not be allowed to
+  // outrank, or tie with, one that can.
+  const priced = candidates.filter((candidate) => candidate.kind !== "amount" || candidate.currency);
+  const best = bestTagged(priced, "amount", AMOUNT_PREFERENCE);
   if (best.length === 0) return {};
   if (new Set(best.map((candidate) => candidate.value)).size > 1) return {};
   const winner = best[0];
-  // ADR-0025 section 3 refuses a cost whose evidence carries no currency,
-  // and the scorer gives no half credit for one, so an amount without a
-  // symbol or code is not half an answer -- it is none.
-  if (!winner.currency) return {};
   const minor = Number(winner.value);
   return Number.isFinite(minor) ? { costMinor: minor, currency: winner.currency } : {};
 }

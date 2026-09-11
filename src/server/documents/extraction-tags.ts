@@ -40,6 +40,12 @@ interface LabelTrigger<K extends CandidateKind = CandidateKind> {
   value: TagForKind[K];
   direction: "forward" | "backward";
   pattern: string;
+  /** A qualifier: it says what a figure is NOT ("net", "excluding", "if you
+   * upgrade", "estimated"), so it beats a plain label describing the same
+   * figure however much nearer that label sits. Without this, the label
+   * touching the figure always wins, and a qualifier is rarely the nearest
+   * words on the page -- it is the words that frame them. */
+  overrides?: true;
   /** Only a label when it is the entire block. Tika prints a form label as
    * its own block ("Policy \n\nMTR-8823-0145"), which is the only place a
    * bare word like "Policy" or "Reference" can be trusted to name a value
@@ -54,15 +60,91 @@ interface LabelTrigger<K extends CandidateKind = CandidateKind> {
  * `rival`, because the page is comparing and not selling.
  */
 const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
+  // Qualified labels come first: a qualifier decides what the number is, and
+  // the plain label inside it would otherwise tie and win on declaration
+  // order. Several run on towards the figure (`[^£\\n]{0,40}`) so that the
+  // qualifier, and not the bare word within it, is its nearest trigger.
+
+  // "including IPT" is the price; "excluding" it, or the tax line itself, is
+  // not. The inclusive form is declared first so it wins the tie.
+  { value: "total", direction: "forward", overrides: true,
+    pattern: "(?:annual |monthly |total )?(?:premium|charge|price|cost),? (?:includ(?:ing|es)|inc\\.?)[^£\\n]{0,40}" },
+
+  // Not a price at all: the tax line, the net-of-tax subtotal, the price of
+  // the thing covered, a cover limit, an excess, a deposit, a set-up fee.
+  { value: "other", direction: "forward", overrides: true,
+    pattern: "(?:insurance )?premium tax(?:,? (?:charged )?at [\\d.]+ ?%)?" },
+  { value: "other", direction: "forward", overrides: true,
+    pattern: "(?:net|gross)(?: [a-z]+){0,2} (?:premium|price|charge|cost|total|payment|amount)" },
+  { value: "other", direction: "forward", overrides: true,
+    pattern: "(?:premium|total|charge|cost|price|amount)s? (?:excluding|exc\\.?|before|net of)[^£\\n]{0,40}" },
+  { value: "other", direction: "forward", overrides: true,
+    pattern: "(?:price|cost|value)(?: paid)? (?:for|of) (?:the |your )?(?:appliance|item|goods|product|vehicle|property|equipment)" },
+  { value: "other", direction: "forward", overrides: true, pattern: "(?:up to|maximum of|no more than)" },
+  { value: "other", direction: "forward", overrides: true,
+    pattern: "(?:cover(?:age)?|limit|sum insured|benefit) (?:of|at|up to)" },
+  { value: "other", direction: "forward", overrides: true, pattern: "(?:excess|deposit)(?: of)?" },
+  { value: "other", direction: "forward", overrides: true,
+    pattern: "(?:joining|arrangement|admin(?:istration)?|set-?up|one-?off|late|missed|returned|non-?return) (?:fee|charge)" },
+
+  // previous: last year's figure, however the page words it
+  { value: "previous", direction: "forward", overrides: true,
+    pattern: "last year(?:'s|\u2019s)?(?:\\s+[a-z\u2019']+){0,3}\\s+(?:premium|price|charge|cost|bill)" },
+  { value: "previous", direction: "forward", pattern: "last year(?: you paid)?" },
+  { value: "previous", direction: "forward", pattern: "previous(?:ly)?(?: you paid)?" },
+  { value: "previous", direction: "forward", pattern: "previous (?:premium|bill|balance|charge)" },
+  { value: "previous", direction: "backward", pattern: "last year" },
+  { value: "previous", direction: "backward", pattern: "was your previous (?:premium|price)" },
+
+  // rival: the figure printed beside the real one to be read instead of it
+  { value: "rival", direction: "forward", overrides: true, pattern: "estimated[^£\\n]{0,40}" },
+  { value: "rival", direction: "forward", overrides: true,
+    pattern: "if (?:you |we |it )?(?:pay|paying|paid|choose|chose|select|take no action|switch|cancel|upgrade|purchas)[^£\\n]{0,40}" },
+  { value: "rival", direction: "forward", overrides: true,
+    pattern: "(?:over|for)\\s+(?:the\\s+)?(?:full\\s+|whole\\s+|entire\\s+)?term[^£\\n]{0,40}" },
+  { value: "rival", direction: "forward", overrides: true,
+    pattern: "a new (?:fixed )?(?:plan|tariff|deal|policy)[^£\\n]{0,40}" },
+  // The add-on offered beside the cover is not the cover.
+  { value: "rival", direction: "forward", overrides: true, pattern: "\\badd (?:on |a |the )?[^£\\n]{0,40}" },
+  // A price that only starts on a future date is not this year's price.
+  { value: "rival", direction: "forward", overrides: true, pattern: "from \\d{1,2} [A-Za-z]+ \\d{4}" },
+  { value: "rival", direction: "backward", overrides: true, pattern: "from \\d{1,2} [A-Za-z]+ \\d{4}" },
+  { value: "rival", direction: "backward", overrides: true, pattern: "for(?: your)? first \\d{1,2} months?" },
+  { value: "rival", direction: "forward", pattern: "if you take no action" },
+  { value: "rival", direction: "forward", pattern: "upgrade(?:d)?(?: to)?" },
+  { value: "rival", direction: "forward", pattern: "you could pay" },
+  { value: "rival", direction: "forward", pattern: "(?:cancellation|exit|early repayment) (?:fee|charge)" },
+  { value: "rival", direction: "backward", pattern: "to upgrade" },
+  { value: "rival", direction: "backward", pattern: "if you (?:switch|cancel)" },
+
+  // instalment. "Monthly" is itself a qualifier: it says the figure is one
+  // of many, so it overrides the plain labels it is printed with.
+  { value: "instalment", direction: "forward", overrides: true,
+    pattern: "(?:your )?monthly(?: [a-z]+){0,2} (?:instalment|payment|amount|charge|price|cost|fee|contribution)" },
+  { value: "instalment", direction: "backward", overrides: true,
+    pattern: "(?:standard )?monthly(?: [a-z]+){0,2} (?:charge|fee|price|cost|contribution)" },
+  // "Monthly by Direct Debit (£15.75 x 12, total £189.00)": everything in
+  // the bracket prices paying monthly, not the thing being paid for.
+  { value: "instalment", direction: "forward", overrides: true,
+    pattern: "(?:monthly|quarterly|weekly) by direct debit[^£\\n]{0,60}" },
+  { value: "instalment", direction: "forward", pattern: "instalments? of" },
+  { value: "instalment", direction: "forward", pattern: "direct debit of" },
+  { value: "instalment", direction: "backward", pattern: "(?:per|a|each) month" },
+  { value: "instalment", direction: "backward", pattern: "(?:by )?(?:monthly|quarterly|weekly) direct debit" },
+
   // total
   { value: "total", direction: "forward", pattern: "grand total" },
   { value: "total", direction: "forward", pattern: "total(?: amount| cost| price| charge| payable)?" },
   { value: "total", direction: "forward", pattern: "(?:renewal |annual |yearly )?premium(?: for the year)?" },
   { value: "total", direction: "forward", pattern: "(?:total|charge|cost|price) for the year" },
   { value: "total", direction: "forward", pattern: "price paid" },
+  // A bare "Fee" heads the figure on a licence or a permit. The set-up and
+  // penalty fees are demoted above, so what is left is the price.
+  { value: "total", direction: "forward", pattern: "fee\\b" },
+  // The pay-in-one-go box on a form, against the pay-monthly box beside it.
+  { value: "total", direction: "forward", pattern: "single(?: \\d{1,2}[ -]month)? payment" },
   { value: "total", direction: "forward", pattern: "(?:total|amount) (?:for|covering) the year" },
   { value: "total", direction: "backward", pattern: "(?:per|a|each) (?:year|annum)" },
-  { value: "total", direction: "backward", pattern: "in total" },
   { value: "total", direction: "backward", pattern: "is the total(?: cost| amount)?" },
   { value: "total", direction: "backward", pattern: "is your (?:renewal )?premium" },
 
@@ -74,28 +156,6 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   { value: "due", direction: "forward", pattern: "payable by" },
   { value: "due", direction: "backward", pattern: "is (?:now )?due" },
   { value: "due", direction: "backward", pattern: "to pay by" },
-
-  // instalment
-  { value: "instalment", direction: "forward", pattern: "instalments? of" },
-  { value: "instalment", direction: "forward", pattern: "monthly (?:instalment|payment|amount)" },
-  { value: "instalment", direction: "forward", pattern: "direct debit of" },
-  { value: "instalment", direction: "backward", pattern: "(?:per|a|each) month" },
-  { value: "instalment", direction: "backward", pattern: "monthly by direct debit" },
-
-  // previous
-  { value: "previous", direction: "forward", pattern: "last year(?: you paid)?" },
-  { value: "previous", direction: "forward", pattern: "previous(?:ly)?(?: you paid)?" },
-  { value: "previous", direction: "forward", pattern: "previous (?:premium|bill|balance|charge)" },
-  { value: "previous", direction: "backward", pattern: "last year" },
-  { value: "previous", direction: "backward", pattern: "was your previous (?:premium|price)" },
-
-  // rival
-  { value: "rival", direction: "forward", pattern: "if you take no action" },
-  { value: "rival", direction: "forward", pattern: "upgrade(?:d)?(?: to)?" },
-  { value: "rival", direction: "forward", pattern: "you could pay" },
-  { value: "rival", direction: "forward", pattern: "(?:cancellation|exit|early repayment) (?:fee|charge)" },
-  { value: "rival", direction: "backward", pattern: "to upgrade" },
-  { value: "rival", direction: "backward", pattern: "if you (?:switch|cancel)" },
 ];
 
 /**
@@ -373,6 +433,8 @@ interface TriggerScope {
   matchStart: number;
   /** The trigger's words as the page printed them, for `Tag.trigger`. */
   matchText: string;
+  /** See `LabelTrigger.overrides`. */
+  overrides: boolean;
 }
 
 /**
@@ -411,16 +473,31 @@ function buildScopes(
     // the whole block; in prose it is an ordinary word and asserts nothing.
     if (match.trigger.labelBlockOnly && !(nothingBefore && nothingAfter)) continue;
 
+    // Whether the label can reach into the next block is decided by whether
+    // its own block holds a value for it to name, not by whether the label
+    // is the last word printed: Tika keeps "ANNUAL PREMIUM, PAID IN FULL" as
+    // one block, and the premium is in the block under it. A row that holds
+    // its own figure ("Monthly membership fee ... £42.50") is answered where
+    // it stands and reaches nowhere.
+    //
+    // A token left hanging on a hyphen is a value Tika broke over the line
+    // ("Reference NDPA-" / "208467"), so the label has already reached its
+    // value and must not reach past it into the next one.
+    const valueInBlock =
+      block !== null &&
+      (targets.some((target) => target >= block.start && target < block.end) ||
+        /[-/]$/u.test(text.slice(match.end, block.end).trim()));
+
     const forward = match.trigger.direction === "forward";
     let scopeStart = forward ? match.end : cutBefore(cuts, match.start);
     let scopeEnd = forward ? cutAfter(cuts, match.end) : match.start;
 
-    if (forward && nothingAfter && block !== null) {
+    if (forward && !valueInBlock && block !== null) {
       const limit = Math.min(cutAfter(hardCuts, match.end), cutAfter(triggerSpans, match.end));
       const reach = blockEndAfter(blocks, block.end, limit, targets);
       if (reach !== null) scopeEnd = Math.max(scopeEnd, reach);
     }
-    if (!forward && nothingBefore && block !== null) {
+    if (!forward && !valueInBlock && block !== null) {
       const limit = Math.max(cutBefore(hardCuts, match.start), cutBefore(triggerSpans, match.start));
       const reach = blockStartBefore(blocks, block.start, limit, targets);
       if (reach !== null) scopeStart = Math.min(scopeStart, reach);
@@ -435,6 +512,7 @@ function buildScopes(
       triggerOrder: match.triggerOrder,
       matchStart: match.start,
       matchText: match.text,
+      overrides: match.trigger.overrides === true,
     });
   }
 
@@ -490,6 +568,8 @@ function labelTag(start: number, end: number, scopes: readonly TriggerScope[]): 
     scope.direction === "forward" ? Math.max(0, start - scope.anchor) : Math.max(0, scope.anchor - end);
 
   covering.sort((a, b) => {
+    // A qualifier outranks distance: see `LabelTrigger.overrides`.
+    if (a.overrides !== b.overrides) return a.overrides ? -1 : 1;
     const distanceA = distance(a);
     const distanceB = distance(b);
     if (distanceA !== distanceB) return distanceA - distanceB;
