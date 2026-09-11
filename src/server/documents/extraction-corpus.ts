@@ -7,6 +7,7 @@
 
 import type { DocumentDateRole } from "./suggestions";
 import type { ScheduleKind } from "@/lib/domain";
+import { FULL_PAGE_CORPUS } from "./extraction-corpus-fullpage";
 
 export interface CorpusExpectation {
   // ISO dates that a correct extraction should surface (order-free).
@@ -63,7 +64,11 @@ export interface CorpusDocument {
   expected: CorpusExpectation;
 }
 
-export const EXTRACTION_CORPUS: CorpusDocument[] = [
+// The six full-page documents from #981 live in their own generated module,
+// because their text is Tika's real output and is regenerated from the source
+// HTML rather than written here. They are part of this corpus, not a separate
+// one: every measurement reads `EXTRACTION_CORPUS`.
+const SHORT_CORPUS: CorpusDocument[] = [
   {
     name: "home insurance schedule, labelled fields",
     filename: "policy-schedule.pdf",
@@ -890,3 +895,6 @@ carried out by Vanterra Service UK.`,
     },
   },
 ];
+
+export const EXTRACTION_CORPUS: CorpusDocument[] = [...SHORT_CORPUS, ...FULL_PAGE_CORPUS];
+

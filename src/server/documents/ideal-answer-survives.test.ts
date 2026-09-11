@@ -121,6 +121,72 @@ interface DocEvidence {
  * model" this test stands in for: one that always quotes real text.
  */
 const EVIDENCE: Record<string, DocEvidence> = {
+  // --- Full-page documents (#981) ---------------------------------------
+  //
+  // Needles here are cut from the real Tika output by
+  // `scripts/corpus/generate-evidence.mjs`, not written by hand, so they
+  // quote the page exactly as production sees it -- including broken words
+  // like `Pu r beck` and `E X PI RY D ATE`, which is what CSS letter-spacing
+  // does to a PDF's text layer. Real letterspaced headings extract this way;
+  // it is a genuine difficulty, not damage.
+  "fullpage-broadband-contract.pdf": {
+    provider: "Kestrel Broadband — Contract Summary and Terms Kestrel Broadband Contract Summary Order",
+    reference: "number KB-771049-3 Order reference ORD-2026-0417726 Billing address Flat 2, 9 Thornfield Close, Marlcombe, Warwickshire,",
+    subtype: "Kestrel Broadband — Contract Summary and Terms Kestrel Broadband Contract Summary Order date 14 April 2026 Document",
+    cost: { amount: "34.99", needle: "2026 24-Month Fibre & Phone Contract Key contract information — Ofcom-format summary MONTHLY PRICE, MINIMUM TERM £34.99 per month, includes line" },
+    recurrence: { months: 24, needle: "SPEED 502 Mbps average upload speed 74 Mbps MINIMUM TERM 24 months ends 21 April 2028 CUSTOMER AND" },
+    dates: [
+      "Warwickshire, CV9 7QL Service start (activation) 22 April 2026 Minimum term 24 months",
+      "upload speed 74 Mbps MINIMUM TERM 24 months ends 21 April 2028 CUSTOMER AND ACCOUNT",
+    ],
+  },
+  "fullpage-gas-safety-record.pdf": {
+    provider: "Date of issue 03/08/2026 BUSINESS NAME Fenwick & Vale Gas Services Ltd GAS SAFE REGISTERED BUSINESS, REGISTRATION NUMBER 512864 BUSINESS",
+    reference: "RECORD LANDLORD / DUTYHOLDER COPY No. GSR-2026-04471 CP12 Date of issue 03/08/2026 BUSINESS NAME Fenwick & Vale Gas Services",
+    subtype: "Landlord's Gas Safety Record — CP12 LANDLORD'S GAS SAFETY RECORD LANDLORD / DUTYHOLDER COPY No.",
+    recurrence: { months: 12, needle: "safety or of efficient operation. This record is valid for 12 months from the date of inspection shown" },
+    dates: [
+      "safe to use on the date shown DATE OF INSPECTION 03 August 2026 This record confirms",
+    ],
+  },
+  "fullpage-home-insurance-schedule.pdf": {
+    provider: "Policy Schedule — Thornfield Assurance plc Thornfield Assurance plc — Policy schedule Policy TA-HH-7734291 — Page",
+    reference: "Assurance plc — Policy schedule Policy TA-HH-7734291 — Page 1 of 3 THORNFIELD ASSURANCE PLC Registered office: Thornfield",
+    subtype: "Policy Schedule — Thornfield Assurance plc Thornfield Assurance plc — Policy schedule",
+    cost: { amount: "412.99", needle: "L PR E M IUM Net premium (excluding Insurance Premium Tax) £368.74 Insurance Premium Tax at 12% £44.25 Annual premium £412.99 Annual premium payable" },
+    dates: [
+      "R IOD Policy number TA-HH-7734291 Period of insurance 14 March 2026 to 14 March 2027 Renewal",
+      "TA-HH-7734291 Period of insurance 14 March 2026 to 14 March 2027 Renewal date 14 March",
+    ],
+  },
+  "fullpage-mot-certificate.pdf": {
+    provider: "STATION AND TESTER 1. TEST STATION Calderwell Motor Services Ltd 2. VTS NUMBER V-441829 3. ADDRESS Unit 7, Brandmoor Industrial Estate,",
+    reference: "— MOT test certificate Test number 1847 2205 9631 — Page 1 of 2 DVTA Driver & Vehicle Testing Authority Statutory",
+    subtype: "MOT Test Certificate VT20 Driver & Vehicle Testing Authority — MOT test certificate Test",
+    dates: [
+      "time. E X PI RY D ATE 08 September 2027 Test date 09 September 2026 VEHICLE DETAILS 1.",
+      "condition at any other time. E X PI RY D ATE 08 September 2027 Test date 09 September",
+    ],
+  },
+  "fullpage-pet-vaccination-card.pdf": {
+    provider: "bring this card to every appointment Hawksmoor Cross Veterinary Centre 22 Thornfield Road, Bramcote St Giles, Wyvern DE7 4PL Telephone 01159",
+    reference: "· Labrador Retriever · Microchip 977200005841236 Vaccination & health record · Page 1 of 2 Vaccination & Health Record",
+    subtype: "Vaccination & Health Record Bramble · Labrador Retriever · Microchip 977200005841236 Vaccination &",
+    dates: [
+      "(DHPPi/L4 + kennel cough) NEXT VACCINATION DUE 18 May 2027 Book in the two weeks",
+    ],
+  },
+  "fullpage-service-charge-demand.pdf": {
+    provider: "22 Petersgate Road Alderwick WX7 4LP Purbeck & Vane Property Management Ltd · Account TFC-014-2627 Page 1 of 4 Pu r beck & Vane Prop erty",
+    reference: "14, Thornfield Court Account reference TFC-014-2627 · Lease reference TFC/14/LR-1998 · First instalment (1 of 2) We write",
+    subtype: "Service Charge Demand — Thornfield Court P&V Pur beck & Vane Pro p erty Management Ltd 14",
+    cost: { amount: "3,930.00", needle: "then falling due. Your apportioned share of the service charge budgeted for the development for that year is £3,930.00, as shown in the" },
+    recurrence: { months: 12, needle: "This demand covers the service charge year running for a 12-month period from 1 April 2026 to 31" },
+    dates: [
+      "the service charge year running from 1 April 2026 to 31 March 2027. This demand is issued",
+    ],
+  },
+
   "policy-schedule.pdf": {
     provider: "Provider: Acme Cover Ltd",
     reference: "Policy number: HI-9284712",
