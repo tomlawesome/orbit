@@ -1,7 +1,17 @@
 # Extraction corpus: full-page documents
 
-Builds the six full-page fixtures in
-`src/server/documents/extraction-corpus-fullpage.ts` (#981).
+Builds the full-page fixtures in
+`src/server/documents/extraction-corpus-fullpage.ts` (#981) and the hold-out
+fixtures in `src/server/documents/extraction-holdout-fullpage.ts` (#986).
+
+Two corpora, two directories. Every script here takes `--dir <name>` (or
+`CORPUS_DIR`) and defaults to `sources`, so a command without the flag still
+means the tuning set:
+
+| directory  | documents | what it is for |
+| ---------- | --------- | -------------- |
+| `sources/` | the tuning set | read it, tune against it, argue with it |
+| `holdout/` | the hold-out set | scored, never read, never tuned against |
 
 ## Why these exist
 
@@ -52,6 +62,12 @@ node scripts/corpus/verify.mjs
 node scripts/corpus/generate.mjs
 node scripts/corpus/generate-evidence.mjs   # paste into ideal-answer-survives.test.ts
 ```
+
+For the hold-out, the same seven steps with `--dir holdout` (and the volume
+mounted from `scripts/corpus/holdout` at step 5). There is no evidence file:
+the ideal-answer test reads the tuning set only. `generate.mjs` writes
+`extraction-holdout-fullpage.ts` and exports `EXTRACTION_HOLDOUT_FULLPAGE`
+when it is pointed at any directory other than `sources`.
 
 `contact-sheet.mjs` and `make-index.mjs` build review pages: page 1 of all six
 side by side, and the PDFs with their ground truth. Two rounds of near-identical
@@ -107,3 +123,32 @@ Two traps, both of which have already cost a rebuild:
 The assignment of face to document is **fixed, not random**. The corpus text is
 committed ground truth; a typeface that changed between renders would change
 what Tika emits and silently invalidate it.
+
+The hold-out documents use twenty further faces, none of them used by the
+tuning set, so the two corpora share no character map. A fault that only
+appears in one font's encoding would otherwise be tuned away on `sources/`
+and never met again.
+
+## The hold-out set
+
+`holdout/` is twelve documents written after the extractor was tuned, by
+someone who had not read `sources/`. It is the only measurement the project
+has of whether the extractor generalises rather than fits the 24 pages it was
+built against, and that is true only while nobody working on the extractor
+has seen the pages.
+
+So, for anyone tuning:
+
+- **Do not read `scripts/corpus/holdout/`**, or
+  `src/server/documents/extraction-holdout-fullpage.ts`, or the PDFs, the
+  truths, the contact sheet or the index built from them.
+- **Do not run `npm run eval:holdout -- --misses`.** The default prints the
+  score lines and nothing else. Per-document misses are how a hold-out
+  quietly turns into a second tuning set, one fixed miss at a time; they are
+  for the owner, who is not the one tuning.
+- **Never change a hold-out document to make a score move.** A fix that needs
+  the hold-out to change is a fix aimed at the answer, not at the extractor.
+
+New documents belong in `sources/`. If the hold-out is ever burned — read,
+tuned against, or quoted back into a fix — it is spent, and the replacement is
+a fresh set, not a scrub of this one.
