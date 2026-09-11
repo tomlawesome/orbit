@@ -72,145 +72,56 @@ function fakeModel(...replies: string[]): MeaningTransport & { prompts: string[]
   return Object.assign(transport, { prompts });
 }
 
-describe("choosing the provider where the page states it", () => {
-  it("takes the brand a plan is held with, not the parent behind it", () => {
-    const line = "Fenwick Mobile is a trading name of Anglia Communications Networks Ltd, registered in England.";
+describe("the provider the rules fall back on with no model to ask", () => {
+  // The bins rank the shortlist; this is all the rules do with them, and
+  // the bar is deliberately one almost no page clears (owner, 2026-09-11
+  // -- the top run, only where it is the only run printed more than once).
+  it("answers the one run the kept names repeat", () => {
     expect(chooseProviderByRules([
-      candidate("organisation", "Fenwick Mobile", [
-        { value: "provider", trigger: "is a trading name of", sieves: AGREED },
-      ], line),
-      candidate("organisation", "of Anglia Communications Networks Ltd", [
-        { value: "subsidiary", trigger: "a trading name of" },
-      ], line),
-    ])).toBe("Fenwick Mobile");
+      candidate("organisation", "Calderwell", [
+        { value: "provider", trigger: "your supplier is", sieves: AGREED },
+      ], "your supplier is Calderwell"),
+      candidate("organisation", "Calderwell", [
+        { value: "provider", trigger: "printed 2 times", sieves: ["printed-throughout"] },
+      ], "Calderwell · Renewal"),
+    ])).toBe("Calderwell");
   });
 
-  it("never answers with the parent when the page names no brand in front of it", () => {
-    const line = "A trading name of Alderway Communications Ltd · Registered office: Unit 14";
+  it("says nothing where the kept names repeat more than one run", () => {
+    // "Millbrook Energy Ltd" twice repeats "millbrook", "millbrook energy"
+    // and "millbrook energy ltd": three runs above one, so the field is
+    // left for the model.
     expect(chooseProviderByRules([
-      candidate("organisation", "of Alderway Communications Ltd", [
-        { value: "subsidiary", trigger: "A trading name of" },
-      ], line),
+      candidate("organisation", "Millbrook Energy Ltd", [
+        { value: "provider", trigger: "your supplier is", sieves: AGREED },
+      ], "your supplier is Millbrook Energy Ltd"),
+      candidate("organisation", "Millbrook Energy Ltd", [
+        { value: "provider", trigger: "printed 2 times", sieves: ["printed-throughout"] },
+      ], "Millbrook Energy Ltd, Bellhaven"),
     ])).toBeUndefined();
   });
 
-  it("takes the firm that sold the policy over the underwriter behind it", () => {
-    const line = "Underwritten by Cambrian Re on behalf of Thornfield Assurance plc · arranged by Hedgerow Home Insurance Services Ltd";
-    expect(chooseProviderByRules([
-      candidate("organisation", "Cambrian Re Insurance Company Ltd", [
-        { value: "underwriter", trigger: "Underwritten by" },
-      ], line),
-      candidate("organisation", "of Thornfield Assurance plc", [
-        { value: "on-behalf-of", trigger: "on behalf of" },
-      ], line),
-      candidate("organisation", "Hedgerow Home Insurance Services Ltd", [
-        { value: "administrator", trigger: "arranged by", sieves: AGREED },
-      ], line),
-    ])).toBe("Hedgerow Home Insurance Services Ltd");
-  });
-
-  it("reads the intermediary as the firm the household deals with", () => {
-    const line = "Intermediary Hedgerow Home Insurance Services Ltd";
+  it("says nothing where no name is printed twice at all", () => {
     expect(chooseProviderByRules([
       candidate("organisation", "Hedgerow Home Insurance Services Ltd", [
-        { value: "administrator", trigger: "Intermediary", sieves: AGREED },
-      ], line),
-    ])).toBe("Hedgerow Home Insurance Services Ltd");
-  });
-
-  it("takes the administrator, who is who the household deals with", () => {
-    const line = "Underwritten by Corvane Insurance plc · administered by Bellward Warranty Administration Ltd";
-    expect(chooseProviderByRules([
-      candidate("organisation", "Corvane Insurance plc", [
-        { value: "underwriter", trigger: "Underwritten by" },
-      ], line),
-      candidate("organisation", "Bellward Warranty Administration Ltd", [
-        { value: "administrator", trigger: "administered by", sieves: AGREED },
-      ], line),
-    ])).toBe("Bellward Warranty Administration Ltd");
-  });
-
-  it("does not read 'managed by' or 'arranged by' as the household's own dealings", () => {
-    const line = "Default fund Ashcombe Balanced Growth, managed by Ashcombe Asset Management Ltd";
-    expect(chooseProviderByRules([
-      candidate("organisation", "Ashcombe Asset Management Ltd", [
-        { value: "administrator", trigger: "managed by" },
-      ], line),
-    ])).toBeUndefined();
-  });
-
-  it("takes the principal a signature was given on behalf of", () => {
-    const line = "R. Thackeray, licence 745231 · for and on behalf of Fenwick & Vale Gas Services Ltd";
-    expect(chooseProviderByRules([
-      candidate("organisation", "of Fenwick & Vale Gas Services Ltd", [
-        { value: "on-behalf-of", trigger: "on behalf of", sieves: AGREED },
-      ], line),
-    ])).toBe("Fenwick & Vale Gas Services Ltd");
-  });
-
-  it("reads a name on to its legal suffix where the candidate stopped short", () => {
-    const signature = "FOR AND ON BEHALF OF Thornleigh Electrical Contractors Ltd";
-    expect(chooseProviderByRules([
-      candidate("organisation", "FOR AND ON BEHALF OF Thornleigh Electrical", [
-        { value: "on-behalf-of", trigger: "ON BEHALF OF", sieves: AGREED },
-      ], signature),
-    ])).toBe("Thornleigh Electrical Contractors Ltd");
-  });
-
-  it("ignores a person labelled the way an organisation would be", () => {
-    expect(chooseProviderByRules([
-      candidate("organisation", "LANDLORD Mr N. Castellan", [
-        { value: "on-behalf-of", trigger: "on behalf of" },
-      ], "LANDLORD Mr N. Castellan"),
-    ])).toBeUndefined();
-  });
-
-  it("ignores print the reader's eye joins up but Tika does not", () => {
-    expect(chooseProviderByRules([
-      candidate("organisation", "UN DE RWR ITIN G", [
-        { value: "administrator", trigger: "Intermediary" },
-      ], "UN DE RWR ITIN G"),
-      candidate("organisation", "Intermediary Hedgerow Home Insurance Services Ltd", [
-        { value: "administrator", trigger: "Intermediary", sieves: AGREED },
+        { value: "provider", trigger: "Intermediary", sieves: AGREED },
       ], "Intermediary Hedgerow Home Insurance Services Ltd"),
-    ])).toBe("Hedgerow Home Insurance Services Ltd");
-  });
-
-  it("ignores a phrase that has not finished", () => {
-    const line = "ClearBourne Water is a trading name of Bourne Valley Water and";
-    expect(chooseProviderByRules([
-      candidate("organisation", "of Bourne Valley Water and", [
-        { value: "subsidiary", trigger: "a trading name of" },
-      ], line),
     ])).toBeUndefined();
   });
 
-  it("never answers with the underwriter, the regulator or the installer", () => {
+  it("counts only the organisations a sieve read as the provider", () => {
     expect(chooseProviderByRules([
-      candidate("organisation", "Palisade Insurance Company plc", [
-        { value: "underwriter", trigger: "Underwritten by" },
-      ], "Underwritten by Palisade Insurance Company plc, regulated by the FCA"),
+      candidate("organisation", "Corvane", [{ value: "underwriter", trigger: "Underwritten by" }],
+        "Underwritten by Corvane"),
+      candidate("organisation", "Corvane", [{ value: "underwriter", trigger: "Underwritten by" }],
+        "Underwritten by Corvane"),
       candidate("organisation", "the Financial Conduct Authority", [
         { value: "regulator", trigger: "authorised and regulated by" },
       ], "authorised and regulated by the Financial Conduct Authority"),
-      candidate("organisation", "SunHarvest Installations Ltd", [
-        { value: "installer", trigger: "installed by" },
-      ], "The meter was installed by SunHarvest Installations Ltd"),
     ])).toBeUndefined();
   });
 
-  it("says nothing when the page states two different principals", () => {
-    expect(chooseProviderByRules([
-      candidate("organisation", "Colworth & Drake Insurance Services Ltd", [
-        { value: "administrator", trigger: "administered by" },
-      ], "administered by Colworth & Drake Insurance Services Ltd"),
-      candidate("organisation", "Marchfield Broking Ltd", [
-        { value: "administrator", trigger: "arranged by" },
-      ], "arranged by Marchfield Broking Ltd"),
-    ])).toBeUndefined();
-  });
-
-  it("says nothing at all where the page states none of it", () => {
+  it("says nothing at all where the sieves kept no name", () => {
     expect(chooseProviderByRules([
       candidate("organisation", "Milldown Motoring Club", ["other"], "Milldown Motoring Club — Renewal"),
       candidate("heading", "Milldown Motoring Club — Renewal", ["title"]),
@@ -219,41 +130,49 @@ describe("choosing the provider where the page states it", () => {
 });
 
 describe("the shortlist the model is shown", () => {
-  it("numbers each organisation once, with the sieves that kept it and its block", () => {
+  it("is the word runs, most printed first, with the count and the blocks", () => {
     const block = "Administered by Colworth & Drake Insurance Services Ltd, of Bellhaven.";
     const entries = providerShortlistEntries([
       candidate("organisation", "Colworth & Drake Insurance Services Ltd", [
-        { value: "administrator", trigger: "Administered by", sieves: AGREED },
+        { value: "provider", trigger: "Administered by", sieves: AGREED },
       ], block),
-      candidate("organisation", "Colworth & Drake Insurance Services Ltd", ["other"], block),
-      candidate("organisation", "Meridian General Insurance Company plc", ["other"]),
+      candidate("organisation", "Colworth & Drake", [
+        { value: "provider", trigger: "printed 2 times", sieves: ["printed-throughout"] },
+      ], "Colworth & Drake · Customer services 0800 960 114"),
+      candidate("organisation", "Meridian General Insurance Company plc", [
+        { value: "provider", trigger: "printed 1 time", sieves: ["printed-throughout"] },
+      ], "Meridian General Insurance Company plc"),
     ]);
     const excerpt = shortlistExcerpt("Organisations named on this page:", entries);
 
-    // One entry per organisation, whatever the page repeats, best first --
-    // and the name nothing spoke for is still offered, below it.
-    expect(entries.map((held) => held.value)).toEqual([
-      "Colworth & Drake Insurance Services Ltd",
-      "Meridian General Insurance Company plc",
-    ]);
-    expect(excerpt).toContain("1. Colworth & Drake Insurance Services Ltd");
-    expect(excerpt).toContain("2. Meridian General Insurance Company plc");
+    // The run both mentions of the administrator carry leads, ahead of the
+    // name printed once -- and the count, the sieves and the blocks are
+    // what the model is shown about it.
+    expect(entries[0].value).toBe("Colworth & Drake");
+    expect(entries[0].support).toBe(2);
+    expect(excerpt).toContain("1. Colworth & Drake");
+    expect(excerpt).toContain("printed 2 times across the names on this page");
+    expect(excerpt).toContain("sieves: language-fact, printed-throughout");
     expect(excerpt).toContain("Administered by");
+    // Eight is the cap, and the runs of the name printed twice fill it:
+    // the name printed once is off the end of the list.
+    expect(entries).toHaveLength(8);
+    expect(entries.map((entry) => entry.value)).not.toContain("Meridian");
     expect(excerpt.length).toBeLessThanOrEqual(1_500);
   });
 
-  it("leaves out the bodies a page names for some other reason", () => {
+  it("counts only the organisations a stage 2 sieve spoke for", () => {
     const entries = providerShortlistEntries([
       candidate("organisation", "Palisade Insurance Company plc", [
         { value: "underwriter", trigger: "Underwritten by" },
       ], "Underwritten by Palisade Insurance Company plc"),
-      candidate("organisation", "of Marchfield Holdings Ltd", [
-        { value: "subsidiary", trigger: "a trading name of" },
-      ], "Kestrel Travel is a trading name of Marchfield Holdings Ltd"),
-      candidate("organisation", "Kestrel Travel Insurance Services Ltd", ["other"]),
+      candidate("organisation", "Kestrel Travel Insurance Services Ltd", [
+        { value: "provider", trigger: "Administered by", sieves: AGREED },
+      ], "Administered by Kestrel Travel Insurance Services Ltd"),
     ]);
 
-    expect(entries.map((entry) => entry.value)).toEqual(["Kestrel Travel Insurance Services Ltd"]);
+    expect(entries.every((entry) => !entry.value.includes("Palisade"))).toBe(true);
+    expect(entries[0].value).toBe("Kestrel Travel Insurance Services Ltd");
   });
 
   it("offers the taxonomy phrases the page's own words support, and no more", () => {
@@ -311,13 +230,19 @@ describe("asking a model to choose the provider", () => {
     expect(await chooseProviderWithModel(shortlist, fakeModel("2"))).toBe("Wealdshire County Council");
   });
 
-  it("takes the name written out, legal suffix aside", async () => {
+  it("takes the run the model wrote out", async () => {
     const named = providerShortlistEntries([
       candidate("organisation", "Millbrook Energy Ltd", [
         { value: "provider", trigger: "your supplier is", sieves: AGREED },
       ], "your supplier is Millbrook Energy Ltd"),
     ]);
-    expect(await chooseProviderWithModel(named, fakeModel("Millbrook Energy"))).toBe("Millbrook Energy Ltd");
+    // Every run of the name is its own entry, so a model writing out a
+    // shorter one is choosing that entry, not a loose spelling of the
+    // longest.
+    expect(await chooseProviderWithModel(named, fakeModel("Millbrook Energy Ltd")))
+      .toBe("Millbrook Energy Ltd");
+    expect(await chooseProviderWithModel(named, fakeModel("Millbrook Energy")))
+      .toBe("Millbrook Energy");
   });
 
   it("takes none for an answer", async () => {
