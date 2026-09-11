@@ -144,20 +144,61 @@ describe("a date range", () => {
       .filter((c) => c.kind === "date")
       .map((c) => c.tags[0].value);
 
-  it("starts at the first date and expires at the second", () => {
+  it("starts at the first date and renews at the second", () => {
     expect(roles("Current period of insurance 15 October 2025 to 15 October 2026")).toEqual([
-      "start",
-      "expiry",
-    ]);
-    expect(roles("Charge for the year 1 April 2026 to 31 March 2027")).toEqual(["start", "expiry"]);
-    expect(roles("cover from 14 June 2026 until 13 June 2031")).toEqual(["start", "expiry"]);
-  });
-
-  it("gives way to a label that sits nearer than the connector", () => {
-    expect(roles("15 October 2025 to 15 October 2026 is your renewal date")).toEqual([
       "start",
       "renewal",
     ]);
+    expect(roles("Charge for the year 1 April 2026 to 31 March 2027")).toEqual(["start", "renewal"]);
+    expect(roles("cover from 14 June 2026 until 13 June 2031")).toEqual(["start", "renewal"]);
+  });
+
+  it("expires instead when the term is a guarantee, warranty or certificate", () => {
+    expect(roles("Cover under this certificate runs from 14 June 2026 to 13 June 2031")).toEqual([
+      "start",
+      "expiry",
+    ]);
+    expect(roles("Guarantee period 14 March 2026 to 14 March 2036")).toEqual(["start", "expiry"]);
+  });
+
+  it("says nothing about two dates the page never called a term", () => {
+    expect(roles("01/04/2025 – 31/03/2026")).toEqual(["other", "other"]);
+    expect(roles("Quarter 1 1 Apr 2025 – 30 Jun 2025")).toEqual(["other", "other"]);
+  });
+
+  it("says nothing about a period the page is only reporting on", () => {
+    expect(roles("Statement period 1 April 2025 to 31 March 2026")).toEqual(["other", "other"]);
+    expect(roles("Billing period 01/03/2026 – 31/05/2026")).toEqual(["other", "other"]);
+    expect(roles("For the scheme year 6 April 2025 to 5 April 2026")).toEqual(["other", "other"]);
+  });
+
+  it("gives way to a label that sits nearer than the connector", () => {
+    expect(roles("Period of cover 15 October 2025 to 15 October 2026 is your renewal date")).toEqual([
+      "start",
+      "renewal",
+    ]);
+  });
+});
+
+describe("a date that bounds a term without saying which kind", () => {
+  const roles = (text: string) =>
+    tagged(text)
+      .filter((c) => c.kind === "date")
+      .map((c) => c.tags[0].value);
+
+  it("renews when the term is one the household takes again", () => {
+    expect(roles("Valid to 31 March 2027")).toEqual(["renewal"]);
+    expect(roles("VALID TO 04/11/2026")).toEqual(["renewal"]);
+  });
+
+  it("expires when the term simply runs out", () => {
+    expect(roles("This guarantee is valid until 30 June 2027")).toEqual(["expiry"]);
+    expect(roles("Expiry date 08 September 2027")).toEqual(["expiry"]);
+  });
+
+  it("says nothing when the period belongs to the organisation", () => {
+    expect(roles("SCHEME REGISTRATION VALID TO 30 April 2027")).toEqual(["other"]);
+    expect(roles("Registered with the Gas Safe Register, valid to 30 April 2027")).toEqual(["other"]);
   });
 
   it("names the connector as the trigger", () => {

@@ -88,8 +88,29 @@ function isDateRole(value: string): value is DocumentDateRole {
 interface RoleClaim {
   date: string;
   role: DocumentDateRole;
-  /** The tag quoted words from the page rather than defaulting. */
-  triggered: boolean;
+  /** How good the page's reason for this role is -- see `claimStrength`. */
+  strength: number;
+}
+
+/** A connector is what a range rule quotes when it reads "A to B": it says
+ * the two dates bound a period, not what either date IS. */
+const RANGE_CONNECTOR_TRIGGER = /^[\s(]*(?:to|until|till|through|up to|–|—|-)[\s)]*$/iu;
+
+/**
+ * How strong a reason the page gave for a role:
+ *
+ * 2. a printed label beside the date ("Renewal date", "Date of issue");
+ * 1. a range connector -- the date bounds a period, which is weaker: the
+ *    same date can end one period and start the next;
+ * 0. nothing quoted at all, which is a guess and says so.
+ *
+ * A stronger claim settles a disagreement a weaker one would otherwise tie,
+ * so "Cover runs from A to B ... expiring on B" keeps B's printed label
+ * instead of blanking the field over an argument with the connector.
+ */
+function claimStrength(trigger: string): number {
+  if (trigger.trim() === "") return 0;
+  return RANGE_CONNECTOR_TRIGGER.test(trigger) ? 1 : 2;
 }
 
 function roleClaims(candidates: readonly TaggedCandidate[]): RoleClaim[] {
@@ -101,7 +122,7 @@ function roleClaims(candidates: readonly TaggedCandidate[]): RoleClaim[] {
       // for. It is not a role, and a date that only has one is not a date
       // this document is about.
       if (tag.value === "other" || !isDateRole(tag.value)) continue;
-      claims.push({ date: candidate.value, role: tag.value, triggered: tag.trigger.trim() !== "" });
+      claims.push({ date: candidate.value, role: tag.value, strength: claimStrength(tag.trigger) });
     }
   }
   return claims;
@@ -121,13 +142,19 @@ function chooseDates(candidates: readonly TaggedCandidate[]): {
   const dateRoles: Array<{ date: string; role: DocumentDateRole }> = [];
   for (const date of dates) {
     const forDate = claims.filter((claim) => claim.date === date);
-    // A tag with no trigger is a guess and says so, so a quoted tag beats
-    // one every time. Two quoted tags disagreeing is the page itself being
-    // ambiguous: keep the date, say nothing about what it is for.
-    const triggered = forDate.filter((claim) => claim.triggered);
-    const considered = triggered.length > 0 ? triggered : forDate;
+    // Only the best-evidenced claims are heard: a quoted label beats a range
+    // connector, and both beat a tag with no trigger. Two claims of equal
+    // strength disagreeing is the page itself being ambiguous -- keep the
+    // date, say nothing about what it is for.
+    const best = Math.max(...forDate.map((claim) => claim.strength));
+    const considered = forDate.filter((claim) => claim.strength === best);
     const roles = new Set(considered.map((claim) => claim.role));
-    if (roles.size === 1) dateRoles.push({ date, role: considered[0].role });
+    // Every document carries a date of issue, so `issued` is the role a date
+    // has when the page says nothing more specific about it. Where one claim
+    // says `issued` and another names a job that date does -- the inspection,
+    // the renewal -- the specific one is what the household needs.
+    if (roles.size > 1 && roles.has("issued")) roles.delete("issued");
+    if (roles.size === 1) dateRoles.push({ date, role: [...roles][0] });
   }
 
   return { dates, dateRoles };

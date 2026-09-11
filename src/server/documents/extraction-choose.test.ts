@@ -81,6 +81,35 @@ describe("choosing dates and their roles", () => {
     expect(chosen.scheduleKind).toBeUndefined();
   });
 
+  it("prefers a printed label over a range connector for the same date", () => {
+    const chosen = chooseFields([
+      candidate("date", "2031-06-13", [{ value: "renewal", trigger: "to" }]),
+      candidate("date", "2031-06-13", [{ value: "expiry", trigger: "expiring on" }]),
+    ]);
+
+    expect(chosen.dateRoles).toEqual([{ date: "2031-06-13", role: "expiry" }]);
+  });
+
+  it("lets the job a date does beat the document's own issue date", () => {
+    const chosen = chooseFields([
+      candidate("date", "2026-08-03", [{ value: "issued", trigger: "Date of issue" }]),
+      candidate("date", "2026-08-03", [{ value: "service", trigger: "inspected on" }]),
+    ]);
+
+    expect(chosen.dateRoles).toEqual([{ date: "2026-08-03", role: "service" }]);
+    expect(chosen.scheduleKind).toBe("service");
+  });
+
+  it("still blanks the role when two equally specific labels disagree", () => {
+    const chosen = chooseFields([
+      candidate("date", "2026-05-01", [{ value: "start", trigger: "starts on" }]),
+      candidate("date", "2026-05-01", [{ value: "service", trigger: "next service" }]),
+    ]);
+
+    expect(chosen.dates).toEqual(["2026-05-01"]);
+    expect(chosen.dateRoles).toBeUndefined();
+  });
+
   it("returns no dates at all when there are no date candidates", () => {
     expect(chooseFields([])).toEqual({ dates: [] });
   });

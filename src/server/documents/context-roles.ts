@@ -96,7 +96,7 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   // expiry
   { role: "expiry", direction: "forward", pattern: "expiry date" },
   { role: "expiry", direction: "forward", pattern: "expires on" },
-  { role: "expiry", direction: "forward", pattern: "valid until" },
+  { role: "expiry", direction: "forward", pattern: "valid (?:until|to|through)" },
   { role: "expiry", direction: "forward", pattern: "cover ends on" },
   { role: "expiry", direction: "backward", pattern: "is the expiry date" },
   { role: "expiry", direction: "backward", pattern: "is when (?:your cover|this) expires" },
@@ -125,6 +125,7 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
 
   // start
   { role: "start", direction: "forward", pattern: "start date" },
+  { role: "start", direction: "forward", pattern: "valid from" },
   { role: "start", direction: "forward", pattern: "starts on" },
   { role: "start", direction: "forward", pattern: "cover starts" },
   { role: "start", direction: "forward", pattern: "policy started" },
