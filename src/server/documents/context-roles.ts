@@ -232,6 +232,9 @@ interface TriggerScope {
   triggerOrder: number;
   /** Start of the trigger's own match, for the final tie-break (earlier occurrence wins). */
   matchStart: number;
+  /** The trigger's own words as the document printed them, so a caller can
+   * report what justified the role rather than just the role itself. */
+  matchText: string;
 }
 
 // Distance from a date to a scope's anchor, measured from whichever edge of
@@ -268,6 +271,7 @@ function buildTriggerScopes(text: string): TriggerScope[] {
           scopeEnd,
           triggerOrder,
           matchStart,
+          matchText: match[0],
         });
       } else {
         const scopeEnd = matchStart;
@@ -283,6 +287,7 @@ function buildTriggerScopes(text: string): TriggerScope[] {
           scopeEnd,
           triggerOrder,
           matchStart,
+          matchText: match[0],
         });
       }
     }
@@ -292,16 +297,31 @@ function buildTriggerScopes(text: string): TriggerScope[] {
 }
 
 /**
- * Assigns a `DocumentDateRole` to each of `dates`, in the same order they
- * were given, by running ConText's trigger-and-scope scan over `text`. Pure:
- * no I/O, no mutation of its arguments.
+ * A role together with the words that justified it, for callers that have to
+ * show their working (the extraction pipeline's stage 2 records the trigger
+ * beside every tag, so a tag with no trigger is visibly a guess).
  */
-export function assignContextRoles(text: string, dates: readonly LocatedDate[]): DocumentDateRole[] {
+export interface ContextRoleAssignment {
+  role: DocumentDateRole;
+  /** The trigger's own words, verbatim from the text, or `""` when the date
+   * fell outside every scope and took the default role. */
+  trigger: string;
+}
+
+/**
+ * The same scan as `assignContextRoles`, reporting which trigger won as well
+ * as the role it asserted. `assignContextRoles` is the role-only view of
+ * this, kept as the narrower contract most callers want.
+ */
+export function assignContextRoleLabels(
+  text: string,
+  dates: readonly LocatedDate[],
+): ContextRoleAssignment[] {
   const scopes = buildTriggerScopes(text);
 
   return dates.map((date) => {
     const covering = scopes.filter((scope) => date.index >= scope.scopeStart && date.index < scope.scopeEnd);
-    if (covering.length === 0) return "other";
+    if (covering.length === 0) return { role: "other", trigger: "" };
 
     covering.sort((a, b) => {
       const distanceA = anchorDistance(date, a);
@@ -311,8 +331,17 @@ export function assignContextRoles(text: string, dates: readonly LocatedDate[]):
       return a.matchStart - b.matchStart;
     });
 
-    return covering[0].role;
+    return { role: covering[0].role, trigger: covering[0].matchText };
   });
+}
+
+/**
+ * Assigns a `DocumentDateRole` to each of `dates`, in the same order they
+ * were given, by running ConText's trigger-and-scope scan over `text`. Pure:
+ * no I/O, no mutation of its arguments.
+ */
+export function assignContextRoles(text: string, dates: readonly LocatedDate[]): DocumentDateRole[] {
+  return assignContextRoleLabels(text, dates).map((assignment) => assignment.role);
 }
 
 // Re-exported so a caller that only has this module in scope can still name
