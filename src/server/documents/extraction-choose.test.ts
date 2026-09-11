@@ -199,13 +199,33 @@ describe("choosing the household's reference", () => {
     expect(chosen.reference).toBe("REF-4491");
   });
 
-  it("blanks when two identifiers are labelled equally well and disagree", () => {
+  it("blanks when two identifiers are labelled equally well, disagree, and the page repeats neither", () => {
     const chosen = chooseFields([
       candidate("identifier", "POL-1111", [{ value: "policy", trigger: "Policy number" }]),
       candidate("identifier", "POL-2222", [{ value: "policy", trigger: "Policy no." }]),
     ]);
 
     expect(chosen.reference).toBeUndefined();
+  });
+
+  it("takes the one the page repeats when two labelled identifiers disagree", () => {
+    const chosen = chooseFields([
+      candidate("identifier", "745231", [{ value: "certificate", trigger: "Licence no." }]),
+      candidate("identifier", "GSR-2026-04471", [{ value: "certificate", trigger: "Certificate no." }]),
+      candidate("identifier", "GSR-2026-04471", ["other"]),
+      candidate("identifier", "GSR-2026-04471", ["other"]),
+    ]);
+
+    expect(chosen.reference).toBe("GSR-2026-04471");
+  });
+
+  it("prefers the number the document is issued under to a policy behind it", () => {
+    const chosen = chooseFields([
+      candidate("identifier", "GPS-0417-2261", [{ value: "policy", trigger: "Policy no." }]),
+      candidate("identifier", "IBG-2026-337215", [{ value: "certificate", trigger: "Certificate no." }]),
+    ]);
+
+    expect(chosen.reference).toBe("IBG-2026-337215");
   });
 
   it("keeps a repeated identifier that agrees with itself", () => {

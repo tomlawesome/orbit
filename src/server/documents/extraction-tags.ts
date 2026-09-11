@@ -107,11 +107,17 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
 const IDENTIFIER_TRIGGERS: readonly LabelTrigger<"identifier">[] = [
   // policy
   { value: "policy", direction: "forward", pattern: "policy(?: number| no\\.?| ref(?:erence)?)" },
+  { value: "policy", direction: "forward", pattern: "plan(?: number| no\\.?)" },
   { value: "policy", direction: "backward", pattern: "is your policy (?:number|reference)" },
 
   // account
   { value: "account", direction: "forward", pattern: "account(?: number| no\\.?| reference)" },
   { value: "account", direction: "forward", pattern: "a/c (?:number|no\\.?)" },
+  // Pages head the number with the bare word as often as with "number":
+  // "GENERATION ACCOUNT SEG-4471-0932", "ACCOUNT 8847 2210 55".
+  // "My account", and the "myaccount." of a printed web page's address bar,
+  // are navigation rather than a label.
+  { value: "account", direction: "forward", pattern: "(?<!my )\\baccount\\b" },
   { value: "account", direction: "backward", pattern: "is your account number" },
 
   // customer
@@ -122,8 +128,11 @@ const IDENTIFIER_TRIGGERS: readonly LabelTrigger<"identifier">[] = [
   { value: "invoice", direction: "forward", pattern: "invoice(?: number| no\\.?)" },
   { value: "invoice", direction: "backward", pattern: "is the invoice number" },
 
-  // certificate
+  // certificate -- a document the household holds, numbered as itself: a
+  // certificate, a licence, a test record. The number IS their reference.
   { value: "certificate", direction: "forward", pattern: "certificate(?: number| no\\.?)" },
+  { value: "certificate", direction: "forward", pattern: "licen[cs]e(?: number| no\\.?)" },
+  { value: "certificate", direction: "forward", pattern: "test(?: certificate)? number" },
   { value: "certificate", direction: "backward", pattern: "is the certificate number" },
 
   // company -- the organisation's own registration, never the household's
@@ -138,6 +147,22 @@ const IDENTIFIER_TRIGGERS: readonly LabelTrigger<"identifier">[] = [
   // membership
   { value: "customer", direction: "forward", pattern: "membership(?: number| no\\.?)" },
 
+  // A reference with a noun in front of it names that noun, not the
+  // household: the issuing body's own file ("Authority reference"), the
+  // building ("Property reference"), the agreement between two other
+  // parties ("contract reference"), the document this one refers to
+  // ("Schedule ref", "booklet reference"), or nothing at all ("prepared
+  // with reference to the National Wiring Safety Code"). Only the words a
+  // page uses for the household's own file are let through, which is why
+  // this is a lookahead over one short list rather than a list of the
+  // hundred nouns that can precede "reference".
+  {
+    value: "other",
+    direction: "forward",
+    pattern:
+      "\\b(?!(?:your|our|payment|account|policy|plan|customer|client|order|membership|invoice|certificate|licen[cs]e|quoting|quote this)\\b)[A-Za-z]+,?\\s+ref(?:erence)?(?: number| no\\.?)?\\b",
+  },
+
   // Single words Tika prints as a block of their own, above the value. They
   // assert nothing in running prose, so they carry `labelBlockOnly`.
   { value: "policy", direction: "forward", pattern: "policy", labelBlockOnly: true },
@@ -147,7 +172,7 @@ const IDENTIFIER_TRIGGERS: readonly LabelTrigger<"identifier">[] = [
   { value: "certificate", direction: "forward", pattern: "certificate", labelBlockOnly: true },
 
   // reference (generic -- declared last, see the note above)
-  { value: "reference", direction: "forward", pattern: "(?:payment|quote|your) ref(?:erence)?(?: number| no\\.?)?" },
+  { value: "reference", direction: "forward", pattern: "(?:payment|order|your) ref(?:erence)?(?: number| no\\.?)?" },
   { value: "reference", direction: "forward", pattern: "ref(?:erence)?(?: number| no\\.?)?" },
   { value: "reference", direction: "backward", pattern: "is your reference" },
   { value: "reference", direction: "forward", pattern: "reference", labelBlockOnly: true },
@@ -449,7 +474,15 @@ function printedLength(text: string, candidate: Candidate): number {
 // point-like candidate this is ConText's ordinary test; for a heading, whose
 // span is the whole block, it is what lets a trigger printed inside the
 // block ("Section 4 Making a claim") govern it.
-function labelTag(start: number, end: number, scopes: readonly TriggerScope[]): Tag | null {
+interface LabelMatch {
+  tag: Tag;
+  /** Which occurrence of which trigger won, so that one label can be held
+   * to naming one value (see `keepOneValuePerLabel`). */
+  scope: TriggerScope;
+  distance: number;
+}
+
+function labelTag(start: number, end: number, scopes: readonly TriggerScope[]): LabelMatch | null {
   const covering = scopes.filter((scope) => start < scope.scopeEnd && end > scope.scopeStart);
   if (covering.length === 0) return null;
 
@@ -464,7 +497,32 @@ function labelTag(start: number, end: number, scopes: readonly TriggerScope[]): 
     return a.matchStart - b.matchStart;
   });
 
-  return { value: covering[0].value, trigger: covering[0].matchText, source: "label" };
+  return {
+    tag: { value: covering[0].value, trigger: covering[0].matchText, source: "label" },
+    scope: covering[0],
+    distance: distance(covering[0]),
+  };
+}
+
+/**
+ * One label names one value. "Account number 7734 2210 91 · Mobile number
+ * 07700 900123" prints two numbers inside one label's scope, and a scope
+ * that claims both turns a page that said exactly which number is the
+ * account into three candidates that all say they are the account -- a tie
+ * stage 3 can only answer by saying nothing. So each occurrence of a
+ * trigger keeps the candidate nearest it and lets the rest fall back to
+ * `other`, which is what they are: values the page did not label.
+ */
+function keepOneValuePerLabel(labels: Array<LabelMatch | null>): void {
+  const nearest = new Map<TriggerScope, number>();
+  labels.forEach((label, at) => {
+    if (!label) return;
+    const held = nearest.get(label.scope);
+    if (held === undefined || label.distance < (labels[held] as LabelMatch).distance) nearest.set(label.scope, at);
+  });
+  labels.forEach((label, at) => {
+    if (label && nearest.get(label.scope) !== at) labels[at] = null;
+  });
 }
 
 // A letterhead: a short block set in capitals, or with every word
@@ -686,7 +744,16 @@ export const tagCandidates: TagStage = (text, candidates) => {
   const headingIndexes = candidates.filter((c) => c.kind === "heading").map((c) => c.index);
   const firstHeadingIndex = headingIndexes.length === 0 ? -1 : Math.min(...headingIndexes);
 
-  return candidates.map((candidate): TaggedCandidate => {
+  // Labels first, across the whole shortlist, so that a trigger claiming
+  // several candidates can be cut back to the one it names.
+  const labels = candidates.map((candidate) => {
+    if (candidate.kind === "date") return null;
+    const start = candidate.index;
+    return labelTag(start, start + printedLength(text, candidate), scopesByKind[candidate.kind]);
+  });
+  keepOneValuePerLabel(labels);
+
+  return candidates.map((candidate, at): TaggedCandidate => {
     const tags: Tag[] = [];
 
     if (candidate.kind === "date") {
@@ -694,9 +761,8 @@ export const tagCandidates: TagStage = (text, candidates) => {
       nextDate += 1;
       tags.push({ value: assignment.role, trigger: assignment.trigger, source: "label" });
     } else {
-      const start = candidate.index;
-      const label = labelTag(start, start + printedLength(text, candidate), scopesByKind[candidate.kind]);
-      if (label) tags.push(label);
+      const label = labels[at];
+      if (label) tags.push(label.tag);
     }
 
     tags.push(...shapeTags(candidate, firstHeadingIndex));

@@ -98,6 +98,48 @@ describe("the candidate's own shape", () => {
   });
 });
 
+describe("a reference with a noun in front of it", () => {
+  it("names that noun and not the household", () => {
+    expect(tagValues("Property reference CH-14-SC-2261", "identifier")).toEqual(["other"]);
+    expect(tagValues("Authority reference AUT/4471/EW", "identifier")).toEqual(["other"]);
+    expect(tagValues("operating under contract reference HCS/CT/2244", "identifier")).toEqual(["other"]);
+    expect(tagValues("prepared with reference to code NWSC-18", "identifier")).toEqual(["other"]);
+  });
+
+  it("still reads the nouns a page uses for the household's own file", () => {
+    expect(tagValues("Order reference ORD-2026-0417726", "identifier")).toContain("reference");
+    expect(tagValues("Payment reference TFC-014-2627", "identifier")).toContain("reference");
+    expect(tagValues("Account reference TFC-014-2627", "identifier")).toContain("account");
+    expect(tagValues("Policy ref MTR-8823-0145", "identifier")).toContain("policy");
+  });
+});
+
+describe("the numbers a page heads without the word 'number'", () => {
+  it("reads a bare account label, but not a web page's own navigation", () => {
+    expect(tagValues("GENERATION ACCOUNT SEG-4471-0932", "identifier")).toContain("account");
+    expect(tagValues("ACCOUNT 8847 2210 55", "identifier")).toContain("account");
+    expect(tagValues("My Account myaccount.example/billing/2026-03/summary", "identifier")).toEqual(["other"]);
+  });
+
+  it("reads the document's own number on a plan, a licence and a test record", () => {
+    expect(tagValues("PLAN NUMBER WPP-0077410-6", "identifier")).toContain("policy");
+    expect(tagValues("Licence number CBL-774-2091", "identifier")).toContain("certificate");
+    expect(tagValues("Test number 1847 2205 9631", "identifier")).toContain("certificate");
+  });
+});
+
+describe("one label naming one value", () => {
+  it("keeps the nearest value and leaves the rest of the block unlabelled", () => {
+    const page = "Account number 7734 2210 91 · Mobile number 07700 900123";
+    const identifiers = tagged(page).filter((c) => c.kind === "identifier");
+    expect(identifiers.map((c) => [c.value, c.tags[0].value])).toEqual([
+      ["7734 2210 91", "account"],
+      ["07700", "other"],
+      ["900123", "other"],
+    ]);
+  });
+});
+
 describe("dates", () => {
   it("take their tag from the ConText roles module, with the trigger that won", () => {
     const text = "Renewal date: 1 October 2026. Cover starts 5 April 2025.";

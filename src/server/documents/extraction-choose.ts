@@ -29,7 +29,7 @@ import { trimFieldValue } from "./value-trim";
  * it stands on the page, and `other` is a candidate nothing on the page
  * explained.
  */
-const REFERENCE_PREFERENCE = ["reference", "policy", "account", "customer", "invoice", "certificate"];
+const REFERENCE_PREFERENCE = ["reference", "certificate", "policy", "account", "customer", "invoice"];
 
 /**
  * Amount tags that can carry this document's cost, best first.
@@ -194,13 +194,46 @@ function chooseRecurrenceMonths(candidates: readonly TaggedCandidate[]): number 
   return undefined;
 }
 
+/**
+ * Two identifiers labelled equally well, saying different things: the one
+ * the page prints most often wins.
+ *
+ * A reference is the number a household is told to quote, so the page puts
+ * it in the header, in the footer of every sheet and in the payment
+ * instructions; a number that appears beside it once -- the engineer's
+ * licence, a meter read, a line in a URL -- does not get repeated. This
+ * counts how often each value appears anywhere in the shortlist, which is
+ * the page agreeing with itself, and not where on the page it sits. No
+ * clear winner is still nothing.
+ */
+function mostRepeated(
+  tied: readonly TaggedCandidate[],
+  candidates: readonly TaggedCandidate[],
+): TaggedCandidate | undefined {
+  const appearances = (value: string) =>
+    candidates.filter((candidate) => candidate.kind === "identifier" && candidate.value === value).length;
+  let winner = tied[0];
+  let clear = true;
+  for (const candidate of tied.slice(1)) {
+    if (candidate.value === winner.value) continue;
+    const difference = appearances(candidate.value) - appearances(winner.value);
+    if (difference > 0) {
+      winner = candidate;
+      clear = true;
+    } else if (difference === 0) {
+      clear = false;
+    }
+  }
+  return clear ? winner : undefined;
+}
+
 function chooseReference(candidates: readonly TaggedCandidate[]): string | undefined {
   const best = bestTagged(candidates, "identifier", REFERENCE_PREFERENCE);
   if (best.length === 0) return undefined;
-  // Two identifiers labelled equally well, saying different things: the
-  // page offers no way to choose and neither does this.
-  if (new Set(best.map((candidate) => candidate.value)).size > 1) return undefined;
-  const winner = best[0];
+  const winner = new Set(best.map((candidate) => candidate.value)).size === 1
+    ? best[0]
+    : mostRepeated(best, candidates);
+  if (!winner) return undefined;
   return trimFieldValue("reference", winner.value, winner.line);
 }
 
