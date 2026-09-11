@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
+import { classifySubtype } from "./extraction-scoring";
 import {
   comparableText,
   modelProposalFromText,
@@ -414,7 +415,11 @@ describe("an ideal model's reply survives modelProposalFromText's grounding and 
       }
       if (doc.expected.subtype !== undefined) {
         if (!evidence.subtype) throw new Error(`[${doc.filename}] expected.subtype set but no evidence.subtype needle`);
-        generated.subtype = { value: doc.expected.subtype, evidence: span(doc.filename, evidence.subtype, normalizedText) };
+        // Ground truth may carry a set of acceptable phrases (#989/#992); a
+        // model reply can only offer one, so the ideal reply offers the
+        // first and the check below accepts a match against any of them.
+        const subtypeAnswer = Array.isArray(doc.expected.subtype) ? doc.expected.subtype[0] : doc.expected.subtype;
+        generated.subtype = { value: subtypeAnswer, evidence: span(doc.filename, evidence.subtype, normalizedText) };
       }
       if (doc.expected.costMinor !== undefined) {
         if (!evidence.cost) throw new Error(`[${doc.filename}] expected.costMinor set but no evidence.cost needle`);
@@ -473,11 +478,12 @@ describe("an ideal model's reply survives modelProposalFromText's grounding and 
           textFieldDiagnosis(doc.expected.reference, evidenceSpan),
         );
       }
-      if (doc.expected.subtype !== undefined && proposal.subtype !== doc.expected.subtype) {
+      if (doc.expected.subtype !== undefined && classifySubtype(doc.expected.subtype, proposal.subtype) !== "correct") {
         const evidenceSpan = (generated.subtype as { evidence: string }).evidence;
+        const subtypeAnswer = Array.isArray(doc.expected.subtype) ? doc.expected.subtype[0] : doc.expected.subtype;
         mismatches.push(
           `subtype: expected ${JSON.stringify(doc.expected.subtype)}, got ${JSON.stringify(proposal.subtype)} -- ` +
-          textFieldDiagnosis(doc.expected.subtype, evidenceSpan),
+          textFieldDiagnosis(subtypeAnswer, evidenceSpan),
         );
       }
       if (doc.expected.costMinor !== undefined &&

@@ -62,6 +62,10 @@
 //    documents shout their headings ("HOME INSURANCE") and the measurement
 //    is whether the extractor found the right thing, not whether it copied
 //    the typography. Every other text field keeps its exact comparison.
+//    Ground truth may also declare a SET of acceptable phrases rather than
+//    one, because a page can genuinely support more than one right answer
+//    (owner decision 2026-09-11, #989/#992); a match against any member of
+//    the set is correct.
 //
 // The heuristics attempt none of the five new categories, by the owner's
 // decision on #319, so they score a blank on every one of those points.
@@ -265,9 +269,21 @@ function comparableSubtype(value: string): string {
   return value.replace(/\s+/gu, " ").trim().toLowerCase();
 }
 
-export function classifySubtype(expected: string, actual: string | undefined): Classification {
-  if (actual !== undefined && comparableSubtype(actual) === comparableSubtype(expected)) return "correct";
-  return actual === undefined ? "blank" : "wrong";
+/** `expected` may be one phrase or a set of acceptable ones (owner decision
+ * 2026-09-11, #989/#992): a page can genuinely support more than one right
+ * answer, and an extracted subtype is correct if it matches any of them. */
+export function classifySubtype(expected: string | string[], actual: string | undefined): Classification {
+  if (actual === undefined) return "blank";
+  const candidates = Array.isArray(expected) ? expected : [expected];
+  const comparableActual = comparableSubtype(actual);
+  return candidates.some((candidate) => comparableSubtype(candidate) === comparableActual) ? "correct" : "wrong";
+}
+
+/** Prints the expected subtype for humans: the one phrase, or every
+ * acceptable phrase joined with " | " when ground truth allows more than
+ * one. */
+export function formatSubtypeExpected(expected: string | string[]): string {
+  return Array.isArray(expected) ? expected.join(" | ") : expected;
 }
 
 /** A cost is its amount and its currency together (ADR-0025 section 3). */
@@ -376,7 +392,7 @@ function scoreDocument(document: CorpusDocument, extracted: ExtractedFields): Do
     earned += addPoint(fieldTotals, "subtype", classification);
     if (classification !== "correct") {
       misses.push(
-        `${name}: subtype expected "${expected.subtype}", got "${extracted.subtype ?? "none"}" (${classification})`,
+        `${name}: subtype expected "${formatSubtypeExpected(expected.subtype)}", got "${extracted.subtype ?? "none"}" (${classification})`,
       );
     }
   }

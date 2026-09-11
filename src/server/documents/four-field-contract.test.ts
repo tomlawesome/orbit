@@ -196,11 +196,15 @@ describe("corpus ground truth for the four fields is consistent with the contrac
     }
 
     // A subtype the page does not print is not something any grounded
-    // extractor could return.
+    // extractor could return. Ground truth may declare a set of acceptable
+    // phrases (#989/#992); every member of the set must still be printed.
     if (expected.subtype !== undefined) {
-      expect(expected.subtype.length).toBeLessThanOrEqual(80);
-      expect(text.replace(/\s+/gu, " ").toLowerCase())
-        .toContain(expected.subtype.replace(/\s+/gu, " ").toLowerCase());
+      const subtypes = Array.isArray(expected.subtype) ? expected.subtype : [expected.subtype];
+      for (const subtype of subtypes) {
+        expect(subtype.length).toBeLessThanOrEqual(80);
+        expect(text.replace(/\s+/gu, " ").toLowerCase())
+          .toContain(subtype.replace(/\s+/gu, " ").toLowerCase());
+      }
     }
   });
 });
