@@ -39,6 +39,7 @@
 
 import { classifyProvider } from "./extraction-scoring";
 import type { TaggedCandidate } from "./extraction-stages";
+import { locateDates, type DocumentDateRole } from "./suggestions";
 import subtypeTaxonomyJson from "./subtype-taxonomy.json";
 import { trimFieldValue } from "./value-trim";
 
@@ -489,6 +490,90 @@ function groundedProvider(answer: string, candidates: readonly TaggedCandidate[]
     if (sameOrganisation(name, answer)) return trimFieldValue("provider", answer.trim(), candidate.line);
   }
   return undefined;
+}
+
+// --------------------------------------------------------------- dates
+
+/**
+ * The dates the rules could not put a job to, with the words printed around
+ * each, and the ones they could as context.
+ *
+ * This is the same bargain as `providerExcerpt`: the shortlist and its
+ * blocks, a few hundred characters, never the page. The already-decided
+ * dates are shown because the question is which of the REST the household
+ * must act on, and a page whose renewal is already known is asking about
+ * something else.
+ */
+export function dateChoiceExcerpt(
+  candidates: readonly TaggedCandidate[],
+  offered: readonly string[],
+  decided: ReadonlyArray<{ date: string; role: string }>,
+): string {
+  const lines: string[] = [];
+  for (const date of offered) {
+    const found = candidates.find((candidate) => candidate.kind === "date" && candidate.value === date);
+    lines.push(`${date}: "${(found?.line ?? "").slice(0, BLOCK_LIMIT)}"`);
+  }
+  const excerpt = excerptLines("Dates printed on this page, with the line each was printed on:", lines);
+  if (decided.length === 0) return excerpt;
+  const already = decided.map((entry) => `${entry.date} (${entry.role})`).join(", ");
+  return `${excerpt}\n\nAlready understood, so not in question: ${already}`;
+}
+
+/** The jobs a date can have, as the household would say them, plus the
+ * answer that says none of them. `other` is left out on purpose: it is what
+ * the pipeline records when nothing is known, not something to choose. */
+const DATE_ROLE_CHOICES = ["renewal", "expiry", "due", "service", "start", "issued", "none"] as const;
+
+function dateInstruction(): string {
+  return [
+    "date_to_act_on must be one of the dates listed below, written exactly as it is listed.",
+    `what_it_is_for must be one of: ${DATE_ROLE_CHOICES.join(", ")}.`,
+    "Answer none if the page gives the household nothing to do.",
+  ].join("\n");
+}
+
+/** The answer only if the shortlist carries it: the date has to BE one of
+ * the dates offered, however the model wrote it, and the job has to be one
+ * of the words it was given. Anything else leaves the field blank. */
+function groundedDate(answer: string, offered: readonly string[]): string | undefined {
+  const written = answer.trim();
+  const direct = offered.find((date) => written.includes(date));
+  if (direct) return direct;
+  // The model may answer in the page's own words ("31 October 2026"), so the
+  // same locator the sieve used reads it back to an ISO date.
+  const read = locateDates(written).map((entry) => entry.value);
+  return offered.find((date) => read.includes(date));
+}
+
+function groundedRole(answer: string | undefined): DocumentDateRole | undefined {
+  const wanted = comparable(answer ?? "");
+  const role = DATE_ROLE_CHOICES.find((choice) => choice === wanted);
+  return role === undefined || role === "none" ? undefined : role;
+}
+
+/**
+ * Which of the dates nothing could label is the one the household must act
+ * on, and what for.
+ *
+ * One question per document, not one per date: the page has one answer, and
+ * asking about forty dates one at a time invites forty answers. An
+ * ungrounded reply -- a date not on the list, a job outside the vocabulary
+ * -- is refused, and the dates stay as they were: offered, with no role.
+ */
+export async function chooseDateToActOnWithModel(
+  candidates: readonly TaggedCandidate[],
+  offered: readonly string[],
+  decided: ReadonlyArray<{ date: string; role: string }>,
+  transport: MeaningTransport,
+): Promise<{ date: string; role: DocumentDateRole } | undefined> {
+  if (offered.length === 0) return undefined;
+  const document = `${dateInstruction()}\n\n${dateChoiceExcerpt(candidates, offered, decided)}`;
+  const raw = await transport(structuredPrompt({ date_to_act_on: "", what_it_is_for: "" }, document));
+  const answer = answerFrom(raw, "date_to_act_on");
+  const date = answer === undefined ? undefined : groundedDate(answer, offered);
+  const role = groundedRole(answerFrom(raw, "what_it_is_for"));
+  return date === undefined || role === undefined ? undefined : { date, role };
 }
 
 export interface MeaningFields {
