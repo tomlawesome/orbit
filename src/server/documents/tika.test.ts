@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
 
-import { extractTextWithTika, getTikaHealth } from "./tika";
+import { extractTextWithTika, getTikaHealth, undoTikaMarkdownEscapes } from "./tika";
 
 const TIKA_URL = "http://tika.internal:9998";
 const DOCUMENT_ID = "11111111-1111-4111-8111-111111111111";
@@ -293,5 +293,37 @@ describe("Tika adapter", () => {
 
     vi.mocked(fetch).mockResolvedValue(response({ ok: false, status: 503 }));
     await expect(getTikaHealth()).resolves.toEqual({ status: "unavailable" });
+  });
+});
+
+describe("Tika's Markdown escapes (#982)", () => {
+  it("removes a backslash the document does not contain", () => {
+    // Observed in real orbit-tika output on a rendered bill: the PDF's
+    // ToUnicode map has a plain `&`, and Tika's writer inserts the escape.
+    expect(undoTikaMarkdownEscapes("Wellmarsh Water \\& Drainage plc")).toBe("Wellmarsh Water & Drainage plc");
+  });
+
+  it("unescapes a numbered field label", () => {
+    expect(undoTikaMarkdownEscapes("1\\. TEST STATION")).toBe("1. TEST STATION");
+  });
+
+  it("unescapes every metacharacter Markdown escapes", () => {
+    const escaped = "\\` \\* \\_ \\{ \\} \\[ \\] \\( \\) \\# \\+ \\- \\. \\! \\| \\& \\< \\> \\~";
+    expect(undoTikaMarkdownEscapes(escaped)).toBe("` * _ { } [ ] ( ) # + - . ! | & < > ~");
+  });
+
+  it("leaves a backslash the document really contains", () => {
+    // A Windows path or a maths expression is the document's own content and
+    // must survive: only a backslash before an escapable character goes.
+    expect(undoTikaMarkdownEscapes("C:\\Users\\anna")).toBe("C:\\Users\\anna");
+    expect(undoTikaMarkdownEscapes("50\\% of nothing")).toBe("50\\% of nothing");
+  });
+
+  it("collapses an escaped backslash to one", () => {
+    expect(undoTikaMarkdownEscapes("a \\\\ b")).toBe("a \\ b");
+  });
+
+  it("leaves ordinary text alone", () => {
+    expect(undoTikaMarkdownEscapes("Renewal date 14 March 2027")).toBe("Renewal date 14 March 2027");
   });
 });
