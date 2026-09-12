@@ -1896,7 +1896,7 @@
           "of": 24
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 35,
           "of": 35
         },
@@ -1911,12 +1911,12 @@
           "of": 24
         },
         "cost": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 19,
           "of": 19
         },
         "scheduleKind": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 18,
           "of": 18
         },
@@ -1958,17 +1958,17 @@
           "of": 109
         },
         "provider": {
-          "pct": 25.0,
+          "pct": 25,
           "net": 3,
           "of": 12
         },
         "reference": {
-          "pct": 50.0,
+          "pct": 50,
           "net": 6,
           "of": 12
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 24,
           "of": 24
         },
@@ -2041,32 +2041,32 @@
           "of": 12
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 24,
           "of": 24
         },
         "dateRoles": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 24
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 12
         },
         "cost": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 11
         },
         "scheduleKind": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 7
         },
         "recurrence": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 7
         }
@@ -2074,6 +2074,126 @@
       "verdict": "baseline",
       "notes": "",
       "isBaseline": true
+    },
+    {
+      "id": "E30",
+      "date": "2026-09-12",
+      "label": "Subtype by describer-word runs, on the unseen twelve",
+      "corpus": "holdout-12",
+      "model": "—",
+      "role": "no model",
+      "route": "subtype by describer runs",
+      "what": "The owner's third method of 2026-09-11, built and measured at last: count the runs of taxonomy words that the headings and the provider organisations repeat, and answer with the first run the taxonomy composes a subtype from. Nine of the twelve right, against ten for the taxonomy bins it was meant to beat.",
+      "how": "npm run eval:subtype-runs -- --holdout",
+      "commit": "159ecfa",
+      "output": "tmp/e-subtype-holdout.txt",
+      "scores": {
+        "overall": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "subtype": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        }
+      },
+      "verdict": "set aside",
+      "notes": "One document apart from the bins, which a twelve-page hold-out cannot resolve. The diagnostic the method was written for is the better number: the right answer is in one of its top two runs on 11 of the 12, so it ranks well and picks badly.",
+      "about": [
+        "subtype"
+      ]
+    },
+    {
+      "id": "E31",
+      "date": "2026-09-12",
+      "label": "Subtype by describer-word runs, on the 24",
+      "corpus": "tuning-24",
+      "model": "—",
+      "role": "no model",
+      "route": "subtype by describer runs",
+      "what": "The same method on the pages the extractor was tuned against: 23 of 24, where the taxonomy bins get 22. It wins here and loses on the unseen twelve, which is the whole reason the hold-out exists.",
+      "how": "npm run eval:subtype-runs",
+      "commit": "159ecfa",
+      "output": "tmp/e-subtype-tuning.txt",
+      "scores": {
+        "overall": {
+          "pct": 95.8,
+          "net": 23,
+          "of": 24
+        },
+        "subtype": {
+          "pct": 95.8,
+          "net": 23,
+          "of": 24
+        }
+      },
+      "verdict": "set aside",
+      "notes": "The right answer is in its top two runs on all 24.",
+      "about": [
+        "subtype"
+      ]
+    },
+    {
+      "id": "E32",
+      "date": "2026-09-12",
+      "label": "Provider by the top word run, on the unseen twelve",
+      "corpus": "holdout-12",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by top word run",
+      "what": "What the provider word-run bins would answer with if the rules simply took their best run: right on 3 of the 12 unseen pages. The same bins put the right provider in their top two on only 4 of the 12, so the ranking is what fails, not the picking (#994).",
+      "how": "npm run eval:provider-bins -- --holdout",
+      "commit": "159ecfa",
+      "output": "tmp/e-provider-holdout.txt",
+      "scores": {
+        "overall": {
+          "pct": 25,
+          "net": 3,
+          "of": 12
+        },
+        "provider": {
+          "pct": 25,
+          "net": 3,
+          "of": 12
+        }
+      },
+      "verdict": "regression",
+      "notes": "Marked by eye rather than by the scorer the numbers are 5 of 12 top-1 and 8 of 12 top-2, because the bins often answer with a short form of the right name.",
+      "about": [
+        "provider"
+      ]
+    },
+    {
+      "id": "E33",
+      "date": "2026-09-12",
+      "label": "Provider by the top word run, on the 24",
+      "corpus": "tuning-24",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by top word run",
+      "what": "The same bins on the tuning pages: right on 17 of 24. They rank far better here -- the right provider is in the top two on 22 of the 24 -- which is the split #994 is about.",
+      "how": "npm run eval:provider-bins",
+      "commit": "159ecfa",
+      "output": "tmp/e-provider-tuning.txt",
+      "scores": {
+        "overall": {
+          "pct": 70.8,
+          "net": 17,
+          "of": 24
+        },
+        "provider": {
+          "pct": 70.8,
+          "net": 17,
+          "of": 24
+        }
+      },
+      "verdict": "regression",
+      "notes": "",
+      "about": [
+        "provider"
+      ]
     }
   ],
   "measurements": [

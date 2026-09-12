@@ -168,4 +168,4 @@ console.log(`\norganisations stage 1 found: ${organisationsFound}; a provider si
 // strict top-1 -- what the rules would answer with, not what a reader
 // marking by eye would accept.
 const scored = percent(gated.top1, gated.pages).replace(/^(\d+)\/(\d+) \((.*)\)$/u, "$3 ($1/$2)");
-console.log(`\n${onHoldout ? "hold-out 12" : "tuning 24"}: provider by top word run: ${scored} [provider ${scored}]`);
+console.log(`\n${onHoldout ? "hold-out: " : ""}provider by top word run: ${scored} [provider ${scored}]`);
