@@ -2400,6 +2400,50 @@
       },
       "verdict": "kept",
       "notes": "Single run. Both subtype methods fall hard from the first unseen set (10 of 12): the subtype rules were closer to the first set's wording than to this one."
+    },
+    {
+      "id": "E40",
+      "date": "2026-09-12",
+      "label": "Provider's own stage 2 (R1-R5), on the 24",
+      "corpus": "tuning-24",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by own stage 2",
+      "what": "Own stage 1 into own stage 2: five loose document-wide vote rules (docs/experiments/provider-stage2-rules.md), sum, tie answers nothing. 15 of 24, against 10 with the shared stage 2 behind the same stage 1.",
+      "how": "npm run eval:provider-stage2",
+      "commit": "b6144a6",
+      "output": "tmp/e-provider-stage2-tuning.txt",
+      "scores": {
+        "overall": {
+          "pct": 63,
+          "net": 15,
+          "of": 24
+        }
+      },
+      "verdict": "kept",
+      "notes": "Sanity number only; the rules were written from a signal table over these pages. Truth on the list 24/24, in the top three 20/24, two ties."
+    },
+    {
+      "id": "E41",
+      "date": "2026-09-12",
+      "label": "Provider's own stage 2 (R1-R5), second unseen twelve",
+      "corpus": "holdout2-12",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by own stage 2",
+      "what": "The test the rules doc set itself. 1 of 12: seven pages end in a tie (no rule separates the top two), four choose wrongly, one right. Truth on the list 8/12 (stage 1's ceiling), in the top three 5/12. The rules fire on the tuning pages' wording and mostly do not fire here.",
+      "how": "npm run eval:provider-stage2 -- --holdout2",
+      "commit": "b6144a6",
+      "output": "tmp/e-holdout2-provider-stage2.txt",
+      "scores": {
+        "overall": {
+          "pct": 8,
+          "net": 1,
+          "of": 12
+        }
+      },
+      "verdict": "regression",
+      "notes": "Single run; counts only, no answers read. By the rules doc's own test this is fitted: the fix is fewer rules and a tie-break that does not need a rule to fire, not more rules. Against 6/12 for the shared route (E36)."
     }
   ],
   "measurements": [
