@@ -406,9 +406,17 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
 
   Asking permission cannot help: the hook screens the command, not the
   intent. Authoring a hold-out is the one exempt role, and it is declared
-  rather than inferred — `ORBIT_HOLDOUT_AUTHOR=1` in the command's own
-  environment, which says "I am writing these and will never tune against
-  them". A session that sets it has spent its right to tune on that set.
+  rather than inferred — write `ORBIT_HOLDOUT_AUTHOR=1` into the command
+  itself, which says "I am writing these and will never tune against them".
+  A session that writes it has spent its right to tune on that set.
+
+  It must be in the command text. The hook runs as its own process, so a
+  variable exported around the command is not set when the hook reads its
+  environment — the first version checked only the environment and so locked
+  the author out along with everyone else. Declaring it in the command is
+  better anyway: the exemption shows up in the transcript on the line that
+  used it. Only Bash can carry it, so a hold-out author reads with `cat` and
+  writes with a heredoc; Read, Write and Edit stay shut on those paths.
 
   The first hold-out was lost on 2026-09-12 without a single file being
   opened: an eval printed the answers, they were read, and the next change
