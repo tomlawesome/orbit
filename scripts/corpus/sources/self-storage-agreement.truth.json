@@ -11,15 +11,14 @@
     ],
     "subtype": { "kinds": ["Rental"] },
     "costMinor": 6800,
-    "currency": "GBP",
-    "recurrenceMonths": 1
+    "currency": "GBP"
   },
   "notes": [
     "dates: move-in 15 August 2026, next payment due 15 September 2026. Four other printed dates are deliberately not declared: the agreement preparation date, the site's last rent increase, a previous, unrelated unit's end date at this address, and the terms edition stamps.",
     "provider is 'SSL': the operator's full legal or trading name is never printed anywhere on the page, only these three letters, used throughout as the brand mark and in the registered-company sentence in the small print.",
     "reference is the unit reference SSL-BX-3390, not the unrelated previous unit reference or the access code.",
     "costMinor is the monthly rent, printed with a currency symbol as the cost of the thing itself; the included-insurance figure is a cover limit, not a cost.",
-    "recurrenceMonths is 1: a '1 month' term is printed in digits.",
+    "recurrenceMonths is not declared even though a '1 month' term is printed in digits: the contract only keeps a recurrence where a dateRole is 'renewal' or 'service' for it to describe (suggestions.ts), and neither role appears here -- 'start' and 'due' are not scheduled events. Declaring it anyway would ask the extractor for a value the design never lets it keep.",
     "subtype: 'Rental'; no qualifier group in the taxonomy names storage closely enough to declare one.",
     "scheduleKind is not declared: neither dateRole is 'renewal' or 'service'."
   ]
