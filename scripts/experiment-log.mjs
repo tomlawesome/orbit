@@ -18,6 +18,9 @@ const CORPUS_ORDER = ["tuning-24", "holdout-12", "fullpage-6", "old-36"];
 const DELTA_VERDICTS = new Set(["kept", "baseline", "control", "regression", "set aside"]);
 const MUTED_VERDICTS = new Set(["broken run", "unexplained"]);
 
+/** At or above this, a score is good in its own right, whatever it beat. */
+const GREEN_AT = 80;
+
 const SCORE_LINE = /^([^:]+):\s*(-?\d+(?:\.\d+)?)%\s*\((-?\d+)\/(\d+)\)\s*\[(.*)\]\s*$/u;
 const FIELD_SCORE = /([A-Za-z]+)\s+(-?\d+(?:\.\d+)?)%\s*\((-?\d+)\/(\d+)\)/gu;
 
@@ -83,22 +86,24 @@ function renderDeltaLine(delta) {
 }
 
 /**
- * The cell's background: a diverging tint around zero, blue as the score
- * climbs to 100, red as it falls below zero, and no tint at zero. One hue
- * each way with a neutral middle, so it reads for colour-blind readers too;
- * the text stays ink and the number is always printed.
+ * A cell's colour band, the owner's rule (2026-09-12): 80% or better is
+ * green, anything above the baseline is blue, anything at or below it is
+ * red, and a score of zero -- nothing answered -- is greyed out with the
+ * cells we never ran. The band is derived from the printed number, so the
+ * number is always the fuller statement of the same thing.
  */
-function scoreTint(pct) {
-  const strength = Math.min(Math.abs(pct), 100) / 100;
-  if (strength === 0) return "";
-  const alpha = (0.08 + strength * 0.42).toFixed(2);
-  return pct > 0 ? `background: rgba(59, 111, 214, ${alpha});` : `background: rgba(208, 59, 59, ${alpha});`;
+function scoreBand(score, baselinePct, isBaselineRow) {
+  if (!score) return "band-empty";
+  if (score.pct === 0) return "band-grey";
+  if (score.pct >= GREEN_AT) return "band-green";
+  if (isBaselineRow || baselinePct == null) return "band-grey";
+  return score.pct > baselinePct ? "band-blue" : "band-red";
 }
 
-function renderScoreCell(score, previousPct, extraClass = "") {
-  if (!score) return `<td class="score ${extraClass}">–</td>`;
+function renderScoreCell(score, previousPct, band, extraClass = "") {
+  if (!score) return `<td class="score band-empty ${extraClass}">–</td>`;
   const delta = previousPct == null ? "" : `<br>${renderDeltaLine(score.pct - previousPct)}`;
-  return `<td class="score ${extraClass}" style="${scoreTint(score.pct)}">` +
+  return `<td class="score ${band} ${extraClass}">` +
     `<span class="pct">${formatPct(score.pct)}</span><br><span class="netof">${score.net}/${score.of}</span>${delta}</td>`;
 }
 
@@ -134,15 +139,28 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
   // model: rules-only against rules-only, qwen against qwen. Comparing a
   // rules-only run with a model run would read as progress or loss where
   // only the chooser differs.
+  // What "above the baseline" means in this table: the run marked as its
+  // reference point, field by field. Without one, nothing is blue or red.
+  const baselineRow = rows.find((experiment) => experiment.isBaseline)
+    ?? rows.find((experiment) => experiment.verdict === "baseline")
+    ?? null;
+  const baselineOf = (field) => (field === "overall"
+    ? baselineRow?.scores.overall?.pct
+    : baselineRow?.scores[field]?.pct) ?? null;
+
   const previousByModel = new Map(); // chooser key -> { overall: pct, fields: { name: pct } }
   const bodyRows = rows.map((experiment) => {
+    const isBaselineRow = experiment === baselineRow;
     const deltaEligible = DELTA_VERDICTS.has(experiment.verdict);
     const muted = MUTED_VERDICTS.has(experiment.verdict);
     const previous = previousByModel.get(chooserKey(experiment)) ?? null;
-    const cells = [renderScoreCell(experiment.scores.overall, deltaEligible ? previous?.overall : null, "overall")];
+    const overall = experiment.scores.overall;
+    const cells = [renderScoreCell(overall, deltaEligible ? previous?.overall : null,
+      scoreBand(overall, baselineOf("overall"), isBaselineRow), "overall")];
     for (const field of fields) {
       const score = experiment.scores[field];
-      cells.push(renderScoreCell(score, deltaEligible ? previous?.fields?.[field] : null));
+      cells.push(renderScoreCell(score, deltaEligible ? previous?.fields?.[field] : null,
+        scoreBand(score, baselineOf(field), isBaselineRow)));
     }
     if (deltaEligible) {
       previousByModel.set(chooserKey(experiment), {
@@ -150,7 +168,8 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
         fields: Object.fromEntries(fields.map((field) => [field, experiment.scores[field]?.pct])),
       });
     }
-    return `<tr${muted ? ' class="muted"' : ""}>
+    const rowClasses = [muted ? "muted" : "", isBaselineRow ? "is-baseline" : ""].filter(Boolean).join(" ");
+    return `<tr${rowClasses ? ` class="${rowClasses}"` : ""}>
       <td class="id">${escapeHtml(experiment.id)}</td>
       <td class="date">${escapeHtml(experiment.date)}</td>
       <td class="label">${escapeHtml(experiment.label)}</td>
@@ -251,24 +270,42 @@ function renderWhatWeDid(experiments) {
 }
 
 const CSS = `
-  :root { color-scheme: light; }
+  /* One navy surface, everything else stepped off it: the page is darker
+     than the cards so a table reads as a panel, and the colour bands are
+     mixed over the card, never over the page. */
+  :root {
+    color-scheme: dark;
+    --page: #0d1726;
+    --surface: #132238;
+    --surface-2: #1a2e49;
+    --line: #24405f;
+    --line-soft: #1d334d;
+    --ink: #e8eef7;
+    --ink-2: #a9bdd6;
+    --ink-3: #8199b5;
+    --accent: #4e96f0;
+  }
   body {
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     max-width: 100rem;
     margin: 0 auto;
     padding: 1rem 1.25rem 3rem;
     line-height: 1.5;
-    color: #1f2328;
-    background: #fcfcfb;
+    color: var(--ink);
+    background: var(--page);
   }
   h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
   h1, h2, h3 { line-height: 1.25; }
-  h2 { margin-top: 2.5rem; padding-left: 0.75rem; border-left: 5px solid #3b6fd6; font-size: 1.3rem; }
-  p.key { color: #57606a; font-size: 0.95rem; }
-  p.best { margin: 0 0 0.5rem; color: #24292f; }
-  .swatch { display: inline-block; width: 0.9em; height: 0.9em; border-radius: 3px; vertical-align: -0.1em; }
-  .swatch-blue { background: rgba(59, 111, 214, 0.5); }
-  .swatch-red { background: rgba(208, 59, 59, 0.5); }
+  h2 { margin-top: 2.5rem; padding-left: 0.75rem; border-left: 5px solid var(--accent); font-size: 1.3rem; }
+  p { color: var(--ink); }
+  p.key { color: var(--ink-2); font-size: 0.95rem; }
+  p.best { margin: 0 0 0.5rem; color: var(--ink-2); }
+  p.best strong { color: var(--ink); }
+  em { color: var(--ink); font-style: italic; }
+  .chip {
+    display: inline-block; padding: 0 0.45rem; border-radius: 4px;
+    color: var(--ink); font-size: 0.85rem; white-space: nowrap;
+  }
   .tables { overflow-x: auto; }
   table {
     border-collapse: separate;
@@ -276,70 +313,90 @@ const CSS = `
     width: 100%;
     margin: 0.5rem 0 1rem;
     font-size: 0.9rem;
-    background: #fff;
-    border: 1px solid #d0d7de;
+    background: var(--surface);
+    border: 1px solid var(--line);
     border-radius: 8px;
     overflow: hidden;
   }
   th, td {
-    border-bottom: 1px solid #e3e6ea;
-    border-right: 1px solid #eef0f2;
+    border-bottom: 1px solid var(--line-soft);
+    border-right: 1px solid var(--line-soft);
     padding: 0.45rem 0.55rem;
     text-align: left;
     vertical-align: top;
   }
-  th { background: #f0f2f5; font-weight: 600; color: #444c56; font-size: 0.8rem; letter-spacing: 0.02em; position: sticky; top: 0; }
+  th {
+    background: var(--surface-2); font-weight: 600; color: var(--ink-2);
+    font-size: 0.8rem; letter-spacing: 0.02em; position: sticky; top: 0;
+  }
   tbody tr:last-child td { border-bottom: 0; }
-  tbody tr:hover td { filter: brightness(0.97); }
+  tbody tr:hover td { filter: brightness(1.18); }
   td.label { min-width: 15rem; white-space: normal; font-weight: 500; }
   td.date, td.id, td.verdict { white-space: nowrap; }
-  td.id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #57606a; }
+  td.id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-3); }
   td.model { min-width: 6rem; }
   td.score { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
-  td.overall, th.overall { border-left: 3px solid #3b6fd6; border-right: 3px solid #3b6fd6; }
+  td.overall, th.overall { border-left: 3px solid var(--accent); border-right: 3px solid var(--accent); }
   td.overall .pct { font-size: 1.05rem; }
   .pct { font-weight: 700; }
-  .netof { font-size: 0.72rem; color: #57606a; }
+  .netof { font-size: 0.72rem; color: var(--ink-3); }
+
+  /* The bands. Colour by what the number says, not by how big it is. */
+  .band-green { background: #1a5133; }
+  .band-blue { background: #21426f; }
+  .band-red { background: #5c2f3c; }
+  .band-grey { background: #17253a; color: var(--ink-3); }
+  .band-empty { background: #17253a; color: var(--ink-3); }
+  .band-grey .pct, .band-empty .pct { font-weight: 500; color: var(--ink-3); }
+  tr.is-baseline td { border-bottom: 2px solid var(--line); }
+
   .delta { font-size: 0.75rem; font-weight: 600; }
-  .delta-up { color: #1f4fb0; }
-  .delta-down { color: #b12a2a; }
-  .delta-zero { color: #6e7781; font-weight: 400; }
-  tr.muted td { color: #8b949e; }
-  tr.muted td.score { background: #f6f8fa !important; }
-  tr.muted .pct, tr.muted .netof { color: #8b949e; }
-  .role { display: block; font-size: 0.7rem; color: #57606a; text-transform: lowercase; }
-  .tag-none { background: #fff; color: #6e7781; border: 1px dashed #b6bec8; font-style: italic; }
-  .badge-control { background: #eef1f5; color: #444c56; border-color: #d0d7de; }
-  .badge-regression { background: #ffe9d9; color: #8a3a12; border-color: #f3c3a3; }
-  .measurement { margin: 1rem 0; padding: 0.75rem 1rem; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; }
-  .measurement h3 { margin: 0 0 0.25rem; font-size: 1.05rem; }
-  .measurement p { margin: 0.3rem 0; }
-  .measurement .meta { font-size: 0.82rem; color: #57606a; }
-  table.results { width: auto; min-width: 32rem; margin: 0.5rem 0; }
-  table.results td.result { font-weight: 600; white-space: normal; }
-  table.results td.label { font-weight: 400; }
-  .tag { display: inline-block; padding: 0 0.4rem; border-radius: 4px; background: #eef1f5; color: #24292f; font-size: 0.8rem; white-space: nowrap; }
+  .delta-up { color: #9ec8ff; }
+  .delta-down { color: #ffa8a8; }
+  .delta-zero { color: var(--ink-3); font-weight: 400; }
+  tr.muted td { color: var(--ink-3); opacity: 0.72; }
+  tr.muted td.score { background: #17253a; }
+  tr.muted .pct, tr.muted .netof { color: var(--ink-3); }
+
+  .role { display: block; font-size: 0.7rem; color: var(--ink-3); text-transform: lowercase; }
+  .tag {
+    display: inline-block; padding: 0 0.4rem; border-radius: 4px;
+    background: #22334d; color: var(--ink); font-size: 0.8rem; white-space: nowrap;
+  }
+  .tag-none { background: transparent; color: var(--ink-3); border: 1px dashed #3b5273; font-style: italic; }
   .badge {
     display: inline-block; padding: 0.05rem 0.5rem; border-radius: 999px;
     font-size: 0.78rem; font-weight: 600; white-space: nowrap; border: 1px solid transparent;
   }
-  .badge-kept { background: #dbe7fb; color: #1f4fb0; border-color: #b7cbf2; }
-  .badge-baseline { background: #eef1f5; color: #444c56; border-color: #d0d7de; }
-  .badge-set-aside { background: #fff; color: #57606a; border-color: #b6bec8; }
-  .badge-broken-run { background: #fbe4e4; color: #9a1f1f; border-color: #f0b8b8; }
-  .badge-unexplained { background: #fff2cf; color: #7a4d00; border-color: #f2d58a; }
+  .badge-kept { background: #1b3c66; color: #9ec8ff; border-color: #2f5c94; }
+  .badge-baseline { background: #24344b; color: var(--ink-2); border-color: #364d6b; }
+  .badge-control { background: #24344b; color: var(--ink-2); border-color: #364d6b; }
+  .badge-set-aside { background: transparent; color: var(--ink-3); border-color: #3b5273; }
+  .badge-regression { background: #4a3218; color: #f3bf7f; border-color: #6d4a22; }
+  .badge-broken-run { background: #4e2027; color: #ff9d9d; border-color: #74323a; }
+  .badge-unexplained { background: #4a3c15; color: #f5d488; border-color: #6d5a21; }
+
   ul.legend { padding-left: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem; margin: 0.5rem 0 1rem; }
-  ul.legend li { font-size: 0.9rem; color: #57606a; }
-  .experiment {
-    margin: 1rem 0; padding: 0.75rem 1rem; background: #fff;
-    border: 1px solid #d0d7de; border-radius: 8px;
+  ul.legend li { font-size: 0.9rem; color: var(--ink-2); }
+  .experiment, .measurement {
+    margin: 1rem 0; padding: 0.75rem 1rem; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 8px;
   }
-  .experiment h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
-  .id-badge { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #24292f; color: #fff; padding: 0 0.4rem; border-radius: 4px; font-size: 0.85rem; }
+  .experiment h3, .measurement h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+  .measurement h3 { margin-bottom: 0.25rem; }
+  .measurement p { margin: 0.3rem 0; }
+  .measurement .meta { font-size: 0.82rem; color: var(--ink-3); }
+  table.results { width: auto; min-width: 32rem; margin: 0.5rem 0; background: var(--surface-2); }
+  table.results td.result { font-weight: 600; white-space: normal; }
+  table.results td.label { font-weight: 400; color: var(--ink-2); }
+  .id-badge {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--accent);
+    color: #08121f; padding: 0 0.4rem; border-radius: 4px; font-size: 0.85rem; font-weight: 700;
+  }
   .experiment dl { margin: 0; }
   .experiment .row { display: flex; gap: 0.75rem; margin: 0.2rem 0; }
-  .experiment dt { flex: 0 0 5rem; font-weight: 600; color: #57606a; font-size: 0.85rem; padding-top: 0.1rem; }
-  .experiment dd { margin: 0; }
+  .experiment dt { flex: 0 0 5rem; font-weight: 600; color: var(--ink-3); font-size: 0.85rem; padding-top: 0.1rem; }
+  .experiment dd { margin: 0; color: var(--ink-2); }
   @media (max-width: 40rem) {
     body { padding: 0.75rem; }
     table { font-size: 0.8rem; }
@@ -369,7 +426,14 @@ export function renderHtml(register) {
 <body>
   <h1>${escapeHtml(title)}</h1>
   <p>${escapeHtml(scoring)}</p>
-  <p class="key">A cell's colour is its score: <span class="swatch swatch-blue"></span> deeper blue as it climbs towards 100%, <span class="swatch swatch-red"></span> red where wrong answers outnumber right ones, no colour at zero. The small ▲ and ▼ figures are the change in points since the last trusted run in the same table that asked the same thing of the same model. Greyed rows are runs whose numbers are not trusted; they carry no change.</p>
+  <p class="key">A cell's colour says how the number reads:
+  <span class="chip band-green">80% or better</span>
+  <span class="chip band-blue">better than the baseline</span>
+  <span class="chip band-red">no better than the baseline</span>
+  <span class="chip band-grey">nothing answered, or the baseline itself</span>.
+  The baseline is the row marked <em>baseline</em> in that table, compared field by field. The small ▲ and ▼ figures
+  are a different question: the change in points since the last trusted run in the same table that asked the same
+  thing of the same model. Greyed-out rows are runs whose numbers are not trusted; they carry no change.</p>
   <p class="key">The <strong>model</strong> column says what the model was asked to do, because in most runs it was not reading the page: <em>chooser</em> means the rules did the work and the model only picked one entry off a short list for a field or two; <em>whole page</em> means the model read the document and wrote every field itself; <em>no model</em> means nothing was asked of any model. Every run marked <em>control</em> is the same code with the chooser switched off, so the gap to the row above it is what the model itself was worth.</p>
   ${renderLegend(verdicts)}
   ${corpusSections}
