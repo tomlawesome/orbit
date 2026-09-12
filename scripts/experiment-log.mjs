@@ -100,10 +100,12 @@ function scoreBand(score, baselinePct, isBaselineRow) {
   return score.pct > baselinePct ? "band-blue" : "band-red";
 }
 
-function renderScoreCell(score, previousPct, band, extraClass = "") {
+function renderScoreCell(score, previousPct, band, isBest, extraClass = "") {
   if (!score) return `<td class="score band-empty ${extraClass}">–</td>`;
   const delta = previousPct == null ? "" : `<br>${renderDeltaLine(score.pct - previousPct)}`;
-  return `<td class="score ${band} ${extraClass}">` +
+  const best = isBest ? " is-best" : "";
+  const mark = isBest ? `<span class="best-mark" title="the best this column has reached">best</span>` : "";
+  return `<td class="score ${band}${best} ${extraClass}">${mark}` +
     `<span class="pct">${formatPct(score.pct)}</span><br><span class="netof">${score.net}/${score.of}</span>${delta}</td>`;
 }
 
@@ -148,6 +150,23 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
     ? baselineRow?.scores.overall?.pct
     : baselineRow?.scores[field]?.pct) ?? null;
 
+  // The best any run in this table has reached, column by column, and the
+  // first run to reach it: that row gets the box, so the box says where a
+  // score came from rather than repeating it on every row that ties.
+  const columns = ["overall", ...fields];
+  const bestByColumn = new Map();
+  for (const column of columns) {
+    let held = null;
+    for (const experiment of rows) {
+      if (MUTED_VERDICTS.has(experiment.verdict)) continue;
+      const score = experiment.scores[column];
+      if (!score) continue;
+      if (held === null || score.pct > held.pct) held = { pct: score.pct, id: experiment.id };
+    }
+    if (held !== null) bestByColumn.set(column, held);
+  }
+  const isBestCell = (experiment, column) => bestByColumn.get(column)?.id === experiment.id;
+
   const previousByModel = new Map(); // chooser key -> { overall: pct, fields: { name: pct } }
   const bodyRows = rows.map((experiment) => {
     const isBaselineRow = experiment === baselineRow;
@@ -156,11 +175,11 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
     const previous = previousByModel.get(chooserKey(experiment)) ?? null;
     const overall = experiment.scores.overall;
     const cells = [renderScoreCell(overall, deltaEligible ? previous?.overall : null,
-      scoreBand(overall, baselineOf("overall"), isBaselineRow), "overall")];
+      scoreBand(overall, baselineOf("overall"), isBaselineRow), isBestCell(experiment, "overall"), "overall")];
     for (const field of fields) {
       const score = experiment.scores[field];
       cells.push(renderScoreCell(score, deltaEligible ? previous?.fields?.[field] : null,
-        scoreBand(score, baselineOf(field), isBaselineRow)));
+        scoreBand(score, baselineOf(field), isBaselineRow), isBestCell(experiment, field)));
     }
     if (deltaEligible) {
       previousByModel.set(chooserKey(experiment), {
@@ -178,6 +197,20 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
       ${cells.join("\n      ")}
     </tr>`;
   });
+
+  const bestCells = ["overall", ...fields].map((column) => {
+    const best = bestByColumn.get(column);
+    const extra = column === "overall" ? " overall" : "";
+    if (!best) return `<td class="score band-empty${extra}">–</td>`;
+    return `<td class="score best-row${extra}"><span class="pct">${formatPct(best.pct)}</span>` +
+      `<br><span class="netof">${escapeHtml(best.id)}</span></td>`;
+  }).join("\n      ");
+  const bestRow = `<tr class="best-summary">
+      <td class="id"></td><td class="date"></td>
+      <td class="label">Best reached, by column</td>
+      <td class="model"></td><td class="verdict"></td>
+      ${bestCells}
+    </tr>`;
 
   const fieldHeaders = fields.map((field) => `<th>${escapeHtml(field)}</th>`).join("");
   const trusted = rows.filter((experiment) => DELTA_VERDICTS.has(experiment.verdict));
@@ -198,6 +231,7 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
     </thead>
     <tbody>
       ${bodyRows.join("\n      ")}
+      ${bestRow}
     </tbody>
   </table>
   </div>
@@ -284,6 +318,7 @@ const CSS = `
     --ink-2: #a9bdd6;
     --ink-3: #8199b5;
     --accent: #4e96f0;
+    --best: #f0954f;
   }
   body {
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -350,6 +385,19 @@ const CSS = `
   .band-grey .pct, .band-empty .pct { font-weight: 500; color: var(--ink-3); }
   tr.is-baseline td { border-bottom: 2px solid var(--line); }
 
+  /* The best a column has reached. An outline rather than a fill, so it
+     sits over whatever band the cell already wears. */
+  td.is-best { box-shadow: inset 0 0 0 2px var(--best); position: relative; }
+  .best-mark {
+    display: block; float: left; margin: -0.15rem 0 0 -0.2rem;
+    font-size: 0.6rem; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--best);
+  }
+  .key-box { padding: 0 0.35rem; border: 2px solid var(--best); border-radius: 4px; color: var(--ink); }
+  tr.best-summary td { background: var(--surface-2); border-top: 2px solid var(--line); color: var(--ink-2); }
+  tr.best-summary td.label { font-weight: 600; color: var(--ink); }
+  td.best-row { background: #2a2013; }
+  td.best-row .pct { color: var(--best); }
   .delta { font-size: 0.75rem; font-weight: 600; }
   .delta-up { color: #9ec8ff; }
   .delta-down { color: #ffa8a8; }
@@ -431,7 +479,9 @@ export function renderHtml(register) {
   <span class="chip band-blue">better than the baseline</span>
   <span class="chip band-red">no better than the baseline</span>
   <span class="chip band-grey">nothing answered, or the baseline itself</span>.
-  The baseline is the row marked <em>baseline</em> in that table, compared field by field. The small ▲ and ▼ figures
+  The baseline is the row marked <em>baseline</em> in that table, compared field by field.
+  An <span class="key-box">orange box</span> marks the best any column has reached, on the run that first reached it,
+  and the last row of each table gathers those bests in one place. The small ▲ and ▼ figures
   are a different question: the change in points since the last trusted run in the same table that asked the same
   thing of the same model. Greyed-out rows are runs whose numbers are not trusted; they carry no change.</p>
   <p class="key">The <strong>model</strong> column says what the model was asked to do, because in most runs it was not reading the page: <em>chooser</em> means the rules did the work and the model only picked one entry off a short list for a field or two; <em>whole page</em> means the model read the document and wrote every field itself; <em>no model</em> means nothing was asked of any model. Every run marked <em>control</em> is the same code with the chooser switched off, so the gap to the row above it is what the model itself was worth.</p>
