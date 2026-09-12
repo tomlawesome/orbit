@@ -2,16 +2,22 @@
 
 Builds the full-page fixtures in
 `src/server/documents/extraction-corpus-fullpage.ts` (#981) and the hold-out
-fixtures in `src/server/documents/extraction-holdout-fullpage.ts` (#986).
+fixtures in `src/server/documents/extraction-holdout3-fullpage.ts` (#998).
 
 Two corpora, two directories. Every script here takes `--dir <name>` (or
 `CORPUS_DIR`) and defaults to `sources`, so a command without the flag still
 means the tuning set:
 
-| directory  | documents | what it is for |
-| ---------- | --------- | -------------- |
-| `sources/` | the tuning set | read it, tune against it, argue with it |
-| `holdout/` | the hold-out set | scored, never read, never tuned against |
+| directory   | documents | what it is for |
+| ----------- | --------- | -------------- |
+| `sources/`  | the tuning set (48) | read it, tune against it, argue with it |
+| `holdout3/` | the hold-out set (12) | scored, never read, never tuned against |
+
+Hold-outs 1 and 2 are retired: both were spent (#996, and the shape of its
+misses read during tuning, #998) and rolled into `sources/` on 2026-09-12,
+which is why the tuning set is 48 rather than 24. `holdout3/` is the only
+unseen set left; if it is ever burned in turn the replacement is `holdout4/`,
+following this file's shape and `generate.mjs`'s directory-derived naming.
 
 ## Why these exist
 
@@ -63,11 +69,14 @@ node scripts/corpus/generate.mjs
 node scripts/corpus/generate-evidence.mjs   # paste into ideal-answer-survives.test.ts
 ```
 
-For the hold-out, the same seven steps with `--dir holdout` (and the volume
-mounted from `scripts/corpus/holdout` at step 5). There is no evidence file:
-the ideal-answer test reads the tuning set only. `generate.mjs` writes
-`extraction-holdout-fullpage.ts` and exports `EXTRACTION_HOLDOUT_FULLPAGE`
-when it is pointed at any directory other than `sources`.
+For the hold-out, the same seven steps with `--dir holdout3` (and the volume
+mounted from `scripts/corpus/holdout3` at step 5). There is no evidence file:
+the ideal-answer test reads the tuning set only. `generate.mjs` derives both
+the output path and the export name from the directory's own basename, so
+`--dir holdout3` writes `extraction-holdout3-fullpage.ts` and exports
+`EXTRACTION_HOLDOUT3_FULLPAGE` -- any directory other than `sources` gets its
+own module and export this way, which is what let a second and third
+hold-out exist without overwriting the one before it.
 
 `contact-sheet.mjs` and `make-index.mjs` build review pages: page 1 of all six
 side by side, and the PDFs with their ground truth. Two rounds of near-identical
@@ -124,57 +133,68 @@ The assignment of face to document is **fixed, not random**. The corpus text is
 committed ground truth; a typeface that changed between renders would change
 what Tika emits and silently invalidate it.
 
-The hold-out documents use twenty further faces, none of them used by the
-tuning set, so the two corpora share no character map. A fault that only
-appears in one font's encoding would otherwise be tuned away on `sources/`
-and never met again.
+`holdout3/` uses its own further faces, none of them used by `sources/`, so
+the two corpora share no character map. A fault that only appears in one
+font's encoding would otherwise be tuned away on `sources/` and never met
+again. The now-retired first and second hold-outs followed the same rule
+against `sources/` and against each other before they were merged in, which
+is why the 48 tuning documents between them use as many distinct typefaces
+as they do.
 
-## The hold-out set
-
-`holdout/` is twelve documents written after the extractor was tuned, by
-someone who had not read `sources/`. It is the only measurement the project
-has of whether the extractor generalises rather than fits the 24 pages it was
-built against, and that is true only while nobody working on the extractor
-has seen the pages.
-
-So, for anyone tuning:
-
-- **Do not read `scripts/corpus/holdout/`**, or
-  `src/server/documents/extraction-holdout-fullpage.ts`, or the PDFs, the
-  truths, the contact sheet or the index built from them.
-- **Do not run `npm run eval:holdout -- --misses`.** The default prints the
-  score lines and nothing else. Per-document misses are how a hold-out
-  quietly turns into a second tuning set, one fixed miss at a time; they are
-  for the owner, who is not the one tuning.
-- **Never change a hold-out document to make a score move.** A fix that needs
-  the hold-out to change is a fix aimed at the answer, not at the extractor.
-
-New documents belong in `sources/`. If the hold-out is ever burned — read,
-tuned against, or quoted back into a fix — it is spent, and the replacement is
-a fresh set, not a scrub of this one.
-
-## The second hold-out
+## Hold-out history
 
 The first hold-out was burned on 2026-09-12 (#996): an eval run with
 `--misses` printed each page's expected answer during a tuning session, the
 output was read, and the next change was designed knowing what those pages
-contained. `holdout2/` (#997) is the replacement — twelve more documents,
-written without reading `sources/`, `holdout/`, or either of their generated
-modules — and every rule above applies to it under its own name:
-`scripts/corpus/holdout2/`, `src/server/documents/extraction-holdout2-fullpage.ts`,
-and `--holdout2` in place of `--holdout` on every CLI that takes it
-(`holdout-score-cli`, `holdout-breakdown-cli`, `provider-bins-cli`,
-`subtype-runs-cli`, `provider-stage1-cli`). It uses twenty-three further
-faces, none used by `sources/` or `holdout/`, so no two of the three corpora
-share a character map.
+contained. The second hold-out (#997) replaced it, written without reading
+`sources/`, the first hold-out, or either of their generated modules -- and
+was itself partly spent (#998) when a script run over it during tuning
+reported the shape of its misses (word counts, capitals): counts, not text,
+but enough to change stage 1 with.
 
-Building either hold-out from a fresh session needs `ORBIT_HOLDOUT_AUTHOR=1`
+Rather than write a fourth set immediately, both retired hold-outs were
+rolled into `sources/` on 2026-09-12 (#998): their 24 documents joined the
+original 24 to make the 48-document tuning set this file now describes, and
+`holdout3/` took over as the only unseen set. Nothing about a document
+changed in the move -- same HTML, same ground truth, same fonts -- only its
+directory and, for the two generated modules it came from
+(`extraction-holdout-fullpage.ts`, `extraction-holdout2-fullpage.ts`), which
+no longer exist.
+
+## Hold-out 3
+
+`holdout3/` is twelve documents written after the extractor was tuned, by
+someone who had not read `sources/` or either retired hold-out. It is the
+only measurement the project has of whether the extractor generalises rather
+than fits the 48 pages it was built against, and that is true only while
+nobody working on the extractor has seen the pages.
+
+So, for anyone tuning:
+
+- **Do not read `scripts/corpus/holdout3/`**, or
+  `src/server/documents/extraction-holdout3-fullpage.ts`, or the PDFs, the
+  truths, the contact sheet or the index built from them.
+- **Do not run `npm run eval:holdout -- --holdout3 --misses`.** The default
+  prints the score lines and nothing else. Per-document misses are how a
+  hold-out quietly turns into a second tuning set, one fixed miss at a time;
+  they are for the owner, who is not the one tuning.
+- **Never change a hold-out document to make a score move.** A fix that needs
+  the hold-out to change is a fix aimed at the answer, not at the extractor.
+
+New documents belong in `sources/`. If `holdout3/` is ever burned -- read,
+tuned against, or quoted back into a fix -- it is spent, and the replacement
+is `holdout4/`, following this section's shape and `generate.mjs`'s
+directory-derived naming -- not a scrub of any retired set.
+
+`--holdout3` selects it on every eval CLI that takes a hold-out
+(`holdout-score-cli`, `holdout-breakdown-cli`, `provider-bins-cli`,
+`subtype-runs-cli`, `provider-stage1-cli`, `provider-stage2-cli`,
+`shortlist-recall-cli`, `model-blind-probe`); none of these CLIs accept
+`--holdout` or `--holdout2` any longer.
+
+Building a hold-out from a fresh session needs `ORBIT_HOLDOUT_AUTHOR=1`
 declared on every command that touches its path, because
 `~/agent-hooks/holdout-gate.py` otherwise refuses to let a tuning session
 read or write it; see that file for exactly what it exempts. Once a hold-out
 is generated, it is scored like any other -- nothing about that gate changes
-what `npm run eval:holdout -- --holdout2` prints.
-
-If `holdout2/` is ever burned in turn, the replacement is `holdout3/`,
-following this same section's shape and `generate.mjs`'s directory-derived
-naming -- not a scrub of either retired set.
+what `npm run eval:holdout -- --holdout3` prints.

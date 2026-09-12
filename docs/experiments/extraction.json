@@ -1,6 +1,6 @@
 {
   "title": "Orbit document extraction: experiment log",
-  "scoring": "Every field a page wants is one point: a right answer scores 1, a wrong answer and a blank both score 0 (owner, 2026-09-12 — weeding out wrong answers is its own job, not something to bend every measurement around). The 24 tuning pages are for steering; the 12 hold-out pages were never tuned on and are the judge. Runs before 2026-09-12 were scored the old way, where a wrong answer also lost a point, and are marked \"old scoring\": their numbers cannot be compared with the ones after.",
+  "scoring": "Every field a page wants is one point: a right answer scores 1, a wrong answer and a blank both score 0 (owner, 2026-09-12 — weeding out wrong answers is its own job, not something to bend every measurement around). The 48 tuning pages are for steering; hold-out 3's 12 pages were never tuned on and are the judge -- hold-outs 1 and 2 were spent and rolled into the tuning set on 2026-09-12 (#998), so tuning-24 and tuning-48 numbers are not comparable either. Runs before 2026-09-12 were scored the old way, where a wrong answer also lost a point, and are marked \"old scoring\": their numbers cannot be compared with the ones after.",
   "fields": [
     "provider",
     "reference",
@@ -12,9 +12,12 @@
     "recurrence"
   ],
   "corpora": {
-    "tuning-24": "The 24 tuning pages (src/server/documents/extraction-corpus.ts)",
-    "holdout-12": "The 12 hold-out pages, never read by an agent (extraction-holdout-corpus*.ts)",
-    "fullpage-6": "The six full-page documents added on 2026-09-11 (#981), now part of the 24",
+    "tuning-48": "The 48 tuning pages after hold-outs 1 and 2 joined the seen corpus (src/server/documents/extraction-corpus.ts, #998)",
+    "tuning-24": "The 24 tuning pages before hold-outs 1 and 2 joined them on 2026-09-12 -- retired, not comparable with tuning-48",
+    "holdout3-12": "The third hold-out, 12 pages, never read by an agent (extraction-holdout3-fullpage.ts, #998)",
+    "holdout2-12": "The second hold-out, 12 pages -- retired 2026-09-12, rolled into tuning-48 (#997, #998)",
+    "holdout-12": "The first hold-out, 12 pages -- retired 2026-09-12, rolled into tuning-48 (extraction-holdout-corpus*.ts, #996, #998)",
+    "fullpage-6": "The six full-page documents added on 2026-09-11 (#981), now part of tuning-48",
     "old-36": "The 36 short documents deleted on 2026-09-11 (#986)"
   },
   "verdicts": {
