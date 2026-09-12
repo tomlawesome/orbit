@@ -2223,7 +2223,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "Marked by eye rather than by classifyProvider it is 10 of 12. Stage 2 and the bins are still the shared ones; only stage 1 changed. Costs 32 candidates a page instead of 11.",
+      "notes": "Marked by eye rather than by classifyProvider it is 10 of 12. Stage 2 and the bins are still the shared ones; only stage 1 changed. Costs 32 candidates a page instead of 11. CONTAMINATED: the hold-out pages' provider answers were read before this sieve was designed (see #996). Not a hold-out number.",
       "about": [
         "provider"
       ]
@@ -2253,7 +2253,7 @@
         }
       },
       "verdict": "regression",
-      "notes": "Read beside E34. The tuning pages were already well served by the shared sieve, so here the widening only costs; the unseen pages are where it pays.",
+      "notes": "Read beside E34. The tuning pages were already well served by the shared sieve, so here the widening only costs; the unseen pages are where it pays. CONTAMINATED: the hold-out pages' provider answers were read before this sieve was designed (see #996). Not a hold-out number.",
       "about": [
         "provider"
       ]
