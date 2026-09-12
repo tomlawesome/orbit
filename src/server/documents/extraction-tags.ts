@@ -76,6 +76,10 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   // order. Several run on towards the figure (`[^£\\n]{0,40}`) so that the
   // qualifier, and not the bare word within it, is its nearest trigger.
 
+  // Tika prints a form's spacing as it finds it ("24  month minimum  term"),
+  // so the rows that read across a phrase allow runs of spaces --
+  // `[^\\S\\n]+`, never `\\s+`, which would join a label to the block under
+  // it ("EMPLOYER'S MONTHLY" / "CONTRIBUTION").
   // "including IPT" is the price; "excluding" it, or the tax line itself, is
   // not. The inclusive form is declared first so it wins the tie.
   { value: "total", direction: "forward", overrides: true,
@@ -95,8 +99,17 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   { value: "other", direction: "forward", overrides: true,
     pattern: "(?:cover(?:age)?|limit|sum insured|benefit) (?:of|at|up to)" },
   { value: "other", direction: "forward", overrides: true, pattern: "(?:excess|deposit)(?: of)?" },
+  // The balloon payment at the end of a finance agreement is an option,
+  // not the price of the agreement.
+  { value: "other", direction: "forward", overrides: true, pattern: "(?:optional|balloon)(?: final)? payment[^£\\n]{0,40}" },
   { value: "other", direction: "forward", overrides: true,
-    pattern: "(?:joining|arrangement|admin(?:istration)?|set-?up|one-?off|late|missed|returned|non-?return) (?:fee|charge)" },
+    pattern: "(?:joining|arrangement|admin(?:istration)?|set-?up|one-?off|late|missed|returned|non-?return|call-?out|option[- ]to[- ]purchase) (?:fee|charge)" },
+  // A cover limit or a penalty is what the page would pay or fine, not what
+  // the household pays for it (owner, 2026-09-12: "words before and/or
+  // after").
+  { value: "other", direction: "backward", overrides: true, pattern: "per (?:claim|condition|incident|item|person)" },
+  { value: "other", direction: "forward", overrides: true, pattern: "per (?:claim|condition|incident)[^£\\n]{0,30}" },
+  { value: "other", direction: "forward", overrides: true, pattern: "(?:penalty|fixed penalty) (?:charge|notice)(?: notice)?(?: of)?" },
 
   // previous: last year's figure, however the page words it
   { value: "previous", direction: "forward", overrides: true,
@@ -110,9 +123,26 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   // rival: the figure printed beside the real one to be read instead of it
   { value: "rival", direction: "forward", overrides: true, pattern: "estimated[^£\\n]{0,40}" },
   { value: "rival", direction: "forward", overrides: true,
-    pattern: "if (?:you |we |it )?(?:pay|paying|paid|choose|chose|select|take no action|switch|cancel|upgrade|purchas)[^£\\n]{0,40}" },
+    pattern: "if (?:you |we |it )?(?:pay|paying|paid|choose|chose|select|take no action|switch|cancel|upgrade|purchas|book|bought)[^£\\n]{0,40}" },
   { value: "rival", direction: "forward", overrides: true,
     pattern: "(?:over|for)\\s+(?:the\\s+)?(?:full\\s+|whole\\s+|entire\\s+)?term[^£\\n]{0,40}" },
+  // The sum of every payment over a term longer than a year is what the
+  // contract adds up to, not what it costs: the page prices it by the
+  // month, and the truth wants the month (alarm monitoring, 2026-09-12).
+  { value: "rival", direction: "forward", overrides: true,
+    pattern: "(?:total(?:[^\\S\\n]+amount)?[^\\S\\n]+payable[^\\S\\n]+)?over[^\\S\\n]+(?:the[^\\S\\n]+|a[^\\S\\n]+|your[^\\S\\n]+)?(?:1[3-9]|[2-9]\\d)[^\\S\\n-]+months?(?:[^\\S\\n]+minimum)?(?:[^\\S\\n]+term)?[^£\\n]{0,40}" },
+  // A figure the page works out for comparison -- "equivalent to £119.88 a
+  // year", "equivalent monthly price (for comparison only)", "would
+  // otherwise cost £148 if booked separately" -- is not the price of
+  // anything on the page.
+  { value: "rival", direction: "forward", overrides: true, pattern: "equivalent(?: to)?[^£\\n]{0,40}" },
+  { value: "rival", direction: "forward", overrides: true, pattern: "(?:would|could) otherwise (?:cost|be|pay)" },
+  { value: "rival", direction: "backward", overrides: true, pattern: "\\(?for comparison" },
+  { value: "rival", direction: "backward", overrides: true, pattern: "if (?:booked|bought|purchased|taken) separately" },
+  // The second permit, the extra card, the additional member: the price of
+  // one more, printed beside the price of this one.
+  { value: "rival", direction: "forward", overrides: true,
+    pattern: "(?:second|additional|extra|further|each additional) (?:permit|vehicle|card|member|person|adult|child|user|device)[^£\\n]{0,60}" },
   { value: "rival", direction: "forward", overrides: true,
     pattern: "a new (?:fixed )?(?:plan|tariff|deal|policy)[^£\\n]{0,40}" },
   // The add-on offered beside the cover is not the cover.
@@ -142,9 +172,9 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   // instalment. "Monthly" is itself a qualifier: it says the figure is one
   // of many, so it overrides the plain labels it is printed with.
   { value: "instalment", direction: "forward", overrides: true,
-    pattern: "(?:your )?monthly(?: [a-z]+){0,2} (?:instalment|payment|amount|charge|price|cost|fee|contribution)" },
+    pattern: "(?:your )?monthly(?:[^\\S\\n]+[a-z]+){0,2}[^\\S\\n]+(?:instalment|payment|amount|charge|price|cost|fee|contribution|rental|rent)" },
   { value: "instalment", direction: "backward", overrides: true,
-    pattern: "(?:standard )?monthly(?: [a-z]+){0,2} (?:charge|fee|price|cost|contribution)" },
+    pattern: "(?:standard )?monthly(?:[^\\S\\n]+[a-z]+){0,2}[^\\S\\n]+(?:charge|fee|price|cost|contribution|rental|rent)" },
   // "Monthly by Direct Debit (£15.75 x 12, total £189.00)": everything in
   // the bracket prices paying monthly, not the thing being paid for.
   { value: "instalment", direction: "forward", overrides: true,
@@ -155,8 +185,11 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   { value: "instalment", direction: "backward", pattern: "(?:by )?(?:monthly|quarterly|weekly) direct debit" },
 
   // total
-  { value: "total", direction: "forward", pattern: "grand total" },
-  { value: "total", direction: "forward", pattern: "total(?: amount| cost| price| charge| payable)?" },
+  { value: "total", direction: "forward", pattern: "(?:grand|final|overall) total" },
+  { value: "total", direction: "forward", pattern: "total(?: amount| cost| price| charge| payable| fee)?" },
+  { value: "total", direction: "forward", pattern: "(?:contract|agreed|purchase|plan|policy|subscription|membership) (?:price|cost|fee|charge)" },
+  { value: "total", direction: "forward", pattern: "invoice (?:total|amount|value)" },
+  { value: "total", direction: "forward", pattern: "(?:annual|yearly) (?:[a-z]+ ){0,2}(?:fee|charge|cost|price|subscription)(?: paid)?" },
   { value: "total", direction: "forward", pattern: "(?:renewal |annual |yearly )?premium(?: for the year)?" },
   { value: "total", direction: "forward", pattern: "(?:total|charge|cost|price) for the year" },
   { value: "total", direction: "forward", pattern: "price paid" },
@@ -173,7 +206,13 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   // due
   { value: "due", direction: "forward", pattern: "amount (?:due|payable|to pay|outstanding)" },
   { value: "due", direction: "forward", pattern: "to pay" },
-  { value: "due", direction: "forward", pattern: "balance (?:due|outstanding)" },
+  // "Balance due", "remaining balance": a sum to pay. A bare "outstanding
+  // balance" is a loan's debt, not its cost (the mortgage statement), so
+  // it needs the word that makes it a payment.
+  { value: "due", direction: "forward", pattern: "balance (?:due|outstanding|remaining|to pay|payable)" },
+  { value: "due", direction: "forward", pattern: "(?:remaining|closing|final) balance" },
+  { value: "due", direction: "forward", pattern: "(?:amount|total|sum) (?:remaining|outstanding|charged|billed|taken|collected)" },
+  { value: "due", direction: "forward", pattern: "(?:your |this )?payment of" },
   { value: "due", direction: "forward", pattern: "please pay" },
   { value: "due", direction: "forward", pattern: "payable by" },
   { value: "due", direction: "backward", pattern: "is (?:now )?due" },
@@ -528,7 +567,12 @@ function buildScopes(
       const reach = blockEndAfter(blocks, block.end, limit, targets);
       if (reach !== null) scopeEnd = Math.max(scopeEnd, reach);
     }
-    if (!forward && !valueInBlock && block !== null) {
+    // Backward, the same -- but only where the trigger starts its block.
+    // "£186.00" over "This schedule confirms your cover from 4 October
+    // 2026" is not a figure "from 4 October 2026": a trigger printed in
+    // the middle of a sentence is that sentence's, and names nothing in
+    // the block above it.
+    if (!forward && !valueInBlock && nothingBefore && block !== null) {
       const limit = Math.max(cutBefore(hardCuts, match.start), cutBefore(triggerSpans, match.start));
       const reach = blockStartBefore(blocks, block.start, limit, targets);
       if (reach !== null) scopeStart = Math.min(scopeStart, reach);
