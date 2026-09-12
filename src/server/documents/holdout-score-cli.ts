@@ -7,6 +7,7 @@
 //   npm run eval:holdout
 //   npm run eval:holdout -- --model
 //   npm run eval:holdout -- --misses      # owner only; see below
+//   npm run eval:holdout -- --holdout2    # the SECOND hold-out (#997)
 //
 // Scores on the 24 are tuning indicators; this is the number that says
 // whether the extractor generalises, and it only says that while nobody has
@@ -19,14 +20,24 @@
 // is the model's pick from that field's shortlist, five or six calls a
 // document, which needs the Ollama container on
 // `orbit_orbit-document-processing`.
+//
+// `--holdout2` swaps in the second hold-out (#997): the first was spent when
+// an eval run with `--misses` printed each page's answer during a tuning
+// session (#996), so a second set exists to go on measuring generalisation
+// while the first stays retired.
 
 import { chooseFields, chooseFieldsWithModel } from "./extraction-choose";
 import { assertChooserReachable, chooserTransport } from "./extraction-choose-meaning";
 import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
+import { EXTRACTION_HOLDOUT2_FULLPAGE } from "./extraction-holdout2-fullpage";
 import { formatRunScore, scoreCorpus, type RunScore } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
 import { proposalFromText } from "./suggestions";
+
+const onHoldout2 = process.argv.includes("--holdout2");
+const corpus = onHoldout2 ? EXTRACTION_HOLDOUT2_FULLPAGE : EXTRACTION_HOLDOUT_FULLPAGE;
+const label = onHoldout2 ? "hold-out 2" : "hold-out";
 
 /** Which model answers the questions, named on the command line:
  * `--chooser-model <name>` sends them to that model over Ollama's generic
@@ -47,15 +58,15 @@ const forPrinting = (score: RunScore): RunScore => (showMisses ? score : { ...sc
 async function main(): Promise<void> {
   const withModel = process.argv.includes("--model");
   if (withModel) await assertChooserReachable(chooserModelNamed());
-  const staged = await scoreCorpus(EXTRACTION_HOLDOUT_FULLPAGE, async (text) => {
+  const staged = await scoreCorpus(corpus, async (text) => {
     const tagged = tagCandidates(text, sieve(text));
     return withModel
       ? chooseFieldsWithModel(tagged, chooserTransport(chooserModelNamed()))
       : chooseFields(tagged);
   });
-  console.log(formatRunScore(withModel ? "hold-out: sieve+tag+choose+model" : "hold-out: sieve+tag+choose", forPrinting(staged)));
-  const heuristics = await scoreCorpus(EXTRACTION_HOLDOUT_FULLPAGE, (text, filename) => proposalFromText(text, filename));
-  console.log(formatRunScore("hold-out: heuristics (one-shot)", forPrinting(heuristics)));
+  console.log(formatRunScore(withModel ? `${label}: sieve+tag+choose+model` : `${label}: sieve+tag+choose`, forPrinting(staged)));
+  const heuristics = await scoreCorpus(corpus, (text, filename) => proposalFromText(text, filename));
+  console.log(formatRunScore(`${label}: heuristics (one-shot)`, forPrinting(heuristics)));
 }
 
 void main();
