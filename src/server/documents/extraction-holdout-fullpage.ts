@@ -1,12 +1,14 @@
 // GENERATED FILE — do not edit by hand.
 //
-// The HOLD-OUT set (#986): full-page documents written after the extractor
-// was tuned, by someone who had not read the 24 in `scripts/corpus/sources/`.
+// A HOLD-OUT set: full-page documents written after the extractor was
+// tuned, by someone who had not read `scripts/corpus/sources/` (or, for a
+// later hold-out, any earlier hold-out either -- `holdout` is the first).
 // They are the generalisation measurement, so they are deliberately NOT part
-// of `EXTRACTION_CORPUS`: nothing tuning against the 24 pulls them in, and
-// tuning against these would destroy the only unseen number the project has.
+// of `EXTRACTION_CORPUS`: nothing tuning against the tuning set pulls them
+// in, and tuning against a hold-out would destroy the only unseen number the
+// project has for it.
 //
-// Score them with `npm run eval:holdout`. Regenerate with:
+// Score with `npm run eval:holdout`. Regenerate with:
 //
 //   node scripts/corpus/generate.mjs --dir holdout
 //
