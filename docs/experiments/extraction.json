@@ -2444,6 +2444,60 @@
       },
       "verdict": "regression",
       "notes": "Single run; counts only, no answers read. By the rules doc's own test this is fitted: the fix is fewer rules and a tie-break that does not need a rule to fire, not more rules. Against 6/12 for the shared route (E36)."
+    },
+    {
+      "id": "E42",
+      "date": "2026-09-12",
+      "label": "Provider stage 1, case-blind with one-word brands, on the 24",
+      "corpus": "tuning-24",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by its own stage 1",
+      "what": "Stage 1 stops caring about case and keeps one-word brands and short lines. Recall stays 24/24; 292 candidates a page against 19.",
+      "how": "npm run eval:provider-stage1",
+      "commit": "977c5ed",
+      "output": "tmp/e-provider-stage1-v2-tuning.txt",
+      "scores": {
+        "overall": {
+          "pct": 8.3,
+          "net": 2,
+          "of": 24
+        },
+        "provider": {
+          "pct": 8.3,
+          "net": 2,
+          "of": 24
+        }
+      },
+      "verdict": "kept",
+      "notes": "End-to-end figure here still runs the shared stage 2 and is not the point; recall is."
+    },
+    {
+      "id": "E43",
+      "date": "2026-09-12",
+      "label": "Provider stage 1, case-blind with one-word brands, second unseen twelve",
+      "corpus": "holdout2-12",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by its own stage 1",
+      "what": "Recall 12 of 12, from 8. The four misses were one-word names; every rule wanted two words. 60 candidates a page.",
+      "how": "npm run eval:provider-stage1 -- --holdout2",
+      "commit": "977c5ed",
+      "output": "tmp/e-holdout2-provider-stage1-v2.txt",
+      "scores": {
+        "overall": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "provider": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        }
+      },
+      "verdict": "kept",
+      "notes": "Second run on this set for stage 1. The change was informed by the shape of the misses (word count, capitals, digits -- counted, not read) and by the owner's case rule; the pages themselves stay unread. Own stage 2 on top of it: 2/12 (from 1/12), tuning 12/24 (from 15/24): stage 2 now has to cope with the flood, which is the next job."
     }
   ],
   "measurements": [
