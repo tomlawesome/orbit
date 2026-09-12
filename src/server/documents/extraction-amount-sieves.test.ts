@@ -269,3 +269,38 @@ describe("the votes merged into tags", () => {
     ]);
   });
 });
+
+describe("the adds-up sieve", () => {
+  const text = [
+    "Hosting plan Business Hosting Plan — £89.99 per year, renews 2 November 2026",
+    "",
+    "Order Summary",
+    "",
+    "Domain renewal (12 months) £12.99",
+    "",
+    "VAT (20%) £2.60",
+    "",
+    "Total due today £15.59",
+  ].join("\n");
+  const all = ["£89.99", "£12.99", "£2.60", "£15.59"].map((printed) => amount(text, printed));
+
+  it("reads the row that adds up the rows above it as the total", () => {
+    const votes = votesFrom("adds-up", text, all[3], all);
+
+    expect(votes[0].tag).toBe("total");
+    expect(votes[0].weight).toBe(STRENGTH_STATED);
+  });
+
+  it("says nothing about a row that adds up nothing", () => {
+    for (const candidate of all.slice(0, 3)) {
+      expect(votesFrom("adds-up", text, candidate, all)).toEqual([]);
+    }
+  });
+
+  it("needs two rows: a figure repeated is not a sum", () => {
+    const repeated = "Premium £12.99\n\nAmount £12.99";
+    const both = [amount(repeated, "£12.99"), { ...amount(repeated, "£12.99"), index: repeated.lastIndexOf("£12.99") }];
+
+    expect(votesFrom("adds-up", repeated, both[1], both)).toEqual([]);
+  });
+});

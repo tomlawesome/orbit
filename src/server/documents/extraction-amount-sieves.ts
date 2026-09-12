@@ -32,6 +32,8 @@
 //   table-neighbours    a row of a list whose rows either side are cover
 //                       limits ("up to £2,000", "£300 per claim") is a
 //                       cover limit too, whatever its own words say
+//   adds-up             the row of an order summary that adds up the rows
+//                       directly above it is the bill, whatever it is called
 //
 // Each returns a vote, never a decision. Votes merge into tags by tag
 // value, so a figure several sieves agree about carries one tag naming all
@@ -548,6 +550,44 @@ const tableNeighbours: AmountSieve = {
   },
 };
 
+/** The one figure in a row of a table, or null where the block is not such
+ * a row. */
+function rowFigure(page: AmountPageFacts, all: readonly AmountCandidate[], at: number): AmountCandidate | null {
+  if (rowLabel(page, all, at) === null) return null;
+  return all.find((entry) => blockOf(page, entry.index) === at) ?? null;
+}
+
+/**
+ * An order summary does its own arithmetic: "Domain renewal £12.99 / VAT
+ * £2.60 / Total due today £15.59". The row that adds up the rows directly
+ * above it is the bill for this page's transaction, whatever the rows
+ * are called, and a per-year price printed elsewhere on the page is not.
+ */
+export const ADDS_UP = "adds-up";
+
+const addsUp: AmountSieve = {
+  name: ADDS_UP,
+  read: (candidate, all, page) => {
+    const own = blockOf(page, candidate.index);
+    if (rowFigure(page, all, own) !== candidate) return [];
+    const target = Number(candidate.value);
+    let sum = 0;
+    let rows = 0;
+    for (let at = own - 1; at >= 0; at -= 1) {
+      const above = rowFigure(page, all, at);
+      if (above === null) break;
+      sum += Number(above.value);
+      rows += 1;
+      // Two rows at least: one row equal to the next is a figure repeated.
+      if (rows >= 2 && sum === target) {
+        return [{ sieve: ADDS_UP, tag: "total", trigger: `adds up the ${rows} rows above`, weight: STRENGTH_STATED }];
+      }
+      if (sum > target) break;
+    }
+    return [];
+  },
+};
+
 // ------------------------------------------------------------------ the set
 
 /** Only the strongest vote a single sieve casts: a sieve has one opinion
@@ -569,6 +609,7 @@ export const AMOUNT_SIEVES: readonly AmountSieve[] = [
   printedThroughout,
   instalmentTotal,
   tableNeighbours,
+  addsUp,
 ];
 
 /** Every sieve's name, the label first, for reports and for ordering the
