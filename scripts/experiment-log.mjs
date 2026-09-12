@@ -12,7 +12,10 @@ const HOLDOUT_PREFIX = "hold-out: ";
 // register happens to list corpora in.
 const CORPUS_ORDER = ["tuning-24", "holdout-12", "fullpage-6", "old-36"];
 
-const DELTA_VERDICTS = new Set(["kept", "baseline"]);
+// Verdicts whose numbers are trusted, so a later run can be measured against
+// them. A control and a regression are both real runs: only a run that failed
+// or is not yet believed drops out of the chain.
+const DELTA_VERDICTS = new Set(["kept", "baseline", "control", "regression"]);
 const MUTED_VERDICTS = new Set(["broken run", "unexplained", "set aside"]);
 
 const SCORE_LINE = /^([^:]+):\s*(-?\d+(?:\.\d+)?)%\s*\((-?\d+)\/(\d+)\)\s*\[(.*)\]\s*$/u;
@@ -104,6 +107,25 @@ function renderVerdict(verdict) {
   return `<span class="badge badge-${slug}">${escapeHtml(verdict)}</span>`;
 }
 
+/**
+ * What a model was asked to do, which matters more than its name: most runs
+ * here are rules with a model choosing two fields from a short list, not a
+ * model reading the page. A run with no model at all says so in words.
+ */
+function renderModelCell(experiment) {
+  const role = experiment.role ?? "chooser";
+  if (role === "no model") {
+    return `<td class="model"><span class="tag tag-none">no model</span></td>`;
+  }
+  return `<td class="model"><span class="role">${escapeHtml(role)}</span>` +
+    `<span class="tag">${escapeHtml(experiment.model)}</span></td>`;
+}
+
+/** Runs are only comparable when the same thing was asked of the same model. */
+function chooserKey(experiment) {
+  return `${experiment.role ?? "chooser"}|${experiment.model}`;
+}
+
 function renderCorpusTable(corpusKey, description, experiments, fields) {
   const rows = experiments.filter((experiment) => experiment.corpus === corpusKey);
   if (rows.length === 0) return "";
@@ -112,18 +134,18 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
   // model: rules-only against rules-only, qwen against qwen. Comparing a
   // rules-only run with a model run would read as progress or loss where
   // only the chooser differs.
-  const previousByModel = new Map(); // model -> { overall: pct, fields: { name: pct } }
+  const previousByModel = new Map(); // chooser key -> { overall: pct, fields: { name: pct } }
   const bodyRows = rows.map((experiment) => {
     const deltaEligible = DELTA_VERDICTS.has(experiment.verdict);
     const muted = MUTED_VERDICTS.has(experiment.verdict);
-    const previous = previousByModel.get(experiment.model) ?? null;
+    const previous = previousByModel.get(chooserKey(experiment)) ?? null;
     const cells = [renderScoreCell(experiment.scores.overall, deltaEligible ? previous?.overall : null, "overall")];
     for (const field of fields) {
       const score = experiment.scores[field];
       cells.push(renderScoreCell(score, deltaEligible ? previous?.fields?.[field] : null));
     }
     if (deltaEligible) {
-      previousByModel.set(experiment.model, {
+      previousByModel.set(chooserKey(experiment), {
         overall: experiment.scores.overall.pct,
         fields: Object.fromEntries(fields.map((field) => [field, experiment.scores[field]?.pct])),
       });
@@ -132,7 +154,7 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
       <td class="id">${escapeHtml(experiment.id)}</td>
       <td class="date">${escapeHtml(experiment.date)}</td>
       <td class="label">${escapeHtml(experiment.label)}</td>
-      <td class="model"><span class="tag">${escapeHtml(experiment.model)}</span></td>
+      ${renderModelCell(experiment)}
       <td class="verdict">${renderVerdict(experiment.verdict)}</td>
       ${cells.join("\n      ")}
     </tr>`;
@@ -145,7 +167,8 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
   const bestLine = best === null
     ? ""
     : `<p class="best">Best trusted run so far: <strong>${escapeHtml(best.id)}</strong> ${escapeHtml(best.label)} — ` +
-      `<strong>${formatPct(best.scores.overall.pct)}</strong> (${escapeHtml(best.model)})</p>`;
+      `<strong>${formatPct(best.scores.overall.pct)}</strong> ` +
+      `(${escapeHtml(best.role === "no model" ? "no model asked" : `${best.role}: ${best.model}`)})</p>`;
   return `<section class="corpus">
   <h2>${escapeHtml(description)}</h2>
   ${bestLine}
@@ -162,6 +185,38 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
 </section>`;
 }
 
+/**
+ * The measurements that are not scored runs: how good the short list handed
+ * to a chooser is. A shortlist that does not carry the answer is a ceiling on
+ * everything downstream, so it is tracked in its own right.
+ */
+function renderMeasurements(measurements, corpora) {
+  if (!measurements || measurements.length === 0) return "";
+  const blocks = measurements.map((measurement) => {
+    const rows = measurement.results
+      .map(([name, value]) => `<tr><td class="label">${escapeHtml(name)}</td><td class="result">${escapeHtml(value)}</td></tr>`)
+      .join("\n        ");
+    return `<article class="measurement">
+      <h3><span class="id-badge">${escapeHtml(measurement.id)}</span> ${escapeHtml(measurement.label)}</h3>
+      <p class="meta">${escapeHtml(measurement.date)} · ${escapeHtml(corpora[measurement.corpus] ?? measurement.corpus)}</p>
+      <p>${escapeHtml(measurement.what)}</p>
+      <table class="results">
+        <tbody>
+        ${rows}
+        </tbody>
+      </table>
+      <p class="meta">How: ${escapeHtml(measurement.how)} · Written down in: ${escapeHtml(measurement.source)}</p>
+    </article>`;
+  });
+  return `<section class="corpus">
+  <h2>How good is the list we hand over? (no model asked)</h2>
+  <p class="key">These are not scores. They ask a different question: when a chooser is handed a short list,
+  is the right answer even on it, and how far up? A list that does not carry the answer is a ceiling no model
+  can beat. This is where the provider word-run bins were measured.</p>
+  ${blocks.join("\n  ")}
+</section>`;
+}
+
 function renderLegend(verdicts) {
   const items = Object.entries(verdicts)
     .map(([name, description]) => `<li>${renderVerdict(name)} ${escapeHtml(description)}</li>`)
@@ -174,7 +229,7 @@ function renderWhatWeDid(experiments) {
     const rows = [
       ["What", experiment.what],
       ["How", experiment.how],
-      ["Model", experiment.model],
+      ["Model", experiment.role === "no model" ? "none asked" : `${experiment.role}: ${experiment.model}`],
       ["Commit", experiment.commit],
       ["Output", experiment.output],
       ["Verdict", experiment.verdict],
@@ -252,6 +307,17 @@ const CSS = `
   tr.muted td { color: #8b949e; }
   tr.muted td.score { background: #f6f8fa !important; }
   tr.muted .pct, tr.muted .netof { color: #8b949e; }
+  .role { display: block; font-size: 0.7rem; color: #57606a; text-transform: lowercase; }
+  .tag-none { background: #fff; color: #6e7781; border: 1px dashed #b6bec8; font-style: italic; }
+  .badge-control { background: #eef1f5; color: #444c56; border-color: #d0d7de; }
+  .badge-regression { background: #ffe9d9; color: #8a3a12; border-color: #f3c3a3; }
+  .measurement { margin: 1rem 0; padding: 0.75rem 1rem; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; }
+  .measurement h3 { margin: 0 0 0.25rem; font-size: 1.05rem; }
+  .measurement p { margin: 0.3rem 0; }
+  .measurement .meta { font-size: 0.82rem; color: #57606a; }
+  table.results { width: auto; min-width: 32rem; margin: 0.5rem 0; }
+  table.results td.result { font-weight: 600; white-space: normal; }
+  table.results td.label { font-weight: 400; }
   .tag { display: inline-block; padding: 0 0.4rem; border-radius: 4px; background: #eef1f5; color: #24292f; font-size: 0.8rem; white-space: nowrap; }
   .badge {
     display: inline-block; padding: 0.05rem 0.5rem; border-radius: 999px;
@@ -284,7 +350,7 @@ const CSS = `
 
 /** Renders the full one-page microsite HTML for a register object. */
 export function renderHtml(register) {
-  const { title, scoring, fields, corpora, verdicts, experiments } = register;
+  const { title, scoring, fields, corpora, verdicts, experiments, measurements } = register;
 
   const corpusSections = CORPUS_ORDER
     .filter((key) => corpora[key])
@@ -303,10 +369,12 @@ export function renderHtml(register) {
 <body>
   <h1>${escapeHtml(title)}</h1>
   <p>${escapeHtml(scoring)}</p>
-  <p class="key">A cell's colour is its score: <span class="swatch swatch-blue"></span> deeper blue as it climbs towards 100%, <span class="swatch swatch-red"></span> red where wrong answers outnumber right ones, no colour at zero. The small ▲ and ▼ figures are the change in points since the last trusted run in the same table that asked the same model. Greyed rows are runs whose numbers are not trusted; they carry no change.</p>
+  <p class="key">A cell's colour is its score: <span class="swatch swatch-blue"></span> deeper blue as it climbs towards 100%, <span class="swatch swatch-red"></span> red where wrong answers outnumber right ones, no colour at zero. The small ▲ and ▼ figures are the change in points since the last trusted run in the same table that asked the same thing of the same model. Greyed rows are runs whose numbers are not trusted; they carry no change.</p>
+  <p class="key">The <strong>model</strong> column says what the model was asked to do, because in most runs it was not reading the page: <em>chooser</em> means the rules did the work and the model only picked one entry off a short list for a field or two; <em>whole page</em> means the model read the document and wrote every field itself; <em>no model</em> means nothing was asked of any model. Every run marked <em>control</em> is the same code with the chooser switched off, so the gap to the row above it is what the model itself was worth.</p>
   ${renderLegend(verdicts)}
   ${corpusSections}
-  <h2>What we did</h2>
+  ${renderMeasurements(measurements, corpora)}
+  <h2>What we did, run by run</h2>
   ${renderWhatWeDid(experiments)}
 </body>
 </html>
@@ -347,6 +415,7 @@ function cmdRecord(flags) {
   const label = requireFlag(flags, "label");
   const corpus = requireFlag(flags, "corpus");
   const model = requireFlag(flags, "model");
+  const role = flags.role ?? (model === "—" ? "no model" : "chooser");
   const what = requireFlag(flags, "what");
   const how = requireFlag(flags, "how");
   const commit = requireFlag(flags, "commit");
@@ -371,6 +440,7 @@ function cmdRecord(flags) {
     label,
     corpus,
     model,
+    role,
     route,
     what,
     how,
