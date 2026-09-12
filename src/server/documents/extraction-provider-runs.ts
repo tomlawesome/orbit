@@ -101,6 +101,16 @@ export function isNameWord(word: string): boolean {
  */
 const JOINING_WORDS = new Set(["of", "and", "the", "a", "an", "for", "to", "in", "on", "at", "by", "with", "or", "&"]);
 
+/** Words that never go in a bin on their own (owner, 2026-09-12: "words
+ * like 'of' and 'and' should be excluded from the binning process"): the
+ * joining words, and the words a sentence around a name is made of. A
+ * name may still contain one -- "Bank of Scotland" is counted as a run --
+ * but none of them is ever a word worth counting by itself. */
+export const STOP_WORDS: ReadonlySet<string> = new Set([
+  ...JOINING_WORDS,
+  "your", "this", "that", "these", "our", "we", "you", "it", "is", "are", "as", "from", "per", "what", "who",
+]);
+
 /** Whether a run is a name rather than a piece of a sentence. A run is
  * allowed to contain a joining word and not to start or end on one: without
  * this the bins answer with "of the Bramblewood Childcare Group", which is

@@ -22,7 +22,7 @@
 // reader marking by hand does.
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
-import { DESCRIBER_WORDS, providerTaggedOrganisations, providerWordRuns } from "./extraction-provider-runs";
+import { DESCRIBER_WORDS, providerTaggedOrganisations, providerWordRuns, STOP_WORDS } from "./extraction-provider-runs";
 import { classifyProvider } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
@@ -31,6 +31,18 @@ import { tagCandidates } from "./extraction-tags";
 const TOP_WORDS = Number(process.argv[process.argv.indexOf("--top-words") + 1]) || 6;
 
 const onHoldout3 = process.argv.includes("--holdout3");
+/** `--edges`: only names printed in the top third or the bottom third of
+ * the page are binned (owner, 2026-09-12). The letterhead and the footer
+ * are where a page names its sender; the middle is where it names
+ * everyone else -- regulators, underwriters, banks. */
+const edgesOnly = process.argv.includes("--edges");
+/** `--edge-weight N`: the whole page is binned, but a name printed in the
+ * top or bottom third counts N times, so the letterhead and footer break
+ * ties without the middle being thrown away. */
+const edgeWeightAt = process.argv.indexOf("--edge-weight");
+const edgeWeight = edgeWeightAt >= 0 ? Number(process.argv[edgeWeightAt + 1]) : 1;
+const inEdges = (index: number, length: number): boolean =>
+  index < length / 3 || index >= (length * 2) / 3;
 const limitAt = process.argv.indexOf("--limit");
 const limit = limitAt >= 0 ? Number(process.argv[limitAt + 1]) : Number.MAX_SAFE_INTEGER;
 const corpus = (onHoldout3 ? EXTRACTION_HOLDOUT3_FULLPAGE : EXTRACTION_CORPUS).slice(0, limit);
@@ -65,6 +77,7 @@ function seededRuns(
   const wordCounts = new Map<string, number>();
   for (const name of names) {
     for (const word of split(name)) {
+      if (STOP_WORDS.has(word)) continue;
       if (dropDescribers && DESCRIBER_WORDS.has(word)) continue;
       wordCounts.set(word, (wordCounts.get(word) ?? 0) + 1);
     }
@@ -75,6 +88,8 @@ function seededRuns(
     .map(([word]) => word));
 
   // The longest stretches made only of seed words, counted across the names.
+  // A stop word inside a stretch is carried ("Bank of Scotland"); one at
+  // either end is not.
   const strings = new Map<string, { count: number; printed: string }>();
   for (const name of names) {
     const printed = name.split(/[^A-Za-z0-9&]+/u).filter(Boolean);
@@ -83,7 +98,8 @@ function seededRuns(
     while (from < folded.length) {
       if (!seeds.has(folded[from] as string)) { from += 1; continue; }
       let to = from;
-      while (to < folded.length && seeds.has(folded[to] as string)) to += 1;
+      while (to < folded.length && (seeds.has(folded[to] as string) || STOP_WORDS.has(folded[to] as string))) to += 1;
+      while (to > from && STOP_WORDS.has(folded[to - 1] as string)) to -= 1;
       const key = folded.slice(from, to).join(" ");
       const held = strings.get(key);
       if (held) held.count += 1;
@@ -139,7 +155,11 @@ let organisationsKept = 0;
 for (const document of corpus) {
   if (document.expected.provider === undefined) continue;
   const wanted = document.expected.provider;
-  const tagged = tagCandidates(document.text, sieve(document.text));
+  const tagged = tagCandidates(document.text, sieve(document.text))
+    .filter((candidate) => !edgesOnly || inEdges(candidate.index, document.text.length))
+    .flatMap((candidate) => inEdges(candidate.index, document.text.length)
+      ? Array.from({ length: edgeWeight }, () => candidate)
+      : [candidate]);
   const organisations = tagged.filter((candidate) => candidate.kind === "organisation");
   const kept = providerTaggedOrganisations(tagged);
   organisationsFound += organisations.length;
@@ -181,7 +201,7 @@ const report = (name: string, tally: Tally): void => {
     `mean entries ${(tally.entries / tally.pages).toFixed(1)}`);
 };
 
-console.log(`${onHoldout3 ? "the 12 unseen pages" : `the ${EXTRACTION_CORPUS.length} tuning pages`}, provider by word-run bins\n`);
+console.log(`${onHoldout3 ? "the 12 unseen pages" : `the ${EXTRACTION_CORPUS.length} tuning pages`}, provider by word-run bins${edgesOnly ? ", top and bottom third only" : edgeWeight > 1 ? `, top and bottom third counted ${edgeWeight} times` : ""}\n`);
 console.log("every run of words, however rare (shipped)");
 report("  over the sieve-2 providers", gated);
 report("  the same, marked by eye", gatedLoose);

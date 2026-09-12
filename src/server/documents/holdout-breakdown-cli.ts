@@ -24,7 +24,7 @@ const KEY: Record<string, string> = {
 };
 
 async function main(): Promise<void> {
-  const score = await scoreCorpus(corpus, (text) => chooseFields(tagCandidates(text, sieve(text))));
+  const score = await scoreCorpus(corpus, (text) => chooseFields(tagCandidates(text, sieve(text)), text));
   console.log("field         right  wrong  blank   of");
   for (const field of FIELD_NAMES) {
     const { possible } = score.fields[field];
