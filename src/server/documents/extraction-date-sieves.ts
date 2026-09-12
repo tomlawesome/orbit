@@ -20,8 +20,8 @@
 //                       which is where a flattened table keeps its column
 //                       headings
 //   term-arithmetic     a date that is another date plus a term the page
-//                       printed ("12 months", "24-month", "annual") ends
-//                       that term, and the other one starts it
+//                       printed anywhere ("12 months", "24-month",
+//                       "annual") ends that term, and the other one starts it
 //   printed-throughout  a date repeated across the whole document is the
 //                       running header or footer, which is when the document
 //                       was produced -- not a date anyone acts on
@@ -349,19 +349,20 @@ const headingAbove: DateSieve = {
 
 // ------------------------------------------------------------ term-arithmetic
 
-/** How far apart two dates can be printed and still be read as the two ends
- * of one term: the blocks they sit in, and the page between them if that is
- * short. Further apart, the term the page printed is about something else. */
+/** How far apart two dates can be printed and still share the words between
+ * them: the blocks they sit in, and the page between them if that is short.
+ * Further apart, what is printed between them is about something else. */
 const ARITHMETIC_GAP = 400;
 
-/** How far back the term can be printed ahead of the pair. UK paper heads
- * the box before it fills it: "Minimum term 24 months" sits above the two
- * dates it governs as often as between them. */
+/** How far back the pair's words start ahead of it. UK paper heads the box
+ * before it fills it: "Statement period" sits above the two dates it
+ * governs as often as between them. */
 const ARITHMETIC_LEAD = 200;
 
-/** The text a pair of dates share, which is where the term has to be printed
- * for it to be their term: their two blocks, the page between them, and the
- * short run-up to the first of them. */
+/** The text a pair of dates share, which says what kind of pair they are --
+ * a statement period, a guarantee, a term ending in a visit: their two
+ * blocks, the page between them, and the short run-up to the first. The
+ * term itself may be printed anywhere on the page. */
 function betweenText(text: string, left: DateCandidate, right: DateCandidate): string {
   const from = Math.min(left.index, right.index);
   const to = Math.max(left.index + left.length, right.index + right.length);
@@ -383,7 +384,12 @@ const termArithmetic: DateSieve = {
       // of dates and says "12 months" somewhere, and none of them is a
       // renewal.
       if (REPORTING_PERIOD.test(context)) continue;
-      for (const term of printedTerms(context)) {
+      // The term can be printed anywhere on the page: a gym agreement
+      // states its minimum term in clause prose a long way from the dates
+      // it governs. Two dates exactly a printed term apart are still one
+      // weak reading, because a page can print "12 months" about something
+      // else -- reading the term from anywhere is what makes it weak.
+      for (const term of printedTerms(text)) {
         const anniversary = addMonths(earlier.value, term.months);
         if (anniversary === undefined) continue;
         if (later.value !== anniversary && later.value !== dayBefore(anniversary)) continue;
