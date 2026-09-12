@@ -9,6 +9,10 @@ cd "$repo_dir"
 # `node --test`, not Vitest -- see vitest.config.ts's exclude entry for why.
 node --test scripts/lockfile-no-pnpm-exe.test.mjs
 
+# Same reason: uses node:test, not vitest globals (#921) -- see
+# vitest.config.ts's exclude entry for this file too.
+node --test scripts/compose-project-name-resolution.test.mjs
+
 # Static analysis covers the full-stack boundary; Vitest exercises all fast
 # server, authentication, database, domain, and reducer tests without Docker.
 #
