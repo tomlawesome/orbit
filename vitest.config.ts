@@ -101,6 +101,19 @@ const test: TestUserConfig = {
           // it here would import it for its side effect of running the
           // check immediately, without a vitest test to attach the result to.
           "scripts/lockfile-no-pnpm-exe.test.mjs",
+          // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
+          // unprivileged `big` lane, which has no `docker` binary on PATH.
+          // `--exclude` on the CLI does not reach a project defined through
+          // `test.projects` -- verified directly: passing it alongside this
+          // same list left both files collected and red -- so the exclusion
+          // has to live in the project's own array instead, gated on the
+          // variable `fast_docker` sets. `fast_docker` runs both files.
+          ...(process.env.ORBIT_TEST_SKIP_DOCKER === "true"
+            ? [
+                "src/lib/install-script-adapters.test.ts",
+                "src/lib/recovery-bundle.parity.test.ts",
+              ]
+            : []),
         ],
       },
     },
