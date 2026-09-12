@@ -6,8 +6,7 @@
 // only -- no page text, no names -- so the hold-out stays unread.
 //
 //   npm run eval:provider-bins
-//   npm run eval:provider-bins -- --holdout      # the 12 unseen pages
-//   npm run eval:provider-bins -- --holdout2     # the second 12, #997
+//   npm run eval:provider-bins -- --holdout3     # the 12 unseen pages (#998; the first two hold-outs are retired)
 //   npm run eval:provider-bins -- --limit 6
 //   npm run eval:provider-bins -- --answers      # owner only; see below
 //
@@ -22,8 +21,7 @@
 // a looser one that counts a short form of the name a hit, which is what a
 // reader marking by hand does.
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
-import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
-import { EXTRACTION_HOLDOUT2_FULLPAGE } from "./extraction-holdout2-fullpage";
+import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { DESCRIBER_WORDS, providerTaggedOrganisations, providerWordRuns } from "./extraction-provider-runs";
 import { classifyProvider } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
@@ -32,11 +30,10 @@ import { tagCandidates } from "./extraction-tags";
 /** How many of the commonest words seed the strings. The owner's six. */
 const TOP_WORDS = Number(process.argv[process.argv.indexOf("--top-words") + 1]) || 6;
 
-const onHoldout = process.argv.includes("--holdout");
-const onHoldout2 = process.argv.includes("--holdout2");
+const onHoldout3 = process.argv.includes("--holdout3");
 const limitAt = process.argv.indexOf("--limit");
 const limit = limitAt >= 0 ? Number(process.argv[limitAt + 1]) : Number.MAX_SAFE_INTEGER;
-const corpus = (onHoldout2 ? EXTRACTION_HOLDOUT2_FULLPAGE : onHoldout ? EXTRACTION_HOLDOUT_FULLPAGE : EXTRACTION_CORPUS).slice(0, limit);
+const corpus = (onHoldout3 ? EXTRACTION_HOLDOUT3_FULLPAGE : EXTRACTION_CORPUS).slice(0, limit);
 
 /** The scorer's answer, and a looser one: a reader marking this by eye
  * counts a short form of the name as a hit. Same runs, two rulers. */
@@ -184,7 +181,7 @@ const report = (name: string, tally: Tally): void => {
     `mean entries ${(tally.entries / tally.pages).toFixed(1)}`);
 };
 
-console.log(`${onHoldout2 ? "the second 12 unseen pages" : onHoldout ? "the 12 unseen pages" : "the 24 tuning pages"}, provider by word-run bins\n`);
+console.log(`${onHoldout3 ? "the 12 unseen pages" : `the ${EXTRACTION_CORPUS.length} tuning pages`}, provider by word-run bins\n`);
 console.log("every run of words, however rare (shipped)");
 report("  over the sieve-2 providers", gated);
 report("  the same, marked by eye", gatedLoose);
@@ -203,7 +200,7 @@ console.log(`\norganisations stage 1 found: ${organisationsFound}; a provider si
 // strict top-1 -- what the rules would answer with, not what a reader
 // marking by eye would accept.
 const scored = percent(gated.top1, gated.pages).replace(/^(\d+)\/(\d+) \((.*)\)$/u, "$3 ($1/$2)");
-const prefix = onHoldout2 ? "hold-out 2: " : onHoldout ? "hold-out: " : "";
+const prefix = onHoldout3 ? "hold-out 3: " : "";
 console.log(`\n${prefix}provider by top word run: ${scored} [provider ${scored}]`);
 
 if (showAnswers) {

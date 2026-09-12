@@ -10,7 +10,10 @@ const HOLDOUT_PREFIX = /^hold-out(?: \d+)?: /u;
 
 // Fixed reading order for the results tables, independent of the order the
 // register happens to list corpora in.
-const CORPUS_ORDER = ["tuning-24", "holdout-12", "fullpage-6", "old-36"];
+const CORPUS_ORDER = [
+  "tuning-48", "holdout3-12",
+  "tuning-24", "holdout2-12", "holdout-12", "fullpage-6", "old-36",
+];
 
 // Verdicts whose numbers are trusted, so a later run can be measured against
 // them. A control, a regression and a measured dead end are all real runs:
@@ -288,9 +291,10 @@ function renderMeasurements(measurements, corpora) {
  * runs that were about it, and nothing else.
  */
 function renderFieldSections(experiments, fields) {
-  // Only the two corpora that still exist: the old 36 and the six full
-  // pages were folded away, and their numbers are not comparable.
-  const LIVE = new Map([["tuning-24", "tuning 24"], ["holdout-12", "unseen 12"]]);
+  // Only the two corpora that are still live: tuning-24 and both retired
+  // hold-outs were folded away the same way the old 36 and the six full
+  // pages were, and their numbers are not comparable with tuning-48's.
+  const LIVE = new Map([["tuning-48", "tuning 48"], ["holdout3-12", "unseen 12"]]);
   const sections = fields.map((field) => {
     const rows = experiments
       .filter((experiment) => LIVE.has(experiment.corpus)

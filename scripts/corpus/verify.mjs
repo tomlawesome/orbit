@@ -122,7 +122,12 @@ for (const f of readdirSync(dir).filter((n) => n.endsWith(".truth.json")).sort()
     if (!["renewal","expiry","due","service","issued","start","other"].includes(r.role)) problems.push(`role "${r.role}" is not a DocumentDateRole`);
     if (!(e.dates ?? []).includes(r.date)) problems.push(`dateRoles names ${r.date}, which is not in dates`);
   }
-  const derived = roles.some((r) => r.role === "renewal") ? "renewal" : roles.some((r) => r.role === "service") ? "service" : undefined;
+  // Matches suggestions.ts exactly: the FIRST dateRole in print order that is
+  // a scheduled kind wins, not "renewal beats service wherever it falls" --
+  // a document with both roles (alarm-monitoring-agreement) needs the same
+  // answer this check gives as the real derivation, or a corpus author has
+  // no way to know which scheduleKind the app will actually produce.
+  const derived = roles.find((r) => r.role === "renewal" || r.role === "service")?.role;
   if (e.scheduleKind !== derived) problems.push(`scheduleKind is ${e.scheduleKind ?? "(absent)"} but the roles derive ${derived ?? "(none)"}`);
 
   // House style: British, not American. Conservative markers only -- a gas

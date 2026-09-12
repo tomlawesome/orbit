@@ -30,12 +30,37 @@ const MODEL_ENVIRONMENT = { OLLAMA_MODEL: "a-local-model:latest" } as NodeJS.Pro
 
 /** A model reply can only offer one phrase. Ground truth may accept several
  * (a literal set, #989/#992) or name taxonomy groups instead of phrases
- * (#989); either way, the ideal reply offers a single concrete answer -- the
- * first phrase of the set, or the first synonym of the first listed kind. */
-function firstSubtypePhrase(expected: string | string[] | SubtypeSpec): string {
-  if (isSubtypeSpec(expected)) return subtypeAnswers({ kinds: [expected.kinds[0]] })[0];
+ * (#989). For the object form, an "ideal" reply still has to be one this
+ * test can ground: given the document's own text, prefer whichever accepted
+ * phrase (kind, qualifier, or their combination) is actually printed on the
+ * page, and fall back to the first synonym of the first listed kind only
+ * when nothing in the accepted set is -- which happens for a document whose
+ * subtype is deliberately never spelled out (see SUBTYPE_NOT_GROUNDABLE). */
+function firstSubtypePhrase(expected: string | string[] | SubtypeSpec, groundingText?: string): string {
+  if (isSubtypeSpec(expected)) {
+    if (groundingText !== undefined) {
+      const haystack = groundingText.toLowerCase();
+      for (const candidate of subtypeAnswers(expected)) {
+        const escaped = candidate.toLowerCase().replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+        if (new RegExp(`\\b${escaped}\\b`, "u").test(haystack)) return candidate;
+      }
+    }
+    return subtypeAnswers({ kinds: [expected.kinds[0]] })[0];
+  }
   return Array.isArray(expected) ? expected[0] : expected;
 }
+
+/** Two documents whose object-form subtype has no accepted taxonomy phrase
+ * -- kind, qualifier, or any combination of them -- printed anywhere on the
+ * page, by design: #989 ruled that a kind such as "Insurance" need not be
+ * printed at all, and a document must not explain its own trap. No model,
+ * however good, could ground this one field there, so it is excluded from
+ * the assertions below for these two filenames only; every other field on
+ * both documents is still checked in full. */
+const SUBTYPE_NOT_GROUNDABLE = new Set([
+  "fullpage-satellite-tv-subscription-invoice.pdf",
+  "fullpage-self-storage-agreement.pdf",
+]);
 
 // --- Copied from model-extraction.test.ts: the transport/envelope fakes
 // around the real modelProposalFromText path. Not reinvented here. ---
@@ -131,6 +156,18 @@ interface DocEvidence {
  * model" this test stands in for: one that always quotes real text.
  */
 const EVIDENCE: Record<string, DocEvidence> = {
+  "alarm-monitoring-agreement.pdf": {
+    provider: "Intruder Alarm Monitoring Agreement NORTHGATE HOME SECURITY Unit 6, Foundry Business Park, Elmscote, EL4 2RJ · 01632 960377 ·",
+    reference: "Elmscote, EL5 8HN Contract Number NGS-CA-20456 Engineer D. Sutton — commissioning visit 28/02/2026 Monitoring Start",
+    subtype: "17 Peartree Close, Elmscote, EL5 8HN Contract Number NGS-CA-20456 Engineer D. Sutton — commissioning visit 28/02/2026",
+    cost: { amount: "24.99", needle: "Term 24 month minimum term, ending 01/03/2028 Annual Maintenance Visit Due 02/03/2027 Monthly Monitoring Charge £24.99 per month, collected by" },
+    recurrence: { months: 24, needle: "28/02/2026 Monitoring Start Date 02/03/2026 Minimum Term 24 month minimum term, ending 01/03/2028 Annual" },
+    dates: [
+      "commissioning visit 28/02/2026 Monitoring Start Date 02/03/2026 Minimum Term 24 month",
+      "term, ending 01/03/2028 Annual Maintenance Visit Due 02/03/2027 Monthly Monitoring",
+      "02/03/2026 Minimum Term 24 month minimum term, ending 01/03/2028 Annual Maintenance Visit",
+    ],
+  },
   "fullpage-appliance-warranty-certificate.pdf": {
     provider: "on behalf of the retailer by Bellward Warranty Administration Ltd of Norwich, and underwritten by Corvane Insurance plc, authorised and",
     reference: "WARRANTY CERTIFICATE Certificate No. EWC-2025-118823 This is to certify that the appliance described below, purchased from",
@@ -139,6 +176,16 @@ const EVIDENCE: Record<string, DocEvidence> = {
     dates: [
       "and below, for a period of five years, commencing on 14 June 2026 and expiring on 13 June",
       "years, commencing on 14 June 2026 and expiring on 13 June 2031. Authorised signatory,",
+    ],
+  },
+  "boiler-service-plan-letter.pdf": {
+    subtype: "Boiler Service Plan Letter HEARTHWELL HOME CARE BO I L ER & CONTROLS COVER Plan reference: HHC-4471-2298 Account no: 3300 5521 Date of this",
+    provider: "Boiler Service Plan Letter HEARTHWELL HOME CARE BO I L ER & CONTROLS COVER Plan reference: HHC-4471-2298 Account no:",
+    reference: "L ER & CONTROLS COVER Plan reference: HHC-4471-2298 Account no: 3300 5521 Date of this letter: 2 September 2026 Mr J.",
+    cost: { amount: "14.99", needle: "Boiler Care Plan — Payment Slip PLAN REFERENCE HHC-4471-2298 NEXT SERVICE DUE 14/10/2026 THIS MONTH 'S INSTALMENT £14.99 ANNUAL TOTAL IF PAID" },
+    recurrence: { months: 12, needle: "Care plan, your boiler and controls are serviced every 12 months. Our records show that your next" },
+    dates: [
+      "Our records show that your next service is due on 14 October 2026. One of our Gas Safe",
     ],
   },
   "fullpage-breakdown-cover-renewal.pdf": {
@@ -162,6 +209,17 @@ const EVIDENCE: Record<string, DocEvidence> = {
       "upload speed 74 Mbps MINIMUM TERM 24 months ends 21 April 2028 CUSTOMER AND ACCOUNT",
     ],
   },
+  "car-finance-agreement.pdf": {
+    subtype: "Personal Contract Purchase Agreement PERSONAL CONTRACT PURCHASE AGREEMENT Regulated by the Consumer Credit Act 1974 Agreement date: 20 February 2026",
+    provider: "BVF-PCP-208841 CREDITOR (LENDER) Bracken Vale Finance plc 1 Millrace House, Doverton DV4 7QS Company number 04471822 Authorised",
+    reference: "20 February 2026 Agreement number BVF-PCP-208841 CREDITOR (LENDER) Bracken Vale Finance plc 1 Millrace House, Doverton",
+    cost: { amount: "279.42", needle: "APR 10.9% APR Duration of agreement 49 months Number of monthly payments 48 Amount of each monthly payment £279.42 Date of first payment" },
+    recurrence: { months: 48, needle: "Duration of agreement 49 months Number of monthly payments 48 Amount of each monthly payment £279.42" },
+    dates: [
+      "by the Consumer Credit Act 1974 Agreement date: 20 February 2026 Agreement number",
+      "first payment 05/04/2026 Optional final payment (due 5 March 2030) £8,245.00 Total amount",
+    ],
+  },
   "fullpage-car-insurance-renewal.pdf": {
     provider: "renewal — policy MTR-8823-0145 Colworth & Drake Insurance Services Ltd — policy administration Document RNW/MTR/0926 — Page 1 of 3 COLWORTH &",
     reference: "Your motor insurance renewal — policy MTR-8823-0145 Colworth & Drake Insurance Services Ltd — policy administration",
@@ -170,6 +228,36 @@ const EVIDENCE: Record<string, DocEvidence> = {
     dates: [
       "2018 Current period of insurance 15 October 2025 to 15 October 2026 Renewal period offered",
       "2026 Renewal period offered 15 October 2026 to 15 October 2027 No claims discount 7",
+    ],
+  },
+  "fullpage-car-lease-statement.pdf": {
+    provider: "which the vehicle must be returned to Wraxall Vehicle Finance plc; this is a hire agreement and you do not own the vehicle at any point.",
+    reference: "Lease statement WVF-PCH-220154 DriveEasy Leasing Personal contract hire brokers · 0800 552 7734 ·",
+    subtype: "Lease statement WVF-PCH-220154 DriveEasy Leasing Personal contract hire",
+    cost: { amount: "329.00", needle: "30,000 over the full term Mileage recorded at last service 18,442 miles, service dated 4 June 2026 MONTHLY RENTAL £329.00 PAYMENT HISTORY, YEAR 2" },
+    dates: [
+      "hybrid estate, registration LV73 KFM Agreement start 1 June 2025 Agreement end 31 May",
+      "LV73 KFM Agreement start 1 June 2025 Agreement end 31 May 2028 Contract mileage 10,000",
+    ],
+  },
+  "fullpage-cavity-wall-insulation-guarantee.pdf": {
+    provider: "Insulation\" is a trading name of Bassington Energy Solutions Ltd, registered in England and Wales No. 06612940, registered office 4",
+    reference: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft insulation specialists · est.",
+    subtype: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft",
+    cost: { amount: "2,340.00", needle: "confirmed by borescope survey 28 April 2026 Guarantee period 25 years, from 12 May 2026 to 12 May 2051 Contract price £2,340.00, paid in full 12 May" },
+    dates: [
+      "Job reference WCI-2026-4471 Date of installation 12 May 2026 Certificate issued 19",
+      "2026 Guarantee period 25 years, from 12 May 2026 to 12 May 2051 Contract price",
+    ],
+  },
+  "fullpage-chimney-sweep-certificate.pdf": {
+    provider: "Chimney sweep certificate CSS-0417 CSS Chimney and flue sweeping, servicing wood and multi-fuel",
+    reference: "Chimney sweep certificate CSS-0417 CSS Chimney and flue sweeping, servicing wood and multi-fuel appliances",
+    subtype: "Chimney sweep certificate CSS-0417 CSS Chimney and flue sweeping, servicing wood and multi-fuel",
+    cost: { amount: "65.00", needle: "on 18 November 2025, which is a separate visit from a sweep and does not replace one. Fee charged for this visit: £65.00, paid by card on the" },
+    dates: [
+      "Cravenshire CV2 4RD Certificate CSS-0417 Date swept 1 September 2026 Previous sweep 3 March",
+      "2026 Previous sweep 3 March 2026 Next sweep due 1 March 2027 APPLIANCE DETAILS Item",
     ],
   },
   "fullpage-council-tax-demand.pdf": {
@@ -183,6 +271,16 @@ const EVIDENCE: Record<string, DocEvidence> = {
       "TAX DEMAND NOTICE Charge for the year 1 April 2026 to 31 March 2027 Notice issued 10 March",
     ],
   },
+  "critical-illness-quote.pdf": {
+    provider: "illness quotation prepared for you by Amberleigh Financial Advisers Ltd Amberleigh Financial Advisers Ltd — Quote AMB-CI-2026-77410 Page 1 of 2",
+    reference: "Netherbourne NB6 5DA Quote reference: AMB-CI-2026-77410 Quote date: 6 October 2026 Valid until: 6 November 2026 Cover",
+    subtype: "12 Fenwick Road, Netherbourne NB6 5DA Quote reference: AMB-CI-2026-77410 Quote date: 6 October 2026 Valid until: 6",
+    cost: { amount: "34.62", needle: "OPTION C Sum assured £100,000 £150,000 £200,000 Term 25 years 25 years 25 years Your monthly premium £28.15 £34.62 £41.90 Option B is the" },
+    dates: [
+      "5DA Quote reference: AMB-CI-2026-77410 Quote date: 6 October 2026 Valid until: 6 November",
+      "Quote date: 6 October 2026 Valid until: 6 November 2026 Cover underwritten by",
+    ],
+  },
   "fullpage-dental-plan-statement.pdf": {
     provider: "and administered on its behalf by Northgate Dental Plan Administration Ltd, PO Box 1156, Newbury Park, NP3 9ZZ, company number 04471102. The",
     reference: "14 August 2026 · Membership number NDPA-208467 Plan Aldermoor Complete Care Plan Plan start date 1 March 2020 Monthly",
@@ -191,6 +289,27 @@ const EVIDENCE: Record<string, DocEvidence> = {
     recurrence: { months: 12, needle: "taken every month by Direct Debit. Your plan year runs for 12 months from your start date shown above, and" },
     dates: [
       "Next payment due 1 September 2026 Plan renewal date 1 March 2027 Last check-up 12 May",
+    ],
+  },
+  "domain-hosting-renewal.pdf": {
+    provider: "Foxglove Hosting — Domain Renewal",
+    reference: "Account number ACC-3348217 Domain brindlewood-supplies.example Domain ID D4471982-EXPL Registered",
+    subtype: "Foxglove Hosting — Domain Renewal",
+    cost: { amount: "12.99", needle: "From 18 January 2028 this domain is expected to renew at £14.99. Renew now Order Summary Domain renewal (12 months) £12.99 VAT (20%) £2.60 Total" },
+    recurrence: { months: 12, needle: "on 18 January 2027 Renewal period This domain renews every 12 months. Auto-renew On Nameservers" },
+    dates: [
+      "Domain ID D4471982-EXPL Registered on 18 January 2019 Renews on 18 January",
+      "D4471982-EXPL Registered on 18 January 2019 Renews on 18 January 2027 Renewal period This",
+    ],
+  },
+  "fullpage-driving-lessons-invoice.pdf": {
+    subtype: "Driving lessons invoice PL-INV-2249 C. Lewis Approved Driving Instructor, ADI badge no. 449213 · bookings@pass2drive.co.uk · www.pass2drive.co.uk ·",
+    provider: "ADI badge no. 449213 · bookings@pass2drive.co.uk · www.pass2drive.co.uk · 07700 900412 Invoice for driving lessons",
+    reference: "Driving lessons invoice PL-INV-2249 C. Lewis Approved Driving Instructor, ADI badge no. 449213 ·",
+    cost: { amount: "360.00", needle: "1-hour lessons, paid up front 360.00 Total paid, received 2 September 2026 £360.00 Thanks for booking" },
+    dates: [
+      "Cravenshire CV9 3TL Invoice PL-INV-2249 Invoice date 2 September 2026 Pick-up point: Penbury",
+      "from this block must be used within 6 months, by 2 March 2027, after which any unused",
     ],
   },
   "fullpage-electrical-condition-report.pdf": {
@@ -203,6 +322,15 @@ const EVIDENCE: Record<string, DocEvidence> = {
       "60 months RECOMMENDED DATE OF NEXT INSPECTION 02 September 2031 DECLARATION AND REPORT",
     ],
   },
+  "energy-performance-certificate.pdf": {
+    provider: "This certificate was produced by Greenline Energy Assessments Ltd, 12 Riverside Court, Hallowfield, HF4 7QP. Telephone 01632 960777.",
+    reference: "HF3 4RT Report Reference Number 8823-4471-9902-1156-3390 Assessment date / certificate issued: 12 May 2026 Valid until: 11 May",
+    subtype: "Energy Performance Certificate Energy Performance Certificate 24 Larkspur Avenue, Hallowfield, HF3 4RT",
+    dates: [
+      "Assessment date / certificate issued: 12 May 2026 Valid until: 11 May 2036",
+      "date / certificate issued: 12 May 2026 Valid until: 11 May 2036 This certificate is",
+    ],
+  },
   "fullpage-energy-tariff-end.pdf": {
     provider: "Achebe Head of Customer Pricing, Kittiwake Energy Ltd Rosalind AchebeKittiwake Energy Ltd, registered in England & Wales No.",
     reference: "Norfolk NR14 9QP Account number: 7724 6650 18 8 September 2026 Dear Mr Voss, Thank you for being a Kittiwake Energy",
@@ -210,6 +338,17 @@ const EVIDENCE: Record<string, DocEvidence> = {
     cost: { amount: "1,284.00", needle: "and what we are able to offer you if you fix your prices again today. Your current plan, Kittiwake Fixed October 2024 £1,284.00 a year Our standard" },
     dates: [
       "runs. Based on our records, your fixed price ends on 14 November 2026, and from the next day",
+    ],
+  },
+  "fullpage-funeral-plan-certificate.pdf": {
+    provider: "Funeral Plans\" is a trading name of Millstone Prepaid Services Ltd, registered in England and Wales No. 05712834, registered office 9",
+    reference: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral plan, fixing today's cost",
+    subtype: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral",
+    cost: { amount: "3,995.00", needle: "Funeral Service PLAN DETAILS Plan type Simple Choice, unattended committal with optional service Total plan price £3,995.00, fixed at today's prices" },
+    dates: [
+      "CV11 5FT Plan number EFP-0091234 Plan commenced 3 November 2024 Certificate issued 10",
+      "Plan commenced 3 November 2024 Certificate issued 10 November 2024 Nominated director:",
+      "monthly instalments of £166.46 Final instalment due 3 October 2026 Funds held by",
     ],
   },
   "fullpage-gas-safety-record.pdf": {
@@ -230,6 +369,37 @@ const EVIDENCE: Record<string, DocEvidence> = {
     dates: [
       "771 903 07700 900 442 d.ostrowski@mailbox.example 02 March 2026 Anna Ostrowski, 07700",
       "from your start date. Your minimum term will end on 2 March 2027 , after which your",
+    ],
+  },
+  "fullpage-health-cash-plan-certificate.pdf": {
+    provider: "Cash Plan is a trading name of Bramwell Friendly Society Ltd, incorporated under the Friendly Societies Act 1992, registered number",
+    reference: "Cash Plan — membership certificate FGP-MEM-338420 FeelGood Cash Plan Everyday healthcare cover for you and your family",
+    subtype: "FeelGood Cash Plan — membership certificate FGP-MEM-338420 FeelGood Cash Plan Everyday",
+    cost: { amount: "14.50", needle: "osteopathy £400 Consultations and diagnostic tests £300 Health screening (once every 2 years) £120 MONTHLY PREMIUM £14.50 Your plan is billed 1" },
+    recurrence: { months: 1, needle: "2 years) £120 MONTHLY PREMIUM £14.50 Your plan is billed 1 month at a time by direct debit and renews" },
+    dates: [
+      "FGP-MEM-338420 Cover level: Family Plus Plan start 6 April 2026 Renewal date 6 April",
+      "Family Plus Plan start 6 April 2026 Renewal date 6 April 2027 What you can claim back",
+    ],
+  },
+  "fullpage-holiday-lodge-site-licence.pdf": {
+    provider: "Site licence renewal — pitch FSH-0412 ✆ FENWATER SHORES HOLIDAY PARK LTD Fenwater Lane, Marsh Cove, Aldreth Bay, Cravenshire CV31 8QT · 01924",
+    reference: "Site licence renewal — pitch FSH-0412 ✆ FENWATER SHORES HOLIDAY PARK LTD Fenwater Lane, Marsh Cove, Aldreth",
+    subtype: "Site licence renewal — pitch FSH-0412 ✆ FENWATER SHORES HOLIDAY PARK LTD Fenwater",
+    cost: { amount: "4,150.00", needle: "Static unit ABI Fenwater 38x12 holiday lodge, plate number AL-2019-3307, sited since 22 April 2019 Annual pitch fee £4,150.00, due in full by 1 March" },
+    dates: [
+      "FSH-0412 Pitch number 412, Willow Row Issued 14 January 2026 Superseding licence",
+      "OF THIS LICENCE Licence period 14 January 2026 to 10 January 2027, subject to the park's",
+    ],
+  },
+  "fullpage-home-emergency-cover-schedule.pdf": {
+    provider: "also raise a claim by emailing claims@homeguard365.co.uk with photographs of the fault, or through our online portal at",
+    reference: "Home emergency cover schedule HG365-POL-552017 HOME EMERGENCY RESPONSE SCHEME 24-hour cover for boilers, plumbing,",
+    subtype: "scheme is underwritten by Casterbridge Insurance plc, registered in England and Wales No. 03217740, authorised by the",
+    cost: { amount: "186.00", needle: "glazing) £250 per claim, up to 2 claims a year Pest control call-out £120 per claim, 1 claim a year ANNUAL PREMIUM £186.00 This schedule confirms" },
+    dates: [
+      "CV2 5JD Policy number HG365-POL-552017 Cover start 4 October 2026 Renewal date 4 October",
+      "Cover start 4 October 2026 Renewal date 4 October 2027 Schedule issued 21",
     ],
   },
   "fullpage-home-insurance-schedule.pdf": {
@@ -281,6 +451,16 @@ const EVIDENCE: Record<string, DocEvidence> = {
       "condition at any other time. E X PI RY D ATE 08 September 2027 Test date 09 September",
     ],
   },
+  "nursery-fees-invoice.pdf": {
+    provider: "Little Acorns Day Nursery - Invoice Little Acorns Day Nursery part of the Bramblewood Childcare",
+    reference: "number INV-045821 Account number 1044829 Invoice date 02/09/2026 Due date 15/09/2026 Child Freddie Marsh FEES",
+    subtype: "date 15/09/2026 Child Freddie Marsh FEES FOR SEPTEMBER 2026 DESCRIPTION QTY RATE AMOUNT Full day sessions",
+    cost: { amount: "1,087.60", needle: "credit (15 hrs/week government funding) – – −£190.40 Balance brought forward from August 2026 – – £45.00 Subtotal £1,087.60 Total payable £1,087.60" },
+    dates: [
+      "£1,087.60 Total payable £1,087.60 Autumn term dates: 2 September 2026 to 18 December 2026.",
+      "Reference: 1044829 Amount due: £1,087.60 Due date: 15 September 2026 Please quote your",
+    ],
+  },
   "fullpage-pension-benefit-statement.pdf": {
     provider: "Marlestone Workplace Pensions Ltd — Annual Benefit Statement Marlestone Workplace Pensions Ltd",
     reference: "DATE 5 April 2026 PLAN NUMBER WPP-0077410-6 PAGE 1 OF 4 Annual Benefit Statement For the scheme year 6 April 2025",
@@ -290,12 +470,64 @@ const EVIDENCE: Record<string, DocEvidence> = {
       "defined contribution pension scheme STATEMENT DATE 5 April 2026 PLAN NUMBER",
     ],
   },
+  "pet-insurance-schedule.pdf": {
+    provider: "Thornbury Pet Cover — Policy Schedule THORNBURY PET COVER Thornbury Pet Cover is a trading",
+    reference: "Bramfield, BF12 4QW POLICY NUMBER TPC-2026-0447182 QUOTATION REF. Q-8820193 PET'S NAME Bramble SPECIES / BREED Dog —",
+    subtype: "Cover is a trading name of Millbrace Insurance Services Limited. Policies are underwritten by Coldharbour Insurance",
+    cost: { amount: "287.64", needle: "This is a 12 month policy. Your renewal date is 1 April 2027. PREMIUM AND PAYMENT Annual premium (paid in full): £287.64. Alternatively, pay by" },
+    recurrence: { months: 12, needle: "starts: 1 April 2026. Cover ends: 31 March 2027. This is a 12 month policy. Your renewal date is 1 April" },
+    dates: [
+      "DATE 2 July 2019 PERIOD OF COVER Cover starts: 1 April 2026. Cover ends: 31 March",
+      "2027. This is a 12 month policy. Your renewal date is 1 April 2027. PREMIUM AND PAYMENT",
+    ],
+  },
   "fullpage-pet-vaccination-card.pdf": {
     provider: "bring this card to every appointment Hawksmoor Cross Veterinary Centre 22 Thornfield Road, Bramcote St Giles, Wyvern DE7 4PL Telephone 01159",
     reference: "· Labrador Retriever · Microchip 977200005841236 Vaccination & health record · Page 1 of 2 Vaccination & Health Record",
     subtype: "Vaccination & Health Record Bramble · Labrador Retriever · Microchip",
     dates: [
       "(DHPPi/L4 + kennel cough) NEXT VACCINATION DUE 18 May 2027 Book in the two weeks",
+    ],
+  },
+  "rail-season-ticket.pdf": {
+    provider: "Cheddleton Rail — Season Ticket ANNUAL SEASON TICKET TICKET NO. ST-0294817-6 FROM",
+    reference: "Ticket ANNUAL SEASON TICKET TICKET NO. ST-0294817-6 FROM MILLBROOK CROSS TO FENWICK PARKWAY ROUTE ANY PERMITTED VALID FROM",
+    subtype: "Cheddleton Rail — Season Ticket ANNUAL SEASON TICKET TICKET NO. ST-0294817-6 FROM MILLBROOK CROSS TO",
+    cost: { amount: "3,412.00", needle: "Parkway, Standard Class. Railcard discount applied: Coastway Saver Railcard, code RC-229104. Annual season ticket £3,412.00 Equivalent monthly price" },
+    dates: [
+      "TO FENWICK PARKWAY ROUTE ANY PERMITTED VALID FROM 01/09/2026 VALID UNTIL 31/08/2027",
+      "ROUTE ANY PERMITTED VALID FROM 01/09/2026 VALID UNTIL 31/08/2027 CLASS STANDARD RAILCARD",
+    ],
+  },
+  "residents-parking-permit.pdf": {
+    provider: "your permit can be reissued. Write to Marchford Borough Council, Parking Services, 40 Guildhall Square, Marchford, MF2 1AA, call 01632",
+    reference: "REG ISTRATION LT19 KXM PERMIT NUMBER RP-2026-118824 VEHICLE MAKE/MODEL FORD FOCUS VAL ID FROM 01/07/2026 EXPIRES 30/06/2027",
+    subtype: "Residents Parking Permit Covering notice — your residents' parking permit Council ref:",
+    cost: { amount: "45.00", needle: "NUMBER RP-2026-118824 VEHICLE MAKE/MODEL FORD FOCUS VAL ID FROM 01/07/2026 EXPIRES 30/06/2027 Annual permit fee paid: £45.00 ✂ detach along this line" },
+    dates: [
+      "VEHICLE MAKE/MODEL FORD FOCUS VAL ID FROM 01/07/2026 EXPIRES 30/06/2027",
+      "MAKE/MODEL FORD FOCUS VAL ID FROM 01/07/2026 EXPIRES 30/06/2027 Annual permit fee paid:",
+    ],
+  },
+  "fullpage-satellite-tv-subscription-invoice.pdf": {
+    subtype: "Starview Satellite TV — invoice STV-AC-774213 Starview Satellite TV Freedom Package · 0800 220 1187 · www.starviewtv.example Your monthly invoice",
+    provider: "Starview Satellite TV — invoice STV-AC-774213 Starview Satellite TV Freedom Package · 0800",
+    reference: "Starview Satellite TV — invoice STV-AC-774213 Starview Satellite TV Freedom Package · 0800 220 1187 ·",
+    cost: { amount: "42.99", needle: "billed 1 month in advance 39.99 Sports add-on 15.00 Multiscreen box rental 6.00 Loyalty discount -18.00 Total due £42.99 DIRECT DEBIT COLLECTION" },
+    recurrence: { months: 1, needle: "THIS MONTH'S CHARGES Item Amount Freedom Package, billed 1 month in advance 39.99 Sports add-on 15.00" },
+    dates: [
+      "Invoice date 5 September 2026 Contract start 12 March 2026 Minimum term ends 12",
+      "2026 Contract start 12 March 2026 Minimum term ends 12 March 2027 THIS MONTH'S CHARGES",
+    ],
+  },
+  "fullpage-self-storage-agreement.pdf": {
+    subtype: "Storage licence agreement SSL-BX-3390 SSL Fenmouth Self Storage Centre · Unit 14, Quayside Industrial Estate, Fenmouth, Cravenshire CV2 7RL Storage",
+    provider: "Storage licence agreement SSL-BX-3390 SSL Fenmouth Self Storage Centre · Unit 14, Quayside Industrial",
+    reference: "Storage licence agreement SSL-BX-3390 SSL Fenmouth Self Storage Centre · Unit 14, Quayside Industrial Estate,",
+    cost: { amount: "68.00", needle: "hours 06:00 to 22:00 daily, including bank holidays Insurance Included up to £2,000 contents value M ON TH LY R E N T £68.00 This storage licence is" },
+    dates: [
+      "CV2 6PN Unit reference SSL-BX-3390 Move-in date 15 August 2026 Next payment due 15",
+      "Move-in date 15 August 2026 Next payment due 15 September 2026 Agreement prepared 12",
     ],
   },
   "fullpage-service-charge-demand.pdf": {
@@ -308,6 +540,17 @@ const EVIDENCE: Record<string, DocEvidence> = {
       "the service charge year running from 1 April 2026 to 31 March 2027. This demand is issued",
     ],
   },
+  "fullpage-skip-hire-contract.pdf": {
+    provider: "and collected by our local partner, Corvedale Skips & Aggregates Ltd, registered waste carrier CBDU887214. SkipFinder Ltd arranges this",
+    reference: "Skip hire order confirmation SKF-ORD-661204 SkipFinder Compare and book local skip hire · 0800 552 0198 ·",
+    subtype: "Order confirmation and hire contract Delivery address Mrs Elin Thomas 7 Orchard Way, Penbury, Cravenshire",
+    cost: { amount: "285.00", needle: "210.00 Waste transfer and disposal charge 55.00 Booking service fee (SkipFinder) 20.00 Total charged to your card £285.00 If the skip is not" },
+    dates: [
+      "Cravenshire CV9 1HL Order SKF-ORD-661204 Booked 2 September 2026 Booking made via",
+      "BOOKING Skip size 8 yard builder's skip Delivery date 9 September 2026, between 7am and 1pm",
+      "1pm Hire period 14 days from delivery Collection due 23 September 2026, unless you request an",
+    ],
+  },
   "fullpage-solar-export-statement.pdf": {
     provider: "then- current default export tariff. Millbrook Energy Ltd is a licensed electricity supplier, registered in England & Wales No.",
     reference: "Export Statement GENERATION ACCOUNT SEG-4471-0932 STATEMENT PERIOD 01/04/2025 – 31/03/2026 STATEMENT DATE 24/04/2026 Mrs",
@@ -316,6 +559,28 @@ const EVIDENCE: Record<string, DocEvidence> = {
     recurrence: { months: 12, needle: "Export meter EM2205968 Export meter last verified 12 May 2022 Your quarterly export and" },
     dates: [
       "1 April 2023 for a fixed term of 4 years and ends on 31 March 2027. Shortly before your",
+    ],
+  },
+  "streaming-subscription-invoice.pdf": {
+    provider: "Your Northlight+ payment receipt mail.example/mail/u/0/#inbox/17c9f2a41d 1 of 1 Your",
+    reference: "(12 month plan) Account number NL-ACC-771049-2 Payment date 3 August 2026 Plan renews on 3 August 2027 Amount charged",
+    subtype: "because you have an active Northlight+ subscription. Unsubscribe from receipts | Privacy policy",
+    cost: { amount: "9.99", needle: "(12 month plan) Account number NL-ACC-771049-2 Payment date 3 August 2026 Plan renews on 3 August 2027 Amount charged £9.99 Manage your plan Invoice" },
+    recurrence: { months: 12, needle: "member. We've taken your monthly payment for your 12 month plan — here's your receipt. Plan" },
+    dates: [
+      "Priya Chandra priya.chandra83@mailbox.example Date: 3 August 2026, 09:14 NORTHLIGHT+ Hi",
+      "Payment date 3 August 2026 Plan renews on 3 August 2027 Amount charged £9.99",
+    ],
+  },
+  "tenancy-agreement.pdf": {
+    provider: "Assured Shorthold Tenancy Agreement THORNFIELD LETTINGS & MANAGEMENT 8 High Street, Barchester, BR1 4DA · 01632 960214 ·",
+    reference: "Barchester, BR1 4DA Tenancy Reference THN-2026-0458 Term A fixed term of 12 months, commencing 15/06/2026 and expiring",
+    subtype: "Assured Shorthold Tenancy Agreement THORNFIELD LETTINGS & MANAGEMENT 8 High Street, Barchester,",
+    cost: { amount: "975.00", needle: "Tenancy Reference THN-2026-0458 Term A fixed term of 12 months, commencing 15/06/2026 and expiring 14/06/2027 Rent £975.00 per calendar month," },
+    recurrence: { months: 12, needle: "4DA Tenancy Reference THN-2026-0458 Term A fixed term of 12 months, commencing 15/06/2026 and expiring" },
+    dates: [
+      "is let for a fixed term of 12 months, commencing on 15 June 2026 and expiring on 14 June",
+      "12 months, commencing on 15 June 2026 and expiring on 14 June 2027, unless terminated",
     ],
   },
   "fullpage-travel-insurance-certificate.pdf": {
@@ -337,6 +602,16 @@ const EVIDENCE: Record<string, DocEvidence> = {
     recurrence: { months: 12, needle: "or record programmes as they are broadcast. It runs for 12 months from the start date shown in the panel" },
     dates: [
       "number CBL-774-2091 Valid from 1 April 2026 Valid to 31 March 2027 Fee £182.00 £45.50 by",
+    ],
+  },
+  "fullpage-university-halls-invoice.pdf": {
+    subtype: "Previous invoice 2 June 2026 PAYMENT DUE 1 October 2026 Charges this term Item Period Amount",
+    provider: "Bay Halls is managed under contract by Bridgewater Living Services Ltd, company number 07734512, registered office 14 Quayside Chambers,",
+    reference: "Halls Student number 20261847 Invoice BLS-INV-24-1187 Tenancy ref AB-KC-214-26 Issued 3 September 2026 Previous invoice 2",
+    cost: { amount: "2,450.00", needle: "insurance (compulsory) autumn term 45.00 Common room and laundry levy autumn term 225.00 Total due this instalment £2,450.00 This is the first of" },
+    dates: [
+      "BLS-INV-24-1187 Tenancy ref AB-KC-214-26 Issued 3 September 2026 Previous invoice 2 June",
+      "2026 Previous invoice 2 June 2026 PAYMENT DUE 1 October 2026 Charges this term Item",
     ],
   },
   "fullpage-vehicle-tax-reminder.pdf": {
@@ -421,9 +696,9 @@ describe("an ideal model's reply survives modelProposalFromText's grounding and 
         if (!evidence.reference) throw new Error(`[${doc.filename}] expected.reference set but no evidence.reference needle`);
         generated.reference = { value: doc.expected.reference, evidence: span(doc.filename, evidence.reference, normalizedText) };
       }
-      if (doc.expected.subtype !== undefined) {
+      if (doc.expected.subtype !== undefined && !SUBTYPE_NOT_GROUNDABLE.has(doc.filename)) {
         if (!evidence.subtype) throw new Error(`[${doc.filename}] expected.subtype set but no evidence.subtype needle`);
-        const subtypeAnswer = firstSubtypePhrase(doc.expected.subtype);
+        const subtypeAnswer = firstSubtypePhrase(doc.expected.subtype, normalizedText);
         generated.subtype = { value: subtypeAnswer, evidence: span(doc.filename, evidence.subtype, normalizedText) };
       }
       if (doc.expected.costMinor !== undefined) {
@@ -483,9 +758,10 @@ describe("an ideal model's reply survives modelProposalFromText's grounding and 
           textFieldDiagnosis(doc.expected.reference, evidenceSpan),
         );
       }
-      if (doc.expected.subtype !== undefined && classifySubtype(doc.expected.subtype, proposal.subtype) !== "correct") {
+      if (doc.expected.subtype !== undefined && !SUBTYPE_NOT_GROUNDABLE.has(doc.filename) &&
+        classifySubtype(doc.expected.subtype, proposal.subtype) !== "correct") {
         const evidenceSpan = (generated.subtype as { evidence: string }).evidence;
-        const subtypeAnswer = firstSubtypePhrase(doc.expected.subtype);
+        const subtypeAnswer = firstSubtypePhrase(doc.expected.subtype, normalizedText);
         mismatches.push(
           `subtype: expected ${JSON.stringify(doc.expected.subtype)}, got ${JSON.stringify(proposal.subtype)} -- ` +
           textFieldDiagnosis(subtypeAnswer, evidenceSpan),
