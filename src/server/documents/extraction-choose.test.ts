@@ -402,6 +402,19 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.costMinor).toBe(1499);
   });
 
+  it("takes the row that adds up the bill over a price read three ways", () => {
+    const chosen = chooseFields([
+      candidate("amount", "8999", [
+        { value: "total", trigger: "per year", sieves: ["label", "words-after", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP" }),
+      candidate("amount", "1559", [
+        { value: "total", trigger: "Total", sieves: ["label", "adds-up"], strength: 2 },
+      ], { currency: "GBP" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(1559);
+  });
+
   it("blanks when two totals disagree", () => {
     const chosen = chooseFields([
       candidate("amount", "61240", [{ value: "total", trigger: "Total payable" }], { currency: "GBP" }),
