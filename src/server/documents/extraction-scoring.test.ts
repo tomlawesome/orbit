@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { CorpusDocument } from "./extraction-corpus";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import {
+  classifyProvider,
   classifySubtype,
   formatThreeWayScore,
   scoreCorpusRepeated,
@@ -235,5 +236,36 @@ describe("scoreCorpusThreeWay (#959, ADR-0025 section 6)", () => {
     expect(score.heuristic.minimum).toBeCloseTo(expected.minimum, 10);
     expect(score.heuristic.worst.earned).toBe(expected.worst.earned);
     expect(score.heuristic.worst.possible).toBe(expected.worst.possible);
+  });
+});
+
+// Owner, 2026-09-12 (#994): the provider ruler was "far too strict". A short
+// form of the name -- what the page itself calls the organisation -- is the
+// same answer; a different organisation, or a mere description, is not.
+describe("classifyProvider accepts a short form of the name", () => {
+  it("counts a name with its trailing company form dropped, either way round", () => {
+    expect(classifyProvider("Northfield Gas & Energy Ltd", "Northfield Gas & Energy")).toBe("correct");
+    expect(classifyProvider("Northfield Gas & Energy", "northfield gas & energy ltd")).toBe("correct");
+  });
+  it("counts a leading run of the name that names the organisation", () => {
+    expect(classifyProvider("Cresswell Fitness Club", "Cresswell")).toBe("correct");
+    expect(classifyProvider("Colworth & Drake Insurance Services Ltd", "Colworth & Drake")).toBe("correct");
+    expect(classifyProvider("Thornleigh Electrical Contractors Ltd", "Thornleigh Electrical")).toBe("correct");
+  });
+  it("counts the long form when the short one was expected", () => {
+    expect(classifyProvider("Kestrel Broadband", "Kestrel Broadband Limited")).toBe("correct");
+    expect(classifyProvider("Foxglove Hosting", "The Foxglove Hosting Company")).toBe("correct");
+  });
+  it("does not count a description with no name in it", () => {
+    expect(classifyProvider("Colworth & Drake Insurance Services Ltd", "Insurance Services")).toBe("wrong");
+    expect(classifyProvider("Wexley Water plc", "Water")).toBe("wrong");
+  });
+  it("does not count a different organisation, or words out of order", () => {
+    expect(classifyProvider("Wexley Water plc", "Direct Debit")).toBe("wrong");
+    expect(classifyProvider("Bracken Vale Finance", "Vale Finance Bracken")).toBe("wrong");
+    expect(classifyProvider("Hedgerow Assurance", "Thornfield Assurance")).toBe("wrong");
+  });
+  it("is blank when nothing was extracted", () => {
+    expect(classifyProvider("Wexley Water plc", undefined)).toBe("blank");
   });
 });

@@ -79,6 +79,7 @@
 // point total rather than the extractor being let off the new fields.
 
 import type { CorpusDocument, SubtypeSpec } from "./extraction-corpus";
+import { DESCRIBER_WORDS } from "./extraction-provider-runs";
 import { selectedExtractionModel } from "./model-extraction";
 import subtypeTaxonomyJson from "./subtype-taxonomy.json";
 import type { DocumentProposal } from "./suggestions";
@@ -249,15 +250,51 @@ function withoutLegalSuffix(name: string): string {
   return words.slice(0, -1).join(" ").replace(/\s*&$/u, "").trim();
 }
 
+/** A provider name as words, for comparison only: lower case, `&` read as
+ * "and", punctuation dropped, a leading "the" and every trailing
+ * company-form word removed. */
+function providerWords(name: string): string[] {
+  const words = name
+    .toLowerCase()
+    .replaceAll("&", " and ")
+    .split(/[^a-z0-9]+/u)
+    .filter((word) => word.length > 0);
+  if (words[0] === "the") words.shift();
+  while (words.length > 1 && LEGAL_SUFFIXES.includes(words[words.length - 1] as string)) words.pop();
+  while (words.length > 1 && words[words.length - 1] === "and") words.pop();
+  return words;
+}
+
+/** Whether `part` is a contiguous run of whole words inside `whole`. */
+function isWordRunOf(part: string[], whole: string[]): boolean {
+  if (part.length === 0 || part.length > whole.length) return false;
+  for (let from = 0; from + part.length <= whole.length; from += 1) {
+    if (part.every((word, at) => whole[from + at] === word)) return true;
+  }
+  return false;
+}
+
+/** Whether a name carries at least one word that says WHICH organisation,
+ * not just what kind: "Cresswell" does, "Insurance Services" does not. */
+function namesSomething(words: string[]): boolean {
+  return words.some((word) => word.length >= 4 && !DESCRIBER_WORDS.has(word));
+}
+
 /** Provider is compared with its legal suffix optional on BOTH sides, per
  * the owner's ruling above. "Northfield Gas & Energy Ltd" and "Northfield
  * Gas & Energy" are the same answer, so scoring one of them wrong — and,
  * since #939, charging it the wrong-value penalty on top — would be
  * measuring a naming convention rather than extraction.
  *
- * Deliberately narrow: only ONE trailing company-form word is optional, and
- * only at the end. Everything else still has to match exactly, so a genuinely
- * different name ("Direct Debit" for a water company) is still wrong. */
+ * Loosened 2026-09-12 (#994, owner: "the classifyProvider is far too
+ * strict"): a short form of the name is the same answer too. "Cresswell" for
+ * "Cresswell Fitness Club", or "Colworth & Drake" for "Colworth & Drake
+ * Insurance Services Ltd", is what a reader marking by eye accepts, and what
+ * the page itself calls the organisation most of the time. The short form
+ * has to be a run of whole words of the long one, and has to carry a word
+ * that names the organisation rather than describes it: "Insurance Services"
+ * is not a short form of anything, and a genuinely different name ("Direct
+ * Debit" for a water company) is still wrong. */
 export function classifyProvider(expected: string, actual: string | undefined): Classification {
   if (actual === undefined) return "blank";
   // Case and whitespace runs ignored, as `comparableSubtype` already does.
@@ -272,6 +309,11 @@ export function classifyProvider(expected: string, actual: string | undefined): 
   if (comparable(withoutLegalSuffix(actual)) === comparable(withoutLegalSuffix(expected))) {
     return "correct";
   }
+  const wanted = providerWords(expected);
+  const got = providerWords(actual);
+  if (wanted.join(" ") === got.join(" ")) return "correct";
+  const [shorter, longer] = got.length <= wanted.length ? [got, wanted] : [wanted, got];
+  if (namesSomething(shorter) && isWordRunOf(shorter, longer)) return "correct";
   return "wrong";
 }
 
