@@ -113,12 +113,14 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   { role: "due", direction: "forward", pattern: "due date" },
   { role: "due", direction: "forward", pattern: "amount due by" },
   { role: "due", direction: "forward", pattern: "due by" },
+  // A hire, a plan or a balance the page says is due by a date.
+  { role: "due", direction: "forward", pattern: "(?:collection|final instalment|instalment|balance) due(?: by| on)?" },
   { role: "due", direction: "backward", pattern: "is due" },
   { role: "due", direction: "backward", pattern: "is when payment is due" },
 
   // service
   { role: "service", direction: "forward", pattern: "service due" },
-  { role: "service", direction: "forward", pattern: "next service" },
+  { role: "service", direction: "forward", pattern: "next service(?: is)?(?: due)?(?: on| by)?" },
   { role: "service", direction: "forward", pattern: "next (?:vaccination|booster|check-?up|appointment|visit|test|inspection|examination)(?: recommended)?(?: due| by)?" },
   { role: "service", direction: "forward", pattern: "date\\(?s?\\)? of inspection(?: and testing)?" },
   { role: "service", direction: "forward", pattern: "inspect(?:ed|ion)(?: carried out)?(?: on)?" },
@@ -130,6 +132,9 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   { role: "issued", direction: "forward", pattern: "date of issue" },
   { role: "issued", direction: "forward", pattern: "issued on" },
   { role: "issued", direction: "forward", pattern: "issue date" },
+  // The day an order or a quote was made, which is the day the page is about.
+  { role: "issued", direction: "forward", pattern: "booked(?: on)?" },
+  { role: "issued", direction: "forward", pattern: "quot(?:e|ation) date" },
   // What a statement, bill or certificate calls its own date.
   { role: "issued", direction: "forward", pattern: "(?:statement|bill|invoice|notice|test|certificate|document|report) (?:date|issued)" },
   { role: "issued", direction: "backward", pattern: "is the date of issue" },
@@ -141,7 +146,9 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   { role: "start", direction: "forward", pattern: "starts on" },
   { role: "start", direction: "forward", pattern: "cover starts" },
   { role: "start", direction: "forward", pattern: "policy started" },
-  { role: "start", direction: "forward", pattern: "commencing" },
+  { role: "start", direction: "forward", pattern: "commenc(?:ing|ed|es)(?: on)?" },
+  { role: "start", direction: "forward", pattern: "move-in date" },
+  { role: "start", direction: "forward", pattern: "registered on" },
   { role: "start", direction: "forward", pattern: "(?:service|contract|cover|policy|plan|tenancy|membership) start" },
   { role: "start", direction: "forward", pattern: "date of installation" },
   { role: "start", direction: "backward", pattern: "is your start date" },

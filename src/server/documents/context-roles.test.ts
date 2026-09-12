@@ -129,6 +129,17 @@ describe("the labels household paper prints beside its dates", () => {
     expect(roleOf("Service start (activation) 22 April 2026", "22 April 2026")).toBe("start");
     expect(roleOf("Date of installation 14 March 2026", "14 March 2026")).toBe("start");
   });
+
+  it("reads the day a plan commenced, a move-in, a registration, a booking, a quote and a collection", () => {
+    expect(roleOf("Plan commenced 3 November 2024", "3 November 2024")).toBe("start");
+    expect(roleOf("Move-in date 15 August 2026", "15 August 2026")).toBe("start");
+    expect(roleOf("Registered on 18 January 2019", "18 January 2019")).toBe("start");
+    expect(roleOf("Booked 2 September 2026", "2 September 2026")).toBe("issued");
+    expect(roleOf("Quote date: 6 October 2026", "6 October 2026")).toBe("issued");
+    expect(roleOf("Collection due 23 September 2026, unless you request an extension", "23 September 2026")).toBe("due");
+    expect(roleOf("Final instalment due 3 October 2026", "3 October 2026")).toBe("due");
+    expect(roleOf("show that your next service is due on 14 October 2026.", "14 October 2026")).toBe("service");
+  });
 });
 
 describe("default role", () => {
