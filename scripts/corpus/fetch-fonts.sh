@@ -123,6 +123,36 @@ fonts=(
   "ofl/librecaslontext|LibreCaslonText%5Bwght%5D.ttf|OFL-1.1"
   "ofl/firacode|FiraCode%5Bwght%5D.ttf|OFL-1.1"
   "ofl/bevan|Bevan-Regular.ttf|OFL-1.1"
+  # --- added for the THIRD hold-out, 12 further documents (#998) ---
+  # Twenty-six more faces, none used by `sources/` (which now includes the
+  # first two retired hold-outs) or by either of them individually, so this
+  # third hold-out shares no character map with the tuning set.
+  "ofl/merriweather|Merriweather%5Bopsz,wdth,wght%5D.ttf|OFL-1.1"
+  "ofl/frankruhllibre|FrankRuhlLibre%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/vt323|VT323-Regular.ttf|OFL-1.1"
+  "ofl/chivomono|ChivoMono%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/redhattext|RedHatText%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/redhatmono|RedHatMono%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/alegreyasans|AlegreyaSans-Regular.ttf|OFL-1.1"
+  "ofl/alegreyasans|AlegreyaSans-Bold.ttf|OFL-1.1"
+  "ofl/barlowcondensed|BarlowCondensed-Regular.ttf|OFL-1.1"
+  "ofl/barlowcondensed|BarlowCondensed-Bold.ttf|OFL-1.1"
+  "ofl/cabincondensed|CabinCondensed-Regular.ttf|OFL-1.1"
+  "ofl/cabincondensed|CabinCondensed-Bold.ttf|OFL-1.1"
+  "ofl/archivoblack|ArchivoBlack-Regular.ttf|OFL-1.1"
+  "ofl/fraunces|Fraunces%5BSOFT,WONK,opsz,wght%5D.ttf|OFL-1.1"
+  "ofl/ibmplexserif|IBMPlexSerif-Regular.ttf|OFL-1.1"
+  "ofl/ibmplexserif|IBMPlexSerif-Bold.ttf|OFL-1.1"
+  "ofl/oldstandardtt|OldStandard-Regular.ttf|OFL-1.1"
+  "ofl/oldstandardtt|OldStandard-Bold.ttf|OFL-1.1"
+  "ofl/oldstandardtt|OldStandard-Italic.ttf|OFL-1.1"
+  "ofl/shadowsintolight|ShadowsIntoLight.ttf|OFL-1.1"
+  "ofl/librebodoni|LibreBodoni%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/bigshoulderstext|BigShouldersText%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/firasanscondensed|FiraSansCondensed-Regular.ttf|OFL-1.1"
+  "ofl/firasanscondensed|FiraSansCondensed-Bold.ttf|OFL-1.1"
+  "ofl/dmseriftext|DMSerifText-Regular.ttf|OFL-1.1"
+  "ofl/librecaslondisplay|LibreCaslonDisplay-Regular.ttf|OFL-1.1"
 )
 
 : > LICENCES.txt
@@ -157,7 +187,11 @@ for d in ptsans ptmono sourceserif4 courierprime archivonarrow ebgaramond nunito
          playfairdisplay nunitosans notoserif ibmplexmono cardo overpass \
          overpassmono chivo neuton dmsans poppins dmmono raleway cousine \
          hankengrotesk quicksand breeserif patrickhand sora cormorant \
-         librecaslontext firacode bevan; do
+         librecaslontext firacode bevan \
+         merriweather frankruhllibre vt323 chivomono redhattext redhatmono \
+         alegreyasans barlowcondensed cabincondensed archivoblack fraunces \
+         ibmplexserif oldstandardtt shadowsintolight librebodoni \
+         bigshoulderstext firasanscondensed dmseriftext librecaslondisplay; do
   curl -sSLf --max-time 30 -o "OFL-$d.txt" "$base/ofl/$d/OFL.txt" 2>/dev/null || true
 done
 
