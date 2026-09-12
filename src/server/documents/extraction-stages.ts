@@ -109,5 +109,8 @@ export interface TaggedCandidate<K extends CandidateKind = CandidateKind> extend
  * for every kind is its `other` with an empty trigger. Order is preserved. */
 export type TagStage = (text: string, candidates: readonly Candidate[]) => TaggedCandidate[];
 
-/** Stage 3: a value per field or nothing. Blank is a first-class answer. */
-export type ChooseStage = (candidates: readonly TaggedCandidate[]) => ExtractedFields;
+/** Stage 3: a value per field or nothing. Blank is a first-class answer.
+ * The page text is for provider alone (`provider-route.ts`, owner
+ * 2026-09-12): its cues are read around each name on the page, not off the
+ * candidates. Without it, provider falls back to the word-run bins. */
+export type ChooseStage = (candidates: readonly TaggedCandidate[], text?: string) => ExtractedFields;

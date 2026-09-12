@@ -64,7 +64,7 @@ async function main(): Promise<void> {
     const tagged = tagCandidates(text, sieve(text));
     return withModel
       ? chooseFieldsWithModel(tagged, chooserTransport(chooserModelNamed()))
-      : chooseFields(tagged);
+      : chooseFields(tagged, text);
   });
   console.log(formatRunScore(withModel ? "sieve+tag+choose+model" : "sieve+tag+choose", staged));
   const heuristics = await scoreCorpus(EXTRACTION_CORPUS, (text, filename) => proposalFromText(text, filename));
