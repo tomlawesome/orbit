@@ -161,3 +161,11 @@ report("  describer words dropped first", seededNames);
 report("  the same, marked by eye", seededNamesLoose);
 report("  and only the sieve-2 providers", seededStage2);
 console.log(`\norganisations stage 1 found: ${organisationsFound}; a provider sieve kept: ${organisationsKept}`);
+
+// One line in the register's own form, so the provider method can take a row
+// on the experiment log beside the other fields' methods (owner, 2026-09-12:
+// one row each, a result only in its own column). It is the shipped bins'
+// strict top-1 -- what the rules would answer with, not what a reader
+// marking by eye would accept.
+const scored = percent(gated.top1, gated.pages).replace(/^(\d+)\/(\d+) \((.*)\)$/u, "$3 ($1/$2)");
+console.log(`\n${onHoldout ? "hold-out 12" : "tuning 24"}: provider by top word run: ${scored} [provider ${scored}]`);
