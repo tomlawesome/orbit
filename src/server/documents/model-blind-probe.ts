@@ -2,6 +2,13 @@
 // Blind-pass-only probe over a small random sample (#965).
 //
 //   node node_modules/tsx/dist/cli.mjs src/server/documents/model-blind-probe.ts [sample] [seed]
+//   node node_modules/tsx/dist/cli.mjs src/server/documents/model-blind-probe.ts --holdout
+//
+// `--holdout` reads all twelve unseen pages instead of a sample of the
+// tuning corpus, and is how the experiment log's front table gets its model
+// row: the blind model against the heuristics on pages nobody tuned on. It
+// prints the score line and nothing per document, so the hold-out stays
+// unread (the rule at the top of `holdout-score-cli.ts`).
 //
 // Why this exists alongside model-eval-cli.ts: the full three-way run over
 // the 36-document corpus costs roughly 17 minutes against a local model, and
@@ -15,6 +22,7 @@
 // section 6's gate is five repeats of the whole corpus, and the hold-out.
 
 import { EXTRACTION_CORPUS, type CorpusDocument } from "./extraction-corpus";
+import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
 import { formatRunScore, scoreCorpus, type CorpusExtractor } from "./extraction-scoring";
 import { modelProposalFromText, MODEL_MAILBOX_DEADLINE_MS, selectedExtractionModel } from "./model-extraction";
 
@@ -43,19 +51,27 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  const onHoldout = process.argv.includes("--holdout");
   const size = Number.parseInt(process.argv[2] ?? "", 10) || 6;
   const seed = Number.parseInt(process.argv[3] ?? "", 10) || 20_260_910;
-  const documents = sample(EXTRACTION_CORPUS, size, seed);
+  const documents = onHoldout
+    ? [...EXTRACTION_HOLDOUT_FULLPAGE]
+    : sample(EXTRACTION_CORPUS, size, seed);
 
   console.log(`model: ${selectedExtractionModel(process.env)}`);
-  console.log(`sample: ${documents.length} of ${EXTRACTION_CORPUS.length} documents, seed ${seed}`);
+  console.log(onHoldout
+    ? `hold-out: all ${documents.length} unseen pages`
+    : `sample: ${documents.length} of ${EXTRACTION_CORPUS.length} documents, seed ${seed}`);
   console.log("blind pass only -- no adjudication, so this is the model reading unaided\n");
 
   const started = Date.now();
   const score = await scoreCorpus(documents, blindExtractor);
   const elapsed = (Date.now() - started) / 1000;
 
-  console.log(formatRunScore("model blind", score));
+  // The hold-out's misses are never printed: a hold-out turns into a second
+  // tuning set one read miss at a time.
+  console.log(formatRunScore(onHoldout ? "hold-out: model blind (whole page)" : "model blind",
+    onHoldout ? { ...score, misses: [] } : score));
   console.log(`\n${elapsed.toFixed(0)}s for ${documents.length} documents (${(elapsed / documents.length).toFixed(0)}s each)`);
   console.log("A screen, not a gate: the section 6 gate is five repeats of the whole corpus, plus the hold-out.");
 }

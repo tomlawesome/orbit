@@ -92,6 +92,12 @@ function renderDeltaLine(delta) {
  * cells we never ran. The band is derived from the printed number, so the
  * number is always the fuller statement of the same thing.
  */
+/** True where a run measured exactly one field, so its overall percentage is
+ * that field's percentage repeated and says nothing about the pipeline. */
+function oneFieldOnly(experiment) {
+  return (experiment.about ?? []).length === 1;
+}
+
 function scoreBand(score, baselinePct, isBaselineRow) {
   if (!score) return "band-empty";
   if (score.pct === 0) return "band-grey";
@@ -159,7 +165,7 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
     let held = null;
     for (const experiment of rows) {
       if (MUTED_VERDICTS.has(experiment.verdict)) continue;
-      const score = experiment.scores[column];
+      const score = column === "overall" && oneFieldOnly(experiment) ? null : experiment.scores[column];
       if (!score) continue;
       if (held === null || score.pct > held.pct) held = { pct: score.pct, id: experiment.id };
     }
@@ -173,7 +179,12 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
     const deltaEligible = DELTA_VERDICTS.has(experiment.verdict);
     const muted = MUTED_VERDICTS.has(experiment.verdict);
     const previous = previousByModel.get(chooserKey(experiment)) ?? null;
-    const overall = experiment.scores.overall;
+    // A run about one field has no overall: its percentage is that field's
+    // score and nothing else, and printing it in the overall column would
+    // put a one-field method beside a whole-pipeline run as if they had
+    // answered the same questions (owner, 2026-09-12: a result only in the
+    // relevant column).
+    const overall = oneFieldOnly(experiment) ? undefined : experiment.scores.overall;
     const cells = [renderScoreCell(overall, deltaEligible ? previous?.overall : null,
       scoreBand(overall, baselineOf("overall"), isBaselineRow), isBestCell(experiment, "overall"), "overall")];
     for (const field of fields) {
@@ -183,7 +194,7 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
     }
     if (deltaEligible) {
       previousByModel.set(chooserKey(experiment), {
-        overall: experiment.scores.overall.pct,
+        overall: oneFieldOnly(experiment) ? previous?.overall : experiment.scores.overall.pct,
         fields: Object.fromEntries(fields.map((field) => [field, experiment.scores[field]?.pct])),
       });
     }
