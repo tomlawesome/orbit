@@ -2953,6 +2953,69 @@
       "verdict": "kept",
       "notes": "",
       "headline": true
+    },
+    {
+      "id": "E58",
+      "date": "2026-09-12",
+      "label": "adds-up sieve; domain renewal truth = total due",
+      "corpus": "tuning-48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "New adds-up amount sieve: the order-summary row equal to the sum of the rows directly above it votes total (stated); stage 3 ranks an adds-up row above any other whole-price figure. Foxglove domain renewal truth changed £12.99 -> £15.59 (owner).",
+      "how": "npm run eval:stages",
+      "commit": "2893b06",
+      "output": "tmp/e-seen48-stages-addsup.txt",
+      "scores": {
+        "overall": {
+          "pct": 80.6,
+          "net": 329,
+          "of": 408
+        },
+        "provider": {
+          "pct": 75,
+          "net": 36,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 72.9,
+          "net": 62,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 70.8,
+          "net": 34,
+          "of": 48
+        },
+        "cost": {
+          "pct": 97.6,
+          "net": 41,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 86.2,
+          "net": 25,
+          "of": 29
+        },
+        "recurrence": {
+          "pct": 65.2,
+          "net": 15,
+          "of": 23
+        }
+      },
+      "verdict": "kept",
+      "notes": "cost 41/42 (was 40/42); 80.6% (was 80.4%). Hold-out 3 unchanged at 72.3%, cost 6/12. Last seen cost miss: PCP (monthly vs total payable).",
+      "headline": true
     }
   ],
   "measurements": [
