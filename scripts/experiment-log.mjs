@@ -379,7 +379,7 @@ function renderHeadline(experiments, fields, corpora) {
     });
     return `<tr>
       <td class="id">${escapeHtml(experiment.id)}</td>
-      <td class="label">${escapeHtml(experiment.label)}</td>
+      <td class="label">${escapeHtml(experiment.label)}${experiment.oldScoring ? '<br><span class="oldscore">old scoring: a wrong answer cost a point</span>' : ""}</td>
       ${renderModelCell(experiment)}
       ${cells.join("\n      ")}
     </tr>`;
