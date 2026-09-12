@@ -42,6 +42,7 @@ import { bestSupported, type ShortlistEntry } from "./extraction-shortlist";
 import type { CandidateKind } from "./extraction-sieve";
 import type { ExtractedFields } from "./extraction-scoring";
 import type { ChooseStage, TaggedCandidate } from "./extraction-stages";
+import { chooseProviderFromPage } from "./provider-route";
 import { documentDateRoles, type DocumentDateRole } from "./suggestions";
 import { trimFieldValue } from "./value-trim";
 
@@ -608,11 +609,11 @@ function scheduleFrom(
   };
 }
 
-export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
+export const chooseFields: ChooseStage = (candidates, text): ExtractedFields => {
   const { dates, dateRoles } = chooseDates(candidates);
   const { scheduleKind, recurrenceMonths } = scheduleFrom(dateRoles, candidates);
   const reference = chooseReference(candidates);
-  const provider = chooseProviderByRules(candidates);
+  const provider = text === undefined ? chooseProviderByRules(candidates) : chooseProviderFromPage(text);
   const subtype = chooseSubtypeByRules(candidates);
 
   return {

@@ -378,6 +378,51 @@ assurance", "council tax", "workplace pensions"); most pages top out at a
 single word, so "dental plan" loses to "dental" and the kind is lost. A
 name is printed whole; a document's kind is not.
 
+## Amendment, 2026-09-12: provider is read off the page, then judged by who acts
+
+The bins cannot separate two real firms on one page where the one the
+household deals with is printed less (owner, 2026-09-12: "two real company
+names but the one we want appears less times"). Provider now has its own
+three steps in `provider-route.ts`, outside the shared sieve and tags:
+
+1. **Names by shape** (`provider-caps-mentions.ts`): capitalised runs, a
+   capital mid-sentence, a name before Ltd/plc, after "trading as", a
+   brand-shaped word (Pass2Drive, ClearBourne), and the label of the page's
+   own web or e-mail address (homeguard365 in claims@homeguard365.co.uk).
+2. **The bins** over those mentions, a domain label counted three times;
+   the top eight runs are the shortlist.
+3. **Who acts** (`provider-dealing-cues.ts`): one vote per cue kind for the
+   name that signs, is paid, is written to, owns the address or the
+   copyright line, or is the trading name; against the company behind a
+   trading name, the underwriter or regulator, a person, a street, a
+   postcode's town, a registration mark. Votes rank; the bins break ties;
+   level on both is blank.
+
+Stage 3 therefore takes the page text as well as the candidates, for
+provider alone. The cues are ConText-shaped triggers read around each name,
+which is stage 2's job in this ADR; they live in their own module rather
+than the shared tags because the bins count mentions the shared sieve never
+made. Folding them into the tags is open.
+
+| provider, top answer | tuning 48 | hold-out 3 (12) |
+|---|---|---|
+| word-run bins (before) | 31 | 7 |
+| names by shape, bins alone | 35 | 9 |
+| names by shape, bins, then who acts | **38** | **12** |
+
+Whole pipeline (`eval:stages` / `eval:holdout`, no model): 76.7% -> 78.2%
+on the 48, 65.2% -> 70.5% on hold-out 3. The ten tuning misses left: a
+broker whose web domain is on the page beats the lender or contractor
+(three), the company behind a trading name where the truth wants it (two),
+and names the shortlist never holds (four). Tried and dropped the same day
+(`docs/experiments/extraction.json`): binning only the top and bottom
+thirds of the page, weighting them, dropping ordinary English words, and
+own stage 2's votes as the second step.
+
+Ruling (owner, 2026-09-12): the provider is the party the contract, product
+or service is with -- the broker the household bought from (Hedgerow), not
+the insurer behind it (Thornfield Assurance).
+
 ## Alternatives rejected
 
 - **Widen the regexes field by field until the 24 pass.** This is the
