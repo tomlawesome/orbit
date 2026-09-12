@@ -37,7 +37,6 @@
 // document we have seen behaves. The word lists are the taxonomy's and the
 // owner's.
 
-import { COMPANY_FORM_WORDS } from "./extraction-provider-runs";
 import type { TaggedCandidate } from "./extraction-stages";
 import {
   composeSubtype,
@@ -60,10 +59,19 @@ interface SubtypeTaxonomy {
 
 /**
  * Words dropped from a line before its runs are read: the words that join a
- * phrase together, and the words that say a name belongs to a company. Both
- * lists are reused rather than restated -- a word that means nothing to the
- * provider bins means nothing here either.
+ * phrase together, and the words that say a name belongs to a company.
+ *
+ * The company-form half is written out here rather than imported from the
+ * provider bins, which hold the same list today. Every field owns its own
+ * copy of every stage (owner, 2026-09-12), and a shared list cannot be tuned
+ * for subtype without moving provider's answers at the same time. The
+ * duplication is the point.
  */
+const COMPANY_FORM_WORDS: readonly string[] = [
+  "ltd", "limited", "plc", "llp", "co", "company", "group",
+  "the", "of", "and", "&", "uk", "for", "a",
+];
+
 export const DROPPED_WORDS: ReadonlySet<string> = new Set<string>([
   ...JOINING_WORDS,
   ...COMPANY_FORM_WORDS,
