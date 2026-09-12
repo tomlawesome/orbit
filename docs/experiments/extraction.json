@@ -2197,6 +2197,66 @@
       "about": [
         "provider"
       ]
+    },
+    {
+      "id": "E34",
+      "date": "2026-09-12",
+      "label": "Provider with its own stage 1 sieve, on the unseen twelve",
+      "corpus": "holdout-12",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by its own stage 1",
+      "what": "Provider stops sharing the sieve. Its own first pass cuts every run of capitalised words rather than only names ending in a known trade word, so the right name reaches stage 2 on 11 of 12 unseen pages instead of 5. The whole route then answers right on 6 of 12, against 3 before.",
+      "how": "npm run eval:provider-stage1 -- --holdout",
+      "commit": "3ee3a02",
+      "output": "tmp/e-provider-stage1-holdout.txt",
+      "scores": {
+        "overall": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "provider": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        }
+      },
+      "verdict": "kept",
+      "notes": "Marked by eye rather than by classifyProvider it is 10 of 12. Stage 2 and the bins are still the shared ones; only stage 1 changed. Costs 32 candidates a page instead of 11.",
+      "about": [
+        "provider"
+      ]
+    },
+    {
+      "id": "E35",
+      "date": "2026-09-12",
+      "label": "Provider with its own stage 1 sieve, on the 24",
+      "corpus": "tuning-24",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by its own stage 1",
+      "what": "The same sieve on the pages the extractor was tuned against: recall goes to 24 of 24, but the strict answer falls from 17 to 10. The extra candidates make the top word run a fragment or an over-long phrase that classifyProvider will not accept; marked by eye it is 17 of 24, unchanged.",
+      "how": "npm run eval:provider-stage1",
+      "commit": "3ee3a02",
+      "output": "tmp/e-provider-stage1-tuning.txt",
+      "scores": {
+        "overall": {
+          "pct": 41.7,
+          "net": 10,
+          "of": 24
+        },
+        "provider": {
+          "pct": 41.7,
+          "net": 10,
+          "of": 24
+        }
+      },
+      "verdict": "regression",
+      "notes": "Read beside E34. The tuning pages were already well served by the shared sieve, so here the widening only costs; the unseen pages are where it pays.",
+      "about": [
+        "provider"
+      ]
     }
   ],
   "measurements": [
