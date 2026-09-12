@@ -11,11 +11,13 @@
 //   npm run eval:provider-pick -- --chooser-model qwen3:4b # another model
 //   npm run eval:provider-pick -- --route bins|own         # one list only
 //   npm run eval:provider-pick -- --limit 6                # first N documents
+//   npm run eval:provider-pick -- --holdout3               # the 12 unseen pages
 //
 // Asks the model, so it must run in a container on
 // `orbit_orbit-document-processing` (AGENTS.md, "stages-rerun" pattern).
 import { assertChooserReachable, chooseProviderWithModel, chooserTransport, providerShortlistEntries } from "./extraction-choose-meaning";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
+import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { classifyProvider } from "./extraction-scoring";
 import type { ShortlistEntry } from "./extraction-shortlist";
 import { sieve } from "./extraction-sieve";
@@ -33,7 +35,9 @@ function flag(name: string): string | undefined {
 const modelNamed = flag("--chooser-model");
 const route = flag("--route") ?? "both";
 const limit = Number(flag("--limit") ?? Number.MAX_SAFE_INTEGER);
-const documents = EXTRACTION_CORPUS.slice(0, limit);
+const holdout3 = process.argv.includes("--holdout3");
+const documents = (holdout3 ? EXTRACTION_HOLDOUT3_FULLPAGE : EXTRACTION_CORPUS).slice(0, limit);
+const prefix = holdout3 ? "hold-out 3: " : "";
 
 /** The first block the name is printed in, as the evidence the model sees. */
 function blockPrinting(text: string, name: string): string {
@@ -87,7 +91,7 @@ async function main(): Promise<void> {
   for (const { name, tally } of routes) {
     const percent = tally.of === 0 ? "0" : ((tally.hits / tally.of) * 100).toFixed(0);
     console.log(`right answer on the ${name} list: ${tally.onList}/${tally.of}; model left blank: ${tally.blank}/${tally.of}`);
-    console.log(`provider by model pick from ${name} (${model}): ${percent}% (${tally.hits}/${tally.of}) [provider ${tally.hits}/${tally.of}]`);
+    console.log(`${prefix}provider by model pick from ${name} (${model}): ${percent}% (${tally.hits}/${tally.of}) [provider ${tally.hits}/${tally.of}]`);
   }
 }
 
