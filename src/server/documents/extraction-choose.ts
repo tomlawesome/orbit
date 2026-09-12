@@ -30,9 +30,10 @@ import {
   chooseProviderWithModel,
   chooseRecurrenceWithModel,
   chooseReferenceWithModel,
+  chooseSubtypeByRules,
   chooseSubtypeWithModel,
   providerShortlistEntries,
-  subtypeShortlistEntries,
+  subtypeShortlist,
   type MeaningTransport,
 } from "./extraction-choose-meaning";
 import { AMOUNT_LABEL } from "./extraction-amount-sieves";
@@ -569,10 +570,10 @@ function chooseCost(candidates: readonly TaggedCandidate[]): {
 
 /**
  * Stage 3 of ADR-0026. The rule-shaped fields are chosen here. Of the two
- * meaning-shaped ones, `provider` takes the value where the page states it
- * in so many words (`extraction-choose-meaning.ts`) and `subtype` is left
- * blank: both are the model's to choose over the shortlist, which is the
- * same module's second half and is wired up by the caller.
+ * meaning-shaped ones, `provider` and `subtype` take the value the bins are
+ * plain about (`extraction-choose-meaning.ts`) and answer blank otherwise:
+ * both are the model's to choose over the shortlist, which is the same
+ * module's second half and is wired up by the caller.
  */
 /**
  * What the roles say about the schedule: the same derivation
@@ -612,6 +613,7 @@ export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
   const { scheduleKind, recurrenceMonths } = scheduleFrom(dateRoles, candidates);
   const reference = chooseReference(candidates);
   const provider = chooseProviderByRules(candidates);
+  const subtype = chooseSubtypeByRules(candidates);
 
   return {
     dates,
@@ -620,6 +622,7 @@ export const chooseFields: ChooseStage = (candidates): ExtractedFields => {
     ...(recurrenceMonths === undefined ? {} : { recurrenceMonths }),
     ...(reference === undefined ? {} : { reference }),
     ...(provider === undefined ? {} : { provider }),
+    ...(subtype === undefined ? {} : { subtype }),
     ...chooseCost(candidates),
   };
 };
@@ -816,7 +819,7 @@ export async function chooseFieldsWithModel(
   const reference = await chooseReferenceWithModel(referenceShortlistEntries(candidates), transport);
   const cost = await chooseCostWithModel(costShortlistEntries(candidates), transport);
   const provider = await chooseProviderWithModel(providerShortlistEntries(candidates), transport);
-  const subtype = await chooseSubtypeWithModel(subtypeShortlistEntries(candidates), transport);
+  const subtype = await chooseSubtypeWithModel(subtypeShortlist(candidates), transport);
 
   // Derived from the roles, exactly as the rules path derives them: a
   // schedule is what the roles mean, not a separate question. The cycle

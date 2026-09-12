@@ -9,7 +9,7 @@ import {
   chooseReferenceWithModel,
   chooseSubtypeWithModel,
   providerShortlistEntries,
-  subtypeShortlistEntries,
+  subtypeShortlist,
   type MeaningTransport,
 } from "./extraction-choose-meaning";
 import type { CandidateKind } from "./extraction-sieve";
@@ -174,16 +174,20 @@ describe("the shortlist the model is shown", () => {
     expect(entries[0].value).toBe("Kestrel Travel Insurance Services Ltd");
   });
 
-  it("offers the taxonomy phrases the page's own words support, and no more", () => {
-    const entries = subtypeShortlistEntries([
+  it("offers the taxonomy groups the page's own words support, and no more", () => {
+    const { qualifiers, kinds, entries } = subtypeShortlist([
       candidate("heading", "Home Insurance Policy Schedule", ["title"]),
       candidate("organisation", "Thornfield Assurance plc", ["other"]),
       candidate("amount", "41299", [{ value: "total", trigger: "Total premium" }], "Total premium £412.99", "GBP"),
     ]);
 
-    expect(entries.length).toBeLessThanOrEqual(8);
-    expect(entries.map((entry) => entry.value)).toContain("Home Insurance");
-    expect(entries.map((entry) => entry.value)).toContain("Insurance");
+    // Two of each at most: the owner's ruling (2026-09-11), a third is a
+    // name the page barely says.
+    expect(qualifiers.length).toBeLessThanOrEqual(2);
+    expect(kinds.length).toBeLessThanOrEqual(2);
+    expect(entries).toEqual([...qualifiers, ...kinds]);
+    expect(qualifiers.map((entry) => entry.value)).toContain("Home");
+    expect(kinds.map((entry) => entry.value)).toContain("Insurance");
     // The page never says "boiler", "mobile" or "tenancy", so the taxonomy's
     // other sixty qualifiers are not on the list.
     expect(entries.some((entry) => entry.value.includes("Boiler"))).toBe(false);
@@ -260,16 +264,27 @@ describe("asking a model to choose the provider", () => {
 });
 
 describe("asking a model what type of thing this is", () => {
-  const shortlist = subtypeShortlistEntries([
+  // One heading, so one qualifier bin ("Home") and one kind bin
+  // ("Insurance"), numbered 1 and 2 as a single list.
+  const shortlist = subtypeShortlist([
     candidate("heading", "Home Insurance Policy Schedule", ["title"]),
   ]);
 
-  it("takes the phrase the model numbered, in the taxonomy's own words", async () => {
-    const chosen = await chooseSubtypeWithModel(shortlist, fakeModel("1"));
-    expect(shortlist.map((held) => held.value)).toContain(chosen);
+  it("offers the qualifier and the kind as one numbered list", () => {
+    expect(shortlist.qualifiers.map((held) => held.value)).toEqual(["Home"]);
+    expect(shortlist.kinds.map((held) => held.value)).toEqual(["Insurance"]);
+    expect(shortlist.entries).toHaveLength(2);
   });
 
-  it("takes the phrase written out", async () => {
+  it("composes the two numbers the model answered, in the taxonomy's own words", async () => {
+    expect(await chooseSubtypeWithModel(shortlist, fakeModel("1 2"))).toBe("Home Insurance");
+  });
+
+  it("takes a number for one half and none for the other", async () => {
+    expect(await chooseSubtypeWithModel(shortlist, fakeModel("none 2"))).toBe("Insurance");
+  });
+
+  it("takes the names written out", async () => {
     expect(await chooseSubtypeWithModel(shortlist, fakeModel("Home Insurance"))).toBe("Home Insurance");
   });
 
