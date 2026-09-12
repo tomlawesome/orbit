@@ -2498,6 +2498,33 @@
       },
       "verdict": "kept",
       "notes": "Second run on this set for stage 1. The change was informed by the shape of the misses (word count, capitals, digits -- counted, not read) and by the owner's case rule; the pages themselves stay unread. Own stage 2 on top of it: 2/12 (from 1/12), tuning 12/24 (from 15/24): stage 2 now has to cope with the flood, which is the next job."
+    },
+    {
+      "id": "E44",
+      "date": "2026-09-12",
+      "label": "Provider ruler loosened: a short form of the name counts",
+      "corpus": "seen-48",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by top word run",
+      "what": "Top word run 26 -> 31 of 48 under the new ruler, matching the by-eye ruler exactly. Shipped extractor 9 -> 10. Own stage 2 unchanged at 17: its misses are ties and junk, not short forms. Seen corpus is now 48 (hold-outs 1 and 2 rolled in, #998).",
+      "how": "npm run eval:provider-bins",
+      "commit": "e9e7e37",
+      "output": "tmp/e-seen48-provider-bins-loose-ruler.txt",
+      "scores": {
+        "overall": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "provider": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        }
+      },
+      "verdict": "kept",
+      "notes": "Ruler change, not an extractor change: the same replies, marked as a reader would. Not comparable with earlier rows for provider; E45 onward use this ruler. Rule: trailing company forms and a leading 'the' dropped, one side a whole-word run of the other, carrying a word that names rather than describes."
     }
   ],
   "measurements": [
