@@ -229,10 +229,16 @@ skipped itself leaves nothing and is never reused. The lookup reads the API
 with `BASE_REPIN_TOKEN`; an unset token, an unreachable API or an expired
 artefact is logged and read as "no reuse", which reruns the job.
 
-The acceptance stage now waits for `fast`, `gitleaks`, `licence_policy` and
-`supply_chain_source`, so a red `fast` costs no image build, no browser suite
-and no installer run — about seven minutes added to a green pipeline, and the
-whole acceptance stage saved on a red one.
+The acceptance stage waits for `fast`, so a red `fast` costs no image build,
+no browser suite and no installer run. It no longer also waits for
+`gitleaks`, `licence_policy` and `supply_chain_source` (#945, owner ruling on
+#923 rec 16b, 2026-09-09): those three queued 541–1105 s on the shared
+`light` lane for about 68 s of actual policy work, holding the stage back by
+over five minutes. A red one of the three still fails the pipeline overall —
+none is `allow_failure: true` — it just no longer blocks a job that never
+reads its result; auto_cancel (#923 rec 13) cancels an acceptance run already
+under way when that happens. `fidelity` and `integration` still wait for all
+four.
 
 ### The second browser lane: an Orbit with no identity provider (#916)
 
