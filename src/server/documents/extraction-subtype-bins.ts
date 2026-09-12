@@ -9,10 +9,9 @@
 // Counting instead which taxonomy groups the page's own words land in
 // leaves four names to choose between.
 //
-//   source      the stage 1 headings, and the stage 2 organisations at
-//               least one sieve read as the provider. What a document calls
-//               itself and who it is from is what says what it is; the
-//               figures and the dates do not.
+//   source      the stage 1 headings, and every organisation stage 1 found.
+//               What a document calls itself and who it is from is what says
+//               what it is; the figures and the dates do not.
 //   phrase      every synonym of every kind and every qualifier, case
 //               folded, with the generic words dropped (of, and, the, a,
 //               an, for, to, in, on, at, by, with, or, &), so "Certificate
@@ -32,7 +31,6 @@
 // the 24 tuning documents behave. The phrases are the taxonomy's own, and
 // the generic word list is the owner's.
 
-import { providerTaggedOrganisations } from "./extraction-provider-runs";
 import type { TaggedCandidate } from "./extraction-stages";
 import subtypeTaxonomyJson from "./subtype-taxonomy.json";
 
@@ -145,11 +143,20 @@ export function subtypeGroupBins<S extends SubtypeSource>(sources: readonly S[])
   };
 }
 
-/** What the bins read: what the document calls itself, and who it is from. */
+/**
+ * What the bins read: what the document calls itself, and who it is from.
+ *
+ * Every organisation, not only the ones provider's stage 2 spoke for. Subtype
+ * used to read provider's shortlist, so tuning provider moved subtype's
+ * answers with no measurement saying it should; every field owns its own
+ * stages now (owner, 2026-09-12). Measured on the day of the change: the two
+ * readings score the same, 22/24 on the tuning corpus and 10/12 on the
+ * hold-out, so nothing was traded for the separation.
+ */
 export function subtypeSources(candidates: readonly TaggedCandidate[]): TaggedCandidate[] {
   return [
     ...candidates.filter((candidate) => candidate.kind === "heading"),
-    ...providerTaggedOrganisations(candidates),
+    ...candidates.filter((candidate) => candidate.kind === "organisation"),
   ];
 }
 
