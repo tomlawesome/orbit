@@ -3075,8 +3075,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "dateRoles 63/85 (was 62/85); 80.9% (was 80.6%). Gym membership start date now found.",
-      "headline": true
+      "notes": "dateRoles 63/85 (was 62/85); 80.9% (was 80.6%). Gym membership start date now found."
     },
     {
       "id": "E60",
@@ -3139,6 +3138,69 @@
       },
       "verdict": "kept",
       "notes": "73.2% (was 72.3%): recurrence 6/6 (was 5/6); cost 6/12, dateRoles 19/26 unchanged.",
+      "headline": true
+    },
+    {
+      "id": "E61",
+      "date": "2026-09-12",
+      "label": "expiry vs renewal: quotes, tickets, leases, forfeited credit",
+      "corpus": "tuning-48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "RUNS_OUT gains quote/quotation, ticket, forfeit(ed), returned, used within; where the date's block is silent the page title decides for ticket/lease/quotation/permit. Tried and rejected: any page-level renew/expire word count (does not separate the corpus).",
+      "how": "npm run eval:stages",
+      "commit": "9b4e352",
+      "output": "tmp/e-seen48-stages-runsout2.txt",
+      "scores": {
+        "overall": {
+          "pct": 81.9,
+          "net": 334,
+          "of": 408
+        },
+        "provider": {
+          "pct": 75,
+          "net": 36,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 78.8,
+          "net": 67,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 70.8,
+          "net": 34,
+          "of": 48
+        },
+        "cost": {
+          "pct": 97.6,
+          "net": 41,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 86.2,
+          "net": 25,
+          "of": 29
+        },
+        "recurrence": {
+          "pct": 65.2,
+          "net": 15,
+          "of": 23
+        }
+      },
+      "verdict": "kept",
+      "notes": "dateRoles 67/85 (was 63/85); 81.9% (was 80.9%). Hold-out 3 unchanged, 73.2%. Remaining dateRoles misses: 18.",
       "headline": true
     }
   ],
