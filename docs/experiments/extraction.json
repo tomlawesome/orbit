@@ -1161,8 +1161,7 @@
         "scheduleKind",
         "recurrence"
       ],
-      "oldScoring": true,
-      "headline": true
+      "oldScoring": true
     },
     {
       "id": "E12",
@@ -2003,8 +2002,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E29",
@@ -2107,8 +2105,7 @@
       "notes": "One document apart from the bins, which a twelve-page hold-out cannot resolve. The diagnostic the method was written for is the better number: the right answer is in one of its top two runs on 11 of the 12, so it ranks well and picks badly.",
       "about": [
         "subtype"
-      ],
-      "headline": true
+      ]
     },
     {
       "id": "E31",
@@ -2168,8 +2165,7 @@
       "notes": "Marked by eye rather than by the scorer the numbers are 5 of 12 top-1 and 8 of 12 top-2, because the bins often answer with a short form of the right name.",
       "about": [
         "provider"
-      ],
-      "headline": true
+      ]
     },
     {
       "id": "E33",
@@ -2768,7 +2764,71 @@
       "notes": "Whole pipeline without a model 65.2% -> 70.5% on hold-out 3.",
       "about": [
         "provider"
-      ]
+      ],
+      "headline": true
+    },
+    {
+      "id": "E54",
+      "date": "2026-09-12",
+      "label": "Rules pipeline, no model, with the new provider route",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "The whole three-stage pipeline answering by rule on the twelve unseen pages, provider now from E53's route. 65.2% -> 70.5%; provider 6/12 -> 12/12, every other field unchanged.",
+      "how": "npm run eval:holdout",
+      "commit": "fb99b56",
+      "output": "tmp/e-holdout3-stages-route.txt",
+      "scores": {
+        "overall": {
+          "pct": 70.5,
+          "net": 79,
+          "of": 112
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 73.1,
+          "net": 19,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
     }
   ],
   "measurements": [
