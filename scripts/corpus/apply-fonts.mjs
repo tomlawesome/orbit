@@ -235,6 +235,83 @@ const DOCS = {
     faces: [FACE("Corpus Quote", "DMSerifDisplay-Regular.ttf", "400"), FACE("Corpus Quote Sans", "Inter.ttf")],
     swap: [[/"Liberation Serif", serif/g, '"Corpus Quote", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Quote Sans", sans-serif']],
   },
+
+  // ---- the SECOND hold-out, 12 further documents (#997) ----
+  //
+  // Twenty-three more faces, none used by `sources/` or the first `holdout/`:
+  // this third corpus shares no character map with either of the other two,
+  // for the same reason the first hold-out shared none with the tuning set.
+
+  // A holiday park's own letterhead: a warm display serif over a rounded sans.
+  "holiday-lodge-site-licence.html": {
+    faces: [FACE("Corpus Park", "PlayfairDisplay.ttf"), FACE("Corpus Park Sans", "NunitoSans.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Park", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Park Sans", sans-serif']],
+  },
+  // An institutional invoice: a plain book serif over a code mono for the
+  // fee table and reference numbers.
+  "university-halls-invoice.html": {
+    faces: [FACE("Corpus Halls", "NotoSerif.ttf"), FACE("Corpus Halls Mono", "IBMPlexMono-Regular.ttf", "400"), FACE("Corpus Halls Mono", "IBMPlexMono-Bold.ttf", "700")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Halls", serif'], [/"Liberation Mono", monospace/g, '"Corpus Halls Mono", monospace']],
+  },
+  // A guarantee certificate: an old-style text serif for the wording, a
+  // plain grotesque for the specification table.
+  "cavity-wall-insulation-guarantee.html": {
+    faces: [FACE("Corpus Guarantee", "Cardo-Regular.ttf", "400"), FACE("Corpus Guarantee", "Cardo-Bold.ttf", "700"), FACE("Corpus Guarantee Sans", "Overpass.ttf")],
+    swap: [[/"Bitstream Charter", serif/g, '"Corpus Guarantee", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Guarantee Sans", sans-serif']],
+  },
+  // A trade order note: a code mono for the fill-in figures, a bold
+  // grotesque for the brand and headings.
+  "skip-hire-contract.html": {
+    faces: [FACE("Corpus Skip Mono", "OverpassMono.ttf"), FACE("Corpus Skip", "Chivo.ttf")],
+    swap: [[/"Liberation Mono", monospace/g, '"Corpus Skip Mono", monospace'], [/"Liberation Sans", sans-serif/g, '"Corpus Skip", sans-serif']],
+  },
+  // An insurance schedule: a soft book serif for the wording, a neutral sans
+  // for the cover table and labels.
+  "home-emergency-cover-schedule.html": {
+    faces: [FACE("Corpus Emergency", "Neuton-Regular.ttf", "400"), FACE("Corpus Emergency", "Neuton-Bold.ttf", "700"), FACE("Corpus Emergency Sans", "DMSans.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Emergency", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Emergency Sans", sans-serif']],
+  },
+  // A modern self-storage brand: a geometric display sans over a code mono
+  // for unit and access codes.
+  "self-storage-agreement.html": {
+    faces: [FACE("Corpus Storage", "Poppins-Regular.ttf", "400"), FACE("Corpus Storage", "Poppins-Bold.ttf", "700"), FACE("Corpus Storage Mono", "DMMono-Regular.ttf", "400")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Storage", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Storage Mono", monospace']],
+  },
+  // A leasing company's statement: a plain sans for the wording, a code mono
+  // for the payment schedule.
+  "car-lease-statement.html": {
+    faces: [FACE("Corpus Lease", "Raleway.ttf"), FACE("Corpus Lease Mono", "Cousine-Regular.ttf", "400"), FACE("Corpus Lease Mono", "Cousine-Bold.ttf", "700")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Lease", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Lease Mono", monospace']],
+  },
+  // A printed consumer bill: one neutral UI sans doing every job.
+  "satellite-tv-subscription-invoice.html": {
+    faces: [FACE("Corpus Satellite", "HankenGrotesk.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Satellite", sans-serif']],
+  },
+  // A friendly consumer certificate: a rounded sans for the branding, a
+  // display serif for the certificate wording.
+  "health-cash-plan-certificate.html": {
+    faces: [FACE("Corpus Cashplan", "Quicksand.ttf"), FACE("Corpus Cashplan Serif", "BreeSerif-Regular.ttf", "400")],
+    swap: [[/"FreeSans", "Loma", sans-serif/g, '"Corpus Cashplan", sans-serif'], [/"FreeSerif", serif/g, '"Corpus Cashplan Serif", serif']],
+  },
+  // A sole trader's invoice: a plain sans for the printed template, a
+  // handwriting face for the instructor's own signature.
+  "driving-lessons-invoice.html": {
+    faces: [FACE("Corpus Tuition", "Sora.ttf"), FACE("Corpus Signature", "PatrickHand-Regular.ttf", "400")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Tuition", sans-serif'], [/"FreeSerif", serif/g, '"Corpus Signature", serif']],
+  },
+  // A parchment-style certificate: a display serif for the brand, a plainer
+  // old-style serif for the body wording.
+  "funeral-plan-certificate.html": {
+    faces: [FACE("Corpus Evergreen", "Cormorant.ttf"), FACE("Corpus Evergreen Body", "LibreCaslonText.ttf")],
+    swap: [[/"Bitstream Charter", serif/g, '"Corpus Evergreen", serif'], [/"Liberation Serif", serif/g, '"Corpus Evergreen Body", serif']],
+  },
+  // A trade certificate: a code mono doing the measurements and figures, a
+  // bold slab for the trader's own three-letter mark.
+  "chimney-sweep-certificate.html": {
+    faces: [FACE("Corpus Sweep Mono", "FiraCode.ttf"), FACE("Corpus Sweep Brand", "Bevan-Regular.ttf", "400")],
+    swap: [[/"Liberation Mono", monospace/g, '"Corpus Sweep Mono", monospace'], [/"Bitstream Charter", serif/g, '"Corpus Sweep Brand", serif']],
+  },
 };
 
 for (const [file, { faces, swap }] of Object.entries(DOCS)) {
