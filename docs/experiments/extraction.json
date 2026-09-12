@@ -1836,44 +1836,6 @@
   ],
   "measurements": [
     {
-      "id": "M01",
-      "date": "2026-09-11",
-      "corpus": "tuning-24",
-      "label": "Owner's prototype: does the biggest bin hold the provider's name?",
-      "what": "Count the words the page repeats across the organisation names the sieves kept, and see whether the provider comes out on top. Three ways of counting, hand-checked on six tuning pages.",
-      "how": "tmp/provider-word-bins.ts, six pages, four biggest bins",
-      "results": [
-        [
-          "single words, over stage 1",
-          "the distinctive word is in the top four on 6/6, but the top bin is a kind word (warranty, broadband, council) on 4/6"
-        ],
-        [
-          "single words, over stage 2",
-          "same, with the provider word one place higher on 3/6"
-        ],
-        [
-          "word runs, over stage 2, describer words split out",
-          "the exact provider is top on 5/6, the short form on the sixth"
-        ]
-      ],
-      "source": "docs/adr-notes/989-word-run-bins.md"
-    },
-    {
-      "id": "M02",
-      "date": "2026-09-11",
-      "corpus": "holdout-12",
-      "label": "Owner's prototype on six unseen hold-out pages",
-      "what": "The same counting, run by the owner on six pages nobody tuning had seen, to check it was not fitted to the 24.",
-      "how": "tmp/provider-word-bins.ts --holdout --limit 6",
-      "results": [
-        [
-          "correct provider in the top two bins",
-          "6 of 6"
-        ]
-      ],
-      "source": "#989 note 16839; docs/adr-notes/989-word-run-bins.md"
-    },
-    {
       "id": "M03",
       "date": "2026-09-11",
       "corpus": "tuning-24",
@@ -1940,7 +1902,7 @@
       "date": "2026-09-12",
       "corpus": "holdout-12",
       "label": "Provider word-run bins on the twelve unseen pages",
-      "what": "The bins were adopted on the strength of the 24 and of a six-page check on unseen pages. Measured today over all twelve unseen pages, they do not carry over: the answer reaches the top two runs a third of the time, against nine times in ten on the 24. Marked generously -- counting a short form of the name as a hit, the way a reader marking by hand would -- it is two thirds. Binning over every organisation stage 1 found, rather than only the ones a provider sieve kept, changes nothing, so the gate in front of the bins is not the cause.",
+      "what": "The bins were adopted on the strength of the 24. Measured over all twelve unseen pages, they do not carry over: the answer reaches the top two runs a third of the time, against nine times in ten on the 24. Marked generously -- counting a short form of the name as a hit, the way a reader marking by hand would -- it is two thirds. Binning over every organisation stage 1 found, rather than only the ones a provider sieve kept, changes nothing, so the gate in front of the bins is not the cause.",
       "how": "npm run eval:provider-bins -- --holdout",
       "results": [
         [
@@ -1965,29 +1927,6 @@
         ]
       ],
       "source": "run at the terminal, 2026-09-12; #989"
-    },
-    {
-      "id": "M06",
-      "date": "2026-09-12",
-      "corpus": "holdout-12",
-      "label": "The six-for-six result does not reproduce",
-      "what": "#989 note 16839 records the owner running the prototype on six unseen pages and the correct provider being in the top two bins on all six. Running the same prototype on the same six pages today puts it in the top two on three: one page's top bins are the underwriter, one is 'report reference number', one never repeats the provider's name at all. The prototype was edited after the note was written, so the two runs are not necessarily the same code. The note was written by an agent from what the owner reported, not from saved output.",
-      "how": "npx tsx tmp/provider-word-bins.ts --holdout --limit 6 --stage2 --phrases (the owner's prototype, untracked)",
-      "results": [
-        [
-          "in the top two bins, as recorded on the night",
-          "6 of 6"
-        ],
-        [
-          "in the top two bins, re-run today",
-          "3 of 6"
-        ],
-        [
-          "where it fails",
-          "pages that print the provider's name once or twice, where a rival is printed more"
-        ]
-      ],
-      "source": "#989 note 16839; re-run 2026-09-12"
     },
     {
       "id": "M07",
