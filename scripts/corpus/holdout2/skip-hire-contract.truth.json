@@ -1,0 +1,25 @@
+{
+  "name": "skip hire order, the booking brand is not who the waste contract is with",
+  "filename": "fullpage-skip-hire-contract.pdf",
+  "expected": {
+    "dates": ["2026-09-02", "2026-09-09", "2026-09-23"],
+    "provider": "Corvedale Skips & Aggregates Ltd",
+    "reference": "SKF-ORD-661204",
+    "dateRoles": [
+      { "date": "2026-09-02", "role": "issued" },
+      { "date": "2026-09-09", "role": "start" },
+      { "date": "2026-09-23", "role": "due" }
+    ],
+    "subtype": { "kinds": ["Contract"], "qualifiers": ["Waste"] },
+    "costMinor": 28500,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: booked 2 September 2026, delivered (hire starts) 9 September 2026, collection due 23 September 2026. Three other printed dates are deliberately not declared: a previous, unrelated booking at the same address (14 Mar 2025), the waste carrier registration renewal (11 Jan 2026) and its next renewal (11 Jan 2029), and the terms-of-booking revision stamp (4 Jun 2024).",
+    "provider is Corvedale Skips & Aggregates Ltd, stated plainly in the page's own text to be who the hire contract is actually with ('the contract for delivery, collection and disposal of the waste is between you and Corvedale Skips & Aggregates Ltd'). SkipFinder, named in the letterhead and throughout, is described in the small print as a booking intermediary regulated for consumer credit, not a waste carrier -- the FCA firm reference on the page belongs to SkipFinder, the broker, not to the provider.",
+    "reference is the booking order number SKF-ORD-661204, not the earlier unrelated order (SKF-ORD-559812) or the waste carrier registration number (CBDU887214).",
+    "costMinor is the £285.00 total charged, not any of the three line items that sum to it, and not the £8.00-a-day unauthorised extension charge.",
+    "subtype: 'Contract' (a hire/order confirmation that is itself the contract) qualified by 'Waste'.",
+    "scheduleKind is not declared: none of the three dateRoles is 'renewal' or 'service'."
+  ]
+}

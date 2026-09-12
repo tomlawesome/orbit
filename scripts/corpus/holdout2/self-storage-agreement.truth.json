@@ -1,0 +1,26 @@
+{
+  "name": "self storage agreement, the provider is never spelled out beyond three letters",
+  "filename": "fullpage-self-storage-agreement.pdf",
+  "expected": {
+    "dates": ["2026-08-15", "2026-09-15"],
+    "provider": "SSL",
+    "reference": "SSL-BX-3390",
+    "dateRoles": [
+      { "date": "2026-08-15", "role": "start" },
+      { "date": "2026-09-15", "role": "due" }
+    ],
+    "subtype": { "kinds": ["Rental"] },
+    "costMinor": 6800,
+    "currency": "GBP",
+    "recurrenceMonths": 1
+  },
+  "notes": [
+    "dates: move-in 15 August 2026, next payment due 15 September 2026. Four other printed dates are deliberately not declared: the agreement preparation date, the site's last rent increase, a previous, unrelated unit's end date at this address, and the terms edition stamps.",
+    "provider is 'SSL': the operator's full legal or trading name is never printed anywhere on the page, only these three letters, used throughout as the brand mark and in the registered-company sentence in the small print.",
+    "reference is the unit reference SSL-BX-3390, not the unrelated previous unit reference or the access code.",
+    "costMinor is the monthly rent, printed with a currency symbol as the cost of the thing itself; the included-insurance figure is a cover limit, not a cost.",
+    "recurrenceMonths is 1: a '1 month' term is printed in digits.",
+    "subtype: 'Rental'; no qualifier group in the taxonomy names storage closely enough to declare one.",
+    "scheduleKind is not declared: neither dateRole is 'renewal' or 'service'."
+  ]
+}

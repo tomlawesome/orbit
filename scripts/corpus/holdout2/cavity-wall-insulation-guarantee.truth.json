@@ -1,0 +1,24 @@
+{
+  "name": "cavity wall insulation guarantee, the trading name on the letterhead is not who guarantees it",
+  "filename": "fullpage-cavity-wall-insulation-guarantee.pdf",
+  "expected": {
+    "dates": ["2026-05-12", "2051-05-12"],
+    "provider": "Bassington Energy Solutions Ltd",
+    "reference": "WC-GTE-08823",
+    "dateRoles": [
+      { "date": "2026-05-12", "role": "issued" },
+      { "date": "2051-05-12", "role": "expiry" }
+    ],
+    "subtype": { "kinds": ["Guarantee"], "qualifiers": ["Building work"] },
+    "costMinor": 234000,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: installed 12 May 2026, the 25-year guarantee runs to 12 May 2051. Two other printed dates are deliberately not declared: the certificate issue date (19 May 2026, a week after installation and after the guarantee period already started) and the cavity survey date (28 Apr 2026). The superseded wording edition (6 Mar 2022) and the current edition date (1 Jan 2026) are print-run stamps, not dates about this job, and are also not declared.",
+    "provider is Bassington Energy Solutions Ltd, named only in the small print as the entity that 'is issued by' this guarantee -- 'WarmCore Insulation', printed large in the letterhead and everywhere else on the page, is stated in that same small print to be only its trading name, the same distinction the owner drew for a broker versus an underwriter (#989).",
+    "reference is the guarantee number WC-GTE-08823, not the job reference (WCI-2026-4471) or the insurance-backed scheme reference (GBW-771049).",
+    "costMinor is the £2,340.00 contract price for the installation itself, the only amount on the page with a currency symbol that is plainly the cost of the thing.",
+    "subtype: 'Guarantee' (the taxonomy group whose synonyms include 'Insurance-backed guarantee', matching the printed scheme) qualified by 'Building work', covering installation and workmanship.",
+    "scheduleKind is not declared: neither dateRole is 'renewal' or 'service'."
+  ]
+}
