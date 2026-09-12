@@ -57,12 +57,15 @@ Six tuning pages, four biggest bins:
 | single-word bins over stage 2 | same, provider word one place higher on 3/6 |
 | word-run bins over stage 2, describers split out | **exact provider top on 5/6**, the short form ("Colworth & Drake") on the sixth |
 
-Six unseen hold-out pages, run by the owner (nobody tuning saw the output):
-**the correct provider was in the top two bins on all six** (#989, note
-16839).
+Six-page checks are no longer evidence here (owner, 2026-09-12): a result on
+six unseen pages is half the hold-out, where one document moves the number by
+17 points. Results are measured on all twelve.
 
-For comparison, the provider rules built on the 24 before this scored
--25% on the hold-out, and the whole-page model blind scored 66.7%.
+On all twelve unseen pages, measured 2026-09-12 (`npm run eval:provider-bins
+-- --holdout`): the answer reaches the top two runs **4 of 12**, against 22 of
+24 on the tuning pages, with 2.6 entries offered a page against 5.7. The
+method does not carry over. For comparison, the provider rules built on the
+24 scored -25% on the hold-out and the whole-page model blind scored 66.7%.
 
 ## Where else it may apply
 
