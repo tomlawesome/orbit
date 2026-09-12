@@ -1,0 +1,25 @@
+{
+  "name": "chimney sweep certificate, the trader is only ever three letters",
+  "filename": "fullpage-chimney-sweep-certificate.pdf",
+  "expected": {
+    "dates": ["2026-09-01", "2027-03-01"],
+    "provider": "CSS",
+    "reference": "CSS-0417",
+    "dateRoles": [
+      { "date": "2026-09-01", "role": "service" },
+      { "date": "2027-03-01", "role": "due" }
+    ],
+    "subtype": { "kinds": ["Certificate"], "qualifiers": ["Chimney"] },
+    "costMinor": 6500,
+    "currency": "GBP",
+    "scheduleKind": "service"
+  },
+  "notes": [
+    "dates: swept 1 September 2026, next sweep due 1 March 2027 (a six-monthly cycle). Five other printed dates are deliberately not declared: the previous sweep (3 Mar 2026), the appliance's installation date (14 Oct 2019), the installer's last service visit (18 Nov 2025, explicitly not a sweep), the trade membership's current year (1 Jan 2026 to 31 Dec 2026), and the insurance renewal (1 Jun 2026).",
+    "provider is 'CSS', the only name the trader ever gives, used as the brand mark and again in 'CSS is a member of the Guild of Master Sweeps' -- the Guild itself is a real-sounding trade body, not the provider.",
+    "reference is the certificate number CSS-0417.",
+    "costMinor is the £65.00 fee for this visit; the £2 million figure is a public liability insurance limit, not a cost.",
+    "subtype: 'Certificate' (matching the printed 'Certificate of chimney sweeping') qualified by 'Chimney'.",
+    "scheduleKind is 'service': the earlier dateRole is 'service', for the sweep actually carried out."
+  ]
+}
