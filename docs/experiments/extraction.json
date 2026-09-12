@@ -2528,6 +2528,94 @@
       },
       "verdict": "kept",
       "notes": "Ruler change, not an extractor change: the same replies, marked as a reader would. Not comparable with earlier rows for provider; E45 onward use this ruler. Rule: trailing company forms and a leading 'the' dropped, one side a whole-word run of the other, carrying a word that names rather than describes."
+    },
+    {
+      "id": "E45",
+      "date": "2026-09-12",
+      "label": "NuExtract picks the provider from the word-run bins",
+      "corpus": "tuning-48",
+      "model": "NuExtract 3 Q4_K_M",
+      "role": "chooser",
+      "route": "provider by model pick from bins (NuExtract)",
+      "what": "Eight names from the shipped bins, one line of evidence each, one question. 25/48; the rules' own top-1 on the same list is 31/48. Right answer was on the list 38/48; left blank 5.",
+      "how": "npm run eval:provider-pick -- --route bins, in a node:22 container on orbit_orbit-document-processing",
+      "commit": "2aa3073",
+      "output": "tmp/e-seen48-provider-pick-nuextract.txt",
+      "scores": {
+        "overall": {
+          "pct": 52,
+          "net": 25,
+          "of": 48
+        }
+      },
+      "verdict": "dropped",
+      "notes": "Rules find, model picks (owner, 2026-09-12). The model is worse than the count that already orders the list. About 37 s a call on CPU."
+    },
+    {
+      "id": "E46",
+      "date": "2026-09-12",
+      "label": "NuExtract picks the provider from own stage 2's top eight",
+      "corpus": "tuning-48",
+      "model": "NuExtract 3 Q4_K_M",
+      "role": "chooser",
+      "route": "provider by model pick from own stage 2 (NuExtract)",
+      "what": "Own stage 2's top eight, with its votes as evidence. 13/48; the rules' own top-1 is 17/48 (22 if ties are broken by list order). Right answer on the list 40/48; left blank 2.",
+      "how": "npm run eval:provider-pick -- --route own, in a node:22 container on orbit_orbit-document-processing",
+      "commit": "2aa3073",
+      "output": "tmp/e-seen48-provider-pick-nuextract.txt",
+      "scores": {
+        "overall": {
+          "pct": 27,
+          "net": 13,
+          "of": 48
+        }
+      },
+      "verdict": "dropped",
+      "notes": "The list holds the answer five times in six and the model finds it one time in four."
+    },
+    {
+      "id": "E47",
+      "date": "2026-09-12",
+      "label": "qwen3:4b picks the provider from the word-run bins",
+      "corpus": "tuning-48",
+      "model": "qwen3:4b",
+      "role": "chooser",
+      "route": "provider by model pick from bins (qwen3-4b)",
+      "what": "Same lists and question as E45. 20/48 against the rules' 31/48. Left blank 6.",
+      "how": "npm run eval:provider-pick -- --route bins --chooser-model qwen3:4b, in a node:22 container on orbit_orbit-document-processing",
+      "commit": "2aa3073",
+      "output": "tmp/e-seen48-provider-pick-qwen3-4b.fixed.txt",
+      "scores": {
+        "overall": {
+          "pct": 42,
+          "net": 20,
+          "of": 48
+        }
+      },
+      "verdict": "dropped",
+      "notes": "About 14 s a call on CPU, so faster than NuExtract and worse. Score line copied with the model's colon replaced, which the register's parser reads as the route separator."
+    },
+    {
+      "id": "E48",
+      "date": "2026-09-12",
+      "label": "qwen3:4b picks the provider from own stage 2's top eight",
+      "corpus": "tuning-48",
+      "model": "qwen3:4b",
+      "role": "chooser",
+      "route": "provider by model pick from own stage 2 (qwen3-4b)",
+      "what": "Same list as E46. 14/48 against the rules' 17/48. Left blank 5.",
+      "how": "npm run eval:provider-pick -- --route own --chooser-model qwen3:4b, in a node:22 container on orbit_orbit-document-processing",
+      "commit": "2aa3073",
+      "output": "tmp/e-seen48-provider-pick-qwen3-4b.fixed.txt",
+      "scores": {
+        "overall": {
+          "pct": 29,
+          "net": 14,
+          "of": 48
+        }
+      },
+      "verdict": "dropped",
+      "notes": "Both models, both lists: the pick step loses to the rules' own ordering. Route dropped on the seen corpus; hold-out 3 not spent on it."
     }
   ],
   "measurements": [
