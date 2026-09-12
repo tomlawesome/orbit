@@ -303,6 +303,57 @@ describe("attribution moves a receipt's draft between keys (ADR-0024 decision 1)
 
     await getDb().delete(metadataKeys).where(eq(metadataKeys.scope, "instance"));
   });
+
+  it("clears a receipt column's damage sighting once it re-keys cleanly, but leaves a still-damaged sibling column alone (#971)", async () => {
+    const fixture = await createIntegrationFixture("tier1-attribution-rekey-clears-sighting");
+    const receiptId = randomUUID();
+    await getDb().insert(imapIngestionMessages).values({
+      id: receiptId,
+      mailbox: "INBOX",
+      mailboxUidValidity: "1",
+      mailboxUid: 5_151,
+      contentSha256: "3".repeat(64),
+      recipientAliasSha256: "4".repeat(64),
+      userId: fixture.users.member.id,
+      householdId: null,
+      status: "pending_review",
+      expiresAt: new Date(Date.now() + 86_400_000),
+      proposal: { title: "Draft with a stale sighting", reference: "SG-1" },
+      fieldEvidence: { title: { source: "subject", confidence: "high" } },
+    });
+    await runMetadataBackfillBatch(100);
+
+    // Damage the field_evidence column for real, so it stays unreadable and
+    // rekeyReceiptDraft has to leave it exactly as it is (ADR-0024 decision 5).
+    const [encrypted] = await getDb().select({ fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc })
+      .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId));
+    await getDb().update(imapIngestionMessages)
+      .set({ fieldEvidenceEnc: `${encrypted.fieldEvidenceEnc!.slice(0, -4)}AAAA` })
+      .where(eq(imapIngestionMessages.id, receiptId));
+
+    // Both columns carry a sighting already recorded — as a prior process
+    // would have left them, not this one, so the process-local `recorded` set
+    // that gates the read-path clear (damage-sightings.ts) has nothing to go
+    // on and cannot be what resolves this.
+    await getDb().delete(metadataDamageSightings);
+    await getDb().insert(metadataDamageSightings).values([
+      { tableName: "imap_ingestion_messages", columnName: "proposal", rowId: receiptId },
+      { tableName: "imap_ingestion_messages", columnName: "field_evidence", rowId: receiptId },
+    ]);
+    resetMetadataDamageSightingsForTests();
+
+    await assignImapReceiptHousehold(fixture.users.member.id, receiptId, fixture.household.id);
+    await flushMetadataDamageSightings();
+
+    const sightings = await getDb().select().from(metadataDamageSightings)
+      .where(eq(metadataDamageSightings.rowId, receiptId));
+    // The proposal value just re-encrypted cleanly under the household DEK, so
+    // its sighting is resolved. field_evidence never decrypted, so it was
+    // correctly left alone and its sighting must still stand.
+    expect(sightings.map((sighting) => sighting.columnName)).toEqual(["field_evidence"]);
+
+    await getDb().delete(metadataKeys).where(eq(metadataKeys.scope, "instance"));
+  });
 });
 
 describe("a corrupt ciphertext (ADR-0024 decision 5)", () => {

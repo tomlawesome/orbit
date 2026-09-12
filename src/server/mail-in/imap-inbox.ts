@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, lt, or, sql } from
 import { AppError } from "@/lib/app-error";
 import { getDb } from "@/db";
 import { documents, households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, sections, users } from "@/db/schema";
+import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { requestDocumentDeletion } from "@/server/document-repository";
 import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
@@ -74,6 +75,10 @@ async function rekeyReceiptDraft(
     if (!proposal.state) {
       changes.proposal = {};
       changes.proposalEnc = target.encryptJson("imap_ingestion_messages.proposal", current.id, proposal.value);
+      // The value just re-encrypted cleanly, so whatever sighting this column
+      // carried is resolved (#971) — cleared here rather than left to the
+      // damaged-value repair, which never runs for this table.
+      await clearMetadataDamageForColumn("imap_ingestion_messages.proposal", current.id, executor);
     }
   }
   if (current.fieldEvidenceEnc !== null) {
@@ -81,6 +86,7 @@ async function rekeyReceiptDraft(
     if (!evidence.state) {
       changes.fieldEvidence = {};
       changes.fieldEvidenceEnc = target.encryptJson("imap_ingestion_messages.field_evidence", current.id, evidence.value);
+      await clearMetadataDamageForColumn("imap_ingestion_messages.field_evidence", current.id, executor);
     }
   }
   return changes;
