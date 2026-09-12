@@ -220,6 +220,35 @@ export function chooserTransport(modelName?: string): MeaningTransport {
 }
 
 /**
+ * Proof, before an evaluation starts, that the chooser can be reached and
+ * the model it will ask is pulled. A call that fails answers blank by
+ * design (the unattended path must not stall on a model), so an evaluation
+ * run from somewhere `orbit-ollama` does not resolve -- the host, rather
+ * than a container on `orbit_orbit-document-processing` -- would otherwise
+ * score 0% in seconds and look like a result (2026-09-12).
+ */
+export async function assertChooserReachable(modelName?: string): Promise<void> {
+  const wanted = modelName?.trim() || DEFAULT_MODEL;
+  const tags = new URL("/api/tags", CHAT_ENDPOINT).toString();
+  let pulled: string[];
+  try {
+    const response = await fetch(tags, { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = (await response.json()) as { models?: Array<{ name?: string }> };
+    pulled = (body.models ?? []).map((model) => model.name ?? "");
+  } catch (error) {
+    throw new Error(
+      `cannot reach the chooser at ${tags} (${error instanceof Error ? error.message : String(error)}). ` +
+        "Model evaluations run inside a container on the orbit_orbit-document-processing network; " +
+        "from the host every answer would be blank.",
+    );
+  }
+  if (!pulled.includes(wanted)) {
+    throw new Error(`model ${wanted} is not pulled on orbit-ollama (pulled: ${pulled.join(", ") || "none"})`);
+  }
+}
+
+/**
  * The provider shortlist: the word-run bins over the organisations stage 2
  * spoke for, best first, each with its count, the form the page printed
  * most, and the blocks the mentions behind it came from

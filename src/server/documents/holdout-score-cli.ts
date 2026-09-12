@@ -21,7 +21,7 @@
 // `orbit_orbit-document-processing`.
 
 import { chooseFields, chooseFieldsWithModel } from "./extraction-choose";
-import { chooserTransport } from "./extraction-choose-meaning";
+import { assertChooserReachable, chooserTransport } from "./extraction-choose-meaning";
 import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
 import { formatRunScore, scoreCorpus, type RunScore } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
@@ -46,6 +46,7 @@ const forPrinting = (score: RunScore): RunScore => (showMisses ? score : { ...sc
 
 async function main(): Promise<void> {
   const withModel = process.argv.includes("--model");
+  if (withModel) await assertChooserReachable(chooserModelNamed());
   const staged = await scoreCorpus(EXTRACTION_HOLDOUT_FULLPAGE, async (text) => {
     const tagged = tagCandidates(text, sieve(text));
     return withModel
