@@ -102,6 +102,41 @@ describe("a qualifier beside an amount", () => {
   it("keeps last year's figure out of this year's price", () => {
     expect(tagValues("Last year your annual premium was £578.90", "amount")[0]).toBe("previous");
   });
+
+  // Owner, 2026-09-12: "words before and/or after, for things like Balance,
+  // Invoice amount, due, Total ... Grand, final, Outstanding, Charge, Fee".
+  it("reads the words the owner named as the price", () => {
+    expect(tagValues("Contract price £2,340.00, paid in full 12 May 2026", "amount")[0]).toBe("total");
+    expect(tagValues("Amount charged £9.99", "amount")[0]).toBe("due");
+    expect(tagValues("Balance due £45.00", "amount")[0]).toBe("due");
+    expect(tagValues("Invoice total £120.00", "amount")[0]).toBe("total");
+    expect(tagValues("Final total £120.00", "amount")[0]).toBe("total");
+    expect(tagValues("Annual permit fee paid: £45.00", "amount")[0]).toBe("total");
+  });
+
+  it("does not read a loan's outstanding balance as its price", () => {
+    expect(tagValues("OUTSTANDING BALANCE AT 31 MARCH 2026 £164,611.07", "amount")).toEqual(["other"]);
+  });
+
+  it("reads a comparison figure, the whole-term sum and the second permit as rivals", () => {
+    expect(tagValues("Paid monthly, your 12 month plan is equivalent to £119.88 a year.", "amount")[0]).toBe("rival");
+    expect(tagValues("Equivalent monthly price (for comparison only) £322.50", "amount")[0]).toBe("rival");
+    expect(tagValues("this service would otherwise cost £148 if booked separately", "amount")[0]).toBe("rival");
+    expect(tagValues("giving a total payable over the 24  month minimum  term of £599.76.", "amount")[0]).toBe("rival");
+    expect(tagValues("A second permit for another vehicle at this household costs £90.00 per year.", "amount")[0]).toBe("rival");
+  });
+
+  it("reads a per-claim limit, a penalty and a balloon payment as not the price", () => {
+    expect(tagValues("Plumbing emergencies £300 per claim, up to 3 claims a year", "amount")[0]).toBe("other");
+    expect(tagValues("Vet fees, per condition per year £7,500", "amount")[0]).toBe("other");
+    expect(tagValues("may receive a Penalty Charge Notice of £70", "amount")[0]).toBe("other");
+    expect(tagValues("Optional final payment (due 5 March 2030) £8,245.00", "amount")[0]).toBe("other");
+  });
+
+  it("lets a sentence in the next block say nothing about the figure above it", () => {
+    const text = "ANNUAL  PREMIUM \n\n£186.00 \n\nThis schedule confirms your cover from 4 October 2026 to 4 October 2027.";
+    expect(tagValues(text, "amount", "18600")[0]).toBe("total");
+  });
 });
 
 describe("how a page prices a plan", () => {

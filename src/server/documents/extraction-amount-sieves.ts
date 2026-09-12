@@ -29,6 +29,9 @@
 //   instalment-total    a figure that is what the printed instalments add up
 //                       to ("ten monthly instalments of £215.91") is the
 //                       total, whatever is printed beside it
+//   table-neighbours    a row of a list whose rows either side are cover
+//                       limits ("up to £2,000", "£300 per claim") is a
+//                       cover limit too, whatever its own words say
 //
 // Each returns a vote, never a decision. Votes merge into tags by tag
 // value, so a figure several sieves agree about carries one tag naming all
@@ -93,6 +96,9 @@ export interface AmountPageFacts {
   /** What the trigger table called each value, where it called it
    * anything: how the repetition sieve knows what a repeated figure is. */
   labelled: Map<string, AmountTag>;
+  /** What the trigger table called each printing, by where it sits, with
+   * the words it went by. */
+  labelAt: Map<number, Tag<"amount">>;
   /** Totals the page's own instalment arithmetic implies. */
   instalmentTotals: Array<{ value: number; trigger: string }>;
 }
@@ -167,13 +173,15 @@ export function amountPageFacts(
     if (line) blocks.push({ index: match.index ?? 0, line });
   }
   const labelled = new Map<string, AmountTag>();
+  const labelAt = new Map<number, Tag<"amount">>();
   candidates.forEach((candidate, at) => {
     const label = labels[at];
-    if (label && label.trigger.trim() !== "" && !labelled.has(candidate.value)) {
-      labelled.set(candidate.value, label.value);
+    if (label && label.trigger.trim() !== "") {
+      labelAt.set(candidate.index, label);
+      if (!labelled.has(candidate.value)) labelled.set(candidate.value, label.value);
     }
   });
-  return { text, blocks, labelled, instalmentTotals: instalmentTotals(text) };
+  return { text, blocks, labelled, labelAt, instalmentTotals: instalmentTotals(text) };
 }
 
 /** The trigger table's reading as a vote, on the same scale as the rest. */
@@ -224,6 +232,10 @@ const TAIL_TRIGGERS: ReadonlyArray<{ tag: AmountTag; pattern: string }> = [
   { tag: "instalment", pattern: "^\\s*(?:monthly|each month|a month)\\b" },
 
   { tag: "previous", pattern: "^\\s*(?:last year|in \\d{4}/\\d{2}|previously)\\b" },
+
+  // "£300 per claim, up to 3 claims a year": a cover limit, whatever the
+  // clause goes on to say about the year.
+  { tag: "other", pattern: "^\\s*per (?:claim|condition|incident|item|person)\\b" },
 ];
 
 const wordsAfter: AmountSieve = {
@@ -272,10 +284,12 @@ function headingShaped(line: string): boolean {
  * includes VAT" is a sentence that happens to carry the word.
  */
 const HEADING_TAGS: ReadonlyArray<{ tag: AmountTag; pattern: RegExp }> = [
-  { tag: "instalment", pattern: /^(?:monthly|instalments?|each month)\b/iu },
+  { tag: "instalment", pattern: /^(?:monthly|instalments?|each month|this month\s?['\u2019]?\s?s (?:instalment|payment))\b/iu },
   { tag: "previous", pattern: /^(?:previous|last year)/iu },
   { tag: "due", pattern: /^(?:amount |balance )?(?:now )?(?:due|outstanding|to pay|payable)\b/iu },
   { tag: "total", pattern: /^(?:grand )?(?:total|premium|annual premium|charge for the year)\b/iu },
+  // The column of what the insurer would pay, not what the household does.
+  { tag: "other", pattern: /^(?:benefits?|cover(?:age)?|limits?|sums? insured|maximum|what (?:is|we) cover|excess)\b/iu },
 ];
 
 /** A heading is a name, not a sentence: a few words at most. */
@@ -302,15 +316,29 @@ function blocksAbove(page: AmountPageFacts, index: number): string[] {
     .reverse();
 }
 
+/** Whether a block is one printed figure and nothing else: a form's value
+ * cell, which Tika prints as its own block under the cell's label. */
+function bareFigure(line: string): boolean {
+  return /^(?:[£€$]\s?|(?:GBP|EUR|USD)\s?)?\d{1,3}(?:,\d{3})*(?:\.\d{2})?$/u.test(line);
+}
+
 const headingAbove: AmountSieve = {
   name: "heading-above",
   read: (candidate, _all, page) => {
+    const own = page.blocks[blockOf(page, candidate.index)]?.line ?? "";
+    let steps = 0;
     for (const line of blocksAbove(page, candidate.index)) {
+      steps += 1;
       if (!tableShaped(line)) break;
       if (!headingShaped(line) || line.split(" ").length > HEADING_WORDS) continue;
       const matched = HEADING_TAGS.filter((entry) => entry.pattern.test(line));
       if (matched.length !== 1) continue;
-      return [{ sieve: "heading-above", tag: matched[0].tag, trigger: line, weight: STRENGTH_WEAK }];
+      // "THIS MONTH'S INSTALMENT" printed straight over a block that is
+      // nothing but "£14.99" is the form's own label for that cell, and is
+      // read as one; a heading further up, or over a row of words, is the
+      // weaker guess it always was.
+      const labelsTheCell = steps === 1 && bareFigure(own);
+      return [{ sieve: "heading-above", tag: matched[0].tag, trigger: line, weight: labelsTheCell ? STRENGTH_STATED : STRENGTH_WEAK }];
     }
     return [];
   },
@@ -467,6 +495,59 @@ const instalmentTotal: AmountSieve = {
   },
 };
 
+// ------------------------------------------------------- table-neighbours
+
+/** The words that make a figure a cover limit rather than any other kind
+ * of "not the cost": a joining fee beside an admin fee is a price list,
+ * and the fee between them is the price. */
+const COVER_LIMIT_WORDS = /\b(?:up to|maximum|no more than|per (?:claim|condition|incident)|cover|limit|sum insured|benefit)\b/iu;
+
+/** What kind of row a block is: a cover limit, some other labelled row,
+ * an unlabelled row (undefined), or not a row of one figure at all (null). */
+function rowLabel(page: AmountPageFacts, all: readonly AmountCandidate[], at: number): "cover-limit" | "labelled" | undefined | null {
+  const block = page.blocks[at];
+  // A row of a benefits table is a longer thing than a cell ("Death of
+  // your pet from illness or injury up to £2,000"), so the test is only
+  // that it is not a sentence.
+  if (block === undefined || block.line.length > 80 || /[.!?;]$/u.test(block.line)) return null;
+  const figures = all.filter((entry) => blockOf(page, entry.index) === at);
+  if (figures.length !== 1) return null;
+  const label = page.labelAt.get(figures[0].index);
+  if (label === undefined) return undefined;
+  return label.value === "other" && COVER_LIMIT_WORDS.test(label.trigger) ? "cover-limit" : "labelled";
+}
+
+/** The nearest labelled row of the same table in one direction, passing
+ * over rows the table said nothing about; null at the table's edge. */
+function nearestLabelledRow(page: AmountPageFacts, all: readonly AmountCandidate[], from: number, step: number): "cover-limit" | "labelled" | null {
+  for (let at = from + step; ; at += step) {
+    const label = rowLabel(page, all, at);
+    if (label === null) return null;
+    if (label !== undefined) return label;
+  }
+}
+
+/**
+ * A benefits table names what the insurer would pay, one row per thing
+ * covered, and only some rows say so in words: "up to £2,000", "£300 per
+ * claim". "Complementary treatment £500 per year" between two of them is
+ * the same list -- the rows either side of it say what the list is.
+ */
+const tableNeighbours: AmountSieve = {
+  name: "table-neighbours",
+  read: (candidate, all, page) => {
+    const own = blockOf(page, candidate.index);
+    if (rowLabel(page, all, own) === null) return [];
+    const above = nearestLabelledRow(page, all, own, -1);
+    const below = nearestLabelledRow(page, all, own, 1);
+    // A labelled row on each side, and both cover limits: a row at the edge
+    // of a table has only one neighbour to say what the table is, and one
+    // row is not a list.
+    if (above !== "cover-limit" || below !== "cover-limit") return [];
+    return [{ sieve: "table-neighbours", tag: "other", trigger: "between two cover limits", weight: STRENGTH_STATED }];
+  },
+};
+
 // ------------------------------------------------------------------ the set
 
 /** Only the strongest vote a single sieve casts: a sieve has one opinion
@@ -487,6 +568,7 @@ export const AMOUNT_SIEVES: readonly AmountSieve[] = [
   periodAdjacent,
   printedThroughout,
   instalmentTotal,
+  tableNeighbours,
 ];
 
 /** Every sieve's name, the label first, for reports and for ordering the

@@ -423,6 +423,45 @@ Ruling (owner, 2026-09-12): the provider is the party the contract, product
 or service is with -- the broker the household bought from (Hedgerow), not
 the insurer behind it (Thornfield Assurance).
 
+## Amendment, 2026-09-12: cost -- the owner's words, and what is not a price
+
+Owner, 2026-09-12: "Select numbers preceded by a currency symbol" (already
+the rule -- `PRINTED_AMOUNT` and stage 3 both refuse a figure without one)
+and "check words before and/or after, for things like Balance, Invoice
+amount, due, Total, total due, Remaining ... Grand, final, Outstanding,
+Charge, Fee". The eleven tuning misses were not gaps in those words but
+figures the page prints *beside* the price, which the words then found:
+
+- **Not a price**: a cover limit ("£300 per claim", "per condition per
+  year", a row between two cover limits -- the `table-neighbours` sieve --
+  or under a "Benefit"/"Limit" heading), a penalty charge, a call-out
+  charge, a balloon payment. An `other` a sieve read in words now counts
+  against the figure in stage 3, as `rival` and `previous` do; the blank
+  `other` on a figure nobody read still counts for nothing.
+- **A comparison**: "equivalent to £119.88 a year", "(for comparison
+  only)", "would otherwise cost £148 if booked separately", the second
+  permit's price, and the sum of every payment over a term longer than a
+  year ("total payable over the 24 month minimum term") -- all `rival`.
+  The truth prices a monthly contract by the month.
+- **The owner's words**: contract price, amount charged, balance due,
+  invoice total, final total, annual permit fee, payment of. A bare
+  "outstanding balance" is a loan's debt and stays out.
+- **Two reach rules**: a heading printed straight over a block that is
+  nothing but the figure is the form's own label for it (full strength);
+  and a backward trigger reaches into the block above only where it
+  starts its own block, so "This schedule confirms your cover from 4
+  October 2026" no longer makes the premium above it a future price.
+
+| cost | tuning 42 | hold-out 3 (12) |
+|---|---|---|
+| before | 31 | 4 |
+| after | **40** | **6** |
+
+Whole pipeline: 78.2% -> 80.4% on the 48, 70.5% -> 72.3% on hold-out 3.
+Left on the tuning set: the PCP agreement (truth wants the monthly payment;
+the page's "Total amount payable" is a regulated whole-term disclosure) and
+the domain renewal (truth wants the line before VAT; open for the owner).
+
 ## Alternatives rejected
 
 - **Widen the regexes field by field until the 24 pass.** This is the

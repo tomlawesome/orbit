@@ -20,7 +20,7 @@
 //                                              # sieve first (owner: "what if
 //                                              # the sieve only looked for
 //                                              # those in the first place")
-import { providerTaggedOrganisations, providerWordRuns } from "./extraction-provider-runs";
+import { providerTaggedOrganisations, providerWordRuns, type ProviderMention } from "./extraction-provider-runs";
 import type { Candidate } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
@@ -77,7 +77,7 @@ function main(): void {
     of += 1;
     const caps = capsMentions(document.text).filter((mention) => !ordinary(mention.value)).flatMap((mention) =>
       mention.rule === "domain" ? Array.from({ length: boost }, () => mention) : [mention]);
-    const found = tagged
+    const found: Array<ProviderMention & { index: number }> = tagged
       ? providerTaggedOrganisations(tagCandidates(document.text, caps.map((mention): Candidate =>
           ({ kind: "organisation", value: mention.value, index: mention.index, line: mention.line }))))
       : caps;

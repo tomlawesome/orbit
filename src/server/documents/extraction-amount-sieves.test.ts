@@ -68,11 +68,32 @@ describe("the words-after sieve", () => {
 
 describe("the heading-above sieve", () => {
   it("takes the column heading a flattened table keeps above its figures", () => {
-    const text = "Amount due\n\n£163.37";
+    const text = "Amount due\n\n£163.37 to be collected on 1 May";
     const votes = votesFrom("heading-above", text, amount(text, "£163.37"));
 
     expect(votes[0].tag).toBe("due");
     expect(votes[0].weight).toBe(STRENGTH_WEAK);
+  });
+
+  it("reads a heading printed straight over a bare figure as the form's own label", () => {
+    const text = "THIS MONTH'S INSTALMENT\n\n£14.99";
+    const votes = votesFrom("heading-above", text, amount(text, "£14.99"));
+
+    expect(votes[0].tag).toBe("instalment");
+    expect(votes[0].weight).toBe(STRENGTH_STATED);
+  });
+
+  it("keeps the weaker reading where the heading is further up", () => {
+    const text = "Amount due\n\nPaid by\n\n£163.37";
+    const votes = votesFrom("heading-above", text, amount(text, "£163.37"));
+
+    expect(votes[0].tag).toBe("due");
+    expect(votes[0].weight).toBe(STRENGTH_WEAK);
+  });
+
+  it("reads a benefits column heading as not the cost", () => {
+    const text = "Benefit Limit\n\nVet fees £7,500";
+    expect(votesFrom("heading-above", text, amount(text, "£7,500"))[0].tag).toBe("other");
   });
 
   it("refuses a sentence that happens to carry the word", () => {
@@ -194,6 +215,30 @@ describe("the instalment-total sieve", () => {
     const text = "12 payments of £31.00, £400.00 over the year";
     const all = [amount(text, "£31.00"), amount(text, "£400.00")];
     expect(votesFrom("instalment-total", text, all[1], all)).toEqual([]);
+  });
+});
+
+describe("the table-neighbours sieve", () => {
+  const limit = (trigger: string): Tag<"amount"> => ({ value: "other", trigger, source: "label" });
+  const text = "Vet fees, per condition per year £7,500\n\nComplementary treatment £500 per year\n\nThird-party liability £1,000,000\n\nDeath of your pet up to £2,000\n\nAnnual premium £287.64";
+  const all = [amount(text, "£7,500"), amount(text, "£500"), amount(text, "£1,000,000"), amount(text, "£2,000"), amount(text, "£287.64")];
+  const labels = [limit("per condition per year"), undefined, undefined, limit("up to"), { value: "total", trigger: "Annual premium", source: "label" } as Tag<"amount">];
+
+  it("reads a row between two cover limits as a cover limit, past rows the table said nothing about", () => {
+    const votes = votesFrom("table-neighbours", text, all[1], all, labels);
+    expect(votes[0].tag).toBe("other");
+    expect(votes[0].weight).toBe(STRENGTH_STATED);
+  });
+
+  it("says nothing at the edge of the table", () => {
+    expect(votesFrom("table-neighbours", text, all[4], all, labels)).toEqual([]);
+  });
+
+  it("says nothing about a fee between two other fees", () => {
+    const fees = "Joining fee £25.00\n\nMonthly membership fee £42.50\n\nAdministration fee £60.00";
+    const rows = [amount(fees, "£25.00"), amount(fees, "£42.50"), amount(fees, "£60.00")];
+    const feeLabels = [limit("Joining fee"), undefined, limit("administration fee")];
+    expect(votesFrom("table-neighbours", fees, rows[1], rows, feeLabels)).toEqual([]);
   });
 });
 

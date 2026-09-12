@@ -382,6 +382,26 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.currency).toBeUndefined();
   });
 
+  it("rules out a figure a sieve read in words as a cover limit, whatever else agreed", () => {
+    const chosen = chooseFields([
+      candidate("amount", "50000", [
+        { value: "total", trigger: "per year", sieves: ["label", "words-after"], strength: 2 },
+        { value: "other", trigger: "between two cover limits", sieves: ["table-neighbours"], strength: 2 },
+      ], { currency: "GBP" }),
+      candidate("amount", "28764", [{ value: "total", trigger: "Annual premium" }], { currency: "GBP" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(28764);
+  });
+
+  it("takes a figure whose only label is the form heading printed straight over it", () => {
+    const chosen = chooseFields([
+      candidate("amount", "1499", [{ value: "instalment", trigger: "THIS MONTH'S INSTALMENT", sieves: ["heading-above"], strength: 2 }], { currency: "GBP" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(1499);
+  });
+
   it("blanks when two totals disagree", () => {
     const chosen = chooseFields([
       candidate("amount", "61240", [{ value: "total", trigger: "Total payable" }], { currency: "GBP" }),
