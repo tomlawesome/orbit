@@ -295,7 +295,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     provider: "Foxglove Hosting — Domain Renewal",
     reference: "Account number ACC-3348217 Domain brindlewood-supplies.example Domain ID D4471982-EXPL Registered",
     subtype: "Foxglove Hosting — Domain Renewal",
-    cost: { amount: "12.99", needle: "From 18 January 2028 this domain is expected to renew at £14.99. Renew now Order Summary Domain renewal (12 months) £12.99 VAT (20%) £2.60 Total" },
+    cost: { amount: "15.59", needle: "Renew now Order Summary Domain renewal (12 months) £12.99 VAT (20%) £2.60 Total due today £15.59 Invoice INV-2027-004471 will be issued once" },
     recurrence: { months: 12, needle: "on 18 January 2027 Renewal period This domain renews every 12 months. Auto-renew On Nameservers" },
     dates: [
       "Domain ID D4471982-EXPL Registered on 18 January 2019 Renews on 18 January",
