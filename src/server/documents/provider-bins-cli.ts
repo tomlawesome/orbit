@@ -8,6 +8,14 @@
 //   npm run eval:provider-bins
 //   npm run eval:provider-bins -- --holdout      # the 12 unseen pages
 //   npm run eval:provider-bins -- --limit 6
+//   npm run eval:provider-bins -- --answers      # owner only; see below
+//
+// `--answers` prints what the bins actually replied on each page beside the
+// right answer, and where the right answer sat in the ranking. On the
+// hold-out that is reading the pages, which is how a hold-out quietly becomes
+// a second tuning set -- it is for the owner deciding whether the scorer is
+// too strict, not for whoever is tuning (the rule at the top of
+// `holdout-score-cli.ts`).
 //
 // Two rulers, because the two disagree: the scorer's `classifyProvider`, and
 // a looser one that counts a short form of the name a hit, which is what a
@@ -106,6 +114,17 @@ function count(
   if (at >= 0) tally.onList += 1;
 }
 
+const showAnswers = process.argv.includes("--answers");
+interface Answer {
+  name: string;
+  wanted: string;
+  got: string;
+  rank: number;
+  strict: boolean;
+  loose: boolean;
+}
+const answers: Answer[] = [];
+
 const gated = empty();
 const ungated = empty();
 const gatedLoose = empty();
@@ -125,7 +144,20 @@ for (const document of corpus) {
   const kept = providerTaggedOrganisations(tagged);
   organisationsFound += organisations.length;
   organisationsKept += kept.length;
-  count(gated, providerWordRuns(kept).slice(0, 8), wanted, strict);
+  const shortlist = providerWordRuns(kept).slice(0, 8);
+  if (showAnswers) {
+    const at = shortlist.findIndex((run) => strict(wanted, run.display));
+    const byEye = shortlist.findIndex((run) => loose(wanted, run.display));
+    answers.push({
+      name: document.name.split(",")[0] as string,
+      wanted,
+      got: shortlist[0]?.display ?? "(nothing)",
+      rank: at >= 0 ? at + 1 : byEye >= 0 ? -(byEye + 1) : 0,
+      strict: at === 0,
+      loose: byEye === 0,
+    });
+  }
+  count(gated, shortlist, wanted, strict);
   count(gatedLoose, providerWordRuns(kept).slice(0, 8), wanted, loose);
   count(ungated, providerWordRuns(organisations).slice(0, 8), wanted, strict);
 
@@ -169,3 +201,18 @@ console.log(`\norganisations stage 1 found: ${organisationsFound}; a provider si
 // marking by eye would accept.
 const scored = percent(gated.top1, gated.pages).replace(/^(\d+)\/(\d+) \((.*)\)$/u, "$3 ($1/$2)");
 console.log(`\n${onHoldout ? "hold-out: " : ""}provider by top word run: ${scored} [provider ${scored}]`);
+
+if (showAnswers) {
+  // "where" reads: the rank the scorer found the right answer at, a negative
+  // rank where only a reader marking by eye would have found it there, and
+  // "not on list" where eight bins never contained it either way.
+  const where = (answer: Answer): string =>
+    answer.rank > 0 ? `#${answer.rank}` : answer.rank < 0 ? `#${-answer.rank} by eye` : "not on list";
+  console.log("\nwhat the bins replied, page by page\n");
+  for (const answer of answers) {
+    const mark = answer.strict ? "right" : answer.loose ? "right by eye" : "wrong";
+    console.log(`${answer.name}`);
+    console.log(`  wanted:  ${answer.wanted}`);
+    console.log(`  replied: ${answer.got}   -> ${mark}, right answer ${where(answer)}`);
+  }
+}
