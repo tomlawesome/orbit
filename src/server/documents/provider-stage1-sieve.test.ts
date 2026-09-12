@@ -45,9 +45,16 @@ describe("any run of capitalised words", () => {
       .toBe(true);
   });
 
-  it("keeps nothing one word long", () => {
-    expect(names("Invoice")).toEqual([]);
-    expect(names("Northgate")).toEqual([]);
+  it("keeps a lone word only where it is a line, a brand shape, or a host", () => {
+    expect(names("The invoice is attached.")).not.toContain("Invoice");
+    expect(names("Northgate")).toContain("Northgate");
+    expect(names("Pay O2 by the 4th")).toContain("O2");
+    expect(names("Serviced by Kwik-Fit on Monday.")).toContain("Kwik-Fit");
+  });
+
+  it("finds a name however it is capitalised", () => {
+    expect(names("Sent from harbourlight hosting ltd on Monday.")).toContain("harbourlight hosting ltd");
+    expect(names("Sent from HARBOURLIGHT HOSTING LTD on Monday.")).toContain("HARBOURLIGHT HOSTING LTD");
   });
 });
 
@@ -60,9 +67,8 @@ describe("addresses", () => {
     expect(names("www.drummond-hale.com")).toContain("Drummond Hale");
   });
 
-  it("says nothing where the host is one word", () => {
-    // "harbourlight" alone is a name of one word, and one word is never kept.
-    expect(names("hello@harbourlight.co.uk")).toEqual([]);
+  it("keeps a one-word host: it is the organisation's own name", () => {
+    expect(names("hello@harbourlight.co.uk")).toContain("Harbourlight");
   });
 });
 
