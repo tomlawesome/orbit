@@ -274,8 +274,17 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
 
   await establishInstanceAdmin(browser);
   await signInAsMember(page);
-  await verifySenderAddress(page);
+  // #958: seed the household BEFORE verifying the sender address. Success
+  // there follows a real one-use link, whose 303 lands on /settings/mail --
+  // a plain page route, not /api/*, so hooks.server.js's first-run door (#840)
+  // applies to it. A member with zero households fails hasOnwardHousehold and
+  // is bounced to "/" instead, which is indistinguishable here from a failed
+  // verification: `sender=verified` never appears on the URL. Whether this
+  // member already had a household depended on what else had run against the
+  // shared instance first, which is exactly what made it flaky rather than
+  // simply broken.
   await seedHousehold(page);
+  await verifySenderAddress(page);
   const alias = await relayAddress(page);
 
   await sendMail(alias, "Boiler cover renewal", {
