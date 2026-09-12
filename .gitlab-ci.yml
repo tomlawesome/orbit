@@ -269,34 +269,40 @@ variables:
 #
 # The acceptance stage used to start beside `fast` and the policy jobs, so a
 # red `fast` still cost a full image build, a browser suite, an installer run
-# and a launcher install before anyone read the first failure. Waiting for the
-# four cheap checks costs about seven minutes on a green pipeline and saves the
-# whole acceptance stage on a red one.
+# and a launcher install before anyone read the first failure. Waiting for
+# `fast` costs nothing extra on a green pipeline and saves the whole
+# acceptance stage on a red one.
 #
-# `optional: true` on all four, because a pipeline that does not create one of
-# them -- a lane, a future rule -- must skip the wait rather than fail to build.
+# `gitleaks`, `licence_policy` and `supply_chain_source` used to be in this
+# wait too. #923 finding 8 measured them queuing 541-1105 s on the shared
+# `light` lane for about 68 s of actual policy work -- holding the whole
+# acceptance stage back by over five minutes for jobs that do not read their
+# output. #945 (owner ruling on #923 rec 16b, 2026-09-09) drops them here:
+# `build_image` and `sidecar_images` (both `.needs_gated`) and the six jobs
+# that test the image (`.needs_gated_image`) now wait only on `classify` and
+# `fast`. A red `gitleaks`/`licence_policy`/`supply_chain_source` still fails
+# the pipeline overall -- none of them is `allow_failure: true` -- it just no
+# longer holds up a job that never reads their result. Accepted risk: a late
+# policy finding can now arrive after the acceptance stage has already
+# started on unvetted input; auto_cancel (#923 rec 13, above) cancels that run
+# rather than it never starting.
+#
+# `fidelity` and `integration` (`.needs_gated_with_fast_artifacts`) keep the
+# full wait, unchanged by #945.
+#
+# `optional: true`, because a pipeline that does not create one of these jobs
+# -- a lane, a future rule -- must skip the wait rather than fail to build.
 # `artifacts: false` where the job reads nothing from them: a `needs` is a
 # waiting order here, not a delivery.
-#
-# None of the four is `allow_failure: true`, which is what makes this work: a
-# job allowed to fail does not hold up what needs it.
 .needs_gated: &needs_gated
   - job: classify
     artifacts: true
   - job: fast
     artifacts: false
     optional: true
-  - job: gitleaks
-    artifacts: false
-    optional: true
-  - job: licence_policy
-    artifacts: false
-    optional: true
-  - job: supply_chain_source
-    artifacts: false
-    optional: true
 
-# The same wait, for the two jobs that already took `fast`'s artefacts.
+# The same wait, for the two jobs that already took `fast`'s artefacts, and
+# that still wait on the policy jobs (#945 did not touch this anchor).
 .needs_gated_with_fast_artifacts: &needs_gated_with_fast_artifacts
   - job: classify
     artifacts: true
@@ -311,22 +317,13 @@ variables:
     artifacts: false
     optional: true
 
-# And for the five jobs that test the image `build_image` handed on.
+# And for the six jobs that test the image `build_image` handed on.
 .needs_gated_image: &needs_gated_image
   - job: classify
     artifacts: true
   - job: build_image
     artifacts: true
   - job: fast
-    artifacts: false
-    optional: true
-  - job: gitleaks
-    artifacts: false
-    optional: true
-  - job: licence_policy
-    artifacts: false
-    optional: true
-  - job: supply_chain_source
     artifacts: false
     optional: true
 
