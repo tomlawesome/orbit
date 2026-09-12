@@ -762,7 +762,7 @@ const ORGANISATION_PERIOD = /scheme registration|registered with|accreditation|a
  * term -- cover, a contract, a membership, a tariff, a charge year -- rolls
  * onto something and has to be acted on again, which is `renewal`.
  */
-const RUNS_OUT = /\b(?:guarantee|warranty|certificate)\b|expir/iu;
+const RUNS_OUT = /\b(?:guarantee|warranty|certificate|quot(?:e|ation)|ticket|forfeit(?:ed)?|returned|used within)\b|expir/iu;
 
 /** Trigger words that only say a date bounds a period, without saying what
  * kind of period: the range connectors and the validity labels. What such a
@@ -784,11 +784,24 @@ function blockTextAround(text: string, index: number): { block: string; lead: st
   };
 }
 
+/** What a page is, when its title says it is a thing that runs out: a
+ * season ticket, a lease, a quotation, a permit. Narrower than `RUNS_OUT`
+ * on purpose -- a travel insurance certificate is renewed. */
+const TITLE_RUNS_OUT = /\b(?:ticket|lease|quot(?:e|ation)|permit)\b/iu;
+
+/** The page's first block, which is its title. */
+function titleOf(text: string): string {
+  return (/[^\n]*\S[^\n]*/u.exec(text) ?? [""])[0];
+}
+
 /** `expiry` when the period runs out, `renewal` when it has to be taken
- * again. Decided from the block the date sits in, not from the document, so
- * a certificate that also prints a contract term gets both right. */
-function termEndRole(block: string): DocumentDateRole {
-  return RUNS_OUT.test(block) ? "expiry" : "renewal";
+ * again. Decided from the block the date sits in, so a certificate that
+ * also prints a contract term gets both right; where the block says
+ * nothing, from what the title says the page is: "Agreement end 31 May
+ * 2028" on a lease statement is when the car goes back. */
+function termEndRole(block: string, text: string): DocumentDateRole {
+  if (RUNS_OUT.test(block)) return "expiry";
+  return TITLE_RUNS_OUT.test(titleOf(text)) ? "expiry" : "renewal";
 }
 
 /**
@@ -828,7 +841,7 @@ function applyDateRanges(
       assignments[at] = { role, trigger: connector, distance };
     };
     claim(i, "start", connectorStart - gapStart);
-    claim(i + 1, termEndRole(block), right.index - connectorEnd);
+    claim(i + 1, termEndRole(block, text), right.index - connectorEnd);
   }
 }
 
@@ -856,7 +869,7 @@ function applyTermEnds(
     }
     if (assignment.role !== "expiry") return;
     if (!TERM_END_TRIGGER.test(assignment.trigger.trim())) return;
-    assignments[at] = { ...assignment, role: termEndRole(block) };
+    assignments[at] = { ...assignment, role: termEndRole(block, text) };
   });
 }
 
