@@ -553,32 +553,32 @@
           "of": 12
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 24,
           "of": 24
         },
         "dateRoles": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 24
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 12
         },
         "cost": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 11
         },
         "scheduleKind": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 7
         },
         "recurrence": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 7
         }
@@ -1328,8 +1328,8 @@
           "of": 14
         }
       },
-      "verdict": "unexplained",
-      "notes": "Subtype answered (91.7%) but dates, cost, provider mostly blank. Being rerun as E16 to tell a broken run from a real loss."
+      "verdict": "set aside",
+      "notes": "Recorded as unexplained on the night. E26 reruns it on healthy code and reproduces the collapse (-10.9%), so it was the design, not the run."
     },
     {
       "id": "E14",
@@ -1390,8 +1390,8 @@
           "of": 7
         }
       },
-      "verdict": "unexplained",
-      "notes": "Same blank pattern as E13."
+      "verdict": "set aside",
+      "notes": "Recorded as unexplained on the night. Its tuning-corpus twin (E13) is now reproduced by E26, so this is the same dead end rather than a failed run. Not itself re-run on the hold-out."
     },
     {
       "id": "E23",
@@ -1578,6 +1578,68 @@
       },
       "verdict": "set aside",
       "notes": "Against E15, the same code with no model: 81.9% to -5.7%. Provider 0.0% means it answered none every time it was asked."
+    },
+    {
+      "id": "E26",
+      "date": "2026-09-12",
+      "label": "qwen3:4b chooses every field, on today's code",
+      "corpus": "tuning-24",
+      "model": "qwen3:4b",
+      "role": "chooser",
+      "route": "sieve+tag+choose+model",
+      "what": "The second half of the rerun: the same questions to qwen3:4b over Ollama chat with thinking off. It reproduces E13, so neither untrusted run was a broken run. qwen is worse than NuExtract at the one field a model was good at: subtype 79.2 against 91.7, and below the rules' own 83.3.",
+      "how": "npm run eval:stages -- --model --chooser-model qwen3:4b, in a node:22 container on the orbit_orbit-document-processing network",
+      "commit": "c9358f2",
+      "output": "tmp/stages-model-qwen-c9358f2.out",
+      "scores": {
+        "overall": {
+          "pct": -10.9,
+          "net": -21,
+          "of": 193
+        },
+        "provider": {
+          "pct": -33.3,
+          "net": -8,
+          "of": 24
+        },
+        "reference": {
+          "pct": -4.2,
+          "net": -1,
+          "of": 24
+        },
+        "dates": {
+          "pct": -40,
+          "net": -14,
+          "of": 35
+        },
+        "dateRoles": {
+          "pct": -62.9,
+          "net": -22,
+          "of": 35
+        },
+        "subtype": {
+          "pct": 79.2,
+          "net": 19,
+          "of": 24
+        },
+        "cost": {
+          "pct": -52.6,
+          "net": -10,
+          "of": 19
+        },
+        "scheduleKind": {
+          "pct": 61.1,
+          "net": 11,
+          "of": 18
+        },
+        "recurrence": {
+          "pct": 28.6,
+          "net": 4,
+          "of": 14
+        }
+      },
+      "verdict": "set aside",
+      "notes": "Against E15, the same code with no model: 81.9% to -10.9%."
     }
   ],
   "measurements": [
