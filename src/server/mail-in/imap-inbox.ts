@@ -493,7 +493,12 @@ const RETENTION_LIVE_STATUSES = ["pending_review", "recoverable", "processing", 
  * reports whether the key is available right now. Called once at the top of
  * every purge cycle, before anything is expired (#964, owner ruling
  * 2026-09-10): a locked receipt was never available to be ignored, so the
- * 45-day retention clock must not run while the key is away.
+ * 45-day retention clock must not run while the key is away. The caller
+ * (`purgeExpiredImapStaging`) uses the return value to drop the clock arm
+ * from its sweep, not to skip the sweep outright -- purging a disabled
+ * member's mail and giving up on an exhausted attachment pipeline are both
+ * unconditional obligations, not clock-based, and neither reads the
+ * metadata key, so neither needs to wait for it.
  *
  * - Key down, no open window: opens one and reports unavailable.
  * - Key down, window already open: reports unavailable; nothing else to do.
@@ -503,7 +508,11 @@ const RETENTION_LIVE_STATUSES = ["pending_review", "recoverable", "processing", 
  *   receipt that arrived mid-outage is credited only from its own arrival,
  *   never from before it existed. Receipts that arrived after the outage
  *   closed are excluded outright (`received_at < ended_at`), which also
- *   keeps the credit from ever going negative.
+ *   keeps the credit from ever going negative. A receipt whose `expires_at`
+ *   had already passed *before* the outage even began is still credited the
+ *   full outage, which can push a deadline that had already run out back
+ *   into the future -- left deliberately: erring toward keeping a receipt
+ *   alive is the right way to err here.
  * - Key up, no open window: today's behaviour, unchanged.
  *
  * `started_at`/`ended_at` are only as precise as this polling cycle -- a few
@@ -520,7 +529,8 @@ async function syncMetadataKeyOutageWindow(now: Date): Promise<boolean> {
     const [open] = await transaction.select({ id: metadataKeyOutages.id, startedAt: metadataKeyOutages.startedAt })
       .from(metadataKeyOutages).where(eq(metadataKeyOutages.status, "open")).for("update").limit(1);
     if (!open) return;
-    const [closed] = await transaction.update(metadataKeyOutages).set({ status: "closed", endedAt: now, updatedAt: now })
+    const endedAt = now;
+    const [closed] = await transaction.update(metadataKeyOutages).set({ status: "closed", endedAt, updatedAt: now })
       .where(and(eq(metadataKeyOutages.id, open.id), eq(metadataKeyOutages.status, "open")))
       .returning({ id: metadataKeyOutages.id, startedAt: metadataKeyOutages.startedAt });
     if (!closed) return;
@@ -528,14 +538,14 @@ async function syncMetadataKeyOutageWindow(now: Date): Promise<boolean> {
     // bind path does not accept a bare Date the way a plain query parameter
     // does, so every other date-bearing raw `sql` fragment in this module
     // (materializeNotifications in imap-receipt-worker.ts) does the same.
-    const endedAtIso = now.toISOString();
+    const endedAtIso = endedAt.toISOString();
     const outageStartedAtIso = closed.startedAt.toISOString();
     await transaction.update(imapIngestionMessages).set({
       expiresAt: sql`${imapIngestionMessages.expiresAt} + (${endedAtIso}::timestamptz - GREATEST(${outageStartedAtIso}::timestamptz, ${imapIngestionMessages.receivedAt}))`,
       updatedAt: now,
     }).where(and(
       inArray(imapIngestionMessages.status, RETENTION_LIVE_STATUSES),
-      lt(imapIngestionMessages.receivedAt, now),
+      lt(imapIngestionMessages.receivedAt, endedAt),
     ));
   });
   return true;
@@ -544,7 +554,7 @@ async function syncMetadataKeyOutageWindow(now: Date): Promise<boolean> {
 /** Expires bounded batches of private drafts only after their ciphertext is purged. */
 export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Promise<void> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("IMAP staging purge limit is invalid");
-  if (!(await syncMetadataKeyOutageWindow(now))) return;
+  const metadataKeyAvailable = await syncMetadataKeyOutageWindow(now);
   for (let processed = 0; processed < limit; processed += 1) {
     const claim = await getDb().transaction(async (transaction) => {
       const [candidate] = await transaction.select({
@@ -558,7 +568,18 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
            does not accumulate mail forever, and after it expires the message
            lives only in the provider mailbox. */
         inArray(imapIngestionMessages.status, RETENTION_LIVE_STATUSES),
-        or(lt(imapIngestionMessages.expiresAt, now), isNotNull(users.disabledAt), and(eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.failureCode, "attachment_processing_exhausted"))),
+        /* The clock arm (#964) drops out while the metadata key is away: a
+           locked receipt's 45-day countdown does not run, so it must not be
+           part of why a row is picked up here. The other two arms purge
+           ciphertext without ever reading it, so a key outage does not
+           suspend them: a disabled member's staged mail is a standing
+           retention obligation, not a countdown, and an exhausted attachment
+           pipeline has already given up regardless of age. */
+        or(
+          ...(metadataKeyAvailable ? [lt(imapIngestionMessages.expiresAt, now)] : []),
+          isNotNull(users.disabledAt),
+          and(eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.failureCode, "attachment_processing_exhausted")),
+        ),
         or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))),
         or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)),
       )).orderBy(asc(imapIngestionMessages.expiresAt)).limit(1);
