@@ -2827,6 +2827,130 @@
         }
       },
       "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E56",
+      "date": "2026-09-12",
+      "label": "Rules pipeline after the cost rules (owner's words, not-a-price, comparisons)",
+      "corpus": "tuning-48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "The pipeline on the 48 after the cost changes of 9d99dcf: the owner's cue words added to the trigger table, cover limits, penalties, comparisons and whole-term sums read as not the price, a heading over a bare figure taken as its label. Cost 31/42 -> 40/42; every other field unchanged. 78.2% -> 80.4%.",
+      "how": "npm run eval:stages",
+      "commit": "9d99dcf",
+      "output": "tmp/e-seen48-stages-cost.txt",
+      "scores": {
+        "overall": {
+          "pct": 80.4,
+          "net": 328,
+          "of": 408
+        },
+        "provider": {
+          "pct": 75,
+          "net": 36,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 72.9,
+          "net": 62,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 70.8,
+          "net": 34,
+          "of": 48
+        },
+        "cost": {
+          "pct": 95.2,
+          "net": 40,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 86.2,
+          "net": 25,
+          "of": 29
+        },
+        "recurrence": {
+          "pct": 65.2,
+          "net": 15,
+          "of": 23
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E57",
+      "date": "2026-09-12",
+      "label": "Rules pipeline after the cost rules, hold-out 3",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "The same pipeline on the twelve unseen pages. Cost 4/12 -> 6/12; every other field unchanged. 70.5% -> 72.3%.",
+      "how": "npm run eval:holdout",
+      "commit": "9d99dcf",
+      "output": "tmp/e-holdout3-stages-cost.txt",
+      "scores": {
+        "overall": {
+          "pct": 72.3,
+          "net": 81,
+          "of": 112
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 73.1,
+          "net": 19,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
       "notes": "",
       "headline": true
     }
