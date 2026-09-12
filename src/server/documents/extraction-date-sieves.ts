@@ -175,7 +175,7 @@ function printedTerms(text: string): Array<{ months: number; trigger: string }> 
 /** The same reading `extraction-tags.ts` makes of a term's end: a guarantee,
  * a warranty or a certificate runs out; everything else the household holds
  * for a term has to be taken again. */
-const RUNS_OUT = /\b(?:guarantee|warranty|certificate)\b|expir/iu;
+const RUNS_OUT = /\b(?:guarantee|warranty|certificate|quot(?:e|ation)|ticket|forfeit(?:ed)?|returned|used within)\b|expir/iu;
 
 /** A term that ends in somebody coming round rather than in a bill: the
  * annual booster, the next inspection. Not "service charge", which is a bill
