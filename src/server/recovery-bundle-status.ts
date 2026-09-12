@@ -62,16 +62,23 @@ export async function computeRecoveryBundleStatus(executor: StatusExecutor): Pro
 }
 
 /**
- * Never throws: like `getKekRotationStatus`, a status that cannot be
- * answered defaults toward not alarming rather than sinking the
- * administration screen over it. An `audit_log` outage is an infrastructure
- * fault with its own reporting path, not evidence the operator skipped the
- * export.
+ * Never throws, but — deliberately unlike `getKekRotationStatus` — fails
+ * toward *showing* the card, not hiding it. `getKekRotationStatus`'s own
+ * fail-quiet precedent exists to stop an unreadable side-detail sinking a
+ * whole screen; this status is not a side-detail, it is the warning that
+ * exists to prevent permanent, unrecoverable lockout, and an instance whose
+ * `audit_log` cannot be read is exactly the instance where that warning
+ * matters most. The two failure directions are not symmetrical: showing the
+ * card to an operator who already exported is a nag they can clear by
+ * exporting again, while hiding it from one who did not is the exact silent
+ * failure #968 was filed to prevent. So this defaults to `exported: false`,
+ * not `true` — do not "fix" this back to match `getKekRotationStatus`; the
+ * two functions are guarding different failure modes on purpose.
  */
 export async function getRecoveryBundleStatus(): Promise<RecoveryBundleStatus> {
   try {
     return await computeRecoveryBundleStatus(getDb());
   } catch {
-    return { exported: true, exportedAt: null };
+    return { exported: false, exportedAt: null };
   }
 }
