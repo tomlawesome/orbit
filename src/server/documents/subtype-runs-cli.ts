@@ -32,7 +32,10 @@ import {
 const holdout = process.argv.includes("--holdout");
 const showMisses = process.argv.includes("--misses");
 const documents = holdout ? EXTRACTION_HOLDOUT_FULLPAGE : EXTRACTION_CORPUS;
-const corpus = holdout ? "hold-out 12" : "tuning 24";
+/** The experiment register reads a score line as "<route>: <percent> (n/m)
+ * [<field> ...]", and strips exactly one leading "hold-out: " to learn which
+ * corpus it was. So the corpus is that prefix and nothing else. */
+const corpus = holdout ? "hold-out: " : "";
 
 /** How many of the top runs the diagnostic line looks at, which is how many
  * the owner's version offers. */
@@ -99,9 +102,9 @@ function main(): void {
     }
   }
 
-  console.log(line(`${corpus}: subtype by describer runs`, answered));
-  console.log(line(`${corpus}: subtype by taxonomy bins`, binned));
-  console.log(line(`${corpus}: subtype in either of the top two runs`, offered));
+  console.log(line(`${corpus}subtype by describer runs`, answered));
+  console.log(line(`${corpus}subtype by taxonomy bins`, binned));
+  console.log(line(`${corpus}subtype in either of the top two runs`, offered));
 }
 
 main();
