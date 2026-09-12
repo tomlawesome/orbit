@@ -36,7 +36,7 @@ import {
   subtypeShortlist,
   type MeaningTransport,
 } from "./extraction-choose-meaning";
-import { AMOUNT_LABEL } from "./extraction-amount-sieves";
+import { ADDS_UP, AMOUNT_LABEL } from "./extraction-amount-sieves";
 import { DATE_RANGE, WORDS_BEFORE } from "./extraction-date-sieves";
 import { bestSupported, type ShortlistEntry } from "./extraction-shortlist";
 import type { CandidateKind } from "./extraction-sieve";
@@ -545,7 +545,13 @@ export function rankedAmounts(candidates: readonly TaggedCandidate[]): AmountCla
   // answer -- it is what a gym membership costs.
   const whole = kept.filter((claim) =>
     claim.rank < AMOUNT_PREFERENCE.indexOf("instalment") && enoughReason(claim));
+  // The row that adds up the rows above it is the bill for this page's
+  // transaction, and outranks a price the page printed for something else
+  // however many ways that price was read: "Business Hosting Plan £89.99
+  // per year" is not what the domain renewal costs.
+  const addsUp = (claim: AmountClaim): number => claim.sieves.has(ADDS_UP) ? 1 : 0;
   return (whole.length > 0 ? whole : kept).sort((left, right) =>
+    addsUp(right) - addsUp(left) ||
     amountAgreement(right) - amountAgreement(left) ||
     right.weight - left.weight ||
     left.rank - right.rank);
