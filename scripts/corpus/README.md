@@ -169,6 +169,13 @@ only measurement the project has of whether the extractor generalises rather
 than fits the 48 pages it was built against, and that is true only while
 nobody working on the extractor has seen the pages.
 
+Twelve documents, real Tika output: about 19,200 characters in total, 97
+date-like strings, 26 of them answers. Measured baselines belong on the
+experiment log (`docs/experiments/extraction.json`, rendered by
+`node scripts/experiment-log.mjs render`), not here -- a number quoted in
+this file would be exactly the kind of spoon-fed result the corpus exists
+to avoid.
+
 So, for anyone tuning:
 
 - **Do not read `scripts/corpus/holdout3/`**, or
