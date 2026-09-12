@@ -79,10 +79,17 @@ export interface CorpusDocument {
   expected: CorpusExpectation;
 }
 
-// The six full-page documents from #981 live in their own generated module,
-// because their text is Tika's real output and is regenerated from the source
-// HTML rather than written here. They are part of this corpus, not a separate
-// one: every measurement reads `EXTRACTION_CORPUS`.
+// The 48 full-page documents live in their own generated module, because
+// their text is Tika's real output and is regenerated from the source HTML
+// rather than written here. They are part of this corpus, not a separate
+// one: every measurement reads `EXTRACTION_CORPUS`. The 48 is 24 original
+// full-page documents (#981, #986) plus hold-outs 1 and 2 (#986 step 8,
+// #997), twelve documents each, both spent and rolled into the tuning set
+// on 2026-09-12 (#996, #998) rather than replaced. Their generated modules
+// (`extraction-holdout-fullpage.ts`, `extraction-holdout2-fullpage.ts`) are
+// gone; hold-out 3 (#998) is the only unseen set now, scored separately from
+// `src/server/documents/extraction-holdout3-fullpage.ts` and never imported
+// here.
 // The thirty-six short documents that used to live here are gone (owner,
 // 2026-09-11): *"The short documents are a pointless accuracy floor. There is
 // no accuracy floor. The short documents are a spoon fed result and we should

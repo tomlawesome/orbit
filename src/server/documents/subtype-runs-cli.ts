@@ -3,10 +3,9 @@
 // is meant to beat. One field, no model (the owner's testing rule of
 // 2026-09-12).
 //
-//   npm run eval:subtype-runs               # the 24 the extractor was tuned on
-//   npm run eval:subtype-runs -- --holdout  # the 12 unseen pages
-//   npm run eval:subtype-runs -- --holdout2 # the second 12 unseen pages, #997
-//   npm run eval:subtype-runs -- --holdout --misses   # owner only
+//   npm run eval:subtype-runs                # the tuning pages the extractor was tuned on
+//   npm run eval:subtype-runs -- --holdout3   # the 12 unseen pages (#998; the first two hold-outs are retired)
+//   npm run eval:subtype-runs -- --holdout3 --misses   # owner only
 //
 // Three lines come out. The first two are the two methods' answers, scored
 // the way every other run is scored: a right answer is a point, a wrong one
@@ -19,8 +18,7 @@
 // tuning: see the note at the top of `holdout-score-cli.ts`.
 import { chooseSubtypeByRules } from "./extraction-choose-meaning";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
-import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
-import { EXTRACTION_HOLDOUT2_FULLPAGE } from "./extraction-holdout2-fullpage";
+import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { classifySubtype, formatSubtypeExpected } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
@@ -31,14 +29,13 @@ import {
   subtypeSources,
 } from "./subtype-describer-runs";
 
-const holdout = process.argv.includes("--holdout");
-const holdout2 = process.argv.includes("--holdout2");
+const holdout3 = process.argv.includes("--holdout3");
 const showMisses = process.argv.includes("--misses");
-const documents = holdout2 ? EXTRACTION_HOLDOUT2_FULLPAGE : holdout ? EXTRACTION_HOLDOUT_FULLPAGE : EXTRACTION_CORPUS;
+const documents = holdout3 ? EXTRACTION_HOLDOUT3_FULLPAGE : EXTRACTION_CORPUS;
 /** The experiment register reads a score line as "<route>: <percent> (n/m)
- * [<field> ...]", and strips exactly one leading "hold-out: " to learn which
- * corpus it was. So the corpus is that prefix and nothing else. */
-const corpus = holdout2 ? "hold-out 2: " : holdout ? "hold-out: " : "";
+ * [<field> ...]", and strips a leading "hold-out N: " to learn which corpus
+ * it was. So the corpus is that prefix and nothing else. */
+const corpus = holdout3 ? "hold-out 3: " : "";
 
 /** How many of the top runs the diagnostic line looks at, which is how many
  * the owner's version offers. */

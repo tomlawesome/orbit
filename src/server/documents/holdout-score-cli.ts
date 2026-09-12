@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // The hold-out measurement (#986 step 8). The same pipeline and the same
 // printing as `stages-score-cli.ts`, over the 12 documents in
-// `extraction-holdout-fullpage.ts` — written after the extractor was tuned,
-// by someone who had not read the 24 in `scripts/corpus/sources/`.
+// `extraction-holdout3-fullpage.ts` -- written after the extractor was
+// tuned, by someone who had not read the 48 in `scripts/corpus/sources/` or
+// either retired hold-out (#998).
 //
-//   npm run eval:holdout
-//   npm run eval:holdout -- --model
-//   npm run eval:holdout -- --misses      # owner only; see below
-//   npm run eval:holdout -- --holdout2    # the SECOND hold-out (#997)
+//   npm run eval:holdout -- --holdout3
+//   npm run eval:holdout -- --holdout3 --model
+//   npm run eval:holdout -- --holdout3 --misses      # owner only; see below
 //
-// Scores on the 24 are tuning indicators; this is the number that says
+// Scores on the 48 are tuning indicators; this is the number that says
 // whether the extractor generalises, and it only says that while nobody has
 // looked at the pages. So the default prints the score lines and nothing
 // else: per-document misses are how a hold-out turns into a second tuning
@@ -21,23 +21,21 @@
 // document, which needs the Ollama container on
 // `orbit_orbit-document-processing`.
 //
-// `--holdout2` swaps in the second hold-out (#997): the first was spent when
-// an eval run with `--misses` printed each page's answer during a tuning
-// session (#996), so a second set exists to go on measuring generalisation
-// while the first stays retired.
+// The first two hold-outs are retired: the first was spent when an eval run
+// with `--misses` printed each page's answer during a tuning session
+// (#996), and both were rolled into the tuning set on 2026-09-12 (#998).
+// `--holdout3` is the only unseen set left.
 
 import { chooseFields, chooseFieldsWithModel } from "./extraction-choose";
 import { assertChooserReachable, chooserTransport } from "./extraction-choose-meaning";
-import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
-import { EXTRACTION_HOLDOUT2_FULLPAGE } from "./extraction-holdout2-fullpage";
+import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { formatRunScore, scoreCorpus, type RunScore } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
 import { proposalFromText } from "./suggestions";
 
-const onHoldout2 = process.argv.includes("--holdout2");
-const corpus = onHoldout2 ? EXTRACTION_HOLDOUT2_FULLPAGE : EXTRACTION_HOLDOUT_FULLPAGE;
-const label = onHoldout2 ? "hold-out 2" : "hold-out";
+const corpus = EXTRACTION_HOLDOUT3_FULLPAGE;
+const label = "hold-out 3";
 
 /** Which model answers the questions, named on the command line:
  * `--chooser-model <name>` sends them to that model over Ollama's generic

@@ -2,9 +2,8 @@
 // What provider's own stage 1 (#996) is worth, against the shared sieve it
 // replaces. One field, no model.
 //
-//   npm run eval:provider-stage1               # the 24 the extractor was tuned on
-//   npm run eval:provider-stage1 -- --holdout  # the 12 unseen pages
-//   npm run eval:provider-stage1 -- --holdout2 # the second 12 unseen pages, #997
+//   npm run eval:provider-stage1                # the tuning pages the extractor was tuned on
+//   npm run eval:provider-stage1 -- --holdout3   # the 12 unseen pages (#998; the first two hold-outs are retired)
 //
 // Two things are measured, because stage 1 is only judged on the first.
 //
@@ -21,18 +20,16 @@
 // first, 2026-09-12: "classifyProvider is far too strict." Until that is
 // settled, read both.
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
-import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
-import { EXTRACTION_HOLDOUT2_FULLPAGE } from "./extraction-holdout2-fullpage";
+import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { providerTaggedOrganisations, providerWordRuns } from "./extraction-provider-runs";
 import { classifyProvider } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
 import { providerCandidates } from "./provider-stage1-sieve";
 
-const holdout = process.argv.includes("--holdout");
-const holdout2 = process.argv.includes("--holdout2");
-const documents = holdout2 ? EXTRACTION_HOLDOUT2_FULLPAGE : holdout ? EXTRACTION_HOLDOUT_FULLPAGE : EXTRACTION_CORPUS;
-const prefix = holdout2 ? "hold-out 2: " : holdout ? "hold-out: " : "";
+const holdout3 = process.argv.includes("--holdout3");
+const documents = holdout3 ? EXTRACTION_HOLDOUT3_FULLPAGE : EXTRACTION_CORPUS;
+const prefix = holdout3 ? "hold-out 3: " : "";
 
 /** The scorer's ruler. */
 const strict = (wanted: string, got: string): boolean =>

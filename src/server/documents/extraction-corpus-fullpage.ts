@@ -10,17 +10,52 @@
 // repeated page headers and all. That is the point: the fixture is what
 // production actually sees, not a tidied version of it.
 //
-// The originals live in `scripts/corpus/sources/`. Never edit `text` here;
-// edit the HTML and regenerate, so the fixture and the document it came from
-// cannot drift apart.
-//
-// These six replace nothing. They sit alongside the short documents in
-// `extraction-corpus.ts`, which remain useful for exactly the labelled,
-// single-fact cases they cover.
+// The originals live in `scripts/corpus/sources/`. Never edit
+// `text` here; edit the HTML and regenerate, so the fixture and the document
+// it came from cannot drift apart.
 
 import type { CorpusDocument } from "./extraction-corpus";
 
 export const FULL_PAGE_CORPUS: CorpusDocument[] = [
+  {
+    // Ground-truth notes:
+    // - Start date 2026-03-02 is printed as 'Monitoring Start Date 02/03/2026' and repeated in the customer signature date.
+    // - Service date 2027-03-02 is printed as 'Annual Maintenance Visit Due 02/03/2027'.
+    // - Renewal/term-end date 2028-03-01 is printed within 'Minimum Term: 24 month minimum term, ending 01/03/2028'.
+    // - scheduleKind is 'service', not 'renewal': the contract derives it from the FIRST dateRole in print order that is a scheduled kind (suggestions.ts), and the service date prints before the renewal date on this page. Three dateRoles on one document, two of them schedule-worthy, is a thin spot the contract's derivation does not resolve by importance -- only by which comes first.
+    // - recurrenceMonths 24 is printed in digits as '24 month minimum term' — the length of the agreement, not the monthly billing cycle; it is retained under the derived 'service' scheduleKind because the contract only requires a schedule kind to be present, not that it match which date the recurrence describes.
+    // - Provider is 'Northgate Home Security', the trading name in the header and footer strip — not the Alarm Receiving Centre or insurer named elsewhere.
+    // - Reference 'NGS-CA-20456' is printed as the Contract Number field and repeated in the footer strip.
+    // - costMinor 2499 is the 'Monthly Monitoring Charge... £24.99 per month' field.
+    // - Trap: the 'Installation Charge £199.00 — paid in full, receipt no. RCT-30442' is a rival, one-off cost already settled.
+    // - Trap: the 'Callout Charge (outside agreement) £65.00 + VAT per visit' is a rival recurring-looking cost.
+    // - Trap: the 'total payable over the 24 month minimum term of £599.76' is a rival aggregate cost figure.
+    // - Trap: 'Alarm Receiving Centre: Beacon Watch Monitoring Centre' is a rival organisation name.
+    // - Trap: 'Police URN: 1234567/26' is a rival reference number.
+    // - Trap: 'Insurer Requiring Monitoring: Hearthstone Home Insurance' is a rival organisation name.
+    // - Trap: the engineer 'D. Sutton — commissioning visit 28/02/2026' gives a rival name and a rival date close to the monitoring start.
+    // - Trap: 'Right to Cancel... up to and including 16/03/2026' is a rival date.
+    // - Trap: the keyholders 'Mrs Diane Whitlock — 07700 900142' and 'Mr Colin Whitlock — 07700 900873' are named with phone numbers as rival contacts.
+    // - Trap: 'Control Panel Manufactured 11/2025 — parts warranty ends 03/03/2027' gives a rival date one day after the true service date.
+    name: "Intruder Alarm Monitoring Agreement",
+    filename: "alarm-monitoring-agreement.pdf",
+    text: "Intruder Alarm Monitoring Agreement  \n\nNORTHGATE  HOME  SECURITY Unit 6, Foundry Business Park, Elmscote, EL4 2RJ  ·  01632 960377  ·  northgatesecurity.example \n\nINTRUDER ALARM MONITORING AGREEMENT \n\nCustomer Mr & Mrs D. Whitlock \n\nInstallation Address 17 Peartree Close, Elmscote, EL5 8HN \n\nContract Number NGS-CA-20456 \n\nEngineer D. Sutton — commissioning visit 28/02/2026 \n\nMonitoring Start Date 02/03/2026 \n\nMinimum Term 24 month minimum term, ending 01/03/2028 \n\nAnnual Maintenance Visit Due 02/03/2027 \n\nMonthly Monitoring Charge £24.99 per month, collected by direct debit \n\nInstallation Charge £199.00 — paid in full, receipt no. RCT-30442 \n\nCallout Charge (outside agreement) £65.00 + VAT per visit \n\nAlarm Receiving Centre Beacon Watch Monitoring Centre \n\nPolice URN 1234567/26 \n\nInsurer Requiring Monitoring Hearthstone Home Insurance \n\nKeyholder 1 Mrs Diane Whitlock — 07700 900142 \n\nKeyholder 2 Mr Colin Whitlock — 07700 900873 \n\nControl Panel Manufactured 11/2025 — parts warranty ends 03/03/2027 \n\nRight to Cancel Within 14 days of signing, up to and including 16/03/2026 \n\nThis agreement is for monitoring of the above installation  address only . The Customer agrees to pay  the monthly  monitoring charge shown  above for \n\nthe minimum  term  stated, giving a total payable over the 24  month minimum  term  of £599.76. Northgate Home Security  will notify  the Customer in \n\nadvance of the annual maintenance visit. The alarm  signal is received and verified by  the Alarm  Receiving Centre named above before the Police are \n\nalerted under the Police URN shown , where applicable. This agreement may  be required by  the Customer's household insurer as a condition  of cover. \n\nTerms: The Customer may cancel this Agreement without charge within 14 days of the date of signing. After that period, cancellation before the end of the minimum \n\nterm is subject to payment of the outstanding monitoring charges for the remainder of the term. Any engineer visit not covered by this Agreement, including call- \n\nouts for false alarms caused by user error, will be charged at the Callout Charge shown above. The parts warranty on the control panel is provided by the \n\nmanufacturer and is separate from this monitoring Agreement. \n\nSignature of Customer  ·  D. Whitlock  ·  02/03/2026 Signature for Northgate Home Security  ·  D. Sutton \n\nPad  No. 004821 — Form  NGS/M3 \n\nCUSTOMER COPY · PINK \n\nNorthgate Home Security  ·  Contract NGS-CA-20456  ·  Pink copy retained by Customer\n",
+    expected: {
+    dates: ["2026-03-02","2027-03-02","2028-03-01"],
+    provider: "Northgate Home Security",
+    reference: "NGS-CA-20456",
+    dateRoles: [
+      { date: "2026-03-02", role: "start" },
+      { date: "2027-03-02", role: "service" },
+      { date: "2028-03-01", role: "renewal" },
+    ],
+    subtype: {"kinds":["Contract","Maintenance contract"],"qualifiers":["Security","Home"]},
+    costMinor: 2499,
+    currency: "GBP",
+    recurrenceMonths: 24,
+    scheduleKind: "service",
+    },
+  },
   {
     // Ground-truth notes:
     // - dates are the day the extended cover commences (14 June 2026) and the day it expires (13 June 2031), five years apart, both stated in the ceremonial paragraph and repeated in the terms. Three nearby dates are deliberately not declared: the date of purchase (14 June 2025), the date the manufacturer's 12-month guarantee ends (13 June 2026, one day before cover starts), and the date the certificate was issued (16 June 2025) -- a reader has to notice the extended cover starts the day after the guarantee lapses, not on the purchase date or the guarantee-end date itself, both of which are printed just as prominently. Also withheld: the appliance's date of manufacture (03/2025, not a full date so it never even reaches ISO form), the 14-day cancellation deadline (28 June 2025), the 30-day certificate-registration deadline (14 July 2025), the terms' effective-from date (01/03/2025), and the final claim-notification date (13 July 2031, 30 days after expiry and easily mistaken for a second expiry). provider is Bellward Warranty Administration Ltd, the claims administrator named as the contact throughout -- not Ashfield Domestic Appliances Ltd, the retailer, whose name is set far larger at the top of the page as the point-of-sale brand, and not Corvane Insurance plc, the underwriter named only once in the small print. reference is the warranty certificate number (EWC-2025-118823), which is also the number printed under the certificate title. costMinor is the £69.99 paid for the extended warranty itself, not the £549.99 price of the washing machine it covers (printed four times, always in a larger or bolder type than the warranty price), not the £60.00 excess payable per claim, and not either of the £549.99 or £1,099.98 claim-value ceilings. recurrenceMonths and scheduleKind are both omitted: a five-year warranty certificate does not recur and is not itself a serviced item -- it simply expires.
@@ -39,6 +74,41 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     subtype: {"kinds":["Warranty","Guarantee","Certificate","Insurance","Maintenance contract"],"qualifiers":["Appliance","Extended","Home"]},
     costMinor: 6999,
     currency: "GBP",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - Declared date: 'your next service is due on 14 October 2026', repeated on the slip as 'Next service due 14/10/2026' — role service.
+    // - Declared recurrence: 'your boiler and controls are serviced every 12 months' — recurrenceMonths 12, scheduleKind service.
+    // - Declared provider: the letterhead brand 'HEARTHWELL HOME CARE', repeated in the reference box and slip.
+    // - Declared reference: 'Plan reference: HHC-4471-2298', repeated identically on the slip.
+    // - Declared cost: the slip's 'This month's instalment £14.99' — costMinor 1499, currency GBP.
+    // - Trap: 'Date of this letter: 2 September 2026' is the letter's own date, not the service date.
+    // - Trap: 'Your last visit was on 16 October 2025' is the previous service, not the one due.
+    // - Trap: 'Thermex Pro 30 boiler (installed 2019)' gives an installation year and model, not a date to extract.
+    // - Trap: 'please telephone us within 28 days of the date of this letter' is a call-by window, not a due date.
+    // - Trap: 'Gas Safe registered engineers (registration number 745213)' is the engineer's registration, not the plan reference.
+    // - Trap: 'non-members pay a callout charge of £90' prices a different audience's callout, not the plan cost.
+    // - Trap: 'this service would otherwise cost £148 if booked separately from the plan' is the non-plan price.
+    // - Trap: the slip's 'Annual total if paid monthly £179.88' is the yearly total, not the monthly instalment.
+    // - Trap: 'collected on the 1st of each month' is the Direct Debit collection day, not a service date.
+    // - Trap: 'Hearthwell Home Care is a trading name of Castlemere Assurance Group plc' names the parent company, a rival provider candidate.
+    // - Trap: 'call our 24-hour emergency line on 01632 960455' is a different phone number from the booking line 01632 960112.
+    name: "Boiler service plan letter",
+    filename: "boiler-service-plan-letter.pdf",
+    text: "Boiler Service Plan Letter  \n\nHEARTHWELL HOME CARE BO I L ER  &  CONTROLS  COVER \n\nPlan reference: HHC-4471-2298 \n\nAccount no: 3300 5521 \n\nDate of this letter: 2 September 2026 \n\nMr J. Whitfield \n\n14 Sycamore Close \n\nHallowfield \n\nHF3 2QT \n\nDear Mr Whitfield, \n\nYour annual boiler service is due \n\nAs a member of the Hearthwell Home Care plan, your boiler and controls are serviced every 12 months. Our records \n\nshow that your next service is due on 14 October 2026. \n\nOne of our Gas Safe registered engineers (registration number 745213) will call to carry out the service. Your last visit \n\nwas on 16 October 2025, when your Thermex Pro 30 boiler (installed 2019) was found to be in good working order. \n\nTo book your appointment, please telephone us within 28 days of the date of this letter on 01632 960112. If you do not \n\nhear from us within that time, please call anyway, as our booking lines are frequently busy at this time of year. \n\nYour plan covers your boiler and controls, and is paid monthly by Direct Debit, collected on the 1st of each month. \n\nMembers are not charged a callout fee for their annual service; non-members pay a callout charge of £90, and this \n\nservice would otherwise cost £148 if booked separately from the plan. \n\nIf your boiler breaks down before your service date, please do not use the number above — call our 24-hour emergency \n\nline on 01632 960455 instead. \n\nYours sincerely, \n\nHearthwell Home Care Customer Services \n\non behalf of the Hearthwell Home Care team \n\nHearthwell Home Care is a trading name of Castlemere Assurance Group plc, registered in England and Wales. Registered office: 8 Foundry Row, \n\nHallowfield, HF1 9AB. \n\n✂  please detach and return the slip below with your payment \n\nBoiler Care Plan — Payment Slip \n\nPLAN REFERENCE \n\nHHC-4471-2298 \n\nNEXT SERVICE DUE \n\n14/10/2026 \n\nTHIS MONTH 'S INSTALMENT \n\n£14.99 \n\nANNUAL TOTAL IF PAID  MONTHLY \n\n£179.88 \n\n⑆  4 4 7 1  2 2 98  07  ⑆  00 1 4 99  ⑆ \n\nPlease quote your plan reference on all correspondence and payments.\n",
+    expected: {
+    dates: ["2026-10-14"],
+    provider: "Hearthwell Home Care",
+    reference: "HHC-4471-2298",
+    dateRoles: [
+      { date: "2026-10-14", role: "service" },
+    ],
+    subtype: {"kinds":["Maintenance contract","Plan","Service"],"qualifiers":["Boiler","Home"]},
+    costMinor: 1499,
+    currency: "GBP",
+    recurrenceMonths: 12,
+    scheduleKind: "service",
     },
   },
   {
@@ -92,6 +162,45 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
   },
   {
     // Ground-truth notes:
+    // - dates: agreement date 20 February 2026 printed as 'Agreement date: 20 February 2026' (role start), and optional final payment date 5 March 2030 printed in the financial table row 'Optional final payment (due 5 March 2030)' (role renewal).
+    // - provider is the finance house the household pays and contacts, Bracken Vale Finance plc, not the dealer.
+    // - reference is the agreement number printed top right as 'BVF-PCP-208841'.
+    // - costMinor is the monthly payment '£279.42' i.e. 27942 pence.
+    // - recurrenceMonths 48 printed as 'Number of monthly payments: 48'.
+    // - scheduleKind renewal reflects the optional final payment / balloon structure ending 5 March 2030.
+    // - trap: cash price of the vehicle '£18,995.00'.
+    // - trap: deposit '£2,500.00' and part-exchange allowance '£1,200.00'.
+    // - trap: total amount payable '£24,730.16'.
+    // - trap: optional final payment amount '£8,245.00'.
+    // - trap: representative APR '10.9% APR' and fixed rate of interest '7.5% per annum'.
+    // - trap: date of first payment '05/04/2026'.
+    // - trap: 14-day right to withdraw, 'You may withdraw from this agreement ... within 14 days'.
+    // - trap: annual mileage allowance '8,000 miles' and excess mileage charge '6p per mile'.
+    // - trap: option-to-purchase fee '£10.00'.
+    // - trap: dealer name, address and own reference, 'Thornfield Motors Limited ... Dealer reference: TM-CAR-55021'.
+    // - trap: vehicle registration 'OV72 KLM', first registered '14/06/2022' and mileage '21,340 miles'.
+    // - trap: FCA authorisation sentence naming FRN 305512.
+    // - trap: company number '04471822'.
+    name: "Personal Contract Purchase Agreement - Bracken Vale Finance",
+    filename: "car-finance-agreement.pdf",
+    text: "Personal Contract Purchase Agreement  \n\nPERSONAL CONTRACT PURCHASE AGREEMENT \n\nRegulated by the Consumer Credit Act 1974 \n\nAgreement date: 20 February 2026 \n\nAgreement number \n\nBVF-PCP-208841 \n\nCREDITOR (LENDER) \n\nBracken Vale Finance plc 1 Millrace House, Doverton DV4 7QS Company number 04471822 Authorised and regulated by the Financial Conduct Authority, FRN 305512. Customer Service: 01632 960228 \n\nSUPPLIER (DEALER) \n\nThornfield Motors Limited Unit 4, Ferrymead Trading Estate, Kelverton KV11 9RT Dealer reference: TM-CAR-55021 Tel: 01632 960117 \n\nCUSTOMER \n\nMr David Coulson 14 Sycamore Grove, Wakemoor WM2 8LN \n\nFinancial details \n\nCash price of the vehicle £18,995.00 \n\nCash deposit £2,500.00 \n\nPart-exchange allowance £1,200.00 \n\nAmount of credit £15,295.00 \n\nFixed rate of interest 7.5% per annum \n\nRepresentative APR 10.9% APR \n\nDuration of agreement 49 months \n\nNumber of monthly payments 48 \n\nAmount of each monthly payment £279.42 \n\nDate of first payment 05/04/2026 \n\nOptional final payment (due 5 March 2030) £8,245.00 \n\nTotal amount payable £24,730.16 \n\nOption-to-purchase fee (payable with final payment) £10.00 \n\nYOUR RIGHT TO WITHDRAW \n\nYou may withdraw from this agreement without giving any reason within 14 days of the date the agreement is signed. Contact Bracken Vale Finance plc on 01632 960228 to withdraw. \n\nMISSING PAYMENTS \n\nMissing payments could affect your credit rating and your ability to obtain credit in future. If you fall behind, contact us straight away on 01632 960228. \n\nTERMINATION: YOUR RIGHTS \n\nYou may end this agreement at any time before the final payment is due by giving notice in writing to Bracken Vale Finance plc and returning the vehicle. \n\nVEHICLE TO BE SUPPLIED \n\nMake/model: Marenta Vela 1.5 TSi Registration: OV72 KLM First registered: 14/06/2022 \n\nMileage at supply: 21,340 miles Colour: Pure Grey Dealer stock ref: TM-CAR-55021 \n\nAnnual mileage allowance: 8,000 miles. Excess mileage charge: 6p per mile over the allowance, payable at the end of the agreement. \n\nBracken Vale Finance plc — Agreement BVF-PCP-208841 Page 1 of 2\n\nPERSONAL CONTRACT PURCHASE AGREEMENT (continued) \n\nBracken Vale Finance plc \n\nAgreement number \n\nBVF-PCP-208841 \n\nUSE OF THE VEHICLE \n\nThe vehicle must be kept in the United Kingdom unless we agree otherwise in \n\nwriting, and must be taxed, insured and maintained by you throughout the \n\nagreement. \n\nThe annual mileage allowance under this agreement is 8,000 miles. Mileage \n\nrecorded in excess of the allowance at the end of the agreement will be \n\ncharged at 6p per mile. \n\nOPTIONAL FINAL PAYMENT \n\nIf you wish to keep the vehicle at the end of the agreement, you may pay the \n\noptional final payment of £8,245.00, due 5 March 2030, together with an \n\noption-to-purchase fee of £10.00. \n\nOWNERSHIP \n\nThe vehicle remains the property of Bracken Vale Finance plc until all sums \n\ndue under this agreement, including any optional final payment, have been \n\npaid in full. \n\nINSURANCE AND MAINTENANCE \n\nYou must insure the vehicle comprehensively at your own expense and \n\nmaintain it in accordance with the manufacturer's service schedule. \n\nTERMINATION CHARGES \n\nIf this agreement is terminated early, you may be required to pay the \n\ndifference between payments already made and 50% of the total amount \n\npayable, subject to fair wear and tear. \n\nCOMPLAINTS \n\nAny complaint about this agreement should be addressed in the first instance \n\nto Bracken Vale Finance plc, 1 Millrace House, Doverton DV4 7QS. \n\nThornfield Motors Limited cannot amend the terms of this agreement. \n\nRIGHT TO WITHDRAW — REMINDER \n\nYour right to withdraw within 14 days is described on page 1 of this agreement. \n\nCustomer signature & date Authorised signatory, Bracken Vale Finance plc & date \n\nBracken Vale Finance plc is authorised and regulated by the Financial Conduct Authority (FRN 305512) and is registered in England and Wales, company number 04471822. Registered office: 1 Millrace House, Doverton DV4 7QS. \n\nBracken Vale Finance plc — Agreement BVF-PCP-208841 Page 2 of 2\n",
+    expected: {
+    dates: ["2026-02-20","2030-03-05"],
+    provider: "Bracken Vale Finance plc",
+    reference: "BVF-PCP-208841",
+    dateRoles: [
+      { date: "2026-02-20", role: "start" },
+      { date: "2030-03-05", role: "renewal" },
+    ],
+    subtype: {"kinds":["Loan","Contract"],"qualifiers":["Motor"]},
+    costMinor: 27942,
+    currency: "GBP",
+    recurrenceMonths: 48,
+    scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
     // - dates: the renewal being offered runs 15 October 2026 to 15 October 2027 ('Renewal period offered', page 1, repeated in the page 2 running header); the end is roled 'renewal'. Ten other printed dates are deliberately not declared: notice date (3 Sep 2026), quote-generated date (28 Aug 2026), the reply-by date (24 Sep 2026, three weeks before the 15 Oct 2026 cover date and set in the largest type on page 1 — it is a deadline to respond, not a cover date), the no-claims-discount confirmation date (2 Sep 2026), the driving licence issue date (3 May 2011), the 2023 windscreen claim date (8 Jan 2023), the policy-wording reprint stamp (1 Apr 2026), the current/expiring period's start (15 Oct 2025), the vehicle's first-registration date (14 Mar 2018), and the insurer's PRA authorisation date (19 Jul 1999). provider is 'Colworth & Drake Insurance Services Ltd', not 'Meridian General Insurance Company plc': "we can't call the underwriters directly, they won't deal with us. We deal with the company that sold us the policy." (owner, 2026-09-11, #989). reference is the policy number MTR-8823-0145, printed beside the recipient's address on page 1 and repeated in every footer; the broker's own client reference (CD-CLI-33920) is a rival identifier for the same customer and is not declared. subtype is 'Motor insurance renewal', not 'Comprehensive' (the cover type printed on page 1) and not a manufacturer or scheme name. costMinor is the annual premium of £612.40 (net £546.79 + IPT £65.61), not the monthly instalment (£54.87) or the total payable if paying monthly (£661.81, which is higher than both and is itself a rival distractor, not the answer) — that ambiguity is tracked as #985. Also undeclared: last year's premium (£578.90) and the many per-section limits and excesses on page 2.
     // - subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Motor insurance renewal').
     name: "car insurance renewal, reply-by date outshines the real cover dates",
@@ -109,6 +218,80 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     costMinor: 61240,
     currency: "GBP",
     scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: agreement runs 1 June 2025 to 31 May 2028. Seven other printed dates are deliberately not declared: the statement date, the last service date, four monthly payment-history dates, a previous unrelated vehicle's return date, and a terms revision stamp.
+    // - provider is Wraxall Vehicle Finance plc, stated plainly in the page's own text to be who provides the lease and the vehicle. DriveEasy Leasing Brokers Ltd, named in the letterhead, is described in the small print as an FCA-regulated credit broker acting on commission, not the lessor -- the same broker-versus-underwriter distinction the owner drew for a motor policy (#989).
+    // - reference is the agreement number, not the vehicle registration or a previous unrelated vehicle's registration.
+    // - costMinor is the monthly rental, the only amount that is plainly the cost of the thing; the per-mile excess charge is a penalty rate, and the payment-history amounts repeat the same rental.
+    // - subtype: 'Lease' qualified by 'Motor'.
+    // - recurrenceMonths is not declared: the rental is described as monthly in words, not in a printed digit count.
+    // - scheduleKind is not declared: neither dateRole is 'renewal' or 'service'.
+    name: "car lease statement, the broker's name is bigger than the finance company's",
+    filename: "fullpage-car-lease-statement.pdf",
+    text: "Lease statement WVF-PCH-220154  \n\nDriveEasy Leasing Personal contract hire brokers · 0800 552 7734 · www.driveeasyleasing.example \n\nAnnual lease statement \n\nLessee \n\nMrs Angharad Vaughan \n\n9 Cedar Grove, Aldreth Bay, Cravenshire CV3 2NF \n\nAgreement WVF-PCH-220154 \n\nVehicle registration LV73 KFM \n\nStatement date 1 September 2026 Statement period covers year 2 \n\nYOUR VEHICLE \n\nVehicle Corvallen Estrix 1.6 hybrid estate, registration LV73 KFM \n\nAgreement start 1 June 2025 \n\nAgreement end 31 May 2028 \n\nContract mileage 10,000 miles a year, 30,000 over the full term \n\nMileage recorded at last service 18,442 miles, service dated 4 June 2026 \n\nMONTHLY  RENTAL \n\n£329.00 \n\nPAYMENT HISTORY,  YEAR 2 \n\nDue date Status Amount \n\n01/06/2026 Paid 01/06/2026 329.00 \n\n01/07/2026 Paid 02/07/2026 329.00 \n\n01/08/2026 Paid 01/08/2026 329.00 \n\n01/09/2026 Due 329.00 \n\nThis agreement runs for 36 months from 1 June 2025 to 31 May 2028, after which the vehicle must be returned to Wraxall Vehicle Finance plc; this \n\nis a hire agreement and you do not own the vehicle at any point. Excess mileage over the 30,000-mile term allowance is charged at £0.08 per mile \n\nat return. Your previous vehicle under a separate agreement (reg LV19 MPR) was returned on 28 May 2025 with no excess mileage or damage \n\ncharges. \n\nDriveEasy Leasing  Brokers Ltd , registered  in England  and  Wales No. 08814401, is an FCA-regulated  credit broker, firm reference number 662017, and  arranges this \n\nagreement on commission. The lease itself, and  the vehicle, are provided  by Wraxall Vehicle Finance plc, registered  in England  and  Wales No. 02841170, registered \n\noffice Wraxall House, 6 Meridian Way, Larchgate, Wexbridge WX9 3QF, authorised  and  regulated  by the Financial Conduct Authority, firm reference number 204471. \n\nTerms last revised  1 April 2025. \n\nWraxall Vehicle Finance plc · Agreement WVF-PCH-220154 Page 1 of 1\n",
+    expected: {
+    dates: ["2025-06-01","2028-05-31"],
+    provider: "Wraxall Vehicle Finance plc",
+    reference: "WVF-PCH-220154",
+    dateRoles: [
+      { date: "2025-06-01", role: "start" },
+      { date: "2028-05-31", role: "expiry" },
+    ],
+    subtype: {"kinds":["Lease"],"qualifiers":["Motor"]},
+    costMinor: 32900,
+    currency: "GBP",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: installed 12 May 2026, the 25-year guarantee runs to 12 May 2051. Two other printed dates are deliberately not declared: the certificate issue date (19 May 2026, a week after installation and after the guarantee period already started) and the cavity survey date (28 Apr 2026). The superseded wording edition (6 Mar 2022) and the current edition date (1 Jan 2026) are print-run stamps, not dates about this job, and are also not declared.
+    // - provider is Bassington Energy Solutions Ltd, named only in the small print as the entity that 'is issued by' this guarantee -- 'WarmCore Insulation', printed large in the letterhead and everywhere else on the page, is stated in that same small print to be only its trading name, the same distinction the owner drew for a broker versus an underwriter (#989).
+    // - reference is the guarantee number WC-GTE-08823, not the job reference (WCI-2026-4471) or the insurance-backed scheme reference (GBW-771049).
+    // - costMinor is the £2,340.00 contract price for the installation itself, the only amount on the page with a currency symbol that is plainly the cost of the thing.
+    // - subtype: 'Guarantee' (the taxonomy group whose synonyms include 'Insurance-backed guarantee', matching the printed scheme) qualified by 'Building work', covering installation and workmanship.
+    // - scheduleKind is not declared: neither dateRole is 'renewal' or 'service'.
+    name: "cavity wall insulation guarantee, the trading name on the letterhead is not who guarantees it",
+    filename: "fullpage-cavity-wall-insulation-guarantee.pdf",
+    text: "Guarantee certificate WC-GTE-08823  \n\nWarmCore Insulation Cavity wall & loft insulation specialists · est. 2009 · www.warmcoreinsulation.example \n\nGUARANTEE CERTIFICATE Cavity wall insulation, installed to CIGA / BBA technical requirements \n\nProperty owner \n\nMr David Okafor 19 Fernhill Close, Aldreth Bay, Cravenshire CV6 4RP \n\nGuarantee number WC- GTE- 08823 \n\nJob reference WCI-2026-4471 Date of installation 12 May 2026 \n\nCertificate issued 19 May 2026 \n\nWHAT  THIS GUARANTEE COVERS \n\nThis guarantee covers defects in the cavity wall insulation materials and workmanship described below, installed at the address shown, for a period of 25 years from the date of installation. It does not cover pre-existing structural defects, penetrating damp not caused by the insulation, or damage arising from alterations carried out after installation without the installer's written agreement. \n\nInsulation material Blown mineral wool, EWI-certified batch 2026/0512 \n\nCavity width surveyed 75mm, confirmed by borescope survey 28 April 2026 \n\nGuarantee period 25 years, from 12 May 2026 to 12 May 2051 \n\nContract price £2,340.00, paid in full 12 May 2026 \n\nInsurance-backed guarantee scheme Registered with GuardBuild Warranty Ltd, scheme ref GBW-771049 \n\nMAKING  A CLAIM \n\nTo make a claim under this guarantee, contact the installer in the first instance using the details in the small print below. If the installer has ceased trading, the insurance-backed guarantee scheme referenced above will handle a valid claim instead; a separate policy document was issued for that scheme on 19 May 2026 and should be kept with this certificate. \n\n\"WarmCore Insulation\" is a trading name of Bassington Energy Solutions Ltd, registered in England and Wales No. 06612940, registered office 4 Colliery Road, \n\nBassington, Cravenshire CV11 3EF. This guarantee is issued by Bassington Energy Solutions Ltd and is not transferable to a subsequent owner of the property \n\nwithout written notice to the installer within 3 months of the change of ownership. Previous guarantee wording, edition dated 6 March 2022, is superseded by this \n\nedition, dated 1 January 2026. VAT registration number GB 442 1187 30. \n\nCIGA APPROVED\n",
+    expected: {
+    dates: ["2026-05-12","2051-05-12"],
+    provider: "Bassington Energy Solutions Ltd",
+    reference: "WC-GTE-08823",
+    dateRoles: [
+      { date: "2026-05-12", role: "issued" },
+      { date: "2051-05-12", role: "expiry" },
+    ],
+    subtype: {"kinds":["Guarantee"],"qualifiers":["Building work"]},
+    costMinor: 234000,
+    currency: "GBP",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: swept 1 September 2026, next sweep due 1 March 2027 (a six-monthly cycle). Five other printed dates are deliberately not declared: the previous sweep (3 Mar 2026), the appliance's installation date (14 Oct 2019), the installer's last service visit (18 Nov 2025, explicitly not a sweep), the trade membership's current year (1 Jan 2026 to 31 Dec 2026), and the insurance renewal (1 Jun 2026).
+    // - provider is 'CSS', the only name the trader ever gives, used as the brand mark and again in 'CSS is a member of the Guild of Master Sweeps' -- the Guild itself is a real-sounding trade body, not the provider.
+    // - reference is the certificate number CSS-0417.
+    // - costMinor is the £65.00 fee for this visit; the £2 million figure is a public liability insurance limit, not a cost.
+    // - subtype: 'Certificate' (matching the printed 'Certificate of chimney sweeping') qualified by 'Chimney'.
+    // - scheduleKind is 'service': the earlier dateRole is 'service', for the sweep actually carried out.
+    name: "chimney sweep certificate, the trader is only ever three letters",
+    filename: "fullpage-chimney-sweep-certificate.pdf",
+    text: "Chimney sweep certificate CSS-0417  \n\nCSS Chimney and flue sweeping, servicing wood and multi-fuel appliances \n\nCertificate of chimney sweeping \n\nProperty \n\nMr Huw Bowen \n\nRose Cottage, Marsh Lane, Fenmouth, Cravenshire CV2 4RD \n\nCertificate CSS-0417 \n\nDate swept 1 September 2026 \n\nPrevious sweep 3 March 2026 \n\nNext sweep due 1 March 2027 \n\nAPPLIANCE DETAILS \n\nItem Detail \n\nAppliance Freestanding multi-fuel stove, installed 14 October 2019 \n\nFlue type Twin-wall insulated, 150mm diameter \n\nFuel used Seasoned hardwood, occasional smokeless coal \n\nMethod used Rotary power sweep, full length, brushed from hearth \n\nSmoke test result Pass, no leaks detected at joints \n\nCarbon monoxide alarm checked Present and tested, battery replaced this visit \n\nSweeping frequency for a wood-burning appliance in regular use should be at least twice a year; this property is on a six-monthly cycle. The appliance was last serviced by its installer on 18 November 2025, which is a separate visit from a sweep and does not replace one. Fee charged for this visit: £65.00, paid by card on the day. \n\nCSS is a member of the Guild of Master Sweeps, membership number GMS-44712, renewed annually each January; the current membership runs from 1 January 2026 to 31 December 2026. Public liability insurance is held to £2 million, policy renewed 1 June 2026. This certificate confirms the condition found on the date swept only and is not a guarantee against chimney fires arising from later use of the appliance. \n\nSWEPT \n\nCSS · Certificate CSS-0417 Page 1 of 1\n",
+    expected: {
+    dates: ["2026-09-01","2027-03-01"],
+    provider: "CSS",
+    reference: "CSS-0417",
+    dateRoles: [
+      { date: "2026-09-01", role: "service" },
+      { date: "2027-03-01", role: "due" },
+    ],
+    subtype: {"kinds":["Certificate"],"qualifiers":["Chimney"]},
+    costMinor: 6500,
+    currency: "GBP",
+    scheduleKind: "service",
     },
   },
   {
@@ -131,6 +314,38 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     currency: "GBP",
     recurrenceMonths: 12,
     scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: quote date printed as 'Quote date: 6 October 2026' (role issued) and printed as 'Valid until: 6 November 2026' (role expiry).
+    // - provider is the advice firm that prepared and would administer the cover, Amberleigh Financial Advisers Ltd, not the underwriter Carrick Life Assurance plc.
+    // - reference is the quote reference 'AMB-CI-2026-77410' printed on page 1 and repeated on the reply slip.
+    // - costMinor is the recommended Option B monthly premium '£34.62' i.e. 3462 pence.
+    // - trap: sum assured '£150,000'.
+    // - trap: term of 25 years and cover ending in 2051, 'with cover ending in 2051'.
+    // - trap: total premiums payable over the term '£10,386.00'.
+    // - trap: alternative Option A premium '£28.15' and Option C premium '£41.90'.
+    // - trap: 'Reply by 31 October 2026 to hold this price'.
+    // - trap: proposed policy start date '1 December 2026'.
+    // - trap: insurer's name 'Carrick Life Assurance plc'.
+    // - trap: adviser's name, phone number and firm's FCA reference, 'Mr Callum Ridgeway ... telephone 01632 960482 ... FCA Reg No. 558214'.
+    // - trap: survival period 'the survival period of 14 days from diagnosis'.
+    // - trap: generic competitor comparison 'could cost up to 15% less than a typical high-street provider's equivalent cover'.
+    name: "Critical Illness Cover - Personal Quotation for Mrs Joanne Pickering",
+    filename: "critical-illness-quote.pdf",
+    text: "Critical Illness Cover - Personal Quotation  \n\nProtecting what matters \n\nQuotation prepared for: Mrs Joanne Pickering 12 Fenwick Road, Netherbourne NB6 5DA \n\nQuote reference: AMB-CI-2026-77410 Quote date: 6 October 2026 Valid until: 6 November 2026 \n\nCover underwritten by Carrick Life Assurance plc. Sum assured: £150,000 over a term of 25 years. \n\nOPTION A OPTION B — RECOMMENDED OPTION C \n\nSum assured £100,000 £150,000 £200,000 \n\nTerm 25 years 25 years 25 years \n\nYour monthly premium £28.15 £34.62 £41.90 \n\nOption B is the option recommended by your adviser and shown throughout this illustration as your quote. Based on a 25-year term, total premiums payable under Option B would be £10,386.00, with cover ending in 2051. \n\nWhat critical illness cover pays for \n\nA lump sum on diagnosis \n\nPays £150,000 if you are diagnosed with a \n\ncovered condition and survive the survival period of 14 days from diagnosis. \n\nCovered conditions \n\nIncludes heart attack, stroke, certain cancers, \n\nand other specified illnesses as set out in the policy conditions. \n\nValue for money \n\nThis plan could cost up to 15% less than a \n\ntypical high-street provider's equivalent cover over the same term. \n\nWhat is not covered \n\nConditions diagnosed before the policy start date, self-inflicted injury, and conditions not meeting the definitions set out in the policy document are not covered. \n\nNo claim is payable for a condition not surviving the 14-day survival period. \n\nYOUR  PE RSONA L  I LLUSTRAT ION \n\nA critical illness quotation prepared for you by Amberleigh Financial Advisers Ltd \n\nAmberleigh Financial Advisers Ltd — Quote AMB-CI-2026-77410 Page 1 of 2\n\nYour adviser and next steps \n\nYour quotation was prepared by Mr Callum Ridgeway of Amberleigh Financial Advisers Ltd, telephone 01632 960482. Amberleigh Financial \n\nAdvisers Ltd is authorised and regulated by the Financial Conduct Authority, FCA Reg No. 558214. \n\nIf you would like to proceed, your proposed policy start date would be 1 December 2026. Reply by 31 October 2026 to hold this price — premiums shown are not guaranteed after that date. \n\nCover would be provided by Carrick Life Assurance plc, but your plan is arranged and administered by Amberleigh Financial Advisers Ltd, who you should contact with any questions about this quotation or a future claim. \n\nReply slip — return to hold your quote \n\nI would like to proceed with Option B, monthly premium £34.62, quote reference AMB-CI-2026-77410. \n\nSignature \n\nDate \n\nFREEPOST AMBERLEIGH ADVISERS \n\nNo stamp required \n\nThis is a quotation only and does not create a contract of insurance. Cover is subject to underwriting and acceptance by Carrick Life Assurance plc. Amberleigh Financial Advisers \n\nLtd, registered in England and Wales, 9 Quayside Court, Netherbourne NB1 3DE. Critical illness cover pays out once during the life of the policy for a covered condition, subject to \n\nthe 14-day survival period and the policy definitions. Premiums are not guaranteed to remain unchanged for the whole term. \n\nAmberleigh Financial Advisers Ltd — Quote AMB-CI-2026-77410 Page 2 of 2\n",
+    expected: {
+    dates: ["2026-10-06","2026-11-06"],
+    provider: "Amberleigh Financial Advisers Ltd",
+    reference: "AMB-CI-2026-77410",
+    dateRoles: [
+      { date: "2026-10-06", role: "issued" },
+      { date: "2026-11-06", role: "expiry" },
+    ],
+    subtype: {"kinds":["Quote","Insurance"],"qualifiers":["Critical illness","Life"]},
+    costMinor: 3462,
+    currency: "GBP",
     },
   },
   {
@@ -161,6 +376,67 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
   },
   {
     // Ground-truth notes:
+    // - Registered on 18 January 2019 ('Registered on 18 January 2019') -- dateRoles start.
+    // - Renews on 18 January 2027 ('Renews on 18 January 2027') -- dateRoles renewal.
+    // - recurrenceMonths 12 printed as 'This domain renews every 12 months.'
+    // - provider is the control-panel operator 'Foxglove Hosting', the registrar/hosting company.
+    // - reference is the customer account number 'ACC-3348217'.
+    // - costMinor is the plain domain renewal price 'Domain renewal (12 months) £12.99', not the VAT-inclusive total.
+    // - subtype Domain+Subscription/Domain from the domain renewal control-panel content.
+    // - Trap: hosting plan's own price and different renewal date 'Business Hosting Plan — £89.99 per year, renews 2 November 2026'.
+    // - Trap: SSL certificate expiry 'Foxglove Domain SSL — expires 5 December 2026'.
+    // - Trap: VAT-inclusive basket total 'Total due today £15.59', a rival amount to the plain renewal price.
+    // - Trap: invoice number 'INV-2027-004471', a rival reference.
+    // - Trap: domain ID 'D4471982-EXPL', another rival reference.
+    // - Trap: DNS TTL '3600'.
+    // - Trap: '60 days after registration or transfer' transfer restriction.
+    // - Trap: price rising at next renewal 'From 18 January 2028 this domain is expected to renew at £14.99', a rival future date and amount.
+    // - Trap: promotional price ending date 'Promotional price of £9.99 was available until 1 October 2026'.
+    // - No password, API key or EPP/auth code is printed on this document.
+    name: "Foxglove Hosting — Domain Renewal",
+    filename: "domain-hosting-renewal.pdf",
+    text: "Foxglove Hosting — Domain Renewal  \n\nhttps://panel.foxglovehosting.example/domains/brindlewood-supplies.example/renewal Printed 11 September 2026 \n\nHome / Domains / brindlewood-supplies.example / Renewal \n\nFoxglove Hosting brindlewood-supplies.example \n\nAccount number ACC-3348217 \n\nDomain brindlewood-supplies.example \n\nDomain ID D4471982-EXPL \n\nRegistered on 18 January 2019 \n\nRenews on 18 January 2027 \n\nRenewal period This domain renews every 12 months. \n\nAuto-renew On \n\nNameservers ns1.foxglovehosting.example \n\nns2.foxglovehosting.example \n\nDNS TTL 3600 \n\nThis domain cannot be transferred to another registrar until 60 days after registration or transfer. \n\nHosting plan Business Hosting Plan — £89.99 per year, renews 2 November 2026 \n\nSSL certificate Foxglove Domain SSL — expires 5 December 2026 \n\nPromotional price of £9.99 was available until 1 October 2026 for new domain registrations and \n\ndoes not apply to renewals of existing domains. \n\nDomain renewal prices are reviewed annually. From 18 January 2028 this domain is expected to \n\nrenew at £14.99. \n\nRenew now \n\nOrder Summary \n\nDomain renewal (12 months) £12.99 \n\nVAT (20%) £2.60 \n\nTotal due today £15.59 \n\nInvoice INV-2027-004471 will be issued once \n\npayment for this renewal is taken. \n\nFoxglove Hosting Limited. help@foxglovehosting.example. 01632 960118. Page 1 of 1\n",
+    expected: {
+    dates: ["2019-01-18","2027-01-18"],
+    provider: "Foxglove Hosting",
+    reference: "ACC-3348217",
+    dateRoles: [
+      { date: "2019-01-18", role: "start" },
+      { date: "2027-01-18", role: "renewal" },
+    ],
+    subtype: {"kinds":["Domain","Subscription"],"qualifiers":["Domain"]},
+    costMinor: 1299,
+    currency: "GBP",
+    recurrenceMonths: 12,
+    scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: invoice issued (and paid) 2 September 2026; the lesson-block credit expires 2 March 2027, six months later. Five other printed dates are deliberately not declared: the previous block's payment date (14 Mar 2026) and its use-by-date's actual use (3 Jun 2026), the practical test booking (20 Nov 2026), the recommended mock test date (6 Nov 2026), the price-increase date (1 Jan 2026), and the ADI certificate renewal dates (4 May 2024, running to 4 May 2028).
+    // - provider is 'Pass2Drive', which never appears as ordinary text on the page -- the header signature and instructor line name only the individual instructor, C. Lewis -- and is findable solely inside the booking e-mail address and the website address.
+    // - reference is the invoice number PL-INV-2249, not the ADI badge number (449213) or the driving-association membership number (DIA-77420).
+    // - costMinor is the £360.00 total paid for the block of ten lessons, not the £34 or £36 hourly rate mentioned in the small print.
+    // - subtype: 'Course' (matching a paid block of lessons) qualified by 'Driving'.
+    // - scheduleKind is not declared: neither dateRole is 'renewal' or 'service'.
+    name: "driving lessons invoice, the instructor signs by hand and the business only lives in an e-mail address",
+    filename: "fullpage-driving-lessons-invoice.pdf",
+    text: "Driving lessons invoice PL-INV-2249  \n\nC. Lewis Approved Driving Instructor, ADI badge no. 449213 · bookings@pass2drive.co.uk · www.pass2drive.co.uk · 07700 900412 \n\nInvoice for driving lessons \n\nTo \n\nMiss Ffion Rhys \n\n3 Larchfield Crescent, Penbury, Cravenshire CV9 3TL \n\nInvoice PL-INV-2249 \n\nInvoice date 2 September 2026 \n\nPick-up point: Penbury High Street \n\nItem Amount \n\nBlock of 10 x 1-hour lessons, paid up front 360.00 \n\nTotal paid, received 2 September 2026 £360.00 \n\nThanks for booking a block of ten lessons. Lesson credits from this block must be used within 6 months, by 2 March 2027, \n\nafter which any unused credit is forfeited. Your last block, paid for on 14 March 2026, was used in full by 3 June 2026. Your \n\npractical test is currently booked for 20 November 2026 at Fenmouth test centre; a mock test is recommended around 6 \n\nNovember 2026. Please give at least 48 hours' notice to rearrange a lesson, or the lesson is charged in full. \n\nPrices last increased on 1 January 2026, from £34 to £36 an hour. I am a member of the Driving Instructors Association, membership number \n\nDIA-77420, and my Approved Driving Instructor certificate was last renewed on 4 May 2024 and runs until 4 May 2028. This invoice is a \n\nreceipt; no VAT is charged as I am not VAT registered.\n",
+    expected: {
+    dates: ["2026-09-02","2027-03-02"],
+    provider: "Pass2Drive",
+    reference: "PL-INV-2249",
+    dateRoles: [
+      { date: "2026-09-02", role: "issued" },
+      { date: "2027-03-02", role: "expiry" },
+    ],
+    subtype: {"kinds":["Course"],"qualifiers":["Driving"]},
+    costMinor: 36000,
+    currency: "GBP",
+    },
+  },
+  {
+    // Ground-truth notes:
     // - Date of inspection (page 1 and repeated in the declaration on page 11) and the recommended date of next inspection (page 2 and repeated on page 11) are the only two dates a user would track, both roled 'service'. Three organisations appear and only the contracting firm, Thornleigh Electrical Contractors Ltd, is the provider: Priorswood Lettings & Property Management is the letting agent who commissioned the report (client field, page 1), and the National Electrical Installers Register is the invented certification scheme that publishes the form and guidance notes (page 12), neither of which is the provider. Rival dates deliberately planted against the two answers: the date the report was requested (18 August 2026), the date the report was signed (03 September 2026) and issued (04 September 2026), the previous EICR date (14 March 2021), the tenant's tenancy start date (1 July 2023), the contractor's scheme registration expiry (30 April 2027), the calibration and calibration-due dates of the four test instruments on page 5 (eight dates), the date the wiring code amendment came into force (28 September 2024), and the guidance notes' own issue/copyright date (1 April 2024). The circuit schedules on pages 6-10 also carry dozens of dd/dd- and d.dd/d.dd-shaped readings (CSA pairs, OCPD/RCD ratings like 32/30, Zs max/measured pairs like 1.15/0.34) that read like dates but are not. No cost or price appears anywhere on the document — this is a certificate, not an invoice — so costMinor and currency are omitted.
     // - subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Electrical installation condition report').
     name: "electrical installation condition report, twelve pages of circuit grids and tick boxes around two service dates",
@@ -177,6 +453,35 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     subtype: {"kinds":["Inspection","Certificate","Record"],"qualifiers":["Electrical","Home","Safety","Tenancy"]},
     recurrenceMonths: 60,
     scheduleKind: "service",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - Declared issued date: 'Assessment date / certificate issued: 12 May 2026'.
+    // - Declared expiry date: 'Valid until: 11 May 2036' and 'This certificate is valid for 10 years.'
+    // - Declared provider: 'This certificate was produced by Greenline Energy Assessments Ltd', printed with its address and phone number as the firm to contact — not the accreditation scheme or the register.
+    // - Declared reference: the RRN '8823-4471-9902-1156-3390', printed identically on both pages.
+    // - No cost is declared: this document has no price, only cost estimates about the property.
+    // - Trap: the cost panel's 'Per year £871', 'Over 3 years £2,614' and 'Potential saving £456 / year' are energy-cost estimates, not a price for the certificate.
+    // - Trap: indicative improvement costs such as 'Solar water heating... £4,000–£6,000' price recommended work, not the certificate.
+    // - Trap: 'Accredited by the Home Energy Assessors Scheme (HEAS)... lodged on the National Energy Performance Register (NEPR)' names the scheme and the register, both rival provider candidates.
+    // - Trap: 'Assessor: Priya Nandakumar, membership number HEAS/2018/004471' is the individual assessor's own membership number, not the certificate reference.
+    // - Trap: 'This property's previous certificate was issued on 4 April 2016' is an earlier, superseded certificate's date.
+    // - Trap: 'Total floor area 94 m²' is a property detail, not a date or reference.
+    // - Trap: 'Year built 1938' is the property's age, not the certificate's issue date.
+    // - Trap: 'call the national helpline on 01632 960900' is a different phone number from the assessment firm's own 01632 960777.
+    name: "Energy Performance Certificate",
+    filename: "energy-performance-certificate.pdf",
+    text: "Energy Performance Certificate  \n\nEnergy Performance Certificate \n\n24 Larkspur Avenue, Hallowfield, HF3 4RT \n\nReport Reference Number \n\n8823-4471-9902-1156-3390 \n\nAssessment date / certificate issued: 12 May 2026 Valid until: 11 May 2036 This certificate is valid for 10 years. \n\nEnergy efficiency rating \n\nA 92–100 \n\nB 81–91 POTENTIAL 84 · B \n\nC 69–80 \n\nD 55–68 CURRENT 63 · D \n\nE 39–54 \n\nF 21–38 \n\nG 1–20 \n\nEstimated energy costs for this property \n\nPER Y EAR \n\n£871 OVER 3  Y EARS \n\n£2,614 POTENTI AL SAVI NG \n\n£456 / year \n\nProperty summary \n\nDwelling type Mid-terrace house Total floor area 94 m² \n\nWalls Cavity, filled Year built 1938 \n\nRoof Pitched, 150mm loft insulation Main heating \n\nGas boiler, radiators \n\nFloor Suspended, no insulation \n\nHot water From main system \n\nWindows Fully double glazed \n\nLighting 62% low energy bulbs \n\n24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390 Page 1 of 2\n\nEnergy Performance Certificate \n\n24 Larkspur Avenue, Hallowfield, HF3 4RT \n\nReport Reference Number \n\n8823-4471-9902-1156-3390 \n\nRecommended improvements \n\nIMPROVEMENT TYPICAL SAVING INDICATIVE COST \n\nTop up loft insulation to 270mm £26 / year £100–£350 \n\nCavity wall insulation top-up £115 / year £500–£1,500 \n\nSuspended floor insulation £62 / year £800–£1,200 \n\nSolar water heating £48 / year £4,000–£6,000 \n\nSolar photovoltaic panels, 2.5 kWp £270 / year £3,500–£5,500 \n\nAssessor and accreditation \n\nThis certificate was produced by Greenline Energy Assessments Ltd, 12 Riverside Court, Hallowfield, HF4 7QP. Telephone 01632 960777. \n\nAssessor: Priya Nandakumar, membership number HEAS/2018/004471. \n\nAccredited by the Home Energy Assessors Scheme (HEAS). This certificate has been lodged on the National Energy Performance Register (NEPR). \n\nThis property's previous certificate was issued on 4 April 2016. \n\nFor general information about Energy Performance Certificates, call the national helpline on 01632 960900. \n\nAbout this certificate \n\nThis certificate records how energy efficient a property is as a building, rather than how it is used and run by the people living in it. It gives a rating from A (most efficient) to G (least \n\nefficient). The estimated energy costs shown are calculated using standard assumptions about occupancy and heating patterns, and actual costs will depend on how the property is \n\nused. \n\nThe recommendations above are generic measures for a property of this type and construction. Indicative costs are approximate and will vary according to the installer chosen, the \n\nspecification of materials and local conditions. \n\n24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390 Page 2 of 2\n",
+    expected: {
+    dates: ["2026-05-12","2036-05-11"],
+    provider: "Greenline Energy Assessments Ltd",
+    reference: "8823-4471-9902-1156-3390",
+    dateRoles: [
+      { date: "2026-05-12", role: "issued" },
+      { date: "2036-05-11", role: "expiry" },
+    ],
+    subtype: {"kinds":["Certificate","Inspection"],"qualifiers":["Energy performance","Home"]},
     },
   },
   {
@@ -479,6 +784,31 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
   },
   {
     // Ground-truth notes:
+    // - dates: plan commenced 3 November 2024, certificate issued 10 November 2024, final instalment due 3 October 2026. Three other printed dates are deliberately not declared: the FCA's take-over of funeral plan regulation (29 Jul 2022, a regulatory milestone, not a date about this plan), and the two plan-document edition stamps (6 Jan 2026 and the superseded 2 Mar 2022).
+    // - provider is Millstone Prepaid Services Ltd, named in the small print as who 'Evergreen Funeral Plans' -- printed large on the certificate and used throughout -- is a trading name of, and as who is FCA-authorised to provide the plan; the nominated funeral director (Fenmouth & District Funeral Service) and the independent trust holding the funds (Cravenshire Funeral Planning Trust) are both named on the page and are neither of them the provider.
+    // - reference is the plan number EFP-0091234.
+    // - costMinor is the £3,995.00 total plan price, fixed at today's prices, not the £166.46 monthly instalment amount.
+    // - subtype: 'Plan' (matching the printed 'pre-paid funeral plan') qualified by 'Funeral'.
+    // - scheduleKind is not declared: none of the three dateRoles is 'renewal' or 'service' -- a prepaid funeral plan does not renew.
+    name: "funeral plan certificate, the trading name on the parchment is not who is FCA-authorised",
+    filename: "fullpage-funeral-plan-certificate.pdf",
+    text: "Evergreen Funeral Plans — certificate EFP-0091234  \n\nEvergreen Funeral Plans A pre-paid funeral plan, fixing today's cost against tomorrow's \n\nCERTIFICATE  OF  PLAN  OWNERSHIP \n\nPlan holder \n\nMrs Olwen Meredith \n\n16 Chapel Row, Bassington, Cravenshire CV11 5FT \n\nPlan number EFP-0091234 \n\nPlan commenced 3 November 2024 \n\nCertificate issued 10 November 2024 \n\nNominated director: Fenmouth & District Funeral Service \n\nPLAN DETAILS \n\nPlan type Simple Choice, unattended committal with optional service \n\nTotal plan price £3,995.00, fixed at today's prices \n\nPayment method 24 monthly instalments of £166.46 \n\nFinal instalment due 3 October 2026 \n\nFunds held by Cravenshire Funeral Planning Trust, an independent trust registered with the Funeral Planning Authority \n\nWHAT IS GUARANTEED \n\nOnce your plan is paid in full, the funeral director's services described in your plan documents are guaranteed at no further cost to your estate, however much prices rise before the plan is needed. Third-party costs such as a doctor's certification fee, a minister's fee or a burial plot are not fixed and are payable by your estate at the rate current when the funeral takes place. Your plan documents were last updated on 6 January 2026, replacing the edition dated 2 March 2022. \n\n\"Evergreen Funeral Plans\" is a trading name of Millstone Prepaid Services Ltd, registered in England and Wales No. 05712834, registered office 9 Millstone Yard, Bassington, Cravenshire CV11 2QE. Millstone Prepaid Services Ltd is authorised and regulated by the Financial Conduct Authority for the provision of funeral plan contracts, firm reference number 913204, following the transfer of funeral plan regulation to the FCA on 29 July 2022. This certificate is not a contract in itself; the plan terms and conditions, most recently issued 6 January 2026, form the whole agreement between you and Millstone Prepaid Services Ltd.\n",
+    expected: {
+    dates: ["2024-11-03","2024-11-10","2026-10-03"],
+    provider: "Millstone Prepaid Services Ltd",
+    reference: "EFP-0091234",
+    dateRoles: [
+      { date: "2024-11-03", role: "start" },
+      { date: "2024-11-10", role: "issued" },
+      { date: "2026-10-03", role: "due" },
+    ],
+    subtype: {"kinds":["Plan"],"qualifiers":["Funeral"]},
+    costMinor: 399500,
+    currency: "GBP",
+    },
+  },
+  {
+    // Ground-truth notes:
     // - Date of inspection, date of issue and the engineer's/receiving person's signature dates are all the same calendar day (03 August 2026), as is normal CP12 practice, so only one ISO date exists on the page and it is labelled once as role 'service'; the issued/signed labels are not treated as separate dateRoles entries since they share the one underlying date. The document never prints a next-inspection or expiry date anywhere (including the running header/footer) — only the digit interval '12 months' in the passband and small print — so recurrenceMonths=12 is declared but no next date is added to `dates`. No cost is stated anywhere on the document, so costMinor/currency are omitted.
     // - subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Gas safety record').
     name: "gas safety record, interval in digits and no next date",
@@ -515,6 +845,79 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     costMinor: 4250,
     currency: "GBP",
     recurrenceMonths: 1,
+    scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: plan starts 6 April 2026 and renews 6 April 2027. Three other printed dates are deliberately not declared: a claim's treatment date (14 Jul 2026), the same claim's payment date (2 Aug 2026), and the benefit-limits review date (1 Jan 2026, unchanged from the previous year so not itself a plan date); the rules-booklet edition stamp (4 Sep 2024) is a print-run date.
+    // - provider is Bramwell Friendly Society Ltd, named only in the small print as who 'FeelGood Cash Plan' -- printed large as the brand everywhere else on the page -- is a trading name of.
+    // - reference is the membership number FGP-MEM-338420.
+    // - costMinor is the £14.50 monthly premium, not any of the five annual benefit limits in the table.
+    // - subtype: 'Plan' (matching the printed 'Cash Plan') qualified by 'Health'.
+    // - scheduleKind is 'renewal': the later dateRole is 'renewal', and the page confirms the plan renews automatically each year.
+    // - recurrenceMonths is 1: the plan is billed '1 month at a time', printed in digits.
+    name: "health cash plan certificate, the friendly society only appears in the small print",
+    filename: "fullpage-health-cash-plan-certificate.pdf",
+    text: "FeelGood Cash Plan — membership certificate FGP-MEM-338420  \n\nFeelGood Cash Plan Everyday healthcare cover for you and your family \n\nMembership certificate \n\nMember \n\nMrs Sioned Pritchard \n\nMembership number FGP-MEM-338420 \n\nCover level: Family Plus \n\nPlan start 6 April 2026 \n\nRenewal date 6 April 2027 \n\nWhat you can claim back each year \n\nBenefit Annual limit \n\nDental treatment and check-ups £250 \n\nOptical, including eye tests £180 \n\nPhysiotherapy and osteopathy £400 \n\nConsultations and diagnostic tests £300 \n\nHealth screening (once every 2 years) £120 \n\nMONTHLY  PREMIUM \n\n£14.50 \n\nYour plan is billed 1 month at a time by direct debit and renews automatically each year on 6 April unless you cancel it. A claim for treatment \n\nreceived before 6 April 2026, when your plan began, cannot be paid. You made one claim in the plan's first year, for dental treatment received \n\non 14 July 2026, paid on 2 August 2026. \n\nFeelGood Cash Plan is a trading name of Bramwell Friendly Society Ltd, incorporated under the Friendly Societies Act 1992, registered number 6612FS, registered office 11 \n\nPriory Court, Larchgate, Wexbridge WX4 1RN, authorised by the Prudential Regulation Authority and regulated by the Financial Conduct Authority and the Prudential \n\nRegulation Authority, firm reference number 110493. Benefit limits were last reviewed on 1 January 2026 and are unchanged from the previous scheme year. Rules booklet \n\nedition dated 4 September 2024. \n\nBramwell Friendly Society Ltd · Membership FGP-MEM-338420 · Page 1 of 1\n",
+    expected: {
+    dates: ["2026-04-06","2027-04-06"],
+    provider: "Bramwell Friendly Society Ltd",
+    reference: "FGP-MEM-338420",
+    dateRoles: [
+      { date: "2026-04-06", role: "start" },
+      { date: "2027-04-06", role: "renewal" },
+    ],
+    subtype: {"kinds":["Plan"],"qualifiers":["Health"]},
+    costMinor: 1450,
+    currency: "GBP",
+    recurrenceMonths: 1,
+    scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: the licence is issued 14 January 2026 and its period runs to 10 January 2027 (the 'Period of this licence' field). Six other printed dates are deliberately not declared: the superseded licence's issue date (12 Jan 2025), the previous licence's end date (13 Jan 2026, one day before this one starts), the park rules revision dates (6 Nov 2025 and 14 Feb 2023), the fire risk assessment (3 Sep 2025), the electrical bollard inspection (18 Oct 2025), the park insurance renewal (1 Oct 2025), the gas safety check (29 Aug 2025), the council site licence renewal (1 Apr 2024), the pitch fee due date (1 Mar 2026, a payment deadline not a licence date), the unit's original siting date (22 Apr 2019), and the wording edition date (3 Jul 2024). provider is the park operator that issued the licence, not the council that issued the underlying site licence referenced in the subtitle. reference is the licence number FSH-0412, not the pitch number (412), the council licence ref (CDC/SL/00417), or any of the compliance-table reference codes. costMinor is the annual pitch fee of £4,150.00, printed with a currency symbol as the cost of the thing itself.
+    // - subtype is a set of kinds/qualifiers naming groups in src/server/documents/subtype-taxonomy.json, per the owner's ruling (#989): 'Licence' matches the printed 'Pitch site licence' title directly; no qualifier group in the taxonomy fits a holiday-park pitch closely enough to declare one, so qualifiers is omitted.
+    // - scheduleKind is not declared: neither dateRole is 'renewal' or 'service', so nothing is derived for it to match.
+    name: "holiday lodge pitch licence, the reply-by stamp and season dates are not the licence period",
+    filename: "fullpage-holiday-lodge-site-licence.pdf",
+    text: "Site licence renewal — pitch FSH-0412  \n\n✆ \n\nFENWATER SHORES HOLIDAY PARK LTD Fenwater Lane, Marsh Cove, Aldreth Bay, Cravenshire CV31 8QT · 01924 552 301 \n\nPITCH SITE LICENCE \n\nIssued under the park's site licence from Cravenshire District Council, licence ref CDC/SL/00417 \n\nLicence holder \n\nMr Aled Fenner & Mrs Bronwen Fenner \n\n14 Sycamore Rise, Penbury, Cravenshire CV9 2LR \n\nLicence reference FSH-0412 \n\nPitch number 412, Willow Row \n\nIssued 14 January 2026 \n\nSuperseding licence dated 12 January 2025 \n\nPERIOD OF  THIS LICENCE \n\nLicence period 14 January 2026 to 10 January 2027, subject to the park's operating season \n\nPark operating season 1 March to 10 January each year; the park is closed to occupation between 11 January and \n\nthe last day of February \n\nStatic unit ABI Fenwater 38x12 holiday lodge, plate number AL-2019-3307, sited since 22 April 2019 \n\nAnnual pitch fee £4,150.00, due in full by 1 March 2026 or by the instalment plan overleaf \n\nThis licence permits the holder to keep the static unit described above on pitch 412 for holiday purposes only during the period shown, in \n\naccordance with the park rules dated 6 November 2025 and the written statement supplied on first occupation. It is not a tenancy and \n\nconfers no right of permanent residence. \n\nCOMPLIANCE RECORD REFERRED TO IN  THIS LICENCE \n\nItem Date Reference \n\nPark fire risk assessment 3 September 2025 FRA-2025-09 \n\nElectrical hook-up bollard inspection, Willow Row 18 October 2025 ELEC-WR-25 \n\nPark public liability insurance renewed 1 October 2025 PLI-771204 \n\nGas safety check, communal shower block 29 August 2025 CP12-SB-114 \n\nPrevious licence period ended 13 January 2026 FSH-0398 \n\nCouncil site licence last renewed 1 April 2024 CDC/SL/00417 \n\nCONDITIONS \n\nThe unit must not be occupied as the holder's main residence. Sub-letting requires written consent. The holder must maintain current insurance on the unit \n\nthroughout the licence period and provide evidence on request. Park rules, as revised from time to time (last revised 6 November 2025, previously revised 14 \n\nFebruary 2023), form part of this licence. A pitch fee unpaid 28 days after the due date above may result in the licence not being offered for renewal the \n\nfollowing season. This licence was prepared using the park's standard wording, edition dated 3 July 2024, and supersedes all earlier editions. \n\nRENE WED \n\nFenwater Shores Holiday Park Ltd, registered in England and Wales No. 05512834 Licence FSH-0412 · Page 1 of 1\n",
+    expected: {
+    dates: ["2026-01-14","2027-01-10"],
+    provider: "Fenwater Shores Holiday Park Ltd",
+    reference: "FSH-0412",
+    dateRoles: [
+      { date: "2026-01-14", role: "issued" },
+      { date: "2027-01-10", role: "expiry" },
+    ],
+    subtype: {"kinds":["Licence"]},
+    costMinor: 415000,
+    currency: "GBP",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: cover starts 4 October 2026 and renews 4 October 2027. Two other printed dates are deliberately not declared: the schedule issue date (21 Sep 2026) and the no-claims history review date (1 Sep 2026). The scheme terms edition stamp (3 Jul 2024) is a print-run date, not a policy date, and is also not declared.
+    // - provider is HomeGuard365, which never appears as ordinary text anywhere on the page -- the letterhead only carries the generic scheme title 'Home Emergency Response Scheme' -- and is findable solely inside the claims e-mail address and the claims-portal web address in the 'Making a claim' section. Two other named organisations are deliberately not the provider: Casterbridge Insurance plc, the underwriter, and Millrace Home Assist Brokers Ltd, the broker that arranged the policy; the customer's day-to-day dealings (the claims line and portal) are with HomeGuard365, the same test the owner applied to a motor policy's broker versus its underwriter (#989).
+    // - reference is the policy number HG365-POL-552017.
+    // - costMinor is the £186.00 annual premium, not last year's premium of £171.00 or any of the five per-claim callout limits in the cover table.
+    // - subtype: 'Insurance' qualified by 'Home'.
+    // - scheduleKind is 'renewal': the later dateRole is 'renewal', which the policy itself confirms ('Your policy renews automatically each year').
+    name: "home emergency schedule, the scheme's generic title carries no provider name at all",
+    filename: "fullpage-home-emergency-cover-schedule.pdf",
+    text: "Home emergency cover schedule HG365-POL-552017  \n\nHOME EMERGENCY RESPONSE SCHEME \n\n24-hour cover for boilers, plumbing, electrics and drainage \n\nPolicy schedule \n\nPolicyholder \n\nMr Gethin Prosser \n\n22 Millbrook Terrace, Fenmouth, Cravenshire CV2 5JD \n\nPolicy number HG365-POL-552017 \n\nCover start 4 October 2026 \n\nRenewal date 4 October 2027 \n\nSchedule issued 21 September 2026 \n\nWHAT  IS COVERED \n\nSection Callout limit \n\nBoiler and central heating breakdown £500 per claim, unlimited claims \n\nPlumbing and drainage emergencies £300 per claim, up to 3 claims a year \n\nHome electrics £300 per claim, up to 2 claims a year \n\nHome security (locks and glazing) £250 per claim, up to 2 claims a year \n\nPest control call-out £120 per claim, 1 claim a year \n\nANNUAL  PREMIUM \n\n£186.00 \n\nThis schedule confirms your cover from 4 October 2026 to 4 October 2027. Your policy renews automatically each year on 4 October unless you cancel it; a renewal notice \n\nwill be sent to you around 21 days beforehand. Last year's premium, for the period 4 October 2025 to 4 October 2026, was £171.00. \n\nMAKING  A CLAIM \n\nCall our 24-hour claims line on 0330 660 1187 and quote your policy number. You can also raise a claim by emailing claims@homeguard365.co.uk with photographs of the \n\nfault, or through our online portal at www.homeguard365.co.uk/claim. Please do not arrange your own engineer without authorisation first, or the cost may not be \n\nreimbursed. \n\nCover under this scheme is underwritten by Casterbridge Insurance plc, registered in England and Wales No. 03217740, authorised by the Prudential Regulation Authority and \n\nregulated by the Financial Conduct Authority and the Prudential Regulation Authority, firm reference number 204471. This policy is arranged through Millrace Home Assist \n\nBrokers Ltd, FCA firm reference number 559812. Your no-claims history was last reviewed on 1 September 2026. Scheme terms edition dated 3 July 2024. If we are unable to \n\nmeet our obligations you may be entitled to compensation from the Financial Services Compensation Scheme. \n\nHome Emergency Response Scheme · HG365-POL-552017 Page 1 of 1\n",
+    expected: {
+    dates: ["2026-10-04","2027-10-04"],
+    provider: "HomeGuard365",
+    reference: "HG365-POL-552017",
+    dateRoles: [
+      { date: "2026-10-04", role: "start" },
+      { date: "2027-10-04", role: "renewal" },
+    ],
+    subtype: {"kinds":["Insurance"],"qualifiers":["Home"]},
+    costMinor: 18600,
+    currency: "GBP",
     scheduleKind: "renewal",
     },
   },
@@ -634,6 +1037,39 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2027-09-08", role: "expiry" },
     ],
     subtype: {"kinds":["Inspection","Certificate"],"qualifiers":["MOT","Motor"]},
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: invoice date printed as 'Invoice date: 02/09/2026' (role issued) and due date printed as 'Due date: 15/09/2026' (role due).
+    // - provider is the nursery itself, 'Little Acorns Day Nursery', not the 'Bramblewood Childcare Group' it belongs to.
+    // - reference is the account number '1044829', printed in the invoice grid and repeated in the remittance panel, not the invoice number.
+    // - costMinor is the total payable '£1,087.60' i.e. 108760 pence.
+    // - trap: invoice number 'INV-045821'.
+    // - trap: session rate '£68.50 / day'.
+    // - trap: funded-hours credit shown as a negative amount '−£190.40'.
+    // - trap: balance brought forward from August 2026 '£45.00'.
+    // - trap: late payment charge 'A late payment charge of £25.00 applies to any balance left unpaid 7 days after the due date'.
+    // - trap: autumn term dates '2 September 2026 to 18 December 2026'.
+    // - trap: fee increase notice 'fees will increase from 1 January 2027'.
+    // - trap: registration fee mention 'Registration fees (one-off, charged on enrolment) are non-refundable'.
+    // - trap: the group's name 'Bramblewood Childcare Group'.
+    // - trap: early years registration number 'EY-558214'.
+    // - trap: bank details 'Sort code: 40-51-62, Account number: 20194837'.
+    name: "Little Acorns Day Nursery - September 2026 fees invoice",
+    filename: "nursery-fees-invoice.pdf",
+    text: "Little Acorns Day Nursery - Invoice  \n\nLittle Acorns Day Nursery part of the Bramblewood Childcare Group \n\n22 Orchard Lane, Bexdale BX3 7QL \n\nTel: 01632 960774  |  billing@littleacorns-bexdale.example \n\nEarly years registration: EY-558214 \n\nInvoice number INV-045821 \n\nAccount number 1044829 \n\nInvoice date 02/09/2026 \n\nDue date 15/09/2026 \n\nChild Freddie Marsh \n\nFEES FOR SEPTEMBER 2026 \n\nDESCRIPTION QTY RATE AMOUNT \n\nFull day sessions (8:00–18:00), 18 days 18 £68.50 / day £1,233.00 \n\nFunded hours credit (15 hrs/week government funding) – – −£190.40 \n\nBalance brought forward from August 2026 – – £45.00 \n\nSubtotal £1,087.60 \n\nTotal payable £1,087.60 \n\nAutumn term dates: 2 September 2026 to 18 December 2026. \n\nPlease note: fees will increase from 1 January 2027. Revised rates will be sent separately. \n\nA late payment charge of £25.00 applies to any balance left unpaid 7 days after the due date. \n\nRegistration fees (one-off, charged on enrolment) are non-refundable and are not included on this invoice. \n\nChildcare vouchers: we accept salary-sacrifice childcare vouchers. Please ask your voucher provider to quote account number 1044829. \n\nREMITTANCE ADVICE \n\nPay to: Little Acorns Day Nursery \n\nSort code: 40-51-62 \n\nAccount number: 20194837 \n\nReference: 1044829 \n\nAmount due: £1,087.60 \n\nDue date: 15 September 2026 \n\nPlease quote your account number 1044829 with all payments.\n",
+    expected: {
+    dates: ["2026-09-02","2026-09-15"],
+    provider: "Little Acorns Day Nursery",
+    reference: "1044829",
+    dateRoles: [
+      { date: "2026-09-02", role: "issued" },
+      { date: "2026-09-15", role: "due" },
+    ],
+    subtype: {"kinds":["Fees","Bill"],"qualifiers":["Childcare"]},
+    costMinor: 108760,
+    currency: "GBP",
     },
   },
   {
@@ -1566,6 +2002,44 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
   },
   {
     // Ground-truth notes:
+    // - Cover starts 1 April 2026 ('Cover starts: 1 April 2026') -- dateRoles start.
+    // - Renewal date 1 April 2027 ('Your renewal date is 1 April 2027') -- dateRoles renewal.
+    // - recurrenceMonths 12 printed as 'This is a 12 month policy.'
+    // - provider is the trading name that sells and administers ('THORNBURY PET COVER' banner), not the parent it is a trading name of and not the underwriter.
+    // - reference is the policy number 'TPC-2026-0447182'.
+    // - costMinor is the annual premium 'Annual premium (paid in full): £287.64.'
+    // - subtype Insurance/Pet from the 'Thornbury Pet Cover' pet insurance schedule content.
+    // - Trap: cover end date 31 March 2027 printed as 'Cover ends: 31 March 2027', a plausible wrong renewal/expiry date.
+    // - Trap: direct debit collection date 'collected by direct debit on the 1st of each month'.
+    // - Trap: pet's date of birth '14 June 2019', a plausible wrong start date.
+    // - Trap: microchip date '2 July 2019', another plausible wrong date.
+    // - Trap: 14-day cooling-off period ('You have a 14-day cooling-off period'), a rival number to recurrenceMonths.
+    // - Trap: vet fee limit '£7,500', a plausible wrong costMinor.
+    // - Trap: excess 'An excess of £95 applies per condition'.
+    // - Trap: monthly instalment price '£26.15' and the higher 'Total payable if you pay monthly: £313.80', both rival amounts to the annual premium.
+    // - Trap: separate quotation reference 'Q-8820193', a rival reference.
+    // - Trap: parent 'Millbrace Insurance Services Limited' and underwriter 'Coldharbour Insurance Limited', both rival providers.
+    // - Trap: company number '04471829' and VAT number 'GB 774 4471 82', rival reference-shaped numbers.
+    name: "Thornbury Pet Cover — Policy Schedule",
+    filename: "pet-insurance-schedule.pdf",
+    text: "Thornbury Pet Cover — Policy Schedule  \n\nTHORNBURY PET COVER Thornbury Pet Cover is a trading name of Millbrace Insurance Services Limited. \n\nPolicies are underwritten by Coldharbour Insurance Limited. \n\nPOLICY  SCHEDULE \n\nPOLICYHOLDER Mrs Eleanor Whitfield \n\nADDRESS 14 Sycamore Grove, Bramfield, \n\nBF12 4QW \n\nPOLICY NUMBER TPC-2026-0447182 \n\nQUOTATION REF. Q-8820193 \n\nPET'S NAME Bramble \n\nSPECIES / BREED Dog — Cocker Spaniel \n\nSEX Male, neutered \n\nDATE OF BIRTH 14 June 2019 \n\nMICROCHIP NUMBER 900215001234567 \n\nMICROCHIP DATE 2 July 2019 \n\nPERIOD OF COVER \n\nCover starts: 1 April 2026. Cover ends: 31 March 2027. \n\nThis is a 12 month policy. \n\nYour renewal date is 1 April 2027. \n\nPREMIUM AND PAYMENT \n\nAnnual premium (paid in full): £287.64. \n\nAlternatively, pay by 12 monthly instalments of £26.15, collected by direct debit on the 1st of each month. Total payable if you \n\npay monthly: £313.80. \n\nBENEFITS SUMMARY \n\nBenefit Limit \n\nVet fees, per condition per year £7,500 \n\nComplementary treatment £500 per year \n\nThird-party liability (dogs only) £1,000,000 \n\nDeath of your pet from illness or injury up to £2,000 \n\nOverseas travel (up to 30 days) £1,000 \n\nAdvertising and reward if your pet goes missing £750 \n\nBoarding fees if you are hospitalised £500 \n\nAn excess of £95 applies per condition, per year of insurance, and is payable towards each claim. \n\nThornbury Pet Cover, PO Box 4471, Bramfield, BF1 9ZZ. Telephone 01632 960221. Page 1 of 2\n\nTHORNBURY PET COVER — POLICY SCHEDULE (continued) Policy number: TPC-2026-0447182 \n\nWHAT IS NOT COVERED \n\nThis policy does not cover: pre-existing conditions present or showing signs before 1 April 2026; routine or preventive treatment, including \n\nvaccinations and worming; dental treatment unless the optional dental add-on is shown on this schedule; costs arising from breeding or \n\npregnancy; cosmetic procedures; and claims made after the period of cover shown above has ended. \n\nHOW TO CLAIM \n\nSubmit your claim form within 30 days of treatment, together with the itemised invoice from your vet. Claims line: 0808 157 0142. Quote your \n\nclaims reference, which begins TPC-CLM- followed by your policy number. \n\nYOUR RIGHT TO CANCEL \n\nYou have a 14-day cooling-off period, starting on the day the policy begins or the day you receive your policy documents, whichever is later. If you \n\ncancel after this period, a proportional charge for the time you have been covered will apply, and any instalments already collected are non- \n\nrefundable in part. \n\nCOMPLAINTS \n\nIf you are unhappy with our service, write to the Customer Relations Team at the address below. If we cannot resolve things to your satisfaction, \n\nyou may refer your complaint to the Financial Ombudsman Service. \n\nREGULATORY  AND COMPANY  INFORMATION \n\nThornbury Pet Cover is authorised and regulated by the Financial Conduct Authority. Coldharbour Insurance Limited, the underwriter of this \n\npolicy, is authorised and regulated by the Financial Conduct Authority. Millbrace Insurance Services Limited is registered in England and Wales, \n\ncompany number 04471829. VAT registration number GB 774 4471 82. \n\nYour quotation reference was Q-8820193. Please keep this schedule with your policy documents. \n\nThornbury Pet Cover, PO Box 4471, Bramfield, BF1 9ZZ. help@thornburypet.example Page 2 of 2\n",
+    expected: {
+    dates: ["2026-04-01","2027-04-01"],
+    provider: "Thornbury Pet Cover",
+    reference: "TPC-2026-0447182",
+    dateRoles: [
+      { date: "2026-04-01", role: "start" },
+      { date: "2027-04-01", role: "renewal" },
+    ],
+    subtype: {"kinds":["Insurance"],"qualifiers":["Pet"]},
+    costMinor: 28764,
+    currency: "GBP",
+    recurrenceMonths: 12,
+    scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
     // - Chose role 'service' over 'due' for the next-vaccination date: it denotes the next scheduled veterinary appointment/procedure (like the gas-safety-record precedent, where an inspection date keeps the 'service' role whether past or future), not a payment or response deadline, which is what the corpus otherwise uses 'due' for. scheduleKind follows as 'service' per the derivation rule (omit unless a date is renewal/service). Excluded from dates/dateRoles: all eleven vial batch expiry dates (the deliberate trap — shelf-life of the medicine, not an action date), the six worming/flea dates and their word-only 'monthly'/'every 3 months' intervals, the card issue date, the animal's date of birth and spay date, and the historical vaccination-given dates — none of these is what a careful owner would act on. reference is the microchip number (verbatim, stable) rather than the client account number or any vaccine batch. recurrenceMonths omitted: the annual booster interval is stated only in words ('annual booster'), never in digits, so the digits-in-evidence rule blocks it. costMinor/currency omitted: no fee is stated anywhere on the card, only the insurance cover limit, which is not a cost being charged.
     // - The card's small print used to explain that the vial expiry column was not actionable. That sentence was removed: a real card does not narrate its own trap, and leaving it in handed the extractor the answer.
     // - subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Health record').
@@ -1581,6 +2055,123 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     ],
     subtype: {"kinds":["Vaccination","Record","Appointment"],"qualifiers":["Pet"]},
     scheduleKind: "service",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - Ticket valid from 01/09/2026 ('VALID FROM 01/09/2026') -- dateRoles start.
+    // - Ticket valid until 31/08/2027 ('VALID UNTIL 31/08/2027') -- dateRoles expiry.
+    // - No scheduleKind or recurrenceMonths declared: an annual season ticket does not print a recurring instalment count.
+    // - provider is the issuing train operator 'ISSUED BY CHEDDLETON RAIL', who would be contacted.
+    // - reference is the season ticket number 'ST-0294817-6'.
+    // - costMinor is the price paid, 'Annual season ticket £3,412.00'.
+    // - subtype Season ticket/Transport from the annual rail season ticket content.
+    // - Trap: date of purchase 'Date of purchase: 24 August 2026', a plausible wrong start date.
+    // - Trap: photocard number 'PHOTOCARD PC 552013847' with its own different expiry 'EXPIRES 14/02/2028'.
+    // - Trap: delay compensation line 'Claims for delay compensation must be submitted within 28 days'.
+    // - Trap: equivalent monthly price '£322.50', a rival amount to the annual cost.
+    // - Trap: first class upgrade price '£5,120.00 per year', another rival amount.
+    // - Trap: refund administration fee '£10.00', another rival amount.
+    // - Trap: industry body name 'the Interoperator Ticketing Council', a rival organisation to the operator.
+    // - Trap: station names 'MILLBROOK CROSS' and 'FENWICK PARKWAY'.
+    // - Trap: railcard discount code 'RC-229104', a rival reference-shaped code.
+    name: "Cheddleton Rail — Annual Season Ticket",
+    filename: "rail-season-ticket.pdf",
+    text: "Cheddleton Rail — Season Ticket  \n\nANNUAL SEASON TICKET \n\nTICKET NO. ST-0294817-6 \n\nFROM MILLBROOK CROSS \n\nTO FENWICK PARKWAY \n\nROUTE ANY PERMITTED \n\nVALID FROM 01/09/2026 \n\nVALID UNTIL 31/08/2027 \n\nCLASS STANDARD \n\nRAILCARD COASTWAY SAVER RC-229104 \n\nISSUED BY CHEDDLETON RAIL \n\nPHOTOCARD PC 552013847   —   EXPIRES 14/02/2028 \n\nTICKET OFFICE  RECEIPT \n\nIssued at Millbrook Cross ticket office — till 4, agent ID 118. \n\nDate of purchase: 24 August 2026. \n\nItem: Annual Season Ticket, Millbrook Cross to Fenwick Parkway, Standard Class. \n\nRailcard discount applied: Coastway Saver Railcard, code RC-229104. \n\nAnnual season ticket £3,412.00 \n\nEquivalent monthly price (for comparison only) £322.50 \n\nFirst class upgrade, per year, if purchased separately £5,120.00 \n\nRefund administration fee (applies to any refund) £10.00 \n\nPayment method: debit card ending 4471. Amount charged today: £3,412.00. \n\nCONDITIONS OF USE \n\nThis ticket is issued subject to Cheddleton Rail's Conditions of Carriage and the rules of the Interoperator Ticketing Council. It is not \n\ntransferable and must be produced, together with your photocard, whenever asked by railway staff. If your photocard is lost or damaged, a \n\nreplacement must be obtained before you travel; your photocard shown above expires separately from this season ticket. \n\nClaims for delay compensation must be submitted within 28 days of the date of travel affected, quoting your season ticket number. \n\nRefunds on unused season tickets are calculated on a daily basis from the date the ticket is returned, less the refund administration fee \n\nshown above. \n\nCheddleton Rail. Lost photocards: 01632 960774. www.cheddletonrail.example\n",
+    expected: {
+    dates: ["2026-09-01","2027-08-31"],
+    provider: "Cheddleton Rail",
+    reference: "ST-0294817-6",
+    dateRoles: [
+      { date: "2026-09-01", role: "start" },
+      { date: "2027-08-31", role: "expiry" },
+    ],
+    subtype: {"kinds":["Season ticket"],"qualifiers":["Transport"]},
+    costMinor: 341200,
+    currency: "GBP",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - Declared start date: the permit panel's 'Valid from 01/07/2026'.
+    // - Declared expiry date: the permit panel's 'Expires 30/06/2027'.
+    // - Declared provider: 'MARCHFORD BOROUGH COUNCIL — PARKING SERVICES', named throughout the permit and covering notice.
+    // - Declared reference: the permit panel's 'Permit number RP-2026-118824'.
+    // - Declared cost: the permit panel's 'Annual permit fee paid: £45.00' — costMinor 4500, currency GBP.
+    // - Trap: 'We received your application on 14 June 2026 and your permit was issued on 22 June 2026' are processing dates, not the validity window.
+    // - Trap: the vehicle details table's 'Vehicle tax due 01/09/2026' and 'MOT expiry 14/03/2027' are vehicle dates, not permit dates.
+    // - Trap: 'A second permit for another vehicle at this household costs £90.00 per year' prices a different permit.
+    // - Trap: 'A book of 20 visitor permits... costs £25.00' prices a different product entirely.
+    // - Trap: 'Penalty Charge Notice of £70, reduced to £35 if paid within 14 days' is a fine, not the permit fee.
+    // - Trap: 'Zone F restrictions operate Monday to Saturday, 8:30am to 6:30pm' is the zone's operating hours, not part of the permit's own dates.
+    // - Trap: 'Permits... are printed and posted on the council's behalf by Northgate Civic Services Ltd' names a contractor, not the issuing provider.
+    // - Trap: 'issued on production of a Council Tax bill dated 3 June 2026' is a proof-of-residency document with its own date.
+    name: "Residents' parking permit",
+    filename: "residents-parking-permit.pdf",
+    text: "Residents Parking Permit  \n\nCovering notice — your residents' parking permit Council ref: PKS/2026/07182 \n\nDear Mr Whitfield, \n\nWe received your application on 14 June 2026 and your permit was issued on 22 June 2026, on production of a \n\nCouncil Tax bill dated 3 June 2026 as proof of residency. Your permit is enclosed above; please detach it along the \n\nperforation and display it flat on your dashboard so that the registration and expiry date are clearly visible through the \n\nwindscreen. \n\nVehicle details held on file \n\nRegistration LT19 KXM \n\nVehicle tax due 01/09/2026 \n\nMOT expiry 14/03/2027 \n\nZone F rules \n\nThis permit is valid only for parking within Zone F — Marchford North, in marked resident bays. \n\nZone F restrictions operate Monday to Saturday, 8:30am to 6:30pm. Parking is unrestricted outside these hours. \n\nA second permit for another vehicle at this household costs £90.00 per year. \n\nA book of 20 visitor permits, for guests without their own permit, costs £25.00. \n\nVehicles parked in Zone F without a valid permit displayed may receive a Penalty Charge Notice of £70, reduced to \n\n£35 if paid within 14 days. \n\nIf your details change \n\nTell us straight away if you change your vehicle or move address, so your permit can be reissued. Write to Marchford \n\nBorough Council, Parking Services, 40 Guildhall Square, Marchford, MF2 1AA, call 01632 960223, or email \n\nparking@marchford.example. \n\nPermits for Marchford Borough Council are printed and posted on the council's behalf by Northgate Civic Services Ltd. This notice is not a VAT invoice. \n\nMARCHFORD BOROUGH COUNCIL — PARKING SERVICES RES IDENT  PERM IT \n\nZONE F — MARCHFORD NORTH \n\nVEHICLE  REG ISTRATION \n\nLT19 KXM PERMIT  NUMBER \n\nRP-2026-118824 VEHICLE  MAKE/MODEL \n\nFORD FOCUS \n\nVAL ID  FROM \n\n01/07/2026 EXPIRES \n\n30/06/2027 \n\nAnnual permit fee paid: £45.00 \n\n✂  detach along this line  and display in the  windscreen,  facing outward\n",
+    expected: {
+    dates: ["2026-07-01","2027-06-30"],
+    provider: "Marchford Borough Council",
+    reference: "RP-2026-118824",
+    dateRoles: [
+      { date: "2026-07-01", role: "start" },
+      { date: "2027-06-30", role: "expiry" },
+    ],
+    subtype: {"kinds":["Parking permit","Permit"],"qualifiers":["Parking","Council"]},
+    costMinor: 4500,
+    currency: "GBP",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: contract started 12 March 2026 and its minimum term, and the printed renewal, both fall on 12 March 2027. Seven other printed dates are deliberately not declared: the invoice date (5 Sep 2026), the direct debit collection date (15 Sep 2026), the previous month's bill date (5 Aug 2026), the four billing-history dates (05/08/2026, 05/07/2026, 05/06/2026, 05/05/2026), the last price review (1 Jun 2026) and next price review (1 Jun 2027), and the terms edition stamp (3 Feb 2025).
+    // - provider is 'Starview Satellite TV', printed large in the letterhead and confirmed by name in the small print ('Starview Satellite TV is a registered trademark of Starview Broadcasting Ltd'); the registered company name is a rival correct-ish answer but the brand is what the customer deals with and what the invoice is issued under.
+    // - reference is the account number STV-AC-774213.
+    // - costMinor is the £42.99 total due, not any of the four individual charge or discount lines that sum to it, and not any of the four historic billing amounts.
+    // - subtype: 'Subscription' qualified by 'TV'.
+    // - scheduleKind is 'renewal': the later dateRole is 'renewal', and the page confirms the contract renews automatically.
+    // - recurrenceMonths is 1: the package is billed '1 month in advance', printed in digits.
+    name: "satellite TV invoice, a plain letterhead among a page of billing-history dates",
+    filename: "fullpage-satellite-tv-subscription-invoice.pdf",
+    text: "Starview Satellite TV — invoice STV-AC-774213  \n\nStarview Satellite TV Freedom Package · 0800 220 1187 · www.starviewtv.example \n\nYour monthly invoice \n\nAccount holder \n\nMr Idris Coleman \n\n5 Beacon Rise, Marsh Cove, Aldreth Bay, Cravenshire CV31 4TP \n\nAccount STV-AC-774213 \n\nInvoice date 5 September 2026 \n\nContract start 12 March 2026 \n\nMinimum term ends 12 March 2027 \n\nTHIS  MONTH'S  CHARGES \n\nItem Amount \n\nFreedom Package, billed 1 month in advance 39.99 \n\nSports add-on 15.00 \n\nMultiscreen box rental 6.00 \n\nLoyalty discount -18.00 \n\nTotal due £42.99 \n\nDIRECT DEBIT COLLECTION \n\n15 September 2026 \n\nYour contract renews for a further 12 months on 12 March 2027 unless you tell us otherwise, at which point your minimum term discount may \n\nchange. Last month's bill, dated 5 August 2026, was £42.99, the same as this month. \n\nBILLING HISTORY \n\nDate Amount \n\n05/08/2026 £42.99 \n\n05/07/2026 £42.99 \n\n05/06/2026 £38.99 \n\n05/05/2026 £38.99 \n\nStarview Satellite TV is a registered trademark of Starview Broadcasting Ltd, registered in England and Wales No. 04217740, registered office Starview House, 2 Meridian Way, \n\nLarchgate, Wexbridge WX9 4QF. VAT registration number GB 771 2049 88. Prices last reviewed 1 June 2026; your next annual price review will take effect from 1 June 2027. \n\nTerms and conditions edition dated 3 February 2025. \n\nStarview Broadcasting Ltd · Account STV-AC-774213 Page 1 of 1\n",
+    expected: {
+    dates: ["2026-03-12","2027-03-12"],
+    provider: "Starview Satellite TV",
+    reference: "STV-AC-774213",
+    dateRoles: [
+      { date: "2026-03-12", role: "start" },
+      { date: "2027-03-12", role: "renewal" },
+    ],
+    subtype: {"kinds":["Subscription"],"qualifiers":["TV"]},
+    costMinor: 4299,
+    currency: "GBP",
+    recurrenceMonths: 1,
+    scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: move-in 15 August 2026, next payment due 15 September 2026. Four other printed dates are deliberately not declared: the agreement preparation date, the site's last rent increase, a previous, unrelated unit's end date at this address, and the terms edition stamps.
+    // - provider is 'SSL': the operator's full legal or trading name is never printed anywhere on the page, only these three letters, used throughout as the brand mark and in the registered-company sentence in the small print.
+    // - reference is the unit reference SSL-BX-3390, not the unrelated previous unit reference or the access code.
+    // - costMinor is the monthly rent, printed with a currency symbol as the cost of the thing itself; the included-insurance figure is a cover limit, not a cost.
+    // - recurrenceMonths is not declared even though a '1 month' term is printed in digits: the contract only keeps a recurrence where a dateRole is 'renewal' or 'service' for it to describe (suggestions.ts), and neither role appears here -- 'start' and 'due' are not scheduled events. Declaring it anyway would ask the extractor for a value the design never lets it keep.
+    // - subtype: 'Rental'; no qualifier group in the taxonomy names storage closely enough to declare one.
+    // - scheduleKind is not declared: neither dateRole is 'renewal' or 'service'.
+    name: "self storage agreement, the provider is never spelled out beyond three letters",
+    filename: "fullpage-self-storage-agreement.pdf",
+    text: "Storage licence agreement SSL-BX-3390  \n\nSSL Fenmouth Self Storage Centre · Unit 14, Quayside Industrial Estate, Fenmouth, Cravenshire CV2 7RL \n\nStorage licence agreement Customer Ms Carys Bevan 31 Hollytree Avenue, Fenmouth, Cravenshire CV2 6PN \n\nUnit reference SSL-BX-3390 \n\nMove-in date 15 August 2026 \n\nNext payment due 15 September 2026 \n\nAgreement prepared 12 August 2026 \n\nYO U R U NI T \n\nItem Detail \n\nUnit size 35 sq ft, ground floor, corridor C \n\nAccess code 7741# \n\nAccess hours 06:00 to 22:00 daily, including bank holidays \n\nInsurance Included up to £2,000 contents value \n\nM ON TH LY  R E N T \n\n£68.00 This storage licence is a rolling agreement, billed 1 month at a time from the move-in date shown above, and renews automatically each month until either party gives notice. Your first payment of £68.00 was taken on 15 August 2026 and your next payment of £68.00 is due on 15 September 2026. A minimum term of 1 month applies; after that, 14 days' written notice is needed to end the agreement. \n\nT E RMS \n\nSSL is a trading style used at this location; goods are stored entirely at the customer's own risk beyond the insured value stated above. SSL may increase the monthly rent on 30 days' written notice, and last increased rents at this site on 1 Apri l  2026. Access is suspended i f payment is more than 7 days overdue, and goods may be disposed of i f rent remains unpaid for 56 days, in l ine with the Torts (Interference with Goods) Act 1977. A previous l icence for unit SSL- BX-1187 at this address ended on 3 August 2026 when that customer's belongings were col lected in ful l . \n\nSSL, registered in England and Wales No. 07741932, registered office U nit 14, Quayside Industrial  Estate, Fenmouth, Cravenshire CV2 7RL. VAT registration number GB 118 7204 55. Terms and conditions edition dated 2 January 2026, superseding the edition dated 6 June 2023. \n\nSSL · Uni t SSL-BX-3 3 90 Page 1 of 1\n",
+    expected: {
+    dates: ["2026-08-15","2026-09-15"],
+    provider: "SSL",
+    reference: "SSL-BX-3390",
+    dateRoles: [
+      { date: "2026-08-15", role: "start" },
+      { date: "2026-09-15", role: "due" },
+    ],
+    subtype: {"kinds":["Rental"]},
+    costMinor: 6800,
+    currency: "GBP",
     },
   },
   {
@@ -1611,6 +2202,31 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
   },
   {
     // Ground-truth notes:
+    // - dates: booked 2 September 2026, delivered (hire starts) 9 September 2026, collection due 23 September 2026. Three other printed dates are deliberately not declared: a previous, unrelated booking at the same address (14 Mar 2025), the waste carrier registration renewal (11 Jan 2026) and its next renewal (11 Jan 2029), and the terms-of-booking revision stamp (4 Jun 2024).
+    // - provider is Corvedale Skips & Aggregates Ltd, stated plainly in the page's own text to be who the hire contract is actually with ('the contract for delivery, collection and disposal of the waste is between you and Corvedale Skips & Aggregates Ltd'). SkipFinder, named in the letterhead and throughout, is described in the small print as a booking intermediary regulated for consumer credit, not a waste carrier -- the FCA firm reference on the page belongs to SkipFinder, the broker, not to the provider.
+    // - reference is the booking order number SKF-ORD-661204, not the earlier unrelated order (SKF-ORD-559812) or the waste carrier registration number (CBDU887214).
+    // - costMinor is the £285.00 total charged, not any of the three line items that sum to it, and not the £8.00-a-day unauthorised extension charge.
+    // - subtype: 'Contract' (a hire/order confirmation that is itself the contract) qualified by 'Waste'.
+    // - scheduleKind is not declared: none of the three dateRoles is 'renewal' or 'service'.
+    name: "skip hire order, the booking brand is not who the waste contract is with",
+    filename: "fullpage-skip-hire-contract.pdf",
+    text: "Skip hire order confirmation SKF-ORD-661204  \n\nSkipFinder Compare and book local skip hire · 0800 552 0198 · www.skipfinder.example \n\nOrder confirmation and hire contract \n\nDelivery address \n\nMrs Elin Thomas \n\n7 Orchard Way, Penbury, Cravenshire CV9 1HL \n\nOrder SKF-ORD-661204 \n\nBooked 2 September 2026 \n\nBooking made via www.skipfinder.example \n\nYOUR  BOOKING \n\nSkip size 8 yard builder's skip \n\nDelivery date 9 September 2026, between 7am and 1pm \n\nHire period 14 days from delivery \n\nCollection due 23 September 2026, unless you request an extension \n\nWaste type General builder's waste, no plasterboard, no hazardous materials \n\nPermit required No, skip stands on private driveway \n\nYour skip will be delivered and collected by our local partner, Corvedale Skips & Aggregates Ltd, registered waste carrier CBDU887214. \n\nSkipFinder Ltd arranges this booking on your behalf and takes payment, but the contract for delivery, collection and disposal of the waste \n\nis between you and Corvedale Skips & Aggregates Ltd. Any query about the skip itself, including a late delivery or an overfilled skip, should \n\ngo to Corvedale directly on 01568 774 220. \n\nCHARGES \n\nItem Amount \n\n8 yard skip, 14-day hire 210.00 \n\nWaste transfer and disposal charge 55.00 \n\nBooking service fee (SkipFinder) 20.00 \n\nTotal charged to your card £285.00 \n\nIf the skip is not collected by 23 September 2026 because it needs more time on site, contact Corvedale before that date to arrange an \n\nextension; an unauthorised extension is charged at £8.00 per day. A previous booking at this address (order SKF-ORD-559812, delivered 14 \n\nMarch 2025) was collected on time and closed with no additional charge. \n\nSkipFinder Ltd, registered in England and Wales No. 08814401, registered office 3 Harbour View, Fenmouth, Cravenshire CV2 8QN, is a booking intermediary regulated \n\nfor consumer credit activities by the Financial Conduct Authority, firm reference number 771204, and is not itself a licensed waste carrier. Corvedale Skips & \n\nAggregates Ltd is registered with the Environment Agency as an upper tier waste carrier, registration CBDU887214, renewed 11 January 2026 and due for its next \n\nrenewal on 11 January 2029. Terms of booking last revised 4 June 2024. \n\nCONFIR MED \n\nOrder SKF-ORD-661204 · delivered by Corvedale Skips & Aggregates Ltd · Page 1 of 1\n",
+    expected: {
+    dates: ["2026-09-02","2026-09-09","2026-09-23"],
+    provider: "Corvedale Skips & Aggregates Ltd",
+    reference: "SKF-ORD-661204",
+    dateRoles: [
+      { date: "2026-09-02", role: "issued" },
+      { date: "2026-09-09", role: "start" },
+      { date: "2026-09-23", role: "due" },
+    ],
+    subtype: {"kinds":["Contract"],"qualifiers":["Waste"]},
+    costMinor: 28500,
+    currency: "GBP",
+    },
+  },
+  {
+    // Ground-truth notes:
     // - The only tracked date is 31 March 2027, when the household's export tariff agreement ends, stated once mid-paragraph in the page 2 tariff terms ('...ends on 31 March 2027'). It sits one line after the unrelated RPI rate-review date (1 October 2026) and is never tabulated or emphasised. The four quarterly blocks on page 1 each carry a period start, a period end, a reading date and a payment date (sixteen dates in total) plus a rate; none is the answer, and the Quarter 4 period end (31 March 2026) is deliberately one calendar year before the answer to bait a same-day-and-month match. Also excluded: the installation commissioning date (18 June 2019), the export meter's last verification date (12 May 2022) and its stated future validity date (12 May 2032), the statement date (24 April 2026), the RPI rate-review date (1 October 2026), and the tariff agreement's own start date (1 April 2023). costMinor is the annual summary's net 'Total paid to you this year' (£343.64), not the gross four-quarter sum before the metering charge (£361.64), not any individual quarterly payment (£108.45 / £146.57 / £55.95 / £50.67), and not the estimated 2026/27 total (£355.00, explicitly a forecast). Meter readings are printed as seven-digit decimal register values (e.g. 018942.6 kWh) and export rates as p/kWh figures (15.72p, 16.05p); none resembles the money answer. provider is Millbrook Energy Ltd, the retail brand named in the header wordmark and small print, not Cheswick Metering Services Ltd, the wholly owned subsidiary named in the small print that actually calculates and administers the generation payments. reference is the generation account number (SEG-4471-0932) rather than either meter's serial number (GM7734215, EM2205968) or the MCS installation reference (2019/A/48871).
     // - subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Solar export statement').
     name: "solar export statement, sixteen quarterly dates around one tariff-end renewal date",
@@ -1625,6 +2241,79 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     ],
     subtype: {"kinds":["Tariff","Statement","Utility"],"qualifiers":["Solar","Electricity","Energy"]},
     costMinor: 34364,
+    currency: "GBP",
+    recurrenceMonths: 12,
+    scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - Issued date 2026-08-03 is printed as the mail Date header '3 August 2026, 09:14' and again as the summary table's 'Payment date'.
+    // - Renewal date 2027-08-03 is printed in the summary table as 'Plan renews on 3 August 2027'.
+    // - recurrenceMonths 12 is the plan's own term, printed in digits twice as '12 month plan' — not the monthly billing frequency.
+    // - Provider is the streaming brand Northlight+, shown in the brand bar and From address — not the billing entity named later.
+    // - Reference is the account number 'NL-ACC-771049-2' printed in the summary table, not the invoice number.
+    // - costMinor 999 is the 'Amount charged £9.99' in the summary table, matching the monthly payment described in the greeting.
+    // - Trap: an 'Invoice number: NL-INV-2208453' sits beside the account number as a rival reference.
+    // - Trap: a 'VAT registration: GB 234 5678 90' is a rival identifier, and 'VAT of £1.67' is a rival money figure within the same charge.
+    // - Trap: the charge is described as 'billed by Meridian Payments Limited on behalf of Northlight+', a rival provider name.
+    // - Trap: 'debit card ending 4471 (expires 09/28)' gives a rival date in card-expiry form.
+    // - Trap: the card was 'taken ... on 4 August 2026', a rival date one day after the stated payment date.
+    // - Trap: 'equivalent to £119.88 a year' is a rival annual cost figure.
+    // - Trap: 'Northlight+ Ultra is available for £13.99 a month' is a rival plan and price.
+    // - Trap: the promotion 'offer ends 31 August 2026' is a rival date.
+    // - Trap: the app store mention directs cancellation elsewhere, a rival management channel.
+    // - Trap: the support address 'support@northlight-help.example' uses a different domain from the billing address 'billing@northlightplus.example'.
+    name: "Northlight+ payment receipt",
+    filename: "streaming-subscription-invoice.pdf",
+    text: "Your Northlight+ payment receipt  \n\nmail.example/mail/u/0/#inbox/17c9f2a41d 1 of 1 \n\nYour Northlight+ payment receipt \n\nFrom: Northlight+ <billing@northlightplus.example> \n\nTo: Priya Chandra <priya.chandra83@mailbox.example> \n\nDate: 3 August 2026, 09:14 \n\nNORTHLIGHT+ \n\nHi Priya, \n\nThanks for being a Northlight+ member. We've taken your monthly payment for your 12 month plan — \n\nhere's your receipt. \n\nPlan Northlight+ Standard (12 month plan) \n\nAccount number NL-ACC-771049-2 \n\nPayment date 3 August 2026 \n\nPlan renews on 3 August 2027 \n\nAmount charged £9.99 \n\nManage your plan \n\nInvoice number: NL-INV-2208453  ·  VAT registration: GB 234 5678 90 \n\nYour payment of £9.99 includes VAT of £1.67. This charge was billed by Meridian Payments Limited on behalf of \n\nNorthlight+ and was taken from your debit card ending 4471 (expires 09/28) on 4 August 2026. \n\nPaid monthly, your 12 month plan is equivalent to £119.88 a year. Fancy more channels? Northlight+ Ultra is available for \n\n£13.99 a month. \n\nQuote code SUMMER26 before the offer ends 31 August 2026 to add a second screen at no extra cost. \n\nSubscribed through the app store instead? Manage and cancel your plan via your device account settings rather than \n\nthrough Northlight+ directly. \n\nQuestions about this receipt? Contact our support team at support@northlight-help.example. \n\nNorthlight+ is a trading name of Northlight Media Group, 4 Aldergate House, Brentmoor, BM1 6QF. \n\nYou're receiving this email because you have an active Northlight+ subscription. Unsubscribe from receipts  |  Privacy policy\n",
+    expected: {
+    dates: ["2026-08-03","2027-08-03"],
+    provider: "Northlight+",
+    reference: "NL-ACC-771049-2",
+    dateRoles: [
+      { date: "2026-08-03", role: "issued" },
+      { date: "2027-08-03", role: "renewal" },
+    ],
+    subtype: {"kinds":["Subscription"],"qualifiers":["Streaming","TV"]},
+    costMinor: 999,
+    currency: "GBP",
+    recurrenceMonths: 12,
+    scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - Term is a fixed term of 12 months, printed in the particulars as 'A fixed term of 12 months, commencing 15/06/2026 and expiring 14/06/2027' — start date 2026-06-15, renewal/expiry date 2027-06-14.
+    // - Provider is the managing agent, Thornfield Lettings & Management, who receives rent and handles notices per clause 1 and 3 — not the private landlord Graham Pettifer.
+    // - Reference THN-2026-0458 is printed as the 'Tenancy Reference' in the particulars and repeated in every page footer.
+    // - Rent is £975.00 per calendar month, printed in the particulars 'Rent' row and restated in clause 3, giving costMinor 97500.
+    // - Trap: the 'Date of this Agreement' (signing date) is printed as 02/06/2026, a rival date near but not equal to the tenancy start.
+    // - Trap: the Inventory / Check-in appointment is printed as '14/06/2026 at 10:00am', the day before the tenancy actually starts.
+    // - Trap: the Break Clause date '15/12/2026 (six months after commencement)' is a plausible but wrong renewal-like date.
+    // - Trap: the deposit amount '£1,125.00' and its '30 days of receipt' protection deadline are printed in the particulars and clause 4, a rival cost figure to the rent.
+    // - Trap: the holding deposit '£225.00, received 18/05/2026' is a third rival money figure and date.
+    // - Trap: 'First Payment Due 02/06/2026' is a rival date for the first rent payment, distinct from the recurring rent date of the 15th.
+    // - Trap: the landlord's own name and address, 'Mr Graham Pettifer, 22 Larch Avenue, Barchester, BR2 9LH', is printed prominently as a rival provider.
+    // - Trap: the deposit protection scheme, 'Home Deposits Custodial Scheme', is a rival organisation name.
+    // - Trap: the agent's redress scheme, 'National Letting Redress Service, membership no. NLRS-88213', is a rival organisation and reference.
+    // - Trap: the agent's client money protection scheme, 'Lettings Client Money Protect, certificate no. LCMP-4471', is a second rival organisation and reference.
+    // - Trap: the break clause notice period 'giving 2 months' written notice' is a rival number to the 12-month recurrence.
+    // - Trap: the late payment interest rate '3% above the Bank of England base rate' is a rival numeric figure.
+    // - Trap: the total rent over the term, '£11,700.00', is a rival cost figure to the monthly rent.
+    name: "Assured Shorthold Tenancy Agreement",
+    filename: "tenancy-agreement.pdf",
+    text: "Assured Shorthold Tenancy Agreement  \n\nTHORNFIELD LETTINGS & MANAGEMENT 8 High Street, Barchester, BR1 4DA  ·  01632 960214  ·  lettings@thornfield-lettings.example \n\nASSURED SHORTHOLD TENANCY AGREEMENT \n\nSCHEDULE OF PARTICULARS \n\nThe Property Flat 4, 12 Mulberry Court, Barchester, BR3 7QW \n\nThe Landlord Mr Graham Pettifer, 22 Larch Avenue, Barchester, BR2 9LH \n\nThe Tenant Ms Eleanor Vance \n\nThe Managing Agent Thornfield Lettings & Management, 8 High Street, Barchester, BR1 4DA \n\nTenancy Reference THN-2026-0458 \n\nTerm A fixed term of 12 months, commencing 15/06/2026 and expiring 14/06/2027 \n\nRent £975.00 per calendar month, payable in advance on the 15th day of each month. Total rent payable over the term: £11,700.00 \n\nFirst Payment Due 02/06/2026 — first month's rent, deposit and remaining holding deposit balance payable on signing \n\nDeposit £1,125.00, to be protected within 30 days of receipt under the Home Deposits Custodial Scheme \n\nHolding Deposit £225.00, received 18/05/2026, credited against the first month's rent \n\nDate of this Agreement 02/06/2026 \n\nInventory / Check-in Appointment 14/06/2026 at 10:00am, Thornfield representative to attend with the Tenant \n\nBreak Clause Exercisable on or after 15/12/2026 (six months after commencement) by either party giving 2 months' written notice \n\nLate Payment Interest charged at 3% above the Bank of England base rate on rent more than 14 days in arrears \n\nAgent's Redress Scheme National Letting Redress Service, membership no. NLRS-88213 \n\nAgent's Client Money \n\nProtection \n\nLettings Client Money Protect, certificate no. LCMP-4471 \n\nThis Schedule of Particulars is incorporated into and forms part of the attached Tenancy Agreement (clauses 1–13). \n\nThornfield Lettings & Management  ·  Tenancy Reference THN-2026-0458  ·  Page 1 of 3\n\nTenancy Agreement — Flat 4, 12 Mulberry Court, Barchester, BR3 7QW Reference THN-2026-0458 \n\n1. Definitions \n\nIn this Agreement, \"the Landlord\" means Mr Graham Pettifer of 22 Larch Avenue, Barchester, BR2 9LH; \"the Tenant\" means \n\nMs Eleanor Vance; \"the Agent\" means Thornfield Lettings & Management of 8 High Street, Barchester, BR1 4DA, acting \n\nthroughout as managing agent for the Landlord and as the Tenant's first point of contact for all rent payments, repairs and \n\nnotices; and \"the Property\" means Flat 4, 12 Mulberry Court, Barchester, BR3 7QW, together with its fixtures and fittings as \n\nrecorded in the inventory. \n\n2. Term and Commencement \n\nThe Property is let for a fixed term of 12 months, commencing on 15 June 2026 and expiring on 14 June 2027, unless \n\nterminated earlier in accordance with clause 10 (Break Clause) or extended by a further written agreement between the parties. \n\nThe Tenant shall not be entitled to occupy the Property before the commencement date without the Agent's prior written \n\nconsent. \n\n3. Rent \n\nThe Tenant shall pay to the Agent, on behalf of the Landlord, rent of £975.00 per calendar month, in advance, on the 15th day \n\nof each month, by standing order to the Agent's client account. The first payment, comprising the balance of the first month's \n\nrent after crediting the holding deposit, falls due on 2 June 2026, being the date of signing. Should any instalment remain \n\nunpaid more than 14 days after its due date, interest shall accrue at 3% above the Bank of England base rate from the due date \n\nuntil payment. Were the Tenant to remain for the whole of the fixed term, the total rent payable would be £11,700.00. \n\n4. Deposit \n\nThe Tenant shall pay a deposit of £1,125.00, equivalent to just under six weeks' rent, prior to the commencement of the \n\ntenancy. The Agent shall protect the deposit within 30 days of receipt under the Home Deposits Custodial Scheme and shall \n\nprovide the Tenant with the scheme's prescribed information within the same period. Subject to deductions properly made \n\nfor damage, arrears or breach of this Agreement, the deposit shall be returned within 10 days of the end of the tenancy. \n\n5. Tenant's Obligations \n\nThe Tenant shall keep the interior of the Property in good and tenantable condition, shall not keep any pet without the \n\nLandlord's prior written consent, shall not smoke within the Property, and shall not assign, sublet or part with possession of the \n\nProperty or any part of it without the Agent's prior written consent. The Tenant shall permit the Landlord, the Agent or their \n\nappointed contractors to enter the Property to inspect its condition or carry out repairs, on not less than 24 hours' written \n\nnotice save in an emergency. \n\n6. Landlord's Obligations \n\nThe Landlord shall keep in repair the structure and exterior of the Property, including drains, gutters and external pipes, and \n\nthe installations for the supply of water, gas, electricity and sanitation. The Landlord shall provide a valid gas safety record and \n\nelectrical installation condition report before the Tenant takes occupation and at the intervals required by law thereafter. \n\n7. Insurance \n\nThe Landlord shall maintain buildings insurance over the Property. The Tenant is responsible for insuring their own contents \n\nand personal possessions and acknowledges that the Landlord's policy does not extend to them. \n\nThornfield Lettings & Management  ·  Tenancy Reference THN-2026-0458  ·  Page 2 of 3\n\nTenancy Agreement — Flat 4, 12 Mulberry Court, Barchester, BR3 7QW Reference THN-2026-0458 \n\n8. Right of Entry \n\nSave in an emergency, the Landlord and the Agent shall give the Tenant not less than 24 hours' written notice before entering \n\nthe Property, and shall attend only at reasonable hours of the day. \n\n9. Assignment and Subletting \n\nThe Tenant shall not assign, underlet, charge or part with possession of the whole or any part of the Property without the prior \n\nwritten consent of the Landlord, such consent to be given through the Agent and not to be unreasonably withheld. \n\n10. Break Clause \n\nEither party may terminate this Agreement by serving not less than 2 months' written notice on the other, provided that such \n\nnotice may not expire earlier than 15 December 2026, being six months after the commencement date. Notice under this \n\nclause shall be served on the Agent at the address in clause 1 and shall be treated as effective on the date of delivery. \n\n11. Termination and Holding Over \n\nIf the Tenant remains in occupation after expiry of the fixed term with the Landlord's consent, a periodic tenancy shall arise on \n\nthe same terms unless a new fixed term agreement is signed. The Landlord shall not seek possession under section 21 of the \n\nHousing Act 1988 by notice expiring earlier than 2 months from the date of service. \n\n12. Notices \n\nAny notice under this Agreement shall be in writing and shall be validly served if delivered by hand or sent by first class post \n\nto the Agent at 8 High Street, Barchester, BR1 4DA, or to the Tenant at the Property. \n\n13. Governing Law \n\nThis Agreement is governed by the law of England and Wales, and the parties submit to the exclusive jurisdiction of its courts. \n\nSigned as an Agreement dated 02/06/2026: \n\nSigned by the Landlord: G. Pettifer \n\nSigned by the Tenant: E. Vance \n\nSigned for the Agent: R. Okafor, Thornfield Lettings \n\nThornfield Lettings & Management  ·  Tenancy Reference THN-2026-0458  ·  Page 3 of 3\n",
+    expected: {
+    dates: ["2026-06-15","2027-06-14"],
+    provider: "Thornfield Lettings & Management",
+    reference: "THN-2026-0458",
+    dateRoles: [
+      { date: "2026-06-15", role: "start" },
+      { date: "2027-06-14", role: "renewal" },
+    ],
+    subtype: {"kinds":["Tenancy","Contract"],"qualifiers":["Tenancy","Home"]},
+    costMinor: 97500,
     currency: "GBP",
     recurrenceMonths: 12,
     scheduleKind: "renewal",
@@ -1671,6 +2360,30 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     currency: "GBP",
     recurrenceMonths: 12,
     scheduleKind: "renewal",
+    },
+  },
+  {
+    // Ground-truth notes:
+    // - dates: invoice issued 3 September 2026, this instalment due 1 October 2026. Nine other printed dates are deliberately not declared: the previous invoice date (2 Jun 2026), the two future instalment due dates (14 Jan 2027, 22 Apr 2027), halls arrivals day (27 Sep 2026), term start (29 Sep 2026), term end (12 Dec 2026), spring term reopening (10 Jan 2027), the tenancy agreement signing date (18 Aug 2026), the room condition report date (27 Sep 2026, same calendar date as arrivals but a different event), and the fire alarm test date (15 Sep 2026).
+    // - provider is Bridgewater Living Services Ltd, the managing agent that actually issues and administers this invoice (named only in the small print and the page footer), not Aldreth Bay University, whose name appears in the letterhead and every heading but which does not itself invoice the resident for accommodation -- the same distinction the owner drew for a broker versus an underwriter (#989).
+    // - reference is the invoice number BLS-INV-24-1187, not the tenancy reference (AB-KC-214-26) or the student number.
+    // - costMinor is the £2,450.00 total due this instalment (the sum of room, insurance and levy charges), not the room charge alone (£2,180.00), the previous year's termly charge (£2,290.00), or the £35.00 late payment charge.
+    // - subtype: 'Fees' (matching the printed 'invoice') qualified by 'School', the taxonomy group covering education and tuition-adjacent charges, since this is a student's accommodation billing rather than a general rental.
+    // - scheduleKind is not declared: neither dateRole is 'renewal' or 'service'.
+    name: "university halls invoice, the university's own name outshines its managing agent",
+    filename: "fullpage-university-halls-invoice.pdf",
+    text: "Accommodation invoice — Aldreth Bay Halls  \n\nALDRETH BAY UNIVERSITY Aldreth Bay Halls of Residence · Student Accommodation Office · halls@aldrethbay.example \n\nAccommodation invoice, autumn term 2026 Miss Priya Osei \n\nRoom 214, Kestrel Court, Aldreth Bay Halls \n\nStudent number 20261847 \n\nInvoice BLS-INV-24-1187 Tenancy ref AB-KC-214-26 Issued 3 September 2026 \n\nPrevious invoice 2 June 2026 \n\nPAYMENT  DUE \n\n1 October 2026 \n\nCharges this term \n\nItem Period Amount \n\nStandard single room, Kestrel Court 29 Sep 2026 to 12 Dec 2026 2,180.00 \n\nContents insurance (compulsory) autumn term 45.00 \n\nCommon room and laundry levy autumn term 225.00 \n\nTotal due this instalment £2,450.00 \n\nThis is the first of three equal termly instalments for the 2026/27 academic year. The spring term instalment falls due on 14 \n\nJanuary 2027 and the summer term instalment on 22 April 2027, each invoiced separately roughly four weeks beforehand. A late \n\npayment charge of £35.00 is applied to any instalment still unpaid ten days after its due date. \n\nKey dates this year \n\nEvent Date \n\nHalls open for arrivals 27 September 2026 \n\nAutumn term teaching begins 29 September 2026 \n\nAutumn term ends, halls close for winter break 12 December 2026 \n\nHalls reopen for spring term 10 January 2027 \n\nTenancy agreement signed by resident 18 August 2026 \n\nRoom condition report completed 27 September 2026 \n\nFire alarm test, Kestrel Court 15 September 2026 \n\nCharges are set annually by the university's accommodation office and reviewed each June; the 2025/26 termly charge was £2,290.00. Aldreth Bay Halls is managed \n\nunder contract by Bridgewater Living Services Ltd, company number 07734512, registered office 14 Quayside Chambers, Fenmouth, Cravenshire CV2 9LT, on behalf \n\nof Aldreth Bay University. Queries about this invoice should be sent to accounts@bridgewaterliving.example, not to the university's central finance office. This \n\ninvoice does not cover meals, which are charged separately through the campus card system. \n\nBridgewater Living Services Ltd, acting as managing agent for Aldreth Bay University · Invoice BLS-INV-24-1187 · Page 1 of 1\n",
+    expected: {
+    dates: ["2026-09-03","2026-10-01"],
+    provider: "Bridgewater Living Services Ltd",
+    reference: "BLS-INV-24-1187",
+    dateRoles: [
+      { date: "2026-09-03", role: "issued" },
+      { date: "2026-10-01", role: "due" },
+    ],
+    subtype: {"kinds":["Fees"],"qualifiers":["School"]},
+    costMinor: 245000,
+    currency: "GBP",
     },
   },
   {

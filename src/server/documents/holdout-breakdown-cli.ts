@@ -2,20 +2,20 @@
 // What the net score hides: how many of each field's points on the hold-out
 // were right, lost to a wrong answer, or left blank.
 //
-//   npm run eval:breakdown
-//   npm run eval:breakdown -- --holdout2   # the SECOND hold-out (#997)
+//   npm run eval:breakdown -- --holdout3
 //
 // A field can score the same net from being cautious (right and blank) or
 // careless (right and wrong), and they are not the same thing to fix. Counts
-// only -- no document is ever named, so the hold-out stays unread.
+// only -- no document is ever named, so the hold-out stays unread. The
+// first two hold-outs are retired, rolled into the tuning set 2026-09-12
+// (#998); `--holdout3` is the only unseen set left.
 import { chooseFields } from "./extraction-choose";
-import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
-import { EXTRACTION_HOLDOUT2_FULLPAGE } from "./extraction-holdout2-fullpage";
+import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { FIELD_NAMES, scoreCorpus } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
 
-const corpus = process.argv.includes("--holdout2") ? EXTRACTION_HOLDOUT2_FULLPAGE : EXTRACTION_HOLDOUT_FULLPAGE;
+const corpus = EXTRACTION_HOLDOUT3_FULLPAGE;
 
 const KEY: Record<string, string> = {
   provider: "provider expected", reference: "reference expected", subtype: "subtype expected",
