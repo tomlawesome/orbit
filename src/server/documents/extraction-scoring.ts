@@ -105,14 +105,17 @@ const SUBTYPE_TAXONOMY = subtypeTaxonomyJson as SubtypeTaxonomy;
 export const SCORING_RUNS = 5;
 
 /**
- * How much more a wrong value costs than a blank (issue #939). A blank
- * field earns 0 out of its 1 possible point. A wrong value earns
- * `-WRONG_VALUE_PENALTY`: it forfeits the same point a blank forfeits, and
- * then loses that much again, because a plausible wrong value is the one
- * that gets approved without a second look while a blank is the one that
- * gets noticed and checked.
+ * How much more a wrong value costs than a blank. Zero since the owner's
+ * ruling of 2026-09-12: a wrong answer and a blank both simply earn no
+ * point, so a score reads as "how many did it get right" and nothing else.
+ *
+ * The earlier value of 1 (issue #939) was there because a plausible wrong
+ * value is the one that gets approved without a second look. That is still
+ * true and still worth handling -- but as its own piece of work, not by
+ * bending every measurement around it. Every score recorded before this
+ * date was computed with the penalty and is not comparable with one after.
  */
-export const WRONG_VALUE_PENALTY = 1;
+export const WRONG_VALUE_PENALTY = 0;
 
 /** The fields a scored extractor returns. `DocumentProposal` satisfies it. */
 export interface ExtractedFields {
@@ -203,8 +206,8 @@ function buildFieldScores(totals: Record<FieldName, FieldTotal>): Record<FieldNa
 
 export type Classification = "correct" | "blank" | "wrong";
 
-/** A correct value earns its point; a blank earns nothing; a wrong value
- * earns `-WRONG_VALUE_PENALTY` (issue #939, see the file header). */
+/** A correct value earns its point; a blank and a wrong value both earn
+ * nothing while `WRONG_VALUE_PENALTY` is 0 (see the file header). */
 function pointsFor(classification: Classification): number {
   if (classification === "correct") return 1;
   if (classification === "blank") return 0;
