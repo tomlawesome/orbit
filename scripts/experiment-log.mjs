@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const REGISTER_PATH = resolve(REPO_ROOT, "docs/experiments/extraction.json");
 const DEFAULT_OUT_DIR = "tmp/experiment-log";
-const HOLDOUT_PREFIX = "hold-out: ";
+const HOLDOUT_PREFIX = /^hold-out(?: \d+)?: /u;
 
 // Fixed reading order for the results tables, independent of the order the
 // register happens to list corpora in.
@@ -52,10 +52,10 @@ function toScore(pct, net, of) {
   return { pct: Number(pct), net: Number(net), of: Number(of) };
 }
 
-/** Finds the first line starting with `prefix`, stripping a leading "hold-out: " if present. */
+/** Finds the first line starting with `prefix`, stripping a leading "hold-out: " or "hold-out 2: " if present. */
 export function findScoreLine(content, prefix) {
   for (const rawLine of content.split(/\r?\n/u)) {
-    const line = rawLine.startsWith(HOLDOUT_PREFIX) ? rawLine.slice(HOLDOUT_PREFIX.length) : rawLine;
+    const line = rawLine.replace(HOLDOUT_PREFIX, "");
     if (line.startsWith(prefix)) return line;
   }
   return null;
