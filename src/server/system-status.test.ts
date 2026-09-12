@@ -27,7 +27,7 @@ vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.getDocume
 vi.mock("@/server/documents/scanner", () => ({ pingClamAv: mocks.pingClamAv }));
 vi.mock("@/server/documents/tika", () => ({ getTikaHealth: mocks.getTikaHealth }));
 
-import { getSystemStatus } from "./system-status";
+import { getSystemStatus, resetSystemStatusCacheForTests } from "./system-status";
 
 const HEALTHY_CONFIG = {
   scanMode: "required" as const,
@@ -35,6 +35,10 @@ const HEALTHY_CONFIG = {
 };
 
 function resetAll() {
+  // Every test gets its own probe: without this, a test running within the
+  // real 5s TTL of a previous one would silently get that previous test's
+  // cached answer instead of exercising its own mocks.
+  resetSystemStatusCacheForTests();
   for (const mock of Object.values(mocks)) mock.mockReset();
   mocks.getPublicReadiness.mockResolvedValue({ status: "ready" });
   mocks.checkDatabaseReachable.mockResolvedValue(true);
@@ -53,6 +57,7 @@ function resetAll() {
 describe("getSystemStatus (#863)", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    resetSystemStatusCacheForTests();
   });
 
   it("reports every dependency healthy and the handle following real readiness -- not always degraded", async () => {
@@ -141,6 +146,9 @@ describe("getSystemStatus (#863)", () => {
       state: "not_enabled",
     });
 
+    // A fresh probe, not the cached answer above: this call is exercising a
+    // second, distinct scenario, not proving anything about the cache.
+    resetSystemStatusCacheForTests();
     mocks.getTikaHealth.mockRejectedValue(new Error("unexpected"));
     status = await getSystemStatus();
     expect(status.services.some((row) => row.service === "orbit-tika")).toBe(false);
@@ -198,5 +206,67 @@ describe("getSystemStatus (#863)", () => {
 
     expect(status.handle).toBe("maintenance");
     expect(status.lastCheck.application).toBe("maintenance");
+  });
+});
+
+/*
+ * `/home` is the product's main screen and every signed-in member's render
+ * calls this, so an unmemoised getSystemStatus pings ClamAV and Tika on
+ * every load. This block proves the cache added on top: concurrent callers
+ * coalesce onto one probe, a cached answer keeps the timestamp of the
+ * observation it actually came from, and the cache expires on schedule.
+ */
+describe("getSystemStatus caching", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    resetSystemStatusCacheForTests();
+  });
+
+  it("coalesces calls inside the cache window into one probe, and a cache hit keeps the first call's observedAt", async () => {
+    resetAll();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-12T10:00:00.000Z"));
+
+    // Two callers racing the same cold cache must share one computation.
+    const [first, second] = await Promise.all([getSystemStatus(), getSystemStatus()]);
+
+    expect(mocks.pingClamAv).toHaveBeenCalledTimes(1);
+    expect(mocks.getTikaHealth).toHaveBeenCalledTimes(1);
+    expect(mocks.getPublicReadiness).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
+
+    // A later caller, still inside the window, gets the SAME object back --
+    // not a fresh probe restamped to its own later instant.
+    vi.setSystemTime(new Date("2026-09-12T10:00:03.000Z"));
+    const third = await getSystemStatus();
+
+    expect(mocks.pingClamAv).toHaveBeenCalledTimes(1);
+    expect(third.services.find((row) => row.service === "orbit-app")?.observedAt)
+      .toBe("2026-09-12T10:00:00.000Z");
+    expect(third.services.find((row) => row.service === "orbit-clamav")?.observedAt)
+      .toBe(first.services.find((row) => row.service === "orbit-clamav")?.observedAt);
+  });
+
+  it("refreshes, with a new observedAt, once the cache window has passed", async () => {
+    resetAll();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-12T10:00:00.000Z"));
+
+    const first = await getSystemStatus();
+    expect(mocks.pingClamAv).toHaveBeenCalledTimes(1);
+
+    // One millisecond past the 5s TTL, and the underlying state has actually
+    // changed -- the refreshed answer must show it, not the stale cached one.
+    vi.setSystemTime(new Date("2026-09-12T10:00:05.001Z"));
+    mocks.pingClamAv.mockResolvedValue(false);
+    const second = await getSystemStatus();
+
+    expect(mocks.pingClamAv).toHaveBeenCalledTimes(2);
+    expect(second.services.find((row) => row.service === "orbit-clamav")?.state).toBe("unreachable");
+    expect(second.services.find((row) => row.service === "orbit-app")?.observedAt)
+      .toBe("2026-09-12T10:00:05.001Z");
+    expect(second.services.find((row) => row.service === "orbit-app")?.observedAt)
+      .not.toBe(first.services.find((row) => row.service === "orbit-app")?.observedAt);
   });
 });
