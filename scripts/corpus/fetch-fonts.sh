@@ -92,6 +92,37 @@ fonts=(
   # A ballpoint hand, for a carbonless pad filled in on a doorstep.
   "ofl/kalam|Kalam-Regular.ttf|OFL-1.1"
   "ofl/kalam|Kalam-Bold.ttf|OFL-1.1"
+  # --- added for the SECOND hold-out, 12 further documents (#997) ---
+  # Twenty-three more faces, none used by `sources/` or the first `holdout/`,
+  # so this third corpus shares no character map with either of the other two.
+  "ofl/playfairdisplay|PlayfairDisplay%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/nunitosans|NunitoSans%5BYTLC,opsz,wdth,wght%5D.ttf|OFL-1.1"
+  "ofl/notoserif|NotoSerif%5Bwdth,wght%5D.ttf|OFL-1.1"
+  "ofl/ibmplexmono|IBMPlexMono-Regular.ttf|OFL-1.1"
+  "ofl/ibmplexmono|IBMPlexMono-Bold.ttf|OFL-1.1"
+  "ofl/cardo|Cardo-Regular.ttf|OFL-1.1"
+  "ofl/cardo|Cardo-Bold.ttf|OFL-1.1"
+  "ofl/overpass|Overpass%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/overpassmono|OverpassMono%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/chivo|Chivo%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/neuton|Neuton-Regular.ttf|OFL-1.1"
+  "ofl/neuton|Neuton-Bold.ttf|OFL-1.1"
+  "ofl/dmsans|DMSans%5Bopsz,wght%5D.ttf|OFL-1.1"
+  "ofl/poppins|Poppins-Regular.ttf|OFL-1.1"
+  "ofl/poppins|Poppins-Bold.ttf|OFL-1.1"
+  "ofl/dmmono|DMMono-Regular.ttf|OFL-1.1"
+  "ofl/raleway|Raleway%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/cousine|Cousine-Regular.ttf|OFL-1.1"
+  "ofl/cousine|Cousine-Bold.ttf|OFL-1.1"
+  "ofl/hankengrotesk|HankenGrotesk%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/quicksand|Quicksand%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/breeserif|BreeSerif-Regular.ttf|OFL-1.1"
+  "ofl/patrickhand|PatrickHand-Regular.ttf|OFL-1.1"
+  "ofl/sora|Sora%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/cormorant|Cormorant%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/librecaslontext|LibreCaslonText%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/firacode|FiraCode%5Bwght%5D.ttf|OFL-1.1"
+  "ofl/bevan|Bevan-Regular.ttf|OFL-1.1"
 )
 
 : > LICENCES.txt
@@ -122,7 +153,11 @@ for d in ptsans ptmono sourceserif4 courierprime archivonarrow ebgaramond nunito
          arvo domine saira manrope vollkorn tinos cormorantgaramond \
          literata librefranklin faustina inter newsreader spacemono archivo \
          sourcecodepro martianmono epilogue redhatdisplay plusjakartasans \
-         josefinsans gelasio sourcesans3 petrona dmserifdisplay kalam; do
+         josefinsans gelasio sourcesans3 petrona dmserifdisplay kalam \
+         playfairdisplay nunitosans notoserif ibmplexmono cardo overpass \
+         overpassmono chivo neuton dmsans poppins dmmono raleway cousine \
+         hankengrotesk quicksand breeserif patrickhand sora cormorant \
+         librecaslontext firacode bevan; do
   curl -sSLf --max-time 30 -o "OFL-$d.txt" "$base/ofl/$d/OFL.txt" 2>/dev/null || true
 done
 
