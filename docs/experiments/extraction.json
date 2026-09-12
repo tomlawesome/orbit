@@ -1986,6 +1986,41 @@
         ]
       ],
       "source": "#989 note 16839; re-run 2026-09-12"
+    },
+    {
+      "id": "M07",
+      "date": "2026-09-12",
+      "corpus": "holdout-12",
+      "label": "The owner's original method, built and measured against the one that shipped",
+      "what": "Two different methods have been called the same thing. The owner's, as they describe it: bin every word across the names the sieve kept, take the top six, then look for places where those words sit next to each other and rank those strings by how often they are printed. What shipped: count every run of consecutive words, whatever the words are worth on their own, and fold a run into the longer name containing it. The single-word bins are computed in the prototype and then thrown away. So no code has ever run the owner's method until now.",
+      "how": "npm run eval:provider-bins [-- --holdout] [--top-words 10]",
+      "results": [
+        [
+          "shipped, tuning 24, answer in the top two",
+          "22 of 24"
+        ],
+        [
+          "owner's, tuning 24, answer in the top two",
+          "17 of 24"
+        ],
+        [
+          "shipped, unseen 12, answer in the top two",
+          "4 of 12 (8 of 12 marked by eye)"
+        ],
+        [
+          "owner's, unseen 12, answer in the top two",
+          "3 of 12 (6 of 12 marked by eye)"
+        ],
+        [
+          "owner's with the top ten words instead of six, unseen 12",
+          "5 of 12 (8 of 12 marked by eye)"
+        ],
+        [
+          "dropping describer words before seeding",
+          "no better, and it strands bare fragments the scorer marks wrong"
+        ]
+      ],
+      "source": "run at the terminal, 2026-09-12; #994"
     }
   ]
 }
