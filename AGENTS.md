@@ -377,12 +377,13 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   owner reads the log at http://192.168.11.30:8090/ (container
   `orbit-experiments`, nginx over `tmp/experiment-log/`); re-render after
   recording.
-- Extraction direction (owner, 2026-09-12): heuristics only, no model in the
-  pipeline. Work one field at a time, and give each field's method its own
-  file — reuse pieces from the others, never extend one file to cover two
-  fields. The page's front table is the blind whole-page model against the
-  heuristics on the twelve unseen pages; a run joins it with
-  `"headline": true` in the register.
+- How extraction work is tested (owner, 2026-09-12), which is not a ruling on
+  what the pipeline ends up doing: heuristics only, no model, one field at a
+  time, each field's method in its own file — reuse pieces from the others,
+  never extend one file to cover two fields. What the full pipeline does is
+  decided later, once the fields have been measured this way. The page's front
+  table is the blind whole-page model against the heuristics on the twelve
+  unseen pages; a run joins it with `"headline": true` in the register.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not
