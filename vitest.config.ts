@@ -101,6 +101,10 @@ const test: TestUserConfig = {
           // it here would import it for its side effect of running the
           // check immediately, without a vitest test to attach the result to.
           "scripts/lockfile-no-pnpm-exe.test.mjs",
+          // Same reason (#921): uses node:test, not vitest globals. Run
+          // standalone with `node --test
+          // scripts/compose-project-name-resolution.test.mjs`.
+          "scripts/compose-project-name-resolution.test.mjs",
         ],
       },
     },
