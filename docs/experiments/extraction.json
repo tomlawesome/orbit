@@ -87,7 +87,17 @@
         }
       },
       "verdict": "baseline",
-      "notes": "Old corpus of 36 short documents, deleted on 2026-09-11 (#986)."
+      "notes": "Old corpus of 36 short documents, deleted on 2026-09-11 (#986).",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E02",
@@ -149,7 +159,17 @@
         }
       },
       "verdict": "baseline",
-      "notes": "Old corpus, deleted 2026-09-11. Not comparable with the runs below."
+      "notes": "Old corpus, deleted 2026-09-11. Not comparable with the runs below.",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E03",
@@ -211,7 +231,17 @@
         }
       },
       "verdict": "baseline",
-      "notes": "Showed that a whole page over-extracts: 5 to 11 dates returned where 1 or 2 are wanted."
+      "notes": "Showed that a whole page over-extracts: 5 to 11 dates returned where 1 or 2 are wanted.",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E04",
@@ -274,7 +304,17 @@
       },
       "verdict": "baseline",
       "notes": "The number every later run is measured against.",
-      "isBaseline": true
+      "isBaseline": true,
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E05",
@@ -336,7 +376,17 @@
         }
       },
       "verdict": "baseline",
-      "notes": ""
+      "notes": "",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E06",
@@ -398,7 +448,17 @@
         }
       },
       "verdict": "kept",
-      "notes": "Subtype negative because the truth convention was wrong, not the chooser."
+      "notes": "Subtype negative because the truth convention was wrong, not the chooser.",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E07",
@@ -460,7 +520,10 @@
         }
       },
       "verdict": "kept",
-      "notes": ""
+      "notes": "",
+      "about": [
+        "subtype"
+      ]
     },
     {
       "id": "E16",
@@ -522,7 +585,11 @@
         }
       },
       "verdict": "control",
-      "notes": "Run on 2026-09-12, not on the day of E07."
+      "notes": "Run on 2026-09-12, not on the day of E07.",
+      "about": [
+        "subtype",
+        "provider"
+      ]
     },
     {
       "id": "E25",
@@ -585,7 +652,17 @@
       },
       "verdict": "baseline",
       "isBaseline": true,
-      "notes": "Unchanged by anything since: the one-shot rules are still in the code as the comparison line."
+      "notes": "Unchanged by anything since: the one-shot rules are still in the code as the comparison line.",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E08",
@@ -647,7 +724,17 @@
         }
       },
       "verdict": "kept",
-      "notes": ""
+      "notes": "",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E20",
@@ -709,7 +796,17 @@
         }
       },
       "verdict": "control",
-      "notes": ""
+      "notes": "",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E09",
@@ -771,7 +868,11 @@
         }
       },
       "verdict": "kept",
-      "notes": "Dates 50% to 100% on the hold-out."
+      "notes": "Dates 50% to 100% on the hold-out.",
+      "about": [
+        "dates",
+        "dateRoles"
+      ]
     },
     {
       "id": "E21",
@@ -833,7 +934,11 @@
         }
       },
       "verdict": "control",
-      "notes": ""
+      "notes": "",
+      "about": [
+        "dates",
+        "dateRoles"
+      ]
     },
     {
       "id": "E10",
@@ -895,7 +1000,11 @@
         }
       },
       "verdict": "kept",
-      "notes": ""
+      "notes": "",
+      "about": [
+        "provider",
+        "cost"
+      ]
     },
     {
       "id": "E22",
@@ -957,7 +1066,11 @@
         }
       },
       "verdict": "control",
-      "notes": ""
+      "notes": "",
+      "about": [
+        "provider",
+        "cost"
+      ]
     },
     {
       "id": "E11",
@@ -1019,7 +1132,17 @@
         }
       },
       "verdict": "baseline",
-      "notes": "Higher than E10 on the hold-out: the whole-page model beats the staged pipeline there on provider and reference."
+      "notes": "Higher than E10 on the hold-out: the whole-page model beats the staged pipeline there on provider and reference.",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E12",
@@ -1081,7 +1204,17 @@
         }
       },
       "verdict": "set aside",
-      "notes": "Recorded as a broken run on the night. E24 reruns the same idea with the same model on healthy code and reproduces the collapse, so this was the design failing, not the run. The two numbers differ (-17.6 against -5.7) because the code moved on between them."
+      "notes": "Recorded as a broken run on the night. E24 reruns the same idea with the same model on healthy code and reproduces the collapse, so this was the design failing, not the run. The two numbers differ (-17.6 against -5.7) because the code moved on between them.",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E17",
@@ -1143,7 +1276,10 @@
         }
       },
       "verdict": "control",
-      "notes": "The number to judge the provider bins against."
+      "notes": "The number to judge the provider bins against.",
+      "about": [
+        "provider"
+      ]
     },
     {
       "id": "E18",
@@ -1205,7 +1341,10 @@
         }
       },
       "verdict": "kept",
-      "notes": "What this bought is in the shortlist table, not here: it is a ranking change."
+      "notes": "What this bought is in the shortlist table, not here: it is a ranking change.",
+      "about": [
+        "provider"
+      ]
     },
     {
       "id": "E19",
@@ -1267,7 +1406,10 @@
         }
       },
       "verdict": "regression",
-      "notes": "Still the live behaviour: E15 scores the same provider 45.8. The bins are good at ranking and poor at deciding."
+      "notes": "Still the live behaviour: E15 scores the same provider 45.8. The bins are good at ranking and poor at deciding.",
+      "about": [
+        "provider"
+      ]
     },
     {
       "id": "E13",
@@ -1329,7 +1471,17 @@
         }
       },
       "verdict": "set aside",
-      "notes": "Recorded as unexplained on the night. E26 reruns it on healthy code and reproduces the collapse (-10.9%), so it was the design, not the run."
+      "notes": "Recorded as unexplained on the night. E26 reruns it on healthy code and reproduces the collapse (-10.9%), so it was the design, not the run.",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E14",
@@ -1391,7 +1543,17 @@
         }
       },
       "verdict": "set aside",
-      "notes": "Recorded as unexplained on the night. Its tuning-corpus twin (E13) is now reproduced by E26, so this is the same dead end rather than a failed run. Not itself re-run on the hold-out."
+      "notes": "Recorded as unexplained on the night. Its tuning-corpus twin (E13) is now reproduced by E26, so this is the same dead end rather than a failed run. Not itself re-run on the hold-out.",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E23",
@@ -1453,7 +1615,11 @@
         }
       },
       "verdict": "kept",
-      "notes": "The hold-out's best trusted number, and no model was called."
+      "notes": "The hold-out's best trusted number, and no model was called.",
+      "about": [
+        "subtype",
+        "provider"
+      ]
     },
     {
       "id": "E15",
@@ -1515,7 +1681,11 @@
         }
       },
       "verdict": "kept",
-      "notes": "Earlier rules-only points from ADR-0026: 75.1% before the model chose every field, 71.5% after provider moved to word runs (per-field split not kept). Subtype 0 to 20/24 is this change."
+      "notes": "Earlier rules-only points from ADR-0026: 75.1% before the model chose every field, 71.5% after provider moved to word runs (per-field split not kept). Subtype 0 to 20/24 is this change.",
+      "about": [
+        "subtype",
+        "provider"
+      ]
     },
     {
       "id": "E24",
@@ -1577,7 +1747,17 @@
         }
       },
       "verdict": "set aside",
-      "notes": "Against E15, the same code with no model: 81.9% to -5.7%. Provider 0.0% means it answered none every time it was asked."
+      "notes": "Against E15, the same code with no model: 81.9% to -5.7%. Provider 0.0% means it answered none every time it was asked.",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     },
     {
       "id": "E26",
@@ -1639,7 +1819,17 @@
         }
       },
       "verdict": "set aside",
-      "notes": "Against E15, the same code with no model: 81.9% to -10.9%."
+      "notes": "Against E15, the same code with no model: 81.9% to -10.9%.",
+      "about": [
+        "provider",
+        "reference",
+        "dates",
+        "dateRoles",
+        "subtype",
+        "cost",
+        "scheduleKind",
+        "recurrence"
+      ]
     }
   ],
   "measurements": [
@@ -1742,6 +1932,60 @@
         ]
       ],
       "source": "run at the terminal, 2026-09-12"
+    },
+    {
+      "id": "M05",
+      "date": "2026-09-12",
+      "corpus": "holdout-12",
+      "label": "Provider word-run bins on the twelve unseen pages",
+      "what": "The bins were adopted on the strength of the 24 and of a six-page check on unseen pages. Measured today over all twelve unseen pages, they do not carry over: the answer reaches the top two runs a third of the time, against nine times in ten on the 24. Marked generously -- counting a short form of the name as a hit, the way a reader marking by hand would -- it is two thirds. Binning over every organisation stage 1 found, rather than only the ones a provider sieve kept, changes nothing, so the gate in front of the bins is not the cause.",
+      "how": "npm run eval:provider-bins -- --holdout",
+      "results": [
+        [
+          "the answer is in the top two runs",
+          "4 of 12 (33.3%), against 22 of 24 on the tuning pages"
+        ],
+        [
+          "the same, marked generously by eye",
+          "8 of 12 (66.7%)"
+        ],
+        [
+          "the answer is anywhere on the list",
+          "5 of 12 (41.7%), against 23 of 24"
+        ],
+        [
+          "entries offered, on average",
+          "2.6, against 5.7 on the tuning pages"
+        ],
+        [
+          "bins over every organisation, not just the kept ones",
+          "4 of 12 in the top two: no better"
+        ]
+      ],
+      "source": "run at the terminal, 2026-09-12; #989"
+    },
+    {
+      "id": "M06",
+      "date": "2026-09-12",
+      "corpus": "holdout-12",
+      "label": "The six-for-six result does not reproduce",
+      "what": "#989 note 16839 records the owner running the prototype on six unseen pages and the correct provider being in the top two bins on all six. Running the same prototype on the same six pages today puts it in the top two on three: one page's top bins are the underwriter, one is 'report reference number', one never repeats the provider's name at all. The prototype was edited after the note was written, so the two runs are not necessarily the same code. The note was written by an agent from what the owner reported, not from saved output.",
+      "how": "npx tsx tmp/provider-word-bins.ts --holdout --limit 6 --stage2 --phrases (the owner's prototype, untracked)",
+      "results": [
+        [
+          "in the top two bins, as recorded on the night",
+          "6 of 6"
+        ],
+        [
+          "in the top two bins, re-run today",
+          "3 of 6"
+        ],
+        [
+          "where it fails",
+          "pages that print the provider's name once or twice, where a rival is printed more"
+        ]
+      ],
+      "source": "#989 note 16839; re-run 2026-09-12"
     }
   ]
 }

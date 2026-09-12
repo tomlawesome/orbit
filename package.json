@@ -23,6 +23,7 @@
     "eval:date-sieves": "node_modules/tsx/dist/cli.mjs src/server/documents/date-sieve-report-cli.ts",
     "eval:amount-sieves": "node_modules/tsx/dist/cli.mjs src/server/documents/amount-sieve-report-cli.ts",
     "eval:provider-sieves": "node_modules/tsx/dist/cli.mjs src/server/documents/provider-sieve-report-cli.ts",
+    "eval:provider-bins": "node_modules/tsx/dist/cli.mjs src/server/documents/provider-bins-cli.ts",
     "eval:shortlist": "node_modules/tsx/dist/cli.mjs src/server/documents/shortlist-recall-cli.ts",
     "eval:stages": "node_modules/tsx/dist/cli.mjs src/server/documents/stages-score-cli.ts",
     "eval:holdout": "node_modules/tsx/dist/cli.mjs src/server/documents/holdout-score-cli.ts",

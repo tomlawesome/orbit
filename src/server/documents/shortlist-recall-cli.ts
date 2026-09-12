@@ -5,6 +5,7 @@
 //
 //   npm run eval:shortlist
 //   npm run eval:shortlist -- --misses
+//   npm run eval:shortlist -- --holdout   # the twelve unseen pages
 //
 // Per field, over the 24 tuning documents: how often the expected answer is
 // among the entries handed to the model, and how many entries there were.
@@ -31,6 +32,7 @@ import {
 import { providerShortlistEntries, subtypeShortlist } from "./extraction-choose-meaning";
 import { composeSubtype } from "./extraction-subtype-bins";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
+import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
 import {
   classifyProvider,
   classifySubtype,
@@ -74,7 +76,14 @@ const percent = (part: number, whole: number): string =>
   whole === 0 ? "n/a" : `${((part / whole) * 100).toFixed(1)}%`;
 
 function main(): void {
-  const showMisses = process.argv.includes("--misses");
+  // `--holdout` reads the twelve pages nobody tuned on. It answers the
+  // question the owner asked by hand -- is the provider in the top bins on
+  // pages we have not seen -- and, like the hold-out score, it prints only
+  // the summary: naming a miss on an unseen page is how a hold-out becomes
+  // a second tuning set.
+  const onHoldout = process.argv.includes("--holdout");
+  const corpus = onHoldout ? EXTRACTION_HOLDOUT_FULLPAGE : EXTRACTION_CORPUS;
+  const showMisses = process.argv.includes("--misses") && !onHoldout;
   const tallies = emptyTallies();
   const providerRank: RankTally = { first: 0, firstTwo: 0, onList: 0, wanted: 0 };
 
@@ -94,7 +103,7 @@ function main(): void {
     }
   };
 
-  for (const document of EXTRACTION_CORPUS) {
+  for (const document of corpus) {
     const tagged = tagCandidates(document.text, sieve(document.text));
     const { expected, name } = document;
 
@@ -151,7 +160,7 @@ function main(): void {
     }], name);
   }
 
-  console.log("field        answer on the shortlist   mean entries");
+  console.log(`${onHoldout ? "hold-out: " : ""}field        answer on the shortlist   mean entries`);
   for (const field of FIELDS) {
     const { found, wanted, entries, lists } = tallies[field];
     const rate = `${found}/${wanted} (${percent(found, wanted)})`;
@@ -165,7 +174,8 @@ function main(): void {
 
   const misses = FIELDS.flatMap((field) => tallies[field].misses);
   if (showMisses && misses.length > 0) console.log(`\nmisses:\n- ${misses.join("\n- ")}`);
-  else if (misses.length > 0) console.log(`\n${misses.length} misses; --misses names them`);
+  else if (misses.length > 0 && !onHoldout) console.log(`\n${misses.length} misses; --misses names them`);
+  else if (misses.length > 0) console.log(`\n${misses.length} misses, not named: these pages stay unread.`);
 }
 
 main();
