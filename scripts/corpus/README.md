@@ -152,3 +152,29 @@ So, for anyone tuning:
 New documents belong in `sources/`. If the hold-out is ever burned — read,
 tuned against, or quoted back into a fix — it is spent, and the replacement is
 a fresh set, not a scrub of this one.
+
+## The second hold-out
+
+The first hold-out was burned on 2026-09-12 (#996): an eval run with
+`--misses` printed each page's expected answer during a tuning session, the
+output was read, and the next change was designed knowing what those pages
+contained. `holdout2/` (#997) is the replacement — twelve more documents,
+written without reading `sources/`, `holdout/`, or either of their generated
+modules — and every rule above applies to it under its own name:
+`scripts/corpus/holdout2/`, `src/server/documents/extraction-holdout2-fullpage.ts`,
+and `--holdout2` in place of `--holdout` on every CLI that takes it
+(`holdout-score-cli`, `holdout-breakdown-cli`, `provider-bins-cli`,
+`subtype-runs-cli`, `provider-stage1-cli`). It uses twenty-three further
+faces, none used by `sources/` or `holdout/`, so no two of the three corpora
+share a character map.
+
+Building either hold-out from a fresh session needs `ORBIT_HOLDOUT_AUTHOR=1`
+declared on every command that touches its path, because
+`~/agent-hooks/holdout-gate.py` otherwise refuses to let a tuning session
+read or write it; see that file for exactly what it exempts. Once a hold-out
+is generated, it is scored like any other -- nothing about that gate changes
+what `npm run eval:holdout -- --holdout2` prints.
+
+If `holdout2/` is ever burned in turn, the replacement is `holdout3/`,
+following this same section's shape and `generate.mjs`'s directory-derived
+naming -- not a scrub of either retired set.
