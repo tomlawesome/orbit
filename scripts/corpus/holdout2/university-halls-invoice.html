@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Accommodation invoice — Aldreth Bay Halls</title>
+<style>
+@font-face{font-family:"Corpus Halls";src:url("../fonts/NotoSerif.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Halls Mono";src:url("../fonts/IBMPlexMono-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Halls Mono";src:url("../fonts/IBMPlexMono-Bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: "Corpus Halls", serif; font-size: 9pt; line-height: 1.32; color: #1a1a1a; }
+  .page { width: 210mm; min-height: 297mm; box-sizing: border-box; padding: 14mm 16mm 16mm 16mm; position: relative; background: #fff; }
+  .uniname { font-size: 18pt; font-weight: 700; color: #0d2c4a; }
+  .unisub { font-size: 8pt; color: #444; margin-top: 1mm; }
+  .headrule { border: none; border-top: 1.6pt solid #0d2c4a; margin: 2mm 0 3mm 0; }
+  .doctitle { font-size: 13pt; font-weight: 700; color: #0d2c4a; margin: 2mm 0 1mm 0; }
+  .refbox { font-family: "Corpus Halls Mono", monospace; font-size: 8pt; text-align: right; line-height: 1.6; color: #222; }
+  .addrwrap { display: flex; justify-content: space-between; margin: 3mm 0 4mm 0; }
+  h2 { font-size: 9pt; font-weight: 700; color: #0d2c4a; border-bottom: 0.6pt solid #0d2c4a; padding-bottom: 0.8mm; margin: 4mm 0 1.6mm 0; }
+  table.charges { width: 100%; border-collapse: collapse; font-family: "Corpus Halls Mono", monospace; font-size: 7.8pt; margin-bottom: 3mm; }
+  table.charges th { background: #0d2c4a; color: #fff; text-align: left; padding: 1.4mm 2mm; }
+  table.charges td { padding: 1.3mm 2mm; border: 0.5pt solid #c8d2dc; }
+  table.charges td.num { text-align: right; }
+  .totalrow td { font-weight: 700; background: #eef2f6; }
+  .note { font-size: 7.8pt; text-align: justify; margin: 0 0 2mm 0; line-height: 1.34; }
+  .duebox { border: 1.5pt solid #0d2c4a; background: #eef2f6; padding: 3mm 5mm; margin: 3mm 0; text-align: center; }
+  .duebox .dlabel { font-size: 8pt; color: #0d2c4a; text-transform: uppercase; letter-spacing: 1px; }
+  .duebox .damt { font-size: 20pt; font-weight: 700; color: #0d2c4a; }
+  table.cal { width: 100%; border-collapse: collapse; font-size: 7.4pt; margin-bottom: 3mm; }
+  table.cal th { background: #0d2c4a; color: #fff; text-align: left; padding: 1.3mm 2mm; }
+  table.cal td { padding: 1.2mm 2mm; border: 0.5pt solid #c8d2dc; }
+  .fine { font-size: 6.4pt; color: #444; line-height: 1.4; }
+  .pagefoot { position: absolute; left: 16mm; right: 16mm; bottom: 8mm; font-size: 6.2pt; color: #444; border-top: 0.6pt solid #0d2c4a; padding-top: 1.2mm; text-align: justify; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="uniname">ALDRETH BAY UNIVERSITY</div>
+  <div class="unisub">Aldreth Bay Halls of Residence &middot; Student Accommodation Office &middot; halls@aldrethbay.example</div>
+  <hr class="headrule">
+
+  <div class="addrwrap">
+    <div>
+      <div class="doctitle">Accommodation invoice, autumn term 2026</div>
+      Miss Priya Osei<br>
+      Room 214, Kestrel Court, Aldreth Bay Halls<br>
+      Student number 20261847
+    </div>
+    <div class="refbox">
+      Invoice BLS-INV-24-1187<br>
+      Tenancy ref AB-KC-214-26<br>
+      Issued 3 September 2026<br>
+      Previous invoice 2 June 2026
+    </div>
+  </div>
+
+  <div class="duebox">
+    <div class="dlabel">Payment due</div>
+    <div class="damt">1 October 2026</div>
+  </div>
+
+  <h2>Charges this term</h2>
+  <table class="charges">
+    <thead><tr><th>Item</th><th>Period</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Standard single room, Kestrel Court</td><td>29 Sep 2026 to 12 Dec 2026</td><td class="num">2,180.00</td></tr>
+      <tr><td>Contents insurance (compulsory)</td><td>autumn term</td><td class="num">45.00</td></tr>
+      <tr><td>Common room and laundry levy</td><td>autumn term</td><td class="num">225.00</td></tr>
+      <tr class="totalrow"><td colspan="2">Total due this instalment</td><td class="num">&pound;2,450.00</td></tr>
+    </tbody>
+  </table>
+  <p class="note">
+    This is the first of three equal termly instalments for the 2026/27 academic year. The spring
+    term instalment falls due on 14 January 2027 and the summer term instalment on 22 April 2027,
+    each invoiced separately roughly four weeks beforehand. A late payment charge of &pound;35.00 is
+    applied to any instalment still unpaid ten days after its due date.
+  </p>
+
+  <h2>Key dates this year</h2>
+  <table class="cal">
+    <thead><tr><th>Event</th><th>Date</th></tr></thead>
+    <tbody>
+      <tr><td>Halls open for arrivals</td><td>27 September 2026</td></tr>
+      <tr><td>Autumn term teaching begins</td><td>29 September 2026</td></tr>
+      <tr><td>Autumn term ends, halls close for winter break</td><td>12 December 2026</td></tr>
+      <tr><td>Halls reopen for spring term</td><td>10 January 2027</td></tr>
+      <tr><td>Tenancy agreement signed by resident</td><td>18 August 2026</td></tr>
+      <tr><td>Room condition report completed</td><td>27 September 2026</td></tr>
+      <tr><td>Fire alarm test, Kestrel Court</td><td>15 September 2026</td></tr>
+    </tbody>
+  </table>
+
+  <p class="fine">
+    Charges are set annually by the university's accommodation office and reviewed each June; the
+    2025/26 termly charge was &pound;2,290.00. Aldreth Bay Halls is managed under contract by
+    Bridgewater Living Services Ltd, company number 07734512, registered office 14 Quayside
+    Chambers, Fenmouth, Cravenshire CV2 9LT, on behalf of Aldreth Bay University. Queries about this
+    invoice should be sent to accounts@bridgewaterliving.example, not to the university's central
+    finance office. This invoice does not cover meals, which are charged separately through the
+    campus card system.
+  </p>
+
+  <div class="pagefoot">
+    Bridgewater Living Services Ltd, acting as managing agent for Aldreth Bay University &middot; Invoice BLS-INV-24-1187 &middot; Page 1 of 1
+  </div>
+</div>
+</body>
+</html>

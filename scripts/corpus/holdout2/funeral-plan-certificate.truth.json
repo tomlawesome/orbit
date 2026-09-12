@@ -1,0 +1,25 @@
+{
+  "name": "funeral plan certificate, the trading name on the parchment is not who is FCA-authorised",
+  "filename": "fullpage-funeral-plan-certificate.pdf",
+  "expected": {
+    "dates": ["2024-11-03", "2024-11-10", "2026-10-03"],
+    "provider": "Millstone Prepaid Services Ltd",
+    "reference": "EFP-0091234",
+    "dateRoles": [
+      { "date": "2024-11-03", "role": "start" },
+      { "date": "2024-11-10", "role": "issued" },
+      { "date": "2026-10-03", "role": "due" }
+    ],
+    "subtype": { "kinds": ["Plan"], "qualifiers": ["Funeral"] },
+    "costMinor": 399500,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: plan commenced 3 November 2024, certificate issued 10 November 2024, final instalment due 3 October 2026. Three other printed dates are deliberately not declared: the FCA's take-over of funeral plan regulation (29 Jul 2022, a regulatory milestone, not a date about this plan), and the two plan-document edition stamps (6 Jan 2026 and the superseded 2 Mar 2022).",
+    "provider is Millstone Prepaid Services Ltd, named in the small print as who 'Evergreen Funeral Plans' -- printed large on the certificate and used throughout -- is a trading name of, and as who is FCA-authorised to provide the plan; the nominated funeral director (Fenmouth & District Funeral Service) and the independent trust holding the funds (Cravenshire Funeral Planning Trust) are both named on the page and are neither of them the provider.",
+    "reference is the plan number EFP-0091234.",
+    "costMinor is the £3,995.00 total plan price, fixed at today's prices, not the £166.46 monthly instalment amount.",
+    "subtype: 'Plan' (matching the printed 'pre-paid funeral plan') qualified by 'Funeral'.",
+    "scheduleKind is not declared: none of the three dateRoles is 'renewal' or 'service' -- a prepaid funeral plan does not renew."
+  ]
+}

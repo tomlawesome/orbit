@@ -1,0 +1,27 @@
+{
+  "name": "health cash plan certificate, the friendly society only appears in the small print",
+  "filename": "fullpage-health-cash-plan-certificate.pdf",
+  "expected": {
+    "dates": ["2026-04-06", "2027-04-06"],
+    "provider": "Bramwell Friendly Society Ltd",
+    "reference": "FGP-MEM-338420",
+    "dateRoles": [
+      { "date": "2026-04-06", "role": "start" },
+      { "date": "2027-04-06", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Plan"], "qualifiers": ["Health"] },
+    "costMinor": 1450,
+    "currency": "GBP",
+    "scheduleKind": "renewal",
+    "recurrenceMonths": 1
+  },
+  "notes": [
+    "dates: plan starts 6 April 2026 and renews 6 April 2027. Three other printed dates are deliberately not declared: a claim's treatment date (14 Jul 2026), the same claim's payment date (2 Aug 2026), and the benefit-limits review date (1 Jan 2026, unchanged from the previous year so not itself a plan date); the rules-booklet edition stamp (4 Sep 2024) is a print-run date.",
+    "provider is Bramwell Friendly Society Ltd, named only in the small print as who 'FeelGood Cash Plan' -- printed large as the brand everywhere else on the page -- is a trading name of.",
+    "reference is the membership number FGP-MEM-338420.",
+    "costMinor is the £14.50 monthly premium, not any of the five annual benefit limits in the table.",
+    "subtype: 'Plan' (matching the printed 'Cash Plan') qualified by 'Health'.",
+    "scheduleKind is 'renewal': the later dateRole is 'renewal', and the page confirms the plan renews automatically each year.",
+    "recurrenceMonths is 1: the plan is billed '1 month at a time', printed in digits."
+  ]
+}
