@@ -46,12 +46,12 @@
           "of": 51
         },
         "provider": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 4
         },
         "reference": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 5,
           "of": 5
         },
@@ -66,22 +66,22 @@
           "of": 15
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 4
         },
         "cost": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 4,
           "of": 4
         },
         "scheduleKind": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 4
         },
         "recurrence": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 0,
           "of": 0
         }
@@ -133,7 +133,7 @@
           "of": 29
         },
         "cost": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 14,
           "of": 14
         },
@@ -143,7 +143,7 @@
           "of": 14
         },
         "recurrence": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 1
         }
@@ -175,12 +175,12 @@
           "of": 6
         },
         "reference": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 6
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 9,
           "of": 9
         },
@@ -200,12 +200,12 @@
           "of": 3
         },
         "scheduleKind": {
-          "pct": 40.0,
+          "pct": 40,
           "net": 2,
           "of": 5
         },
         "recurrence": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 3
         }
@@ -227,7 +227,7 @@
       "role": "no model",
       "scores": {
         "overall": {
-          "pct": 15.0,
+          "pct": 15,
           "net": 29,
           "of": 193
         },
@@ -247,27 +247,27 @@
           "of": 35
         },
         "dateRoles": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 35
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 24
         },
         "cost": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 19
         },
         "scheduleKind": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 18
         },
         "recurrence": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 14
         }
@@ -329,7 +329,7 @@
           "of": 18
         },
         "recurrence": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 14
         }
@@ -356,7 +356,7 @@
           "of": 193
         },
         "provider": {
-          "pct": 50.0,
+          "pct": 50,
           "net": 12,
           "of": 24
         },
@@ -386,7 +386,7 @@
           "of": 19
         },
         "scheduleKind": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 18,
           "of": 18
         },
@@ -418,7 +418,7 @@
           "of": 193
         },
         "provider": {
-          "pct": 75.0,
+          "pct": 75,
           "net": 18,
           "of": 24
         },
@@ -448,7 +448,7 @@
           "of": 19
         },
         "scheduleKind": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 18,
           "of": 18
         },
@@ -500,7 +500,7 @@
           "of": 35
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 24
         },
@@ -510,7 +510,7 @@
           "of": 19
         },
         "scheduleKind": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 18,
           "of": 18
         },
@@ -552,12 +552,12 @@
           "of": 12
         },
         "dates": {
-          "pct": 50.0,
+          "pct": 50,
           "net": 12,
           "of": 24
         },
         "dateRoles": {
-          "pct": 25.0,
+          "pct": 25,
           "net": 6,
           "of": 24
         },
@@ -614,17 +614,17 @@
           "of": 12
         },
         "dates": {
-          "pct": 50.0,
+          "pct": 50,
           "net": 12,
           "of": 24
         },
         "dateRoles": {
-          "pct": 25.0,
+          "pct": 25,
           "net": 6,
           "of": 24
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 12
         },
@@ -676,12 +676,12 @@
           "of": 12
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 24,
           "of": 24
         },
         "dateRoles": {
-          "pct": 25.0,
+          "pct": 25,
           "net": 6,
           "of": 24
         },
@@ -738,17 +738,17 @@
           "of": 12
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 24,
           "of": 24
         },
         "dateRoles": {
-          "pct": 25.0,
+          "pct": 25,
           "net": 6,
           "of": 24
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 12
         },
@@ -790,7 +790,7 @@
           "of": 109
         },
         "provider": {
-          "pct": -25.0,
+          "pct": -25,
           "net": -3,
           "of": 12
         },
@@ -800,12 +800,12 @@
           "of": 12
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 24,
           "of": 24
         },
         "dateRoles": {
-          "pct": 25.0,
+          "pct": 25,
           "net": 6,
           "of": 24
         },
@@ -852,7 +852,7 @@
           "of": 109
         },
         "provider": {
-          "pct": -25.0,
+          "pct": -25,
           "net": -3,
           "of": 12
         },
@@ -862,17 +862,17 @@
           "of": 12
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 24,
           "of": 24
         },
         "dateRoles": {
-          "pct": 25.0,
+          "pct": 25,
           "net": 6,
           "of": 24
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 12
         },
@@ -919,12 +919,12 @@
           "of": 12
         },
         "reference": {
-          "pct": 50.0,
+          "pct": 50,
           "net": 6,
           "of": 12
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 24,
           "of": 24
         },
@@ -934,7 +934,7 @@
           "of": 24
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 12
         },
@@ -944,12 +944,12 @@
           "of": 11
         },
         "scheduleKind": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 7
         },
         "recurrence": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 7
         }
@@ -1016,8 +1016,8 @@
           "of": 14
         }
       },
-      "verdict": "broken run",
-      "notes": "Blank on most fields: the run used a removed setting. Not a measurement of the change."
+      "verdict": "set aside",
+      "notes": "Recorded as a broken run on the night. E24 reruns the same idea with the same model on healthy code and reproduces the collapse, so this was the design failing, not the run. The two numbers differ (-17.6 against -5.7) because the code moved on between them."
     },
     {
       "id": "E17",
@@ -1038,7 +1038,7 @@
           "of": 193
         },
         "provider": {
-          "pct": 75.0,
+          "pct": 75,
           "net": 18,
           "of": 24
         },
@@ -1048,7 +1048,7 @@
           "of": 24
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 35,
           "of": 35
         },
@@ -1058,17 +1058,17 @@
           "of": 35
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 24
         },
         "cost": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 19,
           "of": 19
         },
         "scheduleKind": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 18,
           "of": 18
         },
@@ -1100,7 +1100,7 @@
           "of": 193
         },
         "provider": {
-          "pct": 75.0,
+          "pct": 75,
           "net": 18,
           "of": 24
         },
@@ -1110,7 +1110,7 @@
           "of": 24
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 35,
           "of": 35
         },
@@ -1120,17 +1120,17 @@
           "of": 35
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 24
         },
         "cost": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 19,
           "of": 19
         },
         "scheduleKind": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 18,
           "of": 18
         },
@@ -1172,7 +1172,7 @@
           "of": 24
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 35,
           "of": 35
         },
@@ -1182,17 +1182,17 @@
           "of": 35
         },
         "subtype": {
-          "pct": 0.0,
+          "pct": 0,
           "net": 0,
           "of": 24
         },
         "cost": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 19,
           "of": 19
         },
         "scheduleKind": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 18,
           "of": 18
         },
@@ -1296,12 +1296,12 @@
           "of": 12
         },
         "dates": {
-          "pct": -25.0,
+          "pct": -25,
           "net": -6,
           "of": 24
         },
         "dateRoles": {
-          "pct": -50.0,
+          "pct": -50,
           "net": -12,
           "of": 24
         },
@@ -1348,7 +1348,7 @@
           "of": 109
         },
         "provider": {
-          "pct": -25.0,
+          "pct": -25,
           "net": -3,
           "of": 12
         },
@@ -1358,12 +1358,12 @@
           "of": 12
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 24,
           "of": 24
         },
         "dateRoles": {
-          "pct": 25.0,
+          "pct": 25,
           "net": 6,
           "of": 24
         },
@@ -1420,7 +1420,7 @@
           "of": 24
         },
         "dates": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 35,
           "of": 35
         },
@@ -1435,12 +1435,12 @@
           "of": 24
         },
         "cost": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 19,
           "of": 19
         },
         "scheduleKind": {
-          "pct": 100.0,
+          "pct": 100,
           "net": 18,
           "of": 18
         },
@@ -1452,6 +1452,68 @@
       },
       "verdict": "kept",
       "notes": "Earlier rules-only points from ADR-0026: 75.1% before the model chose every field, 71.5% after provider moved to word runs (per-field split not kept). Subtype 0 to 20/24 is this change."
+    },
+    {
+      "id": "E24",
+      "date": "2026-09-12",
+      "label": "NuExtract chooses every field, on today's code",
+      "corpus": "tuning-24",
+      "model": "NuExtract 3 Q4_K_M",
+      "role": "chooser",
+      "route": "sieve+tag+choose+model",
+      "what": "The rerun that was meant to tell us whether E12 was a broken run. It was not: asking NuExtract to pick every field off its shortlist reproduces the collapse on healthy code. It answers blank or wrong on dates, roles, cost and provider, and is only better than the rules at subtype (91.7 against 83.3).",
+      "how": "npm run eval:stages -- --model, in a node:22 container on the orbit_orbit-document-processing network",
+      "commit": "c9358f2",
+      "output": "tmp/stages-model-nuextract-c9358f2.out",
+      "scores": {
+        "overall": {
+          "pct": -5.7,
+          "net": -11,
+          "of": 193
+        },
+        "provider": {
+          "pct": 0,
+          "net": 0,
+          "of": 24
+        },
+        "reference": {
+          "pct": 25,
+          "net": 6,
+          "of": 24
+        },
+        "dates": {
+          "pct": -54.3,
+          "net": -19,
+          "of": 35
+        },
+        "dateRoles": {
+          "pct": -77.1,
+          "net": -27,
+          "of": 35
+        },
+        "subtype": {
+          "pct": 91.7,
+          "net": 22,
+          "of": 24
+        },
+        "cost": {
+          "pct": -52.6,
+          "net": -10,
+          "of": 19
+        },
+        "scheduleKind": {
+          "pct": 77.8,
+          "net": 14,
+          "of": 18
+        },
+        "recurrence": {
+          "pct": 21.4,
+          "net": 3,
+          "of": 14
+        }
+      },
+      "verdict": "set aside",
+      "notes": "Against E15, the same code with no model: 81.9% to -5.7%. Provider 0.0% means it answered none every time it was asked."
     }
   ],
   "measurements": [
