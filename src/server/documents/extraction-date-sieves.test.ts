@@ -121,9 +121,19 @@ describe("the arithmetic between two dates and a printed term", () => {
     expect(roles("term-arithmetic", statement, "2026-04-05")).toEqual([]);
   });
 
-  it("says nothing when no term is printed anywhere near the two dates", () => {
+  it("says nothing when no term is printed anywhere on the page", () => {
     const bare = "1 April 2026 and 1 April 2027 both appear on this page.";
     expect(roles("term-arithmetic", bare, "2027-04-01")).toEqual([]);
+  });
+
+  it("reads a term printed a long way from the dates it governs", () => {
+    const gym = [
+      "Membership start date 2 March 2026",
+      "Your membership runs to 1 March 2027.",
+      "Clause 4. Minimum term. Your membership has a minimum term of 12 months from the start date and you cannot cancel during it except as set out in clause 9.",
+    ].join(" \n\n" + "Lorem ipsum. \n\n".repeat(12));
+    expect(roles("term-arithmetic", gym, "2026-03-02")).toEqual(["start"]);
+    expect(roles("term-arithmetic", gym, "2027-03-01")).toEqual(["renewal"]);
   });
 });
 
