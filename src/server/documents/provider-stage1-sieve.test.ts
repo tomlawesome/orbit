@@ -4,6 +4,10 @@ import { providerCandidates } from "./provider-stage1-sieve";
 
 // Stage 1 is judged on recall, so these say what reaches the later stages,
 // never what the right answer is: choosing is stage 3's job.
+//
+// Every name here is invented. None is a provider from either corpus, and
+// none is a hold-out answer: a test is committed and read forever, so a real
+// answer written into one leaks the hold-out to every session after it.
 
 const names = (text: string): string[] => providerCandidates(text).map((candidate) => candidate.value);
 
@@ -13,7 +17,7 @@ describe("names with a company form or a trade word", () => {
   });
 
   it("cuts out a public body", () => {
-    expect(names("Issued by Marchford Borough Council")).toContain("Marchford Borough Council");
+    expect(names("Issued by Ashcombe Borough Council")).toContain("Ashcombe Borough Council");
   });
 });
 
@@ -27,17 +31,17 @@ describe("any run of capitalised words", () => {
   it("cuts out a name in a trade no word list covers", () => {
     // The shared sieve needs a word from its list -- Ltd, Council, Insurance
     // -- and has none for a nursery, a lettings agent or an alarm company.
-    expect(names("Little Acorns Day Nursery")).toContain("Little Acorns Day Nursery");
-    expect(names("Thornfield Lettings & Management")).toContain("Thornfield Lettings & Management");
-    expect(names("Northgate Home Security")).toContain("Northgate Home Security");
+    expect(names("Mossgate Day Nursery")).toContain("Mossgate Day Nursery");
+    expect(names("Ravensmoor Lettings & Management")).toContain("Ravensmoor Lettings & Management");
+    expect(names("Quillfield Home Security")).toContain("Quillfield Home Security");
   });
 
   it("finds a name inside a longer line, not only a line of its own", () => {
-    expect(names("Please pay Bramblewood Childcare within 14 days")).toContain("Bramblewood Childcare");
+    expect(names("Please pay Wrenbury Childcare within 14 days")).toContain("Wrenbury Childcare");
   });
 
   it("does not end a name on a joining word", () => {
-    expect(names("Permits for Marchford Borough Council").every((name) => !/\s(?:for|of|and|the)$/u.test(name)))
+    expect(names("Permits for Ashcombe Borough Council").every((name) => !/\s(?:for|of|and|the)$/u.test(name)))
       .toBe(true);
   });
 
@@ -49,16 +53,16 @@ describe("any run of capitalised words", () => {
 
 describe("addresses", () => {
   it("reads the host of an e-mail address as a name", () => {
-    expect(names("billing@foxglove-hosting.co.uk")).toContain("Foxglove Hosting");
+    expect(names("billing@harbourlight-hosting.co.uk")).toContain("Harbourlight Hosting");
   });
 
   it("reads a web address the same way", () => {
-    expect(names("www.bracken-vale.com")).toContain("Bracken Vale");
+    expect(names("www.drummond-hale.com")).toContain("Drummond Hale");
   });
 
   it("says nothing where the host is one word", () => {
-    // "foxglove" alone is a name of one word, and one word is never kept.
-    expect(names("hello@foxglove.co.uk")).toEqual([]);
+    // "harbourlight" alone is a name of one word, and one word is never kept.
+    expect(names("hello@harbourlight.co.uk")).toEqual([]);
   });
 });
 
@@ -74,7 +78,7 @@ describe("what stage 1 hands on", () => {
   });
 
   it("tags everything it finds as an organisation", () => {
-    expect(providerCandidates("Marchford Borough Council").every((c) => c.kind === "organisation")).toBe(true);
+    expect(providerCandidates("Ashcombe Borough Council").every((c) => c.kind === "organisation")).toBe(true);
   });
 
   it("attaches the block a name was printed in", () => {
