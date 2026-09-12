@@ -23,7 +23,7 @@
 // whether a miss is a tag or a choice.
 
 import { chooseFields, chooseFieldsWithModel } from "./extraction-choose";
-import { chooserTransport } from "./extraction-choose-meaning";
+import { assertChooserReachable, chooserTransport } from "./extraction-choose-meaning";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { formatRunScore, scoreCorpus } from "./extraction-scoring";
 import { sieve, type CandidateKind } from "./extraction-sieve";
@@ -59,6 +59,7 @@ async function main(): Promise<void> {
     return;
   }
   const withModel = process.argv.includes("--model");
+  if (withModel) await assertChooserReachable(chooserModelNamed());
   const staged = await scoreCorpus(EXTRACTION_CORPUS, async (text) => {
     const tagged = tagCandidates(text, sieve(text));
     return withModel
