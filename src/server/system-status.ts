@@ -109,7 +109,7 @@ function schedulerRow(): ServiceRow {
  * what already exists into the shape the drawer draws, and drops a row
  * entirely rather than asserting a state it never observed.
  */
-export async function getSystemStatus(): Promise<SystemStatus> {
+async function computeSystemStatus(): Promise<SystemStatus> {
   const [readiness, databaseReachable, scanner, tika] = await Promise.all([
     getPublicReadiness(),
     checkDatabaseReachable(),
@@ -134,4 +134,60 @@ export async function getSystemStatus(): Promise<SystemStatus> {
       application: readiness.status,
     },
   };
+}
+
+/**
+ * Every signed-in household member's `/home` render calls this once
+ * (+page.server.js), and `/home` is the product's main screen: with no cache
+ * a plain page load pings ClamAV and Tika directly, and a burst of loads --
+ * several members open at once, one tab regaining focus, a client retry --
+ * turns into that many concurrent sidecar probes.
+ *
+ * 5 seconds, the same interval `src/server/boot.ts`'s own
+ * `SCANNER_READINESS_RETRY_INTERVAL_MS` already re-probes ClamAV at during
+ * startup -- this reuses that instance's own idea of how often the scanner
+ * is worth asking again, rather than inventing a second number. Short enough
+ * that an operator watching during a real incident sees it recover within a
+ * couple of reloads; long enough to collapse the common case (a burst of
+ * `/home` renders within the same few seconds) into one probe.
+ */
+const STATUS_CACHE_TTL_MS = 5_000;
+
+let cachedStatus: { status: SystemStatus; expiresAt: number } | undefined;
+/** The one in-flight computation, so concurrent callers coalesce onto it instead of each starting their own probe. */
+let inFlight: Promise<SystemStatus> | undefined;
+
+/**
+ * Test-only: clears the module-level cache and any in-flight computation, so
+ * one test's answer cannot leak into the next.
+ */
+export function resetSystemStatusCacheForTests(): void {
+  cachedStatus = undefined;
+  inFlight = undefined;
+}
+
+/**
+ * The cached, coalesced entry point the drawer's route calls.
+ *
+ * A cache hit returns the exact object `computeSystemStatus` built -- every
+ * row's `observedAt` stays the instant it was actually probed, never
+ * restamped to the instant of the cache hit, which is the whole point of
+ * #863 (a timestamp the drawer did not observe is exactly what it must not
+ * assert). A miss with no computation already running starts exactly one,
+ * and every other caller in that window awaits the same promise rather than
+ * starting its own.
+ */
+export async function getSystemStatus(): Promise<SystemStatus> {
+  const now = Date.now();
+  if (cachedStatus && cachedStatus.expiresAt > now) return cachedStatus.status;
+  if (inFlight) return inFlight;
+
+  inFlight = computeSystemStatus();
+  try {
+    const status = await inFlight;
+    cachedStatus = { status, expiresAt: Date.now() + STATUS_CACHE_TTL_MS };
+    return status;
+  } finally {
+    inFlight = undefined;
+  }
 }
