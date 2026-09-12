@@ -13,10 +13,10 @@ const HOLDOUT_PREFIX = "hold-out: ";
 const CORPUS_ORDER = ["tuning-24", "holdout-12", "fullpage-6", "old-36"];
 
 // Verdicts whose numbers are trusted, so a later run can be measured against
-// them. A control and a regression are both real runs: only a run that failed
-// or is not yet believed drops out of the chain.
-const DELTA_VERDICTS = new Set(["kept", "baseline", "control", "regression"]);
-const MUTED_VERDICTS = new Set(["broken run", "unexplained", "set aside"]);
+// them. A control, a regression and a measured dead end are all real runs:
+// only a run that failed or is not yet believed drops out of the chain.
+const DELTA_VERDICTS = new Set(["kept", "baseline", "control", "regression", "set aside"]);
+const MUTED_VERDICTS = new Set(["broken run", "unexplained"]);
 
 const SCORE_LINE = /^([^:]+):\s*(-?\d+(?:\.\d+)?)%\s*\((-?\d+)\/(\d+)\)\s*\[(.*)\]\s*$/u;
 const FIELD_SCORE = /([A-Za-z]+)\s+(-?\d+(?:\.\d+)?)%\s*\((-?\d+)\/(\d+)\)/gu;
