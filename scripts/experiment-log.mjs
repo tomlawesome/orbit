@@ -358,11 +358,17 @@ function renderHeadline(experiments, fields, corpora) {
   if (rows.length === 0) return "";
   const corpus = rows[0].corpus;
 
+  // A one-field row has no overall, here as in the tables below: its
+  // percentage is that field's and would otherwise read as a whole-pipeline
+  // score, and take the column's box off a run that answered every field.
+  const scoreIn = (experiment, column) =>
+    (column === "overall" && oneFieldOnly(experiment) ? undefined : experiment.scores[column]);
+
   const bestByColumn = new Map();
   for (const column of ["overall", ...fields]) {
     let held = null;
     for (const experiment of rows) {
-      const score = experiment.scores[column];
+      const score = scoreIn(experiment, column);
       if (score && (held === null || score.pct > held.pct)) held = { pct: score.pct, id: experiment.id };
     }
     if (held) bestByColumn.set(column, held);
@@ -370,7 +376,7 @@ function renderHeadline(experiments, fields, corpora) {
 
   const body = rows.map((experiment) => {
     const cells = ["overall", ...fields].map((column) => {
-      const score = experiment.scores[column];
+      const score = scoreIn(experiment, column);
       // A tie boxes both: with two rows, marking only the first would read
       // as one method beating the other where they drew.
       const best = score != null && bestByColumn.get(column)?.pct === score.pct;
@@ -389,8 +395,9 @@ function renderHeadline(experiments, fields, corpora) {
   return `<section class="headline">
   <h2>Where we are: ${escapeHtml(corpora[corpus] ?? corpus)}</h2>
   <p class="key">The plain model reading the whole page, against the heuristics with no model at all, on the
-  documents nobody tuned on. A green box marks whichever of the two is ahead on that field. Everything else
-  is in the drawer at the foot of the page.</p>
+  documents nobody tuned on. Under them, each field's own method, scored on the same pages: those rows fill
+  one column only, because a method that reads one field has no overall score. A green box marks the best
+  any row has reached in that column. Everything else is in the drawer at the foot of the page.</p>
   <div class="tables"><table>
     <thead><tr><th>ID</th><th>what ran</th><th>model</th><th class="overall">overall</th>${fieldHeaders}</tr></thead>
     <tbody>
