@@ -379,11 +379,22 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   recording.
 - How extraction work is tested (owner, 2026-09-12), which is not a ruling on
   what the pipeline ends up doing: heuristics only, no model, one field at a
-  time, each field's method in its own file — reuse pieces from the others,
-  never extend one file to cover two fields. What the full pipeline does is
-  decided later, once the fields have been measured this way. The page's front
-  table is the blind whole-page model against the heuristics on the twelve
-  unseen pages; a run joins it with `"headline": true` in the register.
+  time. What the full pipeline does is decided later, once the fields have
+  been measured this way. The page's front table is the blind whole-page model
+  against the heuristics on the twelve unseen pages; a run joins it with
+  `"headline": true` in the register.
+- **Every field gets its own copy of every stage** (owner, 2026-09-12): its
+  own sieve, its own tagging, its own chooser, in its own files. Not one
+  shared stage 1 with per-field choosers on top — provider's sieve is
+  provider's, and making it greedier must not change a single candidate
+  subtype sees. Copy rather than import: a shared helper cannot be tuned for
+  one field without moving the other, which is the whole point of separating
+  them. Duplication is expected and is not a defect to clean up.
+
+  Whether anything can be merged back is decided at the end, from the
+  numbers, once every field has been tuned on its own. Until then, a change
+  that helps one field and is not measured on the others does not go into
+  anything the others read. #996 is the first of these.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not
