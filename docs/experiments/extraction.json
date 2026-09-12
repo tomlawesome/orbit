@@ -1,0 +1,944 @@
+{
+  "title": "Orbit document extraction: experiment log",
+  "scoring": "Every field a page wants is one point: a right answer scores +1, a wrong answer -1, a blank 0. The percentage is that total over the points wanted, so it can go below zero when wrong answers outnumber right ones. The 24 tuning pages are for steering; the 12 hold-out pages were never tuned on and are the judge.",
+  "fields": [
+    "provider",
+    "reference",
+    "dates",
+    "dateRoles",
+    "subtype",
+    "cost",
+    "scheduleKind",
+    "recurrence"
+  ],
+  "corpora": {
+    "tuning-24": "The 24 tuning pages (src/server/documents/extraction-corpus.ts)",
+    "holdout-12": "The 12 hold-out pages, never read by an agent (extraction-holdout-corpus*.ts)",
+    "fullpage-6": "The six full-page documents added on 2026-09-11 (#981), now part of the 24",
+    "old-36": "The 36 short documents deleted on 2026-09-11 (#986)"
+  },
+  "verdicts": {
+    "baseline": "A point of reference, not a change",
+    "kept": "The change stayed in the code",
+    "set aside": "Tried, measured, and not adopted",
+    "broken run": "The run itself failed; the numbers say nothing about the change",
+    "unexplained": "Numbers not yet trusted; a rerun is due"
+  },
+  "experiments": [
+    {
+      "id": "E01",
+      "date": "2026-09-10",
+      "label": "Blind NuExtract on a small seeded sample",
+      "corpus": "old-36",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "nuextract3 native template",
+      "what": "The model read each whole page with its native template and wrote every field itself. No sieve, no rules.",
+      "how": "npm run eval:extraction (blind-only screen, 4176887)",
+      "commit": "4176887",
+      "output": "tmp/nuextract-score.out",
+      "scores": {
+        "overall": {
+          "pct": 41.2,
+          "net": 21,
+          "of": 51
+        },
+        "provider": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 4
+        },
+        "reference": {
+          "pct": 100.0,
+          "net": 5,
+          "of": 5
+        },
+        "dates": {
+          "pct": 73.3,
+          "net": 11,
+          "of": 15
+        },
+        "dateRoles": {
+          "pct": 6.7,
+          "net": 1,
+          "of": 15
+        },
+        "subtype": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 4
+        },
+        "cost": {
+          "pct": 100.0,
+          "net": 4,
+          "of": 4
+        },
+        "scheduleKind": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 4
+        },
+        "recurrence": {
+          "pct": 100.0,
+          "net": 0,
+          "of": 0
+        }
+      },
+      "verdict": "baseline",
+      "notes": "Old corpus of 36 short documents, deleted on 2026-09-11 (#986)."
+    },
+    {
+      "id": "E02",
+      "date": "2026-09-10",
+      "label": "Blind NuExtract on the old corpus",
+      "corpus": "old-36",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "nuextract3 native template",
+      "what": "Same as E01 over the whole old corpus.",
+      "how": "tmp/nuextract-score.ts --full, inside a node:22 container on the Ollama network",
+      "commit": "4176887",
+      "output": "tmp/nuextract-full.out",
+      "scores": {
+        "overall": {
+          "pct": 63.6,
+          "net": 171,
+          "of": 269
+        },
+        "provider": {
+          "pct": 25.9,
+          "net": 7,
+          "of": 27
+        },
+        "reference": {
+          "pct": 79.3,
+          "net": 23,
+          "of": 29
+        },
+        "dates": {
+          "pct": 92.4,
+          "net": 73,
+          "of": 79
+        },
+        "dateRoles": {
+          "pct": 55.3,
+          "net": 42,
+          "of": 76
+        },
+        "subtype": {
+          "pct": -3.4,
+          "net": -1,
+          "of": 29
+        },
+        "cost": {
+          "pct": 100.0,
+          "net": 14,
+          "of": 14
+        },
+        "scheduleKind": {
+          "pct": 92.9,
+          "net": 13,
+          "of": 14
+        },
+        "recurrence": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 1
+        }
+      },
+      "verdict": "baseline",
+      "notes": "Old corpus, deleted 2026-09-11. Not comparable with the runs below."
+    },
+    {
+      "id": "E03",
+      "date": "2026-09-11",
+      "label": "Blind NuExtract on the six full-page documents",
+      "corpus": "fullpage-6",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "nuextract3 native template",
+      "what": "The model read the six new full-page documents (#981) whole.",
+      "how": "tmp/nuextract-score.ts over the six full-page documents",
+      "commit": "f92a987",
+      "output": "tmp/model-fullpage.out",
+      "scores": {
+        "overall": {
+          "pct": 27.7,
+          "net": 13,
+          "of": 47
+        },
+        "provider": {
+          "pct": 66.7,
+          "net": 4,
+          "of": 6
+        },
+        "reference": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 6
+        },
+        "dates": {
+          "pct": 100.0,
+          "net": 9,
+          "of": 9
+        },
+        "dateRoles": {
+          "pct": 11.1,
+          "net": 1,
+          "of": 9
+        },
+        "subtype": {
+          "pct": -66.7,
+          "net": -4,
+          "of": 6
+        },
+        "cost": {
+          "pct": 33.3,
+          "net": 1,
+          "of": 3
+        },
+        "scheduleKind": {
+          "pct": 40.0,
+          "net": 2,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 3
+        }
+      },
+      "verdict": "baseline",
+      "notes": "Showed that a whole page over-extracts: 5 to 11 dates returned where 1 or 2 are wanted."
+    },
+    {
+      "id": "E04",
+      "date": "2026-09-11",
+      "label": "Old one-shot heuristics",
+      "corpus": "tuning-24",
+      "model": "none (rules only)",
+      "route": "heuristics (one-shot)",
+      "what": "The rules Orbit shipped before ADR-0026: a few regexes per field, first match wins, over the whole page.",
+      "how": "npm run eval:stages (the heuristics line)",
+      "commit": "09bfb36",
+      "output": "tmp/stages-model.out",
+      "scores": {
+        "overall": {
+          "pct": 15.0,
+          "net": 29,
+          "of": 193
+        },
+        "provider": {
+          "pct": -33.3,
+          "net": -8,
+          "of": 24
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 8,
+          "of": 24
+        },
+        "dates": {
+          "pct": 82.9,
+          "net": 29,
+          "of": 35
+        },
+        "dateRoles": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 35
+        },
+        "subtype": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 24
+        },
+        "cost": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 19
+        },
+        "scheduleKind": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 18
+        },
+        "recurrence": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 14
+        }
+      },
+      "verdict": "baseline",
+      "notes": "The number every later run is measured against."
+    },
+    {
+      "id": "E05",
+      "date": "2026-09-11",
+      "label": "Blind NuExtract on the 24",
+      "corpus": "tuning-24",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "nuextract3 native template",
+      "what": "The model read each of the 24 tuning pages whole and wrote every field itself.",
+      "how": "npm run eval:extraction",
+      "commit": "09bfb36",
+      "output": "tmp/baseline-model.out",
+      "scores": {
+        "overall": {
+          "pct": 21.8,
+          "net": 42,
+          "of": 193
+        },
+        "provider": {
+          "pct": 37.5,
+          "net": 9,
+          "of": 24
+        },
+        "reference": {
+          "pct": 29.2,
+          "net": 7,
+          "of": 24
+        },
+        "dates": {
+          "pct": 82.9,
+          "net": 29,
+          "of": 35
+        },
+        "dateRoles": {
+          "pct": -14.3,
+          "net": -5,
+          "of": 35
+        },
+        "subtype": {
+          "pct": -54.2,
+          "net": -13,
+          "of": 24
+        },
+        "cost": {
+          "pct": 63.2,
+          "net": 12,
+          "of": 19
+        },
+        "scheduleKind": {
+          "pct": 16.7,
+          "net": 3,
+          "of": 18
+        },
+        "recurrence": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 14
+        }
+      },
+      "verdict": "baseline",
+      "notes": ""
+    },
+    {
+      "id": "E06",
+      "date": "2026-09-11",
+      "label": "First sieve, tag, choose run with the model",
+      "corpus": "tuning-24",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "sieve+tag+choose+model",
+      "what": "ADR-0026 built: stage 1 finds every candidate, stage 2 tags each with the label beside it, stage 3 chooses per field. Rules choose dates, reference, cost; the model chooses provider and subtype from a short list. Subtype truth was still the printed title.",
+      "how": "npm run eval:stages -- --model",
+      "commit": "1a0d068",
+      "output": "tmp/stages-model.out",
+      "scores": {
+        "overall": {
+          "pct": 59.1,
+          "net": 114,
+          "of": 193
+        },
+        "provider": {
+          "pct": 50.0,
+          "net": 12,
+          "of": 24
+        },
+        "reference": {
+          "pct": 79.2,
+          "net": 19,
+          "of": 24
+        },
+        "dates": {
+          "pct": 88.6,
+          "net": 31,
+          "of": 35
+        },
+        "dateRoles": {
+          "pct": 88.6,
+          "net": 31,
+          "of": 35
+        },
+        "subtype": {
+          "pct": -58.3,
+          "net": -14,
+          "of": 24
+        },
+        "cost": {
+          "pct": 63.2,
+          "net": 12,
+          "of": 19
+        },
+        "scheduleKind": {
+          "pct": 100.0,
+          "net": 18,
+          "of": 18
+        },
+        "recurrence": {
+          "pct": 35.7,
+          "net": 5,
+          "of": 14
+        }
+      },
+      "verdict": "kept",
+      "notes": "Subtype negative because the truth convention was wrong, not the chooser."
+    },
+    {
+      "id": "E07",
+      "date": "2026-09-11",
+      "label": "Subtype means the kind of thing, from the taxonomy",
+      "corpus": "tuning-24",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "sieve+tag+choose+model",
+      "what": "Subtype truth rewritten to a short vocabulary of kinds and qualifiers (subtype-taxonomy.json). The model chooses from the taxonomy phrases the page's words support, about eight a page.",
+      "how": "npm run eval:stages -- --model",
+      "commit": "12c355b",
+      "output": "tmp/stages-model-2.out",
+      "scores": {
+        "overall": {
+          "pct": 80.8,
+          "net": 156,
+          "of": 193
+        },
+        "provider": {
+          "pct": 75.0,
+          "net": 18,
+          "of": 24
+        },
+        "reference": {
+          "pct": 79.2,
+          "net": 19,
+          "of": 24
+        },
+        "dates": {
+          "pct": 88.6,
+          "net": 31,
+          "of": 35
+        },
+        "dateRoles": {
+          "pct": 88.6,
+          "net": 31,
+          "of": 35
+        },
+        "subtype": {
+          "pct": 91.7,
+          "net": 22,
+          "of": 24
+        },
+        "cost": {
+          "pct": 63.2,
+          "net": 12,
+          "of": 19
+        },
+        "scheduleKind": {
+          "pct": 100.0,
+          "net": 18,
+          "of": 18
+        },
+        "recurrence": {
+          "pct": 35.7,
+          "net": 5,
+          "of": 14
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E08",
+      "date": "2026-09-11",
+      "label": "First hold-out run",
+      "corpus": "holdout-12",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "sieve+tag+choose+model",
+      "what": "E07's pipeline on twelve pages nobody tuned on. The hold-out judges; the 24 only steer.",
+      "how": "npm run eval:holdout -- --model",
+      "commit": "5cd5e7e",
+      "output": "tmp/holdout-model.out",
+      "scores": {
+        "overall": {
+          "pct": 29.4,
+          "net": 32,
+          "of": 109
+        },
+        "provider": {
+          "pct": -41.7,
+          "net": -5,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 50.0,
+          "net": 12,
+          "of": 24
+        },
+        "dateRoles": {
+          "pct": 25.0,
+          "net": 6,
+          "of": 24
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 8,
+          "of": 12
+        },
+        "cost": {
+          "pct": -27.3,
+          "net": -3,
+          "of": 11
+        },
+        "scheduleKind": {
+          "pct": 71.4,
+          "net": 5,
+          "of": 7
+        },
+        "recurrence": {
+          "pct": 71.4,
+          "net": 5,
+          "of": 7
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E09",
+      "date": "2026-09-11",
+      "label": "Date sieves: read every date several ways",
+      "corpus": "holdout-12",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "sieve+tag+choose+model",
+      "what": "Stage 2 reads each date by the label in front, the sentence around it, the heading above and the range it sits in, and keeps the dates no rule could label for the model to pick from.",
+      "how": "npm run eval:holdout -- --model",
+      "commit": "6d71b48",
+      "output": "tmp/holdout-model-2.out",
+      "scores": {
+        "overall": {
+          "pct": 40.4,
+          "net": 44,
+          "of": 109
+        },
+        "provider": {
+          "pct": -41.7,
+          "net": -5,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100.0,
+          "net": 24,
+          "of": 24
+        },
+        "dateRoles": {
+          "pct": 25.0,
+          "net": 6,
+          "of": 24
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 8,
+          "of": 12
+        },
+        "cost": {
+          "pct": -27.3,
+          "net": -3,
+          "of": 11
+        },
+        "scheduleKind": {
+          "pct": 71.4,
+          "net": 5,
+          "of": 7
+        },
+        "recurrence": {
+          "pct": 71.4,
+          "net": 5,
+          "of": 7
+        }
+      },
+      "verdict": "kept",
+      "notes": "Dates 50% to 100% on the hold-out."
+    },
+    {
+      "id": "E10",
+      "date": "2026-09-11",
+      "label": "Provider and cost sieves: six and seven ways",
+      "corpus": "holdout-12",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "sieve+tag+choose+model",
+      "what": "Organisations read six ways and amounts seven ways in stage 2; provider answered only where two sieves agree, cost only where the page gave two reasons.",
+      "how": "npm run eval:holdout -- --model",
+      "commit": "f58701b",
+      "output": "tmp/holdout-model-3.out",
+      "scores": {
+        "overall": {
+          "pct": 41.3,
+          "net": 45,
+          "of": 109
+        },
+        "provider": {
+          "pct": -25.0,
+          "net": -3,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100.0,
+          "net": 24,
+          "of": 24
+        },
+        "dateRoles": {
+          "pct": 25.0,
+          "net": 6,
+          "of": 24
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 8,
+          "of": 12
+        },
+        "cost": {
+          "pct": -36.4,
+          "net": -4,
+          "of": 11
+        },
+        "scheduleKind": {
+          "pct": 71.4,
+          "net": 5,
+          "of": 7
+        },
+        "recurrence": {
+          "pct": 71.4,
+          "net": 5,
+          "of": 7
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E11",
+      "date": "2026-09-11",
+      "label": "Blind NuExtract on the hold-out",
+      "corpus": "holdout-12",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "nuextract3 native template",
+      "what": "The whole-page model, for comparison, on the twelve hold-out pages.",
+      "how": "npm run eval:extraction over the hold-out",
+      "commit": "f58701b",
+      "output": "tmp/holdout-blind-model.out",
+      "scores": {
+        "overall": {
+          "pct": 50.5,
+          "net": 55,
+          "of": 109
+        },
+        "provider": {
+          "pct": 66.7,
+          "net": 8,
+          "of": 12
+        },
+        "reference": {
+          "pct": 50.0,
+          "net": 6,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100.0,
+          "net": 24,
+          "of": 24
+        },
+        "dateRoles": {
+          "pct": 41.7,
+          "net": 10,
+          "of": 24
+        },
+        "subtype": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 12
+        },
+        "cost": {
+          "pct": 63.6,
+          "net": 7,
+          "of": 11
+        },
+        "scheduleKind": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 7
+        },
+        "recurrence": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 7
+        }
+      },
+      "verdict": "baseline",
+      "notes": "Higher than E10 on the hold-out: the whole-page model beats the staged pipeline there on provider and reference."
+    },
+    {
+      "id": "E12",
+      "date": "2026-09-11",
+      "label": "Model chooses every field; provider ranked by word runs",
+      "corpus": "tuning-24",
+      "model": "NuExtract 3 Q4_K_M",
+      "route": "sieve+tag+choose+model",
+      "what": "Every field goes to the model over a ranked short list (rules only rank and fall back). Provider shortlist ranked by the runs of words a page repeats. Run with a chooser setting that had just been removed from the code.",
+      "how": "npm run eval:stages -- --model",
+      "commit": "e054ad9",
+      "output": "tmp/stages-model-final.out",
+      "scores": {
+        "overall": {
+          "pct": -17.6,
+          "net": -34,
+          "of": 193
+        },
+        "provider": {
+          "pct": -66.7,
+          "net": -16,
+          "of": 24
+        },
+        "reference": {
+          "pct": 16.7,
+          "net": 4,
+          "of": 24
+        },
+        "dates": {
+          "pct": -57.1,
+          "net": -20,
+          "of": 35
+        },
+        "dateRoles": {
+          "pct": -85.7,
+          "net": -30,
+          "of": 35
+        },
+        "subtype": {
+          "pct": 87.5,
+          "net": 21,
+          "of": 24
+        },
+        "cost": {
+          "pct": -57.9,
+          "net": -11,
+          "of": 19
+        },
+        "scheduleKind": {
+          "pct": 77.8,
+          "net": 14,
+          "of": 18
+        },
+        "recurrence": {
+          "pct": 28.6,
+          "net": 4,
+          "of": 14
+        }
+      },
+      "verdict": "broken run",
+      "notes": "Blank on most fields: the run used a removed setting. Not a measurement of the change."
+    },
+    {
+      "id": "E13",
+      "date": "2026-09-11",
+      "label": "qwen3:4b as the chooser",
+      "corpus": "tuning-24",
+      "model": "qwen3:4b",
+      "route": "sieve+tag+choose+model",
+      "what": "Same pipeline as E12, questions sent to qwen3:4b over Ollama chat with thinking off.",
+      "how": "npm run eval:stages -- --model --chooser-model qwen3:4b",
+      "commit": "3f6ecd1",
+      "output": "tmp/stages-model-qwen.out",
+      "scores": {
+        "overall": {
+          "pct": -7.3,
+          "net": -14,
+          "of": 193
+        },
+        "provider": {
+          "pct": -33.3,
+          "net": -8,
+          "of": 24
+        },
+        "reference": {
+          "pct": -4.2,
+          "net": -1,
+          "of": 24
+        },
+        "dates": {
+          "pct": -34.3,
+          "net": -12,
+          "of": 35
+        },
+        "dateRoles": {
+          "pct": -57.1,
+          "net": -20,
+          "of": 35
+        },
+        "subtype": {
+          "pct": 91.7,
+          "net": 22,
+          "of": 24
+        },
+        "cost": {
+          "pct": -52.6,
+          "net": -10,
+          "of": 19
+        },
+        "scheduleKind": {
+          "pct": 61.1,
+          "net": 11,
+          "of": 18
+        },
+        "recurrence": {
+          "pct": 28.6,
+          "net": 4,
+          "of": 14
+        }
+      },
+      "verdict": "unexplained",
+      "notes": "Subtype answered (91.7%) but dates, cost, provider mostly blank. Being rerun as E16 to tell a broken run from a real loss."
+    },
+    {
+      "id": "E14",
+      "date": "2026-09-12",
+      "label": "qwen3:4b on the hold-out",
+      "corpus": "holdout-12",
+      "model": "qwen3:4b",
+      "route": "sieve+tag+choose+model",
+      "what": "E13 on the hold-out.",
+      "how": "npm run eval:holdout -- --model --chooser-model qwen3:4b",
+      "commit": "3f6ecd1",
+      "output": "tmp/holdout-model-qwen.out",
+      "scores": {
+        "overall": {
+          "pct": -13.8,
+          "net": -15,
+          "of": 109
+        },
+        "provider": {
+          "pct": -33.3,
+          "net": -4,
+          "of": 12
+        },
+        "reference": {
+          "pct": -33.3,
+          "net": -4,
+          "of": 12
+        },
+        "dates": {
+          "pct": -25.0,
+          "net": -6,
+          "of": 24
+        },
+        "dateRoles": {
+          "pct": -50.0,
+          "net": -12,
+          "of": 24
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 8,
+          "of": 12
+        },
+        "cost": {
+          "pct": -27.3,
+          "net": -3,
+          "of": 11
+        },
+        "scheduleKind": {
+          "pct": 42.9,
+          "net": 3,
+          "of": 7
+        },
+        "recurrence": {
+          "pct": 42.9,
+          "net": 3,
+          "of": 7
+        }
+      },
+      "verdict": "unexplained",
+      "notes": "Same blank pattern as E13."
+    },
+    {
+      "id": "E15",
+      "date": "2026-09-12",
+      "label": "Rules only, with subtype from the taxonomy bins",
+      "corpus": "tuning-24",
+      "model": "none (rules only)",
+      "route": "sieve+tag+choose",
+      "what": "No model. Subtype's shortlist is now the two qualifier groups and two kind groups the page's headings and provider names land in most; the rules answer each half where the top group stands clear. Provider answers the top word run where it stands clear.",
+      "how": "npm run eval:stages",
+      "commit": "c9358f2",
+      "output": "(run at the terminal, 2026-09-12 10:30)",
+      "scores": {
+        "overall": {
+          "pct": 81.9,
+          "net": 158,
+          "of": 193
+        },
+        "provider": {
+          "pct": 45.8,
+          "net": 11,
+          "of": 24
+        },
+        "reference": {
+          "pct": 79.2,
+          "net": 19,
+          "of": 24
+        },
+        "dates": {
+          "pct": 100.0,
+          "net": 35,
+          "of": 35
+        },
+        "dateRoles": {
+          "pct": 88.6,
+          "net": 31,
+          "of": 35
+        },
+        "subtype": {
+          "pct": 83.3,
+          "net": 20,
+          "of": 24
+        },
+        "cost": {
+          "pct": 100.0,
+          "net": 19,
+          "of": 19
+        },
+        "scheduleKind": {
+          "pct": 100.0,
+          "net": 18,
+          "of": 18
+        },
+        "recurrence": {
+          "pct": 35.7,
+          "net": 5,
+          "of": 14
+        }
+      },
+      "verdict": "kept",
+      "notes": "Earlier rules-only points from ADR-0026: 75.1% before the model chose every field, 71.5% after provider moved to word runs (per-field split not kept). Subtype 0 to 20/24 is this change."
+    }
+  ]
+}

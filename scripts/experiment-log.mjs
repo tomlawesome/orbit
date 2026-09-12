@@ -88,27 +88,32 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
   const rows = experiments.filter((experiment) => experiment.corpus === corpusKey);
   if (rows.length === 0) return "";
 
-  let previous = null; // { overall: pct, fields: { name: pct } }
+  // A change is measured against the last trusted run that asked the same
+  // model: rules-only against rules-only, qwen against qwen. Comparing a
+  // rules-only run with a model run would read as progress or loss where
+  // only the chooser differs.
+  const previousByModel = new Map(); // model -> { overall: pct, fields: { name: pct } }
   const bodyRows = rows.map((experiment) => {
     const deltaEligible = DELTA_VERDICTS.has(experiment.verdict);
     const muted = MUTED_VERDICTS.has(experiment.verdict);
+    const previous = previousByModel.get(experiment.model) ?? null;
     const cells = [renderScoreCell(experiment.scores.overall, deltaEligible ? previous?.overall : null)];
     for (const field of fields) {
       const score = experiment.scores[field];
       cells.push(renderScoreCell(score, deltaEligible ? previous?.fields?.[field] : null));
     }
     if (deltaEligible) {
-      previous = {
+      previousByModel.set(experiment.model, {
         overall: experiment.scores.overall.pct,
         fields: Object.fromEntries(fields.map((field) => [field, experiment.scores[field]?.pct])),
-      };
+      });
     }
     return `<tr${muted ? ' class="muted"' : ""}>
-      <td>${escapeHtml(experiment.id)}</td>
-      <td>${escapeHtml(experiment.date)}</td>
+      <td class="id">${escapeHtml(experiment.id)}</td>
+      <td class="date">${escapeHtml(experiment.date)}</td>
       <td class="label">${escapeHtml(experiment.label)}</td>
-      <td>${escapeHtml(experiment.model)}</td>
-      <td>${escapeHtml(experiment.verdict)}</td>
+      <td class="model">${escapeHtml(experiment.model)}</td>
+      <td class="verdict">${escapeHtml(experiment.verdict)}</td>
       ${cells.join("\n      ")}
     </tr>`;
   });
@@ -164,7 +169,7 @@ const CSS = `
   :root { color-scheme: light; }
   body {
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    max-width: 60rem;
+    max-width: 100rem;
     margin: 0 auto;
     padding: 1rem 1rem 3rem;
     line-height: 1.5;
@@ -186,7 +191,10 @@ const CSS = `
   }
   th { background: #f6f8fa; }
   tbody tr:nth-child(even) { background: #fafbfc; }
-  td.label { max-width: 16rem; white-space: normal; word-break: break-word; }
+  td.label { min-width: 14rem; white-space: normal; }
+  td.date, td.id, td.verdict { white-space: nowrap; }
+  td.model { min-width: 6rem; }
+  .tables { overflow-x: auto; }
   td.score { white-space: nowrap; }
   .pct { font-weight: 600; }
   .netof { font-size: 0.75rem; color: #57606a; }
@@ -229,6 +237,7 @@ export function renderHtml(register) {
 <body>
   <h1>${escapeHtml(title)}</h1>
   <p>${escapeHtml(scoring)}</p>
+  <p>The small green and red numbers under a score are the change, in percentage points, since the last trusted run in the same table that asked the same model. Greyed rows are runs whose numbers are not trusted; they carry no change.</p>
   ${renderLegend(verdicts)}
   ${corpusSections}
   <h2>What we did</h2>

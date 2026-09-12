@@ -364,7 +364,19 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   says what is done.
 - Document extraction: read #992 (extraction lessons, running record) before
   touching `src/server/documents/extraction-*`; add an entry there when a
-  session learns something the next would otherwise relearn.
+  session learns something the next would otherwise relearn. Every scored
+  run (`eval:stages`, `eval:holdout`, `eval:extraction`) is an experiment
+  and goes in `docs/experiments/extraction.json` the same session, with a
+  plain-English "what we did" (owner, 2026-09-12: "we can only improve if
+  we keep track"): `node scripts/experiment-log.mjs record …` parses the
+  score line and renders the page. Runs that ask the model must be run
+  inside a container on `orbit_orbit-document-processing` (the
+  `stages-rerun` pattern: `docker run --network … -v $PWD:/app -w /app
+  --entrypoint sh node:22 -c '…'`); from the host `orbit-ollama` does not
+  resolve, every answer is blank and the run scores 0% in seconds. The
+  owner reads the log at http://192.168.11.30:8090/ (container
+  `orbit-experiments`, nginx over `tmp/experiment-log/`); re-render after
+  recording.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not
