@@ -559,6 +559,37 @@ export const metadataDamageSightings = pgTable("metadata_damage_sightings", {
   uniqueIndex("metadata_damage_sighting_value_unique").on(table.tableName, table.columnName, table.rowId),
 ]);
 
+/**
+ * One row per interval in which `metadataCryptoAvailable()`
+ * (src/server/metadata/keys.ts) was false — the instance KEK absent, so
+ * every Tier 1 field reads locked rather than blank. Modelled on
+ * `maintenanceWindows` above: same shape, and the same partial-unique-index
+ * trick for "at most one open at a time" (`status` filtered to `'open'`,
+ * since a plain unique index cannot constrain a nullable `ended_at` — every
+ * NULL is distinct to PostgreSQL).
+ *
+ * This is what lets the mail-in retention reaper (#964,
+ * src/server/mail-in/imap-inbox.ts) credit a still-pending receipt's
+ * `expires_at` for the part of an outage it existed for, per the owner's
+ * 2026-09-10 ruling: the 45-day clock counts elapsed time the receipt was
+ * *available and ignored*, not wall-clock time, so a locked receipt's clock
+ * does not run for the outage and resumes when the key returns.
+ *
+ * `started_at` is only as precise as the reaper's own poll cycle — it can
+ * lag the real outage by a few minutes either way, which errs in the
+ * member's favour and is accepted (owner ruling, #964).
+ */
+export const metadataKeyOutages = pgTable("metadata_key_outages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  status: text("status").notNull().default("open"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [
+  check("metadata_key_outage_status_valid", sql`${table.status} IN ('open', 'closed')`),
+  uniqueIndex("metadata_key_outage_open_unique").on(table.status).where(sql`${table.status} = 'open'`),
+]);
+
 /** Durable, idempotent worker jobs for document lifecycle operations. */
 export const documentJobs = pgTable("document_jobs", {
   id: uuid("id").primaryKey().defaultRandom(),
