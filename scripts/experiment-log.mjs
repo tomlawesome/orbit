@@ -270,6 +270,73 @@ function renderMeasurements(measurements, corpora) {
 </section>`;
 }
 
+/**
+ * The per-field view, the owner's ask of 2026-09-12: most runs changed one
+ * field and left the rest alone, so reading a run's row says little about
+ * what the change was worth. Each field gets its own short table of the
+ * runs that were about it, and nothing else.
+ */
+function renderFieldSections(experiments, fields) {
+  // Only the two corpora that still exist: the old 36 and the six full
+  // pages were folded away, and their numbers are not comparable.
+  const LIVE = new Map([["tuning-24", "tuning 24"], ["holdout-12", "unseen 12"]]);
+  const sections = fields.map((field) => {
+    const rows = experiments
+      .filter((experiment) => LIVE.has(experiment.corpus)
+        && (experiment.about ?? []).includes(field) && experiment.scores[field])
+      // Tuning pages first, then the unseen ones, each in the order they were run.
+      .sort((a, b) => (a.corpus === b.corpus ? 0 : a.corpus === "tuning-24" ? -1 : 1));
+    if (rows.length === 0) return "";
+
+    // Best per corpus, so a tuning number never claims a hold-out best.
+    const bestIn = new Map();
+    for (const experiment of rows) {
+      if (MUTED_VERDICTS.has(experiment.verdict)) continue;
+      const held = bestIn.get(experiment.corpus);
+      if (!held || experiment.scores[field].pct > held.pct) {
+        bestIn.set(experiment.corpus, { pct: experiment.scores[field].pct, id: experiment.id });
+      }
+    }
+
+    const body = rows.map((experiment) => {
+      const score = experiment.scores[field];
+      const best = bestIn.get(experiment.corpus)?.id === experiment.id;
+      const only = (experiment.about ?? []).length === 1;
+      return `<tr${MUTED_VERDICTS.has(experiment.verdict) ? ' class="muted"' : ""}>
+      <td class="id">${escapeHtml(experiment.id)}</td>
+      <td class="label">${escapeHtml(experiment.label)}</td>
+      <td class="about">${only ? `<span class="only">only ${escapeHtml(field)}</span>` : "with other changes"}</td>
+      <td class="corpus-cell">${escapeHtml(LIVE.get(experiment.corpus))}</td>
+      ${renderModelCell(experiment)}
+      ${renderScoreCell(score, null, best ? "band-green" : "band-grey", best, "overall")}
+    </tr>`;
+    }).join("\n      ");
+
+    const headline = [...bestIn.entries()]
+      .map(([corpus, best]) => `${LIVE.get(corpus)}: <strong>${formatPct(best.pct)}</strong> (${escapeHtml(best.id)})`)
+      .join(" · ");
+    return `<article class="field">
+      <h3>${escapeHtml(field)}</h3>
+      <p class="meta">Best so far — ${headline}</p>
+      <div class="tables"><table>
+        <thead><tr><th>ID</th><th>label</th><th>what it changed</th><th>pages</th><th>model</th><th class="overall">${escapeHtml(field)}</th></tr></thead>
+        <tbody>
+      ${body}
+        </tbody>
+      </table></div>
+    </article>`;
+  }).filter(Boolean);
+
+  return `<section class="corpus">
+  <h2>By field: what we tried for each, and what it scored</h2>
+  <p class="key">The tables above score a whole run, which hides what a change was for: a run that only touched subtype
+  still prints a number for dates. Here each field carries only the runs that were about it, with that field's score and
+  nothing else. <span class="only">only subtype</span> means the run changed that field alone, so the number is the
+  change; "with other changes" means read it alongside its neighbours.</p>
+  ${sections.join("\n  ")}
+</section>`;
+}
+
 function renderLegend(verdicts) {
   const items = Object.entries(verdicts)
     .map(([name, description]) => `<li>${renderVerdict(name)} ${escapeHtml(description)}</li>`)
@@ -426,6 +493,12 @@ const CSS = `
 
   ul.legend { padding-left: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem; margin: 0.5rem 0 1rem; }
   ul.legend li { font-size: 0.9rem; color: var(--ink-2); }
+  .field { margin: 1rem 0; padding: 0.75rem 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+  .field h3 { margin: 0; font-size: 1.1rem; text-transform: capitalize; }
+  .field .meta { margin: 0.1rem 0 0.4rem; font-size: 0.85rem; color: var(--ink-2); }
+  .field table { margin: 0; }
+  .field td.about, .field td.corpus-cell { white-space: nowrap; color: var(--ink-2); font-size: 0.85rem; }
+  .only { color: var(--best); font-weight: 600; }
   .experiment, .measurement {
     margin: 1rem 0; padding: 0.75rem 1rem; background: var(--surface);
     border: 1px solid var(--line); border-radius: 8px;
@@ -487,6 +560,7 @@ export function renderHtml(register) {
   <p class="key">The <strong>model</strong> column says what the model was asked to do, because in most runs it was not reading the page: <em>chooser</em> means the rules did the work and the model only picked one entry off a short list for a field or two; <em>whole page</em> means the model read the document and wrote every field itself; <em>no model</em> means nothing was asked of any model. Every run marked <em>control</em> is the same code with the chooser switched off, so the gap to the row above it is what the model itself was worth.</p>
   ${renderLegend(verdicts)}
   ${corpusSections}
+  ${renderFieldSections(experiments, fields)}
   ${renderMeasurements(measurements, corpora)}
   <h2>What we did, run by run</h2>
   ${renderWhatWeDid(experiments)}
