@@ -1,0 +1,47 @@
+{
+  "name": "rent-to-own appliance rental agreement, a returned tumble dryer as a decoy previous agreement",
+  "filename": "fullpage-appliance-rental-agreement.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-05",
+      "2026-09-12",
+      "2028-03-11"
+    ],
+    "provider": "Homestead Rental Solutions",
+    "reference": "HRS-AGR-661204",
+    "dateRoles": [
+      {
+        "date": "2026-09-05",
+        "role": "issued"
+      },
+      {
+        "date": "2026-09-12",
+        "role": "start"
+      },
+      {
+        "date": "2028-03-11",
+        "role": "renewal"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Rental"
+      ],
+      "qualifiers": [
+        "Appliance"
+      ]
+    },
+    "costMinor": 650,
+    "currency": "GBP",
+    "recurrenceMonths": 18,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "dates: agreement dated 5 September 2026, delivery and start 12 September 2026, minimum term ends 11 March 2028. The first Direct Debit collection date (18 September 2026) and the customer's unrelated previous tumble-dryer agreement's return date (30 August 2026) are undeclared.",
+    "provider is Homestead Rental Solutions.",
+    "reference is agreement HRS-AGR-661204.",
+    "costMinor is the weekly rental, 6.50, the recurring cost of the appliance itself; delivery (20.00, one-off, already paid), optional damage cover (1.20, not selected) and the early-termination charge (15.00) are traps.",
+    "recurrenceMonths is 18, printed in digits as the minimum term; scheduleKind is 'renewal', taken from the minimum-term-ending dateRole exactly as an earlier alarm monitoring agreement's minimum term does.",
+    "subtype: Rental/Appliance."
+  ]
+}
