@@ -4,6 +4,7 @@
 //
 //   npm run eval:provider-stage1               # the 24 the extractor was tuned on
 //   npm run eval:provider-stage1 -- --holdout  # the 12 unseen pages
+//   npm run eval:provider-stage1 -- --holdout2 # the second 12 unseen pages, #997
 //
 // Two things are measured, because stage 1 is only judged on the first.
 //
@@ -21,6 +22,7 @@
 // settled, read both.
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
+import { EXTRACTION_HOLDOUT2_FULLPAGE } from "./extraction-holdout2-fullpage";
 import { providerTaggedOrganisations, providerWordRuns } from "./extraction-provider-runs";
 import { classifyProvider } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
@@ -28,8 +30,9 @@ import { tagCandidates } from "./extraction-tags";
 import { providerCandidates } from "./provider-stage1-sieve";
 
 const holdout = process.argv.includes("--holdout");
-const documents = holdout ? EXTRACTION_HOLDOUT_FULLPAGE : EXTRACTION_CORPUS;
-const prefix = holdout ? "hold-out: " : "";
+const holdout2 = process.argv.includes("--holdout2");
+const documents = holdout2 ? EXTRACTION_HOLDOUT2_FULLPAGE : holdout ? EXTRACTION_HOLDOUT_FULLPAGE : EXTRACTION_CORPUS;
+const prefix = holdout2 ? "hold-out 2: " : holdout ? "hold-out: " : "";
 
 /** The scorer's ruler. */
 const strict = (wanted: string, got: string): boolean =>

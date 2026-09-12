@@ -3,15 +3,19 @@
 // were right, lost to a wrong answer, or left blank.
 //
 //   npm run eval:breakdown
+//   npm run eval:breakdown -- --holdout2   # the SECOND hold-out (#997)
 //
 // A field can score the same net from being cautious (right and blank) or
 // careless (right and wrong), and they are not the same thing to fix. Counts
 // only -- no document is ever named, so the hold-out stays unread.
 import { chooseFields } from "./extraction-choose";
 import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
+import { EXTRACTION_HOLDOUT2_FULLPAGE } from "./extraction-holdout2-fullpage";
 import { FIELD_NAMES, scoreCorpus } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
+
+const corpus = process.argv.includes("--holdout2") ? EXTRACTION_HOLDOUT2_FULLPAGE : EXTRACTION_HOLDOUT_FULLPAGE;
 
 const KEY: Record<string, string> = {
   provider: "provider expected", reference: "reference expected", subtype: "subtype expected",
@@ -20,7 +24,7 @@ const KEY: Record<string, string> = {
 };
 
 async function main(): Promise<void> {
-  const score = await scoreCorpus(EXTRACTION_HOLDOUT_FULLPAGE, (text) => chooseFields(tagCandidates(text, sieve(text))));
+  const score = await scoreCorpus(corpus, (text) => chooseFields(tagCandidates(text, sieve(text))));
   console.log("field         right  wrong  blank   of");
   for (const field of FIELD_NAMES) {
     const { possible } = score.fields[field];
