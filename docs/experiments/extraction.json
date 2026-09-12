@@ -2506,7 +2506,7 @@
       "id": "E44",
       "date": "2026-09-12",
       "label": "Provider ruler loosened: a short form of the name counts",
-      "corpus": "seen-48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "provider by top word run",
@@ -2527,7 +2527,10 @@
         }
       },
       "verdict": "kept",
-      "notes": "Ruler change, not an extractor change: the same replies, marked as a reader would. Not comparable with earlier rows for provider; E45 onward use this ruler. Rule: trailing company forms and a leading 'the' dropped, one side a whole-word run of the other, carrying a word that names rather than describes."
+      "notes": "Ruler change, not an extractor change: the same replies, marked as a reader would. Not comparable with earlier rows for provider; E45 onward use this ruler. Rule: trailing company forms and a leading 'the' dropped, one side a whole-word run of the other, carrying a word that names rather than describes.",
+      "about": [
+        "provider"
+      ]
     },
     {
       "id": "E45",
@@ -2616,6 +2619,156 @@
       },
       "verdict": "dropped",
       "notes": "Both models, both lists: the pick step loses to the rules' own ordering. Route dropped on the seen corpus; hold-out 3 not spent on it."
+    },
+    {
+      "id": "E49",
+      "date": "2026-09-12",
+      "label": "Provider from names read by shape, bins alone",
+      "corpus": "tuning-48",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by capitalisation",
+      "what": "Names taken straight off the page by capitalisation, brand shape and the page's own web/e-mail domain, then the word-run bins; the top run answers. No sieve, no tags. 33/48 against the shipped bins' 31.",
+      "how": "npm run eval:provider-caps",
+      "commit": "fb99b56",
+      "output": "tmp/e-seen48-provider-caps.txt",
+      "scores": {
+        "overall": {
+          "pct": 69,
+          "net": 33,
+          "of": 48
+        },
+        "provider": {
+          "pct": 69,
+          "net": 33,
+          "of": 48
+        }
+      },
+      "verdict": "kept",
+      "notes": "Tried and dropped alongside: binning only the top and bottom third of the page (worse everywhere), weighting them x2/x3/x5 (no gain), the mentions through the shipped provider sieve first (30/48).",
+      "about": [
+        "provider"
+      ]
+    },
+    {
+      "id": "E50",
+      "date": "2026-09-12",
+      "label": "Provider from names read by shape, bins alone, unseen",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by capitalisation",
+      "what": "E49 on the twelve unseen pages: 9/12 against the shipped bins' 7.",
+      "how": "npm run eval:provider-caps -- --holdout3",
+      "commit": "fb99b56",
+      "output": "tmp/e-holdout3-provider-caps.txt",
+      "scores": {
+        "overall": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "provider": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "about": [
+        "provider"
+      ]
+    },
+    {
+      "id": "E51",
+      "date": "2026-09-12",
+      "label": "Ordinary English words dropped from the mentions",
+      "corpus": "tuning-48",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by capitalisation, odd shapes x3, ordinary words (single) dropped",
+      "what": "A mention that is one ordinary English word (Customer, Agent, Testing) dropped before binning, domain labels counted three times. 34/48 against 35 without the dictionary; the role word was not the obstacle, the next rival was.",
+      "how": "npm run eval:provider-caps -- --dict single --boost 3 (the host's /usr/share/dict/american-english, read at run time)",
+      "commit": "fb99b56",
+      "output": "tmp/e-seen48-provider-caps-dict.txt",
+      "scores": {
+        "overall": {
+          "pct": 71,
+          "net": 34,
+          "of": 48
+        },
+        "provider": {
+          "pct": 71,
+          "net": 34,
+          "of": 48
+        }
+      },
+      "verdict": "dropped",
+      "notes": "Dropping any mention made only of ordinary words is worse still: 31/48, 6/12 unseen. Real names are made of ordinary words (Bramwell Friendly Society).",
+      "about": [
+        "provider"
+      ]
+    },
+    {
+      "id": "E52",
+      "date": "2026-09-12",
+      "label": "Provider by name shape, bins, then who acts (shipped)",
+      "corpus": "tuning-48",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by capitalisation, then who-acts cues",
+      "what": "E49's bins make a shortlist of eight; one vote per who-acts cue then ranks it -- signs, is paid, is written to, owns the web domain or the copyright line, is the trading name; against the company behind a trading name, an underwriter or regulator, a person, a street, a registration mark. 38/48. Now the provider route in chooseFields.",
+      "how": "npm run eval:provider-caps -- --then deals; whole pipeline npm run eval:stages",
+      "commit": "fb99b56",
+      "output": "tmp/e-seen48-provider-route.txt",
+      "scores": {
+        "overall": {
+          "pct": 79,
+          "net": 38,
+          "of": 48
+        },
+        "provider": {
+          "pct": 79,
+          "net": 38,
+          "of": 48
+        }
+      },
+      "verdict": "kept",
+      "notes": "Own stage 2's votes as the second step instead: 27/48. Whole pipeline without a model 76.7% -> 78.2%.",
+      "about": [
+        "provider"
+      ]
+    },
+    {
+      "id": "E53",
+      "date": "2026-09-12",
+      "label": "Provider by name shape, bins, then who acts, unseen",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by capitalisation, then who-acts cues",
+      "what": "E52 on the twelve unseen pages: 12/12. The cues were read off tuning-page misses only.",
+      "how": "npm run eval:provider-caps -- --holdout3 --then deals; whole pipeline npm run eval:holdout",
+      "commit": "fb99b56",
+      "output": "tmp/e-holdout3-provider-route.txt",
+      "scores": {
+        "overall": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        }
+      },
+      "verdict": "kept",
+      "notes": "Whole pipeline without a model 65.2% -> 70.5% on hold-out 3.",
+      "about": [
+        "provider"
+      ]
     }
   ],
   "measurements": [
