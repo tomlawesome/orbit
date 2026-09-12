@@ -2257,6 +2257,149 @@
       "about": [
         "provider"
       ]
+    },
+    {
+      "id": "E36",
+      "date": "2026-09-12",
+      "label": "Rules on the second unseen twelve, every field",
+      "corpus": "holdout2-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "The whole rules route on twelve pages nobody had read. Dates hold at 26 of 26; provider 6 of 12; subtype falls to 2 of 12 against 10 of 12 on the first unseen set.",
+      "how": "npm run eval:holdout -- --holdout2",
+      "commit": "ca703ff",
+      "output": "tmp/e-holdout2-rules.txt",
+      "scores": {
+        "overall": {
+          "pct": 61.7,
+          "net": 66,
+          "of": 107
+        },
+        "provider": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "reference": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 53.8,
+          "net": 14,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 16.7,
+          "net": 2,
+          "of": 12
+        },
+        "cost": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 75,
+          "net": 3,
+          "of": 4
+        },
+        "recurrence": {
+          "pct": 33.3,
+          "net": 1,
+          "of": 3
+        }
+      },
+      "verdict": "baseline",
+      "notes": "First and only run on hold-out 2 for this route. Read against E28 (first unseen twelve): dates, cost and scheduleKind hold; subtype and recurrence do not, so the first set was kinder to the subtype rules than the second."
+    },
+    {
+      "id": "E37",
+      "date": "2026-09-12",
+      "label": "Provider word runs with the joining-word trim, second unseen twelve",
+      "corpus": "holdout2-12",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by top word run",
+      "what": "Shared stage 1 and 2, word-run bins with runs that start or end on a joining word dropped (3695221). 6 of 12.",
+      "how": "npm run eval:provider-bins -- --holdout2",
+      "commit": "ca703ff",
+      "output": "tmp/e-holdout2-provider-bins.txt",
+      "scores": {
+        "overall": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "provider": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        }
+      },
+      "verdict": "kept",
+      "notes": "Single run. Same as the plain route (E36 provider) on this set."
+    },
+    {
+      "id": "E38",
+      "date": "2026-09-12",
+      "label": "Provider's own stage 1 on the second unseen twelve",
+      "corpus": "holdout2-12",
+      "model": "—",
+      "role": "no model",
+      "route": "provider by its own stage 1",
+      "what": "The honest number for #996. Recall 8 of 12 against the shared sieve's 7; end to end 5 of 12 against the shared sieve's 6, with 19 candidates a page against 8. The gain E34 showed on the first unseen set was fitting to pages whose answers had been read.",
+      "how": "npm run eval:provider-stage1 -- --holdout2",
+      "commit": "ca703ff",
+      "output": "tmp/e-holdout2-provider-stage1.txt",
+      "scores": {
+        "overall": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "provider": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        }
+      },
+      "verdict": "regression",
+      "notes": "Single run. Marked by eye 6 of 12. Replaces the contaminated E34/E35 as the stage 1 measurement."
+    },
+    {
+      "id": "E39",
+      "date": "2026-09-12",
+      "label": "Subtype by describer runs, second unseen twelve",
+      "corpus": "holdout2-12",
+      "model": "—",
+      "role": "no model",
+      "route": "subtype by describer runs",
+      "what": "Describer-word runs answer 4 of 12 against the taxonomy bins' 2 of 12 on the same pages; in the top two runs 5 of 12.",
+      "how": "npm run eval:subtype-runs -- --holdout2",
+      "commit": "ca703ff",
+      "output": "tmp/e-holdout2-subtype-runs.txt",
+      "scores": {
+        "overall": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        }
+      },
+      "verdict": "kept",
+      "notes": "Single run. Both subtype methods fall hard from the first unseen set (10 of 12): the subtype rules were closer to the first set's wording than to this one."
     }
   ],
   "measurements": [
