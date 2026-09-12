@@ -83,6 +83,7 @@ function fakeBackupAdapter(documentsRoot: string, storageKey: string, contentLen
     collectDocumentsArchive(outputPath: string): void {
       createTar(documentsRoot, outputPath, ["."]);
     },
+    recordRecoveryBundleExported(): void {},
   };
 }
 

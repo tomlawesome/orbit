@@ -331,7 +331,7 @@ export interface RunExportRecoveryBundleOptions {
   passphrase: string;
   passphraseConfirmation: string;
   backupDirectory: string;
-  adapter: Pick<BackupDockerAdapter, "pgRestoreListOk">;
+  adapter: Pick<BackupDockerAdapter, "pgRestoreListOk" | "recordRecoveryBundleExported">;
   now: Date;
 }
 
@@ -365,6 +365,11 @@ export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions)
     const temporaryPath = `${finalPath}.installing`;
     createTar(workDir, temporaryPath, [...RECOVERY_BUNDLE_MEMBERS]);
     publishBundleAtomically(temporaryPath, finalPath);
+    // #968: the bundle is on disk before the administration card can clear,
+    // never the other way round — a failed record here still leaves a
+    // usable bundle at finalPath, so this throws rather than swallowing the
+    // failure (RunExportRecoveryBundleOptions.adapter's own doc comment).
+    options.adapter.recordRecoveryBundleExported();
     return { finalPath };
   } finally {
     rmSync(workDir, { recursive: true, force: true });

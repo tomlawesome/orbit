@@ -923,6 +923,9 @@ function buildRehearsalUpdateBundle(spec: RestoreRehearsalDocumentSpec, document
     collectDocumentsArchive(outputPath: string): void {
       createTar(documentsRoot, outputPath, ["."]);
     },
+    // This rehearsal only exercises runBackup, never runExportRecoveryBundle,
+    // so there is nothing for this throwaway adapter to record.
+    recordRecoveryBundleExported(): void {},
   };
 
   const bundleDirectory = join(scratchRoot, "bundle-source");
