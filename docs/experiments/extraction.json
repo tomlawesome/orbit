@@ -3200,7 +3200,132 @@
         }
       },
       "verdict": "kept",
-      "notes": "dateRoles 67/85 (was 63/85); 81.9% (was 80.9%). Hold-out 3 unchanged, 73.2%. Remaining dateRoles misses: 18.",
+      "notes": "dateRoles 67/85 (was 63/85); 81.9% (was 80.9%). Hold-out 3 unchanged, 73.2%. Remaining dateRoles misses: 18."
+    },
+    {
+      "id": "E55",
+      "date": "2026-09-12",
+      "label": "NuExtract blind, hold-out 3 (baseline)",
+      "corpus": "holdout3-12",
+      "model": "NuExtract",
+      "role": "blind",
+      "route": "model blind (whole page)",
+      "what": "The model reading each whole page unaided, no rules, no adjudication: the baseline the rules pipeline is measured against on hold-out 3.",
+      "how": "model-blind-probe --holdout3 --deadline 900000, inside the orbit_orbit-document-processing container; 97 s a page",
+      "commit": "ffb42a1",
+      "output": "tmp/e-holdout3-blind-nuextract.txt",
+      "scores": {
+        "overall": {
+          "pct": 42,
+          "net": 47,
+          "of": 112
+        },
+        "provider": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "reference": {
+          "pct": 25,
+          "net": 3,
+          "of": 12
+        },
+        "dates": {
+          "pct": 88.5,
+          "net": 23,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 50,
+          "net": 13,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 0,
+          "net": 0,
+          "of": 12
+        },
+        "cost": {
+          "pct": 0,
+          "net": 0,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 50,
+          "net": 3,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 0,
+          "net": 0,
+          "of": 6
+        }
+      },
+      "verdict": "baseline",
+      "notes": "42.0% (47/112). Rules pipeline on the same 12 documents: 73.2% (E60).",
+      "headline": true
+    },
+    {
+      "id": "E62",
+      "date": "2026-09-12",
+      "label": "date labels in the page's own words",
+      "corpus": "tuning-48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Trigger rows: commenced/move-in date/registered on (start); booked, quote date (issued); collection/final instalment/balance due (due); 'next service is due on' stays service. Rejected: forward 'is due on' (hold-out 3 -3).",
+      "how": "npm run eval:stages",
+      "commit": "c7d110d",
+      "output": "tmp/e-seen48-stages-triggers2.txt",
+      "scores": {
+        "overall": {
+          "pct": 83.3,
+          "net": 340,
+          "of": 408
+        },
+        "provider": {
+          "pct": 75,
+          "net": 36,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 85.9,
+          "net": 73,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 70.8,
+          "net": 34,
+          "of": 48
+        },
+        "cost": {
+          "pct": 97.6,
+          "net": 41,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 86.2,
+          "net": 25,
+          "of": 29
+        },
+        "recurrence": {
+          "pct": 65.2,
+          "net": 15,
+          "of": 23
+        }
+      },
+      "verdict": "kept",
+      "notes": "dateRoles 73/85 (was 67/85); 83.3% (was 81.9%). Hold-out 3 unchanged, 73.2%.",
       "headline": true
     }
   ],
