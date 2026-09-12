@@ -94,6 +94,24 @@ export function isNameWord(word: string): boolean {
   return !DESCRIBER_WORDS.has(word.toLowerCase());
 }
 
+/**
+ * Words that join a name together and carry nothing on their own. A real
+ * name is built from them -- "Colworth & Drake", "Bank of Scotland" -- but
+ * never begins or ends on one.
+ */
+const JOINING_WORDS = new Set(["of", "and", "the", "a", "an", "for", "to", "in", "on", "at", "by", "with", "or", "&"]);
+
+/** Whether a run is a name rather than a piece of a sentence. A run is
+ * allowed to contain a joining word and not to start or end on one: without
+ * this the bins answer with "of the Bramblewood Childcare Group", which is
+ * the sentence around the name and not the name. */
+function isWholeName(run: readonly string[]): boolean {
+  const first = run[0];
+  const last = run[run.length - 1];
+  if (first === undefined || last === undefined) return false;
+  return !JOINING_WORDS.has(first) && !JOINING_WORDS.has(last);
+}
+
 /** One place an organisation was printed, as the bins read it: the name the
  * sieve cut, and the Tika block it came from. */
 export interface ProviderMention {
@@ -155,7 +173,8 @@ function isRunOf(part: readonly string[], whole: readonly string[]): boolean {
  * The word-run bins over the mentions the caller kept, best first.
  *
  * Every run of consecutive words in every mention is counted, case folded,
- * as long as one of its words is a name word. Ranked by count, then by the
+ * as long as one of its words is a name word and it neither begins nor ends
+ * on a joining word. Ranked by count, then by the
  * longer run, then by the order they were first seen -- the owner's
  * ordering, which puts the fullest form of a repeated name at the top and
  * its fragments under it.
@@ -180,7 +199,7 @@ export function providerWordRuns<M extends ProviderMention>(
     for (let from = 0; from < folded.length; from += 1) {
       for (let to = from + 1; to <= folded.length; to += 1) {
         const run = folded.slice(from, to);
-        if (!run.some(isNameWord)) continue;
+        if (!run.some(isNameWord) || !isWholeName(run)) continue;
         const key = run.join(" ");
         let bin = bins.get(key);
         if (!bin) {
