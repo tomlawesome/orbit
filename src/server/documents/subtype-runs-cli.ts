@@ -5,6 +5,7 @@
 //
 //   npm run eval:subtype-runs               # the 24 the extractor was tuned on
 //   npm run eval:subtype-runs -- --holdout  # the 12 unseen pages
+//   npm run eval:subtype-runs -- --holdout2 # the second 12 unseen pages, #997
 //   npm run eval:subtype-runs -- --holdout --misses   # owner only
 //
 // Three lines come out. The first two are the two methods' answers, scored
@@ -19,6 +20,7 @@
 import { chooseSubtypeByRules } from "./extraction-choose-meaning";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { EXTRACTION_HOLDOUT_FULLPAGE } from "./extraction-holdout-fullpage";
+import { EXTRACTION_HOLDOUT2_FULLPAGE } from "./extraction-holdout2-fullpage";
 import { classifySubtype, formatSubtypeExpected } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
@@ -30,12 +32,13 @@ import {
 } from "./subtype-describer-runs";
 
 const holdout = process.argv.includes("--holdout");
+const holdout2 = process.argv.includes("--holdout2");
 const showMisses = process.argv.includes("--misses");
-const documents = holdout ? EXTRACTION_HOLDOUT_FULLPAGE : EXTRACTION_CORPUS;
+const documents = holdout2 ? EXTRACTION_HOLDOUT2_FULLPAGE : holdout ? EXTRACTION_HOLDOUT_FULLPAGE : EXTRACTION_CORPUS;
 /** The experiment register reads a score line as "<route>: <percent> (n/m)
  * [<field> ...]", and strips exactly one leading "hold-out: " to learn which
  * corpus it was. So the corpus is that prefix and nothing else. */
-const corpus = holdout ? "hold-out: " : "";
+const corpus = holdout2 ? "hold-out 2: " : holdout ? "hold-out: " : "";
 
 /** How many of the top runs the diagnostic line looks at, which is how many
  * the owner's version offers. */
