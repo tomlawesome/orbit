@@ -273,7 +273,8 @@
         }
       },
       "verdict": "baseline",
-      "notes": "The number every later run is measured against."
+      "notes": "The number every later run is measured against.",
+      "isBaseline": true
     },
     {
       "id": "E05",
@@ -522,6 +523,69 @@
       },
       "verdict": "control",
       "notes": "Run on 2026-09-12, not on the day of E07."
+    },
+    {
+      "id": "E25",
+      "date": "2026-09-12",
+      "label": "Old one-shot heuristics, on the hold-out",
+      "corpus": "holdout-12",
+      "model": "—",
+      "role": "no model",
+      "route": "heuristics (one-shot)",
+      "what": "The rules Orbit shipped before ADR-0026, on the twelve pages nobody tuned on. Every eval prints this line beside its own; it was never written down as a row, so the hold-out table had no 'before' to measure against.",
+      "how": "npm run eval:holdout (the heuristics line)",
+      "commit": "4bcdc6e",
+      "output": "(run at the terminal, 2026-09-12)",
+      "scores": {
+        "overall": {
+          "pct": 24.8,
+          "net": 27,
+          "of": 109
+        },
+        "provider": {
+          "pct": -16.7,
+          "net": -2,
+          "of": 12
+        },
+        "reference": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100.0,
+          "net": 24,
+          "of": 24
+        },
+        "dateRoles": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 24
+        },
+        "subtype": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 12
+        },
+        "cost": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 11
+        },
+        "scheduleKind": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 7
+        },
+        "recurrence": {
+          "pct": 0.0,
+          "net": 0,
+          "of": 7
+        }
+      },
+      "verdict": "baseline",
+      "isBaseline": true,
+      "notes": "Unchanged by anything since: the one-shot rules are still in the code as the comparison line."
     },
     {
       "id": "E08",
