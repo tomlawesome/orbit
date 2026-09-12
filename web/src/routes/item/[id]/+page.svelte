@@ -11,7 +11,7 @@
     snoozeCommand, statusCommand, upsertCommand,
   } from "$lib/data/commands.js";
   import {
-    DAMAGED, DAMAGED_PLACEHOLDER, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS,
+    COST_LOCKED, DAMAGED, DAMAGED_PLACEHOLDER, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS,
     fieldState, itemLocked, saveProblem,
   } from "$lib/data/metadata-status.js";
   import { matchesOf, nearestMatchOf, reachableAt, stepFrom } from "./band.js";
@@ -137,7 +137,11 @@
      value is gone and retyping replaces it; locked means it is intact and
      waiting for an administrator. `locked` is read at PANEL level, not field
      level, because item.upsert is a full-row write: while the key is away
-     every edit to this item is refused, not just the two encrypted fields. */
+     every edit to this item is refused, not just the two encrypted fields.
+     The complete panel is the one exception (#972): item.complete only
+     reaches for the key when a cost is given, so there `locked` gates the
+     cost input alone and the rest of the panel — including the save button
+     for a no-cost completion — stays live. */
   const referenceState = $derived(fieldState(row?.metadataStatus, "reference"));
   const notesState = $derived(fieldState(row?.metadataStatus, "notes"));
   const locked = $derived(itemLocked(row?.metadataStatus));
@@ -558,10 +562,10 @@
           <div class="panel" style="--act:var(--ok);--act-text:var(--ok-text)">
             <div class="row2">
               <div class="field"><label for="a-done">completed on</label>
-                <input id="a-done" type="date" bind:value={form.completedDate} disabled={locked}></div>
+                <input id="a-done" type="date" bind:value={form.completedDate}></div>
               {#if record.recurrenceMonths}
                 <div class="field"><label for="a-next">next orbit</label>
-                  <input id="a-next" type="date" bind:value={form.nextDate} disabled={locked}></div>
+                  <input id="a-next" type="date" bind:value={form.nextDate}></div>
               {/if}
             </div>
             <div class="row2">
@@ -570,12 +574,12 @@
                        disabled={locked}></div>
             </div>
             <div class="field"><label for="a-cnotes">notes</label>
-              <input id="a-cnotes" bind:value={form.notes} placeholder="optional" disabled={locked}></div>
+              <input id="a-cnotes" bind:value={form.notes} placeholder="optional"></div>
             {#if locked}
-              <div class="note">{PANEL_LOCKED}</div>
+              <div class="note">{COST_LOCKED}</div>
             {/if}
             <div class="save-row">
-              <button class="btn-primary" disabled={busy || locked || !form.completedDate}
+              <button class="btn-primary" disabled={busy || !form.completedDate}
                 onclick={() => run(() => completeCommand(record, {
                   completedDate: form.completedDate,
                   nextDate: form.nextDate || undefined,

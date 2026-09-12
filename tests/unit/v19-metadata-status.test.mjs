@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
  * stops being wired the licence to overwrite goes with it.
  */
 import {
-  DAMAGED, DAMAGED_PLACEHOLDER, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS, SAVE_REFUSED,
+  COST_LOCKED, DAMAGED, DAMAGED_PLACEHOLDER, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS, SAVE_REFUSED,
   evidenceReadable, fieldState, itemLocked, receiptWords, saveProblem,
 } from "../../web/src/lib/data/metadata-status.js";
 
@@ -42,7 +42,7 @@ describe("the two states a member learns once", () => {
     // Neither state ever tells a member to despair about the other's data, and
     // no member-facing string names a key mechanic or a count.
     expect(NOTES_WORDS[LOCKED]).not.toContain("recover");
-    for (const words of [...Object.values(REFERENCE_WORDS), ...Object.values(NOTES_WORDS), PANEL_LOCKED, SAVE_REFUSED]) {
+    for (const words of [...Object.values(REFERENCE_WORDS), ...Object.values(NOTES_WORDS), PANEL_LOCKED, COST_LOCKED, SAVE_REFUSED]) {
       expect(words).not.toMatch(/KEK|DOCUMENT_KEK|key[- ]encryption/i);
     }
   });
@@ -131,19 +131,35 @@ describe("the item screen wires both states where they have to be seen", () => {
     expect(editPanel).not.toContain("disabled={notesState");
   });
 
-  it("pauses the whole panel while the item is locked, not only its encrypted fields", () => {
+  it("pauses the whole edit panel while the item is locked, not only its encrypted fields", () => {
     const editPanel = ITEM_PAGE.slice(ITEM_PAGE.indexOf('{#if panel === "edit"}'), ITEM_PAGE.indexOf('{#if panel === "retire"}'));
-    // Every input, because the refused write is the whole row.
+    // Every input, because the refused write is the whole row: item.upsert.
     for (const field of ["e-title", "e-provider", "e-reference", "e-cost", "e-due", "e-recur", "e-notes"]) {
       const input = editPanel.slice(editPanel.indexOf(`id="${field}"`));
       expect(input.slice(0, input.indexOf("</div>"))).toContain("disabled={locked}");
     }
     expect(editPanel).toContain("disabled={busy || locked || !form.title?.trim()}");
     expect(editPanel).toContain("{PANEL_LOCKED}");
+  });
 
+  it("locks only the cost figure in the complete panel, because a no-cost completion needs no key (#972)", () => {
+    // item.complete only reaches for the metadata writer when a cost is
+    // supplied, so a locked household can still complete without one: the
+    // date, next-orbit and notes inputs stay live, and only the cost input
+    // and its explanation are gated on `locked`.
     const completePanel = ITEM_PAGE.slice(ITEM_PAGE.indexOf('{#if panel === "complete"}'), ITEM_PAGE.indexOf('{#if panel === "reschedule"}'));
-    expect(completePanel).toContain("disabled={busy || locked || !form.completedDate}");
-    expect(completePanel).toContain("{PANEL_LOCKED}");
+    for (const field of ["a-done", "a-next", "a-cnotes"]) {
+      const input = completePanel.slice(completePanel.indexOf(`id="${field}"`));
+      expect(input.slice(0, input.indexOf("</div>"))).not.toContain("disabled={locked}");
+    }
+    const costInput = completePanel.slice(completePanel.indexOf('id="a-cost"'));
+    expect(costInput.slice(0, costInput.indexOf("</div>"))).toContain("disabled={locked}");
+    // The save button is never gated on `locked`: a no-cost completion stays
+    // available, exactly as the server accepts it.
+    expect(completePanel).toContain("disabled={busy || !form.completedDate}");
+    expect(completePanel).not.toMatch(/disabled=\{busy \|\| locked/);
+    expect(completePanel).toContain("{COST_LOCKED}");
+    expect(completePanel).not.toContain("{PANEL_LOCKED}");
   });
 
   it("surfaces a stale submit in the alert slot the panel already has", () => {
