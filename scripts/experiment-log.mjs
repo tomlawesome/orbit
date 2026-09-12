@@ -337,6 +337,58 @@ function renderFieldSections(experiments, fields) {
 </section>`;
 }
 
+/**
+ * The page's first and only headline: what the plain model does on the pages
+ * nobody tuned on, and what the heuristics do on the same pages. Everything
+ * else on this page is working-out, and lives in the drawer.
+ */
+function renderHeadline(experiments, fields, corpora) {
+  const rows = experiments.filter((experiment) => experiment.headline);
+  if (rows.length === 0) return "";
+  const corpus = rows[0].corpus;
+
+  const bestByColumn = new Map();
+  for (const column of ["overall", ...fields]) {
+    let held = null;
+    for (const experiment of rows) {
+      const score = experiment.scores[column];
+      if (score && (held === null || score.pct > held.pct)) held = { pct: score.pct, id: experiment.id };
+    }
+    if (held) bestByColumn.set(column, held);
+  }
+
+  const body = rows.map((experiment) => {
+    const cells = ["overall", ...fields].map((column) => {
+      const score = experiment.scores[column];
+      // A tie boxes both: with two rows, marking only the first would read
+      // as one method beating the other where they drew.
+      const best = score != null && bestByColumn.get(column)?.pct === score.pct;
+      return renderScoreCell(score, null, best ? "band-green" : "band-grey", best,
+        column === "overall" ? "overall" : "");
+    });
+    return `<tr>
+      <td class="id">${escapeHtml(experiment.id)}</td>
+      <td class="label">${escapeHtml(experiment.label)}</td>
+      ${renderModelCell(experiment)}
+      ${cells.join("\n      ")}
+    </tr>`;
+  }).join("\n      ");
+
+  const fieldHeaders = fields.map((field) => `<th>${escapeHtml(field)}</th>`).join("");
+  return `<section class="headline">
+  <h2>Where we are: ${escapeHtml(corpora[corpus] ?? corpus)}</h2>
+  <p class="key">The plain model reading the whole page, against the heuristics with no model at all, on the
+  documents nobody tuned on. A green box marks whichever of the two is ahead on that field. Everything else
+  is in the drawer at the foot of the page.</p>
+  <div class="tables"><table>
+    <thead><tr><th>ID</th><th>what ran</th><th>model</th><th class="overall">overall</th>${fieldHeaders}</tr></thead>
+    <tbody>
+      ${body}
+    </tbody>
+  </table></div>
+</section>`;
+}
+
 function renderLegend(verdicts) {
   const items = Object.entries(verdicts)
     .map(([name, description]) => `<li>${renderVerdict(name)} ${escapeHtml(description)}</li>`)
@@ -493,6 +545,21 @@ const CSS = `
 
   ul.legend { padding-left: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem; margin: 0.5rem 0 1rem; }
   ul.legend li { font-size: 0.9rem; color: var(--ink-2); }
+  .headline { margin: 1.5rem 0 2rem; }
+  .headline h2 { margin-top: 0; }
+  .headline table { font-size: 1rem; }
+  .headline td.label { font-weight: 600; }
+  .drawer {
+    margin-top: 2.5rem; border: 1px solid var(--line); border-radius: 8px;
+    background: rgba(0, 0, 0, 0.15); padding: 0 1rem;
+  }
+  .drawer > summary {
+    cursor: pointer; padding: 0.75rem 0; font-weight: 600; color: var(--ink-2);
+    list-style-position: inside;
+  }
+  .drawer > summary:hover { color: var(--ink); }
+  .drawer[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 0.5rem; }
+  .drawer h2:first-of-type { margin-top: 1rem; }
   .field { margin: 1rem 0; padding: 0.75rem 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
   .field h3 { margin: 0; font-size: 1.1rem; text-transform: capitalize; }
   .field .meta { margin: 0.1rem 0 0.4rem; font-size: 0.85rem; color: var(--ink-2); }
@@ -547,23 +614,30 @@ export function renderHtml(register) {
 <body>
   <h1>${escapeHtml(title)}</h1>
   <p>${escapeHtml(scoring)}</p>
-  <p class="key">A cell's colour says how the number reads:
-  <span class="chip band-green">80% or better</span>
-  <span class="chip band-blue">better than the baseline</span>
-  <span class="chip band-red">no better than the baseline</span>
-  <span class="chip band-grey">nothing answered, or the baseline itself</span>.
-  The baseline is the row marked <em>baseline</em> in that table, compared field by field.
-  An <span class="key-box">orange box</span> marks the best any column has reached, on the run that first reached it,
-  and the last row of each table gathers those bests in one place. The small ▲ and ▼ figures
-  are a different question: the change in points since the last trusted run in the same table that asked the same
-  thing of the same model. Greyed-out rows are runs whose numbers are not trusted; they carry no change.</p>
-  <p class="key">The <strong>model</strong> column says what the model was asked to do, because in most runs it was not reading the page: <em>chooser</em> means the rules did the work and the model only picked one entry off a short list for a field or two; <em>whole page</em> means the model read the document and wrote every field itself; <em>no model</em> means nothing was asked of any model. Every run marked <em>control</em> is the same code with the chooser switched off, so the gap to the row above it is what the model itself was worth.</p>
-  ${renderLegend(verdicts)}
-  ${corpusSections}
-  ${renderFieldSections(experiments, fields)}
-  ${renderMeasurements(measurements, corpora)}
-  <h2>What we did, run by run</h2>
-  ${renderWhatWeDid(experiments)}
+  ${renderHeadline(experiments, fields, corpora)}
+  <details class="drawer">
+    <summary>The working-out: every run, every corpus, every measurement</summary>
+    <p class="key">A cell's colour says how the number reads:
+    <span class="chip band-green">80% or better</span>
+    <span class="chip band-blue">better than the baseline</span>
+    <span class="chip band-red">no better than the baseline</span>
+    <span class="chip band-grey">nothing answered, or the baseline itself</span>.
+    The baseline is the row marked <em>baseline</em> in that table, compared field by field.
+    An <span class="key-box">orange box</span> marks the best any column has reached, on the run that first reached it,
+    and the last row of each table gathers those bests in one place.
+    The small ▲ and ▼ figures are the change in points since the last trusted run in the same table that asked the
+    same thing of the same model. Greyed-out rows are runs whose numbers are not trusted; they carry no change.</p>
+    <p class="key">The <strong>model</strong> column says what the model was asked to do: <em>chooser</em> means the
+    rules did the work and the model only picked one entry off a short list for a field or two; <em>whole page</em>
+    means the model read the document and wrote every field itself; <em>no model</em> means nothing was asked of any
+    model. Every run marked <em>control</em> is the same code with the chooser switched off.</p>
+    ${renderLegend(verdicts)}
+    ${corpusSections}
+    ${renderFieldSections(experiments, fields)}
+    ${renderMeasurements(measurements, corpora)}
+    <h2>What we did, run by run</h2>
+    ${renderWhatWeDid(experiments)}
+  </details>
 </body>
 </html>
 `;

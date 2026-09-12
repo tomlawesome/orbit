@@ -1142,7 +1142,8 @@
         "cost",
         "scheduleKind",
         "recurrence"
-      ]
+      ],
+      "headline": true
     },
     {
       "id": "E12",
@@ -1619,7 +1620,8 @@
       "about": [
         "subtype",
         "provider"
-      ]
+      ],
+      "headline": true
     },
     {
       "id": "E15",
