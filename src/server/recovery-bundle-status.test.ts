@@ -74,8 +74,10 @@ describe("getRecoveryBundleStatus", () => {
     });
   });
 
-  it("never throws: an unreadable audit_log defaults toward not alarming, like getKekRotationStatus's own failure direction", async () => {
+  it("never throws, and fails toward SHOWING the card, not hiding it — the opposite of getKekRotationStatus's own direction", async () => {
+    // An unreadable audit_log is exactly the kind of instance where the
+    // warning matters most, so this must not silently look "exported".
     mocks.execute.mockRejectedValueOnce(new Error("audit_log unreachable"));
-    await expect(getRecoveryBundleStatus()).resolves.toEqual({ exported: true, exportedAt: null });
+    await expect(getRecoveryBundleStatus()).resolves.toEqual({ exported: false, exportedAt: null });
   });
 });
