@@ -416,8 +416,14 @@ interface AmountClaim {
   rank: number;
 }
 
-/** Tags that are a reason against a figure being the cost. */
+/** Tags that are a reason against a figure being the cost. `other` is one
+ * too where a sieve said so in words (a cover limit, an excess, a penalty)
+ * and not where it is the blank tag a figure nobody read carries. */
 const NOT_THE_COST = ["previous", "rival"];
+
+function speaksAgainst(tag: { value: string; trigger: string }): boolean {
+  return NOT_THE_COST.includes(tag.value) || (tag.value === "other" && tag.trigger.trim() !== "");
+}
 
 /** What one sieve said, kept at its best: a sieve that read the same
  * figure twice has one opinion about it. */
@@ -450,7 +456,7 @@ export function amountClaims(candidates: readonly TaggedCandidate[]): AmountClai
     if (candidate.kind !== "amount" || !candidate.currency) continue;
     for (const tag of candidate.tags) {
       const rank = AMOUNT_PREFERENCE.indexOf(tag.value);
-      const against = NOT_THE_COST.includes(tag.value);
+      const against = speaksAgainst(tag);
       if (rank === -1 && !against) continue;
       const key = `${candidate.value} ${candidate.currency}`;
       const held = byValue.get(key) ?? {
@@ -468,7 +474,10 @@ export function amountClaims(candidates: readonly TaggedCandidate[]): AmountClai
         const readings = held.byTag.get(tag.value) ?? new Map() as SieveReadings;
         for (const sieve of sieves) record(readings, sieve, strength);
         held.byTag.set(tag.value, readings);
-        if (sieves.includes(AMOUNT_LABEL) && strength >= 2) held.labelStated = true;
+        // The words in front of the figure, or the form's own heading
+        // printed straight over its cell (`heading-above` at full
+        // strength): either is the page naming the figure in so many words.
+        if ((sieves.includes(AMOUNT_LABEL) || sieves.includes("heading-above")) && strength >= 2) held.labelStated = true;
       }
       byValue.set(key, held);
     }
