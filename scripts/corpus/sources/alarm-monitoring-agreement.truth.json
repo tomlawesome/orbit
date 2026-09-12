@@ -14,13 +14,14 @@
     "costMinor": 2499,
     "currency": "GBP",
     "recurrenceMonths": 24,
-    "scheduleKind": "renewal"
+    "scheduleKind": "service"
   },
   "notes": [
     "Start date 2026-03-02 is printed as 'Monitoring Start Date 02/03/2026' and repeated in the customer signature date.",
     "Service date 2027-03-02 is printed as 'Annual Maintenance Visit Due 02/03/2027'.",
     "Renewal/term-end date 2028-03-01 is printed within 'Minimum Term: 24 month minimum term, ending 01/03/2028'.",
-    "recurrenceMonths 24 is printed in digits as '24 month minimum term' — the length of the agreement, not the monthly billing cycle.",
+    "scheduleKind is 'service', not 'renewal': the contract derives it from the FIRST dateRole in print order that is a scheduled kind (suggestions.ts), and the service date prints before the renewal date on this page. Three dateRoles on one document, two of them schedule-worthy, is a thin spot the contract's derivation does not resolve by importance -- only by which comes first.",
+    "recurrenceMonths 24 is printed in digits as '24 month minimum term' — the length of the agreement, not the monthly billing cycle; it is retained under the derived 'service' scheduleKind because the contract only requires a schedule kind to be present, not that it match which date the recurrence describes.",
     "Provider is 'Northgate Home Security', the trading name in the header and footer strip — not the Alarm Receiving Centre or insurer named elsewhere.",
     "Reference 'NGS-CA-20456' is printed as the Contract Number field and repeated in the footer strip.",
     "costMinor 2499 is the 'Monthly Monitoring Charge... £24.99 per month' field.",
