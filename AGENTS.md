@@ -395,6 +395,27 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   numbers, once every field has been tuned on its own. Until then, a change
   that helps one field and is not measured on the others does not go into
   anything the others read. #996 is the first of these.
+- **The unseen documents are locked, not just off limits** (owner,
+  2026-09-12: *"You need to be locked out from the unseen documents."*).
+  `~/agent-hooks/holdout-gate.py` refuses to read a hold-out document, its
+  ground truth or its generated module, and refuses to RUN an eval carrying
+  `--misses` or `--answers` — the flags that print each page's expected value beside
+  what was extracted. Staging, counting, moving, building and writing about
+  those files is all still allowed; reading them out is not. Score them and
+  read the score line.
+
+  Asking permission cannot help: the hook screens the command, not the
+  intent. Authoring a hold-out is the one exempt role, and it is declared
+  rather than inferred — `ORBIT_HOLDOUT_AUTHOR=1` in the command's own
+  environment, which says "I am writing these and will never tune against
+  them". A session that sets it has spent its right to tune on that set.
+
+  The first hold-out was lost on 2026-09-12 without a single file being
+  opened: an eval printed the answers, they were read, and the next change
+  was designed knowing them (#996, #997). That is why the flags are gated and
+  not only the files. `~/agent-hooks/holdout-gate_test.py` proves both halves
+  fire, and that neither blocks ordinary work.
+
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not
