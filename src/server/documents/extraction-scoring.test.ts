@@ -113,14 +113,15 @@ describe("scoreCorpusThreeWay (#959, ADR-0025 section 6)", () => {
     // Always print the measurement, as the neighbouring accuracy test does.
     console.info(formatThreeWayScore("three-way fixture", score));
 
-    // Heuristic alone: both fields wrong (0/2).
-    expect(score.heuristic.minimum).toBeCloseTo(0, 10);
-    // Model blind: both fields correct (2/2) -- a different number from the
+    // Heuristic alone: the two dates right, provider and reference wrong --
+    // 2 of 4, since a wrong answer earns nothing rather than costing a point.
+    expect(score.heuristic.minimum).toBeCloseTo(0.5, 10);
+    // Model blind: everything right (4/4) -- a different number from the
     // heuristic's, proving the two are not the same score in disguise.
     expect(score.model!.blind.minimum).toBeCloseTo(1, 10);
-    // Adjudicated: one endorsed the wrong heuristic reading, one endorsed the
-    // correct blind reading -- 1/2, distinct from both of the above.
-    expect(score.model!.adjudicated.minimum).toBeCloseTo(0.5, 10);
+    // Adjudicated: it endorsed the wrong provider and the right reference --
+    // 3 of 4, distinct from both of the above.
+    expect(score.model!.adjudicated.minimum).toBeCloseTo(0.75, 10);
   });
 
   it("does not fail anything when the blind score sits below the heuristic baseline", async () => {

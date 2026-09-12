@@ -21,18 +21,18 @@ const KEY: Record<string, string> = {
 
 async function main(): Promise<void> {
   const score = await scoreCorpus(EXTRACTION_HOLDOUT_FULLPAGE, (text) => chooseFields(tagCandidates(text, sieve(text))));
-  console.log("field         right  wrong  blank   of   net");
+  console.log("field         right  wrong  blank   of");
   for (const field of FIELD_NAMES) {
-    const { earned, possible } = score.fields[field];
+    const { possible } = score.fields[field];
     const key = KEY[field] as string;
     const misses = score.misses.filter((miss) =>
       field === "dates" ? miss.includes("date ") && !miss.includes("expected role") : miss.includes(key));
-    const missed = misses.length;
-    const right = possible - missed;
-    const wrong = right - earned;
-    const blank = missed - wrong;
-    const ok = right + wrong + blank === possible && right - wrong === earned;
-    console.log(`${field.padEnd(13)} ${String(right).padStart(4)}  ${String(wrong).padStart(5)}  ${String(blank).padStart(5)} ${String(possible).padStart(4)} ${String(earned).padStart(5)}  ${ok ? "" : "PARSE MISMATCH"}`);
+    // The score no longer separates a wrong answer from a blank, so the
+    // count comes from how each miss was classified when it was recorded.
+    const wrong = misses.filter((miss) => miss.trimEnd().endsWith("(wrong)")).length;
+    const blank = misses.filter((miss) => miss.trimEnd().endsWith("(blank)")).length;
+    const right = possible - wrong - blank;
+    console.log(`${field.padEnd(13)} ${String(right).padStart(4)}  ${String(wrong).padStart(5)}  ${String(blank).padStart(5)} ${String(possible).padStart(4)}`);
   }
 }
 void main();

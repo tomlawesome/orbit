@@ -193,7 +193,7 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
       <td class="date">${escapeHtml(experiment.date)}</td>
       <td class="label">${escapeHtml(experiment.label)}</td>
       ${renderModelCell(experiment)}
-      <td class="verdict">${renderVerdict(experiment.verdict)}</td>
+      <td class="verdict">${renderVerdict(experiment.verdict)}${experiment.oldScoring ? '<br><span class="oldscore">old scoring</span>' : ""}</td>
       ${cells.join("\n      ")}
     </tr>`;
   });
@@ -517,6 +517,7 @@ const CSS = `
   tr.best-summary td.label { font-weight: 600; color: var(--ink); }
   td.best-row { background: #2a2013; }
   td.best-row .pct { color: var(--best); }
+  .oldscore { font-size: 0.7rem; color: var(--ink-3); font-style: italic; }
   .delta { font-size: 0.75rem; font-weight: 600; }
   .delta-up { color: #9ec8ff; }
   .delta-down { color: #ffa8a8; }
