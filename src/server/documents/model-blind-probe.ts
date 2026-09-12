@@ -7,7 +7,11 @@
 //
 // `--all` reads every tuning document rather than a sample; `--head <fraction>`
 // sends the model only the top of each page (owner, 2026-09-12: the top
-// third, where the letterhead is).
+// third, where the letterhead is). `--deadline <ms>` waits longer than the
+// application's five minutes for a page: a whole hold-out page on the CPU
+// model took 185s each on a quiet host and timed out on a busy one
+// (2026-09-12), and a page that timed out scores as blank, which is not a
+// baseline of the model but of the host.
 //
 // `--holdout3` reads all twelve unseen pages instead of a sample of the
 // tuning corpus, and is how the experiment log's front table gets its model
@@ -64,8 +68,17 @@ function topOf(text: string, fraction: number): string {
 
 const head = headFraction();
 
+function deadlineMs(): number {
+  const at = process.argv.indexOf("--deadline");
+  const ms = at === -1 ? MODEL_MAILBOX_DEADLINE_MS : Number(process.argv[at + 1]);
+  if (!(ms > 0)) throw new Error("--deadline wants a number of milliseconds");
+  return ms;
+}
+
+const deadline = deadlineMs();
+
 const blindExtractor: CorpusExtractor = async (text, filename) => {
-  const result = await modelProposalFromText(topOf(text, head), filename, { deadlineMs: MODEL_MAILBOX_DEADLINE_MS });
+  const result = await modelProposalFromText(topOf(text, head), filename, { deadlineMs: deadline });
   // A skipped or failed pass scores as "the extractor offered nothing",
   // exactly as a blank does -- never as an error that hides the number.
   return result.status === "ready" ? result.proposal : { dates: [] };
@@ -86,7 +99,7 @@ async function main(): Promise<void> {
     : all ? [...EXTRACTION_CORPUS] : sample(EXTRACTION_CORPUS, size, seed);
   const read = head < 1 ? `top ${Math.round(head * 100)}% of the page` : "whole page";
 
-  console.log(`model: ${selectedExtractionModel(process.env)}; reads the ${read}`);
+  console.log(`model: ${selectedExtractionModel(process.env)}; reads the ${read}; up to ${Math.round(deadline / 1000)}s a page`);
   console.log(onHoldout3
     ? `hold-out 3: all ${documents.length} unseen pages`
     : all ? `all ${documents.length} tuning documents`
