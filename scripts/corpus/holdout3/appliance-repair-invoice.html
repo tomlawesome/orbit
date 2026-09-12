@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Whitlock Domestic Appliance Repairs &mdash; invoice</title>
+<style>
+@font-face{font-family:"Corpus Repair";src:url("../fonts/IBMPlexSerif-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Repair";src:url("../fonts/IBMPlexSerif-Bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Repair Sans";src:url("../fonts/CabinCondensed-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Repair Mono";src:url("../fonts/ChivoMono.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: "Corpus Repair", serif; font-size: 9.2pt; line-height: 1.4; color: #1c1c1c; }
+  .page { width: 210mm; min-height: 297mm; box-sizing: border-box; padding: 12mm 14mm 16mm 14mm; position: relative; background: #fff; }
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4mm; }
+  .brand { font-size: 16pt; font-weight: 700; }
+  .brandsub { font-size: 8pt; color: #555; font-family: "Corpus Repair Sans", sans-serif; }
+  .meta { text-align: right; font-size: 8.4pt; font-family: "Corpus Repair Sans", sans-serif; }
+  h1 { font-size: 12pt; margin: 3mm 0; font-family: "Corpus Repair Sans", sans-serif; }
+  table.grid { width: 100%; border-collapse: collapse; font-size: 8.6pt; margin: 3mm 0 4mm 0; font-family: "Corpus Repair Sans", sans-serif; }
+  table.grid td { padding: 1.3mm 2mm; border-bottom: 0.5pt solid #d8d8d8; vertical-align: top; }
+  table.grid td.label { width: 36%; color: #444; }
+  table.items { width: 100%; border-collapse: collapse; font-size: 8.4pt; margin-bottom: 4mm; font-family: "Corpus Repair Mono", monospace; }
+  table.items th { background: #333; color: #fff; text-align: left; padding: 1.2mm 2mm; font-family: "Corpus Repair Sans", sans-serif; }
+  table.items td { padding: 1.1mm 2mm; border: 0.5pt solid #d8d8d8; }
+  table.items td.amt { text-align: right; }
+  .totalbox { border: 1pt solid #333; background: #f2f2f2; padding: 3mm 4mm; margin: 3mm 0 4mm 0; display: flex; justify-content: space-between; align-items: center; font-family: "Corpus Repair Sans", sans-serif; }
+  .totalbox .amt { font-size: 13.5pt; font-weight: 700; }
+  .note { font-size: 7.6pt; color: #444; line-height: 1.4; margin: 2mm 0; font-family: "Corpus Repair Sans", sans-serif; }
+  .pagefoot { position: absolute; left: 14mm; right: 14mm; bottom: 8mm; font-size: 6.6pt; color: #666; font-family: "Corpus Repair Sans", sans-serif; border-top: 0.6pt solid #bbb; padding-top: 1.4mm; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <div>
+      <div class="brand">Whitlock Domestic Appliance Repairs</div>
+      <div class="brandsub">Cookers, washing machines &amp; dishwashers &middot; 07700 900556</div>
+    </div>
+    <div class="meta">
+      Invoice WDAR-INV-2249<br>
+      Job date 8 September 2026<br>
+      Invoice date 8 September 2026
+    </div>
+  </div>
+
+  <h1>Repair invoice</h1>
+  <table class="grid">
+    <tr><td class="label">Customer</td><td>Mr Callum Reeve, 19 Silverdale Close, Reading, RG6 3PL</td></tr>
+    <tr><td class="label">Appliance</td><td>Kelford 9kg washing machine, model KF-WM-812</td></tr>
+    <tr><td class="label">Fault reported</td><td>Not draining, drum not spinning on cycle end</td></tr>
+  </table>
+
+  <table class="items">
+    <thead><tr><th>Item</th><th class="amt">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Call-out and diagnosis</td><td class="amt">&pound;45.00</td></tr>
+      <tr><td>Replacement drain pump, part &amp; fitting</td><td class="amt">&pound;58.00</td></tr>
+      <tr><td>Labour, 45 minutes</td><td class="amt">&pound;32.00</td></tr>
+    </tbody>
+  </table>
+
+  <div class="totalbox">
+    <div>Total charged, paid by card on the day</div>
+    <div class="amt">&pound;135.00</div>
+  </div>
+
+  <p class="note">
+    Repair carried out on 8 September 2026. The replacement drain pump carries a 90-day parts warranty
+    from the repair date, covering the part only and not labour, ending 7 December 2026. This is a one-off
+    repair invoice; no ongoing service contract is attached to this appliance.
+  </p>
+  <p class="note">
+    The same appliance was previously repaired on 14 January 2025 for an unrelated door-seal fault, invoiced
+    separately at the time and not part of this invoice. Whitlock Domestic Appliance Repairs is a trading
+    name of C. Whitlock, registered for VAT number 227 4471 09.
+  </p>
+
+  <div class="pagefoot">
+    <span>Whitlock Domestic Appliance Repairs &middot; WDAR-INV-2249</span>
+    <span>Page 1 of 1</span>
+  </div>
+</div>
+</body>
+</html>

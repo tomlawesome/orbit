@@ -312,6 +312,82 @@ const DOCS = {
     faces: [FACE("Corpus Sweep Mono", "FiraCode.ttf"), FACE("Corpus Sweep Brand", "Bevan-Regular.ttf", "400")],
     swap: [[/"Liberation Mono", monospace/g, '"Corpus Sweep Mono", monospace'], [/"Bitstream Charter", serif/g, '"Corpus Sweep Brand", serif']],
   },
+
+  // ---- the THIRD hold-out, 12 further documents (#998) ----
+  //
+  // Twenty-six more faces, none used by `sources/` (which now includes the
+  // first two retired hold-outs) or by either of them alone, so this third
+  // hold-out shares no character map with the tuning set.
+
+  // A parent-portal statement: a plain UI sans for the page, a dot-matrix
+  // mono for the till-style transaction ledger.
+  "school-meals-account-statement.html": {
+    faces: [FACE("Corpus Meals", "RedHatText.ttf"), FACE("Corpus Meals Mono", "VT323-Regular.ttf", "400")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Meals", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Meals Mono", monospace']],
+  },
+  // An old-fashioned association's typed agreement: an old-style serif
+  // body, a condensed sans for the labels.
+  "allotment-tenancy-agreement.html": {
+    faces: [FACE("Corpus Allotment", "OldStandard-Regular.ttf", "400"), FACE("Corpus Allotment", "OldStandard-Bold.ttf", "700"), FACE("Corpus Allotment", "OldStandard-Italic.ttf", "400", "italic"), FACE("Corpus Allotment Sans", "FiraSansCondensed-Regular.ttf", "400"), FACE("Corpus Allotment Sans", "FiraSansCondensed-Bold.ttf", "700")],
+    swap: [[/"Bitstream Charter", serif/g, '"Corpus Allotment", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Allotment Sans", sans-serif']],
+  },
+  // An insurtech certificate: one humanist sans doing every job.
+  "cycle-insurance-certificate.html": {
+    faces: [FACE("Corpus Cycle", "AlegreyaSans-Regular.ttf", "400"), FACE("Corpus Cycle", "AlegreyaSans-Bold.ttf", "700")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Cycle", sans-serif']],
+  },
+  // A small cleaning firm's contract: a friendly condensed sans throughout.
+  "domestic-cleaning-contract.html": {
+    faces: [FACE("Corpus Clean", "CabinCondensed-Regular.ttf", "400"), FACE("Corpus Clean", "CabinCondensed-Bold.ttf", "700")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Clean", sans-serif']],
+  },
+  // A sole trader's invoice: a condensed sans template, a handwriting face
+  // for the personal sign-off.
+  "music-tuition-invoice.html": {
+    faces: [FACE("Corpus Tuition", "BarlowCondensed-Regular.ttf", "400"), FACE("Corpus Signoff", "ShadowsIntoLight.ttf", "400")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Tuition", sans-serif'], [/"Bitstream Charter", cursive/g, '"Corpus Signoff", cursive']],
+  },
+  // A conservation charity's letter: a warm serif for the wording, a plain
+  // sans for the account details.
+  "charity-giving-confirmation.html": {
+    faces: [FACE("Corpus Wild", "Merriweather.ttf"), FACE("Corpus Wild Sans", "RedHatText.ttf")],
+    swap: [[/"Bitstream Charter", serif/g, '"Corpus Wild", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Wild Sans", sans-serif']],
+  },
+  // A solicitor's receipt: an elegant legal serif, a plain sans for the
+  // schedule.
+  "will-storage-receipt.html": {
+    faces: [FACE("Corpus Deed", "FrankRuhlLibre.ttf"), FACE("Corpus Deed Sans", "AlegreyaSans-Regular.ttf", "400")],
+    swap: [[/"Bitstream Charter", serif/g, '"Corpus Deed", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Deed Sans", sans-serif']],
+  },
+  // A commercial car park operator: one bold display sans for the brand and
+  // the page, a mono for the plate and ticket dates.
+  "car-park-season-ticket.html": {
+    faces: [FACE("Corpus Park Brand", "BigShouldersText.ttf"), FACE("Corpus Park Mono", "RedHatMono.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Park Brand", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Park Mono", monospace']],
+  },
+  // A consumer rental firm: one condensed retail sans throughout.
+  "appliance-rental-agreement.html": {
+    faces: [FACE("Corpus Rental", "FiraSansCondensed-Regular.ttf", "400"), FACE("Corpus Rental", "FiraSansCondensed-Bold.ttf", "700")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Rental", sans-serif']],
+  },
+  // A tradesperson's invoice: a plain functional serif for the body, a
+  // condensed sans for labels, a mono for the parts and prices.
+  "appliance-repair-invoice.html": {
+    faces: [FACE("Corpus Repair", "IBMPlexSerif-Regular.ttf", "400"), FACE("Corpus Repair", "IBMPlexSerif-Bold.ttf", "700"), FACE("Corpus Repair Sans", "CabinCondensed-Regular.ttf", "400"), FACE("Corpus Repair Mono", "ChivoMono.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Repair", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Repair Sans", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Repair Mono", monospace']],
+  },
+  // A traditional members' club letter: a period serif for the wording, a
+  // condensed sans for the renewal panel.
+  "social-club-subscription-renewal.html": {
+    faces: [FACE("Corpus Club", "LibreBodoni.ttf"), FACE("Corpus Club Sans", "BarlowCondensed-Regular.ttf", "400")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Club", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Club Sans", sans-serif']],
+  },
+  // A private clinic's invoice: one bold clinical-brand sans throughout.
+  "health-screening-clinic-invoice.html": {
+    faces: [FACE("Corpus Clinic Brand", "BigShouldersText.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Clinic Brand", sans-serif']],
+  },
+
 };
 
 for (const [file, { faces, swap }] of Object.entries(DOCS)) {
