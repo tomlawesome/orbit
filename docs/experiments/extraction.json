@@ -3327,6 +3327,68 @@
       "verdict": "kept",
       "notes": "dateRoles 73/85 (was 67/85); 83.3% (was 81.9%). Hold-out 3 unchanged, 73.2%.",
       "headline": true
+    },
+    {
+      "id": "E63",
+      "date": "2026-09-12",
+      "label": "term-multiple arithmetic (owner's idea) -- rejected",
+      "corpus": "tuning-48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Owner (2026-09-12): multiply figures by printed terms/counts, and add pairs of figures, and let an exact match vouch for the pair. Three variants: (a) small x N = big -> small instalment, big total, weak: cost 41->40 (dental plan: 12 x GBP9.50 = GBP114 'plan year value' became the answer; truth is the monthly GBP9.50). (b) small gets the instalment vote only: no change on seen or hold-out 3. (c) any two figures summing to a third -> total, weak: cost 41->39 (coincidental sums on the domain renewal and the service charge).",
+      "how": "npm run eval:stages, npm run eval:holdout",
+      "commit": "c7d110d",
+      "output": "tmp/e-seen48-stages-mult1.txt",
+      "scores": {
+        "overall": {
+          "pct": 83.1,
+          "net": 339,
+          "of": 408
+        },
+        "provider": {
+          "pct": 75,
+          "net": 36,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 85.9,
+          "net": 73,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 70.8,
+          "net": 34,
+          "of": 48
+        },
+        "cost": {
+          "pct": 95.2,
+          "net": 40,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 86.2,
+          "net": 25,
+          "of": 29
+        },
+        "recurrence": {
+          "pct": 65.2,
+          "net": 15,
+          "of": 23
+        }
+      },
+      "verdict": "rejected",
+      "notes": "The maths finds the pairs correctly; what it cannot say is which of the pair the household tracks -- the dental plan and the alarm want the monthly payment, home insurance wants the annual premium, and both pages print both. That stays with the page's label. The contiguous form (adds-up, E58) and the written-out form (instalment-total) already cover the cases where arithmetic is safe."
     }
   ],
   "measurements": [
