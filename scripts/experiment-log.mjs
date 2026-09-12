@@ -71,17 +71,37 @@ function formatPct(pct) {
 function renderDeltaLine(delta) {
   const rounded = Math.round(delta * 10) / 10 || 0; // normalises -0 to 0
   if (rounded === 0) {
-    return `<span class="delta delta-zero">0.0</span>`;
+    return `<span class="delta delta-zero">= 0.0</span>`;
   }
-  const sign = rounded > 0 ? "+" : "−";
+  // A glyph as well as a colour, so the direction never rests on hue alone.
+  const glyph = rounded > 0 ? "▲" : "▼";
   const cls = rounded > 0 ? "delta-up" : "delta-down";
-  return `<span class="delta ${cls}">${sign}${Math.abs(rounded).toFixed(1)}</span>`;
+  return `<span class="delta ${cls}">${glyph} ${Math.abs(rounded).toFixed(1)}</span>`;
 }
 
-function renderScoreCell(score, previousPct) {
-  if (!score) return `<td class="score">–</td>`;
+/**
+ * The cell's background: a diverging tint around zero, blue as the score
+ * climbs to 100, red as it falls below zero, and no tint at zero. One hue
+ * each way with a neutral middle, so it reads for colour-blind readers too;
+ * the text stays ink and the number is always printed.
+ */
+function scoreTint(pct) {
+  const strength = Math.min(Math.abs(pct), 100) / 100;
+  if (strength === 0) return "";
+  const alpha = (0.08 + strength * 0.42).toFixed(2);
+  return pct > 0 ? `background: rgba(59, 111, 214, ${alpha});` : `background: rgba(208, 59, 59, ${alpha});`;
+}
+
+function renderScoreCell(score, previousPct, extraClass = "") {
+  if (!score) return `<td class="score ${extraClass}">–</td>`;
   const delta = previousPct == null ? "" : `<br>${renderDeltaLine(score.pct - previousPct)}`;
-  return `<td class="score"><span class="pct">${formatPct(score.pct)}</span><br><span class="netof">${score.net}/${score.of}</span>${delta}</td>`;
+  return `<td class="score ${extraClass}" style="${scoreTint(score.pct)}">` +
+    `<span class="pct">${formatPct(score.pct)}</span><br><span class="netof">${score.net}/${score.of}</span>${delta}</td>`;
+}
+
+function renderVerdict(verdict) {
+  const slug = verdict.replaceAll(/[^a-z]+/gu, "-");
+  return `<span class="badge badge-${slug}">${escapeHtml(verdict)}</span>`;
 }
 
 function renderCorpusTable(corpusKey, description, experiments, fields) {
@@ -97,7 +117,7 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
     const deltaEligible = DELTA_VERDICTS.has(experiment.verdict);
     const muted = MUTED_VERDICTS.has(experiment.verdict);
     const previous = previousByModel.get(experiment.model) ?? null;
-    const cells = [renderScoreCell(experiment.scores.overall, deltaEligible ? previous?.overall : null)];
+    const cells = [renderScoreCell(experiment.scores.overall, deltaEligible ? previous?.overall : null, "overall")];
     for (const field of fields) {
       const score = experiment.scores[field];
       cells.push(renderScoreCell(score, deltaEligible ? previous?.fields?.[field] : null));
@@ -112,29 +132,39 @@ function renderCorpusTable(corpusKey, description, experiments, fields) {
       <td class="id">${escapeHtml(experiment.id)}</td>
       <td class="date">${escapeHtml(experiment.date)}</td>
       <td class="label">${escapeHtml(experiment.label)}</td>
-      <td class="model">${escapeHtml(experiment.model)}</td>
-      <td class="verdict">${escapeHtml(experiment.verdict)}</td>
+      <td class="model"><span class="tag">${escapeHtml(experiment.model)}</span></td>
+      <td class="verdict">${renderVerdict(experiment.verdict)}</td>
       ${cells.join("\n      ")}
     </tr>`;
   });
 
   const fieldHeaders = fields.map((field) => `<th>${escapeHtml(field)}</th>`).join("");
+  const trusted = rows.filter((experiment) => DELTA_VERDICTS.has(experiment.verdict));
+  const best = trusted.reduce((held, experiment) =>
+    (held === null || experiment.scores.overall.pct > held.scores.overall.pct ? experiment : held), null);
+  const bestLine = best === null
+    ? ""
+    : `<p class="best">Best trusted run so far: <strong>${escapeHtml(best.id)}</strong> ${escapeHtml(best.label)} — ` +
+      `<strong>${formatPct(best.scores.overall.pct)}</strong> (${escapeHtml(best.model)})</p>`;
   return `<section class="corpus">
   <h2>${escapeHtml(description)}</h2>
+  ${bestLine}
+  <div class="tables">
   <table>
     <thead>
-      <tr><th>ID</th><th>date</th><th>label</th><th>model</th><th>verdict</th><th>overall</th>${fieldHeaders}</tr>
+      <tr><th>ID</th><th>date</th><th>label</th><th>model</th><th>verdict</th><th class="overall">overall</th>${fieldHeaders}</tr>
     </thead>
     <tbody>
       ${bodyRows.join("\n      ")}
     </tbody>
   </table>
+  </div>
 </section>`;
 }
 
 function renderLegend(verdicts) {
   const items = Object.entries(verdicts)
-    .map(([name, description]) => `<li><strong>${escapeHtml(name)}</strong> — ${escapeHtml(description)}</li>`)
+    .map(([name, description]) => `<li>${renderVerdict(name)} ${escapeHtml(description)}</li>`)
     .join("");
   return `<ul class="legend">${items}</ul>`;
 }
@@ -156,7 +186,7 @@ function renderWhatWeDid(experiments) {
       .join("\n        ");
 
     return `<article class="experiment">
-      <h3>${escapeHtml(experiment.id)} — ${escapeHtml(experiment.label)}</h3>
+      <h3><span class="id-badge">${escapeHtml(experiment.id)}</span> ${escapeHtml(experiment.label)} ${renderVerdict(experiment.verdict)}</h3>
       <dl>
         ${rowsHtml}
       </dl>
@@ -171,45 +201,81 @@ const CSS = `
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     max-width: 100rem;
     margin: 0 auto;
-    padding: 1rem 1rem 3rem;
+    padding: 1rem 1.25rem 3rem;
     line-height: 1.5;
     color: #1f2328;
+    background: #fcfcfb;
   }
+  h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
   h1, h2, h3 { line-height: 1.25; }
+  h2 { margin-top: 2.5rem; padding-left: 0.75rem; border-left: 5px solid #3b6fd6; font-size: 1.3rem; }
+  p.key { color: #57606a; font-size: 0.95rem; }
+  p.best { margin: 0 0 0.5rem; color: #24292f; }
+  .swatch { display: inline-block; width: 0.9em; height: 0.9em; border-radius: 3px; vertical-align: -0.1em; }
+  .swatch-blue { background: rgba(59, 111, 214, 0.5); }
+  .swatch-red { background: rgba(208, 59, 59, 0.5); }
+  .tables { overflow-x: auto; }
   table {
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     width: 100%;
-    margin: 1rem 0;
+    margin: 0.5rem 0 1rem;
     font-size: 0.9rem;
-  }
-  caption { text-align: left; }
-  th, td {
+    background: #fff;
     border: 1px solid #d0d7de;
-    padding: 0.35rem 0.5rem;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  th, td {
+    border-bottom: 1px solid #e3e6ea;
+    border-right: 1px solid #eef0f2;
+    padding: 0.45rem 0.55rem;
     text-align: left;
     vertical-align: top;
   }
-  th { background: #f6f8fa; }
-  tbody tr:nth-child(even) { background: #fafbfc; }
-  td.label { min-width: 14rem; white-space: normal; }
+  th { background: #f0f2f5; font-weight: 600; color: #444c56; font-size: 0.8rem; letter-spacing: 0.02em; position: sticky; top: 0; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { filter: brightness(0.97); }
+  td.label { min-width: 15rem; white-space: normal; font-weight: 500; }
   td.date, td.id, td.verdict { white-space: nowrap; }
+  td.id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #57606a; }
   td.model { min-width: 6rem; }
-  .tables { overflow-x: auto; }
-  td.score { white-space: nowrap; }
-  .pct { font-weight: 600; }
-  .netof { font-size: 0.75rem; color: #57606a; }
-  .delta { font-size: 0.75rem; }
-  .delta-up { color: #1a7f37; }
-  .delta-down { color: #cf222e; }
-  .delta-zero { color: #6e7781; }
-  tr.muted { color: #6e7781; }
-  ul.legend { padding-left: 1.25rem; }
-  .experiment { margin: 1rem 0; padding-bottom: 0.5rem; border-bottom: 1px solid #d0d7de; }
-  .experiment dl { margin: 0.25rem 0 0; }
-  .experiment .row { display: flex; gap: 0.5rem; margin: 0.15rem 0; }
-  .experiment dt { flex: 0 0 5.5rem; font-weight: 600; }
+  td.score { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+  td.overall, th.overall { border-left: 3px solid #3b6fd6; border-right: 3px solid #3b6fd6; }
+  td.overall .pct { font-size: 1.05rem; }
+  .pct { font-weight: 700; }
+  .netof { font-size: 0.72rem; color: #57606a; }
+  .delta { font-size: 0.75rem; font-weight: 600; }
+  .delta-up { color: #1f4fb0; }
+  .delta-down { color: #b12a2a; }
+  .delta-zero { color: #6e7781; font-weight: 400; }
+  tr.muted td { color: #8b949e; }
+  tr.muted td.score { background: #f6f8fa !important; }
+  tr.muted .pct, tr.muted .netof { color: #8b949e; }
+  .tag { display: inline-block; padding: 0 0.4rem; border-radius: 4px; background: #eef1f5; color: #24292f; font-size: 0.8rem; white-space: nowrap; }
+  .badge {
+    display: inline-block; padding: 0.05rem 0.5rem; border-radius: 999px;
+    font-size: 0.78rem; font-weight: 600; white-space: nowrap; border: 1px solid transparent;
+  }
+  .badge-kept { background: #dbe7fb; color: #1f4fb0; border-color: #b7cbf2; }
+  .badge-baseline { background: #eef1f5; color: #444c56; border-color: #d0d7de; }
+  .badge-set-aside { background: #fff; color: #57606a; border-color: #b6bec8; }
+  .badge-broken-run { background: #fbe4e4; color: #9a1f1f; border-color: #f0b8b8; }
+  .badge-unexplained { background: #fff2cf; color: #7a4d00; border-color: #f2d58a; }
+  ul.legend { padding-left: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem; margin: 0.5rem 0 1rem; }
+  ul.legend li { font-size: 0.9rem; color: #57606a; }
+  .experiment {
+    margin: 1rem 0; padding: 0.75rem 1rem; background: #fff;
+    border: 1px solid #d0d7de; border-radius: 8px;
+  }
+  .experiment h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+  .id-badge { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #24292f; color: #fff; padding: 0 0.4rem; border-radius: 4px; font-size: 0.85rem; }
+  .experiment dl { margin: 0; }
+  .experiment .row { display: flex; gap: 0.75rem; margin: 0.2rem 0; }
+  .experiment dt { flex: 0 0 5rem; font-weight: 600; color: #57606a; font-size: 0.85rem; padding-top: 0.1rem; }
   .experiment dd { margin: 0; }
-  @media (max-width: 30rem) {
+  @media (max-width: 40rem) {
+    body { padding: 0.75rem; }
     table { font-size: 0.8rem; }
     .experiment .row { flex-direction: column; gap: 0; }
     .experiment dt { flex-basis: auto; }
@@ -237,7 +303,7 @@ export function renderHtml(register) {
 <body>
   <h1>${escapeHtml(title)}</h1>
   <p>${escapeHtml(scoring)}</p>
-  <p>The small green and red numbers under a score are the change, in percentage points, since the last trusted run in the same table that asked the same model. Greyed rows are runs whose numbers are not trusted; they carry no change.</p>
+  <p class="key">A cell's colour is its score: <span class="swatch swatch-blue"></span> deeper blue as it climbs towards 100%, <span class="swatch swatch-red"></span> red where wrong answers outnumber right ones, no colour at zero. The small ▲ and ▼ figures are the change in points since the last trusted run in the same table that asked the same model. Greyed rows are runs whose numbers are not trusted; they carry no change.</p>
   ${renderLegend(verdicts)}
   ${corpusSections}
   <h2>What we did</h2>
