@@ -326,6 +326,17 @@ describe("a date that bounds a term without saying which kind", () => {
     expect(roles("Expiry date 08 September 2027")).toEqual(["expiry"]);
   });
 
+  it("expires when the block says the thing is used up or given back", () => {
+    expect(roles("Quote reference AMB-77410. Valid until: 6 November 2026")).toEqual(["expiry"]);
+    expect(roles("Lesson credits are valid until 2 March 2027, after which any unused credit is forfeited")).toEqual(["expiry"]);
+  });
+
+  it("expires when the block is silent but the title says the page is a ticket or a lease", () => {
+    expect(roles("Cheddleton Rail — Season Ticket\n\nVALID FROM 01/09/2026\n\nVALID UNTIL 31/08/2027")).toEqual(["start", "expiry"]);
+    expect(roles("Lease statement WVF-PCH-220154\n\nAgreement end 31 May 2028")).toEqual(["expiry"]);
+    expect(roles("Annual Multi-Trip Travel Insurance Certificate\n\nValid to 31 March 2027")).toEqual(["renewal"]);
+  });
+
   it("renews at the end of a contract's minimum term", () => {
     expect(roles("Minimum term 24 months — ends 20 March 2027")).toEqual(["renewal"]);
     expect(roles("Minimum term ends 21 April 2028")).toEqual(["renewal"]);
