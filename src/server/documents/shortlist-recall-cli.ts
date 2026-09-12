@@ -28,7 +28,8 @@ import {
   recurrenceShortlistEntries,
   referenceShortlistEntries,
 } from "./extraction-choose";
-import { providerShortlistEntries, subtypeShortlistEntries } from "./extraction-choose-meaning";
+import { providerShortlistEntries, subtypeShortlist } from "./extraction-choose-meaning";
+import { composeSubtype } from "./extraction-subtype-bins";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import {
   classifyProvider,
@@ -132,11 +133,15 @@ function main(): void {
       on: providerAt >= 0,
     }], name);
 
-    const subtypes = subtypeShortlistEntries(tagged);
-    count("subtype", subtypes, expected.subtype === undefined ? [] : [{
+    // The subtype shortlist is two lists the chooser pairs up, so the truth
+    // is on it when some qualifier and kind it offers compose to it.
+    const subtypes = subtypeShortlist(tagged);
+    const composable = [undefined, ...subtypes.qualifiers.map((entry) => entry.value)].flatMap((qualifier) =>
+      [undefined, ...subtypes.kinds.map((entry) => entry.value)].map((kind) => composeSubtype(qualifier, kind)));
+    count("subtype", subtypes.entries, expected.subtype === undefined ? [] : [{
       wanted: formatSubtypeExpected(expected.subtype),
-      on: subtypes.some((entry) =>
-        classifySubtype(expected.subtype as NonNullable<ExtractedFields["subtype"]>, entry.value) === "correct"),
+      on: composable.some((composed) => composed !== undefined
+        && classifySubtype(expected.subtype as NonNullable<ExtractedFields["subtype"]>, composed) === "correct"),
     }], name);
 
     const recurrences = recurrenceShortlistEntries(tagged);

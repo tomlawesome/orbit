@@ -47,9 +47,14 @@ import {
   providerWordRuns,
 } from "./extraction-provider-runs";
 import { LANGUAGE_FACT } from "./extraction-provider-sieves";
+import {
+  composeSubtype,
+  subtypeGroupBins,
+  subtypeSources,
+  type GroupBin,
+} from "./extraction-subtype-bins";
 import { classifyProvider } from "./extraction-scoring";
 import {
-  bestSupported,
   comparable,
   entryChosen,
   replyLines,
@@ -60,149 +65,14 @@ import {
 } from "./extraction-shortlist";
 import type { TaggedCandidate } from "./extraction-stages";
 import { locateDates, type DocumentDateRole } from "./suggestions";
-import subtypeTaxonomyJson from "./subtype-taxonomy.json";
 import { trimFieldValue } from "./value-trim";
 
-// ------------------------------------------------------------------ shared
-
-function words(value: string): string[] {
-  return value.trim().split(/\s+/u).filter((word) => word.length > 0);
-}
-
 // ---------------------------------------------------------------- provider
-
-/**
- * Tags that say why an organisation is on the page, and it is never
- * because the household deals with it -- including `subsidiary`, the
- * parent behind a trading name. A candidate the page labels only these
- * ways is dropped before the model sees the shortlist.
- */
-const NEVER_THE_PROVIDER = ["regulator", "underwriter", "installer", "subsidiary"];
-
-const LEGAL_SUFFIXES = ["ltd", "ltd.", "limited", "plc", "plc.", "llp", "cic", "llc", "inc", "inc."];
-
-function endsWithLegalSuffix(value: string): boolean {
-  const last = words(value).at(-1);
-  return last !== undefined && LEGAL_SUFFIXES.includes(last.toLowerCase());
-}
 
 /** The scorer's comparison, with the legal suffix optional on both sides,
  * so "Millbrook Energy" and "Millbrook Energy Ltd" are one name here too. */
 function sameOrganisation(left: string, right: string): boolean {
   return classifyProvider(left, right) === "correct";
-}
-
-/** Words a page puts in front of a person, never an organisation. */
-const PERSON_TITLE = /\b(?:mr|mrs|ms|miss|mx|dr|sir|prof|rev)\b\.?/iu;
-/** An initial and a surname -- "A. J. Brindlecombe", "J. Ashworth". */
-const PERSON_INITIALS = /\b[A-Z]\.\s*(?:[A-Z]\.\s*)?[A-Z][a-z]/u;
-/** A word no name ends on: the phrase carries on somewhere this candidate
- * does not. */
-const UNFINISHED = /^(?:and|&|of|the|for|to|with|by|a|an)$/iu;
-/**
- * A word that is one letter. Tika reads letter-spaced print as words --
- * "UN DE RWR ITIN G" for a heading set wide -- and whatever those letters
- * spell, they are not a name anyone could ring. `&` is a word of its own in
- * real names, so only letters count.
- */
-const LETTER_BY_LETTER = /(?:^|\s)[A-Za-z](?=\s|$)/u;
-
-/**
- * A phrase that names a document rather than an organisation: "Annual
- * Multi-Trip Travel Insurance Certificate", "Mobile Plan Summary",
- * "Vaccination & Health Record". Tika hands the sieve every capitalised
- * line, and a document's own title is the line it hands over most.
- *
- * The words are the taxonomy's own kinds (`subtype-taxonomy.json`), which
- * is the project's list of what a household document can be. A company may
- * be named after what it sells -- "Bellward Warranty Administration Ltd" --
- * so a name carrying its legal form is left alone: that form is what says
- * the phrase is a company and not a title.
- */
-const DOCUMENT_KINDS = new RegExp(
-  `\\b(?:${(subtypeTaxonomyJson as SubtypeTaxonomy).kinds
-    .map((group) => group.name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
-    .join("|")})\\b`,
-  "iu",
-);
-
-function namesADocument(value: string): boolean {
-  return !endsWithLegalSuffix(value) && DOCUMENT_KINDS.test(value);
-}
-
-/**
- * A candidate that cannot be a provider whatever the page says about it: a
- * person rather than an organisation, a single word, a phrase that has
- * plainly not finished, or the document's own title.
- */
-function unusableName(value: string): boolean {
-  const parts = words(value);
-  if (parts.length < 2) return true;
-  if (PERSON_TITLE.test(value) || PERSON_INITIALS.test(value)) return true;
-  if (LETTER_BY_LETTER.test(value)) return true;
-  if (namesADocument(value)) return true;
-  return UNFINISHED.test(parts[parts.length - 1]);
-}
-
-/** The sieve's organisation patterns start at a connective when the name
- * follows one in prose: "on behalf of Fenwick & Vale Gas Services Ltd"
- * yields "of Fenwick & Vale Gas Services Ltd". The article goes the same
- * way: a household writes to "Milldown Motoring Club", never to "the
- * Milldown Motoring Club". */
-const LEADING_CONNECTIVE = /^(?:of|by|for|with|to|and|the)\s+/iu;
-
-/** A company's name ends at its legal form, so anything printed after it is
- * the next thing on the line -- "Fenwick & Vale Gas Services Ltd BUSINESS
- * REGISTRATION", "Bellward Warranty Administration Ltd of Norwich". */
-const THROUGH_LEGAL_SUFFIX = /^(.*?\b(?:ltd|limited|plc|llp|cic|llc|inc)\b\.?)\s+\S/iu;
-
-function cutAtLegalSuffix(value: string): string {
-  const match = THROUGH_LEGAL_SUFFIX.exec(value);
-  return match ? match[1] : value;
-}
-
-/**
- * The name a candidate carries: the words that labelled it removed, the
- * connective the sieve started at removed, and the result checked against
- * the block it came from (`trimFieldValue`).
- *
- * A company's name ends at its legal suffix, so where a candidate stops
- * short of one the very next words supply -- "on behalf of Thornleigh
- * Electrical" written in front of "Contractors Ltd" -- the phrase is read
- * on to the suffix. No further: with no suffix within three words the
- * candidate stands as it was.
- */
-function nameOf(candidate: TaggedCandidate, trigger: string): string | undefined {
-  let value = candidate.value.trim();
-  if (trigger) {
-    const at = comparable(value).indexOf(comparable(trigger));
-    if (at !== -1) value = value.slice(at + trigger.length).trim();
-  }
-  value = cutAtLegalSuffix(value.replace(LEADING_CONNECTIVE, "").trim());
-  if (!value) return undefined;
-
-  if (!endsWithLegalSuffix(value)) {
-    const at = comparable(candidate.line).indexOf(comparable(value));
-    if (at !== -1) {
-      const after = words(candidate.line.slice(at + value.length));
-      const extension: string[] = [];
-      for (const word of after.slice(0, 3)) {
-        // "and" and "&" join the halves of a real name -- "Fenwick & Vale
-        // Gas Services Ltd", "Highways and Vehicle Licensing Authority" --
-        // so they continue the phrase; a lower-case word of any other kind
-        // ends it.
-        if (!/^(?:[A-Z][A-Za-z'’&.-]*|&|and)$/u.test(word)) break;
-        extension.push(word);
-        if (endsWithLegalSuffix(word)) {
-          value = `${value} ${extension.join(" ")}`;
-          break;
-        }
-      }
-    }
-  }
-
-  const trimmed = trimFieldValue("provider", value, candidate.line);
-  return unusableName(trimmed) ? undefined : trimmed;
 }
 
 /**
@@ -350,48 +220,6 @@ export function chooserTransport(modelName?: string): MeaningTransport {
 }
 
 /**
- * Every printing of every organisation the page could mean -- one entry per
- * place it was found.
- *
- * Out go the bodies a page names for a reason other than being the
- * provider: the regulator, the underwriter, the installer, the parent
- * behind a trading name. One stated reason for being on the page that is
- * not being the provider is enough to drop a name -- the underwriter behind
- * a policy is still the underwriter when three other sieves have noticed
- * how often it is printed.
- */
-function organisationsWorthAsking(candidates: readonly TaggedCandidate[]): TaggedCandidate[] {
-  return candidates.filter((candidate) =>
-    candidate.kind === "organisation" &&
-    !candidate.tags.some((tag) => NEVER_THE_PROVIDER.includes(tag.value)));
-}
-
-/**
- * The organisations worth asking about: the shortlist narrowed by what the
- * page says and what the value looks like, never by where it sits.
- *
- * Out go the bodies a page names for a reason other than being the
- * provider -- the regulator, the underwriter, the installer -- and the
- * candidates that are not an organisation's name at all: a person, a
- * single word, a phrase the sieve cut mid-flow. What is left is a handful
- * of real names, which is the choice the model is asked to make.
- */
-function providerNames(candidates: readonly TaggedCandidate[]): Array<{
-  name: string;
-  candidate: TaggedCandidate;
-}> {
-  const named: Array<{ name: string; candidate: TaggedCandidate }> = [];
-  const seen = new Set<string>();
-  for (const candidate of organisationsWorthAsking(candidates)) {
-    const name = nameOf(candidate, "");
-    if (!name || seen.has(comparable(name))) continue;
-    seen.add(comparable(name));
-    named.push({ name, candidate });
-  }
-  return named;
-}
-
-/**
  * The provider shortlist: the word-run bins over the organisations stage 2
  * spoke for, best first, each with its count, the form the page printed
  * most, and the blocks the mentions behind it came from
@@ -453,136 +281,74 @@ function runEvidence(mentions: readonly TaggedCandidate[]): string[] {
   ];
 }
 
-/** The page's own words, as the subtype question may read them: what the
- * document calls itself, who it is from, and what its labelled figures are
- * for. Never the page -- only the blocks stage 1 kept. */
-function subtypeEvidence(candidates: readonly TaggedCandidate[]): Array<{ text: string; line: string }> {
-  const evidence: Array<{ text: string; line: string }> = [];
-  const headings = candidates.filter((candidate) => candidate.kind === "heading");
-  const titleFirst = [
-    ...headings.filter((candidate) => candidate.tags.some((tag) => tag.value === "title")),
-    ...headings.filter((candidate) => !candidate.tags.some((tag) => tag.value === "title")),
-  ];
-  for (const heading of titleFirst) evidence.push({ text: heading.value, line: heading.line });
-  for (const { name, candidate } of providerNames(candidates)) {
-    evidence.push({ text: name, line: candidate.line });
-  }
-  for (const candidate of candidates) {
-    if (candidate.kind !== "amount") continue;
-    for (const tag of candidate.tags) {
-      const trigger = tag.trigger.trim();
-      if (trigger) evidence.push({ text: trigger, line: candidate.line });
-    }
-  }
-  return evidence;
+/**
+ * The two questions subtype asks, each over its own short list, numbered as
+ * one list for the model: what the document is about, and what type of
+ * thing it is.
+ */
+export interface SubtypeShortlist {
+  /** The qualifier groups offered: "Home", "Motor", "Council tax". */
+  qualifiers: ShortlistEntry[];
+  /** The kind groups offered: "Insurance", "Bill", "Certificate". */
+  kinds: ShortlistEntry[];
+  /** Both, in the order the model is shown them. */
+  entries: ShortlistEntry[];
 }
 
-/** How many of each taxonomy group survive into the combinations, so a page
- * mentioning four trades does not produce sixty-three phrases. */
-const TOP_TAXONOMY_GROUPS = 4;
-/** Places kept for a bare kind, so "Insurance" is still on the list when
- * the page also says "home" often enough to fill it with combinations. */
-const BARE_KIND_SLOTS = 3;
+/** How many groups of each sort the model is offered. Two is the owner's
+ * (2026-09-11): on the 24 the true qualifier and the true kind are both
+ * inside the top two, and a third would be a name the page barely says. */
+const GROUPS_OFFERED = 2;
 
-interface TaxonomyHit {
-  group: TaxonomyGroup;
-  /** How many of the page's own phrases carried one of the group's words. */
-  hits: number;
-  /** The first block one was found in. */
-  line: string;
-  /** The word the page actually printed. */
-  printed: string;
-}
 
-/** Which taxonomy groups the page's own words support, most-supported
- * first. A word counts once per phrase it appears in, so a heading naming
- * the trade twice is one reason and not two. */
-function taxonomyHits(
-  groups: readonly TaxonomyGroup[],
-  evidence: ReadonlyArray<{ text: string; line: string }>,
-): TaxonomyHit[] {
-  const found: TaxonomyHit[] = [];
-  for (const group of groups) {
-    let hits = 0;
-    let line = "";
-    let printed = "";
-    for (const phrase of evidence) {
-      const synonym = group.synonyms.find((word) =>
-        new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\b`, "iu").test(phrase.text));
-      if (synonym === undefined) continue;
-      hits += 1;
-      if (!line) {
-        line = phrase.line;
-        printed = synonym;
-      }
-    }
-    if (hits > 0) found.push({ group, hits, line, printed });
-  }
-  return found.sort((left, right) => right.hits - left.hits);
+/**
+ * The subtype shortlist: the two best-supported qualifier groups and the
+ * two best-supported kind groups from the taxonomy bins
+ * (`extraction-subtype-bins.ts`, the owner's method of 2026-09-11), each
+ * with how often the page's words landed in it.
+ *
+ * Four names rather than eight composed phrases. The taxonomy has 51 kinds
+ * and 63 qualifiers; the page's own words -- what it calls itself, who it
+ * is from -- say which handful it is about, and the model is left with two
+ * small questions it can answer from the words in front of it. The answer
+ * is composed afterwards by the taxonomy's own rules (`composeSubtype`),
+ * not written by the model.
+ */
+export function subtypeShortlist(candidates: readonly TaggedCandidate[]): SubtypeShortlist {
+  const bins = subtypeGroupBins(subtypeSources(candidates));
+  const entryOf = (bin: GroupBin<TaggedCandidate>, what: string): ShortlistEntry => ({
+    value: bin.group,
+    display: bin.group,
+    line: bin.sources[0]?.line ?? "",
+    why: [`${what}, the page's words land in it ${bin.count} times`],
+    support: bin.count,
+  });
+  const qualifiers = bins.qualifiers.slice(0, GROUPS_OFFERED)
+    .map((bin) => entryOf(bin, "what it is about"));
+  const kinds = bins.kinds.slice(0, GROUPS_OFFERED)
+    .map((bin) => entryOf(bin, "what type of thing it is"));
+  return { qualifiers, kinds, entries: [...qualifiers, ...kinds] };
 }
 
 /**
- * The subtype shortlist: the taxonomy phrases the page's own words support,
- * best-supported first.
+ * The subtype the rules fall back on with no model to ask: the top
+ * qualifier and the top kind, each taken only where the page's words landed
+ * in it more often than in its runner-up (owner, 2026-09-11).
  *
- * The taxonomy has 51 kinds and 63 qualifiers, and asking a model to choose
- * between 3,000 phrases is asking it to write one. So the page's own words
- * -- the headings, the names, what the figures are labelled -- pick a
- * handful of groups, the taxonomy's combination rules compose them, and the
- * model chooses between those or answers none.
+ * Where two groups are level the page is saying both as loudly, and a
+ * composed answer would be a guess with a wrong-value penalty behind it;
+ * the group drops out and the other one answers alone if it can.
  */
-export function subtypeShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
-  const evidence = subtypeEvidence(candidates);
-  const kinds = taxonomyHits(TAXONOMY.kinds, evidence).slice(0, TOP_TAXONOMY_GROUPS);
-  const qualifiers = taxonomyHits(TAXONOMY.qualifiers, evidence).slice(0, TOP_TAXONOMY_GROUPS);
-
-  const entry = (value: string, hit: TaxonomyHit, support: number, why: string[]): ShortlistEntry => ({
-    value,
-    display: value,
-    line: hit.line,
-    why,
-    support,
-  });
-
-  const bare = kinds.map((kind) =>
-    entry(kind.group.name, kind, kind.hits, [`the page prints "${kind.printed}"`]));
-  const composed: ShortlistEntry[] = [];
-  for (const qualifier of qualifiers) {
-    for (const kind of kinds) {
-      composed.push(entry(
-        `${qualifier.group.name} ${kind.group.name}`,
-        kind,
-        kind.hits + qualifier.hits,
-        [`the page prints "${qualifier.printed}" and "${kind.printed}"`],
-      ));
-    }
-    if (!TAXONOMY.combinations.standalone.includes(qualifier.group.name)) continue;
-    composed.push(entry(
-      qualifier.group.name,
-      qualifier,
-      qualifier.hits,
-      [`the page prints "${qualifier.printed}"`],
-    ));
-  }
-
-  const reserved = bestSupported(bare, BARE_KIND_SLOTS);
-  return bestSupported([...reserved, ...bestSupported(composed, SHORTLIST_LIMIT - reserved.length)]);
+export function chooseSubtypeByRules(candidates: readonly TaggedCandidate[]): string | undefined {
+  const bins = subtypeGroupBins(subtypeSources(candidates));
+  const clear = (ranked: ReadonlyArray<GroupBin<TaggedCandidate>>): string | undefined => {
+    const [best, next] = ranked;
+    if (best === undefined) return undefined;
+    return next !== undefined && next.count >= best.count ? undefined : best.group;
+  };
+  return composeSubtype(clear(bins.qualifiers), clear(bins.kinds));
 }
 
-// ------------------------------------------------------- subtype taxonomy
-
-interface TaxonomyGroup {
-  name: string;
-  synonyms: string[];
-}
-
-interface SubtypeTaxonomy {
-  kinds: TaxonomyGroup[];
-  qualifiers: TaxonomyGroup[];
-  combinations: { patterns: string[]; standalone: string[] };
-}
-
-const TAXONOMY = subtypeTaxonomyJson as SubtypeTaxonomy;
 
 // --------------------------------------------------- asking a model to pick
 
@@ -658,23 +424,48 @@ export async function chooseProviderWithModel(
 
 // ----------------------------------------------------------------- subtype
 
-/** Which of the taxonomy phrases the page's words support is what this
- * document is about. The phrases are the taxonomy's own group names, so the
- * answer reads the same whichever page produced it. */
+/**
+ * What this document is about and what type of thing it is, chosen from the
+ * four names the bins offered.
+ *
+ * One question, two numbers: the model picks a qualifier or none and a kind
+ * or none, and the answer is composed from them by the taxonomy's own rules
+ * (`composeSubtype`). It is never asked to write a phrase -- only to choose
+ * between names the page's own words put in front of it -- and a reply
+ * naming nothing on the list leaves the field blank.
+ */
 export async function chooseSubtypeWithModel(
-  entries: readonly ShortlistEntry[],
+  shortlist: SubtypeShortlist,
   transport: MeaningTransport,
 ): Promise<string | undefined> {
-  const chosen = await pickFromShortlist(
-    {
-      asks: "What type of thing is this document about -- an insurance policy, a service plan, " +
-        "a membership? Choose the description that fits it best.",
-      heading: "Descriptions the words on this page support:",
-    },
-    entries,
-    transport,
-  );
-  return chosen?.value;
+  const { entries, qualifiers, kinds } = shortlist;
+  if (entries.length === 0) return undefined;
+  const asked = [
+    "What is this document about, and what type of thing is it?",
+    'Answer two numbers from the list and nothing else -- what it is about first, ' +
+      'then the type, like "1 3". Answer none in place of either if none of them fits.',
+    "",
+    shortlistExcerpt("What the words on this page say about it:", entries),
+  ].join("\n");
+  const raw = await transport(asked);
+
+  let qualifier: ShortlistEntry | undefined;
+  let kind: ShortlistEntry | undefined;
+  // A reply may be "1 3", two lines, or the names written out; each part is
+  // grounded against the one numbered list the model was shown, and which
+  // list an entry came from is what makes it the qualifier or the kind.
+  for (const part of replyLines(raw).flatMap((line) => line.split(/[\s,;]+/u))) {
+    const entry = entryChosen(part, entries);
+    if (entry === undefined) continue;
+    if (qualifier === undefined && qualifiers.includes(entry)) qualifier = entry;
+    else if (kind === undefined && kinds.includes(entry)) kind = entry;
+  }
+  // A model that wrote out a name in words rather than its number.
+  const written = comparable(raw);
+  qualifier ??= qualifiers.find((entry) => written.includes(comparable(entry.value)));
+  kind ??= kinds.find((entry) => written.includes(comparable(entry.value)));
+
+  return composeSubtype(qualifier?.value, kind?.value);
 }
 
 // -------------------------------------------------------------- reference

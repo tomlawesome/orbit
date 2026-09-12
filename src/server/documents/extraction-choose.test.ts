@@ -463,7 +463,7 @@ describe("choosing the cost and its currency", () => {
 });
 
 describe("the meaning-shaped fields", () => {
-  it("takes the one name the sieves kept, and leaves subtype to the model", () => {
+  it("takes the one name the sieves kept, and the one subtype the page is plain about", () => {
     const chosen = chooseFields([
       candidate("organisation", "Kestrel Mutual", [
         { value: "provider", trigger: "your insurer", sieves: ["language-fact", "contact-details"] },
@@ -472,10 +472,10 @@ describe("the meaning-shaped fields", () => {
     ]);
 
     // The fallback answers the run the page says most often
-    // (`extraction-provider-runs.ts`); here there is only the one. Subtype
-    // has no rules at all.
+    // (`extraction-provider-runs.ts`) and the qualifier and kind bins that
+    // stand clear (`extraction-subtype-bins.ts`); here each has only the one.
     expect(chosen.provider).toBe("Kestrel Mutual");
-    expect(chosen.subtype).toBeUndefined();
+    expect(chosen.subtype).toBe("Home Insurance");
   });
 });
 

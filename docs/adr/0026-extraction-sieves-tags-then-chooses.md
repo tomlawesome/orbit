@@ -245,9 +245,10 @@ So stage 3 is now one shape for every field.
    Five or six calls a document, each a few hundred characters, within the
    five-minute unattended budget. Only grounded answers count: a value on
    the list, a role in the vocabulary. `scheduleKind` still derives from
-   the roles; subtype's shortlist is the taxonomy phrases the page's own
-   words support, so the model chooses between eight phrases rather than
-   51 kinds and 63 qualifiers.
+   the roles; subtype's shortlist is the taxonomy groups the page's own
+   words support -- two qualifiers and two kinds, composed afterwards
+   (below) -- so the model chooses between four names rather than 51
+   kinds and 63 qualifiers.
 
 3. **The rules rank and fall back, and never both.** `chooseFields` is
    unchanged and is what runs where there is no model to ask -- the
@@ -345,10 +346,37 @@ Drake Insurance Services Ltd" -- which is what ranking runs rather than
 names costs a route that has to answer with one. The model route does not
 pay it: the fuller name is on the same shortlist.
 
-**Untried:** the same bins over the describer words rather than the name
-words are a possible subtype signal -- the words a page's organisations
-share with the taxonomy are what the page is about. Nothing has measured
-it.
+### Subtype: taxonomy bins over the page's own words
+
+The same idea turned round is the subtype shortlist
+(`extraction-subtype-bins.ts`, the owner's second method of 2026-09-11,
+#989 note 16840). The sources are what a document calls itself and who it
+is from: stage 1's headings and the organisations at least one sieve read
+as the provider. Every synonym of every taxonomy kind and qualifier, with
+the joining words dropped, is looked for as a run of consecutive words in
+those sources, and each hit scores one for its group. The two qualifier
+groups and the two kind groups with the most hits are the shortlist -- two
+of each, not more, because ranks three and four were stray single matches
+("Bike Service", "Home Bank account"). The model is shown the four as one
+numbered list and answers two numbers, one from each half, and the answer
+is composed by the taxonomy's own rules (`composeSubtype`): a kind alone, a
+qualifier in front of a kind, or a qualifier alone where the taxonomy lets
+it stand ("MOT", "Council tax"). It never writes a phrase.
+
+Measured on the 24 (`eval:shortlist`): the true qualifier and the true kind
+are both on the list on 24/24, at 3.9 entries a page against 7.8 for the
+phrase list before it. The rules fallback answers each half where its top
+group stands clear of the second and blank where two are level, the same
+test as provider: 20/24 right, 2 wrong ("Broadband Bill" for a contract,
+"Gas Permit" for a safety record), 2 blank, from a field the rules could
+not answer at all before. `eval:stages` without `--model` is 81.9%.
+
+**Tried and set aside** (owner, 2026-09-11): the provider method itself --
+repeated runs of describer words -- as the subtype signal. Multi-word runs
+only appear where a page prints the phrase the same way each time ("life
+assurance", "council tax", "workplace pensions"); most pages top out at a
+single word, so "dental plan" loses to "dental" and the kind is lost. A
+name is printed whole; a document's kind is not.
 
 ## Alternatives rejected
 
