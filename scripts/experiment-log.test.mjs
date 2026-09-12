@@ -108,7 +108,7 @@ test("renderHtml includes every experiment id and a delta against the previous k
   assert.match(html, /T02/);
   assert.match(html, /Tiny test register/);
   // T02's overall pct (70.0) is 20.0 points above T01's (50.0).
-  assert.match(html, /delta-up">\+20\.0</);
+  assert.match(html, /delta-up">▲ 20\.0</);
 });
 
 test("renderHtml mutes rows whose verdict is not kept or baseline", () => {
