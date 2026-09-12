@@ -26,6 +26,7 @@
     "eval:provider-bins": "node_modules/tsx/dist/cli.mjs src/server/documents/provider-bins-cli.ts",
     "eval:shortlist": "node_modules/tsx/dist/cli.mjs src/server/documents/shortlist-recall-cli.ts",
     "eval:stages": "node_modules/tsx/dist/cli.mjs src/server/documents/stages-score-cli.ts",
+    "eval:subtype-runs": "node_modules/tsx/dist/cli.mjs src/server/documents/subtype-runs-cli.ts",
     "eval:holdout": "node_modules/tsx/dist/cli.mjs src/server/documents/holdout-score-cli.ts",
     "eval:breakdown": "node_modules/tsx/dist/cli.mjs src/server/documents/holdout-breakdown-cli.ts",
     "test:coverage": "vitest run --coverage",
