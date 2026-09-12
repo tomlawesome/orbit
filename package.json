@@ -27,6 +27,7 @@
     "eval:shortlist": "node_modules/tsx/dist/cli.mjs src/server/documents/shortlist-recall-cli.ts",
     "eval:stages": "node_modules/tsx/dist/cli.mjs src/server/documents/stages-score-cli.ts",
     "eval:holdout": "node_modules/tsx/dist/cli.mjs src/server/documents/holdout-score-cli.ts",
+    "eval:breakdown": "node_modules/tsx/dist/cli.mjs src/server/documents/holdout-breakdown-cli.ts",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
     "orbit": "node_modules/tsx/dist/cli.mjs src/cli/orbit.ts",
