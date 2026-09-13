@@ -213,7 +213,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     subtype: "Personal Contract Purchase Agreement PERSONAL CONTRACT PURCHASE AGREEMENT Regulated by the Consumer Credit Act 1974 Agreement date: 20 February 2026",
     provider: "BVF-PCP-208841 CREDITOR (LENDER) Bracken Vale Finance plc 1 Millrace House, Doverton DV4 7QS Company number 04471822 Authorised",
     reference: "20 February 2026 Agreement number BVF-PCP-208841 CREDITOR (LENDER) Bracken Vale Finance plc 1 Millrace House, Doverton",
-    cost: { amount: "279.42", needle: "APR 10.9% APR Duration of agreement 49 months Number of monthly payments 48 Amount of each monthly payment £279.42 Date of first payment" },
+    cost: { amount: "24,730.16", needle: "Optional final payment (due 5 March 2030) £8,245.00 Total amount payable £24,730.16 Option-to-purchase fee (payable with final payment) £10.00" },
     recurrence: { months: 48, needle: "Duration of agreement 49 months Number of monthly payments 48 Amount of each monthly payment £279.42" },
     dates: [
       "by the Consumer Credit Act 1974 Agreement date: 20 February 2026 Agreement number",
