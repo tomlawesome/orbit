@@ -4567,6 +4567,130 @@
       },
       "verdict": "kept",
       "notes": "Neutral: identical to E80 field by field."
+    },
+    {
+      "id": "E83",
+      "date": "2026-09-13",
+      "label": "cost: the dates say how long a term runs; a split term is a sum",
+      "corpus": "seen48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "chooseCost: where the page states no worded term, the term comes off the chosen date roles -- a start and an expiry a whole number of months apart (2-120, anniversary or day-before form). A renewal end is not a term (a rolling thing keeps its monthly figure). Separately, an introductory leg printed as a monthly rate with its span ('£14/mo for your first 6 months', 'first 3 months at £9.99 a month') is summed with the standing rate for the rest of the term. Two disagreeing readings blank the cost. Built by a sub-agent on a worktree from a8be22d; merged onto the batch branch on top of E81.",
+      "how": "npm run eval:stages",
+      "commit": "2ecce71",
+      "output": "tmp/e-seen48-stages-cost1.txt",
+      "scores": {
+        "overall": {
+          "pct": 87.1,
+          "net": 357,
+          "of": 410
+        },
+        "provider": {
+          "pct": 79.2,
+          "net": 38,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 96.5,
+          "net": 82,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 68.8,
+          "net": 33,
+          "of": 48
+        },
+        "cost": {
+          "pct": 100,
+          "net": 42,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 93.8,
+          "net": 30,
+          "of": 32
+        },
+        "recurrence": {
+          "pct": 72.7,
+          "net": 16,
+          "of": 22
+        }
+      },
+      "verdict": "kept",
+      "notes": "Seen cost 42/42: the mobile plan (6x1400 + 18x2300 = 49800) is the one page fixed; no other field moved. Tried and narrowed: counting a renewal end as the term turned the health cash plan, pension and mortgage into commitments they are not (cost 39/42), so only an expiry end counts."
+    },
+    {
+      "id": "E84",
+      "date": "2026-09-13",
+      "label": "hold-out 3: dated term and split-term cost",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Same code as E83 scored on hold-out 3.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "2ecce71",
+      "output": "tmp/e-holdout3-cost1.txt",
+      "scores": {
+        "overall": {
+          "pct": 71.8,
+          "net": 79,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "Neutral: identical to E82, cost still 6/12. The hold-out's cost misses are not the dated-term or split-term shape."
     }
   ],
   "measurements": [
