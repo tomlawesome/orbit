@@ -5145,63 +5145,63 @@
       "results": [
         [
           "tuning 60: reference first / top three / on list",
-          "38 / 50 / 57 of 60"
+          "38 (63%) / 50 (83%) / 57 (95%) of 60"
         ],
         [
           "tuning 60: cost",
-          "23 / 40 / 47 of 54"
+          "23 (43%) / 40 (74%) / 47 (87%) of 54"
         ],
         [
           "tuning 60: provider",
-          "39 / 46 / 48 of 60"
+          "39 (65%) / 46 (77%) / 48 (80%) of 60"
         ],
         [
           "tuning 60: dates (each expected date)",
-          "32 / 86 / 102 of 102"
+          "32 (31%) / 86 (84%) / 102 (100%) of 102"
         ],
         [
           "tuning 60: subtype on list",
-          "52 of 60"
+          "52 (87%) of 60"
         ],
         [
           "tuning 60: recurrence",
-          "22 / 26 / 26 of 30"
+          "22 (73%) / 26 (87%) / 26 (87%) of 30"
         ],
         [
           "hold-out 4: reference",
-          "4 / 6 / 11 of 12"
+          "4 (33%) / 6 (50%) / 11 (92%) of 12"
         ],
         [
           "hold-out 4: cost",
-          "7 / 7 / 9 of 12"
+          "7 (58%) / 7 (58%) / 9 (75%) of 12"
         ],
         [
           "hold-out 4: provider",
-          "6 / 7 / 8 of 12"
+          "6 (50%) / 7 (58%) / 8 (67%) of 12"
         ],
         [
           "hold-out 4: dates",
-          "9 / 20 / 27 of 28"
+          "9 (32%) / 20 (71%) / 27 (96%) of 28"
         ],
         [
           "hold-out 4: subtype on list",
-          "12 of 12"
+          "12 (100%) of 12"
         ],
         [
           "hold-out 3: reference",
-          "11 / 11 / 11 of 12"
+          "11 (92%) / 11 (92%) / 11 (92%) of 12"
         ],
         [
           "hold-out 3: cost",
-          "8 / 11 / 11 of 12"
+          "8 (67%) / 11 (92%) / 11 (92%) of 12"
         ],
         [
           "hold-out 3: provider",
-          "7 / 7 / 7 of 12"
+          "7 (58%) / 7 (58%) / 7 (58%) of 12"
         ],
         [
           "hold-out 3: dates",
-          "11 / 25 / 26 of 26"
+          "11 (42%) / 25 (96%) / 26 (100%) of 26"
         ]
       ],
       "source": "tmp/e-seen60-shortlist-top3.txt, tmp/e-holdout3-shortlist-top3.txt, tmp/e-holdout4-shortlist-top3.txt; commit 3f51251"
@@ -5216,15 +5216,15 @@
       "results": [
         [
           "tuning 60: reference first / top three / on list",
-          "53 / 56 / 58 of 60"
+          "53 (88%) / 56 (93%) / 58 (97%) of 60"
         ],
         [
           "hold-out 4: reference",
-          "7 / 7 / 10 of 12"
+          "7 (58%) / 7 (58%) / 10 (83%) of 12"
         ],
         [
           "hold-out 3: reference",
-          "11 / 11 / 11 of 12"
+          "11 (92%) / 11 (92%) / 11 (92%) of 12"
         ]
       ],
       "source": "tmp/e-seen60-shortlist-ref1.txt, tmp/e-holdout3-shortlist-ref1.txt, tmp/e-holdout4-shortlist-ref1.txt; commit 04dd7f7"
