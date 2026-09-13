@@ -13,10 +13,36 @@
     font-size: 9.5pt; line-height: 1.4; color: #000;
   }
   .page {
-    width: 210mm; height: 297mm; box-sizing: border-box;
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
     position: relative; page-break-after: always; background: #ffffff;
   }
   .page:last-child { page-break-after: auto; }
+
+  /* ---- leaflet sheets 2 and 3 ---- */
+  .leaflet { padding: 16mm 18mm; box-sizing: border-box; }
+  .leaflethead {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 1.2pt solid #0369a1; padding-bottom: 2mm; margin-bottom: 4mm;
+  }
+  .leaflethead .lt { font-size: 13pt; font-weight: 700; color: #0369a1; }
+  .leaflethead .ls { font-size: 7.4pt; color: #333; }
+  .leaflet h2 {
+    font-size: 9.5pt; font-weight: 700; color: #0369a1; text-transform: uppercase;
+    letter-spacing: 0.4px; margin: 4mm 0 2mm 0;
+  }
+  .leaflet p { font-size: 8.6pt; line-height: 1.5; margin: 0 0 2.4mm 0; }
+  table.plantbl { width: 100%; border-collapse: collapse; font-size: 8.2pt; margin-bottom: 3mm; }
+  table.plantbl th { background: #f0f9ff; text-align: left; padding: 1.2mm 2mm; border-bottom: 0.8pt solid #0369a1; font-weight: 700; }
+  table.plantbl td { padding: 1mm 2mm; border-bottom: 0.4pt solid #cdd4cf; }
+  table.plantbl td.num, table.plantbl th.num { text-align: right; white-space: nowrap; }
+  .leafcols { display: flex; gap: 8mm; }
+  .leafcols > div { flex: 1; }
+  .leafrefs { display: flex; flex-wrap: wrap; gap: 1.6mm 6mm; font-size: 7.4pt; margin: 2mm 0 3mm 0; }
+  .leafrefs span { border-left: 1.2pt solid #0369a1; padding-left: 1.6mm; }
+  .leaffoot {
+    font-size: 6.8pt; color: #444; border-top: 0.6pt solid #cdd4cf; margin-top: 4mm;
+    padding-top: 1.6mm; display: flex; justify-content: space-between;
+  }
 
   /* ---- crop marks at the four corners of the panel ---- */
   .cropmark { position: absolute; width: 5mm; height: 5mm; }
@@ -172,6 +198,198 @@
     </div>
   </div>
 
+</div>
+
+<div class="page">
+  <div class="leaflet">
+    <div class="leaflethead">
+      <div class="lt">What your plan covers</div>
+      <div class="ls">Sheet 2 of 4 &middot; Membership NDPA-208467</div>
+    </div>
+
+    <h2>Aldermoor Complete Care Plan &mdash; benefits</h2>
+    <p>Your monthly payment covers two check-ups and one hygienist visit each plan year at
+    Aldermoor Dental Practice, worldwide dental trauma cover up to &pound;1,000,000, and a 10%
+    discount off any further treatment the practice recommends outside the plan. Benefits are
+    provided by Aldermoor Dental Practice; the plan itself is administered by Northgate Dental Plan
+    Administration Ltd, who collects your payments.</p>
+
+    <h2>Other plans from Northgate Dental Plan Administration Ltd</h2>
+    <table class="plantbl">
+      <thead><tr><th>Plan</th><th>Who it is for</th><th class="num">Monthly payment</th></tr></thead>
+      <tbody>
+        <tr><td>Complete Care Plan</td><td>Adults, two check-ups a year</td><td class="num">&pound;9.50</td></tr>
+        <tr><td>Essential Plan</td><td>Adults, one check-up a year</td><td class="num">&pound;6.20</td></tr>
+        <tr><td>Family Plan</td><td>Two adults and up to three children</td><td class="num">&pound;24.00</td></tr>
+        <tr><td>Junior Plan</td><td>Under-18s, if a parent already holds a plan</td><td class="num">&pound;3.10</td></tr>
+      </tbody>
+    </table>
+    <p>Plan prices shown are those in force from 1 April 2026 for new members joining at Aldermoor
+    Dental Practice; a member on an older plan may be paying a different rate until their next
+    renewal. Prices were last revised on 1 April 2024, when the Complete Care Plan rose from
+    &pound;8.90 to its current rate.</p>
+
+    <h2>How your plan year works</h2>
+    <p>Your plan year runs for 12 months from your start date and renews automatically each year
+    unless you tell us otherwise; this year&rsquo;s renewal falls on 1 March 2027. Unused check-ups
+    or hygienist visits do not carry over into the next plan year. If you join or leave partway
+    through a plan year, your monthly payment and benefit entitlement are not adjusted pro rata;
+    the plan runs to the same annual cycle for every member regardless of join date.</p>
+
+    <h2>Worldwide dental trauma cover</h2>
+    <p>If you suffer an accidental injury to your teeth anywhere in the world, your plan covers
+    emergency dental treatment up to &pound;1,000,000 in total, including treatment received outside
+    the United Kingdom. Claims are made through Northgate Dental Plan Administration Ltd, not
+    through the practice, and you should keep receipts for any treatment received abroad.</p>
+
+    <h2>Treatment outside the plan</h2>
+    <table class="plantbl">
+      <thead><tr><th>Item</th><th class="num">Practice fee</th></tr></thead>
+      <tbody>
+        <tr><td>Private examination</td><td class="num">&pound;62.00</td></tr>
+        <tr><td>Hygienist session</td><td class="num">&pound;58.00</td></tr>
+        <tr><td>Small filling</td><td class="num">&pound;95.00</td></tr>
+        <tr><td>Single crown</td><td class="num">&pound;485.00</td></tr>
+        <tr><td>Missed appointment (less than 24 hours&rsquo; notice)</td><td class="num">&pound;30.00</td></tr>
+      </tbody>
+    </table>
+    <p>Plan members receive the 10% plan discount off the practice fees above; fees are set by
+    Aldermoor Dental Practice and reviewed each 1 April, not by Northgate Dental Plan Administration
+    Ltd.</p>
+
+    <h2>Partner offer</h2>
+    <p>Plan members can claim 15% off a first pair of glasses through our partner, Millbrook Vision
+    Care, on production of your membership number. Quote code <b>NDPA-VISION-15</b> at
+    millbrook-visioncare.example. Provided by Millbrook Vision Care, not part of your plan benefits.</p>
+
+    <div class="leaffoot">
+      <span>Northgate Dental Plan Administration Ltd &middot; Membership NDPA-208467</span>
+      <span>Page 2 of 4</span>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="leaflet">
+    <div class="leaflethead">
+      <div class="lt">Managing your plan</div>
+      <div class="ls">Sheet 3 of 4 &middot; Membership NDPA-208467</div>
+    </div>
+
+    <div class="leafcols">
+      <div>
+        <h2>Contact us</h2>
+        <p>
+          Northgate Dental Plan Administration Ltd<br>
+          Telephone: 0330 100 6642, Monday to Friday 8:30am to 6pm<br>
+          E-mail: members@northgate-dentalplan.example<br>
+          Member portal: northgate-dentalplan.example/myaccount<br>
+          Post: PO Box 1156, Newbury Park, NP3&nbsp;9ZZ
+        </p>
+        <h2>Aldermoor Dental Practice</h2>
+        <p>
+          14 Vicarage Lane, Wexbridge, WX4&nbsp;2QP<br>
+          Telephone: 01926 552 019<br>
+          Emergency out-of-hours line: 01926 552 090
+        </p>
+      </div>
+      <div>
+        <h2>If you need to complain</h2>
+        <p>Complaints about your plan payments or membership should go to Northgate Dental Plan
+        Administration Ltd at the address above. Complaints about clinical treatment should go to
+        Aldermoor Dental Practice in the first instance. If a complaint about administration of your
+        plan is not resolved to your satisfaction, you may refer it free of charge to the Dental
+        Complaints Service, an independent conciliation scheme.</p>
+
+        <h2>Accessibility</h2>
+        <p>Statements are available in large print or by e-mail on request. If you would prefer
+        appointment reminders by text rather than post, ask the practice to update your
+        preferences.</p>
+
+        <h2>Priority appointments</h2>
+        <p>Members over 70, members with a registered disability, or members undergoing cancer
+        treatment can ask to join the priority booking list, which offers earlier appointment slots
+        and a named contact at the practice for anything to do with their plan.</p>
+      </div>
+    </div>
+
+    <h2>Frequently asked questions</h2>
+    <p><b>What happens if I miss a check-up?</b> Your plan continues; a missed check-up is not
+    refunded and does not extend your plan year. <b>Can I change my monthly payment date?</b> Yes,
+    write to Northgate Dental Plan Administration Ltd at least ten working days before your next
+    collection. <b>Does the plan cover a dental emergency at the practice?</b> Emergency
+    appointments at Aldermoor Dental Practice are offered to plan members ahead of non-members
+    where possible, though a same-day slot cannot always be guaranteed.</p>
+
+    <h2>Opening hours</h2>
+    <table class="plantbl">
+      <thead><tr><th>Day</th><th>Northgate member line</th><th>Aldermoor Dental Practice</th></tr></thead>
+      <tbody>
+        <tr><td>Monday to Friday</td><td>8:30am to 6pm</td><td>8:30am to 5:30pm</td></tr>
+        <tr><td>Saturday</td><td>9am to 1pm</td><td>Closed</td></tr>
+        <tr><td>Sunday</td><td>Closed</td><td>Closed</td></tr>
+      </tbody>
+    </table>
+
+    <div class="leaffoot">
+      <span>Northgate Dental Plan Administration Ltd &middot; Membership NDPA-208467</span>
+      <span>Page 3 of 4</span>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="leaflet">
+    <div class="leaflethead">
+      <div class="lt">Other services and terms</div>
+      <div class="ls">Sheet 4 of 4 &middot; Membership NDPA-208467</div>
+    </div>
+
+    <h2>Other services from Aldermoor Dental Practice</h2>
+    <p>Teeth whitening from &pound;225.00 per course, private orthodontic consultation &pound;45.00
+    (refundable against treatment), and referral to a visiting oral hygienist for deep cleaning at
+    &pound;68.00 per session. None of these is included in your Complete Care Plan.</p>
+
+    <h2>Your data</h2>
+    <p>Northgate Dental Plan Administration Ltd holds your membership and payment details to
+    administer this plan and collect your Direct Debit, and shares your check-up and treatment
+    dates with Aldermoor Dental Practice so that benefits can be tracked. A copy of the full privacy
+    notice is available at northgate-dentalplan.example/privacy.</p>
+
+    <h2>Terms and conditions</h2>
+    <p>Full terms and conditions for the Aldermoor Complete Care Plan were issued when you joined
+    and are available again on request or at northgate-dentalplan.example/terms. The version
+    current at the date of this statement is NDPA-T-2025, dated 1 April 2025, and replaces the
+    version dated 1 April 2022. Nothing in this leaflet varies the statement on sheet 1.</p>
+
+    <h2>Cancelling your plan</h2>
+    <p>You may cancel your plan at any time by writing to Northgate Dental Plan Administration Ltd
+    or by cancelling your Direct Debit with your bank, though we ask that you also tell us directly.
+    There is no minimum term and no cancellation fee. Cover ends on the date your final payment was
+    collected.</p>
+
+    <h2>If you move house or change practice</h2>
+    <p>Your plan is arranged with Aldermoor Dental Practice; if you register with a different
+    dentist, your Complete Care Plan does not transfer automatically. Contact Northgate Dental Plan
+    Administration Ltd to check whether your new practice offers a plan through the same
+    administrator, or to cancel this plan.</p>
+
+    <h2>Reference numbers on this statement</h2>
+    <div class="leafrefs">
+      <span>Membership: <b>NDPA-208467</b></span>
+      <span>Plan product: <b>Aldermoor Complete Care Plan</b></span>
+      <span>Administrator company number: <b>04471102</b></span>
+      <span>Direct debit originator: <b>934218</b></span>
+      <span>Practice account: <b>ADP-1140</b></span>
+      <span>Statement batch: <b>STB-2026-08-14</b></span>
+      <span>Correspondence ref: <b>NDPA-COR-70215</b></span>
+    </div>
+
+    <div class="leaffoot">
+      <span>Northgate Dental Plan Administration Ltd &middot; Membership NDPA-208467</span>
+      <span>Page 4 of 4</span>
+    </div>
+  </div>
 </div>
 
 </body>
