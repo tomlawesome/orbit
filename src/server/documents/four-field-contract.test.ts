@@ -158,6 +158,23 @@ describe("the four model-owned fields round-trip to a reviewed item", () => {
 describe("corpus ground truth for the four fields is consistent with the contract", () => {
   const documents = EXTRACTION_CORPUS.map((document) => [document.name, document] as const);
 
+  // A fixed-term contract costs everything paid over its term (owner,
+  // 2026-09-13), and some pages print only the monthly price and the term.
+  // For those the corpus declares the arithmetic instead: each factor here
+  // is a printed amount in minor units and a printed count of months, and
+  // the products add up to the declared cost. The list is closed on
+  // purpose -- an unprinted cost anywhere else is still a corpus bug.
+  const COST_BY_ARITHMETIC: Record<string, ReadonlyArray<readonly [minor: number, months: number]>> = {
+    "fullpage-broadband-contract.pdf": [[3499, 24]],
+    "fullpage-car-lease-statement.pdf": [[32900, 36]],
+    "fullpage-gym-membership-agreement.pdf": [[4250, 12]],
+    "fullpage-mobile-airtime-plan.pdf": [[1400, 6], [2300, 18]],
+  };
+  const printedForms = (minor: number): string[] => {
+    const printed = (minor / 100).toFixed(2);
+    return [printed, printed.replace(/\.00$/u, ""), printed.replace(/\B(?=(\d{3})+\.)/gu, ",")];
+  };
+
   it.each(documents)("%s", (_name, document) => {
     const { expected, text } = document;
     const roles = expected.dateRoles ?? [];
@@ -183,10 +200,20 @@ describe("corpus ground truth for the four fields is consistent with the contrac
     if (expected.costMinor !== undefined) {
       expect(expected.currency).toBe("GBP");
       expect(text).toContain("£");
-      const printed = (expected.costMinor / 100).toFixed(2);
-      const withoutTrailingZeros = printed.replace(/\.00$/u, "");
-      const grouped = printed.replace(/\B(?=(\d{3})+\.)/gu, ",");
-      expect([printed, withoutTrailingZeros, grouped].some((form) => text.includes(form))).toBe(true);
+      const arithmetic = COST_BY_ARITHMETIC[document.filename];
+      if (arithmetic === undefined) {
+        expect(printedForms(expected.costMinor).some((form) => text.includes(form))).toBe(true);
+      } else {
+        // Each price is printed; the term is, or the split of it is (the
+        // mobile plan prints "first 6 months" of a 24-month term).
+        const termPrinted = (months: number) => new RegExp(`\\b${months}\\s*-?\\s*months?\\b`, "iu").test(text);
+        const whole = arithmetic.reduce((sum, [, months]) => sum + months, 0);
+        for (const [minor, months] of arithmetic) {
+          expect(printedForms(minor).some((form) => text.includes(form))).toBe(true);
+          expect(termPrinted(months) || termPrinted(whole)).toBe(true);
+        }
+        expect(arithmetic.reduce((sum, [minor, months]) => sum + minor * months, 0)).toBe(expected.costMinor);
+      }
     }
 
     // A recurrence needs a schedule to repeat, and needs its digits on the

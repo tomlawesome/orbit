@@ -304,3 +304,36 @@ describe("the adds-up sieve", () => {
     expect(votesFrom("adds-up", repeated, both[1], both)).toEqual([]);
   });
 });
+
+describe("the term-multiple sieve", () => {
+  const text = [
+    "Term 24 month minimum term, ending 01/03/2028",
+    "",
+    "Monthly Monitoring Charge £24.99 per month",
+    "",
+    "Installation Charge £199.00 — paid in full",
+    "",
+    "giving a total payable of £599.76.",
+  ].join("\n");
+  const all = ["£24.99", "£199.00", "£599.76"].map((printed) => amount(text, printed));
+
+  it("reads the figure that is another figure times the printed term as the total", () => {
+    const votes = votesFrom("term-multiple", text, all[2], all);
+
+    expect(votes[0].tag).toBe("total");
+    expect(votes[0].weight).toBe(STRENGTH_STATED);
+    expect(votes[0].trigger).toContain("24 x");
+  });
+
+  it("reads the factor as one instalment of it", () => {
+    expect(votesFrom("term-multiple", text, all[0], all)[0].tag).toBe("instalment");
+    expect(votesFrom("term-multiple", text, all[1], all)).toEqual([]);
+  });
+
+  it("says nothing where the page printed no term", () => {
+    const untermed = "Monthly Monitoring Charge £24.99 per month\n\ngiving a total payable of £599.76.";
+    const both = ["£24.99", "£599.76"].map((printed) => amount(untermed, printed));
+
+    expect(votesFrom("term-multiple", untermed, both[1], both)).toEqual([]);
+  });
+});
