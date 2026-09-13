@@ -12,7 +12,9 @@
     "recurrence"
   ],
   "corpora": {
-    "tuning-48": "The 48 tuning pages after hold-outs 1 and 2 joined the seen corpus (src/server/documents/extraction-corpus.ts, #998)",
+    "tuning-60": "The 60 tuning pages after 2026-09-13: the 48 grown to the length and noise of real household paper (#1007) plus twelve new pages of the same shape -- not comparable with tuning-48",
+    "holdout4-12": "The fourth hold-out, 12 pages at real-paper length and noise (#1007), written by an author that never read sources/ or hold-out 3 -- scored, never read, never tuned against",
+    "tuning-48": "The 48 tuning pages between 2026-09-12 and 2026-09-13 (median 3,400 characters) -- retired when they were grown into tuning-60; a rule that scored here met far cleaner paper than it will in use",
     "tuning-24": "The 24 tuning pages before hold-outs 1 and 2 joined them on 2026-09-12 -- retired, not comparable with tuning-48",
     "holdout3-12": "The third hold-out, 12 pages, never read by an agent (extraction-holdout3-fullpage.ts, #998)",
     "holdout2-12": "The second hold-out, 12 pages -- retired 2026-09-12, rolled into tuning-48 (#997, #998)",
@@ -4626,8 +4628,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "Seen cost 42/42: the mobile plan (6x1400 + 18x2300 = 49800) is the one page fixed; no other field moved. Tried and narrowed: counting a renewal end as the term turned the health cash plan, pension and mortgage into commitments they are not (cost 39/42), so only an expiry end counts.",
-      "headline": true
+      "notes": "Seen cost 42/42: the mobile plan (6x1400 + 18x2300 = 49800) is the one page fixed; no other field moved. Tried and narrowed: counting a renewal end as the term turned the health cash plan, pension and mortgage into commitments they are not (cost 39/42), so only an expiry end counts."
     },
     {
       "id": "E84",
@@ -4690,6 +4691,132 @@
       },
       "verdict": "kept",
       "notes": "Neutral: identical to E82, cost still 6/12. The hold-out's cost misses are not the dated-term or split-term shape.",
+      "headline": true
+    },
+    {
+      "id": "E85",
+      "date": "2026-09-13",
+      "label": "tuning 60: the 48 grown to real-paper length and noise, plus twelve new pages",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "No rule change. The owner ran the rules over real household documents (2026-09-13) and found stage 3 picking things that were valid somewhere on the page but not the right thing; the tuning pages were far cleaner than real paper (median 3,400 characters against about 10,000). Every existing tuning document was grown to 8,000-12,000 characters of Tika text with the noise real paper carries -- marketing and product names, valid rival numbers (customer, invoice, VAT, company, payment, serial), links and shortened domains, the provider's plain name reduced to a URL or small-print company on a third of them, extra prices and dates -- with every truth unchanged and verified. Twelve new pages of the same shape joined them (#1007). Same code as E83.",
+      "how": "npm run eval:stages",
+      "commit": "f82b4f9",
+      "output": "tmp/e-seen60-stages-noisy2.txt",
+      "scores": {
+        "overall": {
+          "pct": 77.2,
+          "net": 392,
+          "of": 508
+        },
+        "provider": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "reference": {
+          "pct": 36.7,
+          "net": 22,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 40,
+          "of": 60
+        },
+        "cost": {
+          "pct": 59.3,
+          "net": 32,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "baseline",
+      "notes": "Same code as E83 (87.1% on the old 48). The drop is the corpus getting honest, not a rule changing: reference 22/60, cost 32/54 (was 42/42), provider 42/60, subtype 40/60. Baseline for everything that follows.",
+      "headline": true
+    },
+    {
+      "id": "E86",
+      "date": "2026-09-13",
+      "label": "hold-out 4: twelve unseen pages at real-paper length and noise",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Same code as E83/E85 scored on hold-out 4, written today by an author that never read the tuning pages or hold-out 3, to the same shape as the upgraded tuning set (#1007). 120,106 characters over twelve pages, 215 date-like strings with 28 answers, provider unnamed as a plain word on five.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "f82b4f9",
+      "output": "tmp/e-holdout4-noisy2.txt",
+      "scores": {
+        "overall": {
+          "pct": 65.5,
+          "net": 76,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 0,
+          "net": 0,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "baseline",
+      "notes": "Reference 0/12: every page carries several valid labelled numbers and the fixed label order picks a wrong one -- the failure the owner saw on real paper. Cost 5/12, dateRoles 16/28. Taint on file: helper agents inside the author reported one page's provider name fragment and one wording detail to the tuning session; class-level, recorded so the next reader knows.",
       "headline": true
     }
   ],

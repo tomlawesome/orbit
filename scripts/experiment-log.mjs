@@ -11,7 +11,7 @@ const HOLDOUT_PREFIX = /^hold-out(?: \d+)?: /u;
 // Fixed reading order for the results tables, independent of the order the
 // register happens to list corpora in.
 const CORPUS_ORDER = [
-  "tuning-48", "holdout3-12",
+  "tuning-60", "holdout4-12", "holdout3-12", "tuning-48",
   "tuning-24", "holdout2-12", "holdout-12", "fullpage-6", "old-36",
 ];
 
@@ -294,7 +294,7 @@ function renderFieldSections(experiments, fields) {
   // Only the two corpora that are still live: tuning-24 and both retired
   // hold-outs were folded away the same way the old 36 and the six full
   // pages were, and their numbers are not comparable with tuning-48's.
-  const LIVE = new Map([["tuning-48", "tuning 48"], ["holdout3-12", "unseen 12"]]);
+  const LIVE = new Map([["tuning-60", "tuning 60"], ["holdout4-12", "unseen 12 (noisy)"], ["holdout3-12", "unseen 12 (hold-out 3)"]]);
   const sections = fields.map((field) => {
     const rows = experiments
       .filter((experiment) => LIVE.has(experiment.corpus)
@@ -357,11 +357,18 @@ function renderFieldSections(experiments, fields) {
  * nobody tuned on, and what the heuristics do on the same pages. Everything
  * else on this page is working-out, and lives in the drawer.
  */
+// Short names for the front table's "pages" column; the long descriptions
+// stay with the corpus tables in the drawer.
+const HEADLINE_CORPUS = new Map([
+  ["tuning-60", "tuning 60"],
+  ["holdout4-12", "unseen 12, noisy (hold-out 4)"],
+  ["holdout3-12", "unseen 12 (hold-out 3)"],
+  ["tuning-48", "tuning 48 (retired)"],
+]);
+
 function renderHeadline(experiments, fields, corpora) {
   const rows = experiments.filter((experiment) => experiment.headline);
   if (rows.length === 0) return "";
-  const corpus = rows[0].corpus;
-
   // A one-field row has no overall, here as in the tables below: its
   // percentage is that field's and would otherwise read as a whole-pipeline
   // score, and take the column's box off a run that answered every field.
@@ -390,6 +397,7 @@ function renderHeadline(experiments, fields, corpora) {
     return `<tr>
       <td class="id">${escapeHtml(experiment.id)}</td>
       <td class="label">${escapeHtml(experiment.label)}${experiment.oldScoring ? '<br><span class="oldscore">old scoring: a wrong answer cost a point</span>' : ""}</td>
+      <td class="corpus-cell">${escapeHtml(HEADLINE_CORPUS.get(experiment.corpus) ?? experiment.corpus)}</td>
       ${renderModelCell(experiment)}
       ${cells.join("\n      ")}
     </tr>`;
@@ -397,13 +405,13 @@ function renderHeadline(experiments, fields, corpora) {
 
   const fieldHeaders = fields.map((field) => `<th>${escapeHtml(field)}</th>`).join("");
   return `<section class="headline">
-  <h2>Where we are: ${escapeHtml(corpora[corpus] ?? corpus)}</h2>
+  <h2>Where we are</h2>
   <p class="key">The plain model reading the whole page, against the heuristics with no model at all, on the
   documents nobody tuned on. Under them, each field's own method, scored on the same pages: those rows fill
   one column only, because a method that reads one field has no overall score. A green box marks the best
   any row has reached in that column. Everything else is in the drawer at the foot of the page.</p>
   <div class="tables"><table>
-    <thead><tr><th>ID</th><th>what ran</th><th>model</th><th class="overall">overall</th>${fieldHeaders}</tr></thead>
+    <thead><tr><th>ID</th><th>what ran</th><th>pages</th><th>model</th><th class="overall">overall</th>${fieldHeaders}</tr></thead>
     <tbody>
       ${body}
     </tbody>
