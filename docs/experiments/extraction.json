@@ -4690,8 +4690,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "Neutral: identical to E82, cost still 6/12. The hold-out's cost misses are not the dated-term or split-term shape.",
-      "headline": true
+      "notes": "Neutral: identical to E82, cost still 6/12. The hold-out's cost misses are not the dated-term or split-term shape."
     },
     {
       "id": "E85",
@@ -4753,8 +4752,7 @@
         }
       },
       "verdict": "baseline",
-      "notes": "Same code as E83 (87.1% on the old 48). The drop is the corpus getting honest, not a rule changing: reference 22/60, cost 32/54 (was 42/42), provider 42/60, subtype 40/60. Baseline for everything that follows.",
-      "headline": true
+      "notes": "Same code as E83 (87.1% on the old 48). The drop is the corpus getting honest, not a rule changing: reference 22/60, cost 32/54 (was 42/42), provider 42/60, subtype 40/60. Baseline for everything that follows."
     },
     {
       "id": "E86",
@@ -4816,7 +4814,195 @@
         }
       },
       "verdict": "baseline",
-      "notes": "Reference 0/12: every page carries several valid labelled numbers and the fixed label order picks a wrong one -- the failure the owner saw on real paper. Cost 5/12, dateRoles 16/28. Taint on file: helper agents inside the author reported one page's provider name fragment and one wording detail to the tuning session; class-level, recorded so the next reader knows.",
+      "notes": "Reference 0/12: every page carries several valid labelled numbers and the fixed label order picks a wrong one -- the failure the owner saw on real paper. Cost 5/12, dateRoles 16/28. Taint on file: helper agents inside the author reported one page's provider name fragment and one wording detail to the tuning session; class-level, recorded so the next reader knows."
+    },
+    {
+      "id": "E87",
+      "date": "2026-09-13",
+      "label": "reference: the kind of thing decides the label; never-the-answer numbers dropped",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Reference chooser rewritten (04dd7f7): the taxonomy kind of the document decides which reference label is preferred (a policy prefers policy/certificate numbers, a bill prefers account numbers, and so on) instead of one fixed label order; numbers that are never the answer (VAT, company registration, sort code, phone, page numbering, meter or serial) are dropped from the shortlist (extraction-reference-never.ts). Ordering by support already beat chooseReference in M08 (38 vs 22), so the chooser now uses that order. Reference 22/60 → 53/60; no other field moved. Remaining seven: four where another organisation's number carries the better label, two where the sieve splits a letter prefix off a spaced number, one blank where three numbers share a label.",
+      "how": "npm run eval:stages",
+      "commit": "04dd7f7",
+      "output": "tmp/e-seen60-stages-ref1.txt",
+      "scores": {
+        "overall": {
+          "pct": 83.3,
+          "net": 423,
+          "of": 508
+        },
+        "provider": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "reference": {
+          "pct": 88.3,
+          "net": 53,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 40,
+          "of": 60
+        },
+        "cost": {
+          "pct": 59.3,
+          "net": 32,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E88",
+      "date": "2026-09-13",
+      "label": "reference by kind on hold-out 3",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E87 rules scored on hold-out 3. Reference 4/12 → 9/12; no other field moved. Cost column remains tainted (E53 note).",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "04dd7f7",
+      "output": "tmp/e-holdout3-ref1.txt",
+      "scores": {
+        "overall": {
+          "pct": 76.4,
+          "net": 84,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E89",
+      "date": "2026-09-13",
+      "label": "reference by kind on hold-out 4",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E87 rules scored on hold-out 4 (noisy, real-paper length). Reference 0/12 → 6/12; no other field moved. Same class-level taint as E86.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "04dd7f7",
+      "output": "tmp/e-holdout4-ref1.txt",
+      "scores": {
+        "overall": {
+          "pct": 70.7,
+          "net": 82,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
       "headline": true
     }
   ],
@@ -5019,6 +5205,29 @@
         ]
       ],
       "source": "tmp/e-seen60-shortlist-top3.txt, tmp/e-holdout3-shortlist-top3.txt, tmp/e-holdout4-shortlist-top3.txt; commit 3f51251"
+    },
+    {
+      "id": "M09",
+      "date": "2026-09-13",
+      "corpus": "tuning-60",
+      "label": "Top three for reference after the kind-of-thing rule (E87)",
+      "what": "Same measurement as M08 after E87. Reference first-on-list 38/60 → 53/60 and top three 50 → 56 on tuning 60; hold-out 4 first 4/12 → 7/12 (the chooser itself scores 6/12 there: one page where the repeated-number tie-break overrides the list order), top three 6 → 7; hold-out 3 unchanged at 11/12. Other fields unchanged from M08.",
+      "how": "npm run eval:shortlist [-- --holdout3 | --holdout4]",
+      "results": [
+        [
+          "tuning 60: reference first / top three / on list",
+          "53 / 56 / 58 of 60"
+        ],
+        [
+          "hold-out 4: reference",
+          "7 / 7 / 10 of 12"
+        ],
+        [
+          "hold-out 3: reference",
+          "11 / 11 / 11 of 12"
+        ]
+      ],
+      "source": "tmp/e-seen60-shortlist-ref1.txt, tmp/e-holdout3-shortlist-ref1.txt, tmp/e-holdout4-shortlist-ref1.txt; commit 04dd7f7"
     }
   ]
 }
