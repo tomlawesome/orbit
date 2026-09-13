@@ -5620,8 +5620,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E100",
@@ -5683,8 +5682,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E101",
@@ -5698,6 +5696,194 @@
       "how": "npm run eval:holdout -- --holdout4",
       "commit": "fa21bba",
       "output": "tmp/e-holdout4-ref3.txt",
+      "scores": {
+        "overall": {
+          "pct": 71.6,
+          "net": 83,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E102",
+      "date": "2026-09-13",
+      "label": "the answers cluster: cost tie broken by nearness to the reference",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Item 99 (70bf6ea). A second pass: where the reference is chosen by a clear margin (else a date with a role, else silent), a candidate near it — same Tika block, within 400 characters, same sheet — is preferred. Kept only for cost and only as a tie-break: one tuning page where two figures were level on every reason (cost 41 → 42/54). As a weight it scored the same and could reorder figures other reasons had separated. Provider (−1 as a weight, 0 as tie-break) and date roles (0) do not gain: their misses are not ties. Those paths stay in the file switched off with the numbers beside the switch. Shortlist order unchanged on all corpora. Marginal by the generic-rules standard: the fact is general (the item's own facts sit together) but it moved one page.",
+      "how": "npm run eval:stages",
+      "commit": "70bf6ea",
+      "output": "tmp/e-seen60-stages-cluster1.txt",
+      "scores": {
+        "overall": {
+          "pct": 85.8,
+          "net": 436,
+          "of": 508
+        },
+        "provider": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "reference": {
+          "pct": 93.3,
+          "net": 56,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 40,
+          "of": 60
+        },
+        "cost": {
+          "pct": 77.8,
+          "net": 42,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E103",
+      "date": "2026-09-13",
+      "label": "cluster pass (E102) on hold-out 3",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E102 on hold-out 3: no field moved.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "70bf6ea",
+      "output": "tmp/e-holdout3-cluster1.txt",
+      "scores": {
+        "overall": {
+          "pct": 79.1,
+          "net": 87,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E104",
+      "date": "2026-09-13",
+      "label": "cluster pass (E102) on hold-out 4",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E102 on hold-out 4: no field moved.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "70bf6ea",
+      "output": "tmp/e-holdout4-cluster1.txt",
       "scores": {
         "overall": {
           "pct": 71.6,
