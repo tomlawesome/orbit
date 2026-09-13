@@ -32,6 +32,7 @@ import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { formatRunScore, scoreCorpus, type RunScore } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
+import { repairLetterSpacing } from "./extraction-text-repair";
 import { proposalFromText } from "./suggestions";
 
 const corpus = EXTRACTION_HOLDOUT3_FULLPAGE;
@@ -57,10 +58,11 @@ async function main(): Promise<void> {
   const withModel = process.argv.includes("--model");
   if (withModel) await assertChooserReachable(chooserModelNamed());
   const staged = await scoreCorpus(corpus, async (text) => {
-    const tagged = tagCandidates(text, sieve(text));
+    const page = repairLetterSpacing(text);
+    const tagged = tagCandidates(page, sieve(page));
     return withModel
       ? chooseFieldsWithModel(tagged, chooserTransport(chooserModelNamed()))
-      : chooseFields(tagged, text);
+      : chooseFields(tagged, page);
   });
   console.log(formatRunScore(withModel ? `${label}: sieve+tag+choose+model` : `${label}: sieve+tag+choose`, forPrinting(staged)));
   const heuristics = await scoreCorpus(corpus, (text, filename) => proposalFromText(text, filename));
