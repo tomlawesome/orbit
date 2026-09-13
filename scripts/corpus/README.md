@@ -2,22 +2,24 @@
 
 Builds the full-page fixtures in
 `src/server/documents/extraction-corpus-fullpage.ts` (#981) and the hold-out
-fixtures in `src/server/documents/extraction-holdout3-fullpage.ts` (#998).
+fixtures in `src/server/documents/extraction-holdout3-fullpage.ts` (#998) and
+`src/server/documents/extraction-holdout4-fullpage.ts` (#1007).
 
-Two corpora, two directories. Every script here takes `--dir <name>` (or
+Three corpora, three directories. Every script here takes `--dir <name>` (or
 `CORPUS_DIR`) and defaults to `sources`, so a command without the flag still
 means the tuning set:
 
 | directory   | documents | what it is for |
 | ----------- | --------- | -------------- |
 | `sources/`  | the tuning set (48) | read it, tune against it, argue with it |
-| `holdout3/` | the hold-out set (12) | scored, never read, never tuned against |
+| `holdout3/` | an unseen set (12) | scored, never read, never tuned against |
+| `holdout4/` | an unseen set (12) | scored, never read, never tuned against |
 
 Hold-outs 1 and 2 are retired: both were spent (#996, and the shape of its
 misses read during tuning, #998) and rolled into `sources/` on 2026-09-12,
-which is why the tuning set is 48 rather than 24. `holdout3/` is the only
-unseen set left; if it is ever burned in turn the replacement is `holdout4/`,
-following this file's shape and `generate.mjs`'s directory-derived naming.
+which is why the tuning set is 48 rather than 24. `holdout3/` and `holdout4/`
+are the two unseen sets left; a further one follows this file's shape and
+`generate.mjs`'s directory-derived naming.
 
 ## Why these exist
 
@@ -212,3 +214,33 @@ declared on every command that touches its path, because
 read or write it; see that file for exactly what it exempts. Once a hold-out
 is generated, it is scored like any other -- nothing about that gate changes
 what `npm run eval:holdout -- --holdout3` prints.
+
+## Hold-out 4
+
+`holdout4/` is twelve more documents (#1007), written after hold-out 3 by
+someone who had read neither it nor `sources/`. It answers a different
+question: hold-out 3's pages are about 1,600 characters each and the tuning
+set's median is 3,400, while the real household paper the owner ran the
+rules over on 2026-09-13 is around 10,000. These twelve are built to that
+shape -- long, mostly noise, several labelled numbers and several real
+prices per page, and on five of the twelve the provider's trading name never
+appears as a plain name, only inside a web address, an e-mail address, a
+sub-brand or a registered company name that differs from the brand.
+
+Twelve documents, real Tika output: about 120,100 characters in total, 215
+date-like strings, 28 of them answers. Measured baselines belong on the
+experiment log, not here, for the reason the hold-out 3 section gives.
+
+Everything the hold-out 3 section says applies here word for word: do not
+read `scripts/corpus/holdout4/` or
+`src/server/documents/extraction-holdout4-fullpage.ts`, do not run
+`npm run eval:holdout -- --holdout4 --misses`, and never change a hold-out
+document to make a score move.
+
+`--holdout4` selects it on `holdout-score-cli` and `holdout-breakdown-cli`;
+`--holdout3` still means hold-out 3 everywhere it did before. `holdout4/`
+takes twenty-three typefaces, none of them used by `holdout3/`, so the two
+unseen sets share no character map. Full separation from `sources/` is no
+longer possible: `fetch-fonts.sh` brings down 108 files and the earlier
+corpora already use all but five of them, and a hold-out fetches nothing
+new (see "Fonts").
