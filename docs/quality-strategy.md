@@ -186,7 +186,7 @@ for each.
 | --- | --- | --- |
 | documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads |
 | ignore/policy (#889) | `.gitleaksignore`, `supply-chain/licence-policy.yml` | `classify`, `gitleaks`, `licence_policy`, `supply_chain_source` |
-| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `gitleaks`, `supply_chain_source` |
+| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_docker`, `gitleaks`, `supply_chain_source` |
 
 The documentation lane is the risk classifier's `fast` result and predates the
 other two: it shortens the pipeline by axis, so a job still runs when its own
@@ -217,9 +217,9 @@ A fix pushed after one red job used to rerun every job that had already passed.
 Now `classify` hashes what each job reads (`scripts/ci/job-inputs.json`) and
 looks through the same merge request's earlier pipelines for a run of that job
 that passed on the same hash. Where it finds one the job says which run it
-stands on and stops; where it does not, it runs. Ten jobs can do this: `fast`,
-`integration`, `fidelity`, `build_image`, `smoke`, `acceptance`,
-`repair_journeys`, `supply_chain_image`, `sidecar_images` and
+stands on and stops; where it does not, it runs. Eleven jobs can do this:
+`fast`, `fast_docker`, `integration`, `fidelity`, `build_image`, `smoke`,
+`acceptance`, `repair_journeys`, `supply_chain_image`, `sidecar_images` and
 `launcher_install_compat`. A reused `build_image` fetches the image and its
 identity file back, so the jobs after it get the bytes a real build would
 have given them.
@@ -233,10 +233,32 @@ skipped itself leaves nothing and is never reused. The lookup reads the API
 with `BASE_REPIN_TOKEN`; an unset token, an unreachable API or an expired
 artefact is logged and read as "no reuse", which reruns the job.
 
-The acceptance stage now waits for `fast`, `gitleaks`, `licence_policy` and
-`supply_chain_source`, so a red `fast` costs no image build, no browser suite
-and no installer run — about seven minutes added to a green pipeline, and the
-whole acceptance stage saved on a red one.
+`fast` (#950, owner ruling on #923 rec 15a, 2026-09-09) is the docker-free
+part of what used to be one job: type-check, lint, the coverage-bearing
+Vitest run and the web build, on the unprivileged `big` lane. `fast_docker`
+is the other half, on the privileged `orbit-build` lane, and runs the two
+suites, of everything that mentions Docker, actually confirmed (by running
+the candidate set with `docker` entirely absent from PATH, matching `big`'s
+real condition) to depend on it: `src/lib/install-script-adapters.test.ts`,
+whose `beforeAll` runs a real `docker build`, and
+`src/lib/recovery-bundle.parity.test.ts`, whose "no Docker daemon reachable"
+tests never reach a live daemon but still spawn real scripts that gate on
+`docker` being present before the logic under test runs. The split frees the
+~200-300 s `orbit-build` used to hold for `fast`'s docker-free work every
+pipeline.
+
+The acceptance stage waits for `fast` and `fast_docker`, so a red one of
+either costs no image build, no browser suite and no installer run. It no
+longer also waits for
+`gitleaks`, `licence_policy` and `supply_chain_source` (#945, owner ruling on
+#923 rec 16b, 2026-09-09): those three queued 541–1105 s on the shared
+`light` lane for about 68 s of actual policy work, holding the stage back by
+over five minutes. A red one of the three still fails the pipeline overall —
+none is `allow_failure: true` — it just no longer blocks a job that never
+reads its result; auto_cancel (#923 rec 13) cancels an acceptance run already
+under way when that happens. `fidelity` and `integration` still wait for all
+five: `fast`, `fast_docker`, `gitleaks`, `licence_policy` and
+`supply_chain_source`.
 
 ### The second browser lane: an Orbit with no identity provider (#916)
 
