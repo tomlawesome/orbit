@@ -519,6 +519,122 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.costMinor).toBeUndefined();
   });
 
+  // The same owner rule, for the far larger number of pages that never
+  // write the term down: they print the period instead and leave the
+  // reader to count the months. The end has to be one the page's kind
+  // makes an `expiry` -- nothing here names a kind, and a kind that says
+  // nothing expires (`extraction-term-end.ts`).
+  it("counts the term off the dates where the page never states one in words", () => {
+    const instalment = candidate("amount", "3499", [
+      { value: "instalment", trigger: "Monthly price", sieves: ["label", "period-adjacent"], strength: 2 },
+    ], { currency: "GBP" });
+    const page = (from: string, to: string) => chooseFields([
+      candidate("date", from, [{ value: "start", trigger: "Service start date" }]),
+      candidate("date", to, [{ value: "expiry", trigger: "Contract end date" }]),
+      instalment,
+    ], "Monthly price £34.99. Service start date and contract end date as shown.").costMinor;
+
+    // Two years to the day, and the same two years drawn inclusively.
+    expect(page("2025-03-20", "2027-03-20")).toBe(3499 * 24);
+    expect(page("2026-04-01", "2027-03-31")).toBe(3499 * 12);
+    // Not a whole number of months: a window, not a term.
+    expect(page("2026-04-01", "2027-03-14")).toBe(3499);
+  });
+
+  // A thing that renews rolls on rather than running out, so its period is
+  // not a commitment and its monthly price stands (owner, 2026-09-13).
+  it("keeps the monthly figure where the term ends in a renewal", () => {
+    const chosen = chooseFields([
+      candidate("date", "2026-04-06", [{ value: "start", trigger: "Cover start date" }]),
+      candidate("date", "2027-04-06", [{ value: "renewal", trigger: "Renewal date" }]),
+      candidate("amount", "1450", [
+        { value: "instalment", trigger: "Monthly premium", sieves: ["label", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP" }),
+    ], "Monthly premium £14.50. This plan renews each year. Health Plan Certificate.");
+
+    expect(chosen.costMinor).toBe(1450);
+  });
+
+  it("keeps the monthly figure where the dates make no term at all", () => {
+    const chosen = chooseFields([
+      candidate("date", "2026-04-01", [{ value: "issued", trigger: "Date of issue" }]),
+      candidate("amount", "2150", [
+        { value: "instalment", trigger: "Monthly subscription", sieves: ["label", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP" }),
+    ], "Monthly subscription £21.50. This is a rolling monthly plan with no minimum term.");
+
+    expect(chosen.costMinor).toBe(2150);
+  });
+
+  it("blanks where two pairs of dates put the term at two different lengths", () => {
+    const chosen = chooseFields([
+      candidate("date", "2026-04-01", [{ value: "start", trigger: "Start date" }]),
+      candidate("date", "2027-04-01", [{ value: "expiry", trigger: "End date" }]),
+      candidate("date", "2028-04-01", [{ value: "expiry", trigger: "Agreement ends" }]),
+      candidate("amount", "3499", [
+        { value: "instalment", trigger: "Monthly price", sieves: ["label", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP" }),
+    ], "Monthly price £34.99.");
+
+    expect(chosen.costMinor).toBeUndefined();
+    expect(chosen.currency).toBeUndefined();
+  });
+
+  // Owner, 2026-09-13: a flat term times the standing rate is money never
+  // paid where the page opened with a cheaper leg.
+  it("sums the legs where the page prices the first few months differently", () => {
+    const standing = candidate("amount", "2300", [
+      { value: "instalment", trigger: "standard monthly charge", sieves: ["label", "period-adjacent"], strength: 2 },
+    ], { currency: "GBP" });
+
+    expect(chooseFields([standing],
+      "£14.00/mo for your first 6 months £23.00/mo standard monthly charge, from month 7 onward. Minimum term 24 months")
+      .costMinor).toBe(6 * 1400 + 18 * 2300);
+    expect(chooseFields([standing],
+      "First 3 months at £9.99 a month, then £23.00 per month. Contract length: 18 months")
+      .costMinor).toBe(3 * 999 + 15 * 2300);
+  });
+
+  it("leaves the whole term at one price where the introductory leg outlasts it", () => {
+    const chosen = chooseFields([
+      candidate("amount", "2300", [
+        { value: "instalment", trigger: "monthly charge", sieves: ["label", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP" }),
+    ], "£14.00/mo for your first 24 months. Minimum term 12 months");
+
+    expect(chosen.costMinor).toBe(12 * 2300);
+  });
+
+  it("blanks where the chosen figure is the introductory rate itself", () => {
+    const chosen = chooseFields([
+      candidate("amount", "1400", [
+        { value: "instalment", trigger: "Monthly price", sieves: ["label", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP" }),
+    ], "£14.00/mo for your first 6 months. Minimum term 24 months");
+
+    expect(chosen.costMinor).toBeUndefined();
+  });
+
+  it("blanks where the page names two different introductory legs", () => {
+    const chosen = chooseFields([
+      candidate("amount", "2300", [
+        { value: "instalment", trigger: "monthly charge", sieves: ["label", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP" }),
+    ], "£14.00/mo for your first 6 months. £12.00/mo for your first 3 months. Minimum term 24 months");
+
+    expect(chosen.costMinor).toBeUndefined();
+  });
+
+  it("refuses a lump sum for the opening months as an introductory rate", () => {
+    const chosen = chooseFields([
+      candidate("amount", "2300", [
+        { value: "instalment", trigger: "monthly charge", sieves: ["label", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP" }),
+    ], "£300.00 for your first 6 months. Minimum term 24 months");
+
+    expect(chosen.costMinor).toBe(24 * 2300);
+  });
+
   it("hears the monthly fee where nothing the page called a total earned a hearing", () => {
     const chosen = chooseFields([
       candidate("amount", "45900", [
