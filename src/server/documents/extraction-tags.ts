@@ -37,8 +37,9 @@ import {
   runProviderSieves,
   type OrganisationCandidate,
 } from "./extraction-provider-sieves";
+import { neverTheReferenceShape } from "./extraction-reference-never";
 import type { Candidate, CandidateKind } from "./extraction-sieve";
-import type { Tag, TagForKind, TaggedCandidate, TagStage } from "./extraction-stages";
+import { STRENGTH_WEAK, type Tag, type TagForKind, type TaggedCandidate, type TagStage } from "./extraction-stages";
 import { validateChecksumIdentifier } from "./reference-checksums";
 
 /**
@@ -57,6 +58,13 @@ interface LabelTrigger<K extends CandidateKind = CandidateKind> {
    * touching the figure always wins, and a qualifier is rarely the nearest
    * words on the page -- it is the words that frame them. */
   overrides?: true;
+  /** A single noun naming the paper ("Certificate", "Policy", "Agreement")
+   * rather than a phrase naming the number ("Certificate number"). It is a
+   * real label where a page runs it straight into the value -- "Certificate
+   * CSS-0417" -- and an ordinary word everywhere else, so it is recorded at
+   * `STRENGTH_WEAK` and stage 3 hears it behind every label the page spelled
+   * out. */
+  weak?: true;
   /** Only a label when it is the entire block. Tika prints a form label as
    * its own block ("Policy \n\nMTR-8823-0145"), which is the only place a
    * bare word like "Policy" or "Reference" can be trusted to name a value
@@ -233,19 +241,38 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
  * first. Specific labels therefore have to come before the generic one.
  */
 const IDENTIFIER_TRIGGERS: readonly LabelTrigger<"identifier">[] = [
+  // Never the household's own number, however the page labels it
+  // (`extraction-reference-never.ts`). Declared first so that a page
+  // printing "Sort code (refunds)" or "call us on ... quoting your
+  // reference" is read as what it is: the generic `reference` rows below
+  // would otherwise tie with these and win on declaration order.
+  { value: "phone", direction: "forward", pattern: "\\b(?:tel|telephone|fax|freephone|helpline)\\b[.:]?(?: number| no\\.?)?" },
+  { value: "phone", direction: "forward", pattern: "\\bmobile(?: number| no\\.?)" },
+  { value: "phone", direction: "forward", pattern: "\\b(?:call|ring|phone)(?: us| them)?(?: free)? on\\b" },
+  { value: "bank", direction: "forward", pattern: "sort code" },
+  { value: "bank", direction: "forward", pattern: "\\b(?:iban|bic|swift)\\b" },
+  { value: "bank", direction: "forward", pattern: "bank account(?: number| no\\.?)?" },
+  { value: "bank", direction: "forward",
+    pattern: "(?:direct debit )?(?:originator(?:'s)?|service user)(?: id| identification| number| no\\.?| ref(?:erence)?)?" },
+  { value: "product", direction: "forward",
+    pattern: "\\b(?:product|model|catalogue|part|stock|sku|batch)\\b(?: code| number| no\\.?| ref(?:erence)?)" },
+  { value: "product", direction: "forward",
+    pattern: "\\b(?:promo(?:tion(?:al)?)?|discount|voucher|offer|referral)\\b code" },
+
   // policy
   { value: "policy", direction: "forward", pattern: "policy(?: number| no\\.?| ref(?:erence)?)" },
-  { value: "policy", direction: "forward", pattern: "plan(?: number| no\\.?)" },
+  { value: "policy", direction: "forward", pattern: "plan(?: number| no\\.?| ref(?:erence)?)" },
   { value: "policy", direction: "backward", pattern: "is your policy (?:number|reference)" },
 
   // account
   { value: "account", direction: "forward", pattern: "account(?: number| no\\.?| reference)" },
   { value: "account", direction: "forward", pattern: "a/c (?:number|no\\.?)" },
+  { value: "account", direction: "forward", pattern: "subscription(?: number| no\\.?| ref(?:erence)?)" },
   // Pages head the number with the bare word as often as with "number":
   // "GENERATION ACCOUNT SEG-4471-0932", "ACCOUNT 8847 2210 55".
   // "My account", and the "myaccount." of a printed web page's address bar,
   // are navigation rather than a label.
-  { value: "account", direction: "forward", pattern: "(?<!my )\\baccount\\b" },
+  { value: "account", direction: "forward", pattern: "(?<!my )\\baccount\\b", weak: true },
   { value: "account", direction: "backward", pattern: "is your account number" },
 
   // customer
@@ -256,11 +283,23 @@ const IDENTIFIER_TRIGGERS: readonly LabelTrigger<"identifier">[] = [
   { value: "invoice", direction: "forward", pattern: "invoice(?: number| no\\.?)" },
   { value: "invoice", direction: "backward", pattern: "is the invoice number" },
 
+  // agreement -- money borrowed, a vehicle financed, somewhere rented: the
+  // household's file is the agreement itself, numbered as itself.
+  { value: "agreement", direction: "forward",
+    pattern: "(?:credit |finance |hire |loan |lease |tenancy |rental |service |maintenance |monitoring )?agreement(?: number| no\\.?| ref(?:erence)?)" },
+  { value: "agreement", direction: "forward", pattern: "contract(?: number| no\\.?)" },
+  { value: "agreement", direction: "backward", pattern: "is your agreement number" },
+
   // certificate -- a document the household holds, numbered as itself: a
-  // certificate, a licence, a test record. The number IS their reference.
+  // certificate, a licence, a permit, a test record, an inspection report,
+  // a ticket. The number IS their reference.
   { value: "certificate", direction: "forward", pattern: "certificate(?: number| no\\.?)" },
   { value: "certificate", direction: "forward", pattern: "licen[cs]e(?: number| no\\.?)" },
+  { value: "certificate", direction: "forward", pattern: "permit(?: number| no\\.?)" },
   { value: "certificate", direction: "forward", pattern: "test(?: certificate)? number" },
+  { value: "certificate", direction: "forward", pattern: "(?:guarantee|warranty)(?: certificate)?(?: number| no\\.?)" },
+  { value: "certificate", direction: "forward", pattern: "(?:report|record|ticket)(?: reference)?(?: number| no\\.?)" },
+  { value: "certificate", direction: "forward", pattern: "microchip(?: number| no\\.?)?" },
   { value: "certificate", direction: "backward", pattern: "is the certificate number" },
 
   // company -- the organisation's own registration, never the household's
@@ -288,22 +327,37 @@ const IDENTIFIER_TRIGGERS: readonly LabelTrigger<"identifier">[] = [
     value: "other",
     direction: "forward",
     pattern:
-      "\\b(?!(?:your|our|payment|account|policy|plan|customer|client|order|membership|invoice|certificate|licen[cs]e|quoting|quote this)\\b)[A-Za-z]+,?\\s+ref(?:erence)?(?: number| no\\.?)?\\b",
+      "\\b(?!(?:your|our|payment|account|policy|plan|customer|client|order|membership|invoice|certificate|licen[cs]e|agreement|guarantee|warranty|permit|ticket|document|quote|report|subscription|tenancy|quoting|quote this)\\b)[A-Za-z]+,?\\s+ref(?:erence)?(?: number| no\\.?)?\\b",
   },
+
+  // The word a page heads the number with, on its own. Tika prints a form
+  // label as its own block ("Policy \n\nMTR-8823"), and pages that run the
+  // label into the value print it the same way ("Certificate CSS-0417",
+  // "Agreement BVF-PCP-208841", "Membership MDC-4471-8823"): one word that
+  // names the paper, then the number. The word in running prose is a
+  // weaker reason than any of the labels above, and it loses to them on
+  // distance wherever a page prints both.
+  { value: "policy", direction: "forward", pattern: "\\bpolicy\\b", weak: true },
+  { value: "customer", direction: "forward", pattern: "\\bmembership\\b", weak: true },
+  { value: "agreement", direction: "forward", pattern: "\\bagreement\\b", weak: true },
+  { value: "certificate", direction: "forward", pattern: "\\bcertificate\\b", weak: true },
+  { value: "certificate", direction: "forward", pattern: "\\b(?:guarantee|permit)\\b", weak: true },
+  { value: "certificate", direction: "forward", pattern: "\\breport\\b", weak: true },
+  { value: "invoice", direction: "forward", pattern: "\\b(?:invoice|receipt)\\b", weak: true },
+  { value: "invoice", direction: "forward", pattern: "\\border\\b", weak: true },
+  { value: "account", direction: "forward", pattern: "\\bsubscription\\b", weak: true },
 
   // Single words Tika prints as a block of their own, above the value. They
   // assert nothing in running prose, so they carry `labelBlockOnly`.
-  { value: "policy", direction: "forward", pattern: "policy", labelBlockOnly: true },
-  { value: "account", direction: "forward", pattern: "account", labelBlockOnly: true },
-  { value: "customer", direction: "forward", pattern: "(?:customer|membership)", labelBlockOnly: true },
-  { value: "invoice", direction: "forward", pattern: "invoice", labelBlockOnly: true },
-  { value: "certificate", direction: "forward", pattern: "certificate", labelBlockOnly: true },
+  { value: "customer", direction: "forward", pattern: "customer", labelBlockOnly: true },
 
-  // reference (generic -- declared last, see the note above)
-  { value: "reference", direction: "forward", pattern: "(?:payment|order|your) ref(?:erence)?(?: number| no\\.?)?" },
-  { value: "reference", direction: "forward", pattern: "ref(?:erence)?(?: number| no\\.?)?" },
+  // reference (generic -- declared last, see the note above). The word
+  // boundaries matter: without them "ref" is found inside "refunds",
+  // "referral" and "prefer", which is how a sort code and a promotion code
+  // came to be read as the household's reference.
+  { value: "reference", direction: "forward", pattern: "(?:payment|order|your) ref(?:erence)?(?: number| no\\.?)?\\b" },
+  { value: "reference", direction: "forward", pattern: "\\bref(?:erence)?(?: number| no\\.?)?\\b" },
   { value: "reference", direction: "backward", pattern: "is your reference" },
-  { value: "reference", direction: "forward", pattern: "reference", labelBlockOnly: true },
 ];
 
 /**
@@ -512,6 +566,8 @@ interface TriggerScope {
   matchText: string;
   /** See `LabelTrigger.overrides`. */
   overrides: boolean;
+  /** See `LabelTrigger.weak`. */
+  weak: boolean;
 }
 
 /**
@@ -595,6 +651,7 @@ function buildScopes(
       matchStart: match.start,
       matchText: match.text,
       overrides: match.trigger.overrides === true,
+      weak: match.trigger.weak === true,
     });
   }
 
@@ -660,7 +717,12 @@ function labelTag(start: number, end: number, scopes: readonly TriggerScope[]): 
   });
 
   return {
-    tag: { value: covering[0].value, trigger: covering[0].matchText, source: "label" },
+    tag: {
+      value: covering[0].value,
+      trigger: covering[0].matchText,
+      source: "label",
+      ...(covering[0].weak ? { strength: STRENGTH_WEAK } : {}),
+    },
     scope: covering[0],
     distance: distance(covering[0]),
   };
@@ -699,14 +761,28 @@ function looksLikeLetterhead(line: string): boolean {
   return words.every((word) => TITLE_CASE_WORD.test(word));
 }
 
-function shapeTags(candidate: Candidate, firstHeadingIndex: number): Tag[] {
+/** How much of the page either side of a number a shape rule may read: the
+ * address or the dialling code it is printed inside, never more. */
+const AROUND_A_NUMBER = 48;
+
+function shapeTags(text: string, candidate: Candidate, firstHeadingIndex: number): Tag[] {
   if (candidate.kind === "identifier") {
+    const tags: Tag[] = [];
     // Published check arithmetic, not a guess: a number that balances is the
     // organisation's own registration, whatever the page prints beside it.
     const checksum = validateChecksumIdentifier(candidate.value);
-    return checksum.valid && checksum.kind
-      ? [{ value: "company", trigger: checksum.kind, source: "shape" }]
-      : [];
+    if (checksum.valid && checksum.kind) {
+      tags.push({ value: "company", trigger: checksum.kind, source: "shape" });
+    }
+    // The other numbers whose own form says they are somebody else's: a
+    // telephone number, bank details, a sheet number, a number inside an
+    // address (`extraction-reference-never.ts`).
+    const never = neverTheReferenceShape(candidate.value, candidate.line, {
+      before: text.slice(Math.max(0, candidate.index - AROUND_A_NUMBER), candidate.index),
+      after: text.slice(candidate.index, candidate.index + AROUND_A_NUMBER),
+    });
+    if (never) tags.push(never);
+    return tags;
   }
   if (candidate.kind === "organisation" && looksLikeLetterhead(candidate.line)) {
     // Deliberately `other`, never `provider`: a letterhead says the block is
@@ -1035,7 +1111,7 @@ export const tagCandidates: TagStage = (text, candidates) => {
       if (label) tags.push(label.tag);
     }
 
-    tags.push(...shapeTags(candidate, firstHeadingIndex));
+    tags.push(...shapeTags(text, candidate, firstHeadingIndex));
     if (tags.length === 0) tags.push({ value: "other", trigger: "", source: "label" });
 
     return { ...candidate, tags };

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { assignContextRoles, type LocatedDate } from "./context-roles";
 import { sieve, type CandidateKind } from "./extraction-sieve";
+import { STRENGTH_WEAK } from "./extraction-stages";
 import { tagCandidates } from "./extraction-tags";
 import { validateChecksumIdentifier } from "./reference-checksums";
 
@@ -214,7 +215,9 @@ describe("the numbers a page heads without the word 'number'", () => {
   it("reads a bare account label, but not a web page's own navigation", () => {
     expect(tagValues("GENERATION ACCOUNT SEG-4471-0932", "identifier")).toContain("account");
     expect(tagValues("ACCOUNT 8847 2210 55", "identifier")).toContain("account");
-    expect(tagValues("My Account myaccount.example/billing/2026-03/summary", "identifier")).toEqual(["other"]);
+    // The navigation label says nothing, and the number is printed inside
+    // the address bar's own URL, which is never anybody's reference.
+    expect(tagValues("My Account myaccount.example/billing/2026-03/summary", "identifier")).toEqual(["web"]);
   });
 
   it("reads the document's own number on a plan, a licence and a test record", () => {
@@ -230,7 +233,8 @@ describe("one label naming one value", () => {
     const identifiers = tagged(page).filter((c) => c.kind === "identifier");
     expect(identifiers.map((c) => [c.value, c.tags[0].value])).toEqual([
       ["7734 2210 91", "account"],
-      ["07700", "other"],
+      // The mobile number is left to its own shape, which says what it is.
+      ["07700", "phone"],
       ["900123", "other"],
     ]);
   });
@@ -269,10 +273,14 @@ describe("a label Tika put in a block of its own", () => {
     ]);
   });
 
-  it("trusts a bare one-word label only when it is the whole block", () => {
+  it("reads a bare one-word label, and marks it weak where it is only a word in prose", () => {
     expect(tagValues("Policy \n\nMTR-8823-0145", "identifier")).toEqual(["policy"]);
     expect(tagValues("Membership \n\nWX-4471-B", "identifier")).toEqual(["customer"]);
-    expect(tagValues("Your policy covers item AB-12345 at home", "identifier")).toEqual(["other"]);
+    // Pages run the noun straight into the number ("Certificate CSS-0417"),
+    // so a bare noun is still a label -- but a weak one, and stage 3 hears
+    // it behind every label the page spelled out.
+    expect(candidate("Your policy covers item AB-12345 at home", "identifier").tags[0])
+      .toEqual({ value: "policy", trigger: "policy", source: "label", strength: STRENGTH_WEAK });
   });
 });
 
