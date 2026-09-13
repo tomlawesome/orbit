@@ -296,6 +296,9 @@ function nextLineEndAfter(text: string, from: number): number | null {
   return match && match.index === 0 ? from + match[0].length : null;
 }
 
+/** A preposition that hands a trigger the date after it. */
+const POINTS_FORWARD = /^\s*(?:on|by|at|from|until|before)\b/iu;
+
 function buildTriggerScopes(text: string): TriggerScope[] {
   const breaks = findSentenceBreaks(text);
   const terminators = findTerminators(text);
@@ -309,7 +312,13 @@ function buildTriggerScopes(text: string): TriggerScope[] {
     for (const match of text.matchAll(regex)) {
       const matchStart = match.index ?? 0;
       const matchEnd = matchStart + match[0].length;
-      if (trigger.direction === "forward") {
+      // "is due on 15 September" points at the date after it, however the
+      // row was written: a backward trigger followed by a preposition is a
+      // forward one, and the date before it is somebody else's.
+      const direction = trigger.direction === "backward" && POINTS_FORWARD.test(text.slice(matchEnd, matchEnd + 12))
+        ? "forward"
+        : trigger.direction;
+      if (direction === "forward") {
         const scopeStart = matchEnd;
         let scopeEnd = Math.min(
           sentenceEndAfter(breaks, scopeStart),
@@ -328,7 +337,7 @@ function buildTriggerScopes(text: string): TriggerScope[] {
         }
         scopes.push({
           role: trigger.role,
-          direction: trigger.direction,
+          direction,
           anchor: scopeStart,
           scopeStart,
           scopeEnd,

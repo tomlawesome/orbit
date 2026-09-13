@@ -142,14 +142,21 @@ const TAIL_LIMIT = 90;
  * to 13 June 2031, expiring at midnight" says the expiry is the SECOND date,
  * and a tail that ran past it would hand the word to the first.
  */
-function tailAfter(text: string, candidate: DateCandidate, all: readonly DateCandidate[]): string {
+function tailAfter(
+  text: string,
+  candidate: DateCandidate,
+  all: readonly DateCandidate[],
+): { tail: string; stoppedAtDate: boolean } {
   const from = candidate.index + candidate.length;
   const nextDate = all
     .filter((entry) => entry.index >= from)
-    .reduce((nearest, entry) => Math.min(nearest, entry.index), from + TAIL_LIMIT);
-  const window = text.slice(from, nextDate);
+    .reduce((nearest, entry) => Math.min(nearest, entry.index), Number.POSITIVE_INFINITY);
+  const window = text.slice(from, Math.min(nextDate, from + TAIL_LIMIT));
   const cut = CUT.exec(window);
-  return cut ? window.slice(0, cut.index) : window;
+  return {
+    tail: cut ? window.slice(0, cut.index) : window,
+    stoppedAtDate: !cut && nextDate <= from + TAIL_LIMIT,
+  };
 }
 
 /** A term the page printed, in months: "12 months", "24-month", "5 years",
@@ -247,15 +254,23 @@ const TAIL_TRIGGERS: readonly TailTrigger[] = [
   { role: "issued", weight: STRENGTH_STATED, pattern: "(?:was|were) (?:issued|printed|produced|prepared)\\b" },
 ];
 
+/** What is left of a tail after its trigger when the trigger was about the
+ * date the tail stopped at: nothing, or a preposition leading into it. */
+const LEADS_INTO_NEXT_DATE = /^\s*(?:on|by|at|from|until|before|of)?\s*$/iu;
+
 const wordsAfter: DateSieve = {
   name: "words-after",
   read: (text, candidate, all) => {
-    const tail = tailAfter(text, candidate, all);
+    const { tail, stoppedAtDate } = tailAfter(text, candidate, all);
     if (!tail.trim()) return [];
     const votes: DateVote[] = [];
     for (const trigger of TAIL_TRIGGERS) {
       const match = new RegExp(trigger.pattern, "iu").exec(tail);
       if (!match) continue;
+      // "...and your next payment is due on" with the next date right after
+      // the tail: the clause was leading into that date, not looking back at
+      // this one.
+      if (stoppedAtDate && LEADS_INTO_NEXT_DATE.test(tail.slice(match.index + match[0].length))) continue;
       // "...the registration certificate issued 20 March 2019, which are not
       // renewal documents". A clause that denies what it is saying says the
       // opposite of what the row reads, so the row reads nothing: ConText's

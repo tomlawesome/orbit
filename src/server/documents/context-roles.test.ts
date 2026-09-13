@@ -32,6 +32,12 @@ describe("backward triggers", () => {
     const roles = assignContextRoles(text, [dateAt(text, "1 October 2026")]);
     expect(roles).toEqual(["renewal"]);
   });
+
+  it("points forward instead when a preposition follows it", () => {
+    const text = "Your first payment was taken on 15 August 2026 and your next payment is due on 15 September 2026.";
+    const roles = assignContextRoles(text, [dateAt(text, "15 August 2026"), dateAt(text, "15 September 2026")]);
+    expect(roles).toEqual(["other", "due"]);
+  });
 });
 
 describe("the directional case a naive window cannot tell apart", () => {

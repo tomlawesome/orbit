@@ -54,6 +54,13 @@ describe("the words after a date", () => {
     expect(roles("words-after", text, "2031-06-13")).toEqual(["renewal"]);
   });
 
+  it("gives a clause leading into the next date to that date", () => {
+    const text = "Your first payment was taken on 15 August 2026 and your next payment is due on 15 September 2026.";
+    expect(roles("words-after", text, "2026-08-15")).toEqual([]);
+    const alone = "Your payment of £68.00 is due, and a receipt was sent on 15 August 2026.";
+    expect(roles("words-after", alone, "2026-08-15")).toEqual([]);
+  });
+
   it("says nothing about a clause that denies itself", () => {
     const text = "the registration certificate issued 20 March 2019, which are not renewal documents";
     expect(roles("words-after", text, "2019-03-20")).toEqual([]);
