@@ -5062,8 +5062,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E91",
@@ -5125,8 +5124,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E92",
@@ -5140,6 +5138,194 @@
       "how": "npm run eval:holdout -- --holdout4",
       "commit": "fc03271",
       "output": "tmp/e-holdout4-cost1.txt",
+      "scores": {
+        "overall": {
+          "pct": 70.7,
+          "net": 82,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E93",
+      "date": "2026-09-13",
+      "label": "reference: the sieve keeps a letter prefix printed as part of the number",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Stage 1 (57a75f8). Beside the bare digits the sieve also collects the prefixed form — one to four capitals, one space, then the digits — so a reference printed as AB 1234567 survives whole; a short word the page uses to name a number (Ref, No, Acc, Inv, VAT, Tel…) is not swallowed. Both forms go forward and the label decides. Sieve recall for reference 58 → 60 of 60; chosen 53 → 55. No other field moved.",
+      "how": "npm run eval:stages",
+      "commit": "57a75f8",
+      "output": "tmp/e-seen60-stages-ref2.txt",
+      "scores": {
+        "overall": {
+          "pct": 84.4,
+          "net": 429,
+          "of": 508
+        },
+        "provider": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "reference": {
+          "pct": 91.7,
+          "net": 55,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 40,
+          "of": 60
+        },
+        "cost": {
+          "pct": 66.7,
+          "net": 36,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E94",
+      "date": "2026-09-13",
+      "label": "prefix fix (E93) on hold-out 3",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E93 on hold-out 3: no field moved.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "57a75f8",
+      "output": "tmp/e-holdout3-ref2.txt",
+      "scores": {
+        "overall": {
+          "pct": 79.1,
+          "net": 87,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E95",
+      "date": "2026-09-13",
+      "label": "prefix fix (E93) on hold-out 4",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E93 on hold-out 4: no field moved.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "57a75f8",
+      "output": "tmp/e-holdout4-ref2.txt",
       "scores": {
         "overall": {
           "pct": 70.7,
