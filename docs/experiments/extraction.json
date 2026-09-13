@@ -4876,8 +4876,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E88",
@@ -4939,8 +4938,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E89",
@@ -4954,6 +4952,194 @@
       "how": "npm run eval:holdout -- --holdout4",
       "commit": "04dd7f7",
       "output": "tmp/e-holdout4-ref1.txt",
+      "scores": {
+        "overall": {
+          "pct": 70.7,
+          "net": 82,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E90",
+      "date": "2026-09-13",
+      "label": "cost: a period word is not a label; ties broken by the page's arithmetic; a term has to be printed",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Three cost-ranking changes (fc03271), tried one at a time. A period word in prose (\"costs £N a year\") no longer votes \"total\" — three sieves had been counting the same two words as three reasons (cost 32 → 34/54). A tie is broken by the figure the line items add up to or the instalments multiply out to, instead of blank (→ 35). The term multiplier must be a printed term; the dates fallback (datedTermMonths) is removed as it never paid (→ 36). Tried and dropped: demoting figures whose every printing carries a marketing word (from, only, save, was, RRP…) — lifted the answer to first on the shortlist 23 → 25 but the chooser scored the same. No other field moved. Remaining 19 tuning cost misses: 10 a rival total outranks the charge (another way of paying, another option, last time's payment); 5 a monthly price with no term in words; 1 price in a list of prices; 1 subtotal beats VAT-inclusive total; 1 instalment outranked by a whole price; 1 nothing spoke for the answer.",
+      "how": "npm run eval:stages",
+      "commit": "fc03271",
+      "output": "tmp/e-seen60-stages-cost1.txt",
+      "scores": {
+        "overall": {
+          "pct": 84.1,
+          "net": 427,
+          "of": 508
+        },
+        "provider": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "reference": {
+          "pct": 88.3,
+          "net": 53,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 40,
+          "of": 60
+        },
+        "cost": {
+          "pct": 66.7,
+          "net": 36,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E91",
+      "date": "2026-09-13",
+      "label": "cost ranking (E90) on hold-out 3",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E90 rules on hold-out 3. Cost 6 → 9 of 12; no other field moved. Cost column tainted (#1006), so this is not the judge.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "fc03271",
+      "output": "tmp/e-holdout3-cost1.txt",
+      "scores": {
+        "overall": {
+          "pct": 79.1,
+          "net": 87,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E92",
+      "date": "2026-09-13",
+      "label": "cost ranking (E90) on hold-out 4",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E90 rules on hold-out 4, the clean judge for cost. Cost unchanged at 5/12, nothing fell; no other field moved.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "fc03271",
+      "output": "tmp/e-holdout4-cost1.txt",
       "scores": {
         "overall": {
           "pct": 70.7,
