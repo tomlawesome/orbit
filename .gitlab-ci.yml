@@ -762,7 +762,7 @@ fast:
     # Everything from here runs unprivileged, because two of these tests assert
     # a permission refusal that root does not receive. See .drop_to_node.
     - *drop_to_node
-    # ORBIT_TEST_SKIP_DOCKER excludes the two suites fast_docker owns, below.
+    # ORBIT_TEST_SKIP_DOCKER excludes the suites fast_docker owns, below.
     - orbit_as_node 'ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh'
     # The production build and the render proof, run here as well as inside the
     # image: the container build is the authoritative gate but it is minutes
@@ -782,7 +782,7 @@ fast:
     expire_in: 14 days
     when: on_success
 
-# The other half: the two suites that need a real `docker` binary, on the
+# The other half: the suites that need a real `docker` binary, on the
 # privileged `orbit-build` lane so `fast` no longer has to be. Not
 # `.docker_in_job`: nothing here binds a checkout or tmpdir path into a
 # container, so the dind *service* (`.dind_service`) is enough, and is what
@@ -790,7 +790,7 @@ fast:
 #
 # No `--coverage`: the coverage-bearing run is `fast`'s, and stays whole so
 # the ratchet floors in vitest.config.ts measure one consistent run rather
-# than two partial ones with no merge step. Neither file's own coverage
+# than two partial ones with no merge step. Neither src/lib file's own coverage
 # contribution is currently double-counted or dropped in a way verified
 # against a live pipeline -- watch the first real run after this split for a
 # `src/lib/**` floor regression before assuming it is clear (most of
@@ -816,9 +816,14 @@ fast_docker:
     - orbit_lane_admits fast_docker || exit 0
     - *reuse_gate
     - *docker_cli
+    # test-e2e-local-reuse.test.mjs spawns the real scripts/test-e2e-local.sh,
+    # which checks its whole prerequisite list before the code under test runs
+    # -- and node:22-bookworm carries every one of them except jq (pipeline
+    # 1021). *docker_cli has just run `apt-get update`, so this is one package.
+    - apt-get install -y -qq --no-install-recommends jq
     - pnpm install --frozen-lockfile
     - *drop_to_node
-    - orbit_as_node 'pnpm exec vitest run src/lib/install-script-adapters.test.ts src/lib/recovery-bundle.parity.test.ts'
+    - orbit_as_node 'pnpm exec vitest run src/lib/install-script-adapters.test.ts src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs'
     - *reuse_evidence
   artifacts:
     name: orbit-fast-docker

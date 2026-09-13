@@ -146,13 +146,13 @@ describe("exact-image publication workflow", () => {
     // publish_preview already runs this exact step sequence once on push;
     // smoke itself must never also fire on a push event.
     expect(smoke).not.toContain("'push'");
-    // Since the mirror flip (#801 step 5) GitHub sees pushes, not pull
-    // requests: the mirror delivers dev, preview and main.
+    // #948: this workflow no longer triggers on a mirrored push or a pull
+    // request. GitLab's own pipeline is the push-triggered gate now; this one
+    // is a manual second opinion, reached only by dispatching it.
     const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
-    const pushBranches = trigger.slice(trigger.indexOf("  push:\n"), trigger.indexOf("  workflow_dispatch:"));
-    for (const branch of ["dev", "preview", "main", '"hotfix/**"']) {
-      expect(pushBranches).toContain(`      - ${branch}\n`);
-    }
+    expect(trigger).not.toContain("  push:\n");
+    expect(trigger).not.toContain("  pull_request:\n");
+    expect(trigger.trim()).toBe("on:\n  workflow_dispatch: {}".trim());
   });
 
   it("selects fail-safe risk lanes while keeping required checks reportable", () => {
