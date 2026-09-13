@@ -118,12 +118,19 @@ describe("a qualifier beside an amount", () => {
     expect(tagValues("OUTSTANDING BALANCE AT 31 MARCH 2026 £164,611.07", "amount")).toEqual(["other"]);
   });
 
-  it("reads a comparison figure, the whole-term sum and the second permit as rivals", () => {
-    expect(tagValues("Paid monthly, your 12 month plan is equivalent to £119.88 a year.", "amount")[0]).toBe("rival");
+  it("reads a comparison figure and the second permit as rivals", () => {
     expect(tagValues("Equivalent monthly price (for comparison only) £322.50", "amount")[0]).toBe("rival");
     expect(tagValues("this service would otherwise cost £148 if booked separately", "amount")[0]).toBe("rival");
-    expect(tagValues("giving a total payable over the 24  month minimum  term of £599.76.", "amount")[0]).toBe("rival");
     expect(tagValues("A second permit for another vehicle at this household costs £90.00 per year.", "amount")[0]).toBe("rival");
+  });
+
+  // Owner, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term
+  // contract costs everything paid over its term.
+  it("reads the whole-term sum, the year's total paid monthly and the plan's yearly price as the price", () => {
+    expect(tagValues("giving a total payable over the 24  month minimum  term of £599.76.", "amount")[0]).toBe("total");
+    expect(tagValues("Total premiums payable over full term approximately £7,800.00", "amount")[0]).toBe("total");
+    expect(tagValues("THIS MONTH 'S INSTALMENT \n\n£14.99 \n\nANNUAL TOTAL IF PAID  MONTHLY \n\n£179.88", "amount", "17988")[0]).toBe("total");
+    expect(tagValues("Paid monthly, your 12 month plan is equivalent to £119.88 a year.", "amount")[0]).toBe("total");
   });
 
   it("reads a per-claim limit, a penalty and a balloon payment as not the price", () => {
@@ -143,6 +150,7 @@ describe("how a page prices a plan", () => {
   it("reads the monthly charge as an instalment, and a bare fee as the price", () => {
     expect(tagValues("£23.00/mo standard monthly charge", "amount")).toEqual(["instalment"]);
     expect(tagValues("Monthly membership fee, collected by Direct Debit £42.50", "amount")).toEqual(["instalment"]);
+    expect(tagValues("Your monthly premium £34.62", "amount")).toEqual(["instalment"]);
     expect(tagValues("Fee £182.00", "amount")).toEqual(["total"]);
     expect(tagValues("Joining fee (payable on signing, non-refundable) £25.00", "amount")).toEqual(["other"]);
   });

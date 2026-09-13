@@ -438,17 +438,10 @@ figures the page prints *beside* the price, which the words then found:
   charge, a balloon payment. An `other` a sieve read in words now counts
   against the figure in stage 3, as `rival` and `previous` do; the blank
   `other` on a figure nobody read still counts for nothing.
-- **A comparison**: "equivalent to £119.88 a year", "(for comparison
-  only)", "would otherwise cost £148 if booked separately", the second
-  permit's price, and the sum of every payment over a term longer than a
-  year ("total payable over the 24 month minimum term") -- all `rival`.
-  The corpus truth of 2026-09-12 priced a monthly contract by the month;
-  the owner overruled that on 2026-09-13 for the PCP agreement -- Orbit
-  tracks long-term commitments, not monthly payments, so a stated whole
-  commitment ("Total amount payable") is the cost. Which other monthly
-  truths that reaches is open with the owner (question 40 of that
-  session); the `rival` reading of "over the term" totals stands until it
-  is answered.
+- **A comparison**: "equivalent monthly price (for comparison only)",
+  "would otherwise cost £148 if booked separately", the second permit's
+  price, and the financed option beside a paid-in-full premium ("total if
+  paying monthly") -- all `rival`.
 - **The owner's words**: contract price, amount charged, balance due,
   invoice total, final total, annual permit fee, payment of. A bare
   "outstanding balance" is a loan's debt and stays out.
@@ -467,7 +460,47 @@ Whole pipeline: 78.2% -> 80.4% on the 48, 70.5% -> 72.3% on hold-out 3.
 Left on the tuning set at the time: the PCP agreement and the domain
 renewal. Both truths were later corrected by the owner (total amount
 payable; total due including VAT), and the `adds-up` sieve (E58) reads the
-second; cost is 42/42 on the tuning set as of 2026-09-13.
+second.
+
+## Amendment, 2026-09-13: cost is the whole commitment
+
+The corpus truth of 2026-09-12 priced a monthly contract by the month.
+The owner overruled it: Orbit tracks long-term commitments, not monthly
+payments, so a fixed-term contract costs everything paid over its term --
+"all, except where the pay monthly price is different ... the annual term
+is duration x monthly cost. Renewals often show both options, but the
+policy should show the total amount." Applied to the tuning set:
+
+- A printed whole-term total is the cost: "total payable over the 24 month
+  minimum term", "total premiums payable over full term", "total rent
+  payable over the term", "plan year value", "annual total if paid
+  monthly", "equivalent to £119.88 a year" on a 12-month plan. The
+  `rival` reading of "over the term" flipped to `total`; "annual total"
+  is the year's price however paid; "equivalent" is a rival only when it
+  re-prices by a different period.
+- Where the page prints only the monthly price and the term (gym,
+  broadband, car lease, mobile), the cost is the product. The
+  `term-multiple` sieve reads a figure that is another figure times a
+  printed term as the total (the owner's arithmetic idea of 2026-09-12,
+  E63, which the monthly truth had rejected), and stage 3 multiplies a
+  lone instalment by the one contract term the page states
+  (`contractTermMonths`). The mobile plan's introductory rate makes its
+  true total 6 x £14 + 18 x £23 = £498, not 24 x £23; the pipeline answers
+  £552 and the truth stays honest, flagged to the owner.
+- An offered option is not the commitment: a renewal or schedule printing
+  a paid-in-full premium beside "total if paying monthly" keeps the
+  annual premium (car, home and pet insurance).
+- A rolling contract with no fixed term keeps the monthly figure (health
+  cash plan, self storage), as do the mortgage and the pension.
+
+| cost | tuning 42 | hold-out 3 (12) |
+|---|---|---|
+| truths re-cut, old rules | 31 | -- |
+| after | **41** | 6 |
+
+Whole pipeline 83.6% -> 83.3% on the 48 (the mobile plan), hold-out 3
+unchanged at 73.2%. Hold-out 3's cost truths were written under the
+monthly convention and have not been re-cut; the owner re-checks them.
 
 ## Alternatives rejected
 

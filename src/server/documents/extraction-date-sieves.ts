@@ -159,7 +159,7 @@ const TERM_MONTHS = /(\d{1,3})\s*-?\s*months?\b/iu;
 const TERM_YEARS = /(\d{1,2})\s*-?\s*years?\b/iu;
 const TERM_ANNUAL = /\bannual(?:ly)?\b|\byearly\b|\b(?:per|each|every) (?:year|annum)\b/iu;
 
-function printedTerms(text: string): Array<{ months: number; trigger: string }> {
+export function printedTerms(text: string): Array<{ months: number; trigger: string }> {
   const found: Array<{ months: number; trigger: string }> = [];
   for (const match of text.matchAll(new RegExp(TERM_MONTHS, "giu"))) {
     found.push({ months: Number(match[1]), trigger: match[0].trim() });

@@ -34,6 +34,10 @@
 //                       cover limit too, whatever its own words say
 //   adds-up             the row of an order summary that adds up the rows
 //                       directly above it is the bill, whatever it is called
+//   term-multiple       a figure that is another figure on the page times a
+//                       term the page printed ("24 month minimum term",
+//                       "25-year term") is the whole commitment, and the
+//                       smaller figure is one payment of it
 //
 // Each returns a vote, never a decision. Votes merge into tags by tag
 // value, so a figure several sieves agree about carries one tag naming all
@@ -46,6 +50,7 @@
 // table" is the structure of a table, which every table has, and is as far
 // as position goes.
 
+import { printedTerms } from "./extraction-date-sieves";
 import {
   STRENGTH_STATED,
   STRENGTH_WEAK,
@@ -588,6 +593,41 @@ const addsUp: AmountSieve = {
   },
 };
 
+/**
+ * A contract prices itself two ways: by the payment and by the term. Where
+ * one figure on the page is another figure times a term the page printed
+ * -- £599.76 is £24.99 by 24 months, £10,386.00 is £34.62 by 25 years --
+ * the page has done the arithmetic that says which is which: the product
+ * is the whole commitment (owner, 2026-09-13: Orbit tracks the whole
+ * commitment, so a fixed-term contract's cost is the total over its term)
+ * and the factor is one payment of it. Minor units throughout, so the
+ * multiplication is exact.
+ */
+export const TERM_MULTIPLE = "term-multiple";
+
+const termMultiple: AmountSieve = {
+  name: TERM_MULTIPLE,
+  read: (candidate, all, page) => {
+    const value = Number(candidate.value);
+    if (!Number.isInteger(value) || value <= 0) return [];
+    const months = [...new Set(printedTerms(page.text).map((term) => term.months))].filter((term) => term >= 2);
+    for (const other of all) {
+      if (other.value === candidate.value) continue;
+      const otherValue = Number(other.value);
+      if (!Number.isInteger(otherValue) || otherValue <= 0) continue;
+      for (const term of months) {
+        if (otherValue * term === value) {
+          return [{ sieve: TERM_MULTIPLE, tag: "total", trigger: `${term} x ${other.line.replace(/\s+/gu, " ").trim().slice(0, 40)}`, weight: STRENGTH_STATED }];
+        }
+        if (value * term === otherValue) {
+          return [{ sieve: TERM_MULTIPLE, tag: "instalment", trigger: `one of ${term}`, weight: STRENGTH_WEAK }];
+        }
+      }
+    }
+    return [];
+  },
+};
+
 // ------------------------------------------------------------------ the set
 
 /** Only the strongest vote a single sieve casts: a sieve has one opinion
@@ -610,6 +650,7 @@ export const AMOUNT_SIEVES: readonly AmountSieve[] = [
   instalmentTotal,
   tableNeighbours,
   addsUp,
+  termMultiple,
 ];
 
 /** Every sieve's name, the label first, for reports and for ordering the
