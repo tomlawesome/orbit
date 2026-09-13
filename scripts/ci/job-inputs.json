@@ -51,6 +51,9 @@
     "fast": [
       "**"
     ],
+    "fast_docker": [
+      "**"
+    ],
     "integration": [
       "src/**",
       "web/**",
