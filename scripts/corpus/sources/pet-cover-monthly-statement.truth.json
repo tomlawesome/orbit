@@ -1,0 +1,24 @@
+{
+  "name": "pet cover monthly statement, a ledger of payments and a settled claim",
+  "filename": "pet-cover-monthly-statement.pdf",
+  "expected": {
+    "dates": ["2027-02-01"],
+    "provider": "Bramblepaw Pet Healthcare",
+    "reference": "BP 4411 8820 6",
+    "dateRoles": [
+      { "date": "2027-02-01", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Insurance", "Statement"], "qualifiers": ["Pet"] },
+    "costMinor": 34188,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "provider is Bramblepaw Pet Healthcare, the firm the household pays and rings. It is not the underwriter Sturbridge Underwriting Agency Limited, not the claims handler Vetclaim Services, not the veterinary practice Milden Road Veterinary Group, not the parent Bramblepaw Holdings Limited in the registered-office small print, not the payment processor Aldgate Payments and not the Financial Ombudsman Service.",
+    "reference is the policy number BP 4411 8820 6, printed beside the pet's details and on the payment slip. Genuine rivals the statement prints: the microchip number 981098100472339, the customer number 77123, the statement number ST-0091, the claim number CL-2026-08841, the veterinary practice code VP-2290, the direct debit reference 4411882, the sort code 20-45-11, the bank account number 61550293, the VAT number GB 194 2288 03 and the company registration number 09923118.",
+    "dates and dateRoles carry only the policy anniversary, 1 February 2027, when the cover must be renewed for another year. The statement prints far more: the statement date (2 September 2026), the period it covers (1 August 2026 to 31 August 2026), the policy start (01/02/2023), the pet's date of birth (14/06/2021), the last booster (09/05/2026), the claim received (12/07/2026) and settled (28/07/2026), the next direct debit collection (5 September 2026), the date the new price schedule takes effect (1 January 2027) and every line date in the ledger.",
+    "costMinor is the premium for the current policy year, £341.88. It is not the £28.49 monthly instalment, not the £28.49 statement balance, not the £95 excess for each condition, not the 20 per cent co-payment, not the £7,500 annual vet fee limit or the £1,500 third party liability limit, which are cover limits, not the £412.60 the claim paid out, and not the £12.00 failed payment charge.",
+    "recurrenceMonths is 12, the printed 12 month policy year. scheduleKind is renewal."
+  ]
+}

@@ -467,6 +467,87 @@ const DOCS = {
     swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Anglers", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Anglers Mono", monospace']],
   },
 
+  // ---- twelve long, noisy tuning documents (#1007) ----
+  //
+  // Real household paper is around 10,000 characters and mostly not about
+  // the item. These twelve are that shape, and they join `sources/`, so
+  // their faces are drawn from the families the tuning set already uses --
+  // recombined into pairs no other document has -- and never from the
+  // twenty-one faces `holdout3/` reserves for itself.
+
+  // A posted insurance welcome pack: a soft-contrast display serif for the
+  // wording, a neutral sans for the panels and tables.
+  "motor-policy-welcome-pack.html": {
+    faces: [FACE("Corpus Welcome", "Fraunces.ttf"), FACE("Corpus Welcome Sans", "WorkSans.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Welcome", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Welcome Sans", sans-serif']],
+  },
+  // A renewal invitation: a high-contrast Caslon display for the masthead
+  // and headings, a plain grotesque for the price comparison.
+  "home-insurance-renewal-invitation.html": {
+    faces: [FACE("Corpus Invite", "LibreCaslonDisplay-Regular.ttf", "400"), FACE("Corpus Invite Sans", "Karla.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Invite", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Invite Sans", sans-serif']],
+  },
+  // A consumer account statement: a rounded sans for the page, a narrow
+  // mono for the transaction ledger.
+  "pet-cover-monthly-statement.html": {
+    faces: [FACE("Corpus Vet", "Mulish.ttf"), FACE("Corpus Vet Mono", "Inconsolata.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Vet", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Vet Mono", monospace']],
+  },
+  // A regulated annual energy summary: a friendly grotesque for the page, a
+  // technical mono for meter numbers and readings.
+  "energy-annual-summary.html": {
+    faces: [FACE("Corpus Meter", "Rubik.ttf"), FACE("Corpus Meter Mono", "ShareTechMono-Regular.ttf", "400")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Meter", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Meter Mono", monospace']],
+  },
+  // An e-mail printed to PDF: one mail-client sans, with a developer mono
+  // for the order and equipment codes.
+  "broadband-order-confirmation-email.html": {
+    faces: [FACE("Corpus Order", "Barlow-Regular.ttf", "400"), FACE("Corpus Order Mono", "JetBrainsMono.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Order", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Order Mono", monospace']],
+  },
+  // A self-service portal page printed from a browser: a humanist UI sans
+  // with a geometric mono for account and meter numbers.
+  "water-account-portal-page.html": {
+    faces: [FACE("Corpus Portal", "Cabin.ttf"), FACE("Corpus Portal Mono", "DMMono-Regular.ttf", "400")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Portal", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Portal Mono", monospace']],
+  },
+  // Local-authority print: a civic slab serif for the letter, a condensed
+  // sans for the instalment table and the small print.
+  "council-tax-band-adjustment-letter.html": {
+    faces: [FACE("Corpus Civic", "ZillaSlab-Regular.ttf", "400"), FACE("Corpus Civic Sans", "ArchivoNarrow.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Civic", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Civic Sans", sans-serif']],
+  },
+  // A boxed pre-contract credit form: a book serif for the wording, a plain
+  // typewriter mono for the figures typed into the boxes.
+  "personal-loan-precontract-information.html": {
+    faces: [FACE("Corpus Credit", "Lora.ttf"), FACE("Corpus Credit Mono", "AnonymousPro-Regular.ttf", "400")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Credit", serif'], [/"Liberation Mono", monospace/g, '"Corpus Credit Mono", monospace']],
+  },
+  // A software vendor's receipt with the marketing bolted on: a heavy
+  // display sans for the brand, a workhorse sans for everything else.
+  "software-subscription-receipt.html": {
+    faces: [FACE("Corpus Saas Brand", "ArchivoBlack-Regular.ttf", "400"), FACE("Corpus Saas", "FiraSans-Regular.ttf", "400"), FACE("Corpus Saas", "FiraSans-Bold.ttf", "700")],
+    swap: [[/"FreeSans", "Loma", sans-serif/g, '"Corpus Saas Brand", sans-serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Saas", sans-serif']],
+  },
+  // A registration card with terms on the back: a modern display serif for
+  // the card, a condensed sans for the terms.
+  "appliance-registration-guarantee-card.html": {
+    faces: [FACE("Corpus Reg", "DMSerifText-Regular.ttf", "400"), FACE("Corpus Reg Sans", "Oswald.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Reg", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Reg Sans", sans-serif']],
+  },
+  // A renewal notice with a tear-off slip: a warm text serif for the
+  // wording, a bold condensed sans for the panels and the slip.
+  "boiler-cover-renewal-notice.html": {
+    faces: [FACE("Corpus Warm", "Spectral-Regular.ttf", "400"), FACE("Corpus Warm Display", "BarlowCondensed-Bold.ttf", "700")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Warm", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Warm Display", sans-serif']],
+  },
+  // A workshop job card printed on the garage's own stationery: a machine
+  // mono for the job lines, a broad sans for the brand and headings.
+  "vehicle-service-record.html": {
+    faces: [FACE("Corpus Works Mono", "FiraMono-Regular.ttf", "400"), FACE("Corpus Works", "Chivo.ttf")],
+    swap: [[/"Liberation Mono", monospace/g, '"Corpus Works Mono", monospace'], [/"Liberation Sans", sans-serif/g, '"Corpus Works", sans-serif']],
+  },
+
 };
 
 for (const [file, { faces, swap }] of Object.entries(DOCS)) {
