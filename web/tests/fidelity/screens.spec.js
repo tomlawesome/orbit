@@ -437,15 +437,6 @@ const SCREENS = [
       && document.querySelectorAll(".msys").length > 0,
   },
   {
-    name: "admin",
-    path: "/admin",
-    stage: "porting",
-    mockup: "/design/family/admin.html",
-    settle: () => Boolean(document.querySelector(".pane .row")),
-    /* The mockup names its own motif for the reviewer; the product does not. */
-    mockupOnly: [".foot"],
-  },
-  {
     name: "relay",
     path: "/settings/mail",
     stage: "porting",
