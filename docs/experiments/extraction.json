@@ -3823,6 +3823,68 @@
       },
       "verdict": "kept",
       "notes": "Tried first and reverted: letting 'expires/expiring' decide renewal-vs-expiry by the thing named (RUNS_OUT without the 'expir' clause). Fixed the tenancy, broke the MOT and warranty certificates, net -1: the truths disagree on when 'expires' is a renewal."
+    },
+    {
+      "id": "E71",
+      "date": "2026-09-13",
+      "label": "dateRoles: a trigger followed by a preposition points forward",
+      "corpus": "seen48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Two halves of one rule. In the words-before scan (context-roles.ts) a backward trigger followed by on/by/at/from/until/before ('is due on 15 September') is a forward trigger for the date after it, not a claim on the date before. In the words-after sieve a tail that stopped at the next date and whose trigger is followed by nothing but such a preposition was leading into that date, so it says nothing about this one. Fixes the self-storage move-in date, which had tied start against a wrongly claimed due. dateRoles 77 to 78 of 85.",
+      "how": "npm run eval:stages",
+      "commit": "9d0eb34",
+      "output": "tmp/e-seen48-stages-dr3.txt",
+      "scores": {
+        "overall": {
+          "pct": 85.3,
+          "net": 348,
+          "of": 408
+        },
+        "provider": {
+          "pct": 79.2,
+          "net": 38,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 91.8,
+          "net": 78,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 70.8,
+          "net": 34,
+          "of": 48
+        },
+        "cost": {
+          "pct": 97.6,
+          "net": 41,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 89.7,
+          "net": 26,
+          "of": 29
+        },
+        "recurrence": {
+          "pct": 65.2,
+          "net": 15,
+          "of": 23
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
     }
   ],
   "measurements": [
