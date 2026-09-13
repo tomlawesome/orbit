@@ -5992,8 +5992,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E106",
@@ -6055,8 +6054,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E107",
@@ -6070,6 +6068,194 @@
       "how": "npm run eval:holdout -- --holdout4",
       "commit": "a150059",
       "output": "tmp/e-holdout4-subtype-twice.txt",
+      "scores": {
+        "overall": {
+          "pct": 72.4,
+          "net": 84,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 8,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E108",
+      "date": "2026-09-13",
+      "label": "subtype: the title says what it is; an add-on advert or small print does not answer for the page",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Two general rules (#1015; commits before 1c7d515 and 1c7d515). A word printed only in the running text never outvotes a word the title carries, however often the text repeats it (subtype 40 → 41/60). A heading saying optional extras / add-ons / you may also like / how to complain / regulated by opens a block to the next heading, and words found only inside one rank under every word the page says in its own voice; they stay in the bins and on the shortlist as rivals (→ 42). Tried and dropped: ranking set-apart section headings above running text (tuning 41 → 43 but hold-out 4 subtype 8 → 7 both ways). No other field moved; subtype on-list unchanged (52/60, 10/12, 12/12). 18 tuning subtype misses left: 7 a billing word (Bill, Statement, Order) beats the thing billed (Subscription, Contract, Lease); 8 a genuine section word wins the qualifier; 3 the taxonomy word is never printed. Real-document check pending (#1015).",
+      "how": "npm run eval:stages",
+      "commit": "1c7d515",
+      "output": "tmp/e-seen60-stages-subtype1.txt",
+      "scores": {
+        "overall": {
+          "pct": 86.2,
+          "net": 438,
+          "of": 508
+        },
+        "provider": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "reference": {
+          "pct": 93.3,
+          "net": 56,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "cost": {
+          "pct": 77.8,
+          "net": 42,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E109",
+      "date": "2026-09-13",
+      "label": "subtype rules (E108) on hold-out 3",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E108 on hold-out 3: no field moved.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "1c7d515",
+      "output": "tmp/e-holdout3-subtype1.txt",
+      "scores": {
+        "overall": {
+          "pct": 80,
+          "net": 88,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "cost": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E110",
+      "date": "2026-09-13",
+      "label": "subtype rules (E108) on hold-out 4",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E108 on hold-out 4: no field moved.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "1c7d515",
+      "output": "tmp/e-holdout4-subtype1.txt",
       "scores": {
         "overall": {
           "pct": 72.4,
