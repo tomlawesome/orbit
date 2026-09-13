@@ -1117,6 +1117,19 @@ describe("the meaning-shaped fields", () => {
     expect(chosen.provider).toBe("Kestrel Mutual");
     expect(chosen.subtype).toBe("Home Insurance");
   });
+
+  it("does not say a word twice where the qualifier and the kind are the same word", () => {
+    // "Mortgage" is both a qualifier and a kind in the taxonomy, and a
+    // mortgage statement lands its words in both bins: the answer is
+    // "Mortgage", not "Mortgage Mortgage" (owner's real documents,
+    // 2026-09-13).
+    const chosen = chooseFields([
+      candidate("heading", "MORTGAGE ANNUAL STATEMENT", [{ value: "title", trigger: "" }]),
+      candidate("heading", "Your mortgage", [{ value: "title", trigger: "" }]),
+    ]);
+
+    expect(chosen.subtype).toBe("Mortgage");
+  });
 });
 
 describe("the shortlists stage 2 ranks for the model", () => {
