@@ -3,7 +3,11 @@
 // owner's own machine and lists what it read from each, so the answers can
 // be checked against the paper by hand.
 //
-//   node orbit-extract.cjs [--docs ./docs] [--out ./out] [--tika http://host:9998] [--keep-text]
+//   node orbit-extract.cjs [--docs ./docs] [--out ./out] [--tika http://host:9998] [--keep-text] [--candidates]
+//
+// --candidates adds, under each document, the shortlist stage 2 handed the
+// chooser for provider, reference, subtype, cost and dates -- each
+// candidate's text and tags, the chosen one marked with `*`.
 //
 // The reading is the one being tuned in `src/server/documents/`: Tika turns
 // the file into text exactly as the deployed stack does (same Tika version,
@@ -24,9 +28,11 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import { chooseFields } from "../../src/server/documents/extraction-choose";
 import { sieve } from "../../src/server/documents/extraction-sieve";
+import { subtypeSources } from "../../src/server/documents/extraction-subtype-bins";
 import { tagCandidates } from "../../src/server/documents/extraction-tags";
 import { repairLetterSpacing } from "../../src/server/documents/extraction-text-repair";
 import type { ExtractedFields } from "../../src/server/documents/extraction-scoring";
+import type { TaggedCandidate } from "../../src/server/documents/extraction-stages";
 import { undoTikaMarkdownEscapes } from "../../src/server/documents/tika";
 
 /** As the application: what Tika sends past this point is not read. */
@@ -133,15 +139,107 @@ async function extractText(tika: string, bytes: Buffer, mediaType: string): Prom
   return undoTikaMarkdownEscapes(await response.text()).slice(0, MAX_EXTRACTED_CHARACTERS);
 }
 
-function readFields(text: string): ExtractedFields {
+function readFields(text: string): { fields: ExtractedFields; candidates: TaggedCandidate[] } {
   const page = repairLetterSpacing(text);
-  return chooseFields(tagCandidates(page, sieve(page)), page);
+  const candidates = tagCandidates(page, sieve(page));
+  return { fields: chooseFields(candidates, page), candidates };
 }
 
 function money(fields: ExtractedFields): string {
   if (fields.costMinor === undefined || fields.currency === undefined) return "";
   const symbol = fields.currency === "GBP" ? "£" : `${fields.currency} `;
   return `${symbol}${(fields.costMinor / 100).toFixed(2)}`;
+}
+
+/** As `money`, off a candidate's own minor-units value and currency rather
+ * than a chosen field, for the `--candidates` shortlists. */
+function amountDisplay(candidate: TaggedCandidate): string {
+  const minor = Number(candidate.value);
+  const symbol = candidate.currency === "GBP" ? "£" : candidate.currency ? `${candidate.currency} ` : "";
+  return `${symbol}${(minor / 100).toFixed(2)}`;
+}
+
+// A trimmed field value only ever narrows what a candidate printed (see
+// `value-trim.ts`), so "chosen" is read loosely: case- and space-folded
+// equality, or the candidate containing the chosen text.
+function narrows(candidateValue: string, chosen: string): boolean {
+  const fold = (value: string) => value.toLowerCase().replace(/\s+/gu, " ").trim();
+  const c = fold(candidateValue);
+  const v = fold(chosen);
+  return v.length > 0 && (c === v || c.includes(v));
+}
+
+const MAX_LISTED_CANDIDATES = 8;
+
+/**
+ * `--candidates`: one sub-list per field, showing what stage 2 handed the
+ * chooser -- the candidates of the kind that field reads (`extraction-tags.ts`,
+ * `extraction-choose.ts`), in the order they arrived, capped at eight, the
+ * chosen one (if among them) marked with `*`. A chosen value the list does
+ * not carry -- a derived cost, a composed subtype -- gets a line saying so.
+ */
+function candidateLines(fields: ExtractedFields, candidates: readonly TaggedCandidate[]): string[] {
+  const lines: string[] = [];
+
+  const section = (
+    name: string,
+    pool: readonly TaggedCandidate[],
+    display: (candidate: TaggedCandidate) => string,
+    chosenValues: readonly string[],
+    matches: (candidate: TaggedCandidate, chosen: string) => boolean,
+  ) => {
+    if (pool.length === 0 && chosenValues.length === 0) return;
+    const shown = pool.slice(0, MAX_LISTED_CANDIDATES);
+    lines.push(`  candidates: ${name}`);
+    const remaining = new Set(chosenValues);
+    for (const candidate of shown) {
+      const hit = chosenValues.find((chosen) => matches(candidate, chosen));
+      if (hit !== undefined) remaining.delete(hit);
+      const tags = candidate.tags.map((tag) => tag.value).join(", ");
+      lines.push(`    ${hit !== undefined ? "*" : " "} ${display(candidate)} [${tags}]`);
+    }
+    if (remaining.size > 0) lines.push("    (chosen value not on this list)");
+  };
+
+  section(
+    "provider",
+    candidates.filter((c) => c.kind === "organisation"),
+    (c) => c.value,
+    fields.provider === undefined ? [] : [fields.provider],
+    (c, chosen) => narrows(c.value, chosen),
+  );
+  section(
+    "reference",
+    candidates.filter((c) => c.kind === "identifier"),
+    (c) => c.value,
+    fields.reference === undefined ? [] : [fields.reference],
+    (c, chosen) => narrows(c.value, chosen),
+  );
+  section(
+    "subtype",
+    subtypeSources(candidates),
+    (c) => c.value,
+    fields.subtype === undefined ? [] : [fields.subtype],
+    (c, chosen) => narrows(c.value, chosen),
+  );
+  section(
+    "cost",
+    candidates.filter((c) => c.kind === "amount"),
+    amountDisplay,
+    fields.costMinor === undefined || fields.currency === undefined
+      ? []
+      : [`${fields.costMinor} ${fields.currency}`],
+    (c, chosen) => `${c.value} ${c.currency ?? ""}` === chosen,
+  );
+  section(
+    "dates",
+    candidates.filter((c) => c.kind === "date"),
+    (c) => c.value,
+    fields.dates,
+    (c, chosen) => c.value === chosen,
+  );
+
+  return lines;
 }
 
 function dates(fields: ExtractedFields): string {
@@ -158,6 +256,7 @@ interface Row {
   file: string;
   characters: number;
   fields?: ExtractedFields;
+  candidates?: TaggedCandidate[];
   problem?: string;
 }
 
@@ -189,6 +288,9 @@ function block(row: Row): string {
   if (row.characters === 0 && row.problem === undefined) {
     lines.push("  (no text came out of this file: a scanned image, perhaps -- Orbit reads no OCR either)");
   }
+  if (row.fields !== undefined && row.candidates !== undefined) {
+    lines.push(...candidateLines(row.fields, row.candidates));
+  }
   return lines.join("\n");
 }
 
@@ -203,6 +305,7 @@ async function main(): Promise<void> {
   const docsDir = resolve(option("--docs") ?? join(bundleDir, "docs"));
   const outDir = resolve(option("--out") ?? join(bundleDir, "out"));
   const keepText = process.argv.includes("--keep-text");
+  const showCandidates = process.argv.includes("--candidates");
   const files = readdirSync(docsDir)
     .filter((name) => MEDIA_TYPES[extname(name).toLowerCase()] !== undefined)
     .sort((a, b) => a.localeCompare(b));
@@ -223,7 +326,9 @@ async function main(): Promise<void> {
         const text = await extractText(tika.url, readFileSync(join(docsDir, file)), MEDIA_TYPES[extname(file).toLowerCase()]);
         row.characters = text.length;
         if (keepText) writeFileSync(join(outDir, "text", `${basename(file)}.txt`), text);
-        row.fields = readFields(text);
+        const { fields, candidates } = readFields(text);
+        row.fields = fields;
+        if (showCandidates) row.candidates = candidates;
       } catch (error) {
         row.problem = error instanceof Error ? error.message : String(error);
       }
