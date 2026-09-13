@@ -12,17 +12,28 @@
   @page { size: A4; margin: 0; }
   .page {
     width: 794px;
-    height: 1123px;
+    min-height: 1123px;
     box-sizing: border-box;
     position: relative;
-    overflow: hidden;
     padding: 34px 46px 30px 46px;
     background: #ffffff;
     color: #16202a;
     font-family: "Corpus EPC", sans-serif;
     font-size: 11.8px;
     line-height: 1.42;
+    page-break-after: always;
   }
+  .page:last-child { page-break-after: auto; }
+  .cols2e { display: flex; gap: 20px; }
+  .cols2e > div { flex: 1; }
+  h3.hhe { font-size: 11px; color: #1c5b3a; border-bottom: 1px solid #cfe0d5; padding-bottom: 3px; margin: 10px 0 6px 0; text-transform: uppercase; letter-spacing: 0.3px; }
+  table.tariffe { width: 100%; border-collapse: collapse; font-size: 10.3px; margin-bottom: 8px; }
+  table.tariffe th { background: #eef4f0; text-align: left; border: 1px solid #ccc; padding: 4px 6px; }
+  table.tariffe td { border: 1px solid #ccc; padding: 4px 6px; }
+  table.tariffe td.re { text-align: right; }
+  ul.tighte { margin: 3px 0 8px 14px; padding: 0; font-size: 10.3px; line-height: 1.5; }
+  .refgride { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 9.8px; margin: 6px 0 8px; }
+  .refgride span { border-left: 2px solid #9ab; padding-left: 5px; }
   .header {
     display: flex;
     justify-content: space-between;
@@ -237,9 +248,15 @@
     </table>
   </div>
 
+  <div class="small-print" style="margin-top:6px;">
+    <p>This certificate is one of a series of EPC-related documents issued for this property: the certificate
+    itself (this page and page 2), the recommendations report (page 2), and the guidance sheets on pages 3 and 4
+    explaining how to read them. Keep all four pages together with any home information pack for the property.</p>
+  </div>
+
   <div class="footer-page">
     <div>24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390</div>
-    <div>Page 1 of 2</div>
+    <div>Page 1 of 4</div>
   </div>
 </div>
 
@@ -275,6 +292,8 @@
       <div class="aline">Accredited by the Home Energy Assessors Scheme (HEAS). This certificate has been lodged on the National Energy Performance Register (NEPR).</div>
       <div class="aline">This property's previous certificate was issued on 4 April 2016.</div>
       <div class="aline">For general information about Energy Performance Certificates, call the national helpline on 01632 960900.</div>
+      <div class="aline">Job reference for this assessment: JOB-2026-05512. Quote reference, if one was issued before booking: QT-2026-01184.</div>
+      <div class="aline">Greenline Energy Assessments Ltd holds professional indemnity insurance, policy reference PII-774120, renewed annually on 1 March.</div>
     </div>
   </div>
 
@@ -286,7 +305,143 @@
 
   <div class="footer-page">
     <div>24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390</div>
-    <div>Page 2 of 2</div>
+    <div>Page 2 of 4</div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <h1>Understanding your certificate</h1>
+      <div class="addr">24 Larkspur Avenue, Hallowfield, HF3 4RT</div>
+    </div>
+    <div class="rrn-box">
+      Report Reference Number<br>
+      <span class="rrn">8823-4471-9902-1156-3390</span>
+    </div>
+  </div>
+
+  <div class="cols2e">
+    <div>
+      <h3 class="hhe">How the rating is calculated</h3>
+      <p>The energy efficiency rating is based on the standard assessment procedure used across the United
+      Kingdom for existing homes. It considers the fabric of the building, the heating and hot water systems, and
+      the fixed lighting, using standard occupancy assumptions rather than how this particular household actually
+      lives in the property. Two identical houses used differently can have the same certificate but very
+      different real bills.</p>
+      <h3 class="hhe">Checking a certificate is genuine</h3>
+      <p>Every certificate lodged on the National Energy Performance Register carries a unique Report Reference
+      Number, printed at the top of every page of this document. The register can be searched using this number
+      or the property's postcode at register.nepr.example, or by calling the national helpline on 01632 960900.</p>
+      <h3 class="hhe">Why the rating can look out of date</h3>
+      <p>A certificate remains valid for the ten years shown on the first page even if the property is later
+      altered, for example by adding an extension or replacing a boiler. Property owners are not required to
+      obtain a new certificate after such work unless the property is being marketed for sale or rent, at which
+      point a current certificate must be made available to a prospective buyer or tenant.</p>
+      <h3 class="hhe">Previous assessments of this property</h3>
+      <table class="tariffe">
+        <tr><th>Date issued</th><th>Rating</th><th>Assessor</th></tr>
+        <tr><td>4 April 2016</td><td>E (48)</td><td>Assessed by a different firm</td></tr>
+        <tr><td>19 June 2009</td><td>F (32)</td><td>First certificate lodged for this property</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3 class="hhe">Other assessments we offer</h3>
+      <table class="tariffe">
+        <tr><th>Assessment</th><th class="re">Typical fee</th></tr>
+        <tr><td>Standard domestic EPC (this certificate)</td><td class="re">£75.00</td></tr>
+        <tr><td>Commercial EPC, small unit</td><td class="re">from £180.00</td></tr>
+        <tr><td>Retrofit assessment (PAS 2035)</td><td class="re">£240.00</td></tr>
+        <tr><td>On-site consultation, per hour</td><td class="re">£60.00</td></tr>
+        <tr><td>Duplicate certificate, posted copy</td><td class="re">£15.00</td></tr>
+      </table>
+      <p>Fees above were last revised on 1 February 2026 and exclude travel outside a 20-mile radius of
+      Hallowfield, which is charged at 45p per mile. A commercial EPC quotation is valid for 60 days from the
+      date given.</p>
+      <h3 class="hhe">Glossary</h3>
+      <ul class="tighte">
+        <li><b>RRN</b> &mdash; Report Reference Number, this certificate's unique identifier</li>
+        <li><b>SAP</b> &mdash; the standard assessment procedure used to produce the rating</li>
+        <li><b>HEAS</b> &mdash; Home Energy Assessors Scheme, the accreditation body for the assessor</li>
+        <li><b>NEPR</b> &mdash; National Energy Performance Register, where this certificate is lodged</li>
+        <li><b>kWp</b> &mdash; kilowatt peak, the rated output of a solar photovoltaic array</li>
+        <li><b>Dwelling type</b> &mdash; the general form of the property used for standard assumptions</li>
+      </ul>
+      <h3 class="hhe">Regional variation</h3>
+      <p>Energy costs used in this certificate are calculated using national average fuel prices rather than a
+      regional or supplier-specific tariff, so your actual bill may differ from the figures shown on page 1
+      depending on the tariff you are on and where you live.</p>
+    </div>
+  </div>
+
+  <div class="footer-page">
+    <div>24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390</div>
+    <div>Page 3 of 4</div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <h1>Contact, complaints and our other services</h1>
+      <div class="addr">24 Larkspur Avenue, Hallowfield, HF3 4RT</div>
+    </div>
+    <div class="rrn-box">
+      Report Reference Number<br>
+      <span class="rrn">8823-4471-9902-1156-3390</span>
+    </div>
+  </div>
+
+  <div class="cols2e">
+    <div>
+      <h3 class="hhe">How to reach us</h3>
+      <ul class="tighte">
+        <li>Office, Mon&ndash;Fri 09:00&ndash;17:00: 01632 960777</li>
+        <li>Booking a new assessment: bookings@greenlineenergy.example</li>
+        <li>Self-service quote request: greenlineenergy.example/quote</li>
+        <li>Post: 12 Riverside Court, Hallowfield, HF4 7QP</li>
+      </ul>
+      <h3 class="hhe">Complaints</h3>
+      <p>If you are unhappy with this assessment, write to our office manager at the address above within three
+      months of the assessment date, quoting the Report Reference Number on this certificate. We aim to
+      acknowledge within five working days and resolve within 20 working days. If we cannot resolve your
+      complaint, you may refer it free of charge to the Home Energy Assessors Scheme's independent complaints
+      panel; details at heas.example/complaints.</p>
+      <h3 class="hhe">Accessibility</h3>
+      <p>Large-print and audio versions of this certificate can be issued free of charge within ten working days
+      of a request. Ask by telephone or e-mail using the details above.</p>
+      <h3 class="hhe">Other services from this firm</h3>
+      <ul class="tighte">
+        <li>Condensation and damp survey &mdash; from £120.00</li>
+        <li>Air-tightness testing for new builds &mdash; from £260.00</li>
+        <li>Ventilation (sound insulation) testing &mdash; from £180.00</li>
+      </ul>
+    </div>
+    <div>
+      <h3 class="hhe">Your data</h3>
+      <p>We keep assessment records, including the floor plan sketch and photographs taken on site, for six
+      years after the assessment date. We are registered with the Information Commissioner's Office under
+      registration number ZA774120. Our full privacy notice is at greenlineenergy.example/privacy, last updated
+      02/02/2026.</p>
+      <h3 class="hhe">Reference numbers</h3>
+      <div class="refgride">
+        <span>Company number: <b>05512847</b></span>
+        <span>VAT registration: <b>GB 447 7719 22</b></span>
+        <span>HEAS firm number: <b>HEAS/F/2011</b></span>
+        <span>Job reference: <b>JOB-2026-05512</b></span>
+        <span>Quote reference: <b>QT-2026-01184</b></span>
+      </div>
+      <h3 class="hhe">Small print</h3>
+      <p>Greenline Energy Assessments Ltd is registered in England and Wales, company number 05512847, registered
+      office 12 Riverside Court, Hallowfield, HF4 7QP. Founded 2011. Accredited by the Home Energy Assessors
+      Scheme since 2012; accreditation is renewed annually and was last renewed on 1 March 2026, next due
+      1 March 2027. This certificate template, version EPC/T/2025-11, was last updated 14 November 2025.</p>
+    </div>
+  </div>
+
+  <div class="footer-page">
+    <div>24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390</div>
+    <div>Page 4 of 4</div>
   </div>
 </div>
 

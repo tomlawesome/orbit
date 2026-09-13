@@ -9,11 +9,13 @@
   @page { size: A4; margin: 0; }
   body { margin: 0; font-family: "Corpus Quote Sans", sans-serif; color: #111; }
   .page {
-    width: 794px; height: 1123px; box-sizing: border-box;
-    position: relative; overflow: hidden;
+    width: 794px; min-height: 1123px; box-sizing: border-box;
+    position: relative;
     padding: 0;
     background: #fff;
+    page-break-after: always;
   }
+  .page:last-child { page-break-after: auto; }
   .banner { background: #0d3b53; color: #fff; padding: 26px 44px 22px 44px; }
   .banner .kicker { font-family: "Corpus Quote Sans", sans-serif; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.85; }
   .banner h1 { font-family: "Corpus Quote", serif; font-size: 30px; margin: 6px 0 4px 0; }
@@ -52,6 +54,15 @@
   .freepost { margin-top: 10px; font-size: 10px; border: 1px solid #333; display: inline-block; padding: 6px 10px; }
 
   .smallprint { font-size: 8.3px; color: #444; line-height: 1.45; margin-top: 14px; }
+
+  .prodgrid { display: flex; gap: 12px; margin-bottom: 12px; }
+  .prodcard { flex: 1; border: 1px solid #0d3b53; padding: 10px 12px; font-size: 9.6px; line-height: 1.4; }
+  .prodcard h3 { font-family: "Corpus Quote", serif; font-size: 12px; color: #0d3b53; margin: 0 0 4px 0; }
+  .refstrip { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 9px; margin: 8px 0 12px 0; }
+  .refstrip span { border-left: 2px solid #0d3b53; padding-left: 6px; }
+  .contactcols { display: flex; gap: 20px; font-size: 10px; line-height: 1.5; margin-bottom: 10px; }
+  .contactcols > div { flex: 1; }
+  .contactcols h3 { font-family: "Corpus Quote", serif; font-size: 12.5px; margin: 0 0 4px 0; color: #0d3b53; }
 </style>
 </head>
 <body>
@@ -123,11 +134,18 @@
       policy document are not covered. No claim is payable for a condition
       not surviving the 14-day survival period.
     </div>
+
+    <p style="font-size:9.5px; color:#333;">
+      Premiums shown are guaranteed premiums, meaning the monthly amount cannot rise during the
+      term because of your age or claims experience generally; Carrick Life Assurance plc also
+      offers a reviewable-premium version of this plan, typically cheaper at outset but able to rise
+      at each five-year review, which your adviser can quote separately on request.
+    </p>
   </div>
 
   <div class="footer">
     <span>Amberleigh Financial Advisers Ltd &mdash; Quote AMB-CI-2026-77410</span>
-    <span>Page 1 of 2</span>
+    <span>Page 1 of 4</span>
   </div>
 </div>
 
@@ -147,6 +165,12 @@
     plan is arranged and administered by Amberleigh Financial Advisers Ltd,
     who you should contact with any questions about this quotation or a
     future claim.</p>
+
+    <p>If you decide to proceed, a full application is submitted to Carrick Life Assurance plc,
+    who may ask some further medical questions or request a report from your GP before confirming
+    terms. Most straightforward applications are underwritten within 10 working days; an
+    application needing a GP report can take six to eight weeks depending on how quickly the
+    surgery responds. Your adviser will keep you updated while the application is in progress.</p>
 
     <div class="replyslip">
       <h3>Reply slip &mdash; return to hold your quote</h3>
@@ -175,7 +199,161 @@
 
   <div class="footer">
     <span>Amberleigh Financial Advisers Ltd &mdash; Quote AMB-CI-2026-77410</span>
-    <span>Page 2 of 2</span>
+    <span>Page 2 of 4</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="p2body">
+    <h2>Other cover from Amberleigh Financial Advisers</h2>
+    <p>Amberleigh Financial Advisers Ltd also arranges the plans below. None of these forms part of
+    the quotation on pages 1 and 2; they are shown so you can ask your adviser about a fuller
+    package if you wish.</p>
+
+    <div class="prodgrid">
+      <div class="prodcard">
+        <h3>Life cover</h3>
+        Level or decreasing term life cover, often arranged alongside critical illness cover for a
+        mortgage. Illustrative premium from &pound;9.40 a month for &pound;100,000 of cover over
+        25 years.
+      </div>
+      <div class="prodcard">
+        <h3>Income protection</h3>
+        Replaces part of your income if you cannot work through illness or injury. Illustrative
+        premium from &pound;18.60 a month, deferred period 8 weeks.
+      </div>
+      <div class="prodcard">
+        <h3>Whole-of-life cover</h3>
+        Cover with no fixed end date, often used for inheritance tax or funeral planning.
+        Illustrative premium from &pound;22.90 a month at age 45.
+      </div>
+    </div>
+
+    <h2>Options you could add to this quotation</h2>
+    <table class="opts">
+      <tr><th>Option</th><th>What it does</th><th>Approximate extra cost</th></tr>
+      <tr><td>Waiver of premium</td><td>Premiums paid for you if you are unable to work</td><td>&pound;3.85 a month</td></tr>
+      <tr><td>Children&rsquo;s critical illness cover</td><td>A fixed lump sum for a covered child illness</td><td>&pound;2.10 a month</td></tr>
+      <tr><td>Indexation</td><td>Sum assured and premium rise each year with inflation</td><td>Premium rises each year</td></tr>
+      <tr><td>Guaranteed insurability</td><td>Increase cover at set life events without new underwriting</td><td>No extra cost until used</td></tr>
+    </table>
+    <p style="font-size:10px;">None of these options is included in the Option A, B or C premiums
+    shown on page 1. Adding an option would produce a new illustration and a new quote reference.</p>
+
+    <h2>Rates used for this illustration</h2>
+    <table class="opts">
+      <tr><th>Rate table</th><th>In force from</th><th>Notes</th></tr>
+      <tr><td>Current rates</td><td>1 September 2026</td><td>Used for this quotation</td></tr>
+      <tr><td>Previous rates</td><td>1 March 2026 to 31 August 2026</td><td>Withdrawn, no longer quoted</td></tr>
+      <tr><td>Next scheduled review</td><td>1 March 2027</td><td>Rates may change on that date</td></tr>
+    </table>
+    <p style="font-size:10px;">Under the previous rate table, the Option B monthly premium would
+    have been &pound;36.10; that rate table closed to new quotations on 31 August 2026 and cannot be
+    honoured after that date.</p>
+
+    <h2>Why customers choose Amberleigh</h2>
+    <div class="cols3">
+      <div class="c">
+        <h3>Independent advice</h3>
+        Amberleigh Financial Advisers Ltd is not tied to one insurer and compares cover across the
+        market before recommending a plan.
+      </div>
+      <div class="c">
+        <h3>Local office</h3>
+        Founded in Netherbourne in 2004, with adviser appointments available in person or by video
+        call.
+      </div>
+      <div class="c">
+        <h3>Ongoing support</h3>
+        Your adviser reviews your cover at renewal of any linked mortgage and is available for
+        questions about a future claim.
+      </div>
+    </div>
+  </div>
+  <div class="footer">
+    <span>Amberleigh Financial Advisers Ltd &mdash; Quote AMB-CI-2026-77410</span>
+    <span>Page 3 of 4</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="p2body">
+    <h2>How to reach us</h2>
+    <div class="contactcols">
+      <div>
+        <h3>Adviser and office</h3>
+        Mr Callum Ridgeway, telephone 01632 960482<br>
+        Reception: 01632 960400, Monday to Friday 9am to 5:30pm<br>
+        E-mail: enquiries@amberleigh-advice.example<br>
+        Client portal: amberleigh-advice.example/myplan<br>
+        Address: 9 Quayside Court, Netherbourne NB1 3DE
+      </div>
+      <div>
+        <h3>If you need to complain</h3>
+        Write to the Complaints Officer at the address above, or e-mail
+        complaints@amberleigh-advice.example, quoting your quote reference. We acknowledge a
+        complaint within five working days and aim to give our final response within eight weeks.
+        If you remain unhappy, or eight weeks pass without a response, you can refer your complaint
+        free of charge to the Financial Ombudsman Service at financial-ombudsman.example, or by
+        telephone on 0800 023 4567.
+      </div>
+    </div>
+
+    <h2>Accessibility and additional support</h2>
+    <p>This quotation is available in large print, Braille or audio format on request, and your
+    adviser can arrange a home visit, a video call or a British Sign Language interpreter if that
+    would help. Please tell us about any additional needs so we can note them on your file.</p>
+
+    <h2>How we use your information</h2>
+    <p>Amberleigh Financial Advisers Ltd holds the information in this quotation to prepare and
+    administer your policy, and may share it with Carrick Life Assurance plc and other insurers for
+    the purposes of obtaining terms. It is not used for marketing by other companies without your
+    consent. A copy of our full privacy notice is available at
+    amberleigh-advice.example/privacy or on request from the office.</p>
+
+    <h2>Keeping your cover on track</h2>
+    <p>Once your policy is in force, tell us promptly about a change of address, a change of bank
+    details for your Direct Debit, or a change of name, so your records stay correct. Your adviser
+    can also review your cover if your circumstances change, for example a new mortgage, a change
+    of job, or starting a family, to check the level and type of cover still suits you.</p>
+
+    <h2>Documents you will receive if you proceed</h2>
+    <p>A key features document, a personal illustration specific to the policy you choose, a policy
+    schedule once cover starts, and the full policy conditions issued by Carrick Life Assurance plc.
+    You have a 30-day cancellation period from the day your policy starts, during which you can
+    cancel and receive a full refund of any premiums paid, provided no claim has been made.</p>
+
+    <h2>Office opening hours</h2>
+    <table class="opts">
+      <tr><th>Day</th><th>Hours</th></tr>
+      <tr><td>Monday to Thursday</td><td>9am to 5:30pm</td></tr>
+      <tr><td>Friday</td><td>9am to 5pm</td></tr>
+      <tr><td>Saturday and Sunday</td><td>Closed</td></tr>
+    </table>
+
+    <h2>Reference numbers on this quotation</h2>
+    <div class="refstrip">
+      <span>Quote reference: <b>AMB-CI-2026-77410</b></span>
+      <span>Client file: <b>AMB-CF-30217</b></span>
+      <span>Illustration ID: <b>ILL-2026-88104</b></span>
+      <span>Adviser ID: <b>CR-014</b></span>
+      <span>FCA firm reference: <b>558214</b></span>
+      <span>Company registration: <b>07742210</b></span>
+      <span>Underwriter reference: <b>CLA-QT-441087</b></span>
+    </div>
+
+    <div class="smallprint">
+      Amberleigh Financial Advisers Ltd is registered in England and Wales, company number
+      07742210, registered office 9 Quayside Court, Netherbourne NB1 3DE. Authorised and regulated
+      by the Financial Conduct Authority. This document was prepared using rates in force on
+      6 October 2026 and terms current as at 1 September 2026; rates and terms are reviewed by
+      Carrick Life Assurance plc from time to time and this illustration does not bind either party
+      until a policy is issued.
+    </div>
+  </div>
+  <div class="footer">
+    <span>Amberleigh Financial Advisers Ltd &mdash; Quote AMB-CI-2026-77410</span>
+    <span>Page 4 of 4</span>
   </div>
 </div>
 
