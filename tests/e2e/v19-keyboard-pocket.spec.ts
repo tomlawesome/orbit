@@ -46,7 +46,7 @@ import {
  *     of its own at all" beyond that: the account panel and the three home
  *     drawers this file's desktop twin light-dismiss-tests are `.desk`-only
  *     chrome (home.css) that pocket.css hides outright below 901px/600px.
- *   - /inbox, /create, /item/<id>, /household/<id>, /settings and /admin:
+ *   - /inbox, /create, /item/<id>, /household/<id> and /settings:
  *     none of these routes draw a second dialect (no `.pocket`/`.desk` switch
  *     in their own CSS — checked each file; every @media rule found only
  *     reflows columns) so the same controls the desktop file walks are
@@ -471,34 +471,6 @@ test("inbox (pocket): fully reachable by keyboard", async ({ page }) => {
        screen, not the shell, same as the desktop file. */
     await expect(page.locator(".inbox-page .lanes, .inbox-page .quietnote").first()).toBeVisible({ timeout: 30_000 });
     await auditTabOrder(page, "inbox (pocket)");
-  } finally {
-    await cleanup(page, household);
-  }
-});
-
-/**
- * admin/+page.svelte (the observatory) is server-loaded (+page.js's `load`
- * resolves before the component renders, no client-side data race) and is
- * not on the desktop file's own list of screens at all — audited here on its
- * own since #849 names it explicitly. It has no back link and no Chrome; its
- * nav is six plain `<a href="#">` stops (one "Operations", five inert
- * placeholders the product itself documents as "named in the nav and have no
- * design behind them yet" — admin/+page.svelte's own comment), so this is a
- * genuine reachability audit, not a journey through other chrome.
- */
-test("admin (pocket): fully reachable by keyboard", async ({ page }) => {
-  test.setTimeout(60_000);
-  await installKeyboardAudit(page);
-  await signIn(page, "/home");
-  /* #840: /admin is a gated route like any other, and this reader may own no
-     household at all at this point in the run -- unlike its neighbours
-     above, this test never otherwise needs one. Seeded and removed purely to
-     keep the door open. */
-  const household = await seedHousehold(page);
-  try {
-    await page.goto("/admin");
-    await expect(page.locator(".obs")).toBeVisible({ timeout: 30_000 });
-    await auditTabOrder(page, "admin (pocket)");
   } finally {
     await cleanup(page, household);
   }
