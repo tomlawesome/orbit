@@ -762,21 +762,6 @@ const REPORTING_LEAD = /statement|billing|transaction|quarter|reading|scheme yea
  */
 const ORGANISATION_PERIOD = /scheme registration|registered with|accreditation|accredited by/iu;
 
-/**
- * A term that simply runs out when it ends, so its last date is an `expiry`
- * and not a `renewal`: a guarantee, a warranty, a certificate, or any period
- * the page itself calls an expiry. Everything else the household holds for a
- * term -- cover, a contract, a membership, a tariff, a charge year -- rolls
- * onto something and has to be acted on again, which is `renewal`.
- */
-const RUNS_OUT = /\b(?:guarantee|warranty|certificate|quot(?:e|ation)|ticket|forfeit(?:ed)?|returned|used within)\b|expir/iu;
-
-/** Trigger words that only say a date bounds a period, without saying what
- * kind of period: the range connectors and the validity labels. What such a
- * date means depends on the term around it (see `termEndRole`). */
-const TERM_END_TRIGGER =
-  /^(?:(?:cover |policy |plan |contract |licence |membership |tariff |price )?(?:ends?|ending)(?: on)?|valid (?:to|until|through)|to|until|till|through|up to|–|—|-)$/iu;
-
 interface DateSpan {
   index: number;
   length: number;
@@ -791,29 +776,10 @@ function blockTextAround(text: string, index: number): { block: string; lead: st
   };
 }
 
-/** What a page is, when its title says it is a thing that runs out: a
- * season ticket, a lease, a quotation, a permit. Narrower than `RUNS_OUT`
- * on purpose -- a travel insurance certificate is renewed. */
-const TITLE_RUNS_OUT = /\b(?:ticket|lease|quot(?:e|ation)|permit)\b/iu;
-
-/** The page's first block, which is its title. */
-function titleOf(text: string): string {
-  return (/[^\n]*\S[^\n]*/u.exec(text) ?? [""])[0];
-}
-
-/** `expiry` when the period runs out, `renewal` when it has to be taken
- * again. Decided from the block the date sits in, so a certificate that
- * also prints a contract term gets both right; where the block says
- * nothing, from what the title says the page is: "Agreement end 31 May
- * 2028" on a lease statement is when the car goes back. */
-function termEndRole(block: string, text: string): DocumentDateRole {
-  if (RUNS_OUT.test(block)) return "expiry";
-  return TITLE_RUNS_OUT.test(titleOf(text)) ? "expiry" : "renewal";
-}
-
 /**
  * Rewrites the ConText assignments of any two adjacent dates joined by a
- * range connector to `start` and the end role its term deserves. A label
+ * range connector to `start` and `expiry` (the chooser names the end from
+ * the page's kind, `extraction-term-end.ts`). A label
  * that sits nearer than the connector keeps the date: "Renewal date: A to B"
  * leaves A alone, because the range is only the weaker reading of what joins
  * two dates.
@@ -848,18 +814,20 @@ function applyDateRanges(
       assignments[at] = { role, trigger: connector, distance };
     };
     claim(i, "start", connectorStart - gapStart);
-    claim(i + 1, termEndRole(block, text), right.index - connectorEnd);
+    claim(i + 1, "expiry", right.index - connectorEnd);
   }
 }
 
 /**
- * Two corrections a trigger table cannot make, because both depend on the
- * block around the trigger rather than on the trigger's own words:
+ * One correction a trigger table cannot make, because it depends on the
+ * block around the trigger rather than on the trigger's own words: "Scheme
+ * registration valid to 30 April 2027" is the contractor's registration,
+ * not the household's anything, so it gets no role.
  *
- * - "Valid to 31 March 2027" on a licence is a date the household renews;
- *   the same words under a guarantee are a date that simply runs out.
- * - "Scheme registration valid to 30 April 2027" is the contractor's
- *   registration, not the household's anything, so it gets no role.
+ * A date that ends a term is an `expiry` here whatever the term is;
+ * whether the household then renews the thing or lets it go is decided by
+ * what kind of thing the page is about, in the chooser
+ * (`extraction-term-end.ts`), not by the words around the date.
  */
 function applyTermEnds(
   text: string,
@@ -872,11 +840,7 @@ function applyTermEnds(
     const { block } = blockTextAround(text, span.index);
     if (ORGANISATION_PERIOD.test(block)) {
       assignments[at] = { role: "other", trigger: "", distance: Number.POSITIVE_INFINITY };
-      return;
     }
-    if (assignment.role !== "expiry") return;
-    if (!TERM_END_TRIGGER.test(assignment.trigger.trim())) return;
-    assignments[at] = { ...assignment, role: termEndRole(block, text) };
   });
 }
 

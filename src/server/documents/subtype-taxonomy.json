@@ -195,7 +195,12 @@
         "Finance agreement",
         "Borrowing",
         "Personal loan",
-        "Hire purchase"
+        "Hire purchase",
+        "Hire purchase agreement",
+        "Personal contract purchase",
+        "Personal contract purchase agreement",
+        "PCP",
+        "Conditional sale agreement"
       ]
     },
     {
