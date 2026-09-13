@@ -442,7 +442,13 @@ figures the page prints *beside* the price, which the words then found:
   only)", "would otherwise cost £148 if booked separately", the second
   permit's price, and the sum of every payment over a term longer than a
   year ("total payable over the 24 month minimum term") -- all `rival`.
-  The truth prices a monthly contract by the month.
+  The corpus truth of 2026-09-12 priced a monthly contract by the month;
+  the owner overruled that on 2026-09-13 for the PCP agreement -- Orbit
+  tracks long-term commitments, not monthly payments, so a stated whole
+  commitment ("Total amount payable") is the cost. Which other monthly
+  truths that reaches is open with the owner (question 40 of that
+  session); the `rival` reading of "over the term" totals stands until it
+  is answered.
 - **The owner's words**: contract price, amount charged, balance due,
   invoice total, final total, annual permit fee, payment of. A bare
   "outstanding balance" is a loan's debt and stays out.
@@ -458,9 +464,10 @@ figures the page prints *beside* the price, which the words then found:
 | after | **40** | **6** |
 
 Whole pipeline: 78.2% -> 80.4% on the 48, 70.5% -> 72.3% on hold-out 3.
-Left on the tuning set: the PCP agreement (truth wants the monthly payment;
-the page's "Total amount payable" is a regulated whole-term disclosure) and
-the domain renewal (truth wants the line before VAT; open for the owner).
+Left on the tuning set at the time: the PCP agreement and the domain
+renewal. Both truths were later corrected by the owner (total amount
+payable; total due including VAT), and the `adds-up` sieve (E58) reads the
+second; cost is 42/42 on the tuning set as of 2026-09-13.
 
 ## Alternatives rejected
 
