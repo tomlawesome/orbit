@@ -28,11 +28,11 @@ It prints one block per document as it goes, then leaves:
 - `out\results.csv` — one row per document, with an empty "right?" column
   for ticking off in a spreadsheet.
 
-Add `--keep-text` (run it from a command prompt: `run.cmd --keep-text`) to
+Add `--keep-text` (run it from a PowerShell or command prompt in the unzipped folder: `.\run.cmd --keep-text`) to
 also save the text Tika pulled out of each file in `out\text\`, which shows
 what the reader was actually looking at.
 
-Add `--candidates` (`run.cmd --candidates`) to also print, under each
+Add `--candidates` (`.\run.cmd --candidates`) to also print, under each
 document, every candidate it weighed for provider, reference, subtype, cost
 and dates, with the chosen one marked `*`. Use it to see why a field came out
 blank or wrong -- whether the right value was never on the shortlist, or was
