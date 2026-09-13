@@ -544,6 +544,60 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.costMinor).toBe(215907);
   });
 
+  // #1006 class 1: "members still on it pay £98.40 a year" is a rival price
+  // in a sentence, and "a year" says how often it falls due -- not that this
+  // figure is the document's total.
+  it("does not read a period word in a sentence as a total", () => {
+    const chosen = chooseFields([
+      candidate("amount", "9840", [
+        { value: "total", trigger: "a year", sieves: ["label", "words-after", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP", line: "Members who are still on the old rate pay £98.40 a year." }),
+      candidate("amount", "8499", [
+        { value: "due", trigger: "Amount due", sieves: ["label", "printed-throughout"], strength: 2 },
+      ], { currency: "GBP", line: "£84.99" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(8499);
+  });
+
+  it("keeps a period word as a total where the page printed it in a row", () => {
+    const chosen = chooseFields([
+      candidate("amount", "9600", [
+        { value: "total", trigger: "a year", sieves: ["label", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP", line: "European breakdown cover £96.00 a year" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(9600);
+  });
+
+  // #1006 class 3: two figures the sieves spoke for equally well used to
+  // blank, throwing away the page's own arithmetic.
+  it("breaks a tie towards the figure the line items add up to", () => {
+    const chosen = chooseFields([
+      candidate("amount", "215907", [
+        { value: "total", trigger: "ten monthly instalments of £215.91", sieves: ["instalment-total", "column-period"], strength: 2 },
+      ], { currency: "GBP" }),
+      candidate("amount", "194630", [
+        { value: "total", trigger: "Total", sieves: ["label", "heading-above"], strength: 2 },
+      ], { currency: "GBP" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(215907);
+  });
+
+  it("still blanks a tie neither figure's line items settle", () => {
+    const chosen = chooseFields([
+      candidate("amount", "215907", [
+        { value: "total", trigger: "Total", sieves: ["label", "column-period"], strength: 2 },
+      ], { currency: "GBP" }),
+      candidate("amount", "194630", [
+        { value: "total", trigger: "Total", sieves: ["label", "heading-above"], strength: 2 },
+      ], { currency: "GBP" }),
+    ]);
+
+    expect(chosen.costMinor).toBeUndefined();
+  });
+
   it("rules out a figure a sieve read in so many words as last year's", () => {
     const chosen = chooseFields([
       candidate("amount", "205630", [
@@ -555,12 +609,10 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.costMinor).toBeUndefined();
   });
 
-  // The same owner rule, for the far larger number of pages that never
-  // write the term down: they print the period instead and leave the
-  // reader to count the months. The end has to be one the page's kind
-  // makes an `expiry` -- nothing here names a kind, and a kind that says
-  // nothing expires (`extraction-term-end.ts`).
-  it("counts the term off the dates where the page never states one in words", () => {
+  // #1006 class 5: the multiplier has to be a term the page printed in so
+  // many words. A span counted off two dates is a period the document
+  // covers, not a commitment it prices, so the monthly figure stands.
+  it("will not multiply by a term it had to count off the dates itself", () => {
     const instalment = candidate("amount", "3499", [
       { value: "instalment", trigger: "Monthly price", sieves: ["label", "period-adjacent"], strength: 2 },
     ], { currency: "GBP" });
@@ -570,11 +622,23 @@ describe("choosing the cost and its currency", () => {
       instalment,
     ], "Monthly price £34.99. Service start date and contract end date as shown.").costMinor;
 
-    // Two years to the day, and the same two years drawn inclusively.
-    expect(page("2025-03-20", "2027-03-20")).toBe(3499 * 24);
-    expect(page("2026-04-01", "2027-03-31")).toBe(3499 * 12);
-    // Not a whole number of months: a window, not a term.
+    // Two years to the day, and the same two years drawn inclusively: a
+    // clean term either way, and still not one the page wrote down.
+    expect(page("2025-03-20", "2027-03-20")).toBe(3499);
+    expect(page("2026-04-01", "2027-03-31")).toBe(3499);
     expect(page("2026-04-01", "2027-03-14")).toBe(3499);
+  });
+
+  it("still multiplies where the same page also states the term in words", () => {
+    const chosen = chooseFields([
+      candidate("date", "2025-03-20", [{ value: "start", trigger: "Service start date" }]),
+      candidate("date", "2027-03-20", [{ value: "expiry", trigger: "Contract end date" }]),
+      candidate("amount", "3499", [
+        { value: "instalment", trigger: "Monthly price", sieves: ["label", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP" }),
+    ], "Monthly price £34.99. Minimum term 24 months.");
+
+    expect(chosen.costMinor).toBe(3499 * 24);
   });
 
   // A thing that renews rolls on rather than running out, so its period is
@@ -602,18 +666,14 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.costMinor).toBe(2150);
   });
 
-  it("blanks where two pairs of dates put the term at two different lengths", () => {
+  it("keeps the monthly figure where the page states two different terms", () => {
     const chosen = chooseFields([
-      candidate("date", "2026-04-01", [{ value: "start", trigger: "Start date" }]),
-      candidate("date", "2027-04-01", [{ value: "expiry", trigger: "End date" }]),
-      candidate("date", "2028-04-01", [{ value: "expiry", trigger: "Agreement ends" }]),
       candidate("amount", "3499", [
         { value: "instalment", trigger: "Monthly price", sieves: ["label", "period-adjacent"], strength: 2 },
       ], { currency: "GBP" }),
-    ], "Monthly price £34.99.");
+    ], "Monthly price £34.99. Minimum term 12 months. Contract length: 24 months.");
 
-    expect(chosen.costMinor).toBeUndefined();
-    expect(chosen.currency).toBeUndefined();
+    expect(chosen.costMinor).toBe(3499);
   });
 
   // Owner, 2026-09-13: a flat term times the standing rate is money never
