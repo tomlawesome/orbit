@@ -358,6 +358,27 @@ interface AmountClaim {
    * monthly figure as a total must not promote it to one.
    */
   rank: number;
+  /** Whether every printing of the figure is the page talking about what
+   * was paid before (`LAST_TIME`). */
+  lastTime: boolean;
+}
+
+/**
+ * The page talking about what was paid before: "your last payment of
+ * £140.00", "may still be paying £39.00 under the previous price list",
+ * "last year's premium", a withdrawn tariff.
+ *
+ * A real, labelled total, and still not the commitment -- so it is demoted
+ * below every figure the page does not frame as history, rather than ruled
+ * out. Read off the figure's own block, because that is where a page puts
+ * the words that date it; a figure the page also prints plainly somewhere
+ * else is not history at all, which is why every printing has to say so.
+ */
+const LAST_TIME =
+  /\b(?:previous(?:ly)?|last year(?:'s|’s)?|last (?:payment|bill|invoice|premium|charge|price)\b|you (?:last )?paid\b|(?:payment|amount|sum) received\b|received on \d|paid on \d|old (?:price|rate)|former(?:ly)?|withdrawn|no longer available)\b/iu;
+
+function everyPrintingIsHistory(lines: readonly string[]): boolean {
+  return lines.length > 0 && lines.every((line) => LAST_TIME.test(line));
 }
 
 /** Tags that are a reason against a figure being the cost. `other` is one
@@ -421,6 +442,14 @@ export function amountClaims(candidates: readonly TaggedCandidate[]): AmountClai
     labelStated: boolean;
   }
   const byValue = new Map<string, Working>();
+  // Every block each figure was printed in, so a reading of the printings as
+  // a whole -- history, or the other way of paying -- can be taken once.
+  const linesOf = new Map<string, string[]>();
+  for (const candidate of candidates) {
+    if (candidate.kind !== "amount" || !candidate.currency) continue;
+    const key = `${candidate.value} ${candidate.currency}`;
+    linesOf.set(key, [...(linesOf.get(key) ?? []), candidate.line]);
+  }
 
   for (const candidate of candidates) {
     // ADR-0025 section 3 refuses a cost whose evidence carries no currency,
@@ -481,6 +510,7 @@ export function amountClaims(candidates: readonly TaggedCandidate[]): AmountClai
       weight: totalStrength(readings),
       labelStated: working.labelStated,
       rank: headline === undefined ? AMOUNT_PREFERENCE.length : AMOUNT_PREFERENCE.indexOf(headline.tag),
+      lastTime: everyPrintingIsHistory(linesOf.get(`${working.value} ${working.currency}`) ?? []),
     });
   }
   return claims;
@@ -534,7 +564,13 @@ export function rankedAmounts(candidates: readonly TaggedCandidate[]): AmountCla
   // however many ways that price was read: "Business Hosting Plan £89.99
   // per year" is not what the domain renewal costs.
   const addsUp = (claim: AmountClaim): number => claim.sieves.has(ADDS_UP) ? 1 : 0;
+  // Last time's figure is a real, labelled total and still not the
+  // commitment, so it sorts below every figure the page does not date --
+  // ahead of any other reason, because no amount of agreement about what a
+  // figure was makes it what the household pays now.
+  const now = (claim: AmountClaim): number => claim.lastTime ? 0 : 1;
   return (whole.length > 0 ? whole : kept).sort((left, right) =>
+    now(right) - now(left) ||
     addsUp(right) - addsUp(left) ||
     amountAgreement(right) - amountAgreement(left) ||
     right.weight - left.weight ||
@@ -651,6 +687,7 @@ function chooseCost(
     amountAgreement(rival) === amountAgreement(best) &&
     rival.weight === best.weight &&
     rival.rank === best.rank &&
+    rival.lastTime === best.lastTime &&
     lineItemsAddUp(rival) === lineItemsAddUp(best)) {
     return {};
   }
@@ -912,6 +949,12 @@ export function referenceShortlistEntries(candidates: readonly TaggedCandidate[]
   return referenceEntries(candidates);
 }
 
+/** How far under the current figures the cost shortlist puts the ones the
+ * page dates to last time, and the ones its own words rule out: far enough
+ * that no amount of agreement lifts a figure out of its band. */
+const LAST_TIME_BAND = -1_000;
+const RULED_OUT_BAND = -2_000;
+
 /** The figure as the page would print it, which is how the model is asked
  * about it and how its answer is read back. */
 function printedAmount(value: string, currency: string | undefined): string {
@@ -948,10 +991,14 @@ export function costShortlistEntries(candidates: readonly TaggedCandidate[]): Sh
         ...(claim.against.size > 0
           ? [`read as last year's or the rival beside it by: ${[...claim.against].join(", ")}`]
           : []),
+        ...(claim.lastTime ? ["printed only where the page is saying what was paid before"] : []),
       ],
-      // Ruled out by the page's own words, so last -- but still on the list,
-      // because a rule that drops a candidate takes the choice off the model.
-      support: claim.ruledOut ? -1 : amountAgreement(claim) * 2 + claim.weight + (claim.labelStated ? 2 : 0),
+      // Three bands, best first: the figures the page speaks for now, the
+      // ones it dates to last time, and the ones its own words rule out.
+      // Nothing is dropped -- a rule that drops a candidate takes the choice
+      // off the model -- and the reasons still order each band within itself.
+      support: amountAgreement(claim) * 2 + claim.weight + (claim.labelStated ? 2 : 0) +
+        (claim.ruledOut ? RULED_OUT_BAND : claim.lastTime ? LAST_TIME_BAND : 0),
     });
   }
 

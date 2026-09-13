@@ -489,6 +489,47 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.costMinor).toBe(59976);
   });
 
+  // A rival total outranking the charge, class 1 (item 106): what was paid
+  // before is a real, labelled total and still not the commitment.
+  it("puts the figure the page dates to last time under every current one", () => {
+    const chosen = chooseFields([
+      candidate("amount", "14000", [
+        { value: "due", trigger: "payment of", sieves: ["label", "heading-above", "printed-throughout"], strength: 2 },
+      ], { currency: "GBP", line: "Your last payment of £140.00 was received on 14/10/2026." }),
+      candidate("amount", "14255", [
+        { value: "due", trigger: "Amount due", sieves: ["label", "printed-throughout"], strength: 2 },
+      ], { currency: "GBP", line: "Amount due, 12 November 2026 £142.55" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(14255);
+  });
+
+  it("keeps last time's figure on the shortlist, under the current ones", () => {
+    const entries = costShortlistEntries([
+      candidate("amount", "3900", [
+        { value: "instalment", trigger: "a month", sieves: ["label", "words-after", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP", line: "under the previous price list may still be paying £39.00 a month" }),
+      candidate("amount", "4250", [
+        { value: "instalment", trigger: "Monthly membership fee", sieves: ["label"], strength: 2 },
+      ], { currency: "GBP", line: "Monthly membership fee, collected by Direct Debit £42.50" }),
+    ]);
+
+    expect(entries.map((entry) => entry.value)).toEqual(["4250", "3900"]);
+  });
+
+  it("still reads a figure the page also prints plainly as a current one", () => {
+    const chosen = chooseFields([
+      candidate("amount", "28764", [
+        { value: "total", trigger: "Annual premium", sieves: ["label"], strength: 2 },
+      ], { currency: "GBP", line: "Annual premium (paid in full): £287.64." }),
+      candidate("amount", "28764", [
+        { value: "total", trigger: "premium", sieves: ["printed-throughout"], strength: 2 },
+      ], { currency: "GBP", line: "Last year's premium was £287.64." }),
+    ]);
+
+    expect(chosen.costMinor).toBe(28764);
+  });
+
   it("blanks when two totals disagree", () => {
     const chosen = chooseFields([
       candidate("amount", "61240", [{ value: "total", trigger: "Total payable" }], { currency: "GBP" }),
