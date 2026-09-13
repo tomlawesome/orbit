@@ -19,9 +19,13 @@
 // the total than the second, and a rule that says otherwise would be a
 // guess wearing a rule's clothes.
 //
-// Nothing here reads the page. Each candidate already carries `line`, the
-// Tika block it was found in, and its tags already carry the words that
-// justified them, so this stage only compares what stage 2 decided.
+// Almost nothing here reads the page. Each candidate already carries `line`,
+// the Tika block it was found in, and its tags already carry the words that
+// justified them, so this stage mostly compares what stage 2 decided. The
+// exceptions are named where they take the text: provider's cues
+// (`provider-route.ts`), the contract term a lone instalment multiplies out
+// by, and the heading printed over a figure, which the figure's own block
+// does not carry.
 
 import {
   chooseCostWithModel,
@@ -41,6 +45,7 @@ import { DATE_RANGE, WORDS_BEFORE } from "./extraction-date-sieves";
 import { referencePreference } from "./extraction-reference-kind";
 import { neverTheReference } from "./extraction-reference-never";
 import { bestSupported, type ShortlistEntry } from "./extraction-shortlist";
+import { pageBlocks } from "./extraction-sieve";
 import type { ExtractedFields } from "./extraction-scoring";
 import { STRENGTH_STATED, type ChooseStage, type Tag, type TaggedCandidate } from "./extraction-stages";
 import { subtypeGroupBins, subtypeSources } from "./extraction-subtype-bins";
@@ -361,6 +366,12 @@ interface AmountClaim {
   /** Whether every printing of the figure is the page talking about what
    * was paid before (`LAST_TIME`). */
   lastTime: boolean;
+  /** Whether every printing of the figure is the page pricing the other way
+   * of paying (`THE_OTHER_WAY_OF_PAYING`). */
+  theOtherWay: boolean;
+  /** Whether the page frames the figure as the whole commitment: the year,
+   * the term, the price paid in one go (`THE_WHOLE_COMMITMENT`). */
+  wholeCommitment: boolean;
 }
 
 /**
@@ -379,6 +390,64 @@ const LAST_TIME =
 
 function everyPrintingIsHistory(lines: readonly string[]): boolean {
   return lines.length > 0 && lines.every((line) => LAST_TIME.test(line));
+}
+
+/**
+ * The other way of paying. A page that prices one thing twice -- the annual
+ * premium and what the same cover comes to spread over twelve instalments,
+ * the paid-in-full price and the pay-monthly one -- is offering an option
+ * and not naming a second commitment, and the commitment is the figure the
+ * option is set beside (ADR-0026, 2026-09-13: "an offered option is not the
+ * commitment").
+ *
+ * So a figure every printing of which prices paying monthly sorts under one
+ * no printing of which does. Where the page frames every figure that way it
+ * changes nothing, which is the rolling contract paid by the month: there
+ * is no other way of paying on offer for it to lose to.
+ */
+const THE_OTHER_WAY_OF_PAYING =
+  /\b(?:paid|pay|paying|payable|spread|split)\s+(?:it\s+|this\s+|the\s+cost\s+|for\s+)?(?:monthly\b|by\s+(?:\d{1,2}\s+)?(?:monthly\s+|quarterly\s+|weekly\s+)?instalments?|(?:over|across|in)\s+(?:\d{1,2}|twelve|ten)\s+(?:monthly\s+)?(?:instalments?|payments?))/iu;
+
+/**
+ * The page naming the whole commitment: the year, the term, the price paid
+ * in one go. A figure framed this way is the commitment however the page
+ * also words it -- "Annual total if paid monthly" is the year's price on a
+ * plan the household pays by the month (ADR-0026, 2026-09-13), not the
+ * other way of paying.
+ */
+const THE_WHOLE_COMMITMENT =
+  /\b(?:annual(?:ly)?|yearly|in full|in one (?:go|payment)|single (?:\d{1,2}[- ]month )?payment|up ?front|for the year|over the (?:full |whole |entire )?term|for the \d{1,3}[- ]month (?:period|term))\b/iu;
+
+/**
+ * The block above a figure, where the page is using it as the figure's
+ * heading: the block before it with no figure of its own. "PAID MONTHLY, 12
+ * INSTALMENTS" printed over "£61.83 total £741.96 a year" is the page saying
+ * what the figures under it price, and the figures alone do not say it.
+ */
+function framesOf(candidates: readonly TaggedCandidate[], text: string | undefined): Map<number, string> {
+  const frames = new Map<number, string>();
+  if (text === undefined) return frames;
+  const blocks = pageBlocks(text);
+  for (const candidate of candidates) {
+    let above = "";
+    for (let at = blocks.length - 1; at >= 0; at -= 1) {
+      if (blocks[at].index > candidate.index) continue;
+      const heading = blocks[at - 1];
+      if (heading !== undefined && !PRINTED_FIGURE.test(heading.line)) above = heading.line;
+      break;
+    }
+    frames.set(candidate.index, `${above} ${candidate.line}`);
+  }
+  return frames;
+}
+
+/** A money amount as a page prints it: what tells a heading from a row of
+ * figures. */
+const PRINTED_FIGURE = /[£€$]\s?\d/u;
+
+function everyPrintingPricesTheOtherWay(frames: readonly string[]): boolean {
+  return frames.length > 0 &&
+    frames.every((frame) => THE_OTHER_WAY_OF_PAYING.test(frame) && !THE_WHOLE_COMMITMENT.test(frame));
 }
 
 /** Tags that are a reason against a figure being the cost. `other` is one
@@ -431,7 +500,12 @@ function totalStrength(readings: SieveReadings): number {
   return [...readings.values()].reduce((sum, strength) => sum + strength, 0);
 }
 
-export function amountClaims(candidates: readonly TaggedCandidate[]): AmountClaim[] {
+/**
+ * The page text is optional and is read for one thing only: the heading a
+ * figure sits under, which the figure's own block does not carry. Without
+ * it every reading falls back to the block, as it always did.
+ */
+export function amountClaims(candidates: readonly TaggedCandidate[], text?: string): AmountClaim[] {
   interface Working {
     value: string;
     currency?: string;
@@ -442,13 +516,20 @@ export function amountClaims(candidates: readonly TaggedCandidate[]): AmountClai
     labelStated: boolean;
   }
   const byValue = new Map<string, Working>();
-  // Every block each figure was printed in, so a reading of the printings as
-  // a whole -- history, or the other way of paying -- can be taken once.
+  // Every block each figure was printed in, with the heading over it, so a
+  // reading of the printings as a whole -- history, or the other way of
+  // paying -- can be taken once.
+  const frames = framesOf(candidates, text);
   const linesOf = new Map<string, string[]>();
+  const framesOfValue = new Map<string, string[]>();
   for (const candidate of candidates) {
     if (candidate.kind !== "amount" || !candidate.currency) continue;
     const key = `${candidate.value} ${candidate.currency}`;
     linesOf.set(key, [...(linesOf.get(key) ?? []), candidate.line]);
+    framesOfValue.set(key, [
+      ...(framesOfValue.get(key) ?? []),
+      frames.get(candidate.index) ?? candidate.line,
+    ]);
   }
 
   for (const candidate of candidates) {
@@ -511,6 +592,11 @@ export function amountClaims(candidates: readonly TaggedCandidate[]): AmountClai
       labelStated: working.labelStated,
       rank: headline === undefined ? AMOUNT_PREFERENCE.length : AMOUNT_PREFERENCE.indexOf(headline.tag),
       lastTime: everyPrintingIsHistory(linesOf.get(`${working.value} ${working.currency}`) ?? []),
+      theOtherWay: everyPrintingPricesTheOtherWay(
+        framesOfValue.get(`${working.value} ${working.currency}`) ?? [],
+      ),
+      wholeCommitment: (framesOfValue.get(`${working.value} ${working.currency}`) ?? [])
+        .some((frame) => THE_WHOLE_COMMITMENT.test(frame)),
     });
   }
   return claims;
@@ -550,8 +636,8 @@ function lineItemsAddUp(claim: AmountClaim): boolean {
  * no total and no amount due at all -- and within either group, the figure
  * the most sieves agree about wins.
  */
-export function rankedAmounts(candidates: readonly TaggedCandidate[]): AmountClaim[] {
-  const kept = amountClaims(candidates)
+export function rankedAmounts(candidates: readonly TaggedCandidate[], text?: string): AmountClaim[] {
+  const kept = amountClaims(candidates, text)
     .filter((claim) => !claim.ruledOut && amountAgreement(claim) > 0);
   // Only a total or an amount due the page really gave a reason for keeps
   // the instalments out of the running: where the whole-price figures are
@@ -569,12 +655,24 @@ export function rankedAmounts(candidates: readonly TaggedCandidate[]): AmountCla
   // ahead of any other reason, because no amount of agreement about what a
   // figure was makes it what the household pays now.
   const now = (claim: AmountClaim): number => claim.lastTime ? 0 : 1;
+  // What the thing costs, ahead of what the option to spread it costs. Only
+  // a rival TOTAL is demoted: an instalment already ranks under every
+  // whole-price figure, and the monthly fee on a rolling agreement is the
+  // answer rather than a rival to it.
+  const commitment = (claim: AmountClaim): number =>
+    claim.theOtherWay && claim.rank < AMOUNT_PREFERENCE.indexOf("instalment") ? 0 : 1;
+  // Last, because being framed as the year or the term is a way of telling
+  // two figures the page spoke for equally well apart, not a reason that
+  // outranks how well it spoke for them.
+  const whole0 = (claim: AmountClaim): number => claim.wholeCommitment ? 1 : 0;
   return (whole.length > 0 ? whole : kept).sort((left, right) =>
     now(right) - now(left) ||
+    commitment(right) - commitment(left) ||
     addsUp(right) - addsUp(left) ||
     amountAgreement(right) - amountAgreement(left) ||
     right.weight - left.weight ||
-    left.rank - right.rank);
+    left.rank - right.rank ||
+    whole0(right) - whole0(left));
 }
 
 /**
@@ -673,7 +771,7 @@ function chooseCost(
   costMinor?: number;
   currency?: string;
 } {
-  const ranked = rankedAmounts(candidates);
+  const ranked = rankedAmounts(candidates, text);
   const best = ranked[0];
   if (best === undefined) return {};
   if (!enoughReason(best)) return {};
@@ -688,6 +786,8 @@ function chooseCost(
     rival.weight === best.weight &&
     rival.rank === best.rank &&
     rival.lastTime === best.lastTime &&
+    rival.theOtherWay === best.theOtherWay &&
+    rival.wholeCommitment === best.wholeCommitment &&
     lineItemsAddUp(rival) === lineItemsAddUp(best)) {
     return {};
   }
@@ -949,11 +1049,20 @@ export function referenceShortlistEntries(candidates: readonly TaggedCandidate[]
   return referenceEntries(candidates);
 }
 
-/** How far under the current figures the cost shortlist puts the ones the
- * page dates to last time, and the ones its own words rule out: far enough
- * that no amount of agreement lifts a figure out of its band. */
-const LAST_TIME_BAND = -1_000;
-const RULED_OUT_BAND = -2_000;
+/**
+ * The bands the cost shortlist falls into, best first and far enough apart
+ * that no amount of agreement lifts a figure out of its own: the figures
+ * the page speaks for as this commitment, then the ones it prints to price
+ * the other way of paying, then the ones no sieve spoke for at all, then
+ * the ones it dates to last time, then the ones its own words rule out.
+ *
+ * Nothing is dropped. A rule that drops a candidate takes the choice off
+ * the model, and the reasons still order each band within itself.
+ */
+const THE_OTHER_WAY_BAND = -1_000;
+const NOTHING_SPOKE_BAND = -2_000;
+const LAST_TIME_BAND = -3_000;
+const RULED_OUT_BAND = -4_000;
 
 /** The figure as the page would print it, which is how the model is asked
  * about it and how its answer is read back. */
@@ -965,19 +1074,18 @@ function printedAmount(value: string, currency: string | undefined): string {
 /**
  * Every figure the page prints with a currency, the best-spoken-for first.
  *
- * The rules' ranking, with nothing dropped: a figure a sieve read as last
- * year's or as the rival beside the real one goes last rather than out, and
- * a figure no sieve spoke for at all sits between the two. The cap is what
- * shortens the list, not a rule.
+ * The rules' ranking, with nothing dropped: a rival total the page prints to
+ * be read instead of the charge goes down a band rather than off the list.
+ * The cap is what shortens the list, not a rule.
  */
-export function costShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
+export function costShortlistEntries(candidates: readonly TaggedCandidate[], text?: string): ShortlistEntry[] {
   const entries: ShortlistEntry[] = [];
   const seen = new Set<string>();
   const blockFor = (value: string, currency: string | undefined) =>
     candidates.find((candidate) =>
       candidate.kind === "amount" && candidate.value === value && candidate.currency === currency);
 
-  for (const claim of amountClaims(candidates)) {
+  for (const claim of amountClaims(candidates, text)) {
     const key = `${claim.value} ${claim.currency}`;
     seen.add(key);
     const reading = claim.rank < AMOUNT_PREFERENCE.length ? AMOUNT_PREFERENCE[claim.rank] : "other";
@@ -992,13 +1100,14 @@ export function costShortlistEntries(candidates: readonly TaggedCandidate[]): Sh
           ? [`read as last year's or the rival beside it by: ${[...claim.against].join(", ")}`]
           : []),
         ...(claim.lastTime ? ["printed only where the page is saying what was paid before"] : []),
+        ...(claim.theOtherWay ? ["printed only where the page is pricing the other way of paying"] : []),
       ],
-      // Three bands, best first: the figures the page speaks for now, the
-      // ones it dates to last time, and the ones its own words rule out.
-      // Nothing is dropped -- a rule that drops a candidate takes the choice
-      // off the model -- and the reasons still order each band within itself.
       support: amountAgreement(claim) * 2 + claim.weight + (claim.labelStated ? 2 : 0) +
-        (claim.ruledOut ? RULED_OUT_BAND : claim.lastTime ? LAST_TIME_BAND : 0),
+        (claim.ruledOut
+          ? RULED_OUT_BAND
+          : claim.lastTime
+            ? LAST_TIME_BAND
+            : claim.theOtherWay ? THE_OTHER_WAY_BAND : 0),
     });
   }
 
@@ -1013,7 +1122,7 @@ export function costShortlistEntries(candidates: readonly TaggedCandidate[]): Sh
       currency: candidate.currency,
       line: candidate.line,
       why: ["no sieve spoke for it"],
-      support: 0,
+      support: NOTHING_SPOKE_BAND,
     });
   }
 
