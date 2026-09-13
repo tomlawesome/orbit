@@ -156,8 +156,12 @@ dependencies outside the approved SPDX licence policy block integration.
 
 ### Risk-proportional pull-request lanes
 
-Every pull request runs lint, type checking and the complete unit suite. Separate read-only workflows retain dependency-diff review
-and CodeQL. Higher-cost evidence is concentrated on the protected release lane:
+Every pull request runs lint, type checking and the complete unit suite. A
+separate read-only workflow retains CodeQL. Dependency-diff review moved off
+GitHub once the mirror flip (#801) left it no pull requests to diff against
+(#815): GitLab's `licence_policy` job now walks the whole installed
+dependency tree instead (see [supply-chain.md](supply-chain.md)). Higher-cost
+evidence is concentrated on the protected release lane:
 
 | Lane | Additional evidence | Typical eligible change |
 | --- | --- | --- |
@@ -232,14 +236,20 @@ artefact is logged and read as "no reuse", which reruns the job.
 `fast` (#950, owner ruling on #923 rec 15a, 2026-09-09) is the docker-free
 part of what used to be one job: type-check, lint, the coverage-bearing
 Vitest run and the web build, on the unprivileged `big` lane. `fast_docker`
-is the other half, on the privileged `orbit-build` lane, and runs the two
+is the other half, on the privileged `orbit-build` lane, and runs the
 suites, of everything that mentions Docker, actually confirmed (by running
 the candidate set with `docker` entirely absent from PATH, matching `big`'s
 real condition) to depend on it: `src/lib/install-script-adapters.test.ts`,
-whose `beforeAll` runs a real `docker build`, and
+whose `beforeAll` runs a real `docker build`;
 `src/lib/recovery-bundle.parity.test.ts`, whose "no Docker daemon reachable"
 tests never reach a live daemon but still spawn real scripts that gate on
-`docker` being present before the logic under test runs. The split frees the
+`docker` being present before the logic under test runs; and
+`scripts/test-e2e-local-reuse.test.mjs` (#947), which drives
+`test-e2e-local.sh --reuse` far enough to reach its own discovery code, past
+preconditions that demand both the binary and a reachable daemon. That last
+one arrived red on `fast` rather than being predicted: a suite that spawns a
+real script belongs here whether or not the test file itself says "docker".
+The split frees the
 ~200-300 s `orbit-build` used to hold for `fast`'s docker-free work every
 pipeline.
 
