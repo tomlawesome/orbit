@@ -3325,8 +3325,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "dateRoles 73/85 (was 67/85); 83.3% (was 81.9%). Hold-out 3 unchanged, 73.2%.",
-      "headline": true
+      "notes": "dateRoles 73/85 (was 67/85); 83.3% (was 81.9%). Hold-out 3 unchanged, 73.2%."
     },
     {
       "id": "E63",
@@ -3389,6 +3388,69 @@
       },
       "verdict": "rejected",
       "notes": "The maths finds the pairs correctly; what it cannot say is which of the pair the household tracks -- the dental plan and the alarm want the monthly payment, home insurance wants the annual premium, and both pages print both. That stays with the page's label. The contiguous form (adds-up, E58) and the written-out form (instalment-total) already cover the cases where arithmetic is safe."
+    },
+    {
+      "id": "E64",
+      "date": "2026-09-13",
+      "label": "PCP truth = total amount payable (owner)",
+      "corpus": "tuning-48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "No rule change. Owner corrected the PCP cost truth to the whole commitment (total amount payable), which the pipeline already answered.",
+      "how": "npm run eval:stages",
+      "commit": "8a1e6fe",
+      "output": "tmp/e-seen48-stages-pcp.txt",
+      "scores": {
+        "overall": {
+          "pct": 83.6,
+          "net": 341,
+          "of": 408
+        },
+        "provider": {
+          "pct": 75,
+          "net": 36,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 85.9,
+          "net": 73,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 70.8,
+          "net": 34,
+          "of": 48
+        },
+        "cost": {
+          "pct": 100,
+          "net": 42,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 86.2,
+          "net": 25,
+          "of": 29
+        },
+        "recurrence": {
+          "pct": 65.2,
+          "net": 15,
+          "of": 23
+        }
+      },
+      "verdict": "kept",
+      "notes": "cost 42/42; 83.6%. Hold-out 3 unaffected (no rule change).",
+      "headline": true
     }
   ],
   "measurements": [
