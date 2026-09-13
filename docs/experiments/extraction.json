@@ -3947,6 +3947,130 @@
       },
       "verdict": "kept",
       "notes": ""
+    },
+    {
+      "id": "E73",
+      "date": "2026-09-13",
+      "label": "dateRoles: join Tika's letter-spaced headings before the sieve",
+      "corpus": "seen48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "New extraction-text-repair.ts: a run of capital fragments with at least two that cannot be words (C U R R EN T  T A X  EX P IR ES) is joined into words before the sieve runs, in the three scoring paths. Fifteen seen pages carry such headings. The vehicle tax reminder's headings become readable: its date goes from blank to 'expiry' (truth says renewal -- convention question for the owner), its reference and subtype flip from blank/lucky to wrong because the page's other headings (CASE REFERENCE, REGISTRATION MARK) are readable too. Net -1 on the seen set.",
+      "how": "npm run eval:stages",
+      "commit": "b21a209",
+      "output": "tmp/e-seen48-stages-dr5.txt",
+      "scores": {
+        "overall": {
+          "pct": 85.3,
+          "net": 348,
+          "of": 408
+        },
+        "provider": {
+          "pct": 79.2,
+          "net": 38,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 92.9,
+          "net": 79,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 68.8,
+          "net": 33,
+          "of": 48
+        },
+        "cost": {
+          "pct": 97.6,
+          "net": 41,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 89.7,
+          "net": 26,
+          "of": 29
+        },
+        "recurrence": {
+          "pct": 65.2,
+          "net": 15,
+          "of": 23
+        }
+      },
+      "verdict": "kept",
+      "notes": "Kept as the precondition for reading those pages' headings at all; its fixes are follow-ups on the reference and subtype stages. Hold-out in E74."
+    },
+    {
+      "id": "E74",
+      "date": "2026-09-13",
+      "label": "Hold-out 3 after the dateRoles work (E70-E73)",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "No rule change beyond E70-E73. First hold-out score since E68: label rows, points-forward, the Date: header and letter-spacing repair together.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "b21a209",
+      "output": "tmp/e-holdout3-dr5.txt",
+      "scores": {
+        "overall": {
+          "pct": 73.2,
+          "net": 82,
+          "of": 112
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 73.1,
+          "net": 19,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 6,
+          "of": 6
+        }
+      },
+      "verdict": "baseline",
+      "notes": "73.2%, dateRoles 19/26: identical to E68. Six seen-set dateRoles gains, none on the unseen set."
     }
   ],
   "measurements": [

@@ -14,6 +14,7 @@ import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { FIELD_NAMES, scoreCorpus } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
+import { repairLetterSpacing } from "./extraction-text-repair";
 
 const corpus = EXTRACTION_HOLDOUT3_FULLPAGE;
 
@@ -24,7 +25,10 @@ const KEY: Record<string, string> = {
 };
 
 async function main(): Promise<void> {
-  const score = await scoreCorpus(corpus, (text) => chooseFields(tagCandidates(text, sieve(text)), text));
+  const score = await scoreCorpus(corpus, (text) => {
+    const page = repairLetterSpacing(text);
+    return chooseFields(tagCandidates(page, sieve(page)), page);
+  });
   console.log("field         right  wrong  blank   of");
   for (const field of FIELD_NAMES) {
     const { possible } = score.fields[field];
