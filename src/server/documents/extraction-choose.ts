@@ -24,8 +24,9 @@
 // justified them, so this stage mostly compares what stage 2 decided. The
 // exceptions are named where they take the text: provider's cues
 // (`provider-route.ts`), the contract term a lone instalment multiplies out
-// by, and the heading printed over a figure, which the figure's own block
-// does not carry.
+// by, the heading printed over a figure, which the figure's own block does
+// not carry, and the sheet marks the reference is counted across, which are
+// a fact about the document rather than about any one block.
 
 import {
   chooseCostWithModel,
@@ -307,21 +308,24 @@ function chooseRecurrenceMonths(candidates: readonly TaggedCandidate[]): number 
  * The household's own reference: the top of the same ranking the model is
  * shown (`referenceShortlistEntries`), or nothing.
  *
- * One ranking, not two. The shortlist already scores each number by the word
- * the page labelled it with -- in the order this page's kind of thing puts
- * those words -- and by how often the page printed it, which is the page
- * agreeing with itself: a reference is the number a household is told to
- * quote, so it appears in the header, in every sheet's footer and in the
- * payment instructions, while the engineer's licence beside it is printed
- * once.
+ * One ranking, not two. The shortlist already scores each number by how many
+ * of the document's sheets it was printed on, by the word the page labelled
+ * it with -- in the order this page's kind of thing puts those words -- and
+ * by how often the page printed it, which is the page agreeing with itself: a
+ * reference is the number a household is told to quote, so it appears in the
+ * header, in every sheet's footer and in the payment instructions, while the
+ * engineer's licence beside it is printed once.
  *
  * Two entries level at the top is the page printing two equally good claims,
  * and the answer to that is nothing. A top entry no label spoke for is the
  * page never saying which number is theirs, which is also nothing: the most
  * repeated unlabelled number is a guess, and a guess costs twice a blank.
  */
-function chooseReference(candidates: readonly TaggedCandidate[]): string | undefined {
-  const ranked = referenceEntries(candidates);
+function chooseReference(
+  candidates: readonly TaggedCandidate[],
+  text: string | undefined,
+): string | undefined {
+  const ranked = referenceEntries(candidates, text);
   const best = ranked[0];
   if (best === undefined || !best.labelled) return undefined;
   if (ranked[1] !== undefined && ranked[1].support === best.support) return undefined;
@@ -977,7 +981,7 @@ function scheduleFrom(
 export const chooseFields: ChooseStage = (candidates, text): ExtractedFields => {
   const { dates, dateRoles } = chooseDates(candidates, text);
   const { scheduleKind, recurrenceMonths } = scheduleFrom(dateRoles, candidates);
-  const reference = chooseReference(candidates);
+  const reference = chooseReference(candidates, text);
   const provider = text === undefined ? chooseProviderByRules(candidates) : chooseProviderFromPage(text);
   const subtype = chooseSubtypeByRules(candidates);
 
@@ -1044,9 +1048,18 @@ export function dateShortlistEntries(candidates: readonly TaggedCandidate[]): Sh
 // certificate beside it is printed once.
 
 /** A number some label spoke for always outranks one nothing did, however
- * often the page printed it. A page laying out its sheets is not the page
- * saying which number is the household's. */
-const A_LABEL_AT_ALL = 1_000;
+ * often the page printed it and however far through the document it ran. A
+ * page laying out its sheets is not the page saying which number is the
+ * household's. Far enough above the band below that no count reaches it. */
+const A_LABEL_AT_ALL = 1_000_000;
+
+/** One more sheet the number was printed on, ranked above the word the page
+ * labelled it with. Real paper prints the item's own reference in the header
+ * or footer of every sheet -- "Policy number ... | page 2 of 4" -- while the
+ * invoice number, the VAT number and another organisation's number are
+ * printed once and left there. Far enough above the order and the repeats
+ * that neither lifts a number out of the sheets it reached. */
+const A_SHEET_PRINTED_ON = 1_000;
 
 /** One step of the preference order: an account number where the kind of
  * thing wanted a policy number, or a bare noun where the page could have
@@ -1059,10 +1072,60 @@ const A_STEP_OF_THE_ORDER = 4;
  * 1, and only settles what is otherwise level. */
 const A_LABEL_PRINTED_AGAIN = 4;
 
-/** A shortlist entry with the one thing the rules need and the model does
- * not: whether any label spoke for this number at all. */
+/**
+ * How a page says where one sheet ended and the next began: "Policy number
+ * ... | page 2 of 4", "Sheet 3 of 12". Tika's text runs the sheets together
+ * with nothing between them, so the number the page printed to find its own
+ * way around is the only break left in it, and the fixtures carry it
+ * verbatim (`extraction-corpus-fullpage.ts`).
+ *
+ * It is the same string stage 2 tags `page` and `extraction-reference-never.ts`
+ * drops, which is why counting sheets costs the shortlist nothing: the marks
+ * are read off the page here, and the numbers inside them were never
+ * candidates.
+ */
+const SHEET_MARK = /\b(?:page|sheet|p\.)\s*(\d{1,3})\s*(?:of|\/)\s*\d{1,3}\b/giu;
+
+/**
+ * Where each sheet ends, in character offsets.
+ *
+ * A sheet that numbers itself twice -- a header and a footer both saying
+ * "Page 2 of 4" -- is one sheet, so a run of marks carrying the same number
+ * is one mark. Whether a document numbers itself at the head or the foot of
+ * each sheet is not known and does not need to be: every candidate is placed
+ * on the first mark at or after it, which on a head-numbered document names
+ * every sheet one too high and moves no candidate relative to another. What
+ * is asked of this is how MANY sheets a number was printed on, so a naming
+ * that is consistently one out answers it exactly.
+ */
+function sheetMarks(text: string | undefined): number[] {
+  if (text === undefined) return [];
+  const marks: number[] = [];
+  let numbered: string | undefined;
+  for (const match of text.matchAll(SHEET_MARK)) {
+    const ends = (match.index ?? 0) + match[0].length;
+    if (match[1] === numbered && marks.length > 0) marks[marks.length - 1] = ends;
+    else marks.push(ends);
+    numbered = match[1];
+  }
+  return marks;
+}
+
+/** The sheet a printing sits on: the first mark at or after it, or the sheet
+ * past the last mark. A document with no marks is one sheet, and every
+ * candidate on it gets the same answer -- which is the rule staying silent,
+ * as it must where there is nothing to count. */
+function sheetAt(marks: readonly number[], index: number): number {
+  const at = marks.findIndex((mark) => mark >= index);
+  return at === -1 ? marks.length : at;
+}
+
+/** A shortlist entry with the two things the rules need and the model does
+ * not: whether any label spoke for this number at all, and how many of the
+ * document's sheets it was printed on. */
 interface ReferenceEntry extends ShortlistEntry {
   labelled: boolean;
+  sheets: number;
 }
 
 /**
@@ -1080,13 +1143,31 @@ interface ReferenceEntry extends ShortlistEntry {
  * 3. how often the page printed it with a label, because a reference is the
  *    number the household is told to quote and a page repeats it.
  *
+ * Above all three sits how many of the document's SHEETS the number was
+ * printed on, under only the plain fact of a label, which nothing outranks.
+ * Real paper puts the item's own reference in the header or footer of every
+ * sheet -- "Policy number ... | page 2 of 4" -- while the invoice number, the
+ * VAT number and another organisation's number are printed once and left
+ * there. Sheets, not repeats: a number set three times in one table is not on
+ * every sheet, and this counts the sheets it reached rather than the times it
+ * was set.
+ *
+ * Where a customer number repeats in the same footer as the answer both are
+ * on every sheet, the counts are level, and the page's own word for the
+ * number decides as before -- which is the label still deciding, and the
+ * reason the sheets are a band rather than a bigger version of (3).
+ *
  * Numbers that can never be the household's reference -- the organisation's
  * VAT or company registration, a telephone number, bank details, a product
  * or promotion code, a sheet number, a number inside an address -- are not
  * ranked last, they are not here at all (`extraction-reference-never.ts`).
  * They are still in the tagged candidates, carrying the tag that says why.
  */
-function referenceEntries(candidates: readonly TaggedCandidate[]): ReferenceEntry[] {
+function referenceEntries(
+  candidates: readonly TaggedCandidate[],
+  text: string | undefined,
+): ReferenceEntry[] {
+  const marks = sheetMarks(text);
   const preference: readonly string[] = referencePreference(subtypeGroupBins(subtypeSources(candidates)));
   const dropped = new Set<string>();
   for (const candidate of candidates) {
@@ -1095,7 +1176,7 @@ function referenceEntries(candidates: readonly TaggedCandidate[]): ReferenceEntr
     }
   }
 
-  interface Working extends ReferenceEntry {
+  interface Working extends Omit<ReferenceEntry, "sheets"> {
     /** The best place in the order any printing of this number earned --
      * two steps per tag, so that a bare noun sits between its own tag and
      * the next one down -- or the end of the order where none did. */
@@ -1103,6 +1184,9 @@ function referenceEntries(candidates: readonly TaggedCandidate[]): ReferenceEntr
     printings: number;
     /** How many of those printings the page put a label beside. */
     labelledPrintings: number;
+    /** The sheets it was printed on, so that a number set three times in one
+     * table counts as the one sheet it reached. */
+    sheets: Set<number>;
   }
   const entries = new Map<string, Working>();
   for (const candidate of candidates) {
@@ -1117,9 +1201,11 @@ function referenceEntries(candidates: readonly TaggedCandidate[]): ReferenceEntr
       step: preference.length * 2,
       printings: 0,
       labelledPrintings: 0,
+      sheets: new Set<number>(),
     };
     // Printed again is one more reason, whatever the label beside it says.
     held.printings += 1;
+    held.sheets.add(sheetAt(marks, candidate.index));
     let labelledHere = false;
     for (const tag of candidate.tags) {
       const rank = preference.indexOf(tag.value);
@@ -1142,19 +1228,30 @@ function referenceEntries(candidates: readonly TaggedCandidate[]): ReferenceEntr
     if (labelledHere) held.labelledPrintings += 1;
     entries.set(candidate.value, held);
   }
-  return bestSupported([...entries.values()].map(({ step, printings, labelledPrintings, ...entry }) => ({
+  const ranked = [...entries.values()].map(({ step, printings, labelledPrintings, sheets, ...entry }) => ({
     ...entry,
-    support: (entry.labelled ? A_LABEL_AT_ALL : 0) +
+    sheets: sheets.size,
+    support: (entry.labelled ? A_LABEL_AT_ALL : 0) + sheets.size * A_SHEET_PRINTED_ON +
       (preference.length * 2 - step) * A_STEP_OF_THE_ORDER +
       labelledPrintings * A_LABEL_PRINTED_AGAIN + printings,
     why: entry.why.length > 0 ? entry.why.slice(0, REASONS_SHOWN) : ["no label beside it"],
-  }))) as ReferenceEntry[];
+  }));
+  // On a single sheet, and on a document that never numbered its sheets,
+  // every entry reaches the same one sheet: the term is the same for all of
+  // them and settles nothing, which is the rule staying silent where there is
+  // nothing to count.
+  return bestSupported(ranked) as ReferenceEntry[];
 }
 
 /** The reference shortlist as the model is shown it: `referenceEntries`
- * without the rules' own note of which entries a label spoke for. */
-export function referenceShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
-  return referenceEntries(candidates);
+ * without the rules' own note of which entries a label spoke for and how far
+ * through the document each ran. The page text is read for the sheet marks
+ * alone; without it the ranking is what it was before they were counted. */
+export function referenceShortlistEntries(
+  candidates: readonly TaggedCandidate[],
+  text?: string,
+): ShortlistEntry[] {
+  return referenceEntries(candidates, text);
 }
 
 /**
