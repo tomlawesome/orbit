@@ -83,6 +83,34 @@ function amounts(text: string, blocks: Array<{ index: number; line: string }>): 
 // identifier, compared without the spaces.
 const IDENTIFIER = /\b(?=[A-Z0-9/-]*\d)[A-Z0-9][A-Z0-9/-]{4,}\b(?:\s\d{2,4}\b)*|\b\d{2,4}(?:\s\d{2,4}){1,4}\b/gu;
 
+// A reference is often printed as a short letter prefix, a space, then the
+// digits: "WV 2291 0834", "AB 1234567", "POL 12 345 678". Where the page runs
+// the two together ("WV2291 0834") the token rule above already keeps the
+// prefix; where a space separates them it starts at the digits, and the value
+// is a substring of the answer. So the prefixed form is collected as well --
+// beside the bare digits, never instead of them, because which of the two the
+// page means is a question about the label, and labels are stage 2's.
+//
+// The prefix is one to four capitals separated from the digits by a single
+// space, never a line break, so a label block printed above cannot run into
+// the number below it. The digits may end in a group of one ("BP 4411 8820
+// 6"), which the bare rule's groups of two to four cannot reach.
+const PREFIXED_IDENTIFIER = /(?<![A-Za-z0-9/-])([A-Z]{1,4}) (\d{2,}(?:[ ]\d{1,4})*)(?![A-Za-z0-9/-])/gu;
+
+// Words a page prints to name a number rather than as part of one: "Ref
+// 123456" is a labelled number, and swallowing the label would make the
+// label's own words part of the household's reference. Stage 2 reads these
+// same words as labels (`IDENTIFIER_TRIGGERS`); listed here are the ones
+// short enough to pass for a prefix.
+const NOT_A_PREFIX = new Set([
+  "REF", "REFS", "NO", "NOS", "ID", "ACC", "INV", "PLAN", "CODE", "PART",
+  "SKU", "PIN", "VAT", "UTR", "FCA", "FSA", "TEL", "FAX", "IBAN", "BIC",
+]);
+
+/** Digits enough to be a reference rather than a house number or a year --
+ * the same judgement the bare rule makes by asking for two groups. */
+const PREFIXED_DIGITS_AT_LEAST = 4;
+
 function identifiers(text: string, blocks: Array<{ index: number; line: string }>): Candidate[] {
   const found: Candidate[] = [];
   for (const match of text.matchAll(IDENTIFIER)) {
@@ -90,6 +118,12 @@ function identifiers(text: string, blocks: Array<{ index: number; line: string }
     // The printed form is the value -- "7738 2204 91" is the reference as the
     // page and the ground truth write it. Compare with spaces stripped.
     found.push({ kind: "identifier", value: match[0].replace(/\s+/gu, " "), index, line: blockAt(blocks, index) });
+  }
+  for (const match of text.matchAll(PREFIXED_IDENTIFIER)) {
+    if (NOT_A_PREFIX.has(match[1])) continue;
+    if (match[2].replace(/ /gu, "").length < PREFIXED_DIGITS_AT_LEAST) continue;
+    const index = match.index ?? 0;
+    found.push({ kind: "identifier", value: match[0], index, line: blockAt(blocks, index) });
   }
   return found;
 }

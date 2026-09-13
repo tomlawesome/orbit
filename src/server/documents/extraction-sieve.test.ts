@@ -37,6 +37,32 @@ describe("the sieve keeps every candidate and chooses nothing", () => {
     expect(values).toContain("7724 6650 18");
   });
 
+  it("keeps a letter prefix the page printed as part of the number, and the bare digits too", () => {
+    const text = [
+      "PLAN NUMBER",
+      "WV 2291 0834 PLAN RENEWS",
+      "Policy number BP 4411 8820 6",
+      "Your claim reference AB 1234567",
+    ].join(" \n\n");
+    const values = sieve(text).filter((c) => c.kind === "identifier").map((c) => c.value);
+    expect(values).toContain("WV 2291 0834");
+    expect(values).toContain("2291 0834");
+    // A group of one digit ends the number as often as a group of four.
+    expect(values).toContain("BP 4411 8820 6");
+    expect(values).toContain("AB 1234567");
+  });
+
+  it("does not read a label word, or the block above, as a prefix", () => {
+    const text = ["Ref 123456 · REF 8845 6120", "ACCOUNT NUMBER", "8847 2210 55"].join(" \n\n");
+    const values = sieve(text).filter((c) => c.kind === "identifier").map((c) => c.value);
+    expect(values).toContain("8845 6120");
+    expect(values).not.toContain("REF 8845 6120");
+    expect(values.some((value) => /^Ref\b/u.test(value))).toBe(false);
+    // "ACCOUNT NUMBER" is the block above, not a prefix on the line below.
+    expect(values).toContain("8847 2210 55");
+    expect(values.some((value) => /NUMBER/u.test(value))).toBe(false);
+  });
+
   it("finds every organisation named, whether in a letterhead, prose or capitals", () => {
     const values = of("organisation").map((c) => c.value);
     expect(values).toContain("COLWORTH & DRAKE INSURANCE SERVICES LTD");
