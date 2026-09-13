@@ -4195,6 +4195,130 @@
       },
       "verdict": "kept",
       "notes": "70.9% (78/110), dateRoles 18/26. Fair comparison on the same re-checked truths: the code before this rule (8632790) scores 71.8% (79/110), dateRoles 18/26, recurrence 5/5 -- so the rule moves no hold-out date role and loses one recurrence. Kept on the owner's call that the role should follow the kind of thing, not the word on the page; the hold-out says that is not yet a measured gain."
+    },
+    {
+      "id": "E77",
+      "date": "2026-09-13",
+      "label": "dateRoles: every taxonomy kind decides its term end; cycle words for unknown kinds",
+      "corpus": "seen48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "extraction-term-end.ts covers every kind that bounds a term (certificate, inspection, service, identity document, benefit renew; credit card, savings, investment, deposit, claim, prescription, fine, fees, appointment, order, delivery, repair expire; bill/statement/bank account/pension/record/deed/will left to wording). Fallback for unknown kinds weighs cycle words (annual, every N months, per month, rolling, auto-renew) against end words (one-off, final payment, matures, warranty) instead of only 'renew'.",
+      "how": "npm run eval:stages",
+      "commit": "bbd75ab",
+      "output": "tmp/e-seen48-stages-te5.txt",
+      "scores": {
+        "overall": {
+          "pct": 84.9,
+          "net": 348,
+          "of": 410
+        },
+        "provider": {
+          "pct": 79.2,
+          "net": 38,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 90.6,
+          "net": 77,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 68.8,
+          "net": 33,
+          "of": 48
+        },
+        "cost": {
+          "pct": 97.6,
+          "net": 41,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 87.5,
+          "net": 28,
+          "of": 32
+        },
+        "recurrence": {
+          "pct": 68.2,
+          "net": 15,
+          "of": 22
+        }
+      },
+      "verdict": "kept",
+      "notes": "Neutral on the seen set, as expected: every seen kind was already in the table. Kept because the owner asked for full coverage plus a general catch (77)."
+    },
+    {
+      "id": "E78",
+      "date": "2026-09-13",
+      "label": "hold-out 3: every taxonomy kind decides its term end",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Same code as E77 scored on hold-out 3 (12 documents, author truths at 943aabf).",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "bbd75ab",
+      "output": "tmp/e-holdout3-te5.txt",
+      "scores": {
+        "overall": {
+          "pct": 68.2,
+          "net": 75,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 65.4,
+          "net": 17,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 60,
+          "net": 3,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 60,
+          "net": 3,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "Neutral: 70.9% (78/110), dateRoles 18/26, identical to E76 field by field."
     }
   ],
   "measurements": [
