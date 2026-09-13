@@ -156,8 +156,12 @@ dependencies outside the approved SPDX licence policy block integration.
 
 ### Risk-proportional pull-request lanes
 
-Every pull request runs lint, type checking and the complete unit suite. Separate read-only workflows retain dependency-diff review
-and CodeQL. Higher-cost evidence is concentrated on the protected release lane:
+Every pull request runs lint, type checking and the complete unit suite. A
+separate read-only workflow retains CodeQL. Dependency-diff review moved off
+GitHub once the mirror flip (#801) left it no pull requests to diff against
+(#815): GitLab's `licence_policy` job now walks the whole installed
+dependency tree instead (see [supply-chain.md](supply-chain.md)). Higher-cost
+evidence is concentrated on the protected release lane:
 
 | Lane | Additional evidence | Typical eligible change |
 | --- | --- | --- |
