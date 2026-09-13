@@ -101,6 +101,10 @@ const test: TestUserConfig = {
           // it here would import it for its side effect of running the
           // check immediately, without a vitest test to attach the result to.
           "scripts/lockfile-no-pnpm-exe.test.mjs",
+          // Same reason (#921): uses node:test, not vitest globals. Run
+          // standalone with `node --test
+          // scripts/compose-project-name-resolution.test.mjs`.
+          "scripts/compose-project-name-resolution.test.mjs",
           // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
           // unprivileged `big` lane, which has no `docker` binary on PATH.
           // `--exclude` on the CLI does not reach a project defined through
