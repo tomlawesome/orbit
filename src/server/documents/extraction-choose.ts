@@ -51,7 +51,7 @@ import type { ExtractedFields } from "./extraction-scoring";
 import { STRENGTH_STATED, type ChooseStage, type Tag, type TaggedCandidate } from "./extraction-stages";
 import { subtypeGroupBins, subtypeSources } from "./extraction-subtype-bins";
 import { termEndRole } from "./extraction-term-end";
-import { chooseProviderFromPage } from "./provider-route";
+import { chooseProviderFromPage, providerPicks } from "./provider-route";
 import { documentDateRoles, type DocumentDateRole } from "./suggestions";
 import { trimFieldValue } from "./value-trim";
 
@@ -80,6 +80,10 @@ function isDateRole(value: string): value is DocumentDateRole {
 interface RoleClaim {
   date: string;
   role: DocumentDateRole;
+  /** The printing that made the claim: which copy of the date carried the
+   * words, so the cluster can tell a claim made in the answer panel from one
+   * made in a table further down (item 99). */
+  at: { index: number; line: string };
   /** How good the page's reason for this role is -- see `claimStrength`. */
   strength: number;
   /** The stage 2 sieves that agreed on it. Several sieves reading a date
@@ -123,6 +127,7 @@ function roleClaims(candidates: readonly TaggedCandidate[]): RoleClaim[] {
       claims.push({
         date: candidate.value,
         role: tag.value,
+        at: { index: candidate.index, line: candidate.line },
         strength: tag.strength ?? claimStrength(tag.trigger),
         // A tag with no sieve names came from the words beside the date --
         // which is the range connector when that is what it quoted.
@@ -194,7 +199,11 @@ export function datesWithoutARole(
  * longer dropped: the sieve found it on the page, and a rule that throws it
  * away takes the choice off the model that could still have made it.
  */
-function chooseDates(candidates: readonly TaggedCandidate[], text: string | undefined): {
+function chooseDates(
+  candidates: readonly TaggedCandidate[],
+  text: string | undefined,
+  anchor: ClusterAnchor | undefined,
+): {
   dates: string[];
   dateRoles: Array<{ date: string; role: DocumentDateRole }>;
 } {
@@ -206,6 +215,7 @@ function chooseDates(candidates: readonly TaggedCandidate[], text: string | unde
   const family = (role: DocumentDateRole): DocumentDateRole => (endsATerm(role) ? "expiry" : role);
   const claims = roleClaims(candidates).map((claim) => ({ ...claim, role: family(claim.role) }));
   const endRole = termEndRole(subtypeGroupBins(subtypeSources(candidates)), text);
+  const marks = sheetMarks(text);
 
   const claimed: string[] = [];
   for (const claim of claims) if (!claimed.includes(claim.date)) claimed.push(claim.date);
@@ -251,16 +261,34 @@ function chooseDates(candidates: readonly TaggedCandidate[], text: string | unde
     // having several (ADR-0026 stage 2). Where they are level, the role the
     // page states most often wins, the same way a reference printed in every
     // footer wins. Level on both is an ambiguous page: blank.
+    // A claim made where the document settled its other fields is the
+    // answer panel talking about this date; one made in a table three
+    // sheets away is the page talking about something else (item 99). As a
+    // weight it joins the sieve count, where it can lift a role one sieve
+    // read in the panel over one another sieve read far from it; as a
+    // tie-break it sits under the sieves and the claims and separates only
+    // what both called level.
     const winner = [...roles]
       .map((role) => {
         const mine = considered.filter((claim) => claim.role === role);
         const sieves = new Set(mine.flatMap((claim) => claim.sieves));
-        return { role, sieves: sieves.size, claims: mine.length };
+        const boost = anchor === undefined
+          ? 0
+          : Math.max(...mine.map((claim) =>
+            clusterBoost(CLUSTER.dateRoles, nearnessTo(anchor, claim.at, marks), A_SIEVE)));
+        return {
+          role,
+          sieves: sieves.size + (CLUSTER.dateRoles === "weight" ? boost : 0),
+          claims: mine.length,
+          near: CLUSTER.dateRoles === "tie-break" ? boost : 0,
+        };
       })
-      .sort((a, b) => b.sieves - a.sieves || b.claims - a.claims);
+      .sort((a, b) => b.sieves - a.sieves || b.claims - a.claims || b.near - a.near);
     const clear = winner.length === 1 ||
       winner[0].sieves > winner[1].sieves ||
-      (winner[0].sieves === winner[1].sieves && winner[0].claims > winner[1].claims);
+      (winner[0].sieves === winner[1].sieves &&
+        (winner[0].claims > winner[1].claims ||
+          (winner[0].claims === winner[1].claims && winner[0].near > winner[1].near)));
     if (clear) dateRoles.push({ date, role: endsATerm(winner[0].role) ? endRole : winner[0].role });
   }
 
@@ -331,6 +359,213 @@ function chooseReference(
   if (ranked[1] !== undefined && ranked[1].support === best.support) return undefined;
   return trimFieldValue("reference", best.value, best.line);
 }
+
+// ------------------------------------------------- the answers cluster
+//
+// On real paper the answers about one thing are printed together: the
+// summary panel, the "your policy" box, the header of the first sheet carry
+// the provider, the reference, the price and the dates side by side, while
+// the marketing, the other products and the legal text sit elsewhere. Each
+// field is still chosen on its own evidence, so a rival that wins its own
+// field's ranking can sit three sheets away from every other answer.
+//
+// The cluster is a SECOND pass over a ranking the first pass already made:
+// once one field is settled with a clear margin, candidates for the others
+// printed beside it gain a little. Three rules keep it from becoming a
+// position rule, which stage 3 has never had (see this file's header):
+//
+//   1. It is silent unless some field was settled with a clear margin. A
+//      wrong anchor must do no harm, and the reference is wrong often
+//      enough to make that the first requirement rather than a nicety.
+//   2. It boosts, it never overrides: a labelled figure far from the anchor
+//      still beats an unlabelled figure printed beside it.
+//   3. It never drops anything. A far candidate stays on the shortlist,
+//      lower down.
+
+/**
+ * A field already settled, and every place the page printed it.
+ *
+ * The reference is the strongest anchor: it is the number the page prints
+ * where it is talking about this item, and the chooser above already refuses
+ * it where two numbers are level. A date the rules gave a job to is next --
+ * weaker, because a page prints dates in tables that are about nothing.
+ */
+interface ClusterAnchor {
+  field: "reference" | "date";
+  /** Every printing of the anchored value: its offset and its block. */
+  at: ReadonlyArray<{ index: number; line: string }>;
+}
+
+/** How far a candidate sits from the nearest printing of the anchor. */
+interface Nearness {
+  /** The same Tika block -- the same row of the same panel. */
+  sameBlock: boolean;
+  /** The same sheet of the document, where the page numbers its sheets. */
+  sameSheet: boolean;
+  /** Characters to the nearest printing. */
+  chars: number;
+}
+
+/**
+ * How much clearer than its rival the reference has to be before it is
+ * allowed to speak for the other fields.
+ *
+ * `chooseReference` answers on any margin at all, because a wrong reference
+ * costs one field. An anchor that is wrong drags every field it touches, so
+ * it asks for a whole step of the preference order -- the page naming one
+ * number better than the other, not the page printing one an extra time.
+ *
+ * A function rather than a constant because the step it reads is declared
+ * with the reference ranking, further down the file.
+ */
+function aClearMargin(): number {
+  return A_STEP_OF_THE_ORDER;
+}
+
+/** Every printing of one value, as the anchor needs them. */
+function printingsOf(candidates: readonly TaggedCandidate[], value: string): Array<{ index: number; line: string }> {
+  return candidates
+    .filter((candidate) => candidate.value === value)
+    .map((candidate) => ({ index: candidate.index, line: candidate.line }));
+}
+
+/**
+ * The field this document settled clearly enough to speak for the others,
+ * or nothing at all -- which is the pass staying silent, and is the answer
+ * on a page that named neither a reference nor a date's job.
+ */
+function referenceAnchor(
+  candidates: readonly TaggedCandidate[],
+  text: string | undefined,
+): ClusterAnchor | undefined {
+  const ranked = referenceEntries(candidates, text);
+  const best = ranked[0];
+  if (best === undefined || !best.labelled) return undefined;
+  if (ranked[1] !== undefined && best.support - ranked[1].support < aClearMargin()) return undefined;
+  const at = printingsOf(candidates, best.value);
+  return at.length > 0 ? { field: "reference", at } : undefined;
+}
+
+function clusterAnchor(
+  candidates: readonly TaggedCandidate[],
+  text: string | undefined,
+): ClusterAnchor | undefined {
+  const reference = referenceAnchor(candidates, text);
+  if (reference !== undefined) return reference;
+  // No reference worth trusting: the dates the rules could put a job to,
+  // read without any cluster of their own so that this cannot circle back
+  // on itself. The dates' own roles never take this fallback -- a field
+  // cannot be its own anchor -- so they ask for the reference alone.
+  const { dateRoles } = chooseDates(candidates, text, undefined);
+  const at = dateRoles.flatMap((entry) => printingsOf(candidates, entry.date));
+  return at.length > 0 ? { field: "date", at } : undefined;
+}
+
+/**
+ * Characters either side of the anchor that still read as one panel. A Tika
+ * block is a line, and a summary panel is a handful of them; beyond a few
+ * hundred characters the page has moved on to something else.
+ */
+const A_PANEL = 400;
+
+function nearnessTo(
+  anchor: ClusterAnchor,
+  candidate: { index: number; line: string },
+  marks: readonly number[],
+): Nearness {
+  let chars = Number.POSITIVE_INFINITY;
+  let sameBlock = false;
+  let sameSheet = false;
+  const sheet = sheetAt(marks, candidate.index);
+  for (const printing of anchor.at) {
+    chars = Math.min(chars, Math.abs(printing.index - candidate.index));
+    sameBlock ||= printing.line !== "" && printing.line === candidate.line;
+    sameSheet ||= sheetAt(marks, printing.index) === sheet;
+  }
+  return { sameBlock, sameSheet, chars };
+}
+
+/**
+ * Nearness as one number between 0 and 1: the same block, then the same
+ * panel, then the same sheet, then nothing.
+ *
+ * A document that never numbers its sheets, and a document printed on one,
+ * give every candidate the same sheet -- so that tier separates nothing
+ * there, which is this pass staying silent where there is nothing to
+ * measure.
+ */
+function nearnessScore(near: Nearness): number {
+  if (near.sameBlock) return 1;
+  if (near.chars <= A_PANEL) return 0.75;
+  return near.sameSheet ? 0.5 : 0;
+}
+
+/**
+ * What the cluster is allowed to be worth, per field.
+ *
+ * `tie-break`: less than the smallest difference any other reason can make,
+ * so it only ever separates two candidates every other reason called level.
+ * `weight`: one reason's worth in the units the field already ranks by -- a
+ * stated sieve for cost, a cue for provider, a sieve for a date's role --
+ * added to that ranking. Still under the bands and the agreement counts
+ * above it, so a labelled figure far from the anchor keeps its place.
+ * `off`: the field is ranked exactly as it was.
+ */
+type ClusterUse = "off" | "tie-break" | "weight";
+
+/** Under the smallest difference any other reason can make, which is 1
+ * everywhere stage 3 counts reasons. */
+const A_TIE_BREAK = 0.5;
+
+/**
+ * The cluster's say, in the field's own units: `unit` is what one more
+ * reason is worth there, so the pass can lift a candidate past one reason
+ * and no further.
+ */
+function clusterBoost(use: ClusterUse, near: Nearness, unit: number): number {
+  if (use === "off") return 0;
+  return nearnessScore(near) * (use === "tie-break" ? A_TIE_BREAK : unit);
+}
+
+/**
+ * Which fields the second pass speaks to, and how (item 99).
+ *
+ * Measured field by field and variant by variant, 2026-09-13, on the tuning
+ * 60 and both hold-outs. What each one did, so the next session does not run
+ * it again:
+ *
+ * - cost, tie-break: 41/54 -> 42/54 on the tuning 60, both hold-outs
+ *   unchanged. The gain is one page whose two figures were level on every
+ *   other reason and the answer was the one printed with the reference.
+ *   Kept.
+ * - cost, weight: the same 42/54 and the same hold-outs -- it buys nothing
+ *   the tie-break does not, and it can reorder figures other reasons had
+ *   separated, so the tie-break is what ships.
+ * - provider, tie-break: no change anywhere. Provider's route already asks
+ *   who acts, and two names level on that AND on printings is rare.
+ * - provider, weight: 42/60 -> 41/60 on the tuning 60. A cue is a stronger
+ *   reason than a neighbour, and one vote's worth of nearness is enough to
+ *   beat one.
+ * - dateRoles, either variant: no change anywhere. The pass can only break a
+ *   tie between two roles claimed for one date, and the tuning misses are
+ *   not that: five are a wrong role the sieves agreed on and four are dates
+ *   no sieve claimed a role for at all.
+ *
+ * The three off paths stay in, switched off, because the next tuning round
+ * is the cheapest place to try them again against better anchors.
+ */
+const CLUSTER: Record<"cost" | "provider" | "dateRoles", ClusterUse> = {
+  cost: "tie-break",
+  provider: "off",
+  dateRoles: "off",
+};
+
+/** One more reason, in each field's own units: a sieve reading the figure in
+ * the page's words (cost, where a stated reading is worth 2), one cue saying
+ * who acts (provider), one sieve agreeing on a role (a date's job). */
+const A_STATED_SIEVE = STRENGTH_STATED;
+const A_CUE = 1;
+const A_SIEVE = 1;
 
 /**
  * The amounts the page gave a reason to read as this document's cost, one
@@ -732,6 +967,36 @@ function lineItemsAddUp(claim: AmountClaim): boolean {
 }
 
 /**
+ * What each figure is worth for being printed with the anchor: the nearest
+ * printing of that figure to the nearest printing of the settled field.
+ *
+ * Zero for every figure where no field was settled clearly, which is the
+ * cluster staying silent; zero for every figure where the pass is off.
+ */
+function amountCluster(
+  candidates: readonly TaggedCandidate[],
+  text: string | undefined,
+): Map<string, number> {
+  const boosts = new Map<string, number>();
+  if (CLUSTER.cost === "off") return boosts;
+  const anchor = clusterAnchor(candidates, text);
+  if (anchor === undefined) return boosts;
+  const marks = sheetMarks(text);
+  for (const candidate of candidates) {
+    if (candidate.kind !== "amount" || !candidate.currency) continue;
+    const key = `${candidate.value} ${candidate.currency}`;
+    const boost = clusterBoost(CLUSTER.cost, nearnessTo(anchor, candidate, marks), A_STATED_SIEVE);
+    boosts.set(key, Math.max(boosts.get(key) ?? 0, boost));
+  }
+  return boosts;
+}
+
+/** The key a figure is held under, everywhere the cost is worked out. */
+function amountKey(claim: AmountClaim): string {
+  return `${claim.value} ${claim.currency}`;
+}
+
+/**
  * Claims worth offering: something spoke for the figure and nothing has
  * cancelled it out. Ordered best first.
  *
@@ -743,6 +1008,11 @@ function lineItemsAddUp(claim: AmountClaim): boolean {
  * the most sieves agree about wins.
  */
 export function rankedAmounts(candidates: readonly TaggedCandidate[], text?: string): AmountClaim[] {
+  const cluster = amountCluster(candidates, text);
+  // What the figure gains for being printed with the field this document
+  // settled: a tie-break under every other reason, or a modest weight beside
+  // the strengths -- never a reason of its own (item 99).
+  const near = (claim: AmountClaim): number => cluster.get(amountKey(claim)) ?? 0;
   const kept = amountClaims(candidates, text)
     .filter((claim) => !claim.ruledOut && amountAgreement(claim) > 0);
   // Only a total or an amount due the page really gave a reason for keeps
@@ -776,14 +1046,21 @@ export function rankedAmounts(candidates: readonly TaggedCandidate[], text?: str
   // two figures the page spoke for equally well apart, not a reason that
   // outranks how well it spoke for them.
   const whole0 = (claim: AmountClaim): number => claim.wholeCommitment ? 1 : 0;
+  // As a weight the cluster joins the strengths, where it can separate two
+  // figures the same number of sieves spoke for; as a tie-break it sits
+  // under every other reason and separates only what they all called level.
+  const weighed = (claim: AmountClaim): number =>
+    claim.weight + (CLUSTER.cost === "weight" ? near(claim) : 0);
+  const tied = (claim: AmountClaim): number => CLUSTER.cost === "tie-break" ? near(claim) : 0;
   return (whole.length > 0 ? whole : kept).sort((left, right) =>
     now(right) - now(left) ||
     commitment(right) - commitment(left) ||
     addsUp(right) - addsUp(left) ||
     amountAgreement(right) - amountAgreement(left) ||
-    right.weight - left.weight ||
+    weighed(right) - weighed(left) ||
     left.rank - right.rank ||
-    whole0(right) - whole0(left));
+    whole0(right) - whole0(left) ||
+    tied(right) - tied(left));
 }
 
 /**
@@ -887,6 +1164,13 @@ function chooseCost(
   if (best === undefined) return {};
   if (!enoughReason(best)) return {};
   const rival = ranked[1];
+  // Where the cluster is what separates them, the page has said which of the
+  // two figures this document is about, and the tie is no longer genuine:
+  // the panel that carries the reference carries the price beside it. With
+  // the pass off, or with neither figure near the anchor, both boosts are
+  // zero and the tie stands as it always did.
+  const cluster = amountCluster(candidates, text);
+  const near = (claim: AmountClaim): number => cluster.get(amountKey(claim)) ?? 0;
   // A tie on how well the page spoke for two figures is a genuine tie and
   // blank is the answer -- unless the page's own arithmetic breaks it
   // (#1006 class 3). Where one of the two is what the line items add up to
@@ -900,6 +1184,7 @@ function chooseCost(
     rival.theOtherWay === best.theOtherWay &&
     rival.wholeCommitment === best.wholeCommitment &&
     rival.anotherThingOnOffer === best.anotherThingOnOffer &&
+    near(rival) === near(best) &&
     lineItemsAddUp(rival) === lineItemsAddUp(best)) {
     return {};
   }
@@ -978,11 +1263,69 @@ function scheduleFrom(
   };
 }
 
+/**
+ * The provider, read off the page as `provider-route.ts` reads it, with the
+ * names printed beside this document's settled field heard a little louder
+ * (item 99).
+ *
+ * The route itself is untouched: this takes its picks, its votes and its own
+ * count order, and adds the cluster to them. With the pass off, or with no
+ * field settled clearly, it IS `chooseProviderFromPage` -- same picks, same
+ * test, same blank.
+ */
+function chooseProviderNearTheRest(
+  candidates: readonly TaggedCandidate[],
+  text: string,
+): string | undefined {
+  if (CLUSTER.provider === "off") return chooseProviderFromPage(text);
+  const anchor = clusterAnchor(candidates, text);
+  if (anchor === undefined) return chooseProviderFromPage(text);
+  const marks = sheetMarks(text);
+  // A name is printed several times; the nearest printing to the anchor is
+  // the one that says whether the page put this name with the answers.
+  const picks = providerPicks(text).map((pick, rank) => {
+    const boost = pick.run.mentions.length === 0
+      ? 0
+      : Math.max(...pick.run.mentions.map((mention) =>
+        clusterBoost(CLUSTER.provider, nearnessTo(anchor, mention, marks), A_CUE)));
+    return {
+      display: pick.run.display,
+      count: pick.run.count,
+      rank,
+      votes: pick.votes + (CLUSTER.provider === "weight" ? boost : 0),
+      near: CLUSTER.provider === "tie-break" ? boost : 0,
+    };
+  });
+  type Pick = (typeof picks)[number];
+  // The route's own order -- who acts, then how much of the page the name
+  // accounts for -- with the cluster where the variant puts it.
+  const ranked = [...picks].sort((left, right) =>
+    right.votes - left.votes || left.rank - right.rank || right.near - left.near);
+  const [top, next] = ranked;
+  if (top === undefined) return undefined;
+  const ahead = (over: Pick): boolean =>
+    top.votes > over.votes ||
+    (top.votes === over.votes &&
+      (top.count > over.count || (top.count === over.count && top.near > over.near)));
+  // Level on every reason is the page naming two things as loudly as each
+  // other, and the answer to that is still nothing.
+  if (next !== undefined && !ahead(next)) return undefined;
+  return top.display;
+}
+
 export const chooseFields: ChooseStage = (candidates, text): ExtractedFields => {
-  const { dates, dateRoles } = chooseDates(candidates, text);
+  // The reference is the one field the others may lean on, and it is chosen
+  // exactly as it was: the second pass reads its answer, it never changes it.
+  const { dates, dateRoles } = chooseDates(
+    candidates,
+    text,
+    CLUSTER.dateRoles === "off" ? undefined : referenceAnchor(candidates, text),
+  );
   const { scheduleKind, recurrenceMonths } = scheduleFrom(dateRoles, candidates);
   const reference = chooseReference(candidates, text);
-  const provider = text === undefined ? chooseProviderByRules(candidates) : chooseProviderFromPage(text);
+  const provider = text === undefined
+    ? chooseProviderByRules(candidates)
+    : chooseProviderNearTheRest(candidates, text);
   const subtype = chooseSubtypeByRules(candidates);
 
   return {
@@ -1286,6 +1629,11 @@ function printedAmount(value: string, currency: string | undefined): string {
 export function costShortlistEntries(candidates: readonly TaggedCandidate[], text?: string): ShortlistEntry[] {
   const entries: ShortlistEntry[] = [];
   const seen = new Set<string>();
+  // The same second pass the rules rank by, so the list the model is shown
+  // and the answer the rules fall back to are one ordering and not two.
+  // Nothing is dropped for being far: a far figure sorts lower, as a rival
+  // total does (item 99).
+  const cluster = amountCluster(candidates, text);
   const blockFor = (value: string, currency: string | undefined) =>
     candidates.find((candidate) =>
       candidate.kind === "amount" && candidate.value === value && candidate.currency === currency);
@@ -1309,6 +1657,7 @@ export function costShortlistEntries(candidates: readonly TaggedCandidate[], tex
         ...(claim.anotherThingOnOffer ? ["printed only under a heading offering something else"] : []),
       ],
       support: amountAgreement(claim) * 2 + claim.weight + (claim.labelStated ? 2 : 0) +
+        (cluster.get(key) ?? 0) +
         (claim.ruledOut
           ? RULED_OUT_BAND
           : claim.lastTime
