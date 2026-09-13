@@ -16,8 +16,8 @@ vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const script = fileURLToPath(new URL("./test-e2e-local.sh", import.meta.url));
 
-function dryRunArgs(args) {
-  const result = failOnProcessDeadline(
+function dryRunArgsRaw(args) {
+  return failOnProcessDeadline(
     spawnSync("bash", [script, ...args], {
       encoding: "utf8",
       env: { ...process.env, TEST_E2E_LOCAL_DRY_RUN: "1" },
@@ -25,9 +25,67 @@ function dryRunArgs(args) {
     }),
     { label: "dryRunArgs" },
   );
+}
+
+function dryRunArgs(args) {
+  const result = dryRunArgsRaw(args);
   expect(result.status, `stderr: ${result.stderr}`).toBe(0);
   return result.stdout.split("\n").filter((line) => line.length > 0);
 }
+
+/*
+ * #947: `--reuse PROJECT` skips the image build, the OIDC build and
+ * `compose up`, identifying and health-checking an already-running stack by
+ * Compose's own project/service labels instead. These drive the real script
+ * past the dry-run hook -- discovery uses only read-only `docker ps`/`docker
+ * inspect` calls, and a project name that certainly does not exist reaches
+ * `fail()` before the script would ever touch pnpm, a build or `compose up`,
+ * so this needs no Docker stub and starts nothing.
+ */
+function runReuse(args) {
+  const result = failOnProcessDeadline(
+    spawnSync("bash", [script, ...args], {
+      encoding: "utf8",
+      // Deliberately no TEST_E2E_LOCAL_DRY_RUN: this must reach the real
+      // --reuse discovery code, not the argument-assembly short-circuit.
+      env: process.env,
+      ...processGuard(),
+    }),
+    { label: "runReuse" },
+  );
+  return result;
+}
+
+describe("test-e2e-local.sh --reuse", () => {
+  it("accepts a value without disturbing Playwright argument assembly", () => {
+    expect(dryRunArgs(["--reuse", "some-project"])).toEqual(dryRunArgs([]));
+  });
+
+  it("requires a value", () => {
+    const result = dryRunArgsRaw(["--reuse"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("--reuse requires a Compose project name");
+  });
+
+  it("fails loudly and exits non-zero when no stack exists for the named project", () => {
+    const project = `orbit-e2e-local-reuse-test-absent-${process.pid}`;
+    const result = runReuse(["--reuse", project]);
+    expect(result.status).not.toBe(0);
+    expect(result.status).not.toBeNull();
+    expect(result.stderr).toContain(project);
+    expect(result.stderr).toContain("no running orbit-app container");
+  });
+
+  it("never tears down a stack it did not create, even when it fails to identify one", () => {
+    const project = `orbit-e2e-local-reuse-test-absent-${process.pid}`;
+    const result = runReuse(["--reuse", project]);
+    expect(result.stderr).toContain("not tearing down project");
+    // The positive form ("tearing down project ...", no "not") is only ever
+    // logged right before a real `compose down` call, so its absence here is
+    // the proof that call never happened.
+    expect(result.stderr).not.toMatch(/(?<!not )tearing down project/);
+  });
+});
 
 describe("test-e2e-local.sh Playwright argument assembly", () => {
   it("keeps the spec out of --project's value when both flags are given", () => {
