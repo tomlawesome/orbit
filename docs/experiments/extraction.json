@@ -5786,6 +5786,57 @@
         ]
       ],
       "source": "tmp/e-seen60-shortlist-ref1.txt, tmp/e-holdout3-shortlist-ref1.txt, tmp/e-holdout4-shortlist-ref1.txt; commit 04dd7f7"
+    },
+    {
+      "id": "M10",
+      "date": "2026-09-13",
+      "corpus": "tuning-60",
+      "label": "Top two against top three, after the day's ranking rules (E96)",
+      "what": "The owner asked whether two slots would show the answer as often as three. Tool now prints a top-2 column. On tuning 60 the third slot adds 7 costs, 5 providers and 19 dates; on hold-out 4 the second and third slots add nothing for reference or cost — where the answer is not first it is well down the list — and one provider.",
+      "how": "npm run eval:shortlist [-- --holdout3 | --holdout4]",
+      "results": [
+        [
+          "tuning 60: reference first / top two / top three / on list",
+          "55 (92%) / 55 (92%) / 58 (97%) / 60 (100%) of 60"
+        ],
+        [
+          "tuning 60: cost",
+          "27 (50%) / 37 (69%) / 44 (81%) / 48 (89%) of 54"
+        ],
+        [
+          "tuning 60: provider",
+          "39 (65%) / 41 (68%) / 46 (77%) / 48 (80%) of 60"
+        ],
+        [
+          "tuning 60: dates",
+          "32 (31%) / 67 (66%) / 86 (84%) / 102 (100%) of 102"
+        ],
+        [
+          "hold-out 4: reference",
+          "7 (58%) / 7 (58%) / 7 (58%) / 10 (83%) of 12"
+        ],
+        [
+          "hold-out 4: cost",
+          "7 (58%) / 7 (58%) / 7 (58%) / 10 (83%) of 12"
+        ],
+        [
+          "hold-out 4: provider",
+          "6 (50%) / 7 (58%) / 7 (58%) / 8 (67%) of 12"
+        ],
+        [
+          "hold-out 4: dates",
+          "9 (32%) / 14 (50%) / 20 (71%) / 27 (96%) of 28"
+        ],
+        [
+          "hold-out 3: cost",
+          "9 (75%) / 11 (92%) / 11 (92%) / 11 (92%) of 12"
+        ],
+        [
+          "hold-out 3: dates",
+          "11 (42%) / 21 (81%) / 25 (96%) / 26 (100%) of 26"
+        ]
+      ],
+      "source": "tmp/e-seen60-shortlist-cost2.txt, tmp/e-holdout3-shortlist-cost2.txt, tmp/e-holdout4-shortlist-cost2.txt; commit 4496cdd"
     }
   ]
 }

@@ -60,6 +60,8 @@ import { tagCandidates } from "./extraction-tags";
 interface FieldTally {
   /** Expected answers that were first on the shortlist. */
   top1: number;
+  /** Expected answers in the top two. */
+  top2: number;
   /** Expected answers in the top three. */
   top3: number;
   /** Expected answers that were on the shortlist anywhere. */
@@ -84,7 +86,7 @@ const RANKED: Record<Field, boolean> = {
 function emptyTallies(): Record<Field, FieldTally> {
   const tallies = {} as Record<Field, FieldTally>;
   for (const field of FIELDS) {
-    tallies[field] = { top1: 0, top3: 0, found: 0, wanted: 0, entries: 0, lists: 0, misses: [] };
+    tallies[field] = { top1: 0, top2: 0, top3: 0, found: 0, wanted: 0, entries: 0, lists: 0, misses: [] };
   }
   return tallies;
 }
@@ -134,6 +136,7 @@ function main(): void {
         tally.found += 1;
         if (RANKED[field]) {
           if (rank === 0) tally.top1 += 1;
+          if (rank <= 1) tally.top2 += 1;
           if (rank <= 2) tally.top3 += 1;
         }
       } else {
@@ -197,13 +200,14 @@ function main(): void {
     }], name);
   }
 
-  console.log(`${label}field        top-1               top-3               on list             mean entries`);
+  console.log(`${label}field        top-1               top-2               top-3               on list             mean entries`);
   for (const field of FIELDS) {
-    const { top1, top3, found, wanted, entries, lists } = tallies[field];
+    const { top1, top2, top3, found, wanted, entries, lists } = tallies[field];
     const top1Cell = RANKED[field] ? `${top1}/${wanted} (${percent(top1, wanted)})` : "n/a";
+    const top2Cell = RANKED[field] ? `${top2}/${wanted} (${percent(top2, wanted)})` : "n/a";
     const top3Cell = RANKED[field] ? `${top3}/${wanted} (${percent(top3, wanted)})` : "n/a";
     const onCell = `${found}/${wanted} (${percent(found, wanted)})`;
-    console.log(`${field.padEnd(12)} ${top1Cell.padEnd(19)} ${top3Cell.padEnd(19)} ${onCell.padEnd(19)} ${(entries / lists).toFixed(1)}`);
+    console.log(`${field.padEnd(12)} ${top1Cell.padEnd(19)} ${top2Cell.padEnd(19)} ${top3Cell.padEnd(19)} ${onCell.padEnd(19)} ${(entries / lists).toFixed(1)}`);
   }
 
   const misses = FIELDS.flatMap((field) => tallies[field].misses);
