@@ -2,16 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Foxglove Hosting — Domain Renewal</title>
+<title>Domain Control Panel — Renewal</title>
 <style>
 @font-face{font-family:"Corpus Host";src:url("../fonts/Epilogue.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
 @font-face{font-family:"Corpus Host Mono";src:url("../fonts/SourceCodePro.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
   @page { size: A4; margin: 0; }
   body { margin: 0; font-family: "Corpus Host", sans-serif; color: #1a1a1a; }
   .page {
-    width: 794px; height: 1123px; box-sizing: border-box; position: relative;
-    overflow: hidden; padding: 30px 42px; background: #fff;
+    width: 794px; min-height: 1123px; box-sizing: border-box; position: relative;
+    padding: 30px 42px; background: #fff; page-break-after: always;
   }
+  .page:last-child { page-break-after: auto; }
+  .pricecols { display: flex; gap: 16px; margin-bottom: 10px; }
+  .pricecols > div { flex: 1; }
+  h4.hh { font-size: 11.5px; margin: 10px 0 5px; text-transform: uppercase; letter-spacing: 0.3px; border-bottom: 1px solid #ccc; padding-bottom: 3px; color: #14361f; }
+  table.tariff2 { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 8px; }
+  table.tariff2 th { text-align: left; background: #eef4ef; border: 1px solid #b9c9bd; padding: 3px 5px; }
+  table.tariff2 td { border: 1px solid #d8dfda; padding: 3px 5px; }
+  table.tariff2 td.r { text-align: right; }
+  ul.tight2 { margin: 3px 0 8px 14px; padding: 0; font-size: 10px; line-height: 1.5; }
+  .refstrip { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 9.5px; margin: 6px 0 8px; }
+  .refstrip span { border-left: 2px solid #9ab; padding-left: 5px; }
+  .sheethead { border-bottom: 2px solid #14361f; padding-bottom: 6px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; }
+  .sheethead .st { font-size: 15px; font-weight: bold; color: #14361f; }
+  .sheethead .sn { font-size: 9px; color: #555; text-align: right; line-height: 1.5; }
   .printhead { font-size: 9px; color: #777; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-bottom: 12px;
                font-family: "Corpus Host Mono", monospace; display: flex; justify-content: space-between; }
   .crumbs { font-size: 10.5px; color: #555; margin-bottom: 10px; }
@@ -48,7 +62,7 @@
   <div class="crumbs">Home / Domains / brindlewood-supplies.example / Renewal</div>
 
   <div class="topbar">
-    <h1>Foxglove Hosting</h1>
+    <h1>Domain Control Panel</h1>
     <span class="domain-name">brindlewood-supplies.example</span>
   </div>
 
@@ -96,7 +110,217 @@
 
   <div class="footfoot">
     <span>Foxglove Hosting Limited. help@foxglovehosting.example. 01632 960118.</span>
-    <span>Page 1 of 1</span>
+    <span>Page 1 of 4</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="printhead">
+    <span>https://panel.foxglovehosting.example/account/plans</span>
+    <span>Printed 11 September 2026</span>
+  </div>
+  <div class="sheethead">
+    <div class="st">Your hosting plans and add-ons</div>
+    <div class="sn">Price list effective 01/02/2026<br>Sheet 2 of 4</div>
+  </div>
+
+  <p class="small">The table below lists the published monthly and annual rates for each plan sold through this
+  control panel. Prices are reviewed each February; the previous list, in force until 31 January 2026, is kept for
+  reference on the pricing archive page at pricing-archive.foxglovehosting.example. VAT is added at the rate shown
+  unless stated otherwise.</p>
+
+  <div class="pricecols">
+    <div>
+      <h4 class="hh">Hosting plans</h4>
+      <table class="tariff2">
+        <tr><th>Plan</th><th>Storage</th><th class="r">Per month</th></tr>
+        <tr><td>Starter Hosting</td><td>10 GB</td><td class="r">£3.99</td></tr>
+        <tr><td>Business Hosting Plan</td><td>50 GB</td><td class="r">£7.49</td></tr>
+        <tr><td>Pro Hosting</td><td>200 GB</td><td class="r">£14.99</td></tr>
+        <tr><td>Reseller Hosting</td><td>1 TB</td><td class="r">£28.00</td></tr>
+      </table>
+      <p class="small">Customers who joined before 1 March 2025 may still be billed on the withdrawn Classic Hosting
+      tariff at £5.60 per month; that tariff closed to new sign-ups on 28 February 2025 and cannot be re-selected
+      once changed away from.</p>
+      <h4 class="hh">Domain add-ons</h4>
+      <table class="tariff2">
+        <tr><th>Item</th><th class="r">Per year</th></tr>
+        <tr><td>WHOIS privacy service</td><td class="r">£4.99</td></tr>
+        <tr><td>Extra DNS zone (secondary)</td><td class="r">£6.00</td></tr>
+        <tr><td>Domain lock upgrade</td><td class="r">£2.50</td></tr>
+      </table>
+    </div>
+    <div>
+      <h4 class="hh">Mailboxes and SSL</h4>
+      <table class="tariff2">
+        <tr><th>Item</th><th class="r">Charge</th></tr>
+        <tr><td>Mailbox, 10 GB, per box/month</td><td class="r">£1.20</td></tr>
+        <tr><td>Foxglove Domain SSL, per year</td><td class="r">£18.00</td></tr>
+        <tr><td>Wildcard SSL, per year</td><td class="r">£54.00</td></tr>
+        <tr><td>Daily off-site backup, per month</td><td class="r">£2.75</td></tr>
+      </table>
+      <h4 class="hh">Other charges</h4>
+      <ul class="tight2">
+        <li>Late payment, seven days after due date: £6.00 administration fee</li>
+        <li>Failed direct debit re-presentment: £4.50</li>
+        <li>Calls to the billing line from a mobile: standard network rate applies</li>
+        <li>Domain restore after expiry (within 30 days): £35.00</li>
+        <li>Paper invoice by post instead of e-mail: £1.50 per invoice</li>
+      </ul>
+      <p class="small">Manage add-ons at any time from the self-service portal at
+      account.foxglovehosting.example/manage, or by e-mail to billing@foxglovehosting.example. A change to a
+      recurring add-on takes effect from the next renewal date, not immediately.</p>
+    </div>
+  </div>
+
+  <div class="footfoot">
+    <span>Price list &middot; Account ACC-3348217</span>
+    <span>Page 2 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="printhead">
+    <span>https://panel.foxglovehosting.example/support</span>
+    <span>Printed 11 September 2026</span>
+  </div>
+  <div class="sheethead">
+    <div class="st">Help, complaints and your account</div>
+    <div class="sn">Sheet 3 of 4</div>
+  </div>
+
+  <div class="pricecols">
+    <div>
+      <h4 class="hh">How to reach us</h4>
+      <ul class="tight2">
+        <li>Support desk, 24 hours: 0330 100 4218</li>
+        <li>Billing enquiries, Mon&ndash;Fri 09:00&ndash;17:30: 01632 960118</li>
+        <li>Live chat: panel.foxglovehosting.example/chat</li>
+        <li>Social: @fghosting</li>
+        <li>Registered office post: Unit 14, Bramcote Trading Estate, Astonleigh, AL2 9RF</li>
+      </ul>
+      <h4 class="hh">Complaints</h4>
+      <p class="small">Write to the Customer Care team at the address above or e-mail complaints@foxglovehosting.example,
+      quoting the account number on sheet 1. We aim to acknowledge within three working days and resolve within 21
+      days. If we cannot resolve a domain dispute between you and another registrant, either party may refer the
+      matter free of charge to the Independent Domain Adjudication Service; details at
+      idas-domains.example/complaints.</p>
+      <h4 class="hh">Accessibility</h4>
+      <p class="small">Large-print and audio copies of this notice and of our terms are available free of charge on
+      request within ten working days. Ask at panel.foxglovehosting.example/accessibility or by telephone.</p>
+    </div>
+    <div>
+      <h4 class="hh">Your data</h4>
+      <p class="small">Account and billing records are kept for six years after an account is closed, as required for
+      tax purposes. We are registered with the Information Commissioner's Office under registration number
+      ZB204471. The full privacy notice is at foxglovehosting.example/privacy, last updated 14/11/2025.</p>
+      <h4 class="hh">Reference numbers for this account</h4>
+      <div class="refstrip">
+        <span>Support ticket prefix: <b>FGH-TCK</b></span>
+        <span>Registrar IANA ID: <b>4471</b></span>
+        <span>VAT registration: <b>GB 662 1140 37</b></span>
+        <span>Company number: <b>08834471</b></span>
+        <span>Sort code (refunds): <b>30-92-14</b></span>
+        <span>Last statement ref: <b>STM-2026-08-3348217</b></span>
+      </div>
+      <h4 class="hh">Other services</h4>
+      <ul class="tight2">
+        <li>Managed WordPress hosting &mdash; from £11.00/month</li>
+        <li>Website builder subscription &mdash; from £6.50/month</li>
+        <li>Bulk domain transfer service &mdash; £3.00 per domain</li>
+      </ul>
+      <p class="small">Terms in force at the date of this renewal are version FGH/T/2026-02, dated 1 February 2026,
+      published at foxglovehosting.example/terms. Foxglove Hosting Limited is registered in England and Wales,
+      company number 08834471, registered office Unit 14, Bramcote Trading Estate, Astonleigh, AL2 9RF.</p>
+    </div>
+  </div>
+
+  <div class="footfoot">
+    <span>Foxglove Hosting Limited. help@foxglovehosting.example.</span>
+    <span>Page 3 of 4</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="printhead">
+    <span>https://panel.foxglovehosting.example/marketplace</span>
+    <span>Printed 11 September 2026</span>
+  </div>
+  <div class="sheethead">
+    <div class="st">Domain marketplace and partner offers</div>
+    <div class="sn">Sheet 4 of 4</div>
+  </div>
+
+  <p class="small">Alongside renewals and hosting, the control panel lists a marketplace of domain names released by
+  other registrants or reserved by us for resale. Prices in the marketplace are set separately from ordinary
+  registration and renewal fees and are not affected by any promotional price shown on sheet 1. A domain purchased
+  through the marketplace is transferred to the buyer's account within five working days of payment clearing.</p>
+
+  <div class="pricecols">
+    <div>
+      <h4 class="hh">Marketplace listing fees</h4>
+      <table class="tariff2">
+        <tr><th>Listing type</th><th class="r">Fee</th></tr>
+        <tr><td>Standard listing, 90 days</td><td class="r">£9.00</td></tr>
+        <tr><td>Featured listing, 90 days</td><td class="r">£19.00</td></tr>
+        <tr><td>Broker-assisted sale</td><td class="r">15% of sale price</td></tr>
+      </table>
+      <p class="small">Listing fees were last revised on 1 February 2026, up from £7.50 for a standard listing under
+      the previous list dated 1 February 2025. Broker-assisted sales are handled by our marketplace partner at
+      brokerage.foxglovehosting.example and are subject to a separate agreement.</p>
+      <h4 class="hh">Partner offer</h4>
+      <div class="notice">Households and small businesses moving a website to us from another provider get their
+      first year of Business Hosting Plan at half price. Quote code MOVEIN-26 at panel.foxglovehosting.example/moveme.
+      Offer closes 30 November 2026 and cannot be used alongside the promotional domain price shown on sheet 1.</div>
+    </div>
+    <div>
+      <h4 class="hh">Security and monitoring add-ons</h4>
+      <table class="tariff2">
+        <tr><th>Item</th><th class="r">Per month</th></tr>
+        <tr><td>Website uptime monitoring</td><td class="r">£1.50</td></tr>
+        <tr><td>Malware scanning and removal</td><td class="r">£3.20</td></tr>
+        <tr><td>Web application firewall</td><td class="r">£4.00</td></tr>
+      </table>
+      <p class="small">These add-ons are billed together with the hosting plan shown on sheet 2 and can be cancelled
+      at any time from the next billing date. A cancellation made after the billing date for a given month is not
+      refunded for that month.</p>
+      <h4 class="hh">Panel access record</h4>
+      <div class="refstrip">
+        <span>Session started: <b>11 September 2026, 09:42</b></span>
+        <span>Panel build: <b>v9.14.2</b></span>
+        <span>Data centre: <b>Astonleigh DC2</b></span>
+        <span>Ticket queue depth: <b>3</b></span>
+      </div>
+    </div>
+  </div>
+
+  <p class="small">Foxglove Hosting Limited first began trading in 2011 and has operated this control panel since
+  2014. This marketplace sheet, the price list on sheet 2 and the help sheet on sheet 3 together form part of the
+  standard renewal paperwork issued to every account holder and do not need to be returned.</p>
+
+  <h4 class="hh">Frequently asked questions</h4>
+  <div class="pricecols">
+    <div>
+      <p class="small"><b>Can I change my renewal date?</b> No. The renewal date shown on sheet 1 is fixed to the
+      original registration date for this domain and cannot be moved earlier or later, even if you upgrade or
+      downgrade your hosting plan.</p>
+      <p class="small"><b>What happens if a payment fails?</b> We retry a failed payment three times over seven
+      days. If all three attempts fail the domain is suspended, not cancelled, and can be reinstated by paying the
+      domain restore fee shown on sheet 2 within 30 days of suspension.</p>
+    </div>
+    <div>
+      <p class="small"><b>Can I move a domain away from this provider?</b> Yes, subject to the transfer
+      restriction shown on sheet 1. Requesting an authorisation code does not itself cancel the domain or stop
+      auto-renewal; auto-renewal must be turned off separately from the panel before the transfer completes.</p>
+      <p class="small"><b>Who do I contact about a billing dispute?</b> Billing enquiries are handled by the
+      accounts team on sheet 3, not by the technical support desk, and a dispute should be raised within 60 days
+      of the charge appearing on your statement.</p>
+    </div>
+  </div>
+
+  <div class="footfoot">
+    <span>Foxglove Hosting Limited. help@foxglovehosting.example.</span>
+    <span>Page 4 of 4</span>
   </div>
 </div>
 </body>

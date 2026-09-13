@@ -14,13 +14,13 @@
     font-size: 8pt; color: #000; background: #d9d9d2;
   }
   .page {
-    width: 210mm; height: 297mm; box-sizing: border-box;
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
     padding: 6mm 7mm 6mm 7mm; position: relative; page-break-after: always;
     background: #fdfbe8;
   }
   .page:last-child { page-break-after: auto; }
   .sheet {
-    border: 2.2px solid #000; height: 100%; box-sizing: border-box;
+    border: 2.2px solid #000; min-height: 283mm; box-sizing: border-box;
     padding: 2.4mm 3mm 3mm 3mm; position: relative;
   }
 
@@ -116,6 +116,19 @@
     position: absolute; left: 3mm; right: 3mm; bottom: 1.4mm; font-size: 6pt;
     border-top: 1px solid #000; padding-top: 0.8mm; display: flex; justify-content: space-between;
   }
+
+  .rate3 { width: 100%; border-collapse: collapse; margin-bottom: 1mm; }
+  .rate3 th {
+    background: #000; color: #fff; text-align: left; padding: 0.9mm 1.2mm;
+    font-size: 5.8pt; font-weight: 700; letter-spacing: -0.3px; text-transform: uppercase;
+  }
+  .rate3 td {
+    padding: 0.9mm 1.2mm; border: 1px solid #000; vertical-align: top;
+    font-family: "Corpus Typewriter", monospace; font-size: 7.2pt;
+  }
+  .rate3 td.num { text-align: right; white-space: nowrap; }
+  .cols3 { display: flex; gap: 3mm; }
+  .cols3 > div { flex: 1; }
 </style>
 </head>
 <body>
@@ -300,7 +313,7 @@
 
   <div class="runfoot">
     <span>Fenwick &amp; Vale Gas Services Ltd &middot; Certificate GSR-2026-04471 &middot; 14 Sycamore Court, Flat 2</span>
-    <span>Page 1 of 2</span>
+    <span>Page 1 of 3</span>
   </div>
 </div>
 </div>
@@ -309,7 +322,7 @@
 <div class="sheet">
   <div class="padstrip">
     <span class="serial">No. GSR-2026-04471</span>
-    <span class="formcode">CP12 &middot; page 2</span>
+    <span class="formcode">CP12 &middot; page 2 of 3</span>
     <span class="issue">Fenwick &amp; Vale Gas Services Ltd</span>
   </div>
 
@@ -392,7 +405,98 @@
 
   <div class="runfoot">
     <span>Fenwick &amp; Vale Gas Services Ltd &middot; Certificate GSR-2026-04471 &middot; 14 Sycamore Court, Flat 2</span>
-    <span>Page 2 of 2</span>
+    <span>Page 2 of 3</span>
+  </div>
+</div>
+</div>
+
+<div class="page">
+<div class="sheet">
+  <div class="padstrip">
+    <span class="serial">No. GSR-2026-04471</span>
+    <span class="formcode">CP12 &middot; page 3 of 3</span>
+    <span class="issue">Fenwick &amp; Vale Gas Services Ltd</span>
+  </div>
+
+  <h2>Other work from this business</h2>
+  <div class="cols3">
+    <div>
+      <table class="rate3">
+        <thead><tr><th>Service</th><th class="num">Charge</th></tr></thead>
+        <tbody>
+          <tr><td>Annual boiler service</td><td class="num">&pound;79.00</td></tr>
+          <tr><td>Combined boiler service + gas safety record</td><td class="num">&pound;110.00</td></tr>
+          <tr><td>Landlord multi-property record, per additional property</td><td class="num">&pound;68.00</td></tr>
+          <tr><td>Callout, weekday 08:00&ndash;18:00</td><td class="num">&pound;62.00 + VAT</td></tr>
+          <tr><td>Callout, evening or Saturday</td><td class="num">&pound;89.00 + VAT</td></tr>
+          <tr><td>Missed appointment charge</td><td class="num">&pound;30.00</td></tr>
+        </tbody>
+      </table>
+      <div class="fine">Rates shown are those on price list PL-FV-2026-3, effective from
+      1 March 2026 and reviewed annually every March. Customers booked before that date were on
+      the withdrawn 2025 rate card, under which an annual gas safety record cost &pound;58.00;
+      that card closed to new bookings on 28 February 2026.</div>
+    </div>
+    <div>
+      <table class="rate3">
+        <thead><tr><th>Reference</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td>Customer account no.</td><td>FV-118420</td></tr>
+          <tr><td>Invoice no.</td><td>INV-2026-33017</td></tr>
+          <tr><td>VAT registration</td><td>GB 447 2201 66</td></tr>
+          <tr><td>Company registration no.</td><td>06621147</td></tr>
+          <tr><td>Direct debit SUN</td><td>552118</td></tr>
+          <tr><td>Sort code</td><td>20-77-42</td></tr>
+        </tbody>
+      </table>
+      <div class="fine">To book your next annual check, use the online form at
+      <b>fenwickvale.example/book</b> or call the office on 01947 552 118. An engineer covering
+      the Wynmouth area can usually attend within five working days.</div>
+    </div>
+  </div>
+
+  <h2>Getting in touch and putting things right</h2>
+  <div class="small">
+    <p><b>Booking and enquiries.</b> Office hours are Monday to Friday 08:00&ndash;17:30 on
+    01947 552 118, or e-mail office@fenwickvale.example. Out-of-hours gas escape emergencies
+    should be reported to the National Gas Emergency Service on 0800 111 999, free of charge at
+    any time; Fenwick &amp; Vale Gas Services Ltd is a separate organisation from that service.</p>
+
+    <p><b>Complaints.</b> Write to the Business Manager at the address on page 1, or e-mail
+    complaints@fenwickvale.example, quoting the certificate number shown above. We aim to
+    acknowledge within five working days and resolve within 20 working days. Unresolved
+    complaints about the engineer's Gas Safe registration can also be raised with Gas Safe
+    Register direct on 0800 408 5500.</p>
+
+    <p><b>Accessibility.</b> If the landlord, tenant or occupier needs an appointment adjusted
+    for a disability, or needs this record in large print, tell the office when booking and we
+    will make reasonable arrangements.</p>
+
+    <p><b>Your data.</b> Property and appliance details are retained for at least 6 years for
+    safety record-keeping. We are registered with the Information Commissioner under number
+    <b>ZA447201</b>. Full privacy notice at <b>fenwickvale.example/privacy</b>.</p>
+
+    <p><b>Company details.</b> Fenwick &amp; Vale Gas Services Ltd, registered in England and
+    Wales, company number 06621147, registered office Unit 4, Bridgewater Trading Estate,
+    Calderbeck, Wynmouth WY7 2QN. Founded 2004.</p>
+
+    <p><b>Referral scheme.</b> Existing customers who refer a new landlord client receive
+    &pound;15 credit against their next annual check once the new client's first record has
+    been issued. Quote code <b>FV-REFER-26</b> when booking.</p>
+
+    <p><b>Multiple properties.</b> Landlords with more than one rented property can ask the
+    office to set up a shared renewal reminder covering all addresses, so that annual checks for
+    each property fall in the same visit window where practicable. There is no charge for
+    setting up a shared reminder.</p>
+
+    <p><b>Carbon monoxide alarms.</b> This record does not cover the presence or condition of
+    carbon monoxide alarms, which are a separate landlord duty under different regulations. Ask
+    the engineer at your next visit if you would like a supply-and-fit quotation.</p>
+  </div>
+
+  <div class="runfoot">
+    <span>Fenwick &amp; Vale Gas Services Ltd &middot; Certificate GSR-2026-04471</span>
+    <span>Page 3 of 3</span>
   </div>
 </div>
 </div>

@@ -11,16 +11,33 @@
   body { margin: 0; }
   .page {
     width: 794px;
-    height: 1123px;
+    min-height: 1123px;
     box-sizing: border-box;
     position: relative;
-    overflow: hidden;
     padding: 30px 44px;
     background: #fbeef2;
     font-family: "Corpus Alarm", serif;
     color: #2a2a2a;
     font-size: 11.5px;
+    page-break-after: always;
   }
+  .page:last-child { page-break-after: auto; }
+  .page.white { background: #fff; }
+  .sheet-head { border-bottom: 2px solid #333; padding-bottom: 6px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; }
+  .sheet-head .st { font-size: 15px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+  .sheet-head .sn { font-size: 9px; color: #555; text-align: right; line-height: 1.5; }
+  .cols { display: flex; gap: 16px; }
+  .cols > div { flex: 1; }
+  h4 { font-size: 11px; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid #bbb; padding-bottom: 2px; }
+  p.small { font-size: 9.5px; line-height: 1.5; margin: 4px 0; text-align: justify; }
+  table.tariff { width: 100%; border-collapse: collapse; font-size: 9.4px; margin: 4px 0 6px; }
+  table.tariff th { text-align: left; background: #f6e2e8; border: 1px solid #999; padding: 3px 5px; font-size: 9px; }
+  table.tariff td { border: 1px solid #bbb; padding: 3px 5px; }
+  table.tariff td.r { text-align: right; }
+  ul.tight { margin: 3px 0 6px 14px; padding: 0; font-size: 9.5px; line-height: 1.45; }
+  .boxout { border: 1px dashed #a11; padding: 6px 8px; font-size: 9.4px; line-height: 1.45; margin: 6px 0; }
+  .ref-grid { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 9.2px; margin: 4px 0 6px; }
+  .ref-grid span { border-left: 2px solid #c9a; padding-left: 5px; }
   .pad-corner { position: absolute; top: 12px; right: 20px; font-size: 9.5px; text-align: right; color: #555; }
   .copy-stamp { display: inline-block; border: 2px solid #a11; color: #a11; font-weight: bold; padding: 3px 10px; transform: rotate(-3deg); font-size: 12px; margin-top: 4px; }
   .header { text-align: center; border-bottom: 3px double #333; padding-bottom: 8px; margin-bottom: 14px; }
@@ -103,7 +120,194 @@
     </div>
   </div>
 
-  <div class="foot-strip">Northgate Home Security &nbsp;&middot;&nbsp; Contract NGS-CA-20456 &nbsp;&middot;&nbsp; Pink copy retained by Customer</div>
+  <div class="foot-strip">Northgate Home Security &nbsp;&middot;&nbsp; Contract NGS-CA-20456 &nbsp;&middot;&nbsp; Pink copy retained by Customer &nbsp;&middot;&nbsp; Sheet 1 of 3</div>
+
+</div>
+
+<div class="page white">
+
+  <div class="sheet-head">
+    <div class="st">Schedule of Charges &mdash; effective 01/01/2026</div>
+    <div class="sn">Form NGS/M3 (rev. 9, 11/2025)<br>Sheet 2 of 3 &middot; retain with pink copy</div>
+  </div>
+
+  <p class="small">
+    The charges below are the published rates for the Elmscote and Harbrook branches and apply to work ordered on or
+    after 1 January 2026. They are held until the annual review on 01/01/2027, after which a revised sheet is issued
+    with the maintenance visit paperwork. Rates quoted exclude VAT unless the line says otherwise. Work at a property
+    more than 25 miles from the Foundry Business Park depot carries a mileage supplement of 58p per mile.
+  </p>
+
+  <div class="cols">
+    <div>
+      <h4>Monitoring plans</h4>
+      <table class="tariff">
+        <tr><th>Plan</th><th>Signalling</th><th class="r">Per month</th></tr>
+        <tr><td>Bells Only Check</td><td>None &mdash; audible only</td><td class="r">&pound;8.50</td></tr>
+        <tr><td>Digital Watch</td><td>Single path, broadband</td><td class="r">&pound;16.75</td></tr>
+        <tr><td>Dual Path Watch</td><td>Broadband + roaming SIM</td><td class="r">&pound;24.99</td></tr>
+        <tr><td>Dual Path Watch Plus</td><td>Dual path + CCTV verify</td><td class="r">&pound;33.40</td></tr>
+        <tr><td>Commercial Grade 3</td><td>Dual path, redundant ARC</td><td class="r">&pound;48.00</td></tr>
+      </table>
+      <p class="small">
+        Plans are collected monthly by direct debit under service user number 947226. A plan taken on a 24 month
+        minimum term is discounted by 5% against the rolling rate; a rolling plan may be ended on one month's
+        written notice. Customers who left a plan before 31/12/2025 were on the withdrawn Homewatch tariff at
+        &pound;21.60 per month; that tariff closed to new sales on 30/09/2025 and to renewals on 31/03/2026.
+      </p>
+
+      <h4>Engineer attendance</h4>
+      <table class="tariff">
+        <tr><th>Visit type</th><th class="r">Charge</th></tr>
+        <tr><td>Annual maintenance (in plan)</td><td class="r">included</td></tr>
+        <tr><td>Callout, weekday 08:00&ndash;18:00</td><td class="r">&pound;65.00 + VAT</td></tr>
+        <tr><td>Callout, evening and Saturday</td><td class="r">&pound;96.00 + VAT</td></tr>
+        <tr><td>Callout, Sunday and bank holiday</td><td class="r">&pound;128.00 + VAT</td></tr>
+        <tr><td>Second false alarm in 12 months</td><td class="r">&pound;42.00</td></tr>
+        <tr><td>URN reinstatement after loss</td><td class="r">&pound;75.00</td></tr>
+        <tr><td>Missed appointment</td><td class="r">&pound;35.00</td></tr>
+      </table>
+    </div>
+    <div>
+      <h4>Equipment and add-ons</h4>
+      <table class="tariff">
+        <tr><th>Item</th><th>Code</th><th class="r">Fitted</th></tr>
+        <tr><td>Additional door contact</td><td>NG-DC2</td><td class="r">&pound;38.00</td></tr>
+        <tr><td>Pet-tolerant movement sensor</td><td>NG-PIR7</td><td class="r">&pound;54.00</td></tr>
+        <tr><td>Panic button, wireless</td><td>NG-PB1</td><td class="r">&pound;46.50</td></tr>
+        <tr><td>External sounder, self-powered</td><td>NG-ES4</td><td class="r">&pound;118.00</td></tr>
+        <tr><td>Smoke and heat detector, monitored</td><td>NG-SD3</td><td class="r">&pound;92.00</td></tr>
+        <tr><td>Doorbell camera, 2K</td><td>NG-CAM2</td><td class="r">&pound;189.00</td></tr>
+        <tr><td>Key safe, police approved</td><td>NG-KS1</td><td class="r">&pound;74.00</td></tr>
+        <tr><td>Replacement control panel battery</td><td>NG-BT9</td><td class="r">&pound;29.95</td></tr>
+      </table>
+
+      <h4>Keyholding and response</h4>
+      <p class="small">
+        Where no keyholder can attend within 20 minutes, a guard may be sent from our response partner. Response is
+        charged at &pound;58.00 per attendance and is booked through the partner's own desk, not through this office.
+        A standing keyholding retainer is &pound;11.90 per month. Keyholder details may be changed at any time
+        through the customer portal at <b>ngs-secure.example/keyholders</b> or by telephone; a change made by
+        telephone is confirmed in writing within five working days.
+      </p>
+
+      <div class="boxout">
+        <b>Introduce a neighbour.</b> Both households receive &pound;30 credit once the new plan has run for three
+        months. Quote introduction code <b>NGS-FRIEND-26</b> at <b>ngs-secure.example/introduce</b>. Offer closes
+        30/06/2026 and is limited to one credit per plan per year.
+      </div>
+    </div>
+  </div>
+
+  <h4>Account and payment details</h4>
+  <div class="ref-grid">
+    <span>Customer number: <b>C-118240</b></span>
+    <span>Account number: <b>60451188</b></span>
+    <span>Sort code: <b>20-44-71</b></span>
+    <span>Payment reference: <b>WHITLOCK1724</b></span>
+    <span>Direct debit SUN: <b>947226</b></span>
+    <span>VAT registration: <b>GB 418 2290 55</b></span>
+    <span>Company number: <b>04471982</b></span>
+    <span>Panel serial: <b>PNL-7726-0091</b></span>
+    <span>ARC account: <b>BW/33481</b></span>
+    <span>SIM (roaming): <b>8944 1122 4471 8823 06</b></span>
+    <span>Engineer ID: <b>ENG-2214</b></span>
+    <span>Last invoice: <b>INV-2026-004112</b>, &pound;24.99, issued 01/03/2026</span>
+  </div>
+
+  <p class="small">
+    Invoices are raised on the first working day of the month and are due on presentation. A payment not met on
+    first presentation carries an administration fee of &pound;12.00 and is represented after ten working days.
+    Interest on overdue sums accrues at 4% above base rate. Statements for the last 24 months can be downloaded
+    from the portal; paper copies older than six years are charged at &pound;9.50 per statement.
+  </p>
+
+  <div class="foot-strip">Charges sheet &nbsp;&middot;&nbsp; Contract NGS-CA-20456 &nbsp;&middot;&nbsp; Sheet 2 of 3</div>
+
+</div>
+
+<div class="page white">
+
+  <div class="sheet-head">
+    <div class="st">Customer information</div>
+    <div class="sn">Form NGS/M3 &middot; Sheet 3 of 3<br>Printed 02/03/2026</div>
+  </div>
+
+  <div class="cols">
+    <div>
+      <h4>How to reach us</h4>
+      <ul class="tight">
+        <li>Monitoring desk, 24 hours: 0330 100 4471 (calls from a mobile cost your standard rate)</li>
+        <li>Accounts and billing, Mon&ndash;Fri 09:00&ndash;17:00: 01632 960377</li>
+        <li>Engineer bookings: 01632 960412 or <b>ngs-secure.example/book</b></li>
+        <li>Text relay: 18001 followed by the number you want</li>
+        <li>Post: Customer Services, Unit 6, Foundry Business Park, Elmscote, EL4 2RJ</li>
+        <li>E-mail: help@ngs-secure.example</li>
+      </ul>
+
+      <h4>Approvals and inspection</h4>
+      <p class="small">
+        The company has been inspected annually since 1998 and holds certificate <b>SSAIB/CERT/22841</b>, last
+        renewed 14/11/2025 and next inspected in November 2026. Installations are designed to BS EN 50131 grade 2
+        and monitored to BS 8243. Police response is granted and withdrawn by the local force under the national
+        policy of 2021, not by this company; three false calls in a rolling twelve months withdraws response until
+        the installation has run clear for 90 days.
+      </p>
+
+      <h4>Complaints</h4>
+      <p class="small">
+        Write to the Customer Care Manager at the address above or e-mail complaints@ngs-secure.example, quoting the
+        contract number on sheet 1. We acknowledge within five working days and aim to answer within 28 days. If
+        eight weeks pass without a resolution you may refer the matter free of charge to the alarm industry
+        conciliation scheme operated by our inspectorate; details at <b>ssaib.example/complaints</b>. Referring a
+        complaint does not affect your right to take the matter elsewhere.
+      </p>
+    </div>
+    <div>
+      <h4>Accessibility and priority services</h4>
+      <p class="small">
+        Large print, Braille and audio versions of this agreement are issued free within ten working days on
+        request. Households where someone is over 75, has a disability, or depends on medical equipment can join
+        the priority register, which brings a shorter response target and a named contact. Ask at
+        <b>ngs-secure.example/priority</b>.
+      </p>
+
+      <h4>Your data</h4>
+      <p class="small">
+        Alarm signals, call recordings and keyholder details are held for six years after the agreement ends.
+        Recordings of monitoring calls are kept for 13 months. We are registered with the Information
+        Commissioner under number <b>ZA118240</b>. The full notice is at <b>ngs-secure.example/privacy</b>, last
+        updated 04/09/2025. To ask for a copy of what we hold, e-mail dataoffice@ngs-secure.example.
+      </p>
+
+      <h4>Other services from this branch</h4>
+      <ul class="tight">
+        <li>CCTV design, installation and remote review &mdash; from &pound;540 fitted</li>
+        <li>Access control for flats and yards &mdash; survey free, quote within five working days</li>
+        <li>Fire alarm servicing to BS 5839 &mdash; &pound;145.00 per annual visit</li>
+        <li>Safes, supplied and bolted down &mdash; from &pound;265.00</li>
+        <li>Landlord key management &mdash; &pound;4.50 per key per month</li>
+      </ul>
+
+      <div class="boxout">
+        <b>Partner offer.</b> Households on a dual path plan may qualify for a premium reduction with several
+        insurers. Our broker partner will check the market for you free of charge &mdash; <b>oakmoor-broking.example</b>,
+        telephone 0345 900 2277. Terms apply; the reduction is set by the insurer, not by us.
+      </div>
+    </div>
+  </div>
+
+  <h4>Small print</h4>
+  <p class="small">
+    Northgate Home Security Limited is registered in England and Wales, company number 04471982, registered office
+    Unit 6, Foundry Business Park, Elmscote, EL4 2RJ. VAT registration GB 418 2290 55. Founded 1998. Monitoring is
+    carried out on our behalf by the alarm receiving centre named on sheet 1 under a contract that may be changed
+    on 30 days' notice to you. Nothing in this Agreement affects your statutory rights. A copy of these terms is
+    kept at <b>ngs-secure.example/terms</b> and the version in force at signing is NGS/T/2026-01, dated 01/01/2026.
+    Follow the maintenance reminders at <b>@ngs_secure</b>.
+  </p>
+
+  <div class="foot-strip">Northgate Home Security Limited &nbsp;&middot;&nbsp; Contract NGS-CA-20456 &nbsp;&middot;&nbsp; Sheet 3 of 3</div>
 
 </div>
 </body>

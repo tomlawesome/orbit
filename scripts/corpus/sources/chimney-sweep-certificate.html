@@ -9,7 +9,15 @@
   @page { size: A4; margin: 0; }
   html, body { margin: 0; padding: 0; }
   body { font-family: "Corpus Sweep Mono", monospace; font-size: 8.6pt; line-height: 1.34; color: #1a1a1a; }
-  .page { width: 210mm; min-height: 297mm; box-sizing: border-box; padding: 12mm 14mm 14mm 14mm; position: relative; background: #fff; }
+  .page { width: 210mm; min-height: 297mm; box-sizing: border-box; padding: 12mm 14mm 14mm 14mm; position: relative; background: #fff; page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  .sheetno { font-family: "Liberation Sans", sans-serif; font-size: 6.6pt; color: #444; text-align: right; margin-bottom: 2mm; }
+  .priceline { display: flex; justify-content: space-between; font-size: 7.8pt; border-bottom: 0.4pt dotted #d8c4b0; padding: 0.8mm 0 0.8mm 0; }
+  .priceline b { font-weight: 700; }
+  .refgrid { display: flex; flex-wrap: wrap; gap: 1.6mm 6mm; font-size: 7.2pt; margin: 2mm 0 3mm 0; }
+  .refgrid span { border-left: 1.4pt solid #3a1f0d; padding-left: 1.6mm; }
+  .twocol { display: flex; gap: 6mm; }
+  .twocol > div { flex: 1; }
   .brand { font-family: "Corpus Sweep Brand", serif; font-size: 22pt; font-weight: 700; color: #3a1f0d; letter-spacing: 1px; }
   .brandsub { font-family: "Liberation Sans", sans-serif; font-size: 7.6pt; color: #444; margin-top: 1mm; }
   .headrule { border: none; border-top: 1.6pt solid #3a1f0d; margin: 2mm 0 3mm 0; }
@@ -76,9 +84,209 @@
     fires arising from later use of the appliance.
   </p>
 
+  <p class="note">
+    A reminder card for your next sweep is posted to the property address above around six weeks
+    ahead of the due date; if you move house in the meantime, please let the office know so the
+    reminder reaches you. Reminder cards are sent by post only and not by e-mail or text unless you
+    have asked for a text reminder instead.
+  </p>
+
   <div class="pagefoot">
     <span>CSS &middot; Certificate CSS-0417</span>
-    <span>Page 1 of 1</span>
+    <span>Page 1 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="sheetno">Sheet 2 of 3 &middot; keep with your certificate</div>
+  <div class="doctitle">Price list and additional work</div>
+  <p class="note">
+    The prices below are CSS&rsquo;s standard rates for domestic customers in the Fenmouth and
+    Cravenshire area, correct from 1 April 2026 and reviewed each spring. A rural or hard-to-reach
+    property may attract a small travel supplement, agreed before the visit, not added afterwards.
+  </p>
+  <h2>Sweeping and inspection</h2>
+  <div class="priceline"><span>Standard sweep, single flue, appointment kept</span><b>&pound;65.00</b></div>
+  <div class="priceline"><span>Second flue at the same visit</span><b>&pound;25.00</b></div>
+  <div class="priceline"><span>CCTV chimney survey (recorded, on request)</span><b>&pound;45.00</b></div>
+  <div class="priceline"><span>Smoke test only, no sweep carried out</span><b>&pound;30.00</b></div>
+  <div class="priceline"><span>Certificate reprint or duplicate copy</span><b>&pound;5.00</b></div>
+  <div class="priceline"><span>Missed appointment, no access given</span><b>&pound;20.00</b></div>
+  <h2>Fitting and small works</h2>
+  <div class="priceline"><span>Bird guard, supplied and fitted</span><b>&pound;38.00</b></div>
+  <div class="priceline"><span>Rain cowl, supplied and fitted</span><b>&pound;32.00</b></div>
+  <div class="priceline"><span>Carbon monoxide alarm, supplied and fitted</span><b>&pound;22.00</b></div>
+  <div class="priceline"><span>HETAS pre-installation flue check, new appliance</span><b>&pound;85.00</b></div>
+  <p class="note">
+    Prices shown are unchanged from the list issued 1 April 2025; the previous list, withdrawn on
+    that date, charged &pound;58.00 for a standard single-flue sweep. A revised list is expected
+    from 1 April 2027. All prices include VAT where VAT applies; CSS is currently below the
+    registration threshold and does not charge VAT.
+  </p>
+  <div class="twocol">
+    <div>
+      <h2>Guarantee</h2>
+      <p class="note">
+        Every sweep carried out by CSS is guaranteed for the interval stated on the certificate. If
+        soot or debris is found to have been left in the flue within that period, CSS will return
+        and put it right at no charge. This guarantee does not cover damage caused by continued use
+        of an appliance known to be faulty, or by a chimney fire arising after the certificate date
+        from causes unrelated to the sweep itself.
+      </p>
+    </div>
+    <div>
+      <h2>If something goes wrong</h2>
+      <p class="note">
+        Contact CSS in the first instance using the details on sheet 3. Most concerns are settled
+        directly. Where they are not, CSS is a member of the Guild of Master Sweeps, and a complaint
+        that cannot be resolved between the parties may be referred to the Guild&rsquo;s own
+        conciliation panel, which considers disputes free of charge to the customer.
+      </p>
+    </div>
+  </div>
+  <h2>Autumn offer</h2>
+  <p class="note">
+    Book your next sweep before 30 September 2026 and pay the 2025/26 season rate of &pound;60.00
+    rather than the current &pound;65.00 standard rate; the offer ran previously from 1 September to
+    30 September 2025 and returns on the same terms each fixed-term year. It cannot be combined with
+    the second-flue rate above and does not apply to CCTV surveys or fitting work.
+  </p>
+  <h2>What a CSS sweep includes and does not include</h2>
+  <div class="twocol">
+    <div>
+      <p class="note">
+        Included: dust sheets laid before work starts, full brushing of the flue from appliance to
+        pot, removal of swept soot from the property, a smoke test, a check of the carbon monoxide
+        alarm where one is fitted, and this certificate. Debris is bagged and taken away; none is
+        left for the household to dispose of.
+      </p>
+    </div>
+    <div>
+      <p class="note">
+        Not included: repair or replacement of a damaged flue liner, removal of a bird or squirrel
+        nest requiring specialist extraction, structural repointing above the roofline, or servicing
+        of the appliance itself, which remains a separate job quoted on inspection and invoiced
+        under its own job sheet number, not this certificate.
+      </p>
+    </div>
+  </div>
+  <h2>Reference numbers on this job</h2>
+  <div class="refgrid">
+    <span>Certificate: <b>CSS-0417</b></span>
+    <span>Booking ref: <b>BK-22910</b></span>
+    <span>Job sheet no: <b>JS-4471</b></span>
+    <span>Guild membership: <b>GMS-44712</b></span>
+    <span>Public liability policy: <b>PLI-88204-6</b></span>
+    <span>Engineer ID: <b>CSS-ENG-1</b></span>
+    <span>Van registration: <b>NG16 CSS</b></span>
+    <span>Payment taken: <b>card, on the day</b></span>
+  </div>
+  <h2>Sweep history for this property</h2>
+  <table class="spec">
+    <thead><tr><th>Date</th><th>Work carried out</th><th>Job sheet</th></tr></thead>
+    <tbody>
+      <tr><td>3 March 2026</td><td>Standard sweep, single flue</td><td>JS-4108</td></tr>
+      <tr><td>1 September 2025</td><td>Standard sweep, single flue (autumn offer rate)</td><td>JS-3742</td></tr>
+      <tr><td>18 November 2025</td><td>Installer&rsquo;s own service visit, not a sweep</td><td>&mdash;</td></tr>
+      <tr><td>2 March 2025</td><td>Standard sweep, single flue</td><td>JS-3391</td></tr>
+    </tbody>
+  </table>
+  <div class="pagefoot">
+    <span>CSS &middot; Certificate CSS-0417</span>
+    <span>Page 2 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="sheetno">Sheet 3 of 3 &middot; keep with your certificate</div>
+  <div class="doctitle">Looking after your chimney between visits</div>
+  <h2>Appliances CSS sweeps and services</h2>
+  <table class="spec">
+    <thead><tr><th>Appliance type</th><th>Standard interval</th></tr></thead>
+    <tbody>
+      <tr><td>Open fire, wood or coal</td><td>Twice yearly, more in constant use</td></tr>
+      <tr><td>Freestanding wood or multi-fuel stove</td><td>Twice yearly, as on this certificate</td></tr>
+      <tr><td>Inset stove or fireplace insert</td><td>Twice yearly</td></tr>
+      <tr><td>Oil-fired boiler flue</td><td>Once yearly</td></tr>
+      <tr><td>Gas fire flue</td><td>Not serviced by CSS &mdash; refer to a Gas Safe engineer</td></tr>
+    </tbody>
+  </table>
+  <p class="note">
+    CSS does not sweep flues serving gas appliances; that work must be carried out by a Gas Safe
+    registered engineer. Where a property has both a solid fuel appliance and a separate gas fire,
+    only the solid fuel flue is covered by this certificate.
+  </p>
+  <p class="note">
+    Burn only well-seasoned wood with a moisture content below 20%, checked with a meter if in
+    doubt, and occasional smokeless coal as your appliance allows. A smoky fire, a strong smell
+    from the flue, or soot appearing at the appliance seal between visits are all reasons to bring
+    your next sweep forward rather than wait for the date on your certificate.
+  </p>
+  <p class="note">
+    Have your carbon monoxide alarm tested monthly using its own test button, and replace the
+    battery at least once a year, ideally at the same time as your annual sweep. CSS tests the
+    alarm at every visit as part of the standard sweep but cannot be responsible for its condition
+    between visits.
+  </p>
+  <h2>Contact and booking</h2>
+  <div class="twocol">
+    <div class="gcol">
+      Bookings and enquiries: 01632 960214<br>
+      Office hours: Monday to Friday, 8am to 5pm; Saturday mornings in the autumn season<br>
+      E-mail: bookings@css-sweep.example<br>
+      Booking portal: css-sweep.example/book<br>
+      Social: @cssflues
+    </div>
+    <div class="gcol">
+      Accounts and invoice queries: 01632 960215<br>
+      Accessibility: large-print certificates and appointment reminders by phone are available on
+      request<br>
+      Data protection: CSS holds your name, address and appliance details only to arrange sweeps
+      and issue certificates, and does not pass them to any other business
+    </div>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Day</th><th>Office hours</th></tr></thead>
+    <tbody>
+      <tr><td>Monday to Friday</td><td>8am to 5pm</td></tr>
+      <tr><td>Saturday, September to March</td><td>8am to 12 noon</td></tr>
+      <tr><td>Saturday, April to August</td><td>Closed</td></tr>
+      <tr><td>Sunday and bank holidays</td><td>Closed &mdash; voicemail only</td></tr>
+    </tbody>
+  </table>
+  <p class="note">
+    If you need a large-print copy of this certificate, or would prefer appointment reminders by
+    text rather than phone, tell the office when booking and this will be noted against your
+    property record for future visits.
+  </p>
+  <h2>Terms of business</h2>
+  <p class="note">
+    Appointments are booked in two-hour windows; CSS calls ahead if running late. Cancellation with
+    less than 24 hours&rsquo; notice, or no access on arrival, is charged at the missed appointment
+    rate on sheet 2. A visit unsafe due to weather is rearranged at no charge. Terms version
+    CSS-T-2026-01, dated 1 January 2026, replaces the version dated 1 January 2024.
+  </p>
+  <h2>Frequently asked questions</h2>
+  <p class="note">
+    <b>Do I need to be in?</b> Yes, someone over 18 must give access and sign for the visit.
+    <b>How long does a sweep take?</b> Around 30 to 45 minutes for a single flue in normal
+    condition. <b>Can CSS sweep a chimney that has never been swept?</b> Usually yes, though a
+    first sweep on an old or blocked flue may take longer and occasionally reveals work that needs
+    a follow-up quote. <b>Is soot mess left behind?</b> No, dust sheets and a sealed vacuum keep the
+    room clean; any residual dust is the exception, not the rule. <b>Can CSS sweep a thatched
+    property?</b> Yes, with extra care taken around the thatch coat and spark arrestor, quoted on
+    inspection as it takes longer than a standard visit.
+  </p>
+  <p class="fine">
+    CSS is a trading name used by a sole trader operating in the Fenmouth, Cravenshire and Harbrook
+    area since 2011. This sheet and the price list overleaf are provided for information and do not
+    form part of the certificate itself. Terms of business are available on request and are sent
+    with every new customer&rsquo;s first booking confirmation. Nothing on this sheet varies the
+    certificate issued on sheet 1.
+  </p>
+  <div class="pagefoot">
+    <span>CSS &middot; Certificate CSS-0417</span>
+    <span>Page 3 of 3</span>
   </div>
 </div>
 </body>
