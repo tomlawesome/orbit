@@ -9,14 +9,13 @@ import { settleArrival } from "./support/arrival";
  *
  * What "degrade" means was read out of the app rather than assumed:
  *
- *   - every route with a live backdrop (home's sky, due-next/documents/
+ *   - every route with a live backdrop (home's sky,
  *     inbox/settings/household/item's own "*-drift" keyframes, the dial's
  *     POL-1/POL-2 flourishes, the login/logout flight) carries its own
  *     `@media (prefers-reduced-motion: reduce)` block that sets the
  *     offending `animation` to `none` or drops the element — see home.css,
- *     due-next.css, documents.css, inbox.css, settings.css, admin.css (see
- *     below), pocket.css, flight.css, arrival.css, logout.css and
- *     maintenance.css.
+ *     inbox.css, settings.css, admin.css (see below), pocket.css,
+ *     flight.css, arrival.css, logout.css and maintenance.css.
  *   - home's sky DRIFT specifically is not CSS at all: skies.js's
  *     `mountPlane()` reads `matchMedia("(prefers-reduced-motion: reduce)")`
  *     into a `still()` guard and never calls `requestAnimationFrame` when it
@@ -155,8 +154,6 @@ test.describe("reduced motion", () => {
     try {
       const routes = [
         "/home",
-        "/due-next",
-        "/documents",
         "/inbox",
         "/create",
         "/settings",
