@@ -1146,6 +1146,39 @@ describe("the meaning-shaped fields", () => {
     expect(chosen.subtype).toBe("Water Bill");
   });
 
+  it("does not let an add-on block answer for the document it is printed on", () => {
+    // What a page offers as an extra is not what the page is. The words
+    // under "Optional extras" are still on the shortlist as rivals; they
+    // are just not heard over the words the page says in its own voice
+    // (#1015). The block runs until the page puts up another heading.
+    const chosen = chooseFields([
+      candidate("heading", "WELCOME TO YOUR NEW UNIT", [{ value: "title", trigger: "" }], { index: 0 }),
+      candidate("heading", "Rental start", [{ value: "section", trigger: "" }], { index: 200 }),
+      candidate("heading", "Rental payments", [{ value: "section", trigger: "" }], { index: 300 }),
+      candidate("heading", "OPTIONAL EXTRAS", [{ value: "section", trigger: "" }], { index: 400 }),
+      candidate("heading", "Insurance cover", [{ value: "section", trigger: "" }], { index: 500 }),
+      candidate("heading", "Insurance claims", [{ value: "section", trigger: "" }], { index: 600 }),
+      candidate("heading", "Insurance limits", [{ value: "section", trigger: "" }], { index: 700 }),
+    ]);
+
+    // Counted over the whole page, insurance wins three to two; heard in
+    // the page's own voice, it is not said at all.
+    expect(chosen.subtype).toBe("Rental");
+  });
+
+  it("hears an add-on word again once the page is talking about it", () => {
+    // The same word, printed where the page is speaking for itself, is the
+    // answer. Nothing is struck off a bin for having appeared in an aside.
+    const chosen = chooseFields([
+      candidate("heading", "CERTIFICATE OF INSURANCE", [{ value: "title", trigger: "" }], { index: 0 }),
+      candidate("heading", "Your contents cover", [{ value: "section", trigger: "" }], { index: 200 }),
+      candidate("heading", "OPTIONAL EXTRAS", [{ value: "section", trigger: "" }], { index: 400 }),
+      candidate("heading", "Legal cover", [{ value: "section", trigger: "" }], { index: 500 }),
+    ]);
+
+    expect(chosen.subtype).toBe("Contents Insurance");
+  });
+
   it("still counts, where the title names neither word", () => {
     // The rule only says a word printed nowhere but the text cannot outvote
     // one the document named itself with. Between two words the title is
