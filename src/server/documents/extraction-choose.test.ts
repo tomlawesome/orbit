@@ -392,6 +392,160 @@ describe("choosing the household's reference", () => {
   });
 });
 
+describe("the reference the page carries through every sheet", () => {
+  /** Every offset the page printed a value at, in page order: what stage 1
+   * would have recorded as each printing's `index`. */
+  function printedAt(page: string, value: string): number[] {
+    const found: number[] = [];
+    for (let at = page.indexOf(value); at !== -1; at = page.indexOf(value, at + 1)) found.push(at);
+    return found;
+  }
+
+  /** A block per line, as Tika hands one over, and the page's own "page 2 of
+   * 3" footers -- the only mark left in the text of where a sheet ended. */
+  function page(...blocks: string[]): string {
+    return blocks.join("\n\n");
+  }
+
+  it("prefers the number printed on every sheet to the better-labelled one printed once", () => {
+    const text = page(
+      "Northgate Home Security - monitoring agreement",
+      "Certificate number CSS-0417",
+      "Contract number NGS-CA-20456",
+      "NGS-CA-20456 - page 1 of 3",
+      "What the monitoring covers",
+      "NGS-CA-20456 - page 2 of 3",
+      "How to cancel",
+      "NGS-CA-20456 - page 3 of 3",
+    );
+    const [labelled, ...footers] = printedAt(text, "NGS-CA-20456");
+    const identifiers = [
+      candidate("identifier", "CSS-0417", [{ value: "certificate", trigger: "Certificate number" }], {
+        index: printedAt(text, "CSS-0417")[0],
+      }),
+      candidate("identifier", "NGS-CA-20456", [{ value: "agreement", trigger: "Contract number" }], {
+        index: labelled,
+      }),
+      ...footers.map((index) => candidate("identifier", "NGS-CA-20456", ["other"], { index })),
+    ];
+
+    expect(chooseFields(identifiers, text).reference).toBe("NGS-CA-20456");
+    // Without the page there are no sheets to count and the better label
+    // wins, which is what the ranking did before the sheets were counted.
+    expect(chooseFields(identifiers).reference).toBe("CSS-0417");
+  });
+
+  it("counts the sheets a number reached, not the times it was printed", () => {
+    const text = page(
+      "Wexley Water - your bill",
+      "Account number 7719 0042 18",
+      "Account number 8845 6120 33",
+      "Meter reading 8845 6120 33",
+      "Estimate 8845 6120 33",
+      "Balance brought forward 8845 6120 33",
+      "page 1 of 2",
+      "7719 0042 18 - page 2 of 2",
+    );
+    const rival = printedAt(text, "8845 6120 33");
+    const chosen = chooseFields([
+      ...rival.map((index, at) => candidate(
+        "identifier",
+        "8845 6120 33",
+        at === 0 ? [{ value: "account" as const, trigger: "Account number" }] : ["other" as const],
+        { index },
+      )),
+      ...printedAt(text, "7719 0042 18").map((index, at) => candidate(
+        "identifier",
+        "7719 0042 18",
+        at === 0 ? [{ value: "account" as const, trigger: "Account number" }] : ["other" as const],
+        { index },
+      )),
+    ], text);
+
+    // Four printings against two, the same label on both, and the answer is
+    // the one the page carried onto the second sheet rather than the one it
+    // set four times in the table on the first.
+    expect(rival).toHaveLength(4);
+    expect(chosen.reference).toBe("7719 0042 18");
+  });
+
+  it("says nothing about a document printed on one sheet", () => {
+    const text = page(
+      "Foxglove Hosting - renewal",
+      "Your reference FGH-2291",
+      "Invoice number INV-2026-0099142",
+      "INV-2026-0099142",
+      "INV-2026-0099142",
+    );
+    const chosen = chooseFields([
+      candidate("identifier", "FGH-2291", [{ value: "reference", trigger: "Your reference" }], {
+        index: printedAt(text, "FGH-2291")[0],
+      }),
+      ...printedAt(text, "INV-2026-0099142").map((index, at) => candidate(
+        "identifier",
+        "INV-2026-0099142",
+        at === 0 ? [{ value: "invoice" as const, trigger: "Invoice number" }] : ["other" as const],
+        { index },
+      )),
+    ], text);
+
+    // Every number is on the one sheet, so the count separates nothing and
+    // the word the page used decides, as it does on a page with no sheets.
+    expect(chosen.reference).toBe("FGH-2291");
+  });
+
+  it("lets the label decide where a rival repeats in the same footer as the answer", () => {
+    const text = page(
+      "Thornfield Assurance - policy schedule",
+      "Policy number TA-HH-7734291 Customer number CUS-880193",
+      "TA-HH-7734291 CUS-880193 page 1 of 3",
+      "Your cover",
+      "TA-HH-7734291 CUS-880193 page 2 of 3",
+      "Making a claim",
+      "TA-HH-7734291 CUS-880193 page 3 of 3",
+    );
+    const chosen = chooseFields([
+      ...printedAt(text, "TA-HH-7734291").map((index, at) => candidate(
+        "identifier",
+        "TA-HH-7734291",
+        at === 0 ? [{ value: "policy" as const, trigger: "Policy number" }] : ["other" as const],
+        { index },
+      )),
+      ...printedAt(text, "CUS-880193").map((index, at) => candidate(
+        "identifier",
+        "CUS-880193",
+        at === 0 ? [{ value: "customer" as const, trigger: "Customer number" }] : ["other" as const],
+        { index },
+      )),
+    ], text);
+
+    // Both ran through every sheet, so the counts are level and the page's
+    // own word for the number is what is left to separate them.
+    expect(chosen.reference).toBe("TA-HH-7734291");
+  });
+
+  it("keeps the rivals on the shortlist, lower", () => {
+    const text = page(
+      "Certificate number CSS-0417",
+      "Contract number NGS-CA-20456",
+      "NGS-CA-20456 - page 1 of 2",
+      "NGS-CA-20456 - page 2 of 2",
+    );
+    const [labelled, ...footers] = printedAt(text, "NGS-CA-20456");
+    const entries = referenceShortlistEntries([
+      candidate("identifier", "CSS-0417", [{ value: "certificate", trigger: "Certificate number" }], {
+        index: printedAt(text, "CSS-0417")[0],
+      }),
+      candidate("identifier", "NGS-CA-20456", [{ value: "agreement", trigger: "Contract number" }], {
+        index: labelled,
+      }),
+      ...footers.map((index) => candidate("identifier", "NGS-CA-20456", ["other"], { index })),
+    ], text);
+
+    expect(entries.map((entry) => entry.value)).toEqual(["NGS-CA-20456", "CSS-0417"]);
+  });
+});
+
 describe("choosing the cost and its currency", () => {
   it("takes the total over an instalment and a due figure", () => {
     const chosen = chooseFields([

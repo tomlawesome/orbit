@@ -127,7 +127,9 @@ export interface TaggedCandidate<K extends CandidateKind = CandidateKind> extend
 export type TagStage = (text: string, candidates: readonly Candidate[]) => TaggedCandidate[];
 
 /** Stage 3: a value per field or nothing. Blank is a first-class answer.
- * The page text is for provider alone (`provider-route.ts`, owner
- * 2026-09-12): its cues are read around each name on the page, not off the
- * candidates. Without it, provider falls back to the word-run bins. */
+ * The page text is for the few things no single block can carry: provider's
+ * cues, read around each name on the page (`provider-route.ts`, owner
+ * 2026-09-12), and the sheet marks a reference is counted across. Without it,
+ * provider falls back to the word-run bins and the reference is ranked
+ * without them. */
 export type ChooseStage = (candidates: readonly TaggedCandidate[], text?: string) => ExtractedFields;
