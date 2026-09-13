@@ -197,8 +197,13 @@ describe("the administrator's aggregate", () => {
     expect(ADMINISTRATION).toContain("<h2>Encrypted details are locked</h2>");
     expect(ADMINISTRATION).toContain("<h2>Damaged encrypted details</h2>");
     // #956's composition, reused rather than reinvented: card wide, no buttons.
+    // Three of them in this region since #968: locked, damaged, and the
+    // recovery-bundle card, which joined the same family rather than drawing
+    // its own. The bundle card's own content is pinned by
+    // tests/unit/v19-recovery-bundle-card.test.mjs; what this asserts is that
+    // the composition stayed shared.
     const cards = ADMINISTRATION.slice(ADMINISTRATION.indexOf("{#if view.metadata}"), ADMINISTRATION.indexOf("<h2>People</h2>"));
-    expect(cards.match(/class="card wide rotation"/g)).toHaveLength(2);
+    expect(cards.match(/class="card wide rotation"/g)).toHaveLength(3);
     expect(cards).not.toContain("<button");
     expect(cards).toContain("in the administrator guide has the steps.");
     // The honest caveat about sightings-based counting survives.
