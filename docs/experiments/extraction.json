@@ -3761,6 +3761,68 @@
       },
       "verdict": "kept",
       "notes": "Seen set only. Hold-out 3 unchanged from E68."
+    },
+    {
+      "id": "E70",
+      "date": "2026-09-13",
+      "label": "dateRoles: four label rows the trigger table lacked",
+      "corpus": "seen48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Four words-before trigger rows in context-roles.ts: a visit/sweep/inspection/test that is 'due' is a service date without needing 'next' ('Annual Maintenance Visit Due'); 'date swept/serviced/inspected/tested/cleaned/fitted' and 'swept on' are the day the work was done (service); 'delivery date' and 'agreement date' are starts. dateRoles 73 to 77 of 85: alarm visit, chimney sweep, skip delivery, PCP agreement date. The chimney's 'Next sweep due' now reads service where the truth says due -- the truth and the existing 'next booster due' convention disagree; raised with the owner.",
+      "how": "npm run eval:stages",
+      "commit": "028eba6",
+      "output": "tmp/e-seen48-stages-dr2.txt",
+      "scores": {
+        "overall": {
+          "pct": 85,
+          "net": 347,
+          "of": 408
+        },
+        "provider": {
+          "pct": 79.2,
+          "net": 38,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 90.6,
+          "net": 77,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 70.8,
+          "net": 34,
+          "of": 48
+        },
+        "cost": {
+          "pct": 97.6,
+          "net": 41,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 89.7,
+          "net": 26,
+          "of": 29
+        },
+        "recurrence": {
+          "pct": 65.2,
+          "net": 15,
+          "of": 23
+        }
+      },
+      "verdict": "kept",
+      "notes": "Tried first and reverted: letting 'expires/expiring' decide renewal-vs-expiry by the thing named (RUNS_OUT without the 'expir' clause). Fixed the tenancy, broke the MOT and warranty certificates, net -1: the truths disagree on when 'expires' is a renewal."
     }
   ],
   "measurements": [
