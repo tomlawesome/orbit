@@ -3572,8 +3572,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "cost 31 -> 41/42. Steps: tags flip 35, term-multiple 37, monthly premium 38, instalment x term 41. Left: the mobile plan (true total 6 x GBP14 + 18 x GBP23 = GBP498; answered 24 x GBP23 = GBP552), flagged to the owner.",
-      "headline": true
+      "notes": "cost 31 -> 41/42. Steps: tags flip 35, term-multiple 37, monthly premium 38, instalment x term 41. Left: the mobile plan (true total 6 x GBP14 + 18 x GBP23 = GBP498; answered 24 x GBP23 = GBP552), flagged to the owner."
     },
     {
       "id": "E67",
@@ -3697,14 +3696,13 @@
         }
       },
       "verdict": "baseline",
-      "notes": "73.2%, cost 6/12: unchanged from E67.",
-      "headline": true
+      "notes": "73.2%, cost 6/12: unchanged from E67."
     },
     {
       "id": "E69",
       "date": "2026-09-13",
       "label": "truths: trading name is the provider (cavity wall, funeral plan)",
-      "corpus": "seen48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "sieve+tag+choose",
@@ -3766,7 +3764,7 @@
       "id": "E70",
       "date": "2026-09-13",
       "label": "dateRoles: four label rows the trigger table lacked",
-      "corpus": "seen48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "sieve+tag+choose",
@@ -3828,7 +3826,7 @@
       "id": "E71",
       "date": "2026-09-13",
       "label": "dateRoles: a trigger followed by a preposition points forward",
-      "corpus": "seen48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "sieve+tag+choose",
@@ -3890,7 +3888,7 @@
       "id": "E72",
       "date": "2026-09-13",
       "label": "dateRoles: a line-initial 'Date:' and an agreement date are the document's own date",
-      "corpus": "seen48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "sieve+tag+choose",
@@ -3952,7 +3950,7 @@
       "id": "E73",
       "date": "2026-09-13",
       "label": "dateRoles: join Tika's letter-spaced headings before the sieve",
-      "corpus": "seen48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "sieve+tag+choose",
@@ -4076,7 +4074,7 @@
       "id": "E75",
       "date": "2026-09-13",
       "label": "dateRoles: the page's kind names a term end renewal or expiry (owner rule 2026-09-13)",
-      "corpus": "seen48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "sieve+tag+choose",
@@ -4200,7 +4198,7 @@
       "id": "E77",
       "date": "2026-09-13",
       "label": "dateRoles: every taxonomy kind decides its term end; cycle words for unknown kinds",
-      "corpus": "seen48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "sieve+tag+choose",
@@ -4324,7 +4322,7 @@
       "id": "E79",
       "date": "2026-09-13",
       "label": "dateRoles: term-end tables trimmed to kinds that name the thing itself",
-      "corpus": "seen48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "sieve+tag+choose",
@@ -4448,7 +4446,7 @@
       "id": "E81",
       "date": "2026-09-13",
       "label": "dateRoles: life and critical illness cover ends with its term",
-      "corpus": "seen48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "sieve+tag+choose",
@@ -4572,7 +4570,7 @@
       "id": "E83",
       "date": "2026-09-13",
       "label": "cost: the dates say how long a term runs; a split term is a sum",
-      "corpus": "seen48",
+      "corpus": "tuning-48",
       "model": "—",
       "role": "no model",
       "route": "sieve+tag+choose",
@@ -4628,7 +4626,8 @@
         }
       },
       "verdict": "kept",
-      "notes": "Seen cost 42/42: the mobile plan (6x1400 + 18x2300 = 49800) is the one page fixed; no other field moved. Tried and narrowed: counting a renewal end as the term turned the health cash plan, pension and mortgage into commitments they are not (cost 39/42), so only an expiry end counts."
+      "notes": "Seen cost 42/42: the mobile plan (6x1400 + 18x2300 = 49800) is the one page fixed; no other field moved. Tried and narrowed: counting a renewal end as the term turned the health cash plan, pension and mortgage into commitments they are not (cost 39/42), so only an expiry end counts.",
+      "headline": true
     },
     {
       "id": "E84",
@@ -4690,7 +4689,8 @@
         }
       },
       "verdict": "kept",
-      "notes": "Neutral: identical to E82, cost still 6/12. The hold-out's cost misses are not the dated-term or split-term shape."
+      "notes": "Neutral: identical to E82, cost still 6/12. The hold-out's cost misses are not the dated-term or split-term shape.",
+      "headline": true
     }
   ],
   "measurements": [
