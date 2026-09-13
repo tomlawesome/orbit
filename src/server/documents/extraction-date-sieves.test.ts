@@ -191,6 +191,13 @@ describe("where a date sits relative to the document's own", () => {
     const bare = "Cover runs 1 April 2026 to 31 March 2027.";
     expect(issueDate(bare, dates(bare))).toBeUndefined();
   });
+
+  it("reads a letter's or an email's own 'Date:' line, but not a label that merely ends in date", () => {
+    const email = ["From: billing@example", "Date: 3 August 2026, 09:14", "Plan renews on 3 August 2027"].join(" \n\n");
+    expect(issueDate(email, dates(email))?.value).toBe("2026-08-03");
+    const form = "Renewal date: 3 August 2027";
+    expect(issueDate(form, dates(form))).toBeUndefined();
+  });
 });
 
 describe("the calendar the sieves count with", () => {
