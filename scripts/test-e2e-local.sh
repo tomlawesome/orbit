@@ -352,8 +352,14 @@ if [[ -n "$reuse_project" ]]; then
   # actually ready", the same bar a fresh `compose up --wait` holds a new
   # stack to.
   container_for_service() {
-    docker ps --filter "label=com.docker.compose.project=${project_name}" \
-      --filter "label=com.docker.compose.service=$1" --format '{{.Names}}' | head -n1
+    # First name only, taken by parameter expansion rather than a pipe into
+    # `head`: that shape races SIGPIPE and the acceptance check for #809
+    # rejects it outright. `docker ps` here returns at most a handful of
+    # lines, so reading them all and trimming costs nothing.
+    local names
+    names=$(docker ps --filter "label=com.docker.compose.project=${project_name}" \
+      --filter "label=com.docker.compose.service=$1" --format '{{.Names}}')
+    printf '%s' "${names%%$'\n'*}"
   }
   host_port_of() {
     docker inspect --format "{{with index .NetworkSettings.Ports \"$2\"}}{{(index . 0).HostPort}}{{end}}" "$1" 2>/dev/null
