@@ -4948,6 +4948,77 @@
         ]
       ],
       "source": "run at the terminal, 2026-09-12; #994"
+    },
+    {
+      "id": "M08",
+      "date": "2026-09-13",
+      "corpus": "tuning-60",
+      "label": "Top three per field: how often the answer is first, in the top three, or on the list at all",
+      "what": "The owner's decision (#1008): the review screen shows the top three candidates per field with the reader's pick pre-selected, so 'in the top three' is what ranking is judged on. First measurement, same code as E85/E86, on tuning 60 and both hold-outs. Rank is the order the chooser receives the shortlist in; subtype's list is unordered so it has no rank. Reference's shortlist order is already better than what chooseReference picks from it (38/60 first on the list against 22/60 chosen, 4/12 against 0/12 on hold-out 4); cost's is worse (23/54 against 32/54).",
+      "how": "npm run eval:shortlist [-- --holdout3 | --holdout4]",
+      "results": [
+        [
+          "tuning 60: reference first / top three / on list",
+          "38 / 50 / 57 of 60"
+        ],
+        [
+          "tuning 60: cost",
+          "23 / 40 / 47 of 54"
+        ],
+        [
+          "tuning 60: provider",
+          "39 / 46 / 48 of 60"
+        ],
+        [
+          "tuning 60: dates (each expected date)",
+          "32 / 86 / 102 of 102"
+        ],
+        [
+          "tuning 60: subtype on list",
+          "52 of 60"
+        ],
+        [
+          "tuning 60: recurrence",
+          "22 / 26 / 26 of 30"
+        ],
+        [
+          "hold-out 4: reference",
+          "4 / 6 / 11 of 12"
+        ],
+        [
+          "hold-out 4: cost",
+          "7 / 7 / 9 of 12"
+        ],
+        [
+          "hold-out 4: provider",
+          "6 / 7 / 8 of 12"
+        ],
+        [
+          "hold-out 4: dates",
+          "9 / 20 / 27 of 28"
+        ],
+        [
+          "hold-out 4: subtype on list",
+          "12 of 12"
+        ],
+        [
+          "hold-out 3: reference",
+          "11 / 11 / 11 of 12"
+        ],
+        [
+          "hold-out 3: cost",
+          "8 / 11 / 11 of 12"
+        ],
+        [
+          "hold-out 3: provider",
+          "7 / 7 / 7 of 12"
+        ],
+        [
+          "hold-out 3: dates",
+          "11 / 25 / 26 of 26"
+        ]
+      ],
+      "source": "tmp/e-seen60-shortlist-top3.txt, tmp/e-holdout3-shortlist-top3.txt, tmp/e-holdout4-shortlist-top3.txt; commit 3f51251"
     }
   ]
 }
