@@ -27,11 +27,9 @@ const RENEWS = new Set([
   "Tax", "Licence", "Permit", "Mortgage", "Maintenance contract", "Tenancy", "Rental",
   "Registration", "Service charge", "Season ticket", "Parking permit", "Domain",
   "Software subscription",
-  // A certificate or inspection is valid for a while and must be done again
-  // while the household still needs it (an MOT, a gas safety record); a
-  // service plan is booked again; an identity document is renewed; a benefit
-  // award is reviewed or claimed again when it ends.
-  "Certificate", "Inspection", "Service", "Identity document", "Benefit",
+  // An identity document is renewed; a benefit award is reviewed or claimed
+  // again when it ends.
+  "Identity document", "Benefit",
 ]);
 
 /** Kinds that are over when their term is: a promise about a thing already
@@ -40,17 +38,20 @@ const RENEWS = new Set([
 const ENDS = new Set([
   "Warranty", "Guarantee", "Loan", "Lease", "Course", "Quote",
   // A card is replaced by the bank; savings and investments mature and the
-  // money comes back; a deposit is protected until the tenancy ends; a claim
-  // window, a prescription, a fine's discount period and a fee period close;
-  // an appointment, a vaccination, an order, a delivery and a repair happen.
-  "Credit card", "Savings", "Investment", "Deposit", "Claim", "Prescription",
-  "Vaccination", "Fine", "Fees", "Appointment", "Order", "Delivery", "Repair",
+  // money comes back; a prescription, a vaccination and a fine's discount
+  // period run out.
+  "Credit card", "Savings", "Investment", "Prescription", "Vaccination", "Fine",
 ]);
 
-// Kinds deliberately left undecided: Bill, Statement, Bank account, Pension,
-// Record, Deed and Will bound no term of their own. A page of one of those
-// kinds is decided by any more specific kind it also carries, else by the
-// words on it.
+// Kinds deliberately left undecided. Bill, Statement, Bank account, Pension,
+// Record, Deed and Will bound no term of their own. Certificate, Inspection,
+// Service, Appointment, Repair, Delivery and Order end in a visit, which the
+// date sieve names `service` on its own. Claim, Fees, Deposit and the rest
+// are words every other kind's page uses too -- an insurance schedule says
+// "claim" more than it says "insurance" -- so letting them decide misnames
+// the thing the page is really about. A page of one of these kinds is
+// decided by any more specific kind it also carries, else by the words on
+// it.
 
 /** Words for the piece of paper rather than the thing it is about: every
  * tenancy is an agreement, every quote is for something. These decide only
