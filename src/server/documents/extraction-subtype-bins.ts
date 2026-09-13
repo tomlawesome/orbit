@@ -91,17 +91,18 @@ const QUALIFIER_PHRASES = phrasesOf(TAXONOMY.qualifiers);
  * Where on the paper a word was printed, loudest first.
  *
  * A general fact about household paper: a document names what it is at the
- * top of its first sheet, heads the sections it is made of, and mentions
- * everything else -- other products, the regulator, how to pay -- in the
- * text underneath. So the same word is a different amount of evidence
- * depending on where it was printed.
+ * top of its first sheet; its text mentions everything else it has to do
+ * with; and under some of its headings it is talking about something else
+ * entirely -- an add-on it would like to sell, the firm's regulator, how to
+ * complain. So the same word is a different amount of evidence depending on
+ * where it was printed.
  */
-export const SUBTYPE_PLACES = ["title", "heading", "body"] as const;
+export const SUBTYPE_PLACES = ["title", "body", "aside"] as const;
 export type SubtypePlace = (typeof SUBTYPE_PLACES)[number];
 
 /** One line of the page the bins may read: what it says, the Tika block it
  * was printed in, and where on the paper that block sits. A source with no
- * place stated is read as body text, the quietest place there is. */
+ * place stated is read as body text, the middle of the three. */
 export interface SubtypeSource {
   value: string;
   line: string;
@@ -119,7 +120,7 @@ export interface GroupBin<S extends SubtypeSource = SubtypeSource> {
 }
 
 function noPlaces(): Record<SubtypePlace, number> {
-  return { title: 0, heading: 0, body: 0 };
+  return { title: 0, body: 0, aside: 0 };
 }
 
 function bin<S extends SubtypeSource>(
@@ -177,30 +178,43 @@ export function subtypeGroupBins<S extends SubtypeSource>(sources: readonly S[])
 }
 
 /** Whether the document named this group where it names itself -- its title
- * or a heading -- rather than only mentioning it in the text below. */
+ * -- rather than only mentioning it further down. */
 function named(bin: Pick<GroupBin, "places">): number {
-  return bin.places.title + bin.places.heading > 0 ? 1 : 0;
+  return bin.places.title > 0 ? 1 : 0;
+}
+
+/** How often the page says a word other than as an aside: an advert for an
+ * add-on and the small print about the firm are the page talking about
+ * something else, whatever they are selling under them. */
+function spoken(bin: Pick<GroupBin, "count" | "places">): number {
+  return bin.count - bin.places.aside;
 }
 
 /**
  * Which of two groups the page says louder: negative when `left` is louder,
  * the comparator's own sign convention.
  *
- * The fact about paper this states: a document says what it is in its title
- * and its headings, and its text mentions everything else it has to do with
- * -- other products, the regulator, how it may be paid. So a word printed
- * only in the text never outvotes a word the document named itself with,
- * however often the text repeats it.
+ * Two facts about paper, in the order they are read.
  *
- * Among words the document did name itself with, how often it says them
- * decides, as it always did; where two are still level, the one printed
- * higher up wins, a title before a heading.
+ * A document says what it is in its title, and its text mentions everything
+ * else it has to do with -- other products, the regulator, how it may be
+ * paid. So a word printed only in the text never outvotes a word the title
+ * carries, however often the text repeats it.
+ *
+ * Then, among words the title is silent about, an aside does not count: what
+ * a page offers as an extra, and the small print about the firm, are the
+ * page talking about something else. A word printed nowhere but there is a
+ * rival, ranked under every word the page says in its own voice, and still
+ * ranked above nothing at all -- it stays in its bin and on the shortlist.
+ *
+ * Everything after those two is the count, as it always was.
  */
 export function louderWherePrinted(
   left: Pick<GroupBin, "count" | "places">,
   right: Pick<GroupBin, "count" | "places">,
 ): number {
   if (named(left) !== named(right)) return named(right) - named(left);
+  if (spoken(left) !== spoken(right)) return spoken(right) - spoken(left);
   if (left.count !== right.count) return right.count - left.count;
   for (const place of SUBTYPE_PLACES) {
     const difference = right.places[place] - left.places[place];
@@ -238,6 +252,98 @@ function titleBlock(candidates: readonly TaggedCandidate[]): TaggedCandidate | u
     candidate.kind === "heading" && candidate.tags.some((tag) => tag.value === "title"));
 }
 
+/**
+ * A block the page set apart as the name of what follows it.
+ *
+ * The general fact: a heading is a name, not a sentence and not a row of a
+ * table. It is short, it does not punctuate like prose, it carries none of
+ * the figures the text under it carries, and it is printed in capitals or
+ * with its words capitalised -- which, once Tika has thrown the type away,
+ * is all that is left of being set apart. Subtype keeps its own copy of this
+ * judgement (AGENTS.md: every field owns its own stages), and stage 1's
+ * looser reading of a heading -- any short block -- stays exactly as it is.
+ */
+function isSetApartHeading(line: string): boolean {
+  if (line.length < 3 || line.length > HEADING_MAX_CHARS) return false;
+  if (!/[A-Za-z]/u.test(line)) return false;
+  // A figure belongs to the text; the name over it does not carry one.
+  if (/\d/u.test(line)) return false;
+  if (/[.,;:!?]$/u.test(line)) return false;
+  const words = line.split(" ").filter((word) => word.length > 0);
+  if (words.length === 0 || words.length > HEADING_MAX_WORDS) return false;
+  if (line === line.toUpperCase()) return true;
+  return words.every((word) => CAPITALISED_WORD.test(word) || JOINING.has(word.toLowerCase()));
+}
+
+/** As long a block as a heading can be, in characters and in words. A name
+ * for what follows is short; past this the block is a sentence. */
+const HEADING_MAX_CHARS = 80;
+const HEADING_MAX_WORDS = 10;
+
+/** A word printed as part of a name rather than as part of a sentence. */
+const CAPITALISED_WORD = /^[A-Z][A-Za-z'’&.-]*$/u;
+
+/**
+ * Headings that say the block under them is an aside rather than part of
+ * what the document is.
+ *
+ * Two kinds of block, named as block kinds and not as products (#1015). A
+ * household document offers things it is not: an add-on, an optional cover,
+ * something else the household may also like. And it carries small print it
+ * is not about: who regulates the firm, how to complain, which scheme would
+ * pay out. Both are headed in so many words, and the words are the same
+ * whatever is being sold under them -- which is what makes this a fact about
+ * paper rather than a list of products.
+ */
+const OFFERS_SOMETHING_ELSE = [
+  "add on", "add ons", "optional", "optional extra", "optional extras", "extras",
+  "extra cover", "additional cover", "additional products", "other products",
+  "other services", "also available", "you may also like", "cover options",
+  "further products", "upgrade", "upgrades",
+];
+
+const SMALL_PRINT_ABOUT_THE_FIRM = [
+  "complain", "complaint", "complaints", "ombudsman",
+  "regulator", "regulated", "regulatory", "compensation scheme",
+];
+
+const ASIDE_HEADINGS = [...OFFERS_SOMETHING_ELSE, ...SMALL_PRINT_ABOUT_THE_FIRM]
+  .map((phrase) => ` ${phrase} `);
+
+/** A line reduced to its words, spaced at both ends, so a phrase is looked
+ * for whole rather than inside a longer word. */
+function spacedWords(line: string): string {
+  return ` ${line.toLowerCase().replace(/[^a-z0-9]+/gu, " ").trim()} `;
+}
+
+function saysAside(line: string): boolean {
+  const words = spacedWords(line);
+  return ASIDE_HEADINGS.some((phrase) => words.includes(phrase));
+}
+
+/**
+ * The stretches of the page an aside heading owns: from that heading to the
+ * next heading that is not one, or to the end of the page.
+ *
+ * A heading owns what is printed under it until the page puts up another
+ * heading, which is what a heading is for.
+ */
+function asideBlocks(candidates: readonly TaggedCandidate[]): Array<{ from: number; to: number }> {
+  const blocks: Array<{ from: number; to: number }> = [];
+  let opened: number | undefined;
+  for (const candidate of candidates) {
+    if (candidate.kind !== "heading" || !isSetApartHeading(candidate.line)) continue;
+    if (saysAside(candidate.line)) {
+      opened ??= candidate.index;
+    } else if (opened !== undefined) {
+      blocks.push({ from: opened, to: candidate.index });
+      opened = undefined;
+    }
+  }
+  if (opened !== undefined) blocks.push({ from: opened, to: Number.POSITIVE_INFINITY });
+  return blocks;
+}
+
 /** Whether a source was printed inside a given block: the same block text, at
  * an offset the block covers. Both halves are needed -- a page that repeats
  * its title in a footer prints the same words somewhere else entirely. */
@@ -263,10 +369,17 @@ function inside(block: TaggedCandidate, candidate: TaggedCandidate): boolean {
  */
 export function subtypeSources(candidates: readonly TaggedCandidate[]): PlacedCandidate[] {
   const title = titleBlock(candidates);
-  const placed = (candidate: TaggedCandidate): PlacedCandidate => ({
-    ...candidate,
-    place: title !== undefined && inside(title, candidate) ? "title" : "body",
-  });
+  const asides = asideBlocks(candidates);
+  const placeOf = (candidate: TaggedCandidate): SubtypePlace => {
+    if (title !== undefined && inside(title, candidate)) return "title";
+    // A word the page prints only under "optional extras" or "how to
+    // complain" is a rival, not the answer: it stays in its bin and on the
+    // shortlist, ranked under every word the document named itself with.
+    if (asides.some((block) => candidate.index >= block.from && candidate.index < block.to)) return "aside";
+    return "body";
+  };
+  const placed = (candidate: TaggedCandidate): PlacedCandidate =>
+    ({ ...candidate, place: placeOf(candidate) });
   return [
     ...candidates.filter((candidate) => candidate.kind === "heading").map(placed),
     ...candidates.filter((candidate) => candidate.kind === "organisation").map(placed),

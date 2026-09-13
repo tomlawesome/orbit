@@ -3,7 +3,7 @@ import { GENERIC_REFERENCE_PREFERENCE, referencePreference } from "./extraction-
 import type { GroupBin } from "./extraction-subtype-bins";
 
 const bin = (group: string): GroupBin =>
-  ({ group, count: 1, places: { title: 0, heading: 0, body: 1 }, sources: [] });
+  ({ group, count: 1, places: { title: 0, body: 1, aside: 0 }, sources: [] });
 const kinds = (...groups: string[]) => ({ kinds: groups.map(bin), qualifiers: [] });
 const about = (kindGroups: string[], qualifierGroups: string[]) => ({
   kinds: kindGroups.map(bin),

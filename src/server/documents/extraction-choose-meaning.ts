@@ -338,8 +338,8 @@ const GROUPS_OFFERED = 2;
  * were printed, in the household's words. */
 const PLACE_NAMED: Record<SubtypePlace, string> = {
   title: "the title",
-  heading: "a heading",
   body: "the text",
+  aside: "an add-on or small-print block",
 };
 
 function wherePrinted(bin: GroupBin<PlacedCandidate>): string {
