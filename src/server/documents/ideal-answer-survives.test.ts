@@ -193,20 +193,18 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "boiler-service-plan-letter.pdf": {
-    provider: "Boiler Service Plan Letter HEARTHWELL HOME CARE BO I L ER & CONTROLS COVER Plan reference: HHC-4471-2298 Account no:",
-    reference: "L ER & CONTROLS COVER Plan reference: HHC-4471-2298 Account no: 3300 5521 Date of this letter: 2 September 2026 Mr J.",
-    // Kept from the previous table: generate-evidence.mjs looks only for the
-    // first synonym of the first kind, which this page does not print.
-    subtype: "Boiler Service Plan Letter HEARTHWELL HOME CARE BO I L ER & CONTROLS COVER Plan reference: HHC-4471-2298 Account no: 3300 5521 Date of this",
+    subtype: "Boiler Service Plan Letter THE BOILER CARE PLAN BO I L ER & CONTROLS COVER · hea r thwe l l- homec a re .e xamp le Plan reference: HHC-4471-2298",
+    provider: "· service@hearthwell-homecare.example Hearthwell Home Care is a trading name of Castlemere Assurance Group plc, registered in",
+    reference: "homec a re .e xamp le Plan reference: HHC-4471-2298 Account no: 3300 5521 Customer no: 118 240 77 Date of this letter: 2",
     cost: { amount: "179.88", needle: "PLAN REFERENCE HHC-4471-2298 NEXT SERVICE DUE 14/10/2026 THIS MONTH 'S INSTALMENT £14.99 ANNUAL TOTAL IF PAID MONTHLY £179.88 ⑆ 4 4 7 1 2 2 98 07 ⑆ 00" },
-    recurrence: { months: 12, needle: "Care plan, your boiler and controls are serviced every 12 months. Our records show that your next" },
+    recurrence: { months: 12, needle: "Care Plan, your boiler and controls are serviced every 12 months. Our records show that your next" },
     dates: [
       "Our records show that your next service is due on 14 October 2026. One of our Gas Safe",
     ],
   },
   "fullpage-breakdown-cover-renewal.pdf": {
-    provider: "Milldown Motoring Club — Your Breakdown Cover Renewal MILLDOWN MOTORING CLUB Your breakdown",
-    reference: "Prepared 2 September 2026 Membership MDC-4471-8823 THIS OFFER ENDS 30 SEPTEMBER 2026 Renew now and keep last year's",
+    provider: "2026 and replace all earlier versions. Milldown Motoring Club is a trading name of Milldown Club Services Ltd, used since 1974 and",
+    reference: "Prepared 2 September 2026 Membership MDC-4471-8823 Customer 118 240 77 · milldown-club.example THIS OFFER ENDS 30",
     subtype: "as at 28 August 2026 and include Insurance Premium Tax where applicable. Prices may change at your next renewal.",
     cost: { amount: "84.99", needle: "LINE AND KEEP THIS CARD IN YOUR GLOVEBOX Choose your cover for the year ahead Your current cover Roadside Assist £84.99 per year · you paid" },
     recurrence: { months: 12, needle: "TO 04/11/2026 24HR: 0330 555 0198 Roadside & Recovery £129.99 or £11.99 a month Save £30 — renew" },
@@ -230,8 +228,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   "car-finance-agreement.pdf": {
     provider: "BVF-PCP-208841 CREDITOR (LENDER) Bracken Vale Finance plc 1 Millrace House, Doverton DV4 7QS Company number 04471822 Authorised",
     reference: "20 February 2026 Agreement number BVF-PCP-208841 CREDITOR (LENDER) Bracken Vale Finance plc 1 Millrace House, Doverton",
-    // Kept from the previous table, as above.
-    subtype: "Personal Contract Purchase Agreement PERSONAL CONTRACT PURCHASE AGREEMENT Regulated by the Consumer Credit Act 1974 Agreement date: 20 February 2026",
+    subtype: "from Bracken Vale Finance plc Personal loans, unsecured, from £1,000 to £25,000 Savings accounts through our",
     cost: { amount: "24,730.16", needle: "£279.42 Date of first payment 05/04/2026 Optional final payment (due 5 March 2030) £8,245.00 Total amount payable £24,730.16 Option-to-purchase fee" },
     dates: [
       "by the Consumer Credit Act 1974 Agreement date: 20 February 2026 Agreement number",
@@ -260,9 +257,9 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-cavity-wall-insulation-guarantee.pdf": {
-    provider: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft insulation specialists · est. 2009 ·",
-    reference: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft insulation specialists · est.",
-    subtype: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft",
+    provider: "Services is a trading name of WarmCore Insulation Ltd, registered in England and Wales No. 06612940, registered office 4",
+    reference: "Guarantee certificate WC-GTE-08823 Brightwell Insulation Services Cavity wall & loft insulation",
+    subtype: "Guarantee certificate WC-GTE-08823 Brightwell Insulation Services Cavity wall &",
     cost: { amount: "2,340.00", needle: "confirmed by borescope survey 28 April 2026 Guarantee period 25 years, from 12 May 2026 to 12 May 2051 Contract price £2,340.00, paid in full 12 May" },
     dates: [
       "Job reference WCI-2026-4471 Date of installation 12 May 2026 Certificate issued 19",
@@ -291,7 +288,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "critical-illness-quote.pdf": {
-    provider: "illness quotation prepared for you by Amberleigh Financial Advisers Ltd Amberleigh Financial Advisers Ltd — Quote AMB-CI-2026-77410 Page 1 of 2",
+    provider: "illness quotation prepared for you by Amberleigh Financial Advisers Ltd Amberleigh Financial Advisers Ltd — Quote AMB-CI-2026-77410 Page 1 of 4",
     reference: "Netherbourne NB6 5DA Quote reference: AMB-CI-2026-77410 Quote date: 6 October 2026 Valid until: 6 November 2026 Cover",
     subtype: "12 Fenwick Road, Netherbourne NB6 5DA Quote reference: AMB-CI-2026-77410 Quote date: 6 October 2026 Valid until: 6",
     cost: { amount: "10,386.00", needle: "throughout this illustration as your quote. Based on a 25-year term, total premiums payable under Option B would be £10,386.00, with cover ending in" },
@@ -311,9 +308,9 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "domain-hosting-renewal.pdf": {
-    provider: "Foxglove Hosting — Domain Renewal",
+    provider: "payment for this renewal is taken. Foxglove Hosting Limited. help@foxglovehosting.example. 01632 960118. Page 1 of 4",
     reference: "Account number ACC-3348217 Domain brindlewood-supplies.example Domain ID D4471982-EXPL Registered",
-    subtype: "Foxglove Hosting — Domain Renewal",
+    subtype: "Domain Control Panel — Renewal",
     cost: { amount: "15.59", needle: "to renew at £14.99. Renew now Order Summary Domain renewal (12 months) £12.99 VAT (20%) £2.60 Total due today £15.59 Invoice INV-2027-004471" },
     recurrence: { months: 12, needle: "on 18 January 2027 Renewal period This domain renews every 12 months. Auto-renew On Nameservers" },
     dates: [
@@ -322,12 +319,9 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-driving-lessons-invoice.pdf": {
-    provider: "ADI badge no. 449213 · bookings@pass2drive.co.uk · www.pass2drive.co.uk · 07700 900412 Invoice for driving lessons",
+    provider: "ADI badge no. 449213 · bookings@pass2drive.example · www.pass2drive.example · 07700 900412 Invoice for driving",
     reference: "Driving lessons invoice PL-INV-2249 C. Lewis Approved Driving Instructor, ADI badge no. 449213 ·",
-    // Kept from the previous table, as above.
-    subtype: "Driving lessons invoice PL-INV-2249 C. Lewis Approved Driving Instructor, ADI badge no. 449213 · bookings@pass2drive.co.uk · www.pass2drive.co.uk ·",
-    // Kept from the previous table: the generated window stops short of the
-    // only printed pound sign, and a span without one fails the cost check.
+    subtype: "or dual carriageway) £74.00 Intensive course, 20 hours over one week £700.00 Previous block price, in force until",
     cost: { amount: "360.00", needle: "1-hour lessons, paid up front 360.00 Total paid, received 2 September 2026 £360.00 Thanks for booking" },
     dates: [
       "Cravenshire CV9 3TL Invoice PL-INV-2249 Invoice date 2 September 2026 Pick-up point: Penbury",
@@ -354,18 +348,18 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-energy-tariff-end.pdf": {
-    provider: "Achebe Head of Customer Pricing, Kittiwake Energy Ltd Rosalind AchebeKittiwake Energy Ltd, registered in England & Wales No.",
-    reference: "Norfolk NR14 9QP Account number: 7724 6650 18 8 September 2026 Dear Mr Voss, Thank you for being a Kittiwake Energy",
+    provider: "Halcyon Energy is a trading name of Kittiwake Energy Ltd, registered in England and Wales, company number 07734215, registered",
+    reference: "Norfolk NR14 9QP Account number: 7724 6650 18 8 September 2026 Dear Mr Voss, Thank you for being a Halcyon Energy",
     subtype: "onto our standard variable tariff, unless you choose a new plan with us before then. If you would rather",
-    cost: { amount: "1,284.00", needle: "and what we are able to offer you if you fix your prices again today. Your current plan, Kittiwake Fixed October 2024 £1,284.00 a year Our standard" },
+    cost: { amount: "1,284.00", needle: "and what we are able to offer you if you fix your prices again today. Your current plan, Halcyon Fixed October 2024 £1,284.00 a year Our standard" },
     dates: [
       "runs. Based on our records, your fixed price ends on 14 November 2026, and from the next day",
     ],
   },
   "fullpage-funeral-plan-certificate.pdf": {
-    provider: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral",
-    reference: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral plan, fixing today's cost",
-    subtype: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral",
+    provider: "under which your plan is administered. Evergreen Funeral Plans Limited is registered in England and Wales No. 05712834, registered",
+    reference: "Willowmere Funeral Plans — certificate EFP-0091234 Willowmere Funeral Plans A pre-paid funeral plan, fixing today's cost",
+    subtype: "Willowmere Funeral Plans — certificate EFP-0091234 Willowmere Funeral Plans A pre-paid funeral",
     cost: { amount: "3,995.00", needle: "Funeral Service PLAN DETAILS Plan type Simple Choice, unattended committal with optional service Total plan price £3,995.00, fixed at today's prices" },
     dates: [
       "CV11 5FT Plan number EFP-0091234 Plan commenced 3 November 2024 Certificate issued 10",
