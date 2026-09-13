@@ -55,7 +55,7 @@ export const EXTRACTION_HOLDOUT3_FULLPAGE: CorpusDocument[] = [
     // - provider is Homestead Rental Solutions.
     // - reference is agreement HRS-AGR-661204.
     // - costMinor is 50700, the 18-month minimum term x the £6.50 weekly rental: 78 Friday collections from 18 September 2026 to the term end on 11 March 2028 (18 months is 78 weeks), never printed (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x periodic price where it is not; only rolling, no-term contracts keep the periodic figure). The £6.50 weekly rental alone is the instalment and a trap, as under the old monthly convention it was the truth; delivery (20.00, one-off, already paid, excluded as a one-off fee), optional damage cover (1.20, not selected) and the early-termination charge (15.00) are traps too.
-    // - recurrenceMonths is 18, printed in digits as the minimum term; scheduleKind is 'renewal', taken from the minimum-term-ending dateRole exactly as an earlier alarm monitoring agreement's minimum term does.
+    // - No recurrenceMonths or scheduleKind is declared. The minimum-term end is 'expiry' under the kind-of-thing rule (owner, 2026-09-13): renting an appliance is a lease of goods, and at 11 March 2028 the household does not have to do anything for the rental to carry on -- it rolls weekly until someone gives 28 days' notice -- so the renewal test ('continues only if the household acts again') fails. With no 'renewal' or 'service' dateRole there is no scheduleKind, and a recurrence needs a schedule, so the 18 printed in digits as the minimum term is a trap rather than a recurrenceMonths.
     // - subtype: Rental/Appliance.
     name: "rent-to-own appliance rental agreement, a returned tumble dryer as a decoy previous agreement",
     filename: "fullpage-appliance-rental-agreement.pdf",
@@ -67,13 +67,11 @@ export const EXTRACTION_HOLDOUT3_FULLPAGE: CorpusDocument[] = [
     dateRoles: [
       { date: "2026-09-05", role: "issued" },
       { date: "2026-09-12", role: "start" },
-      { date: "2028-03-11", role: "renewal" },
+      { date: "2028-03-11", role: "expiry" },
     ],
     subtype: {"kinds":["Rental"],"qualifiers":["Appliance"]},
     costMinor: 50700,
     currency: "GBP",
-    recurrenceMonths: 18,
-    scheduleKind: "renewal",
     },
   },
   {
