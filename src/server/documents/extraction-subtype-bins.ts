@@ -165,10 +165,12 @@ export function subtypeSources(candidates: readonly TaggedCandidate[]): TaggedCa
  * combination rules: a kind on its own, a qualifier in front of a kind, or
  * a qualifier alone where the taxonomy allows it to stand alone ("MOT",
  * "Council tax"). A qualifier with no kind and no licence to stand alone is
- * not an answer.
+ * not an answer. A word the taxonomy lists on both sides ("Mortgage") is
+ * said once: a mortgage statement lands its words in both bins, and
+ * "Mortgage Mortgage" is not a thing (owner's real documents, 2026-09-13).
  */
 export function composeSubtype(qualifier?: string, kind?: string): string | undefined {
-  if (kind !== undefined && qualifier !== undefined) return `${qualifier} ${kind}`;
+  if (kind !== undefined && qualifier !== undefined) return qualifier === kind ? kind : `${qualifier} ${kind}`;
   if (kind !== undefined) return kind;
   if (qualifier !== undefined && TAXONOMY.combinations.standalone.includes(qualifier)) return qualifier;
   return undefined;
