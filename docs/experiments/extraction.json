@@ -3635,7 +3635,69 @@
         }
       },
       "verdict": "kept",
-      "notes": "73.2%, cost 6/12, dateRoles 19/26: unchanged from E60.",
+      "notes": "73.2%, cost 6/12, dateRoles 19/26: unchanged from E60."
+    },
+    {
+      "id": "E68",
+      "date": "2026-09-13",
+      "label": "Hold-out 3 after its cost truths were re-checked (author sub-agent)",
+      "corpus": "holdout3-12",
+      "model": "\u2014",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "No rule change. A separate author agent re-checked hold-out 3's cost truths under the whole-commitment rule (commit 8025d26; its notes sit beside the hold-out sources, unread by the tuning session).",
+      "how": "npm run eval:holdout",
+      "commit": "8025d26",
+      "output": "tmp/e-holdout3-stages-q40e.txt",
+      "scores": {
+        "overall": {
+          "pct": 73.2,
+          "net": 82,
+          "of": 112
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 73.1,
+          "net": 19,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 6,
+          "of": 6
+        }
+      },
+      "verdict": "baseline",
+      "notes": "73.2%, cost 6/12: unchanged from E67.",
       "headline": true
     }
   ],
