@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Haverfield Energy — Annual Summary</title>
+<style>
+@font-face{font-family:"Corpus Meter";src:url("../fonts/Rubik.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Meter Mono";src:url("../fonts/ShareTechMono-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; }
+  .page { width: 794px; height: 1123px; box-sizing: border-box; position: relative; overflow: hidden; padding: 34px 42px; font-family: "Corpus Meter", sans-serif; color: #1a1a1a; font-size: 10.2px; line-height: 1.4; }
+
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #0d5c46; padding-bottom: 8px; margin-bottom: 10px; }
+  .brand { font-size: 21px; font-weight: 700; color: #0d5c46; letter-spacing: 0.3px; }
+  .brand .sub { display: block; font-size: 8.6px; font-weight: 400; color: #444; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 2px; }
+  .doctitle { text-align: right; font-size: 12.5px; font-weight: 700; }
+  .doctitle .small { display: block; font-size: 8.4px; font-weight: 400; color: #555; margin-top: 3px; }
+
+  .headerbox { display: flex; gap: 10px; margin-bottom: 10px; }
+  .hcell { flex: 1; border: 1px solid #c7cfcb; padding: 6px 8px; background: #f4f8f6; }
+  .hcell .lbl { font-size: 7.6px; text-transform: uppercase; color: #4a5a54; letter-spacing: 0.4px; }
+  .hcell .val { font-family: "Corpus Meter Mono", monospace; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+
+  h2.zt { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px; color: #0d5c46; border-bottom: 1px solid #c7cfcb; padding-bottom: 2px; margin: 10px 0 6px; }
+
+  .summarygrid { display: flex; gap: 8px; margin-bottom: 4px; }
+  .sgcell { flex: 1; border: 1px solid #ddd; padding: 5px 7px; }
+  .sgcell .lbl { font-size: 7.6px; color: #555; }
+  .sgcell .val { font-size: 13px; font-weight: 700; }
+
+  .chart { display: flex; align-items: flex-end; height: 110px; gap: 4px; border-bottom: 1px solid #999; margin: 8px 0 2px; padding: 0 2px; }
+  .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .bar { width: 60%; background: linear-gradient(#2f8f6f, #0d5c46); }
+  .bar-lbl { font-size: 6.6px; color: #555; margin-top: 2px; }
+  .chartcap { font-size: 7.6px; color: #666; margin-bottom: 8px; }
+
+  table.chg { width: 100%; border-collapse: collapse; font-size: 8.8px; margin-bottom: 8px; }
+  table.chg th { background: #eef3f1; text-align: left; padding: 3px 5px; border-bottom: 1px solid #0d5c46; font-weight: 700; }
+  table.chg td { padding: 3px 5px; border-bottom: 1px solid #ddd; }
+  table.chg td.num, table.chg th.num { text-align: right; white-space: nowrap; font-family: "Corpus Meter Mono", monospace; }
+  table.chg tr.total td { font-weight: 700; border-top: 1.5px solid #0d5c46; }
+
+  .cheaperbox { border: 2px solid #b9860b; background: #fff8e8; padding: 8px 10px; margin-bottom: 8px; }
+  .cheaperbox .cbtitle { font-weight: 700; font-size: 10px; color: #7a5b06; margin-bottom: 3px; }
+
+  .footnote { font-size: 7.2px; color: #666; line-height: 1.5; }
+  .pagefoot { position: absolute; bottom: 16px; left: 42px; right: 42px; font-size: 7px; color: #888; border-top: 1px solid #ddd; padding-top: 4px; display: flex; justify-content: space-between; }
+
+  .payslip { border: 1.5px dashed #888; padding: 8px 10px; margin-top: 8px; }
+  .payslip .pslbl { font-size: 7.4px; color: #555; }
+  .payslip .psval { font-family: "Corpus Meter Mono", monospace; font-size: 11px; font-weight: 700; white-space: nowrap; }
+
+  .tariffbox { border: 1px solid #0d5c46; padding: 8px 10px; margin-bottom: 8px; }
+  .tariffbox .ttitle { font-weight: 700; color: #0d5c46; font-size: 10px; margin-bottom: 4px; }
+  .kv { display: flex; justify-content: space-between; font-size: 8.6px; padding: 1.5px 0; border-bottom: 1px dotted #ccc; }
+
+  .noise h3 { font-size: 9.4px; margin: 8px 0 3px; color: #0d5c46; }
+  .noise p { font-size: 8.4px; margin: 2px 0 6px; }
+  .noise ul { margin: 2px 0 6px 16px; padding: 0; font-size: 8.2px; }
+  .noise li { margin-bottom: 2px; }
+
+  .twocol { display: flex; gap: 14px; }
+  .twocol > div { flex: 1; }
+
+  .metergrid { display: flex; gap: 10px; margin-bottom: 8px; }
+  .metercell { flex: 1; border: 1px solid #ccc; padding: 6px 8px; }
+  .metercell .mlbl { font-size: 7.4px; color: #555; }
+  .metercell .mval { font-family: "Corpus Meter Mono", monospace; font-size: 10.5px; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="topbar">
+    <div class="brand">Haverfield Energy<span class="sub">gas &amp; electricity supply</span></div>
+    <div class="doctitle">Annual Summary<span class="small">Document no. 00921107</span></div>
+  </div>
+
+  <div class="headerbox">
+    <div class="hcell"><div class="lbl">Account number</div><div class="val">2201 8834 09</div></div>
+    <div class="hcell"><div class="lbl">Summary period</div><div class="val" style="font-size:10px;">01/10/25 – 30/09/26</div></div>
+    <div class="hcell"><div class="lbl">Date of this summary</div><div class="val" style="font-size:10px;">05/10/2026</div></div>
+  </div>
+
+  <p style="font-size:8.6px; margin:0 0 8px;">Mr &amp; Mrs T Lawson, 14 Sherbourne Close, Reddington, RD4 7QP. This is your annual summary for the twelve months from 1 October 2025 to 30 September 2026, showing what you paid and what you're on track to pay next. Please keep this with your records — you may need the account number above if you contact us or switch supplier.</p>
+
+  <h2 class="zt">What you paid last year</h2>
+  <div class="summarygrid">
+    <div class="sgcell"><div class="lbl">Total paid 2025/26</div><div class="val">£1,312.87</div></div>
+    <div class="sgcell"><div class="lbl">Monthly Direct Debit</div><div class="val">£119.02</div></div>
+    <div class="sgcell"><div class="lbl">Credit balance</div><div class="val">£87.43</div></div>
+    <div class="sgcell"><div class="lbl">Warm Home Discount</div><div class="val">£150.00</div></div>
+  </div>
+
+  <h2 class="zt">Your energy use, month by month</h2>
+  <div class="chart">
+    <div class="bar-wrap"><div class="bar" style="height:78%"></div><div class="bar-lbl">Oct</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:88%"></div><div class="bar-lbl">Nov</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:100%"></div><div class="bar-lbl">Dec</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:96%"></div><div class="bar-lbl">Jan</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:84%"></div><div class="bar-lbl">Feb</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:60%"></div><div class="bar-lbl">Mar</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:38%"></div><div class="bar-lbl">Apr</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:29%"></div><div class="bar-lbl">May</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:24%"></div><div class="bar-lbl">Jun</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:22%"></div><div class="bar-lbl">Jul</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:31%"></div><div class="bar-lbl">Aug</div></div>
+    <div class="bar-wrap"><div class="bar" style="height:52%"></div><div class="bar-lbl">Sep</div></div>
+  </div>
+  <div class="chartcap">Combined electricity and gas use, kWh per month, October 2025 to September 2026.</div>
+
+  <h2 class="zt">Charges for the year</h2>
+  <table class="chg">
+    <tr><th>Item</th><th class="num">Units</th><th class="num">Rate</th><th class="num">Amount</th></tr>
+    <tr><td>Electricity — unit rate</td><td class="num">3,412 kWh</td><td class="num">24.19p/kWh</td><td class="num">£825.53</td></tr>
+    <tr><td>Electricity — standing charge</td><td class="num">365 days</td><td class="num">54.85p/day</td><td class="num">£200.20</td></tr>
+    <tr><td>Gas — unit rate</td><td class="num">6,980 kWh</td><td class="num">6.11p/kWh</td><td class="num">£426.48</td></tr>
+    <tr><td>Gas — standing charge</td><td class="num">365 days</td><td class="num">31.47p/day</td><td class="num">£114.87</td></tr>
+    <tr><td>Warm Home Discount rebate</td><td class="num">—</td><td class="num">—</td><td class="num">-£150.00</td></tr>
+    <tr class="total"><td>Total charged 2025/26</td><td class="num"></td><td class="num"></td><td class="num">£1,417.08</td></tr>
+  </table>
+
+  <div class="cheaperbox">
+    <div class="cbtitle">You could pay less</div>
+    <p style="font-size:8.4px; margin:0 0 3px;">Based on your usage, the cheapest tariff we currently offer new customers is <b>£1,377.60</b> a year — you'd save by moving before your fixed term ends. We also list this alongside independent comparisons at switchwise.uk, a comparison service that is not part of Haverfield Energy. Call 0800 112 2901 or visit haverfield-energy.co.uk/summary to see your options.</p>
+  </div>
+
+  <div class="payslip">
+    <div class="twocol">
+      <div><div class="pslbl">Amount to pay by Direct Debit</div><div class="psval">£119.02 / month</div></div>
+      <div><div class="pslbl">Payment slip — account 2201 8834 09</div><div class="psval">HAV-FIX-26-V3</div></div>
+    </div>
+  </div>
+
+  <div class="pagefoot"><span>Haverfield Energy Ltd — Summary 00921107</span><span>Page 1 of 3</span></div>
+</div>
+
+<div class="page">
+  <h2 class="zt" style="margin-top:0;">Your fixed tariff</h2>
+  <div class="tariffbox">
+    <div class="ttitle">Tariff information — HAV-FIX-26-V3</div>
+    <div class="kv"><span>Fixed until</span><span>30 September 2027</span></div>
+    <div class="kv"><span>Term length</span><span>12 month fixed term</span></div>
+    <div class="kv"><span>Current tariff started</span><span>1 October 2026</span></div>
+    <div class="kv"><span>Previous tariff ended</span><span>30 September 2026</span></div>
+    <div class="kv"><span>Your personal projection to 30 September 2027</span><span>£1,428.24</span></div>
+    <div class="kv"><span>Exit fee (per fuel, if you leave early)</span><span>£30.00</span></div>
+    <div class="kv"><span>Next annual review</span><span>1 April 2027</span></div>
+    <div class="kv"><span>Ofgem price cap last changed</span><span>1 July 2026</span></div>
+  </div>
+  <p class="footnote">Your personal projection is an estimate of what you would pay over the next twelve months if your usage stays the same as the summary period. It is not a bill. Actual charges depend on the unit rates and standing charges in force at the time, which may change if the Ofgem price cap changes at its next review.</p>
+
+  <h2 class="zt">Meter and supply details</h2>
+  <div class="metergrid">
+    <div class="metercell"><div class="mlbl">Electricity supply no. (MPAN)</div><div class="mval">20 8834 5521 09</div></div>
+    <div class="metercell"><div class="mlbl">Gas supply no. (MPRN)</div><div class="mval">8825510</div></div>
+  </div>
+  <div class="metergrid">
+    <div class="metercell"><div class="mlbl">Electricity meter serial</div><div class="mval">E19K220841</div><div class="mlbl">Last read 28/09/2026</div></div>
+    <div class="metercell"><div class="mlbl">Gas meter serial</div><div class="mval">G4K09912</div><div class="mlbl">Last read 29/09/2026</div></div>
+  </div>
+
+  <div class="noise">
+    <h3>Reading your own meter</h3>
+    <p>You can submit readings any time at my.haverfield-energy.co.uk or through the Haverfield Energy app. A photo of the meter dial helps us resolve any query quickly. If your meter has more than one register (Economy 7 or similar), please give both readings, and note whether your electricity meter reads in kWh or in units that need converting.</p>
+
+    <h3>The smart meter rollout</h3>
+    <p>Smart meters send us readings automatically so your bills are based on what you actually use, not an estimate. Our installer, Fielden Install, is fitting smart meters across the network at no charge. If you're not sure whether yours is smart, check the display for a home screen showing today's spend, or ask when you next call 0800 112 2901.</p>
+
+    <h3>Priority Services Register</h3>
+    <p>If you or someone in your household is of pensionable age, disabled, chronically ill, or would otherwise benefit from extra support (for example advance notice of planned power cuts), you can join our free Priority Services Register. Registering also means our network partner, Kestrel Grid Networks, can prioritise your address during an unplanned outage.</p>
+
+    <h3>Ways to use less energy</h3>
+    <ul>
+      <li>Turn appliances off standby rather than leaving them idle overnight.</li>
+      <li>Batch-wash at 30 degrees where you can — most modern detergents don't need higher.</li>
+      <li>Bleed radiators each autumn so the system doesn't work harder than it needs to.</li>
+      <li>Draught-proof letterboxes, keyholes and loft hatches; small gaps add up.</li>
+    </ul>
+  </div>
+
+  <div class="pagefoot"><span>Haverfield Energy Ltd — Summary 00921107</span><span>Page 2 of 3</span></div>
+</div>
+
+<div class="page">
+  <h2 class="zt" style="margin-top:0;">Other products from Haverfield Energy</h2>
+  <div class="noise">
+    <p><b>HomeCare Boiler Cover</b> — from £9.50 a month, covering an annual service and unlimited call-outs for breakdowns, fitted by our approved engineers. <b>DriveFree EV Tariff</b> — a dedicated overnight rate of 7.50p/kWh between 00:00 and 05:00 for customers who charge an electric vehicle at home, on a separate smart meter circuit installed by Fielden Install.</p>
+
+    <h3>Go paperless</h3>
+    <p>Switch to e-billing at my.haverfield-energy.co.uk and we'll email you when a new statement is ready instead of posting it. You can still request paper copies free of charge at any time by calling 0800 112 2901 or emailing help@haverfield-energy.co.uk.</p>
+
+    <h3>The Haverfield Energy app</h3>
+    <p>Track your daily usage, submit meter readings, update your Direct Debit and view past statements from your phone. Search "Haverfield Energy" in your app store, or follow @haverfieldenergy for outage updates and energy-saving tips.</p>
+
+    <h3>Power cuts and emergencies</h3>
+    <p>Haverfield Energy sells you energy but doesn't own the wires and pipes that bring it to your home. For a power cut, contact the distribution network operator for your area, Kestrel Grid Networks, free on 105, or visit kestrelgrid.co.uk/powercuts for a live outage map. For a suspected gas leak, call the National Gas Emergency Service on 0800 111 999 immediately.</p>
+
+    <h3>If something goes wrong</h3>
+    <p>If you're unhappy with our service, contact us first on 0800 112 2901 or help@haverfield-energy.co.uk and we'll aim to resolve things within 10 working days. If you remain unhappy after eight weeks, or we've issued a deadlock letter, you can refer your complaint free of charge to the Energy Ombudsman, who will investigate independently. Citizens Advice also runs a free, confidential consumer service if you'd like guidance beforehand.</p>
+
+    <h3>Meter operation and metering charges</h3>
+    <p>Metering equipment at your property is maintained under contract by Larkhill Metering Services on our behalf. A small metering charge is already included within your standing charge and is not billed separately.</p>
+
+    <h3>Accessibility</h3>
+    <p>This summary is available in large print, Braille or audio on request, free of charge. We also offer a nominated-contact service so a friend, relative or carer can deal with your account on your behalf with your permission.</p>
+
+    <h3>Data protection</h3>
+    <p>We use your account and usage data to bill you accurately, plan network capacity with Kestrel Grid Networks, and, where you've agreed, to tell you about other Haverfield Energy products. You can ask us to stop marketing contact at any time without affecting your supply. See our privacy notice at haverfield-energy.co.uk/summary for full details of how long we keep your data and who we may share it with.</p>
+
+    <h3>Company and regulatory details</h3>
+    <p>Haverfield Energy is a trading name used under licence from its parent, Haverfield Utilities Group plc. Company registration number 06621092. VAT registration number GB 651 2290 44. Electricity supply licence number ELEC-2288, granted by Ofgem, the regulator for the energy industry in Great Britain. Registered office: Haverfield House, Longmarsh Road, Reddington RD1 2AB.</p>
+  </div>
+
+  <p class="footnote">Rates shown are correct as of the date of this summary and are subject to change in line with the Ofgem default tariff cap where applicable to your product. hav.energy/tariffs has our current tariff comparison rates in the format required by Ofgem's Tariff Information Label rules.</p>
+
+  <div class="pagefoot"><span>Haverfield Energy Ltd — Summary 00921107</span><span>Page 3 of 4</span></div>
+</div>
+
+<div class="page">
+  <h2 class="zt" style="margin-top:0;">Understanding your tariff information label</h2>
+  <div class="noise">
+    <p>Ofgem requires every domestic energy supplier to publish a Tariff Information Label alongside any summary or bill so you can compare rates on a like-for-like basis. Your label shows the unit rate and standing charge for both fuels, the estimated annual cost for a typical household, and whether the tariff is fixed, variable or tracks the default price cap. Your current label is for tariff code HAV-FIX-26-V3 and is available in full at hav.energy/tariffs.</p>
+
+    <h3>Fixed versus variable tariffs</h3>
+    <p>A fixed tariff, like the one on this account, locks your unit rates and standing charges for the length of the term shown above — in your case, a 12 month fixed term ending 30 September 2027. A variable tariff instead moves in line with the Ofgem default price cap, which is reviewed every three months. Some households prefer the certainty of a fixed tariff; others prefer the flexibility of moving supplier at any time without an exit fee. Your exit fee of £30.00 per fuel only applies if you leave before your fixed term ends.</p>
+
+    <h3>What happens when your fixed term ends</h3>
+    <p>Around 42 days before your tariff ends on 30 September 2027, we'll write to you with your renewal options, including any new fixed tariffs we're offering and what would happen if you did nothing. If you don't choose a new tariff, we'll move you onto our standard variable tariff, which tracks the Ofgem price cap and can be cancelled at any time without an exit fee. We'd always recommend comparing our renewal offer against the rest of the market, including through independent services such as switchwise.uk, before you decide.</p>
+
+    <h3>How the price cap works</h3>
+    <p>Ofgem sets a price cap on the unit rates and standing charges that suppliers can charge customers on default variable tariffs. The cap is not a cap on your total bill — if you use more energy, you pay more. It was last reviewed on 1 July 2026 and is reviewed every three months thereafter. Fixed tariffs, including yours, are not directly limited by the cap, though suppliers generally price them with reference to it.</p>
+
+    <h3>Our commitment to vulnerable customers</h3>
+    <p>We follow Ofgem's rules on supporting customers in vulnerable circumstances, including those on our Priority Services Register. This includes never disconnecting a Priority Services Register customer for debt during winter months without exhausting all other options first, and offering additional support with meter reading, billing formats and repayment plans. If cost is a worry, please contact us before a bill becomes overdue — we have a range of repayment plans and can check whether you're eligible for the Warm Home Discount, worth £150.00 this year, or other government schemes.</p>
+
+    <h3>Switching supplier</h3>
+    <p>You're free to switch supplier at any time under Ofgem's rules, and switching should not cause a loss of supply. If you're within your fixed term, your new supplier or switchwise.uk will usually tell you about any exit fee before you commit. Most switches complete within three weeks under the industry's reliable switching guarantee, which also covers your right to a "cooling off" period after signing up with a new supplier in case you change your mind.</p>
+
+    <h3>Keeping your details up to date</h3>
+    <p>Please let us know if your contact details change, or if you move home, so we can close your account correctly and take a final reading rather than relying on an estimate. You can update your details at my.haverfield-energy.co.uk, through the app, or by calling 0800 112 2901.</p>
+  </div>
+
+  <div class="pagefoot"><span>Haverfield Energy Ltd — Summary 00921107</span><span>Page 4 of 4</span></div>
+</div>
+
+</body>
+</html>
