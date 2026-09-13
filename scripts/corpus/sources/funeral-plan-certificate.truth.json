@@ -1,9 +1,9 @@
 {
-  "name": "funeral plan certificate, the trading name on the parchment is not who is FCA-authorised",
+  "name": "funeral plan certificate, the trading name on the parchment is the provider, not the FCA-authorised company behind it",
   "filename": "fullpage-funeral-plan-certificate.pdf",
   "expected": {
     "dates": ["2024-11-03", "2024-11-10", "2026-10-03"],
-    "provider": "Millstone Prepaid Services Ltd",
+    "provider": "Evergreen Funeral Plans",
     "reference": "EFP-0091234",
     "dateRoles": [
       { "date": "2024-11-03", "role": "start" },
@@ -16,7 +16,7 @@
   },
   "notes": [
     "dates: plan commenced 3 November 2024, certificate issued 10 November 2024, final instalment due 3 October 2026. Three other printed dates are deliberately not declared: the FCA's take-over of funeral plan regulation (29 Jul 2022, a regulatory milestone, not a date about this plan), and the two plan-document edition stamps (6 Jan 2026 and the superseded 2 Mar 2022).",
-    "provider is Millstone Prepaid Services Ltd, named in the small print as who 'Evergreen Funeral Plans' -- printed large on the certificate and used throughout -- is a trading name of, and as who is FCA-authorised to provide the plan; the nominated funeral director (Fenmouth & District Funeral Service) and the independent trust holding the funds (Cravenshire Funeral Planning Trust) are both named on the page and are neither of them the provider.",
+    "provider is 'Evergreen Funeral Plans', printed large on the certificate and used throughout: the household deals with the trading name, and the trading name is the more likely answer than the legal entity behind it (owner, 2026-09-13, generalising the gym's 'Cresswell Fitness Club' ruling in #989). 'Millstone Prepaid Services Ltd', named only in the small print as who the trading name belongs to and who is FCA-authorised, is a trap; so are the nominated funeral director (Fenmouth & District Funeral Service) and the independent trust holding the funds (Cravenshire Funeral Planning Trust).",
     "reference is the plan number EFP-0091234.",
     "costMinor is the £3,995.00 total plan price, fixed at today's prices, not the £166.46 monthly instalment amount.",
     "subtype: 'Plan' (matching the printed 'pre-paid funeral plan') qualified by 'Funeral'.",

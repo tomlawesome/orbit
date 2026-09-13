@@ -28,14 +28,14 @@
         "Life"
       ]
     },
-    "costMinor": 3462,
+    "costMinor": 1038600,
     "currency": "GBP"
   },
   "notes": [
     "dates: quote date printed as 'Quote date: 6 October 2026' (role issued) and printed as 'Valid until: 6 November 2026' (role expiry).",
     "provider is the advice firm that prepared and would administer the cover, Amberleigh Financial Advisers Ltd, not the underwriter Carrick Life Assurance plc.",
     "reference is the quote reference 'AMB-CI-2026-77410' printed on page 1 and repeated on the reply slip.",
-    "costMinor is the recommended Option B monthly premium '£34.62' i.e. 3462 pence.",
+    "costMinor is 1038600, 'total premiums payable under Option B would be £10,386.00' over the 25-year term (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure); the recommended Option B monthly premium '£34.62' is the instalment.",
     "trap: sum assured '£150,000'.",
     "trap: term of 25 years and cover ending in 2051, 'with cover ending in 2051'.",
     "trap: total premiums payable over the term '£10,386.00'.",

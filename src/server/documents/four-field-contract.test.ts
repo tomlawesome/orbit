@@ -160,16 +160,10 @@ describe("corpus ground truth for the four fields is consistent with the contrac
 
   // A fixed-term contract costs everything paid over its term (owner,
   // 2026-09-13), and some pages print only the monthly price and the term.
-  // For those the corpus declares the arithmetic instead: each factor here
-  // is a printed amount in minor units and a printed count of months, and
-  // the products add up to the declared cost. The list is closed on
-  // purpose -- an unprinted cost anywhere else is still a corpus bug.
-  const COST_BY_ARITHMETIC: Record<string, ReadonlyArray<readonly [minor: number, months: number]>> = {
-    "fullpage-broadband-contract.pdf": [[3499, 24]],
-    "fullpage-car-lease-statement.pdf": [[32900, 36]],
-    "fullpage-gym-membership-agreement.pdf": [[4250, 12]],
-    "fullpage-mobile-airtime-plan.pdf": [[1400, 6], [2300, 18]],
-  };
+  // For those the truth declares `costArithmetic` instead: each factor is a
+  // printed amount in minor units and a printed count of months, and the
+  // products add up to the declared cost (`scripts/corpus/verify.mjs` checks
+  // the same). An unprinted cost without it is still a corpus bug.
   const printedForms = (minor: number): string[] => {
     const printed = (minor / 100).toFixed(2);
     return [printed, printed.replace(/\.00$/u, ""), printed.replace(/\B(?=(\d{3})+\.)/gu, ",")];
@@ -200,7 +194,7 @@ describe("corpus ground truth for the four fields is consistent with the contrac
     if (expected.costMinor !== undefined) {
       expect(expected.currency).toBe("GBP");
       expect(text).toContain("£");
-      const arithmetic = COST_BY_ARITHMETIC[document.filename];
+      const arithmetic = expected.costArithmetic;
       if (arithmetic === undefined) {
         expect(printedForms(expected.costMinor).some((form) => text.includes(form))).toBe(true);
       } else {

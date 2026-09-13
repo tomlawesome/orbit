@@ -110,7 +110,20 @@ for (const f of readdirSync(dir).filter((n) => n.endsWith(".truth.json")).sort()
   }
   if (e.costMinor !== undefined) {
     if (e.currency === undefined) problems.push("costMinor declared without currency");
-    if (!money(e.costMinor, e.currency).some((m) => text.includes(m))) problems.push(`costMinor ${e.costMinor} prints as none of ${money(e.costMinor, e.currency).join(" / ")}`);
+    if (e.costArithmetic) {
+      // The total is never printed: the cost is price x months (owner,
+      // 2026-09-13), so each price and each months count (or the whole term,
+      // for a split like "first 6 months" of 24) must be, and the products
+      // must add up to the declared cost.
+      const whole = e.costArithmetic.reduce((sum, [, months]) => sum + months, 0);
+      const termPrinted = (months) => new RegExp(`\\b${months}\\s*-?\\s*months?\\b`, "iu").test(text);
+      for (const [minor, months] of e.costArithmetic) {
+        if (!money(minor, e.currency).some((m) => text.includes(m))) problems.push(`costArithmetic price ${minor} prints as none of ${money(minor, e.currency).join(" / ")}`);
+        if (!termPrinted(months) && !termPrinted(whole)) problems.push(`costArithmetic term ${months} months is not printed (nor the whole ${whole})`);
+      }
+      const product = e.costArithmetic.reduce((sum, [minor, months]) => sum + minor * months, 0);
+      if (product !== e.costMinor) problems.push(`costArithmetic sums to ${product}, not costMinor ${e.costMinor}`);
+    } else if (!money(e.costMinor, e.currency).some((m) => text.includes(m))) problems.push(`costMinor ${e.costMinor} prints as none of ${money(e.costMinor, e.currency).join(" / ")}`);
   }
   if (e.currency !== undefined && e.costMinor === undefined) problems.push("currency declared without costMinor");
   if (e.recurrenceMonths !== undefined && !new RegExp(`\\b${e.recurrenceMonths}\\b`, "u").test(text)) {

@@ -95,7 +95,14 @@ documents got through because they were reviewed one PDF at a time.
   to any extractor that reads it. Both were removed.
 - **Every expected value is verified present**, not assumed. `verify.mjs`
   fails the build rather than letting a fixture claim something the page does
-  not say.
+  not say. The one cost that may be unprinted is a fixed-term total the page
+  leaves as price x months (owner, 2026-09-13): the truth then declares
+  `costArithmetic` and `verify.mjs` checks each price and term is printed and
+  the products add up.
+- **The truth JSON is the source; the TypeScript is generated.** Edit
+  `sources/<name>.truth.json`, then run `generate.mjs`. Edits made directly
+  to `extraction-corpus-fullpage.ts` are lost on the next generation (that
+  happened to eleven cost truths and two providers before 2026-09-13).
 - **British, never American** (owner, 2026-09-11). Dates are `3 March 2026` or
   `03/03/2026`, day before month; money is in pounds; spelling is `licence`,
   `cheque`, `organisation`, `authorised`, `instalment`, `centre`; addresses

@@ -67,6 +67,13 @@ export interface CorpusExpectation {
   /** Minor units. Always declared together with `currency`, never alone. */
   costMinor?: number;
   currency?: string;
+  /** Declared only when `costMinor` is never printed: a fixed-term contract's
+   * cost is everything paid over its term (owner, 2026-09-13), and some pages
+   * print the monthly price and the term but never the product. Each
+   * `[minor, months]` pair's price must be printed, its months (or the whole
+   * term) must be printed, and the products must sum to `costMinor`;
+   * `scripts/corpus/verify.mjs` and `four-field-contract.test.ts` both check. */
+  costArithmetic?: ReadonlyArray<readonly [minor: number, months: number]>;
   recurrenceMonths?: number;
   /** Derived from the roles above; the model never emits it. */
   scheduleKind?: ScheduleKind;

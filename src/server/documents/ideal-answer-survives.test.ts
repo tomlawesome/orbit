@@ -254,7 +254,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-cavity-wall-insulation-guarantee.pdf": {
-    provider: "Insulation\" is a trading name of Bassington Energy Solutions Ltd, registered in England and Wales No. 06612940, registered office 4",
+    provider: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft insulation specialists · est. 2009",
     reference: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft insulation specialists · est.",
     subtype: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft",
     cost: { amount: "2,340.00", needle: "confirmed by borescope survey 28 April 2026 Guarantee period 25 years, from 12 May 2026 to 12 May 2051 Contract price £2,340.00, paid in full 12 May" },
@@ -354,7 +354,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-funeral-plan-certificate.pdf": {
-    provider: "Funeral Plans\" is a trading name of Millstone Prepaid Services Ltd, registered in England and Wales No. 05712834, registered office 9",
+    provider: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral plan",
     reference: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral plan, fixing today's cost",
     subtype: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral",
     cost: { amount: "3,995.00", needle: "Funeral Service PLAN DETAILS Plan type Simple Choice, unattended committal with optional service Total plan price £3,995.00, fixed at today's prices" },
