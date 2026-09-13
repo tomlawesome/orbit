@@ -1026,6 +1026,82 @@ describe("choosing the cost and its currency", () => {
   });
 });
 
+// Item 99: on real paper the answers about one thing are printed together,
+// so once one field is settled with a clear margin the candidates for the
+// others beside it are heard a little louder. Measured field by field: cost
+// is the one that gained, and it gained as the LAST tie-break -- so these
+// are the rules that shipped, and the two that bound them.
+describe("the answers cluster: the figure printed with the settled field", () => {
+  /** A number the page labelled and printed nowhere else: the anchor, with
+   * no rival to make its margin unclear. */
+  const reference = (line: string) =>
+    candidate("identifier", "POL-88421", [{ value: "policy", trigger: "Policy number", strength: 2 }], { line });
+
+  it("breaks a tie towards the figure printed in the anchor's own block", () => {
+    const panel = "Policy number POL-88421 Total premium £412.66";
+    const chosen = chooseFields([
+      reference(panel),
+      candidate("amount", "41266", [
+        { value: "total", trigger: "Total premium", sieves: ["label", "heading-above"], strength: 2 },
+      ], { currency: "GBP", line: panel }),
+      candidate("amount", "37820", [
+        { value: "total", trigger: "Total", sieves: ["label", "heading-above"], strength: 2 },
+      ], { currency: "GBP", line: "Home emergency cover Total £378.20" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(41266);
+  });
+
+  it("still prefers a labelled figure far from the anchor over an unlabelled one beside it", () => {
+    const panel = "Policy number POL-88421 £61.83";
+    const chosen = chooseFields([
+      reference(panel),
+      candidate("amount", "6183", [
+        { value: "total", trigger: "a year", sieves: ["period-adjacent"], strength: 1 },
+      ], { currency: "GBP", line: panel }),
+      candidate("amount", "41266", [
+        { value: "total", trigger: "Total premium", sieves: ["label", "heading-above"], strength: 2 },
+      ], { currency: "GBP", line: "Your premium Total premium £412.66", index: 4_000 }),
+    ]);
+
+    expect(chosen.costMinor).toBe(41266);
+  });
+
+  it("says nothing where no field was settled clearly, as it did before", () => {
+    const panel = "Customer 9034 1128 Total £412.66";
+    const chosen = chooseFields([
+      // Two numbers labelled equally well and neither repeated: the
+      // reference chooser blanks, so there is no anchor to lean on.
+      candidate("identifier", "9034 1128", [{ value: "customer", trigger: "Customer number", strength: 2 }], { line: panel }),
+      candidate("identifier", "4471 8823", [{ value: "customer", trigger: "Customer number", strength: 2 }], { line: "Customer number 4471 8823" }),
+      candidate("amount", "41266", [
+        { value: "total", trigger: "Total", sieves: ["label", "heading-above"], strength: 2 },
+      ], { currency: "GBP", line: panel }),
+      candidate("amount", "37820", [
+        { value: "total", trigger: "Total", sieves: ["label", "heading-above"], strength: 2 },
+      ], { currency: "GBP", line: "Home emergency cover Total £378.20" }),
+    ]);
+
+    expect(chosen.reference).toBeUndefined();
+    expect(chosen.costMinor).toBeUndefined();
+  });
+
+  it("keeps the far figure on the shortlist, lower down", () => {
+    const panel = "Policy number POL-88421 Total premium £412.66";
+    const entries = costShortlistEntries([
+      reference(panel),
+      candidate("amount", "37820", [
+        { value: "total", trigger: "Total", sieves: ["label", "heading-above"], strength: 2 },
+      ], { currency: "GBP", line: "Home emergency cover Total £378.20" }),
+      candidate("amount", "41266", [
+        { value: "total", trigger: "Total premium", sieves: ["label", "heading-above"], strength: 2 },
+      ], { currency: "GBP", line: panel }),
+    ]);
+
+    expect(entries.map((entry) => entry.value)).toEqual(["41266", "37820"]);
+  });
+});
+
 describe("the meaning-shaped fields", () => {
   it("takes the one name the sieves kept, and the one subtype the page is plain about", () => {
     const chosen = chooseFields([
