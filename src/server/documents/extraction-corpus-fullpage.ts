@@ -165,7 +165,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - dates: agreement date 20 February 2026 printed as 'Agreement date: 20 February 2026' (role start), and optional final payment date 5 March 2030 printed in the financial table row 'Optional final payment (due 5 March 2030)' (role renewal).
     // - provider is the finance house the household pays and contacts, Bracken Vale Finance plc, not the dealer.
     // - reference is the agreement number printed top right as 'BVF-PCP-208841'.
-    // - costMinor is the whole commitment, 'Total amount payable £24,730.16' (owner, 2026-09-13: Orbit tracks long-term commitments, not monthly payments).
+    // - costMinor is 'Total amount payable £24,730.16', everything paid over the term of the contract -- not the cash price of the car and not the monthly payment (owner, 2026-09-13: Orbit tracks long-term commitments; a PCP fits Orbit poorly on cost and well on dates, which is the primary function -- when the deal starts and when it ends).
     // - recurrenceMonths 48 printed as 'Number of monthly payments: 48'.
     // - scheduleKind renewal reflects the optional final payment / balloon structure ending 5 March 2030.
     // - trap: cash price of the vehicle '£18,995.00'.
