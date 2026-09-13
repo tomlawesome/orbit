@@ -155,7 +155,7 @@ function main(): void {
       rank: dates.findIndex((entry) => entry.value === date),
     })), name);
 
-    const references = referenceShortlistEntries(tagged);
+    const references = referenceShortlistEntries(tagged, document.text);
     count("reference", references, expected.reference === undefined ? [] : [{
       wanted: expected.reference,
       rank: references.findIndex((entry) => entry.value === expected.reference),
