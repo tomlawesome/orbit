@@ -1,0 +1,20 @@
+{
+  "name": "Pet cover payment statement",
+  "filename": "pet-cover-payment-statement.pdf",
+  "notes": ["Pet insurance direct debit payment statement with transaction ledger"],
+  "expected": {
+    "dates": ["2026-03-04", "2027-03-03"],
+    "provider": "Bramblewick Pet Cover",
+    "reference": "P-BRM-2291884",
+    "dateRoles": [
+      { "date": "2026-03-04", "role": "start" },
+      { "date": "2027-03-03", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Insurance"], "qualifiers": ["Pet"] },
+    "costMinor": 29988,
+    "currency": "GBP",
+    "costArithmetic": [[2499, 12]],
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  }
+}
