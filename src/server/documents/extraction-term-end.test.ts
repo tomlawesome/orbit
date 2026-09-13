@@ -31,7 +31,6 @@ describe("termEndRole", () => {
 
   it("decides every kind that bounds a term, not just the common ones", () => {
     expect(termEndRole([bin("Identity document")], undefined)).toBe("renewal");
-    expect(termEndRole([bin("Certificate")], undefined)).toBe("renewal");
     expect(termEndRole([bin("Benefit")], undefined)).toBe("renewal");
     expect(termEndRole([bin("Savings")], undefined)).toBe("expiry");
     expect(termEndRole([bin("Prescription")], undefined)).toBe("expiry");
@@ -41,6 +40,13 @@ describe("termEndRole", () => {
   it("leaves a kind with no term of its own to the wording", () => {
     expect(termEndRole([bin("Pension")], "reviewed annually")).toBe("renewal");
     expect(termEndRole([bin("Bank account")], "the bond matures on the date shown")).toBe("expiry");
+  });
+
+  it("does not let a word every page uses decide against the thing the page is about", () => {
+    // An insurance schedule says "claim" more often than "insurance".
+    expect(termEndRole([bin("Claim"), bin("Insurance")], undefined)).toBe("renewal");
+    // A certificate's end is a visit, which the date sieve names itself.
+    expect(termEndRole([bin("Certificate")], "valid for ten years")).toBe("expiry");
   });
 
   it("renews on a cycle word when the kind is unknown", () => {
