@@ -54,6 +54,7 @@ const EXPECTED_ROUTES = [
   "/api/admin/operations/mailbox-notifications",
   "/api/admin/operations/smtp-test",
   "/api/admin/primary",
+  "/api/admin/recovery-bundle",
   "/api/admin/users",
   // Admin-issued setup and recovery links (M7 slice 8, #911, ADR-0023 §3):
   // re-issues a `recovery` token for a local user who has forgotten their
@@ -162,7 +163,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 64 route families -- no fewer, no more", () => {
+  it("has exactly the expected 65 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
