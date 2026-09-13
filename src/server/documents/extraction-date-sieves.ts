@@ -459,9 +459,10 @@ const printedThroughout: DateSieve = {
 // ------------------------------------------------------------- issue-relative
 
 /** What a document calls its own date. "Date" on its own is not here: every
- * label on the page ends in it. */
+ * label on the page ends in it. "Date:" opening a line is, because that is
+ * how a letter or an email heads itself. */
 const ISSUE_LABEL =
-  /\b(?:date of issue|issue date|issued(?: on)?|dated|date printed|printed on|(?:statement|invoice|bill|notice|certificate|document|report|letter|account) date)\b/giu;
+  /\b(?:date of issue|issue date|issued(?: on)?|dated|date printed|printed on|(?:statement|invoice|bill|notice|certificate|document|report|letter|account|agreement) date)\b|^date:/gimu;
 
 /** A label names the date beside it, not one in the next paragraph. */
 const ISSUE_LABEL_REACH = 40;
