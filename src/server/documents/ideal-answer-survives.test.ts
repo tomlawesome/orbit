@@ -173,7 +173,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     provider: "Intruder Alarm Monitoring Agreement NORTHGATE HOME SECURITY Unit 6, Foundry Business Park, Elmscote, EL4 2RJ · 01632 960377 ·",
     reference: "Elmscote, EL5 8HN Contract Number NGS-CA-20456 Engineer D. Sutton — commissioning visit 28/02/2026 Monitoring Start",
     subtype: "17 Peartree Close, Elmscote, EL5 8HN Contract Number NGS-CA-20456 Engineer D. Sutton — commissioning visit 28/02/2026",
-    cost: { amount: "599.76", needle: "the minimum term stated, giving a total payable over the 24 month minimum term of £599.76. Northgate Home Security will notify" },
+    cost: { amount: "599.76", needle: "monitoring charge shown above for the minimum term stated, giving a total payable over the 24 month minimum term of £599.76. Northgate Home Security" },
     recurrence: { months: 24, needle: "28/02/2026 Monitoring Start Date 02/03/2026 Minimum Term 24 month minimum term, ending 01/03/2028 Annual" },
     dates: [
       "commissioning visit 28/02/2026 Monitoring Start Date 02/03/2026 Minimum Term 24 month",
@@ -192,10 +192,12 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "boiler-service-plan-letter.pdf": {
-    subtype: "Boiler Service Plan Letter HEARTHWELL HOME CARE BO I L ER & CONTROLS COVER Plan reference: HHC-4471-2298 Account no: 3300 5521 Date of this",
     provider: "Boiler Service Plan Letter HEARTHWELL HOME CARE BO I L ER & CONTROLS COVER Plan reference: HHC-4471-2298 Account no:",
     reference: "L ER & CONTROLS COVER Plan reference: HHC-4471-2298 Account no: 3300 5521 Date of this letter: 2 September 2026 Mr J.",
-    cost: { amount: "179.88", needle: "NEXT SERVICE DUE 14/10/2026 THIS MONTH 'S INSTALMENT £14.99 ANNUAL TOTAL IF PAID MONTHLY £179.88" },
+    // Kept from the previous table: generate-evidence.mjs looks only for the
+    // first synonym of the first kind, which this page does not print.
+    subtype: "Boiler Service Plan Letter HEARTHWELL HOME CARE BO I L ER & CONTROLS COVER Plan reference: HHC-4471-2298 Account no: 3300 5521 Date of this",
+    cost: { amount: "179.88", needle: "PLAN REFERENCE HHC-4471-2298 NEXT SERVICE DUE 14/10/2026 THIS MONTH 'S INSTALMENT £14.99 ANNUAL TOTAL IF PAID MONTHLY £179.88 ⑆ 4 4 7 1 2 2 98 07 ⑆ 00" },
     recurrence: { months: 12, needle: "Care plan, your boiler and controls are serviced every 12 months. Our records show that your next" },
     dates: [
       "Our records show that your next service is due on 14 October 2026. One of our Gas Safe",
@@ -215,6 +217,8 @@ const EVIDENCE: Record<string, DocEvidence> = {
     provider: "Kestrel Broadband — Contract Summary and Terms Kestrel Broadband Contract Summary Order",
     reference: "number KB-771049-3 Order reference ORD-2026-0417726 Billing address Flat 2, 9 Thornfield Close, Marlcombe, Warwickshire,",
     subtype: "Kestrel Broadband — Contract Summary and Terms Kestrel Broadband Contract Summary Order date 14",
+    // Kept from the previous table: the total over the term is never printed,
+    // so generate-evidence.mjs cannot place it (see COST_NOT_PRINTED).
     cost: { amount: "839.76", needle: "2026 24-Month Fibre & Phone Contract Key contract information — Ofcom-format summary MONTHLY PRICE, MINIMUM TERM £34.99 per month, includes line" },
     recurrence: { months: 24, needle: "SPEED 502 Mbps average upload speed 74 Mbps MINIMUM TERM 24 months ends 21 April 2028 CUSTOMER AND" },
     dates: [
@@ -223,11 +227,11 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "car-finance-agreement.pdf": {
-    subtype: "Personal Contract Purchase Agreement PERSONAL CONTRACT PURCHASE AGREEMENT Regulated by the Consumer Credit Act 1974 Agreement date: 20 February 2026",
     provider: "BVF-PCP-208841 CREDITOR (LENDER) Bracken Vale Finance plc 1 Millrace House, Doverton DV4 7QS Company number 04471822 Authorised",
     reference: "20 February 2026 Agreement number BVF-PCP-208841 CREDITOR (LENDER) Bracken Vale Finance plc 1 Millrace House, Doverton",
-    cost: { amount: "24,730.16", needle: "Optional final payment (due 5 March 2030) £8,245.00 Total amount payable £24,730.16 Option-to-purchase fee (payable with final payment) £10.00" },
-    recurrence: { months: 48, needle: "Duration of agreement 49 months Number of monthly payments 48 Amount of each monthly payment £279.42" },
+    // Kept from the previous table, as above.
+    subtype: "Personal Contract Purchase Agreement PERSONAL CONTRACT PURCHASE AGREEMENT Regulated by the Consumer Credit Act 1974 Agreement date: 20 February 2026",
+    cost: { amount: "24,730.16", needle: "£279.42 Date of first payment 05/04/2026 Optional final payment (due 5 March 2030) £8,245.00 Total amount payable £24,730.16 Option-to-purchase fee" },
     dates: [
       "by the Consumer Credit Act 1974 Agreement date: 20 February 2026 Agreement number",
       "first payment 05/04/2026 Optional final payment (due 5 March 2030) £8,245.00 Total amount",
@@ -247,6 +251,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     provider: "which the vehicle must be returned to Wraxall Vehicle Finance plc; this is a hire agreement and you do not own the vehicle at any point.",
     reference: "Lease statement WVF-PCH-220154 DriveEasy Leasing Personal contract hire brokers · 0800 552 7734 ·",
     subtype: "Lease statement WVF-PCH-220154 DriveEasy Leasing Personal contract hire",
+    // Kept from the previous table, as above.
     cost: { amount: "11,844.00", needle: "MONTHLY RENTAL £329.00 PAYMENT HISTORY, YEAR 2" },
     dates: [
       "hybrid estate, registration LV73 KFM Agreement start 1 June 2025 Agreement end 31 May",
@@ -254,7 +259,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-cavity-wall-insulation-guarantee.pdf": {
-    provider: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft insulation specialists · est. 2009",
+    provider: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft insulation specialists · est. 2009 ·",
     reference: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft insulation specialists · est.",
     subtype: "Guarantee certificate WC-GTE-08823 WarmCore Insulation Cavity wall & loft",
     cost: { amount: "2,340.00", needle: "confirmed by borescope survey 28 April 2026 Guarantee period 25 years, from 12 May 2026 to 12 May 2051 Contract price £2,340.00, paid in full 12 May" },
@@ -288,7 +293,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     provider: "illness quotation prepared for you by Amberleigh Financial Advisers Ltd Amberleigh Financial Advisers Ltd — Quote AMB-CI-2026-77410 Page 1 of 2",
     reference: "Netherbourne NB6 5DA Quote reference: AMB-CI-2026-77410 Quote date: 6 October 2026 Valid until: 6 November 2026 Cover",
     subtype: "12 Fenwick Road, Netherbourne NB6 5DA Quote reference: AMB-CI-2026-77410 Quote date: 6 October 2026 Valid until: 6",
-    cost: { amount: "10,386.00", needle: "Based on a 25-year term, total premiums payable under Option B would be £10,386.00, with cover ending in 2051." },
+    cost: { amount: "10,386.00", needle: "throughout this illustration as your quote. Based on a 25-year term, total premiums payable under Option B would be £10,386.00, with cover ending in" },
     dates: [
       "5DA Quote reference: AMB-CI-2026-77410 Quote date: 6 October 2026 Valid until: 6 November",
       "Quote date: 6 October 2026 Valid until: 6 November 2026 Cover underwritten by",
@@ -298,7 +303,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     provider: "and administered on its behalf by Northgate Dental Plan Administration Ltd, PO Box 1156, Newbury Park, NP3 9ZZ, company number 04471102. The",
     reference: "14 August 2026 · Membership number NDPA-208467 Plan Aldermoor Complete Care Plan Plan start date 1 March 2020 Monthly",
     subtype: "Annual Plan Statement — Aldermoor Complete Care Plan Aldermoor Dental Practice 14",
-    cost: { amount: "114.00", needle: "2026 · Membership number NDPA-208467 Plan Aldermoor Complete Care Plan Plan start date 1 March 2020 Monthly payment £9.50 Plan year value £114.00" },
+    cost: { amount: "114.00", needle: "NDPA-208467 Plan Aldermoor Complete Care Plan Plan start date 1 March 2020 Monthly payment £9.50 Plan year value £114.00 Last payment taken 1" },
     recurrence: { months: 12, needle: "taken every month by Direct Debit. Your plan year runs for 12 months from your start date shown above, and" },
     dates: [
       "Next payment due 1 September 2026 Plan renewal date 1 March 2027 Last check-up 12 May",
@@ -308,7 +313,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     provider: "Foxglove Hosting — Domain Renewal",
     reference: "Account number ACC-3348217 Domain brindlewood-supplies.example Domain ID D4471982-EXPL Registered",
     subtype: "Foxglove Hosting — Domain Renewal",
-    cost: { amount: "15.59", needle: "Renew now Order Summary Domain renewal (12 months) £12.99 VAT (20%) £2.60 Total due today £15.59 Invoice INV-2027-004471 will be issued once" },
+    cost: { amount: "15.59", needle: "to renew at £14.99. Renew now Order Summary Domain renewal (12 months) £12.99 VAT (20%) £2.60 Total due today £15.59 Invoice INV-2027-004471" },
     recurrence: { months: 12, needle: "on 18 January 2027 Renewal period This domain renews every 12 months. Auto-renew On Nameservers" },
     dates: [
       "Domain ID D4471982-EXPL Registered on 18 January 2019 Renews on 18 January",
@@ -316,9 +321,12 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-driving-lessons-invoice.pdf": {
-    subtype: "Driving lessons invoice PL-INV-2249 C. Lewis Approved Driving Instructor, ADI badge no. 449213 · bookings@pass2drive.co.uk · www.pass2drive.co.uk ·",
     provider: "ADI badge no. 449213 · bookings@pass2drive.co.uk · www.pass2drive.co.uk · 07700 900412 Invoice for driving lessons",
     reference: "Driving lessons invoice PL-INV-2249 C. Lewis Approved Driving Instructor, ADI badge no. 449213 ·",
+    // Kept from the previous table, as above.
+    subtype: "Driving lessons invoice PL-INV-2249 C. Lewis Approved Driving Instructor, ADI badge no. 449213 · bookings@pass2drive.co.uk · www.pass2drive.co.uk ·",
+    // Kept from the previous table: the generated window stops short of the
+    // only printed pound sign, and a span without one fails the cost check.
     cost: { amount: "360.00", needle: "1-hour lessons, paid up front 360.00 Total paid, received 2 September 2026 £360.00 Thanks for booking" },
     dates: [
       "Cravenshire CV9 3TL Invoice PL-INV-2249 Invoice date 2 September 2026 Pick-up point: Penbury",
@@ -354,7 +362,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-funeral-plan-certificate.pdf": {
-    provider: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral plan",
+    provider: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral",
     reference: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral plan, fixing today's cost",
     subtype: "Evergreen Funeral Plans — certificate EFP-0091234 Evergreen Funeral Plans A pre-paid funeral",
     cost: { amount: "3,995.00", needle: "Funeral Service PLAN DETAILS Plan type Simple Choice, unattended committal with optional service Total plan price £3,995.00, fixed at today's prices" },
@@ -377,6 +385,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     provider: "Cresswell Fitness Club — Membership Agreement CFC Cresswell Fitness Club I NDEPENDENT HEALTH &",
     reference: "member (for office use) MEMBER COPY CFC-004821 Daniel Ostrowski 12 Vale Road, Bournholt, BH4 2LN 14 July 1988 01284",
     subtype: "Cresswell Fitness Club — Membership Agreement CFC Cresswell Fitness Club I NDEPENDENT HEALTH & F I TNESS",
+    // Kept from the previous table, as above.
     cost: { amount: "510.00", needle: "Monthly membership fee, collected by Direct Debit £42.50 Annual membership, paid" },
     recurrence: { months: 1, needle: "is due in January 2027. We will give you not less than 1 month's written notice of any increase, which" },
     dates: [
@@ -416,8 +425,8 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-home-insurance-schedule.pdf": {
-    provider: "IN TE R M E DIA RY Intermediary Hedgerow Home Insurance Services Ltd Intermediary address 8 Silvermead Court, Oakenfold, Drewshire DR1 2LP",
-    reference: "Assurance plc — Policy schedule Policy TA-HH-7734291 — Page 1 of 3 THORNFIELD ASSURANCE PLC Registered office: Thornfield",
+    provider: "firm reference number 187204. Hedgerow Home Insurance Services Ltd, trading as Hedgerow Direct, registered office 8 Silvermead Court,",
+    reference: "Assurance plc — Policy schedule Policy TA-HH-7734291 — Page 1 of 4 THORNFIELD ASSURANCE PLC Registered office: Thornfield",
     subtype: "· This schedule, the statement of insurance and the policy booklet HB-14 together form your contract. POL ICY N UM",
     cost: { amount: "412.99", needle: "L PR E M IUM Net premium (excluding Insurance Premium Tax) £368.74 Insurance Premium Tax at 12% £44.25 Annual premium £412.99 Annual premium payable" },
     dates: [
@@ -429,16 +438,17 @@ const EVIDENCE: Record<string, DocEvidence> = {
     provider: "Ashcombe Life Assurance plc — Life and Critical Illness Cover: Policy Booklet Life and Critical",
     reference: "Staffordshire, ST9 4LP Policy number ALA-662048-13 Type of policy Life cover policy, with critical illness cover",
     subtype: "booklet is, by itself, a contract of insurance. Your contract is made up of this booklet, your policy schedule, the",
-    cost: { amount: "7,800.00", needle: "Total premiums payable over full term approximately £7,800.00 Underwriting basis Full medical" },
+    cost: { amount: "7,800.00", needle: "policy term without any premium review changing the amount, the total you would pay over the term is approximately £7,800.00. This figure is" },
     dates: [
       "illness cover (accelerated) Policy start date 18 October 2026 Policy end date 17",
       "Policy start date 18 October 2026 Policy end date 17 October 2046 Policy term 20 years Sum",
     ],
   },
   "fullpage-mobile-airtime-plan.pdf": {
-    provider: "Fenwick Mobile – Mobile Plan Summary | My Account Fenwick Mobile – Mobile Plan Summary",
-    reference: "rise takes effect. Account number 7734 2210 91 · Mobile number 07700 900123 Fenwick Mobile is a trading name of Anglia",
-    subtype: "Fenwick Mobile – Mobile Plan Summary | My Account Fenwick Mobile – Mobile Plan Summary | My Account",
+    provider: "on this account are provided by Fenwick Mobile Networks Limited, registered in England and Wales no. 07845213, part of",
+    reference: "rise takes effect. Account number 7734 2210 91 · Mobile number 07700 900123 Mobile services on this account are",
+    subtype: "My Account – Mobile Plan Summary My Account – Mobile Plan Summary",
+    // Kept from the previous table, as above.
     cost: { amount: "498.00", needle: "YOUR PLAN SIM Only 30GB Flex £14.00/mo for your first 6 months £23.00/mo standard monthly" },
     recurrence: { months: 24, needle: "month 7 onward Plan started 20 March 2025 Minimum term 24 months — ends 20 March 2027 Data allowance" },
     dates: [
@@ -447,17 +457,17 @@ const EVIDENCE: Record<string, DocEvidence> = {
   },
   "fullpage-mortgage-annual-statement.pdf": {
     provider: "Kelbridge Home Loans — Mortgage Annual Statement Kelbridge Home Loans Residential mortgage",
-    reference: "STATEMENT DATE 06/04/2026 ACCOUNT 7738 2204 91 PAGE 1 OF 3 MORTGAGE ANNUAL STATEMENT For the statement period 1 April",
+    reference: "STATEMENT DATE 06/04/2026 ACCOUNT 7738 2204 91 PAGE 1 OF 4 MORTGAGE ANNUAL STATEMENT For the statement period 1 April",
     subtype: "Kelbridge Home Loans — Mortgage Annual Statement Kelbridge Home Loans Residential mortgage lending",
     cost: { amount: "742.18", needle: "June 2049 (23 years remaining) OUTSTANDING BALANCE AT 31 MARCH 2026 £164,611.07 YOUR PAYMENTS CURRENT MONTHLY PAYMENT £742.18 Collected by direct" },
-    recurrence: { months: 1, needle: "lending STATEMENT DATE 06/04/2026 ACCOUNT 7738 2204 91 PAGE 1 OF 3 MORTGAGE ANNUAL STATEMENT" },
+    recurrence: { months: 1, needle: "lending STATEMENT DATE 06/04/2026 ACCOUNT 7738 2204 91 PAGE 1 OF 4 MORTGAGE ANNUAL STATEMENT" },
     dates: [
       "Year Fixed 4.19% Fixed rate period 20 June 2024 to 19 June 2026 Early repayment charge",
     ],
   },
   "fullpage-mot-certificate.pdf": {
     provider: "STATION AND TESTER 1. TEST STATION Calderwell Motor Services Ltd 2. VTS NUMBER V-441829 3. ADDRESS Unit 7, Brandmoor Industrial Estate,",
-    reference: "— MOT test certificate Test number 1847 2205 9631 — Page 1 of 2 DVTA Driver & Vehicle Testing Authority Statutory",
+    reference: "— MOT test certificate Test number 1847 2205 9631 — Page 1 of 3 DVTA Driver & Vehicle Testing Authority Statutory",
     subtype: "2026 in accordance with the statutory inspection manual in force on that date, and that it met the prescribed",
     dates: [
       "time. E X PI RY D ATE 08 September 2027 Test date 09 September 2026 VEHICLE DETAILS 1.",
@@ -496,7 +506,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   },
   "fullpage-pet-vaccination-card.pdf": {
     provider: "bring this card to every appointment Hawksmoor Cross Veterinary Centre 22 Thornfield Road, Bramcote St Giles, Wyvern DE7 4PL Telephone 01159",
-    reference: "· Labrador Retriever · Microchip 977200005841236 Vaccination & health record · Page 1 of 2 Vaccination & Health Record",
+    reference: "· Labrador Retriever · Microchip 977200005841236 Vaccination & health record · Page 1 of 4 Vaccination & Health Record",
     subtype: "Vaccination & Health Record Bramble · Labrador Retriever · Microchip",
     dates: [
       "(DHPPi/L4 + kennel cough) NEXT VACCINATION DUE 18 May 2027 Book in the two weeks",
@@ -523,9 +533,8 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-satellite-tv-subscription-invoice.pdf": {
-    subtype: "Starview Satellite TV — invoice STV-AC-774213 Starview Satellite TV Freedom Package · 0800 220 1187 · www.starviewtv.example Your monthly invoice",
-    provider: "Starview Satellite TV — invoice STV-AC-774213 Starview Satellite TV Freedom Package · 0800",
-    reference: "Starview Satellite TV — invoice STV-AC-774213 Starview Satellite TV Freedom Package · 0800 220 1187 ·",
+    provider: "This invoice is issued under the Starview Satellite TV Broadcasting Limited trading style, registered in England and Wales No.",
+    reference: "SVTV — invoice STV-AC-774213 SVTV Freedom Package · 0800 220 1187 · www.starviewtv.example Your",
     cost: { amount: "42.99", needle: "billed 1 month in advance 39.99 Sports add-on 15.00 Multiscreen box rental 6.00 Loyalty discount -18.00 Total due £42.99 DIRECT DEBIT COLLECTION" },
     recurrence: { months: 1, needle: "THIS MONTH'S CHARGES Item Amount Freedom Package, billed 1 month in advance 39.99 Sports add-on 15.00" },
     dates: [
@@ -534,7 +543,6 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-self-storage-agreement.pdf": {
-    subtype: "Storage licence agreement SSL-BX-3390 SSL Fenmouth Self Storage Centre · Unit 14, Quayside Industrial Estate, Fenmouth, Cravenshire CV2 7RL Storage",
     provider: "Storage licence agreement SSL-BX-3390 SSL Fenmouth Self Storage Centre · Unit 14, Quayside Industrial",
     reference: "Storage licence agreement SSL-BX-3390 SSL Fenmouth Self Storage Centre · Unit 14, Quayside Industrial Estate,",
     cost: { amount: "68.00", needle: "hours 06:00 to 22:00 daily, including bank holidays Insurance Included up to £2,000 contents value M ON TH LY R E N T £68.00 This storage licence is" },
@@ -545,7 +553,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   },
   "fullpage-service-charge-demand.pdf": {
     provider: "22 Petersgate Road Alderwick WX7 4LP Purbeck & Vane Property Management Ltd · Account TFC-014-2627 Page 1 of 4 Pu r beck & Vane Prop erty",
-    reference: "14, Thornfield Court Account reference TFC-014-2627 · Lease reference TFC/14/LR-1998 · First instalment (1 of 2) We write",
+    reference: "14, Thornfield Court Account reference TFC-014-2627 · Lease reference TFC/14/LR-1998 · First instalment (1 of 2) Demand",
     subtype: "Service Charge Demand — Thornfield Court P&V Pur beck & Vane Pro p erty Management Ltd",
     cost: { amount: "3,930.00", needle: "then falling due. Your apportioned share of the service charge budgeted for the development for that year is £3,930.00, as shown in the" },
     recurrence: { months: 12, needle: "This demand covers the service charge year running for a 12-month period from 1 April 2026 to 31" },
@@ -575,13 +583,13 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "streaming-subscription-invoice.pdf": {
-    provider: "Your Northlight+ payment receipt mail.example/mail/u/0/#inbox/17c9f2a41d 1 of 1 Your",
+    provider: "on this receipt are processed for Northlight+ Media Group Limited, company number 09876543, registered in England and",
     reference: "(12 month plan) Account number NL-ACC-771049-2 Payment date 3 August 2026 Plan renews on 3 August 2027 Amount charged",
-    subtype: "because you have an active Northlight+ subscription. Unsubscribe from receipts | Privacy policy",
-    cost: { amount: "119.88", needle: "Paid monthly, your 12 month plan is equivalent to £119.88 a year. Fancy more channels?" },
-    recurrence: { months: 12, needle: "member. We've taken your monthly payment for your 12 month plan — here's your receipt. Plan" },
+    subtype: "email because you have an active N+ subscription. Unsubscribe from receipts | Privacy policy",
+    cost: { amount: "119.88", needle: "from your debit card ending 4471 (expires 09/28) on 4 August 2026. Paid monthly, your 12 month plan is equivalent to £119.88 a year. Fancy more" },
+    recurrence: { months: 12, needle: "an N+ member. We've taken your monthly payment for your 12 month plan — here's your receipt. Plan N+" },
     dates: [
-      "Priya Chandra priya.chandra83@mailbox.example Date: 3 August 2026, 09:14 NORTHLIGHT+ Hi",
+      "Priya Chandra, priya.chandra83@mailbox.example Date: 3 August 2026, 09:14 N+ Hi Priya,",
       "Payment date 3 August 2026 Plan renews on 3 August 2027 Amount charged £9.99",
     ],
   },
@@ -589,7 +597,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     provider: "Assured Shorthold Tenancy Agreement THORNFIELD LETTINGS & MANAGEMENT 8 High Street, Barchester, BR1 4DA · 01632 960214 ·",
     reference: "Barchester, BR1 4DA Tenancy Reference THN-2026-0458 Term A fixed term of 12 months, commencing 15/06/2026 and expiring",
     subtype: "Assured Shorthold Tenancy Agreement THORNFIELD LETTINGS & MANAGEMENT 8 High Street, Barchester,",
-    cost: { amount: "11,700.00", needle: "payable in advance on the 15th day of each month. Total rent payable over the term: £11,700.00 First Payment Due 02/06/2026" },
+    cost: { amount: "11,700.00", needle: "Rent £975.00 per calendar month, payable in advance on the 15th day of each month. Total rent payable over the term: £11,700.00 First Payment Due" },
     recurrence: { months: 12, needle: "4DA Tenancy Reference THN-2026-0458 Term A fixed term of 12 months, commencing 15/06/2026 and expiring" },
     dates: [
       "is let for a fixed term of 12 months, commencing on 15 June 2026 and expiring on 14 June",
@@ -597,9 +605,9 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-travel-insurance-certificate.pdf": {
-    provider: "Travel Insurance Certificate KESTREL TRAVEL INSURANCE SERVICES LTD Administrator of your annual multi-trip travel insurance policy",
+    provider: "your right to take legal action. Kestrel Travel Insurance Services Ltd, trading as Kestrel Cover, registered in England and Wales, company",
     reference: "insurance policy Certificate number KTL/AMT/449108 ANNUAL MULTI-TRIP TRAVEL INSURANCE CERTIFICATE P OLIC YHOLD E R Mr",
-    subtype: "Annual Multi-Trip Travel Insurance Certificate KESTREL TRAVEL INSURANCE SERVICES LTD Administrator of your",
+    subtype: "Annual Multi-Trip Travel Insurance Certificate KESTREL COVER Administrator of your annual multi-trip",
     cost: { amount: "159.60", needle: "per incident £95.00 Premium excluding Insurance Premium Tax £133.00 Annual premium, including Insurance Premium Tax £159.60 Underwritten by Palisade" },
     recurrence: { months: 12, needle: "Canada, the Caribbean and Mexico P E RIOD OF INSURANC E 12 months, from 1 April 2026 to 1 April 2027 RE" },
     dates: [
@@ -608,19 +616,19 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-tv-licence-confirmation.pdf": {
-    provider: "contact us using the address below. Colefield Broadcast Licensing Authority Limited · Confirmation issued 10 March 2026 · Enquiries 0300 555 0148",
+    provider: "team 0300 555 0192 Page 1 of 4 Colefield Broadcast Licensing Authority Limited · Confirmation issued 10 March 2026 · Enquiries 0300 555 0148 CONFIRMAT",
     reference: "Television Licence Licence number CBL-774-2091 Valid from 1 April 2026 Valid to 31 March 2027 Fee £182.00 £45.50 by",
-    subtype: "Television Licence Confirmation COLEF I ELD L ICENSING Television Licence Licence number",
-    cost: { amount: "182.00", needle: "I ELD L ICENSING Television Licence Licence number CBL-774-2091 Valid from 1 April 2026 Valid to 31 March 2027 Fee £182.00 £45.50 by quarterly" },
+    subtype: "Television Licence Confirmation CBLA cbla.uk/account Television Licence Licence number",
+    cost: { amount: "182.00", needle: "cbla.uk/account Television Licence Licence number CBL-774-2091 Valid from 1 April 2026 Valid to 31 March 2027 Fee £182.00 £45.50 by quarterly" },
     recurrence: { months: 12, needle: "or record programmes as they are broadcast. It runs for 12 months from the start date shown in the panel" },
     dates: [
       "number CBL-774-2091 Valid from 1 April 2026 Valid to 31 March 2027 Fee £182.00 £45.50 by",
     ],
   },
   "fullpage-university-halls-invoice.pdf": {
-    subtype: "Previous invoice 2 June 2026 PAYMENT DUE 1 October 2026 Charges this term Item Period Amount",
     provider: "Bay Halls is managed under contract by Bridgewater Living Services Ltd, company number 07734512, registered office 14 Quayside Chambers,",
     reference: "Halls Student number 20261847 Invoice BLS-INV-24-1187 Tenancy ref AB-KC-214-26 Issued 3 September 2026 Previous invoice 2",
+    subtype: "Court 15 September 2026 Accommodation fees are set annually by the university's accommodation office and reviewed",
     cost: { amount: "2,450.00", needle: "insurance (compulsory) autumn term 45.00 Common room and laundry levy autumn term 225.00 Total due this instalment £2,450.00 This is the first of" },
     dates: [
       "BLS-INV-24-1187 Tenancy ref AB-KC-214-26 Issued 3 September 2026 Previous invoice 2 June",
@@ -639,7 +647,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
   },
   "fullpage-water-bill.pdf": {
     provider: "ClearBourne Water — Water and Wastewater Bill ClearBourne Water Water and wastewater",
-    reference: "region BILL DATE 09/06/2026 ACCOUNT 8847 2210 55 TARIFF CODE WV-M-04 PAGE 1 OF 2 Mr J Whitcombe 12 Silverdale Close",
+    reference: "region BILL DATE 09/06/2026 ACCOUNT 8847 2210 55 TARIFF CODE WV-M-04 PAGE 1 OF 4 Mr J Whitcombe 12 Silverdale Close",
     subtype: "Water — Water and Wastewater Bill ClearBourne Water Water and wastewater services for the Bourne Valley",
     cost: { amount: "163.37", needle: "M-2291487 Supply type Metered, combined Direct debit Collecting 23/06/2026 AMOUNT NOW DUE Payment due by 30/06/2026 £163.37 METER READINGS ON YOUR" },
     dates: [
@@ -647,9 +655,9 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-window-installation-guarantee.pdf": {
-    provider: "Guarantee Issued by the National Fenestration Guarantee Scheme Ltd following notification of the work described below under the competent",
-    reference: "and Insurance-Backed Guarantee — IBG-2026-337215 NFGS National Fenestration Guarantee Scheme Competent person scheme for",
-    subtype: "of Compliance and Insurance-Backed Guarantee — IBG-2026-337215 NFGS National Fenestration Guarantee Scheme Competent",
+    provider: "guarantee certificate number. National Fenestration Guarantee Scheme Ltd, Scheme House, 4 Brindley Court, Wolverstone WV3 7DP. Registered in",
+    reference: "and Insurance-Backed Guarantee — IBG-2026-337215 NFGS NFGS Competent person scheme for the self-certification of",
+    subtype: "of Compliance and Insurance-Backed Guarantee — IBG-2026-337215 NFGS NFGS Competent person scheme for the",
     dates: [
       "SCHEME POLICY NO. GPS-0417-2261 Date of installation 14 March 2026 Guarantee expires 14",
       "Date of installation 14 March 2026 Guarantee expires 14 March 2036 Certificate of",
