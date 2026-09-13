@@ -1,0 +1,20 @@
+{
+  "name": "Boiler cover plan schedule",
+  "filename": "boiler-cover-plan-schedule.pdf",
+  "notes": ["Boiler and central heating cover plan schedule, printed in three sheets"],
+  "expected": {
+    "dates": ["2026-02-02", "2026-05-20", "2027-02-01"],
+    "provider": "Coldbeck Heating Care",
+    "reference": "CHC/PL/553-7710",
+    "dateRoles": [
+      { "date": "2026-02-02", "role": "start" },
+      { "date": "2026-05-20", "role": "service" },
+      { "date": "2027-02-01", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Plan"], "qualifiers": ["Boiler"] },
+    "costMinor": 23700,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "service"
+  }
+}

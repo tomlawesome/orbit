@@ -388,6 +388,85 @@ const DOCS = {
     swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Clinic Brand", sans-serif']],
   },
 
+  // ---- the FOURTH hold-out, 12 further documents (#1007) ----
+  //
+  // Twenty-three faces, none of them used by `holdout3/`, so the two unseen
+  // sets share no character map. Full separation from `sources/` is not
+  // possible any more: `fetch-fonts.sh` brings down 108 files, `sources/`
+  // and `holdout3/` between them already use all but five, and nothing new
+  // is fetched for a hold-out. Three of the five spare faces are used here
+  // and the other twenty are faces `sources/` uses exactly once.
+
+  // A broker's welcome pack: a contemporary display serif for the wording,
+  // a workhorse grotesque for the summary panels and cover tables.
+  "motor-insurance-welcome-pack.html": {
+    faces: [FACE("Corpus Larkspur", "Fraunces.ttf"), FACE("Corpus Larkspur Sans", "Karla.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Larkspur", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Larkspur Sans", sans-serif']],
+  },
+  // A renewal mailing: a high-contrast display caslon over a rounded sans.
+  "home-contents-renewal-invitation.html": {
+    faces: [FACE("Corpus Nether", "LibreCaslonDisplay-Regular.ttf", "400"), FACE("Corpus Nether Sans", "Mulish.ttf")],
+    swap: [[/"Bitstream Charter", serif/g, '"Corpus Nether", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Nether Sans", sans-serif']],
+  },
+  // A printed ledger: a screen-first book serif for the wording, a narrow
+  // mono for the transaction columns.
+  "pet-cover-payment-statement.html": {
+    faces: [FACE("Corpus Bramble", "Gelasio.ttf"), FACE("Corpus Bramble Mono", "Inconsolata.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Bramble", serif'], [/"Liberation Mono", monospace/g, '"Corpus Bramble Mono", monospace']],
+  },
+  // Utility bulk print: a neutral grotesque with a code mono for meter
+  // numbers, readings and rates.
+  "dual-fuel-energy-bill.html": {
+    faces: [FACE("Corpus Kestrel", "HankenGrotesk.ttf"), FACE("Corpus Kestrel Mono", "JetBrainsMono.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Kestrel", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Kestrel Mono", monospace']],
+  },
+  // A browser print of an account page: one product sans at every size.
+  "mobile-plan-account-page.html": {
+    faces: [FACE("Corpus Wren", "Sora.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Wren", sans-serif']],
+  },
+  // A printed e-mail: one geometric sans, as the mail client set it.
+  "cloud-storage-subscription-email.html": {
+    faces: [FACE("Corpus Fenwold", "Rubik.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Fenwold", sans-serif']],
+  },
+  // A workshop job card: a squared trade sans for the printed form, a
+  // typewriter mono for the figures typed into it.
+  "vehicle-service-record.html": {
+    faces: [FACE("Corpus Motorworks", "Saira.ttf"), FACE("Corpus Motorworks Mono", "CutiveMono-Regular.ttf", "400")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Motorworks", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Motorworks Mono", monospace']],
+  },
+  // A consumer plan schedule: a rounded geometric sans for the tables, an
+  // old-style serif for the plan conditions.
+  "boiler-cover-plan-schedule.html": {
+    faces: [FACE("Corpus Coldbeck", "Quicksand.ttf"), FACE("Corpus Coldbeck Serif", "Vollkorn.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Coldbeck", sans-serif'], [/"Liberation Serif", serif/g, '"Corpus Coldbeck Serif", serif']],
+  },
+  // Municipal recovery print: a condensed display sans for the masthead and
+  // the notice panel, a neutral text face for the columns of small print.
+  "council-tax-instalment-reminder.html": {
+    faces: [FACE("Corpus Ellerby", "Oswald.ttf"), FACE("Corpus Ellerby Text", "Asap.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Ellerby", sans-serif'], [/"Liberation Serif", serif/g, '"Corpus Ellerby Text", serif']],
+  },
+  // Regulated credit print: a newspaper serif for the statutory wording, a
+  // plain grotesque for the figures tables.
+  "personal-loan-settlement-quotation.html": {
+    faces: [FACE("Corpus Ravensgill", "Newsreader.ttf"), FACE("Corpus Ravensgill Sans", "Overpass.ttf")],
+    swap: [[/"Liberation Serif", serif/g, '"Corpus Ravensgill", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Ravensgill Sans", sans-serif']],
+  },
+  // Legal stationery: an old-style serif for the clauses under the heaviest
+  // display sans in the collection for the notice heading.
+  "rent-review-notice.html": {
+    faces: [FACE("Corpus Quenby", "Cardo-Regular.ttf", "400"), FACE("Corpus Quenby", "Cardo-Bold.ttf", "700"), FACE("Corpus Quenby Display", "ArchivoBlack-Regular.ttf", "400")],
+    swap: [[/"Bitstream Charter", serif/g, '"Corpus Quenby", serif'], [/"Liberation Sans", sans-serif/g, '"Corpus Quenby Display", sans-serif']],
+  },
+  // A till receipt with a leaflet behind it: a condensed bold for the
+  // panels, a wide mono for the receipt column.
+  "rod-licence-receipt.html": {
+    faces: [FACE("Corpus Anglers", "BarlowCondensed-Bold.ttf", "400"), FACE("Corpus Anglers Mono", "OverpassMono.ttf")],
+    swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Anglers", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Anglers Mono", monospace']],
+  },
+
 };
 
 for (const [file, { faces, swap }] of Object.entries(DOCS)) {
