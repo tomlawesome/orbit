@@ -573,6 +573,35 @@
       {/if}
       {/if}
 
+      <!-- NO RECOVERY BUNDLE EXPORTED (#968, slice 1 of #966): the third card
+           in this family, same composition again — zero pixels once a bundle
+           is recorded, full width and no buttons while it isn't. Persistent
+           rather than a one-time nag (owner ruling, 2026-09-10): "enforced
+           means it persists, not that it blocks" — not dismissible while the
+           condition holds, never a modal, never blocks use of the instance.
+           Re-arms after a document-KEK rotation because a bundle wrapped
+           under the old key can no longer recover the new one
+           (server/recovery-bundle-status.ts's own rule). Wording matches
+           "Exporting a recovery bundle" in the administrator guide word for
+           word, per the issue's own done-when criterion. -->
+      {#if view.recoveryBundle && !view.recoveryBundle.exported}
+        <div class="card wide rotation">
+          <div class="cardhead"><h2>No recovery bundle exported</h2></div>
+          <p class="rotationwords">
+            If the encryption key is ever lost with no recovery bundle to recover it, every
+            document, all encrypted metadata, and — once account addresses are encrypted —
+            every stored address are gone for good. Run <code>orbit backup</code> then
+            <code>orbit export-recovery-bundle &lt;backup.tar&gt;</code> to make one. Keep its
+            two parts apart: the bundle file on storage separate from this instance, and its
+            passphrase in a password manager or on paper — never both together, because that
+            separation is what keeps anyone who gets hold of the file alone from being able to
+            use it. This reappears after every encryption-key rotation, because a bundle wrapped
+            under the previous key can no longer recover the current one. "Exporting a recovery
+            bundle" in the administrator guide has the steps.
+          </p>
+        </div>
+      {/if}
+
       <div class="card">
         <div class="cardhead"><h2>People</h2><button>invite someone</button></div>
 
