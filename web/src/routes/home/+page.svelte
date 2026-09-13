@@ -69,6 +69,7 @@
     return () => document.body.classList.remove("health-degraded");
   });
   /** Every word the drawer draws maps to one of three dot colours; anything unrecognised reads as unknown, not healthy. */
+  /** @type {Record<string, string>} */
   const STATUS_DOT = {
     healthy: "var(--ok)", ready: "var(--ok)", maintenance: "var(--ok)",
     unreachable: "var(--degraded)", failed: "var(--degraded)", degraded: "var(--degraded)",
@@ -114,7 +115,10 @@
    */
   /* The fixture harness (see +page.server.js): drives either journey to one
      millisecond and holds it there. Off unless the server says ORBIT_FIXTURES,
-     so the query string is inert in the product. */
+     so the query string is inert in the product. Reading `data` here once,
+     deliberately: the flight it drives is decided at load and held there
+     (see the launch note below), never recomputed off a later `data`. */
+  // svelte-ignore state_referenced_locally
   const fixtureFlight = browser && data?.fixtures ? page.url.searchParams.get("flight") : null;
   const fixtureAt = Number(page.url.searchParams.get("at") ?? 0) || 0;
 
