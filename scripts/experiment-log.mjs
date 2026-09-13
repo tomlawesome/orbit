@@ -710,6 +710,11 @@ function cmdRecord(flags) {
   if (register.experiments.some((experiment) => experiment.id === id)) {
     throw new Error(`Experiment ${id} already exists in the register; refusing to add a duplicate.`);
   }
+  // A misspelt corpus is a phantom: ten runs sat under "seen48" on 2026-09-13,
+  // out of every per-field table, until someone noticed.
+  if (!register.corpora[corpus]) {
+    throw new Error(`Unknown corpus "${corpus}"; the register knows ${Object.keys(register.corpora).join(", ")}.`);
+  }
 
   const fromPath = resolve(process.cwd(), from);
   const content = readFileSync(fromPath, "utf8");
