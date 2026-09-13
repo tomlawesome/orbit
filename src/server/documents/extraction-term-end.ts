@@ -53,6 +53,12 @@ const ENDS = new Set([
 // decided by any more specific kind it also carries, else by the words on
 // it.
 
+/** Insurance that is bought for a fixed term and simply ends with it,
+ * rather than being renewed each year like cover on a house or a car: the
+ * term is the point of the product. Named by the qualifier beside the
+ * kind. */
+const FIXED_TERM_INSURANCE = new Set(["Life", "Critical illness"]);
+
 /** Words for the piece of paper rather than the thing it is about: every
  * tenancy is an agreement, every quote is for something. These decide only
  * when nothing more specific is on the page. */
@@ -73,13 +79,18 @@ function count(pattern: RegExp, text: string): number {
 /**
  * The role of a date that ends the page's term. The best-supported kind
  * with a known answer decides, the paper words waiting their turn behind
- * the thing words. A page whose kind says nothing renews if its wording
+ * the thing words; life and critical illness cover, bought for a fixed
+ * term, end with it. A page whose kind says nothing renews if its wording
  * speaks more of a cycle than of an end, and otherwise merely expires.
  */
-export function termEndRole(kinds: ReadonlyArray<GroupBin>, text: string | undefined): DocumentDateRole {
+export function termEndRole(
+  { kinds, qualifiers }: { kinds: ReadonlyArray<GroupBin>; qualifiers: ReadonlyArray<GroupBin> },
+  text: string | undefined,
+): DocumentDateRole {
   const things = kinds.filter(({ group }) => !PAPER.has(group));
   const paper = kinds.filter(({ group }) => PAPER.has(group));
   for (const { group } of [...things, ...paper]) {
+    if (group === "Insurance" && qualifiers.some(({ group: q }) => FIXED_TERM_INSURANCE.has(q))) return "expiry";
     if (RENEWS.has(group)) return "renewal";
     if (ENDS.has(group)) return "expiry";
   }
