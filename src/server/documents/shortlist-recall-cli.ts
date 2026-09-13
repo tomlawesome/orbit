@@ -158,7 +158,7 @@ function main(): void {
       rank: references.findIndex((entry) => entry.value === expected.reference),
     }], name);
 
-    const costs = costShortlistEntries(tagged);
+    const costs = costShortlistEntries(tagged, document.text);
     count("cost", costs, expected.costMinor === undefined ? [] : [{
       wanted: `${expected.costMinor} ${expected.currency ?? "no currency"}`,
       rank: costs.findIndex((entry) =>

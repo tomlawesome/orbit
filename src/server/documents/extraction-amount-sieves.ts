@@ -323,10 +323,26 @@ function blocksAbove(page: AmountPageFacts, index: number): string[] {
     .reverse();
 }
 
-/** Whether a block is one printed figure and nothing else: a form's value
- * cell, which Tika prints as its own block under the cell's label. */
+/**
+ * Whether a block is one printed figure and nothing else: a form's value
+ * cell, which Tika prints as its own block under the cell's label.
+ *
+ * The period the cell covers stays part of the cell. "£684.30 for the 12
+ * month period" under "ANNUAL PREMIUM (INCL. IPT)" is one figure in a
+ * labelled cell, not a sentence that happens to carry a figure -- so the
+ * heading names it in so many words, as it does over a block printing the
+ * figure alone.
+ */
+const A_PERIOD_THE_CELL_COVERS =
+  /(?:\s+(?:for|over)\s+the\s+\d{1,3}[- ]?month\s+(?:period|term)|\s+(?:per|a|each)\s+(?:month|year|annum)|\s+(?:monthly|annually|yearly)|\s+(?:for|covering)\s+the\s+year)?/u;
+
+const BARE_FIGURE = new RegExp(
+  `^(?:[£€$]\\s?|(?:GBP|EUR|USD)\\s?)?\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?${A_PERIOD_THE_CELL_COVERS.source}$`,
+  "u",
+);
+
 function bareFigure(line: string): boolean {
-  return /^(?:[£€$]\s?|(?:GBP|EUR|USD)\s?)?\d{1,3}(?:,\d{3})*(?:\.\d{2})?$/u.test(line);
+  return BARE_FIGURE.test(line);
 }
 
 const headingAbove: AmountSieve = {

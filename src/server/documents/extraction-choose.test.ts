@@ -530,6 +530,47 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.costMinor).toBe(28764);
   });
 
+  // Class 2: the page prices one thing twice, and the option to spread the
+  // cost is not a second commitment (ADR-0026, 2026-09-13).
+  it("takes the premium over the total of paying it monthly", () => {
+    const chosen = chooseFields([
+      candidate("amount", "44928", [
+        { value: "total", trigger: "total", sieves: ["label", "term-multiple", "period-adjacent"], strength: 2 },
+      ], { currency: "GBP", line: "Paid monthly across 12 instalments — £37.44 (total £449.28)" }),
+      candidate("amount", "41266", [
+        { value: "total", trigger: "premium", sieves: ["label"], strength: 2 },
+      ], { currency: "GBP", line: "Annual premium, including Insurance Premium Tax £412.66" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(41266);
+  });
+
+  it("leaves the year's price alone where the page says it is paid monthly", () => {
+    const chosen = chooseFields([
+      candidate("amount", "17988", [
+        { value: "total", trigger: "Annual total if paid monthly", sieves: ["label"], strength: 2 },
+      ], { currency: "GBP", line: "Annual total if paid monthly £179.88" }),
+      candidate("amount", "1499", [
+        { value: "instalment", trigger: "a month", sieves: ["period-adjacent"], strength: 1 },
+      ], { currency: "GBP", line: "£14.99 a month" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(17988);
+  });
+
+  it("separates two equally spoken-for figures by which one the page frames as the term", () => {
+    const chosen = chooseFields([
+      candidate("amount", "2500", [
+        { value: "total", trigger: "fee", sieves: ["label"], strength: 2 },
+      ], { currency: "GBP", line: "Mid-term adjustment fee (if you change your cover) £25.00" }),
+      candidate("amount", "68430", [
+        { value: "total", trigger: "ANNUAL PREMIUM (INCL. IPT)", sieves: ["heading-above"], strength: 2 },
+      ], { currency: "GBP", line: "£684.30 for the 12 month period" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(68430);
+  });
+
   it("blanks when two totals disagree", () => {
     const chosen = chooseFields([
       candidate("amount", "61240", [{ value: "total", trigger: "Total payable" }], { currency: "GBP" }),
