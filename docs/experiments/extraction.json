@@ -5806,8 +5806,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E103",
@@ -5869,8 +5868,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E104",
@@ -5913,6 +5911,194 @@
         "subtype": {
           "pct": 58.3,
           "net": 7,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E105",
+      "date": "2026-09-13",
+      "label": "subtype: a word listed as both qualifier and kind is said once",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Defect fix (a150059), seen on the owner's real documents: \"Mortgage Mortgage\". composeSubtype says a word once where qualifier and kind are the same word. Tuning unchanged (the page that shows it is blank on subtype for other reasons).",
+      "how": "npm run eval:stages",
+      "commit": "a150059",
+      "output": "tmp/e-seen60-stages-subtype-twice.txt",
+      "scores": {
+        "overall": {
+          "pct": 85.8,
+          "net": 436,
+          "of": 508
+        },
+        "provider": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "reference": {
+          "pct": 93.3,
+          "net": 56,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 40,
+          "of": 60
+        },
+        "cost": {
+          "pct": 77.8,
+          "net": 42,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E106",
+      "date": "2026-09-13",
+      "label": "doubled-word fix (E105) on hold-out 3",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E105 on hold-out 3: subtype +1; nothing else moved.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "a150059",
+      "output": "tmp/e-holdout3-subtype-twice.txt",
+      "scores": {
+        "overall": {
+          "pct": 80,
+          "net": 88,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "cost": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E107",
+      "date": "2026-09-13",
+      "label": "doubled-word fix (E105) on hold-out 4",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E105 on hold-out 4: subtype +1; nothing else moved.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "a150059",
+      "output": "tmp/e-holdout4-subtype-twice.txt",
+      "scores": {
+        "overall": {
+          "pct": 72.4,
+          "net": 84,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 8,
           "of": 12
         },
         "cost": {

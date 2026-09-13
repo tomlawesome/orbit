@@ -26,17 +26,23 @@ It prints one block per document as it goes, then leaves:
 
 - `out\results.txt` — the same blocks.
 - `out\results.csv` — one row per document, with an empty "right?" column
-  for ticking off in a spreadsheet.
+  for ticking off in a spreadsheet, and a "top three" column per field.
+
+Under each document's answers come the **top three** for provider,
+reference, subtype, cost and dates: the answer it chose first, marked `*`,
+then the next two it would have offered. This is the list the review
+screen will show, with the first pre-selected. When you check a document,
+count it as *first* (the `*` is right), *in three* (right one is 2 or 3),
+*wrong* (not in the three) or *blank*.
 
 Add `--keep-text` (run it from a PowerShell or command prompt in the unzipped folder: `.\run.cmd --keep-text`) to
 also save the text Tika pulled out of each file in `out\text\`, which shows
 what the reader was actually looking at.
 
-Add `--candidates` (`.\run.cmd --candidates`) to also print, under each
-document, every candidate it weighed for provider, reference, subtype, cost
-and dates, with the chosen one marked `*`. Use it to see why a field came out
-blank or wrong -- whether the right value was never on the shortlist, or was
-on it and passed over.
+Add `--candidates` (`.\run.cmd --candidates`) to lengthen each list to the
+whole shortlist it weighed (up to eight), with the reasons beside each. Use
+it to see why a field came out blank or wrong -- whether the right value was
+never on the shortlist, or was on it and passed over.
 
 ## Reading the answers
 
