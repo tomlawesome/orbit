@@ -1,6 +1,5 @@
 <script>
   import { onMount } from "svelte";
-  import { resolve } from "$app/paths";
   import {
     addMember,
     commandContact,
@@ -845,7 +844,7 @@
         </div>
 
         <div class="half">
-          <div class="cardhead"><h2>Operations</h2><a href={resolve("/admin")}>open operations →</a></div>
+          <div class="cardhead"><h2>Operations</h2></div>
           {#each view.services as [tone, name, detail] (name)}
             <div class="svc"><i style="background:var(--{tone})"></i><b>{name}</b><small>{detail}</small></div>
           {/each}
