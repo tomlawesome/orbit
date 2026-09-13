@@ -49,9 +49,14 @@ import {
 import { LANGUAGE_FACT } from "./extraction-provider-sieves";
 import {
   composeSubtype,
+  louderWherePrinted,
+  rankedWherePrinted,
   subtypeGroupBins,
   subtypeSources,
+  SUBTYPE_PLACES,
   type GroupBin,
+  type PlacedCandidate,
+  type SubtypePlace,
 } from "./extraction-subtype-bins";
 import { classifyProvider } from "./extraction-scoring";
 import {
@@ -329,6 +334,40 @@ export interface SubtypeShortlist {
  * inside the top two, and a third would be a name the page barely says. */
 const GROUPS_OFFERED = 2;
 
+/** What the review screen and the model are told about where a group's words
+ * were printed, in the household's words. */
+const PLACE_NAMED: Record<SubtypePlace, string> = {
+  title: "the title",
+  heading: "a heading",
+  body: "the text",
+};
+
+function wherePrinted(bin: GroupBin<PlacedCandidate>): string {
+  return SUBTYPE_PLACES
+    .filter((place) => bin.places[place] > 0)
+    .map((place) => `${bin.places[place]} in ${PLACE_NAMED[place]}`)
+    .join(", ");
+}
+
+/**
+ * The groups offered, ranked by where the page printed the words rather than
+ * by how many times it printed them (`extraction-subtype-bins.ts`, #1015).
+ *
+ * Which groups are offered is unchanged -- the best-supported `GROUPS_OFFERED`
+ * of each sort, as the owner set it. Only their order changes, and with it
+ * the group the plain-page rules answer from, which is always the head of the
+ * list the review screen shows.
+ */
+function subtypeBinsWherePrinted(candidates: readonly TaggedCandidate[]): {
+  qualifiers: Array<GroupBin<PlacedCandidate>>;
+  kinds: Array<GroupBin<PlacedCandidate>>;
+} {
+  const bins = subtypeGroupBins(subtypeSources(candidates));
+  return {
+    qualifiers: rankedWherePrinted(bins.qualifiers.slice(0, GROUPS_OFFERED)),
+    kinds: rankedWherePrinted(bins.kinds.slice(0, GROUPS_OFFERED)),
+  };
+}
 
 /**
  * The subtype shortlist: the two best-supported qualifier groups and the
@@ -344,36 +383,35 @@ const GROUPS_OFFERED = 2;
  * not written by the model.
  */
 export function subtypeShortlist(candidates: readonly TaggedCandidate[]): SubtypeShortlist {
-  const bins = subtypeGroupBins(subtypeSources(candidates));
-  const entryOf = (bin: GroupBin<TaggedCandidate>, what: string): ShortlistEntry => ({
+  const bins = subtypeBinsWherePrinted(candidates);
+  const entryOf = (bin: GroupBin<PlacedCandidate>, what: string): ShortlistEntry => ({
     value: bin.group,
     display: bin.group,
     line: bin.sources[0]?.line ?? "",
-    why: [`${what}, the page's words land in it ${bin.count} times`],
+    why: [`${what}, the page's words land in it ${bin.count} times (${wherePrinted(bin)})`],
     support: bin.count,
   });
-  const qualifiers = bins.qualifiers.slice(0, GROUPS_OFFERED)
-    .map((bin) => entryOf(bin, "what it is about"));
-  const kinds = bins.kinds.slice(0, GROUPS_OFFERED)
-    .map((bin) => entryOf(bin, "what type of thing it is"));
+  const qualifiers = bins.qualifiers.map((bin) => entryOf(bin, "what it is about"));
+  const kinds = bins.kinds.map((bin) => entryOf(bin, "what type of thing it is"));
   return { qualifiers, kinds, entries: [...qualifiers, ...kinds] };
 }
 
 /**
  * The subtype the rules fall back on with no model to ask: the top
- * qualifier and the top kind, each taken only where the page's words landed
- * in it more often than in its runner-up (owner, 2026-09-11).
+ * qualifier and the top kind, each taken only where the page spoke it louder
+ * than its runner-up (owner, 2026-09-11; louder now means where the words
+ * were printed, #1015).
  *
  * Where two groups are level the page is saying both as loudly, and a
  * composed answer would be a guess with a wrong-value penalty behind it;
  * the group drops out and the other one answers alone if it can.
  */
 export function chooseSubtypeByRules(candidates: readonly TaggedCandidate[]): string | undefined {
-  const bins = subtypeGroupBins(subtypeSources(candidates));
-  const clear = (ranked: ReadonlyArray<GroupBin<TaggedCandidate>>): string | undefined => {
+  const bins = subtypeBinsWherePrinted(candidates);
+  const clear = (ranked: ReadonlyArray<GroupBin<PlacedCandidate>>): string | undefined => {
     const [best, next] = ranked;
     if (best === undefined) return undefined;
-    return next !== undefined && next.count >= best.count ? undefined : best.group;
+    return next !== undefined && louderWherePrinted(best, next) >= 0 ? undefined : best.group;
   };
   return composeSubtype(clear(bins.qualifiers), clear(bins.kinds));
 }
