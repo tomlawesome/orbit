@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { GroupBin } from "./extraction-subtype-bins";
 import { termEndRole } from "./extraction-term-end";
 
-const bin = (group: string): GroupBin => ({ group, count: 1, sources: [] });
+const bin = (group: string): GroupBin =>
+  ({ group, count: 1, places: { title: 0, heading: 0, body: 1 }, sources: [] });
 const kinds = (...groups: string[]) => ({ kinds: groups.map(bin), qualifiers: [] });
 
 describe("termEndRole", () => {
