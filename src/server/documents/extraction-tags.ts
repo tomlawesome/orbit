@@ -84,6 +84,11 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   // not. The inclusive form is declared first so it wins the tie.
   { value: "total", direction: "forward", overrides: true,
     pattern: "(?:annual |monthly |total )?(?:premium|charge|price|cost),? (?:includ(?:ing|es)|inc\\.?)[^£\\n]{0,40}" },
+  // "Annual total if paid monthly" is the year's price on a plan the
+  // household pays by the month; "total if paying monthly" beside a
+  // paid-in-full premium is the financed option, and stays a rival below.
+  { value: "total", direction: "forward", overrides: true,
+    pattern: "(?:annual|yearly)[^\\S\\n]+total(?:[^\\S\\n]+if[^\\S\\n]+paid[^\\S\\n]+[a-z]+)?[^£\\n]{0,40}" },
 
   // Not a price at all: the tax line, the net-of-tax subtotal, the price of
   // the thing covered, a cover limit, an excess, a deposit, a set-up fee.
@@ -124,18 +129,13 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   { value: "rival", direction: "forward", overrides: true, pattern: "estimated[^£\\n]{0,40}" },
   { value: "rival", direction: "forward", overrides: true,
     pattern: "if (?:you |we |it )?(?:pay|paying|paid|choose|chose|select|take no action|switch|cancel|upgrade|purchas|book|bought)[^£\\n]{0,40}" },
+  // A figure the page works out for comparison -- "equivalent monthly price
+  // (for comparison only)", "would otherwise cost £148 if booked separately"
+  // -- is not the price of anything on the page. "Equivalent to £119.88 a
+  // year" on a 12-month plan is the plan's price, and is left to the "a
+  // year" row below.
   { value: "rival", direction: "forward", overrides: true,
-    pattern: "(?:over|for)\\s+(?:the\\s+)?(?:full\\s+|whole\\s+|entire\\s+)?term[^£\\n]{0,40}" },
-  // The sum of every payment over a term longer than a year is what the
-  // contract adds up to, not what it costs: the page prices it by the
-  // month, and the truth wants the month (alarm monitoring, 2026-09-12).
-  { value: "rival", direction: "forward", overrides: true,
-    pattern: "(?:total(?:[^\\S\\n]+amount)?[^\\S\\n]+payable[^\\S\\n]+)?over[^\\S\\n]+(?:the[^\\S\\n]+|a[^\\S\\n]+|your[^\\S\\n]+)?(?:1[3-9]|[2-9]\\d)[^\\S\\n-]+months?(?:[^\\S\\n]+minimum)?(?:[^\\S\\n]+term)?[^£\\n]{0,40}" },
-  // A figure the page works out for comparison -- "equivalent to £119.88 a
-  // year", "equivalent monthly price (for comparison only)", "would
-  // otherwise cost £148 if booked separately" -- is not the price of
-  // anything on the page.
-  { value: "rival", direction: "forward", overrides: true, pattern: "equivalent(?: to)?[^£\\n]{0,40}" },
+    pattern: "equivalent (?:monthly|weekly|daily|annual|yearly)[^£\\n]{0,40}" },
   { value: "rival", direction: "forward", overrides: true, pattern: "(?:would|could) otherwise (?:cost|be|pay)" },
   { value: "rival", direction: "backward", overrides: true, pattern: "\\(?for comparison" },
   { value: "rival", direction: "backward", overrides: true, pattern: "if (?:booked|bought|purchased|taken) separately" },
@@ -172,9 +172,9 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   // instalment. "Monthly" is itself a qualifier: it says the figure is one
   // of many, so it overrides the plain labels it is printed with.
   { value: "instalment", direction: "forward", overrides: true,
-    pattern: "(?:your )?monthly(?:[^\\S\\n]+[a-z]+){0,2}[^\\S\\n]+(?:instalment|payment|amount|charge|price|cost|fee|contribution|rental|rent)" },
+    pattern: "(?:your )?monthly(?:[^\\S\\n]+[a-z]+){0,2}[^\\S\\n]+(?:instalment|payment|amount|charge|price|cost|fee|contribution|rental|rent|premium)" },
   { value: "instalment", direction: "backward", overrides: true,
-    pattern: "(?:standard )?monthly(?:[^\\S\\n]+[a-z]+){0,2}[^\\S\\n]+(?:charge|fee|price|cost|contribution|rental|rent)" },
+    pattern: "(?:standard )?monthly(?:[^\\S\\n]+[a-z]+){0,2}[^\\S\\n]+(?:charge|fee|price|cost|contribution|rental|rent|premium)" },
   // "Monthly by Direct Debit (£15.75 x 12, total £189.00)": everything in
   // the bracket prices paying monthly, not the thing being paid for.
   { value: "instalment", direction: "forward", overrides: true,
@@ -184,7 +184,14 @@ const AMOUNT_TRIGGERS: readonly LabelTrigger<"amount">[] = [
   { value: "instalment", direction: "backward", pattern: "(?:per|a|each) month" },
   { value: "instalment", direction: "backward", pattern: "(?:by )?(?:monthly|quarterly|weekly) direct debit" },
 
-  // total
+  // total. Everything paid over a fixed term is what the contract costs
+  // (owner, 2026-09-13: Orbit tracks the whole commitment), so "total
+  // payable over the 24 month minimum term" and "over the full term" name
+  // the price, and the monthly figure beside them is one instalment of it.
+  { value: "total", direction: "forward", overrides: true,
+    pattern: "(?:over|for)\\s+(?:the\\s+)?(?:full\\s+|whole\\s+|entire\\s+)?term[^£\\n]{0,40}" },
+  { value: "total", direction: "forward", overrides: true,
+    pattern: "(?:total(?:[^\\S\\n]+amount)?[^\\S\\n]+payable[^\\S\\n]+)?over[^\\S\\n]+(?:the[^\\S\\n]+|a[^\\S\\n]+|your[^\\S\\n]+)?(?:1[3-9]|[2-9]\\d)[^\\S\\n-]+months?(?:[^\\S\\n]+minimum)?(?:[^\\S\\n]+term)?[^£\\n]{0,40}" },
   { value: "total", direction: "forward", pattern: "(?:grand|final|overall) total" },
   { value: "total", direction: "forward", pattern: "total(?: amount| cost| price| charge| payable| fee)?" },
   { value: "total", direction: "forward", pattern: "(?:contract|agreed|purchase|plan|policy|subscription|membership) (?:price|cost|fee|charge)" },

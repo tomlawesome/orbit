@@ -565,7 +565,30 @@ export function rankedAmounts(candidates: readonly TaggedCandidate[]): AmountCla
  * figures: a wrong cost costs a point where a blank costs nothing, and the
  * blank is what the model is then asked about.
  */
-function chooseCost(candidates: readonly TaggedCandidate[]): {
+/**
+ * The term a contract binds the household for, in months, where the page
+ * states it as a term -- "initial minimum term of 12 months", "Minimum
+ * term 24 months", "runs for 36 months", "24-month contract" -- and not
+ * where it merely mentions a span of months. One figure only: a page that
+ * names two different terms has not said which one the price runs over.
+ */
+const CONTRACT_TERM = [
+  /(?:minimum|fixed|initial|contract|agreement)[^\S\n]+term(?:[^\S\n]+(?:of|is))?:?[^\S\n]+(\d{1,3})[^\S\n]*-?[^\S\n]*months?\b/giu,
+  /(\d{1,3})[^\S\n]*-?[^\S\n]*months?[^\S\n]+(?:minimum[^\S\n]+|fixed[^\S\n]+|initial[^\S\n]+)?(?:term|contract|agreement)\b/giu,
+  /(?:runs|running|lasts)[^\S\n]+for[^\S\n]+(\d{1,3})[^\S\n]+months?\b/giu,
+  /contract[^\S\n]+length:?[^\S\n]+(\d{1,3})[^\S\n]+months?\b/giu,
+];
+
+export function contractTermMonths(text: string): number | undefined {
+  const found = new Set<number>();
+  for (const pattern of CONTRACT_TERM) {
+    for (const match of text.matchAll(pattern)) found.add(Number(match[1]));
+  }
+  const terms = [...found].filter((months) => months >= 2 && months <= 600);
+  return terms.length === 1 ? terms[0] : undefined;
+}
+
+function chooseCost(candidates: readonly TaggedCandidate[], text?: string): {
   costMinor?: number;
   currency?: string;
 } {
@@ -581,7 +604,19 @@ function chooseCost(candidates: readonly TaggedCandidate[]): {
     return {};
   }
   const minor = Number(best.value);
-  return Number.isFinite(minor) ? { costMinor: minor, currency: best.currency } : {};
+  if (!Number.isFinite(minor)) return {};
+  // A page that prices a fixed-term contract only by the month has left
+  // the arithmetic to the reader: what the contract costs is the payment
+  // times the term (owner, 2026-09-13: Orbit tracks the whole commitment,
+  // and where the pay-monthly price is what the household pays, the term's
+  // cost is duration times the monthly cost). Only where the page names
+  // no total at all -- the best figure is an instalment -- and states one
+  // contract term; a page that printed the product has been read already
+  // by the `term-multiple` sieve.
+  const term = text === undefined || best.rank !== AMOUNT_PREFERENCE.indexOf("instalment")
+    ? undefined
+    : contractTermMonths(text);
+  return { costMinor: term === undefined ? minor : minor * term, currency: best.currency };
 }
 
 /**
@@ -639,7 +674,7 @@ export const chooseFields: ChooseStage = (candidates, text): ExtractedFields => 
     ...(reference === undefined ? {} : { reference }),
     ...(provider === undefined ? {} : { provider }),
     ...(subtype === undefined ? {} : { subtype }),
-    ...chooseCost(candidates),
+    ...chooseCost(candidates, text),
   };
 };
 

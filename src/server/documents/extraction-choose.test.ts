@@ -415,6 +415,29 @@ describe("choosing the cost and its currency", () => {
     expect(chosen.costMinor).toBe(1559);
   });
 
+  // Owner, 2026-09-13: a fixed-term contract priced only by the month costs
+  // duration times the monthly cost.
+  it("multiplies a lone instalment by the one contract term the page states", () => {
+    const instalment = candidate("amount", "4250", [
+      { value: "instalment", trigger: "Monthly membership fee", sieves: ["label", "period-adjacent"], strength: 2 },
+    ], { currency: "GBP" });
+
+    expect(chooseFields([instalment], "memberships are subject to an initial minimum term of 12 months from your start date").costMinor).toBe(51000);
+    expect(chooseFields([instalment], "This agreement runs for 36 months from 1 June 2025").costMinor).toBe(153000);
+    expect(chooseFields([instalment], "Check-ups fall due every 6 months").costMinor).toBe(4250);
+    expect(chooseFields([instalment], "Minimum term 12 months. Contract length: 24 months.").costMinor).toBe(4250);
+    expect(chooseFields([instalment]).costMinor).toBe(4250);
+  });
+
+  it("leaves a printed total alone whatever term the page states", () => {
+    const chosen = chooseFields([
+      candidate("amount", "2499", [{ value: "instalment", trigger: "Monthly charge", sieves: ["label"], strength: 2 }], { currency: "GBP" }),
+      candidate("amount", "59976", [{ value: "total", trigger: "total payable", sieves: ["label", "term-multiple"], strength: 2 }], { currency: "GBP" }),
+    ], "24 month minimum term");
+
+    expect(chosen.costMinor).toBe(59976);
+  });
+
   it("blanks when two totals disagree", () => {
     const chosen = chooseFields([
       candidate("amount", "61240", [{ value: "total", trigger: "Total payable" }], { currency: "GBP" }),

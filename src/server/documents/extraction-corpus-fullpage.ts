@@ -26,10 +26,10 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - recurrenceMonths 24 is printed in digits as '24 month minimum term' — the length of the agreement, not the monthly billing cycle; it is retained under the derived 'service' scheduleKind because the contract only requires a schedule kind to be present, not that it match which date the recurrence describes.
     // - Provider is 'Northgate Home Security', the trading name in the header and footer strip — not the Alarm Receiving Centre or insurer named elsewhere.
     // - Reference 'NGS-CA-20456' is printed as the Contract Number field and repeated in the footer strip.
-    // - costMinor 2499 is the 'Monthly Monitoring Charge... £24.99 per month' field.
+    // - costMinor 59976 is the 'total payable over the 24 month minimum term of £599.76' (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure).
     // - Trap: the 'Installation Charge £199.00 — paid in full, receipt no. RCT-30442' is a rival, one-off cost already settled.
     // - Trap: the 'Callout Charge (outside agreement) £65.00 + VAT per visit' is a rival recurring-looking cost.
-    // - Trap: the 'total payable over the 24 month minimum term of £599.76' is a rival aggregate cost figure.
+    // - Trap: the 'Monthly Monitoring Charge... £24.99 per month' field is the instalment, not the commitment.
     // - Trap: 'Alarm Receiving Centre: Beacon Watch Monitoring Centre' is a rival organisation name.
     // - Trap: 'Police URN: 1234567/26' is a rival reference number.
     // - Trap: 'Insurer Requiring Monitoring: Hearthstone Home Insurance' is a rival organisation name.
@@ -50,7 +50,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2028-03-01", role: "renewal" },
     ],
     subtype: {"kinds":["Contract","Maintenance contract"],"qualifiers":["Security","Home"]},
-    costMinor: 2499,
+    costMinor: 59976,
     currency: "GBP",
     recurrenceMonths: 24,
     scheduleKind: "service",
@@ -82,7 +82,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - Declared recurrence: 'your boiler and controls are serviced every 12 months' — recurrenceMonths 12, scheduleKind service.
     // - Declared provider: the letterhead brand 'HEARTHWELL HOME CARE', repeated in the reference box and slip.
     // - Declared reference: 'Plan reference: HHC-4471-2298', repeated identically on the slip.
-    // - Declared cost: the slip's 'This month's instalment £14.99' — costMinor 1499, currency GBP.
+    // - Declared cost: the slip's 'Annual total if paid monthly £179.88' — costMinor 17988, currency GBP (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure).
     // - Trap: 'Date of this letter: 2 September 2026' is the letter's own date, not the service date.
     // - Trap: 'Your last visit was on 16 October 2025' is the previous service, not the one due.
     // - Trap: 'Thermex Pro 30 boiler (installed 2019)' gives an installation year and model, not a date to extract.
@@ -90,7 +90,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - Trap: 'Gas Safe registered engineers (registration number 745213)' is the engineer's registration, not the plan reference.
     // - Trap: 'non-members pay a callout charge of £90' prices a different audience's callout, not the plan cost.
     // - Trap: 'this service would otherwise cost £148 if booked separately from the plan' is the non-plan price.
-    // - Trap: the slip's 'Annual total if paid monthly £179.88' is the yearly total, not the monthly instalment.
+    // - Trap: the slip's 'This month's instalment £14.99' is one instalment of twelve, not the commitment.
     // - Trap: 'collected on the 1st of each month' is the Direct Debit collection day, not a service date.
     // - Trap: 'Hearthwell Home Care is a trading name of Castlemere Assurance Group plc' names the parent company, a rival provider candidate.
     // - Trap: 'call our 24-hour emergency line on 01632 960455' is a different phone number from the booking line 01632 960112.
@@ -105,7 +105,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2026-10-14", role: "service" },
     ],
     subtype: {"kinds":["Maintenance contract","Plan","Service"],"qualifiers":["Boiler","Home"]},
-    costMinor: 1499,
+    costMinor: 17988,
     currency: "GBP",
     recurrenceMonths: 12,
     scheduleKind: "service",
@@ -134,7 +134,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
   },
   {
     // Ground-truth notes:
-    // - costMinor is the £34.99 monthly price during the minimum term ('Monthly price during minimum term' price box and the 'Total during minimum term' table row), not the £46.99 after-term price, not the £4.99 activation charge, and not any of the 24 early-termination amounts — those sit right next to the real price precisely to test whether an extractor grabs the wrong one.
+    // - costMinor is 83976, 24 months x the £34.99 monthly price during the minimum term ('Monthly price during minimum term' price box and the 'Total during minimum term' table row) -- the total is never printed (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure). Not the £46.99 after-term price, not the £4.99 activation charge, and not any of the 24 early-termination amounts — those sit right next to the real price precisely to test whether an extractor grabs the wrong one.
     // - recurrenceMonths is declared as 24 because the document prints 'Minimum term 24 months' in digits, but this is the length of the fixed commitment, not a repeating interval — after it, billing continues monthly on a rolling basis at a different price. A parser that reads 24 as 'this item recurs every 24 months' would be wrong; flagging this as the real judgement call.
     // - 2028-04-21 is labelled 'renewal' rather than 'expiry' because the document explicitly says the contract 'continues and renews automatically on a rolling 30-day basis' at that point (page 1 callout and page 3 'Contract renewal' paragraph) — an actual renewal event, not just a term ending.
     // - Distractors left in deliberately and excluded from dates[]: order date 14 April 2026, document-issued date 15 April 2026, cooling-off deadline 28 April 2026, the 1 April annual price-rise date, the Direct Debit collection day, and the 24 contract-month numbers (1-24) in the exit-fee table, which are month indices, not dates.
@@ -154,7 +154,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2028-04-21", role: "renewal" },
     ],
     subtype: {"kinds":["Contract","Subscription","Plan","Tariff","Utility","Service"],"qualifiers":["Broadband"]},
-    costMinor: 3499,
+    costMinor: 83976,
     currency: "GBP",
     recurrenceMonths: 24,
     scheduleKind: "renewal",
@@ -225,7 +225,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - dates: agreement runs 1 June 2025 to 31 May 2028. Seven other printed dates are deliberately not declared: the statement date, the last service date, four monthly payment-history dates, a previous unrelated vehicle's return date, and a terms revision stamp.
     // - provider is Wraxall Vehicle Finance plc, stated plainly in the page's own text to be who provides the lease and the vehicle. DriveEasy Leasing Brokers Ltd, named in the letterhead, is described in the small print as an FCA-regulated credit broker acting on commission, not the lessor -- the same broker-versus-underwriter distinction the owner drew for a motor policy (#989).
     // - reference is the agreement number, not the vehicle registration or a previous unrelated vehicle's registration.
-    // - costMinor is the monthly rental, the only amount that is plainly the cost of the thing; the per-mile excess charge is a penalty rate, and the payment-history amounts repeat the same rental.
+    // - costMinor is 1184400, 36 months x the £329.00 monthly rental ('This agreement runs for 36 months') -- the total is never printed (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure); the per-mile excess charge is a penalty rate, and the payment-history amounts repeat the same rental.
     // - subtype: 'Lease' qualified by 'Motor'.
     // - recurrenceMonths is not declared: the rental is described as monthly in words, not in a printed digit count.
     // - scheduleKind is not declared: neither dateRole is 'renewal' or 'service'.
@@ -241,7 +241,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2028-05-31", role: "expiry" },
     ],
     subtype: {"kinds":["Lease"],"qualifiers":["Motor"]},
-    costMinor: 32900,
+    costMinor: 1184400,
     currency: "GBP",
     },
   },
@@ -321,7 +321,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - dates: quote date printed as 'Quote date: 6 October 2026' (role issued) and printed as 'Valid until: 6 November 2026' (role expiry).
     // - provider is the advice firm that prepared and would administer the cover, Amberleigh Financial Advisers Ltd, not the underwriter Carrick Life Assurance plc.
     // - reference is the quote reference 'AMB-CI-2026-77410' printed on page 1 and repeated on the reply slip.
-    // - costMinor is the recommended Option B monthly premium '£34.62' i.e. 3462 pence.
+    // - costMinor is 1038600, 'total premiums payable under Option B would be £10,386.00' over the 25-year term (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure); the recommended Option B monthly premium '£34.62' is the instalment.
     // - trap: sum assured '£150,000'.
     // - trap: term of 25 years and cover ending in 2051, 'with cover ending in 2051'.
     // - trap: total premiums payable over the term '£10,386.00'.
@@ -344,7 +344,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2026-11-06", role: "expiry" },
     ],
     subtype: {"kinds":["Quote","Insurance"],"qualifiers":["Critical illness","Life"]},
-    costMinor: 3462,
+    costMinor: 1038600,
     currency: "GBP",
     },
   },
@@ -353,7 +353,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - provider is Northgate Dental Plan Administration Ltd, the scheme administrator named only in the panel's small print and in the Direct Debit Guarantee wording. Aldermoor Dental Practice, named largest at the top of the panel as the masthead, is the practice where treatment happens, not the organisation the plan is with, so it is not the provider.
     // - reference is the membership number NDPA-208467, which is how the member's own record is filed with the administrator, not the plan product name (Aldermoor Complete Care Plan) or the administrator's company number (04471102) or the Direct Debit originator's identification number (934218), none of which a member would quote to identify their plan.
     // - dates/dateRoles carry only the plan renewal date (1 March 2027), role 'renewal': Orbit tracks the plan, not the appointments (owner ruling 2026-09-11: 'The check up date is unrelated, Orbit is to track the plan!'; the truth previously tracked the next check-up, 12 November 2026, as 'service'). The statement prints seven other dates -- the statement date (14 August 2026), the plan start date (1 March 2020), the last check-up (12 May 2026), the next check-up (12 November 2026), the last hygienist visit (30 June 2026), the last payment taken (1 August 2026), the next payment due (1 September 2026) and the fee price-list effective date (1 April 2026) -- none of which is the answer.
-    // - costMinor is 950 (the £9.50 monthly payment collected by Direct Debit), not the £114.00 plan-year value, not the practice's £62.00 private examination fee, not the £58.00 hygienist fee, and not the £1,000,000 worldwide dental trauma cover limit -- all printed on the same panel as rival amounts.
+    // - costMinor is 11400 (the £114.00 'Plan year value', twelve £9.50 monthly Direct Debit payments) (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure); not the £9.50 instalment, not the practice's £62.00 private examination fee, not the £58.00 hygienist fee, and not the £1,000,000 worldwide dental trauma cover limit -- all printed on the same panel as rival amounts.
     // - recurrenceMonths is 12, the plan year the page states as running 12 months: the cycle of the plan, not the 6-month check-up interval and not the monthly payment, both also printed.
     // - scheduleKind is 'renewal' because the tracked date is when the plan year renews.
     // - subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Dental plan statement').
@@ -368,7 +368,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2027-03-01", role: "renewal" },
     ],
     subtype: {"kinds":["Plan","Insurance","Membership","Subscription","Statement","Maintenance contract"],"qualifiers":["Dental","Health"]},
-    costMinor: 950,
+    costMinor: 11400,
     currency: "GBP",
     recurrenceMonths: 12,
     scheduleKind: "renewal",
@@ -831,7 +831,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
   },
   {
     // Ground-truth notes:
-    // - provider is 'Cresswell Fitness Club', not 'Cresswell Leisure Ltd': "we deal with the trading as company, not the parent, so we don't want to pick the parent." (owner, 2026-09-11, #989). reference is the hand-filled membership number at the top of page 1 ('Membership No. CFC-004821'); price list ref 'PL-2026-03' is a rival. dates/dateRoles: the start date (02 March 2026, hand-filled overleaf) and the minimum-term end date, which is never printed in the member details block -- it appears only inside clause 4's prose, hand-filled into the printed sentence ('Your minimum term will end on 2 March 2027'). Rival, non-answer dates that are hand-filled in the same italic style as the start date: date of birth (14 July 1988, three lines above the start date field), the date the health questionnaire was completed (20 February 2026) and the date the member signed (27 February 2026) -- none of these are tracked. 'January 2027' (next fee review, clause 6) is a further rival close to but distinct from the exact renewal date. costMinor is the monthly Direct Debit fee of £42.50; the joining fee (£25.00), the paid-in-full annual fee (£459.00), the day-pass rate (£12.00) and the cancellation administration fee (£60.00) are rivals on the same price list. recurrenceMonths is 1, matching the monthly Direct Debit collection in clauses 5 and 12; the minimum term (12 months, clauses 1, 4 and 8), the maximum freeze period (3 months, clause 8) and the cancellation/variation notice period (1 calendar month, clauses 12, 6 and 22) are all cited elsewhere and give 12, 3 and 1 as rival period lengths. scheduleKind is 'renewal' because the membership rolls forward monthly after the minimum term (clause 4) rather than being a one-off service.
+    // - provider is 'Cresswell Fitness Club', not 'Cresswell Leisure Ltd': "we deal with the trading as company, not the parent, so we don't want to pick the parent." (owner, 2026-09-11, #989). reference is the hand-filled membership number at the top of page 1 ('Membership No. CFC-004821'); price list ref 'PL-2026-03' is a rival. dates/dateRoles: the start date (02 March 2026, hand-filled overleaf) and the minimum-term end date, which is never printed in the member details block -- it appears only inside clause 4's prose, hand-filled into the printed sentence ('Your minimum term will end on 2 March 2027'). Rival, non-answer dates that are hand-filled in the same italic style as the start date: date of birth (14 July 1988, three lines above the start date field), the date the health questionnaire was completed (20 February 2026) and the date the member signed (27 February 2026) -- none of these are tracked. 'January 2027' (next fee review, clause 6) is a further rival close to but distinct from the exact renewal date. costMinor is 51000, the 12-month minimum term x the £42.50 monthly Direct Debit fee -- never printed (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure); the paid-in-full annual fee (£459.00) is a different, discounted price the member did not take, and the joining fee (£25.00), the day-pass rate (£12.00) and the cancellation administration fee (£60.00) are rivals on the same price list. recurrenceMonths is 1, matching the monthly Direct Debit collection in clauses 5 and 12; the minimum term (12 months, clauses 1, 4 and 8), the maximum freeze period (3 months, clause 8) and the cancellation/variation notice period (1 calendar month, clauses 12, 6 and 22) are all cited elsewhere and give 12, 3 and 1 as rival period lengths. scheduleKind is 'renewal' because the membership rolls forward monthly after the minimum term (clause 4) rather than being a one-off service.
     // - subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Gym membership agreement').
     name: "gym membership agreement, minimum-term end date only in clause prose",
     filename: "fullpage-gym-membership-agreement.pdf",
@@ -845,7 +845,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2027-03-02", role: "renewal" },
     ],
     subtype: {"kinds":["Membership","Contract","Subscription","Plan"],"qualifiers":["Gym"]},
-    costMinor: 4250,
+    costMinor: 51000,
     currency: "GBP",
     recurrenceMonths: 1,
     scheduleKind: "renewal",
@@ -856,7 +856,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - dates: plan starts 6 April 2026 and renews 6 April 2027. Three other printed dates are deliberately not declared: a claim's treatment date (14 Jul 2026), the same claim's payment date (2 Aug 2026), and the benefit-limits review date (1 Jan 2026, unchanged from the previous year so not itself a plan date); the rules-booklet edition stamp (4 Sep 2024) is a print-run date.
     // - provider is Bramwell Friendly Society Ltd, named only in the small print as who 'FeelGood Cash Plan' -- printed large as the brand everywhere else on the page -- is a trading name of.
     // - reference is the membership number FGP-MEM-338420.
-    // - costMinor is the £14.50 monthly premium, not any of the five annual benefit limits in the table.
+    // - costMinor is the £14.50 monthly premium, not any of the five annual benefit limits in the table; the plan is rolling monthly with no fixed term, so the monthly premium is the commitment (owner rule, 2026-09-13).
     // - subtype: 'Plan' (matching the printed 'Cash Plan') qualified by 'Health'.
     // - scheduleKind is 'renewal': the later dateRole is 'renewal', and the page confirms the plan renews automatically each year.
     // - recurrenceMonths is 1: the plan is billed '1 month at a time', printed in digits.
@@ -949,7 +949,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
   },
   {
     // Ground-truth notes:
-    // - The policy start date (18 October 2026) and end date (17 October 2046) appear only on the page-13 schedule, along with the policy number and the monthly premium; nothing before page 13 states them. The ten terms pages (3-12) carry roughly 24,000 characters of clause text ahead of the schedule, so an extractor that truncates its input at 12,000 characters and reads only the head never reaches any of the answer fields. Distractors seeded before page 13: the cover page's large 'Issued: 12 June 2026' and 'Edition 4, revised 14 January 2026' dates (both in the first 500 characters); a claim-notification worked example (3 March 2026 / 2 April 2026); a critical-illness waiting-period worked example (1 March 2025 / 29 May 2025); a cancellation cooling-off worked example (3 April 2026 / 3 May 2026); a complaints-timescale worked example (1 June 2026 / 27 July 2026); the date the terms were last updated (4 February 2026); the regulator authorisation date (15 September 2004); and an eight-row premium review table (1 January 2027 through 2034) -- 20 distractor dates in total before the schedule, against the 2 answers. costMinor is the monthly premium (£32.50) shown on the schedule; the rival amounts printed nearby -- the sum assured (£150,000.00), the critical illness benefit (£75,000.00), the annual premium option (£351.00) and the total premiums payable over the full term (approximately £7,800.00, also previewed on page 12) -- are all deliberately not the answer. provider is the insurer, Ashcombe Life Assurance plc, not the fund manager (Meridian Asset Management Ltd, which manages the assets backing the policy) or the reinsurer (Continental Re (UK) Ltd, which reinsures part of the risk) -- both named in section 8 but neither the entity that issued the policy. reference is the policy number, printed on the schedule and, from page 13 onward, in the running footer; the document code in the footer of every page (Form ALA-PB-LCI-07) is a separate identifier and not the reference. recurrenceMonths is 1 because the schedule states premiums are 'paid every 1 month'; scheduleKind is declared 'renewal' per the brief for this document even though both declared dateRoles are 'start' and 'expiry' rather than 'renewal' -- this is a known mismatch against verify.mjs's role-derivation check (which infers scheduleKind only from a 'renewal' or 'service' role) and should be reconciled centrally rather than in this fixture. scheduleKind and recurrenceMonths are both omitted: a 20-year term policy ends rather than renewing, so the end date is 'expiry' like the MOT certificate, and recurrenceMonths in this corpus means the cycle of the thing (a 24-month contract, a 12-month inspection interval), not how often the premium is paid.
+    // - The policy start date (18 October 2026) and end date (17 October 2046) appear only on the page-13 schedule, along with the policy number and the monthly premium; nothing before page 13 states them. The ten terms pages (3-12) carry roughly 24,000 characters of clause text ahead of the schedule, so an extractor that truncates its input at 12,000 characters and reads only the head never reaches any of the answer fields. Distractors seeded before page 13: the cover page's large 'Issued: 12 June 2026' and 'Edition 4, revised 14 January 2026' dates (both in the first 500 characters); a claim-notification worked example (3 March 2026 / 2 April 2026); a critical-illness waiting-period worked example (1 March 2025 / 29 May 2025); a cancellation cooling-off worked example (3 April 2026 / 3 May 2026); a complaints-timescale worked example (1 June 2026 / 27 July 2026); the date the terms were last updated (4 February 2026); the regulator authorisation date (15 September 2004); and an eight-row premium review table (1 January 2027 through 2034) -- 20 distractor dates in total before the schedule, against the 2 answers. costMinor is 780000, 'Total premiums payable over full term approximately £7,800.00' on the schedule (240 months x the £32.50 monthly premium; owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term); the rival amounts printed nearby -- the £32.50 monthly instalment, the sum assured (£150,000.00), the critical illness benefit (£75,000.00) and the annual premium option (£351.00, a different price the policyholder did not take) -- are all deliberately not the answer. provider is the insurer, Ashcombe Life Assurance plc, not the fund manager (Meridian Asset Management Ltd, which manages the assets backing the policy) or the reinsurer (Continental Re (UK) Ltd, which reinsures part of the risk) -- both named in section 8 but neither the entity that issued the policy. reference is the policy number, printed on the schedule and, from page 13 onward, in the running footer; the document code in the footer of every page (Form ALA-PB-LCI-07) is a separate identifier and not the reference. recurrenceMonths is 1 because the schedule states premiums are 'paid every 1 month'; scheduleKind is declared 'renewal' per the brief for this document even though both declared dateRoles are 'start' and 'expiry' rather than 'renewal' -- this is a known mismatch against verify.mjs's role-derivation check (which infers scheduleKind only from a 'renewal' or 'service' role) and should be reconciled centrally rather than in this fixture. scheduleKind and recurrenceMonths are both omitted: a 20-year term policy ends rather than renewing, so the end date is 'expiry' like the MOT certificate, and recurrenceMonths in this corpus means the cycle of the thing (a 24-month contract, a 12-month inspection interval), not how often the premium is paid.
     // - subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Life cover policy').
     name: "life and critical illness booklet, answers only on the page-13 schedule past the truncation point",
     filename: "fullpage-life-cover-booklet.pdf",
@@ -963,7 +963,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2046-10-17", role: "expiry" },
     ],
     subtype: {"kinds":["Insurance","Plan"],"qualifiers":["Life","Critical illness"]},
-    costMinor: 3250,
+    costMinor: 780000,
     currency: "GBP",
     },
   },
@@ -971,7 +971,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // Ground-truth notes:
     // - provider is 'Fenwick Mobile', not 'Anglia Communications Networks Ltd': "we deal with the trading as company, not the parent, so we don't want to pick the parent." (owner, 2026-09-11, #989).
     // - dates and dateRoles carry only 20 March 2027, when the 24-month minimum term ends. The page prints many other dates that a careful reader would not track as the document's governing date: the plan start date (20 March 2025), the next bill date shown in the largest type on the page with a day countdown (20 October 2026), the same date repeated as the data allowance reset date, the handset upgrade window opening one month early (20 February 2027, deliberately close to but not the same as the term end), the last two bill dates (20 September 2026, 20 August 2026), a 'prices correct as of' stamp (1 September 2026), the year-month segment in the printed URL (2026-03), the copyright year, and the browser's own printed-on timestamp in the footer (11/09/2026, 14:32), which is the last date on the page and is a full print timestamp, not a plan date.
-    // - costMinor is the standard monthly plan charge of £23.00, which applies from month 7 onward. It is not the discounted £14.00/month introductory rate for the first 6 months (shown larger, in the brand colour), not the out-of-bundle rates (45p/min calls, 11p/text, £6.00/GB data, £2.00/day roaming), not the £5.00/month international add-on, and not last month's total bill of £31.50 (which blends the plan charge with add-on and usage charges) or the previous bill of £23.50.
+    // - costMinor is 49800: the 24-month minimum term paid at the discounted £14.00/month introductory rate for the first 6 months and the standard £23.00 plan charge from month 7 (6 x 14 + 18 x 23 = £498.00), never printed (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure). A flat 24 x £23.00 (£552.00) is money never paid; flagged for the owner. It is not the £23.00 or £14.00 instalment alone, not the out-of-bundle rates (45p/min calls, 11p/text, £6.00/GB data, £2.00/day roaming), not the £5.00/month international add-on, and not last month's total bill of £31.50 (which blends the plan charge with add-on and usage charges) or the previous bill of £23.50.
     // - reference is the account number 7734 2210 91, not the mobile number 07700 900123 printed alongside it, since the account number is what the customer would quote when contacting the operator.
     // - recurrenceMonths is 24, the printed minimum term ('Minimum term 24 months — ends 20 March 2027'): the cycle of the thing, not the monthly billing (corrected 2026-09-11; the value was 1, which measured payment frequency and contradicted the broadband contract's 24). scheduleKind is 'renewal' because the tracked date is when the minimum term completes and the contract rolls onto its next arrangement, not a service event.
     // - subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Mobile plan summary').
@@ -986,7 +986,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2027-03-20", role: "renewal" },
     ],
     subtype: {"kinds":["Plan","Contract","Subscription","Tariff"],"qualifiers":["Mobile"]},
-    costMinor: 2300,
+    costMinor: 49800,
     currency: "GBP",
     recurrenceMonths: 24,
     scheduleKind: "renewal",
@@ -2157,7 +2157,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - dates: move-in 15 August 2026, next payment due 15 September 2026. Four other printed dates are deliberately not declared: the agreement preparation date, the site's last rent increase, a previous, unrelated unit's end date at this address, and the terms edition stamps.
     // - provider is 'SSL': the operator's full legal or trading name is never printed anywhere on the page, only these three letters, used throughout as the brand mark and in the registered-company sentence in the small print.
     // - reference is the unit reference SSL-BX-3390, not the unrelated previous unit reference or the access code.
-    // - costMinor is the monthly rent, printed with a currency symbol as the cost of the thing itself; the included-insurance figure is a cover limit, not a cost.
+    // - costMinor is the monthly rent, printed with a currency symbol as the cost of the thing itself; the agreement is rolling monthly with no fixed term, so the monthly rent is the commitment (owner rule, 2026-09-13). The included-insurance figure is a cover limit, not a cost.
     // - recurrenceMonths is not declared even though a '1 month' term is printed in digits: the contract only keeps a recurrence where a dateRole is 'renewal' or 'service' for it to describe (suggestions.ts), and neither role appears here -- 'start' and 'due' are not scheduled events. Declaring it anyway would ask the extractor for a value the design never lets it keep.
     // - subtype: 'Rental'; no qualifier group in the taxonomy names storage closely enough to declare one.
     // - scheduleKind is not declared: neither dateRole is 'renewal' or 'service'.
@@ -2256,13 +2256,13 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - recurrenceMonths 12 is the plan's own term, printed in digits twice as '12 month plan' — not the monthly billing frequency.
     // - Provider is the streaming brand Northlight+, shown in the brand bar and From address — not the billing entity named later.
     // - Reference is the account number 'NL-ACC-771049-2' printed in the summary table, not the invoice number.
-    // - costMinor 999 is the 'Amount charged £9.99' in the summary table, matching the monthly payment described in the greeting.
+    // - costMinor 11988 is 'your 12 month plan is equivalent to £119.88 a year', the whole 12-month plan paid monthly (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure).
     // - Trap: an 'Invoice number: NL-INV-2208453' sits beside the account number as a rival reference.
     // - Trap: a 'VAT registration: GB 234 5678 90' is a rival identifier, and 'VAT of £1.67' is a rival money figure within the same charge.
     // - Trap: the charge is described as 'billed by Meridian Payments Limited on behalf of Northlight+', a rival provider name.
     // - Trap: 'debit card ending 4471 (expires 09/28)' gives a rival date in card-expiry form.
     // - Trap: the card was 'taken ... on 4 August 2026', a rival date one day after the stated payment date.
-    // - Trap: 'equivalent to £119.88 a year' is a rival annual cost figure.
+    // - Trap: the 'Amount charged £9.99' in the summary table is one monthly payment, not the commitment.
     // - Trap: 'Northlight+ Ultra is available for £13.99 a month' is a rival plan and price.
     // - Trap: the promotion 'offer ends 31 August 2026' is a rival date.
     // - Trap: the app store mention directs cancellation elsewhere, a rival management channel.
@@ -2279,7 +2279,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2027-08-03", role: "renewal" },
     ],
     subtype: {"kinds":["Subscription"],"qualifiers":["Streaming","TV"]},
-    costMinor: 999,
+    costMinor: 11988,
     currency: "GBP",
     recurrenceMonths: 12,
     scheduleKind: "renewal",
@@ -2290,7 +2290,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - Term is a fixed term of 12 months, printed in the particulars as 'A fixed term of 12 months, commencing 15/06/2026 and expiring 14/06/2027' — start date 2026-06-15, renewal/expiry date 2027-06-14.
     // - Provider is the managing agent, Thornfield Lettings & Management, who receives rent and handles notices per clause 1 and 3 — not the private landlord Graham Pettifer.
     // - Reference THN-2026-0458 is printed as the 'Tenancy Reference' in the particulars and repeated in every page footer.
-    // - Rent is £975.00 per calendar month, printed in the particulars 'Rent' row and restated in clause 3, giving costMinor 97500.
+    // - costMinor 1170000 is 'Total rent payable over the term: £11,700.00' (12 x the £975.00 monthly rent in the particulars 'Rent' row, restated in clause 4) (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure).
     // - Trap: the 'Date of this Agreement' (signing date) is printed as 02/06/2026, a rival date near but not equal to the tenancy start.
     // - Trap: the Inventory / Check-in appointment is printed as '14/06/2026 at 10:00am', the day before the tenancy actually starts.
     // - Trap: the Break Clause date '15/12/2026 (six months after commencement)' is a plausible but wrong renewal-like date.
@@ -2303,7 +2303,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - Trap: the agent's client money protection scheme, 'Lettings Client Money Protect, certificate no. LCMP-4471', is a second rival organisation and reference.
     // - Trap: the break clause notice period 'giving 2 months' written notice' is a rival number to the 12-month recurrence.
     // - Trap: the late payment interest rate '3% above the Bank of England base rate' is a rival numeric figure.
-    // - Trap: the total rent over the term, '£11,700.00', is a rival cost figure to the monthly rent.
+    // - Trap: the monthly rent '£975.00' is the instalment, not the commitment.
     name: "Assured Shorthold Tenancy Agreement",
     filename: "tenancy-agreement.pdf",
     text: "Assured Shorthold Tenancy Agreement  \n\nTHORNFIELD LETTINGS & MANAGEMENT 8 High Street, Barchester, BR1 4DA  ·  01632 960214  ·  lettings@thornfield-lettings.example \n\nASSURED SHORTHOLD TENANCY AGREEMENT \n\nSCHEDULE OF PARTICULARS \n\nThe Property Flat 4, 12 Mulberry Court, Barchester, BR3 7QW \n\nThe Landlord Mr Graham Pettifer, 22 Larch Avenue, Barchester, BR2 9LH \n\nThe Tenant Ms Eleanor Vance \n\nThe Managing Agent Thornfield Lettings & Management, 8 High Street, Barchester, BR1 4DA \n\nTenancy Reference THN-2026-0458 \n\nTerm A fixed term of 12 months, commencing 15/06/2026 and expiring 14/06/2027 \n\nRent £975.00 per calendar month, payable in advance on the 15th day of each month. Total rent payable over the term: £11,700.00 \n\nFirst Payment Due 02/06/2026 — first month's rent, deposit and remaining holding deposit balance payable on signing \n\nDeposit £1,125.00, to be protected within 30 days of receipt under the Home Deposits Custodial Scheme \n\nHolding Deposit £225.00, received 18/05/2026, credited against the first month's rent \n\nDate of this Agreement 02/06/2026 \n\nInventory / Check-in Appointment 14/06/2026 at 10:00am, Thornfield representative to attend with the Tenant \n\nBreak Clause Exercisable on or after 15/12/2026 (six months after commencement) by either party giving 2 months' written notice \n\nLate Payment Interest charged at 3% above the Bank of England base rate on rent more than 14 days in arrears \n\nAgent's Redress Scheme National Letting Redress Service, membership no. NLRS-88213 \n\nAgent's Client Money \n\nProtection \n\nLettings Client Money Protect, certificate no. LCMP-4471 \n\nThis Schedule of Particulars is incorporated into and forms part of the attached Tenancy Agreement (clauses 1–13). \n\nThornfield Lettings & Management  ·  Tenancy Reference THN-2026-0458  ·  Page 1 of 3\n\nTenancy Agreement — Flat 4, 12 Mulberry Court, Barchester, BR3 7QW Reference THN-2026-0458 \n\n1. Definitions \n\nIn this Agreement, \"the Landlord\" means Mr Graham Pettifer of 22 Larch Avenue, Barchester, BR2 9LH; \"the Tenant\" means \n\nMs Eleanor Vance; \"the Agent\" means Thornfield Lettings & Management of 8 High Street, Barchester, BR1 4DA, acting \n\nthroughout as managing agent for the Landlord and as the Tenant's first point of contact for all rent payments, repairs and \n\nnotices; and \"the Property\" means Flat 4, 12 Mulberry Court, Barchester, BR3 7QW, together with its fixtures and fittings as \n\nrecorded in the inventory. \n\n2. Term and Commencement \n\nThe Property is let for a fixed term of 12 months, commencing on 15 June 2026 and expiring on 14 June 2027, unless \n\nterminated earlier in accordance with clause 10 (Break Clause) or extended by a further written agreement between the parties. \n\nThe Tenant shall not be entitled to occupy the Property before the commencement date without the Agent's prior written \n\nconsent. \n\n3. Rent \n\nThe Tenant shall pay to the Agent, on behalf of the Landlord, rent of £975.00 per calendar month, in advance, on the 15th day \n\nof each month, by standing order to the Agent's client account. The first payment, comprising the balance of the first month's \n\nrent after crediting the holding deposit, falls due on 2 June 2026, being the date of signing. Should any instalment remain \n\nunpaid more than 14 days after its due date, interest shall accrue at 3% above the Bank of England base rate from the due date \n\nuntil payment. Were the Tenant to remain for the whole of the fixed term, the total rent payable would be £11,700.00. \n\n4. Deposit \n\nThe Tenant shall pay a deposit of £1,125.00, equivalent to just under six weeks' rent, prior to the commencement of the \n\ntenancy. The Agent shall protect the deposit within 30 days of receipt under the Home Deposits Custodial Scheme and shall \n\nprovide the Tenant with the scheme's prescribed information within the same period. Subject to deductions properly made \n\nfor damage, arrears or breach of this Agreement, the deposit shall be returned within 10 days of the end of the tenancy. \n\n5. Tenant's Obligations \n\nThe Tenant shall keep the interior of the Property in good and tenantable condition, shall not keep any pet without the \n\nLandlord's prior written consent, shall not smoke within the Property, and shall not assign, sublet or part with possession of the \n\nProperty or any part of it without the Agent's prior written consent. The Tenant shall permit the Landlord, the Agent or their \n\nappointed contractors to enter the Property to inspect its condition or carry out repairs, on not less than 24 hours' written \n\nnotice save in an emergency. \n\n6. Landlord's Obligations \n\nThe Landlord shall keep in repair the structure and exterior of the Property, including drains, gutters and external pipes, and \n\nthe installations for the supply of water, gas, electricity and sanitation. The Landlord shall provide a valid gas safety record and \n\nelectrical installation condition report before the Tenant takes occupation and at the intervals required by law thereafter. \n\n7. Insurance \n\nThe Landlord shall maintain buildings insurance over the Property. The Tenant is responsible for insuring their own contents \n\nand personal possessions and acknowledges that the Landlord's policy does not extend to them. \n\nThornfield Lettings & Management  ·  Tenancy Reference THN-2026-0458  ·  Page 2 of 3\n\nTenancy Agreement — Flat 4, 12 Mulberry Court, Barchester, BR3 7QW Reference THN-2026-0458 \n\n8. Right of Entry \n\nSave in an emergency, the Landlord and the Agent shall give the Tenant not less than 24 hours' written notice before entering \n\nthe Property, and shall attend only at reasonable hours of the day. \n\n9. Assignment and Subletting \n\nThe Tenant shall not assign, underlet, charge or part with possession of the whole or any part of the Property without the prior \n\nwritten consent of the Landlord, such consent to be given through the Agent and not to be unreasonably withheld. \n\n10. Break Clause \n\nEither party may terminate this Agreement by serving not less than 2 months' written notice on the other, provided that such \n\nnotice may not expire earlier than 15 December 2026, being six months after the commencement date. Notice under this \n\nclause shall be served on the Agent at the address in clause 1 and shall be treated as effective on the date of delivery. \n\n11. Termination and Holding Over \n\nIf the Tenant remains in occupation after expiry of the fixed term with the Landlord's consent, a periodic tenancy shall arise on \n\nthe same terms unless a new fixed term agreement is signed. The Landlord shall not seek possession under section 21 of the \n\nHousing Act 1988 by notice expiring earlier than 2 months from the date of service. \n\n12. Notices \n\nAny notice under this Agreement shall be in writing and shall be validly served if delivered by hand or sent by first class post \n\nto the Agent at 8 High Street, Barchester, BR1 4DA, or to the Tenant at the Property. \n\n13. Governing Law \n\nThis Agreement is governed by the law of England and Wales, and the parties submit to the exclusive jurisdiction of its courts. \n\nSigned as an Agreement dated 02/06/2026: \n\nSigned by the Landlord: G. Pettifer \n\nSigned by the Tenant: E. Vance \n\nSigned for the Agent: R. Okafor, Thornfield Lettings \n\nThornfield Lettings & Management  ·  Tenancy Reference THN-2026-0458  ·  Page 3 of 3\n",
@@ -2316,7 +2316,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2027-06-14", role: "renewal" },
     ],
     subtype: {"kinds":["Tenancy","Contract"],"qualifiers":["Tenancy","Home"]},
-    costMinor: 97500,
+    costMinor: 1170000,
     currency: "GBP",
     recurrenceMonths: 12,
     scheduleKind: "renewal",
