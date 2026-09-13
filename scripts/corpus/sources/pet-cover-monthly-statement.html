@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Bramblepaw Pet Healthcare — monthly statement</title>
+<style>
+@font-face{font-family:"Corpus Vet";src:url("../fonts/Mulish.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Vet Mono";src:url("../fonts/Inconsolata.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; }
+  .page { width: 794px; height: 1123px; box-sizing: border-box; position: relative; overflow: hidden; padding: 40px 48px; font-family: "Corpus Vet", sans-serif; color: #1a1a1a; font-size: 10.4px; line-height: 1.42; }
+
+  .mono { font-family: "Corpus Vet Mono", monospace; }
+  .masthead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2f6b4f; padding-bottom: 7px; margin-bottom: 10px; }
+  .brand { font-size: 20px; font-weight: bold; color: #2f6b4f; }
+  .brand small { display: block; font-size: 8px; font-weight: normal; color: #444; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
+  .stmtbox { font-size: 8px; text-align: right; line-height: 1.6; color: #333; }
+  .stmtbox b { font-family: "Corpus Vet Mono", monospace; color: #000; }
+
+  h1.doctitle { font-size: 15px; color: #2f6b4f; margin: 4px 0 8px 0; }
+  h2.sec { font-size: 9.4px; color: #2f6b4f; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2f6b4f; padding-bottom: 2px; margin: 11px 0 5px 0; }
+  p { margin: 0 0 6.5px 0; text-align: justify; }
+
+  .covbox { border: 1.4px solid #2f6b4f; background: #eef6f1; padding: 7px 10px; margin: 8px 0; }
+  .covbox .ctitle { font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; color: #2f6b4f; font-size: 8px; margin-bottom: 4px; }
+  .kv { display: flex; margin-bottom: 2px; font-size: 8.6px; }
+  .kv .k { width: 210px; flex-shrink: 0; color: #333; }
+  .kv .v { font-family: "Corpus Vet Mono", monospace; font-weight: bold; }
+
+  table.details { width: 100%; border-collapse: collapse; font-size: 8.4px; margin-bottom: 8px; }
+  table.details td { padding: 2.6px 5px; border-bottom: 0.5px solid #bcd9c8; }
+  table.details td.lbl { width: 42%; color: #333; }
+  table.details td.val { font-family: "Corpus Vet Mono", monospace; }
+
+  table.ledger { width: 100%; border-collapse: collapse; font-family: "Corpus Vet Mono", monospace; font-size: 7.8px; margin-bottom: 8px; }
+  table.ledger th { background: #2f6b4f; color: #fff; text-align: left; padding: 3px 5px; font-family: "Corpus Vet", sans-serif; font-size: 7.8px; }
+  table.ledger td { padding: 2.4px 5px; border-bottom: 0.5px solid #bcd9c8; }
+  table.ledger td.num { text-align: right; }
+  table.ledger tr.total td { font-weight: bold; border-top: 1px solid #2f6b4f; }
+
+  table.claimtab { width: 100%; border-collapse: collapse; font-size: 8.2px; margin-bottom: 8px; }
+  table.claimtab th { background: #2f6b4f; color: #fff; text-align: left; padding: 3px 5px; }
+  table.claimtab td { padding: 2.4px 5px; border-bottom: 0.5px solid #bcd9c8; }
+  table.claimtab td.num { font-family: "Corpus Vet Mono", monospace; text-align: right; }
+
+  .limitgrid { display: flex; gap: 5px; margin: 6px 0; }
+  .limitcell { flex: 1; border: 0.9px solid #2f6b4f; padding: 5px 4px; text-align: center; }
+  .limitcell .llabel { font-size: 6.6px; text-transform: uppercase; color: #444; letter-spacing: 0.3px; }
+  .limitcell .lamt { font-family: "Corpus Vet Mono", monospace; font-weight: bold; font-size: 11.5px; margin-top: 2px; }
+
+  .footer { position: absolute; left: 48px; right: 48px; bottom: 18px; font-size: 7px; color: #444; display: flex; justify-content: space-between; border-top: 0.75px solid #2f6b4f; padding-top: 3px; }
+  .fine { font-size: 7px; color: #333; line-height: 1.35; }
+  .cols2 { column-count: 2; column-gap: 12px; font-size: 7.8px; text-align: justify; }
+  .cols2 p { margin: 0 0 5px 0; }
+  .noteblock { border-left: 2.4px solid #2f6b4f; padding-left: 7px; margin: 6px 0; font-size: 8px; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="masthead">
+    <div class="brand">Bramblepaw Pet Healthcare<small>Monthly account statement</small></div>
+    <div class="stmtbox">
+      Statement number <b>ST-0091</b><br>
+      Statement date <b>2 September 2026</b><br>
+      Customer number <b>77123</b>
+    </div>
+  </div>
+  <h1 class="doctitle">Your monthly statement</h1>
+  <p>This statement covers the period <b>1 August 2026 to 31 August 2026</b> for the cover held on your pet, Milo. It shows the premium collected during the period, and a summary of your most recent claim. Please keep this statement for your records, and let us know straight away if any of the details on it look wrong.</p>
+  <div class="covbox">
+    <div class="ctitle">Your cover</div>
+    <div class="kv"><div class="k">Policy number</div><div class="v" style="white-space:nowrap">BP 4411 8820 6</div></div>
+    <div class="kv"><div class="k">Premium for the current policy year</div><div class="v">&pound;341.88</div></div>
+    <div class="kv"><div class="k">Paid monthly instalment</div><div class="v">&pound;28.49</div></div>
+    <div class="kv"><div class="k">Your 12 month policy year ends on</div><div class="v">1 February 2027</div></div>
+  </div>
+  <h2 class="sec">Pet and policy details</h2>
+  <table class="details">
+    <tr><td class="lbl">Pet's name</td><td class="val">Milo</td></tr>
+    <tr><td class="lbl">Date of birth</td><td class="val">14/06/2021</td></tr>
+    <tr><td class="lbl">Microchip number</td><td class="val">981098100472339</td></tr>
+    <tr><td class="lbl">Policy start date</td><td class="val">01/02/2023</td></tr>
+    <tr><td class="lbl">Registered veterinary practice</td><td class="val">Milden Road Veterinary Group, practice code VP-2290</td></tr>
+    <tr><td class="lbl">Date of last booster vaccination on file</td><td class="val">09/05/2026</td></tr>
+  </table>
+  <h2 class="sec">Payment details</h2>
+  <table class="details">
+    <tr><td class="lbl">Direct debit reference</td><td class="val">4411882</td></tr>
+    <tr><td class="lbl">Sort code</td><td class="val">20-45-11</td></tr>
+    <tr><td class="lbl">Account number</td><td class="val">61550293</td></tr>
+    <tr><td class="lbl">Next collection date</td><td class="val">5 September 2026</td></tr>
+  </table>
+  <p style="font-size:8.6px">Please note that new prices for premiums, excesses and add-on tiers take effect from 1 January 2027. We will write to you separately before your policy year ends on 1 February 2027 to confirm your renewal terms.</p>
+  <p style="font-size:8.6px">We send you a statement like this one every month so you can see exactly what has been collected from your account and how your cover is progressing through the year. Your instalment is collected in advance on the same date each month, and this statement is produced a day or two after collection so that it reflects the payment shown in the ledger overleaf. If you would prefer to receive your statements by post rather than by email, you can change this at any time through your online account.</p>
+  <p style="font-size:8.6px">Keeping your pet's details up to date helps us process any future claim more quickly. If Milo's weight, breed information or regular medication has changed since your policy started, please let your registered practice know at your next visit so their records, and ours, stay accurate.</p>
+  <div class="footer"><span>Policy BP 4411 8820 6</span><span>Page 1 of 3</span></div>
+</div>
+
+<div class="page">
+  <h2 class="sec">Account ledger, 1 August 2026 to 31 August 2026</h2>
+  <table class="ledger">
+    <tr><th>Date</th><th>Description</th><th class="num">Charge</th><th class="num">Payment</th><th class="num">Balance</th></tr>
+    <tr><td>01/08/2026</td><td>Balance brought forward</td><td class="num">&nbsp;</td><td class="num">&nbsp;</td><td class="num">0.00</td></tr>
+    <tr><td>01/08/2026</td><td>Direct debit collected, ref 4411882</td><td class="num">&nbsp;</td><td class="num">28.49</td><td class="num">-28.49</td></tr>
+    <tr><td>04/08/2026</td><td>Premium instalment for August applied</td><td class="num">28.49</td><td class="num">&nbsp;</td><td class="num">0.00</td></tr>
+    <tr><td>28/08/2026</td><td>Loyalty note: no claims charge applied this month</td><td class="num">0.00</td><td class="num">&nbsp;</td><td class="num">0.00</td></tr>
+    <tr><td>31/08/2026</td><td>Premium instalment invoiced for September</td><td class="num">28.49</td><td class="num">&nbsp;</td><td class="num">28.49</td></tr>
+    <tr class="total"><td colspan="4">Closing balance, to be collected 5 September 2026</td><td class="num">28.49</td></tr>
+  </table>
+  <p style="font-size:8.4px">Your monthly instalment is collected in advance and covers your pet for the following month. If a direct debit collection is unsuccessful, we will attempt to collect it again and a failed payment charge may apply; see the direct debit guarantee notes overleaf.</p>
+  <h2 class="sec">Your most recent claim</h2>
+  <table class="claimtab">
+    <tr><th>Claim reference</th><td>CL-2026-08841</td></tr>
+    <tr><th>Received</th><td>12/07/2026</td></tr>
+    <tr><th>Settled</th><td>28/07/2026</td></tr>
+    <tr><th>Treating practice</th><td>Milden Road Veterinary Group (practice code VP-2290)</td></tr>
+    <tr><th>Handled by</th><td>Vetclaim Services on our behalf</td></tr>
+    <tr><th>Vet fee submitted</th><td class="num">&pound;610.75</td></tr>
+    <tr><th>Excess deducted (per condition)</th><td class="num">&pound;95.00</td></tr>
+    <tr><th>Co-payment deducted (20%)</th><td class="num">&pound;103.15</td></tr>
+    <tr><th>Amount paid to the practice</th><td class="num">&pound;412.60</td></tr>
+  </table>
+  <p style="font-size:8.4px">Claims are usually paid directly to your registered veterinary practice, so in most cases you only need to pay any excess and co-payment due at the time of treatment. Payments are processed on our behalf by Aldgate Payments. Milo was seen for a course of treatment following a minor injury, and Milden Road Veterinary Group submitted the claim directly to Vetclaim Services on your behalf, which is usually the quickest way for a claim to be settled.</p>
+  <p style="font-size:8.4px">If you pay a vet bill yourself and claim the money back afterwards, it can take a little longer for us to review the invoices and confirm what is covered before we reimburse you, so wherever possible we recommend asking your practice to claim directly instead, as Milden Road Veterinary Group did in this case.</p>
+  <h2 class="sec">Your cover limits</h2>
+  <div class="limitgrid">
+    <div class="limitcell"><div class="llabel">Annual vet fee limit</div><div class="lamt">&pound;7,500</div></div>
+    <div class="limitcell"><div class="llabel">Third party liability</div><div class="lamt">&pound;1,500</div></div>
+    <div class="limitcell"><div class="llabel">Excess per condition</div><div class="lamt">&pound;95</div></div>
+  </div>
+  <p style="font-size:8.4px">A 20 per cent co-payment applies to vet fees above the excess for each condition claimed for. From 1 January 2027, a senior pet tier will be available at &pound;34.10 a month for pets over the age of eight, and a multi-pet discount will apply automatically where more than one pet from the same household is insured with us. The third party liability limit of &pound;1,500 covers costs if your dog injures someone or damages their property while out of your control, and is separate from the vet fee limit shown above.</p>
+  <div class="footer"><span>Policy BP 4411 8820 6</span><span>Page 2 of 3</span></div>
+</div>
+
+<div class="page">
+  <h2 class="sec">How your cover works</h2>
+  <p style="font-size:8.6px">Bramblepaw Pet Healthcare is the trading name you know us by, and the name to use if you ever need to call us. Your policy is underwritten by Sturbridge Underwriting Agency Limited, and claims are handled on our behalf by Vetclaim Services, who work directly with your registered practice wherever possible so you do not have to pay the full bill upfront and wait to be reimbursed.</p>
+  <p style="font-size:8.6px">Not everything is covered. Your policy does not cover conditions that existed, or showed symptoms, before your policy started on 01/02/2023, routine or preventative treatment such as vaccinations and flea treatment, or the cost of a health certificate for travel. Dental cover applies only to accidental damage and specific conditions listed in your policy booklet, not routine scale and polish treatment.</p>
+  <p style="font-size:8.6px">Our 24 hour vet advice line is available to all policyholders and can help you decide whether a trip to the vet is needed. You can also use our practice finder tool to locate a vet near you if you are away from home, and our app lets you submit claim photographs, track a claim's progress at vetclaim.co.uk/track, and view your statements without waiting for the post.</p>
+  <h2 class="sec">Microchipping and travel</h2>
+  <p style="font-size:8.6px">Keeping your pet's microchip details up to date with the national database helps reunite you quickly if they are ever lost. If you plan to travel abroad with your pet, check well in advance whether your policy includes any travel cover and what documentation you will need, as requirements vary between countries and can change with little notice.</p>
+  <h2 class="sec">Dental cover in detail</h2>
+  <p style="font-size:8.6px">Dental treatment following an accident, such as a broken tooth from a fall or a road accident, is covered in the same way as any other accidental injury, subject to your excess and co-payment. Routine dental care, including scale and polish treatment, tartar removal and check-ups recommended purely for preventative reasons, is not covered under any of our policies, in line with most pet insurance in the market.</p>
+  <h2 class="sec">Multi-pet households</h2>
+  <p style="font-size:8.6px">If you insure more than one pet from the same household with Bramblepaw Pet Healthcare, a multi-pet discount is applied automatically to each policy, and each pet still has its own policy number, excess and cover limits. Adding a second pet does not affect Milo's cover or his policy number BP 4411 8820 6 in any way.</p>
+  <h2 class="sec">If you need to complain</h2>
+  <p style="font-size:8.6px">If something has gone wrong, please contact us at care@bramblepaw.co.uk or call our claims line on 0330 055 2190 and we will do our best to put it right. If you remain unhappy after our final response, you may be able to refer your complaint to the Financial Ombudsman Service free of charge.</p>
+  <div class="cols2">
+    <p><b>About us.</b> Bramblepaw Pet Healthcare is a trading name of Bramblepaw Holdings Limited, registered office in England, company registration number 09923118, VAT registration number GB 194 2288 03. Underwriting is provided by Sturbridge Underwriting Agency Limited.</p>
+    <p><b>Direct debit guarantee.</b> This guarantee is offered by all banks and building societies that accept direct debit instructions. If the amount to be paid or the payment date changes, we will notify you in advance. If an error is made, you are entitled to a full and immediate refund from your bank or building society. If a collection fails for any reason, including insufficient funds, a failed payment charge of &pound;12.00 may be added to your account and collected alongside your next instalment.</p>
+    <p><b>Data protection.</b> We use your information to administer your policy, assess claims and prevent fraud, and may share it with our underwriter, claims handler and payment processor. You can find our full privacy notice at bramblepaw.co.uk/claims.</p>
+    <p><b>Keeping in touch.</b> Manage your policy, view statements and update your details at bp-pet.co/app or bramblepaw.co.uk/vets, or follow us on social media at @bramblepawpets for pet health tips and reminders.</p>
+    <p><b>The app.</b> Our free app lets you submit claim photographs in a few taps, check your excess and cover limits, and see when your next instalment will be collected. You can also use it to find a nearby practice registered with us if you are travelling within the UK and need to see a vet who is not your usual one.</p>
+    <p><b>Vulnerable customers.</b> If you or another member of your household needs extra support when dealing with us, for example during a bereavement or a long illness, please tell us so we can adjust how we communicate and give you more time to respond.</p>
+  </div>
+  <p style="font-size:8.4px">Our claims handler, Vetclaim Services, reviews every claim individually against your policy terms, and will contact your practice directly if any further information is needed before a claim can be settled. Most straightforward claims, like the one settled on 28/07/2026, are dealt with within a couple of weeks of the practice submitting the invoice.</p>
+  <p class="fine">This statement was produced on 2 September 2026 for policy BP 4411 8820 6, statement number ST-0091. If any figure here differs from your policy schedule, the schedule takes precedence. Bramblepaw Pet Healthcare, a trading name of Bramblepaw Holdings Limited, company number 09923118.</p>
+  <div class="footer"><span>Policy BP 4411 8820 6</span><span>Page 3 of 3</span></div>
+</div>
+
+</body>
+</html>

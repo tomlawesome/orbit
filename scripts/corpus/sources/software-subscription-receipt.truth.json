@@ -1,0 +1,24 @@
+{
+  "name": "software subscription receipt with the upsell pages attached, provider named only in links",
+  "filename": "software-subscription-receipt.pdf",
+  "expected": {
+    "dates": ["2027-10-04"],
+    "provider": "Stackhive",
+    "reference": "SH-SUB-4471029",
+    "dateRoles": [
+      { "date": "2027-10-04", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Subscription", "Software subscription"], "qualifiers": ["Software"] },
+    "costMinor": 21588,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "provider is Stackhive. The name is never printed plainly: it appears only inside stackhive.io, app.stackhive.io/billing, billing@stackhive.io, status.stackhive.io, docs.stackhive.io and the handle @stackhive. The registered company in the footer is Northlight Software Systems Ltd, registered in Scotland, a different form of words. Other organisations named: the payment processor Ardent Payments, the reseller Kingsmead Technology, the data centre operator Fernbrook Hosting and the app store links.",
+    "reference is the subscription reference SH-SUB-4471029, the identifier the receipt asks the customer to quote. Rivals: the invoice number INV-2026-0099142, the customer identifier CUS-88201194, the licence key XQ4T-9912-KKD2-1180, the payment reference PAY-5510983, the support ticket number 55219, the VAT number GB 344 1290 55, the company registration number SC442190, the card ending 4417 and the seat and workspace identifiers.",
+    "dates and dateRoles carry the renewal date, 4 October 2027, when the annual plan renews and the card is charged again unless the household acts. Rivals: the invoice date (4 October 2026), the date payment was taken (4 October 2026), the period the plan covers (4 October 2026 to 3 October 2027), the previous invoice (4 October 2025), the date the free trial ended (4 October 2025), the date list prices change (1 November 2026), the offer end date (31 October 2026) and the version release dates in the what is new panel.",
+    "costMinor is the total paid on this receipt, £215.88, the annual plan of £179.90 plus £35.98 of VAT (owner, 2026-09-13: the whole commitment, and the total due including VAT). It is not the £179.90 net figure, not the £17.99 monthly equivalent shown for comparison, not the £21.99 a month price if billed monthly, not the £4.00 a month extra storage, not the £8.50 per seat list price and not the £0.02 per thousand calls overage rate.",
+    "recurrenceMonths is 12, the printed 12 month billing term. scheduleKind is renewal."
+  ]
+}

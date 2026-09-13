@@ -1,0 +1,24 @@
+{
+  "name": "home insurance renewal invitation, provider named only inside its web and e-mail addresses",
+  "filename": "home-insurance-renewal-invitation.pdf",
+  "expected": {
+    "dates": ["2026-11-23"],
+    "provider": "Wrenfield",
+    "reference": "WF-HM-33915-2",
+    "dateRoles": [
+      { "date": "2026-11-23", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Insurance"], "qualifiers": ["Home", "Buildings and contents"] },
+    "costMinor": 41266,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "provider is Wrenfield, the brand the household deals with. Its trading name is never printed as a plain name anywhere on the page: it appears only inside the addresses wrenfield.co.uk/renew, renewals@wrenfield.co.uk, my.wrenfield.co.uk and the social handle @wrenfieldhome. The registered company in the small print is Calder Vale Insurance Services Limited, which is a different form of words; the other organisations on the page are the underwriter Ryedale Insurance Company Limited, the home emergency partner Stanhope Assist, the comparison site pricebadger.co.uk, the Financial Conduct Authority and the Financial Ombudsman Service.",
+    "reference is the policy number WF-HM-33915-2, shown in the renewal panel and the footer. Rivals the page really prints: last year's policy number WF-HM-33915-1, the renewal quote reference RQ 8827 4410, the customer identifier 5510983, the claim reference CLM-2024-0207, the payment reference 33915244, the FCA firm reference number 310256, the company registration number 04991862, the VAT number GB 733 1102 66 and the alarm certificate number NSI-22-77401.",
+    "dates and dateRoles carry the renewal date, 23 November 2026, the day the household must act again. Other dates on the page: the letter date (21 October 2026), last year's renewal (23 November 2025), the reply-by date printed in the panel (16 November 2026), the price guarantee expiry (9 November 2026), the last claim (04/02/2024), the boiler service the discount depends on (12/03/2026), the date the documents were issued (24 October 2026), the date premiums were last reviewed (1 April 2026) and the year the firm began trading.",
+    "costMinor is the renewal premium for the coming year, £412.66 including insurance premium tax. Rivals: last year's premium £378.20, the twelve instalment total £449.28 and its £37.44 monthly figure (an offered option is not the commitment, owner 2026-09-13), the accidental damage extension £48.00, home emergency £59.99, legal expenses £26.50, the standard excess £250, the escape of water excess £1,000, the £30.00 mid-term change fee and the £275,000 buildings sum insured, which is a cover limit rather than a price.",
+    "recurrenceMonths is 12, the printed 12 month period of cover. scheduleKind is renewal."
+  ]
+}
