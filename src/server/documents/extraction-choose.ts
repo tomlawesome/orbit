@@ -246,7 +246,7 @@ function chooseDates(candidates: readonly TaggedCandidate[], text: string | unde
   const endsATerm = (role: DocumentDateRole) => role === "renewal" || role === "expiry";
   const family = (role: DocumentDateRole): DocumentDateRole => (endsATerm(role) ? "expiry" : role);
   const claims = roleClaims(candidates).map((claim) => ({ ...claim, role: family(claim.role) }));
-  const endRole = termEndRole(subtypeGroupBins(subtypeSources(candidates)).kinds, text);
+  const endRole = termEndRole(subtypeGroupBins(subtypeSources(candidates)), text);
 
   const claimed: string[] = [];
   for (const claim of claims) if (!claimed.includes(claim.date)) claimed.push(claim.date);
