@@ -10,18 +10,6 @@ fixing the cause deletes the heading in the same commit.
 - 2026-09-09 · 11a68e8 (+ #911's uncommitted setup-mail work, none of it near documents) · local `pnpm test:integration` · the bounded reason came back `crypto_metadata_missing` where the test expects `storage_object_missing`. The same file passed on the run immediately before, on the same code, and the run's other 39 files were green both times — so reconciliation appears to reach the two missing-piece checks in a different order under load.
 - 2026-09-10 · 257d263 (+ #961's uncommitted `modelExtraction` health work, none of it near reconciliation) · local `pnpm test:integration` · failed on one run and passed on the run before it on the same code, and two later runs on the branch point without the change were green here as well. Only the four `@node-rs/argon2` files failed on every run.
 
-## v19-mail-collection.spec.ts "a spoofed PDF travels the real pipe" — #958
-
-- 2026-09-09 · ed9497e · pipeline 813 / smoke (job 9079, `dev`) · failed then passed on retry; the two retry runs cost 45.6 s and 27.0 s. The spec is `test.describe.configure({ mode: "serial" })`, so the retry re-ran the group.
-- 2026-09-09 · 9e27d38 · pipeline 822 / smoke (job 9269, !908) · same test, same shape, on a branch that touches nothing in the mail-in path.
-- 2026-09-10 · cb9cbfd · pipeline 907 / smoke (job 10645, !911) · `sender verification link did not confirm: 200 http://127.0.0.1:3000/` at `v19-mail-collection.spec.ts:183`. Retried job 10651 passed on the same commit, all 282 green.
-
-Three sightings across `dev` and two feature branches, none of which changed
-the mail-in path, so the cause is in the check rather than the change. The
-third one filed **#958**. Note what it took to surface: the first two were
-absorbed by the second Playwright retry, and this branch spends only one, so a
-flake that used to cost 45 s took the job down instead.
-
 ## v19-keyboard.spec.ts:432 "settings: reached via the account panel"
 
 - 2026-09-08 · af13319 · local `scripts/test-e2e-local.sh`, kept stack, 10 repeat runs · failed 2 of 10. The settings sessions list renders one "sign out of <device>" button per session and is unbounded, so on a stack reused across runs (168 sessions by the tenth) `auditTabOrder`'s 60-stop cap is exhausted, and `readSessions()` resolving after `.cards` lets rows arrive after the visibility snapshot. Likely fix shape: the `.cand` exclusion the household test already uses.
