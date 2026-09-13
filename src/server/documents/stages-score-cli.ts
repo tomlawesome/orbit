@@ -28,6 +28,7 @@ import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { formatRunScore, scoreCorpus } from "./extraction-scoring";
 import { sieve, type CandidateKind } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
+import { repairLetterSpacing } from "./extraction-text-repair";
 import { proposalFromText } from "./suggestions";
 
 /** Which model answers the questions, named on the command line:
@@ -44,7 +45,8 @@ function dump(filePart: string, kind: CandidateKind): void {
   const doc = EXTRACTION_CORPUS.find((d) => d.filename.includes(filePart));
   if (!doc) throw new Error(`no corpus document matches ${filePart}`);
   console.log(JSON.stringify(doc.expected));
-  for (const c of tagCandidates(doc.text, sieve(doc.text))) {
+  const page = repairLetterSpacing(doc.text);
+  for (const c of tagCandidates(page, sieve(page))) {
     if (c.kind !== kind) continue;
     const tags = c.tags.map((t) => `${t.value}${t.trigger ? `<${t.trigger}>` : ""}`).join(",");
     if (tags === "other") continue;
@@ -61,10 +63,11 @@ async function main(): Promise<void> {
   const withModel = process.argv.includes("--model");
   if (withModel) await assertChooserReachable(chooserModelNamed());
   const staged = await scoreCorpus(EXTRACTION_CORPUS, async (text) => {
-    const tagged = tagCandidates(text, sieve(text));
+    const page = repairLetterSpacing(text);
+    const tagged = tagCandidates(page, sieve(page));
     return withModel
       ? chooseFieldsWithModel(tagged, chooserTransport(chooserModelNamed()))
-      : chooseFields(tagged, text);
+      : chooseFields(tagged, page);
   });
   console.log(formatRunScore(withModel ? "sieve+tag+choose+model" : "sieve+tag+choose", staged));
   const heuristics = await scoreCorpus(EXTRACTION_CORPUS, (text, filename) => proposalFromText(text, filename));
