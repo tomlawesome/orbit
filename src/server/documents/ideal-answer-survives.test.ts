@@ -62,7 +62,7 @@ const SUBTYPE_NOT_GROUNDABLE = new Set([
   "fullpage-self-storage-agreement.pdf",
 ]);
 
-/** Four fixed-term contracts whose cost truth is the total over the term
+/** Five fixed-term contracts whose cost truth is the total over the term
  * (owner, 2026-09-13: Orbit tracks the whole commitment) but whose page
  * prints only the monthly price and the term, never the product. An ideal
  * model can quote the two factors but no span contains the amount, so the
@@ -73,6 +73,7 @@ const COST_NOT_PRINTED = new Set([
   "fullpage-car-lease-statement.pdf",
   "fullpage-gym-membership-agreement.pdf",
   "fullpage-mobile-airtime-plan.pdf",
+  "broadband-order-confirmation-email.pdf",
 ]);
 
 // --- Copied from model-extraction.test.ts: the transport/envelope fakes
@@ -661,6 +662,135 @@ const EVIDENCE: Record<string, DocEvidence> = {
     dates: [
       "SCHEME POLICY NO. GPS-0417-2261 Date of installation 14 March 2026 Guarantee expires 14",
       "Date of installation 14 March 2026 Guarantee expires 14 March 2036 Certificate of",
+    ],
+  },
+
+  // ---- the twelve long, noisy tuning documents (#1007) ----
+  //
+  // Produced by `node scripts/corpus/generate-evidence.mjs` and pasted here,
+  // as the README directs. The broadband order confirmation has no cost
+  // needle: its cost truth is the whole-term total the page never prints,
+  // which is what COST_NOT_PRINTED above covers.
+
+  "motor-policy-welcome-pack.pdf": {
+    provider: "Welcome to your motor policy — Harroway Direct Harroway Direct MOTOR INSURANCE, CHELTENHAM Customer number 40028817",
+    reference: "YOUR POLICY AT A GLANCE Policy number HD/MT/6621043/01 Period of insurance 12 October 2026 to 11 October 2027 Certificate of",
+    subtype: "Harroway Direct Harroway Direct MOTOR INSURANCE, CHELTENHAM Customer number 40028817 Quote reference QR-559102",
+    cost: { amount: "684.30", needle: "figures below are correct as at 1 September 2026 and may change if you amend your cover. ANNUAL PREMIUM (INCL. IPT) £684.30 for the 12 month period" },
+    recurrence: { months: 12, needle: "begins on 12 October 2026 and runs to 11 October 2027, a 12 month period of insurance. If you previously" },
+    dates: [
+      "on 19/09/2026. Your period of insurance begins on 12 October 2026 and runs to 11 October",
+      "of insurance begins on 12 October 2026 and runs to 11 October 2027, a 12 month period of",
+    ],
+  },
+  "home-insurance-renewal-invitation.pdf": {
+    provider: "Your home insurance renewal invitation wrenfield.co.uk H O M E I NS U R A NC E Customer identifier 5510983 Renewal quote",
+    reference: "Last year (WF-HM-33915-1) This year (WF-HM-33915-2) Annual premium, including Insurance Premium Tax £378.20 £412.66 Paid",
+    subtype: "Your home insurance renewal invitation wrenfield.co.uk H O M E I NS U R A NC E Customer",
+    cost: { amount: "412.66", needle: "2025. Last year (WF-HM-33915-1) This year (WF-HM-33915-2) Annual premium, including Insurance Premium Tax £378.20 £412.66 Paid monthly across 12" },
+    recurrence: { months: 12, needle: "insurance renewal invitation Dear Mrs Okafor, Your current 12 month period of cover is coming to an end," },
+    dates: [
+      "you to renew for another year. Your cover renews on 23 November 2026, and if you do nothing,",
+    ],
+  },
+  "pet-cover-monthly-statement.pdf": {
+    provider: "Bramblepaw Pet Healthcare — monthly statement Bramblepaw Pet Healthcare MONTHLY ACCOUNT STATEMENT",
+    reference: "look wrong. YOUR COVER Policy number BP 4411 8820 6 Premium for the current policy year £341.88 Paid monthly instalment",
+    subtype: "of our policies, in line with most pet insurance in the market. MULTI-PET HOUSEHOLDS If you insure more than one pet",
+    cost: { amount: "341.88", needle: "if any of the details on it look wrong. YOUR COVER Policy number BP 4411 8820 6 Premium for the current policy year £341.88 Paid monthly instalment" },
+    recurrence: { months: 12, needle: "policy year £341.88 Paid monthly instalment £28.49 Your 12 month policy year ends on 1 February 2027 PET" },
+    dates: [
+      "instalment £28.49 Your 12 month policy year ends on 1 February 2027 PET AND POLICY DETAILS",
+    ],
+  },
+  "energy-annual-summary.pdf": {
+    provider: "Haverfield Energy — Annual Summary Haverfield Energy GAS & ELECTRICITY SUPPLY Annual",
+    reference: "Document no. 00921107 ACCOUNT NUMBER 2201 8834 09 SUMMARY PERIOD 01/10/25 – 30/09/26 DATE OF THIS SUMMARY 05/10/2026 Mr &",
+    subtype: "less Based on your usage, the cheapest tariff we currently offer new customers is £1,377.60 a year — you'd save by",
+    cost: { amount: "1,428.24", needle: "tariff started 1 October 2026 Previous tariff ended 30 September 2026 Your personal projection to 30 September 2027 £1,428.24 Exit fee (per fuel, if" },
+    recurrence: { months: 12, needle: "— HAV-FIX-26-V3 Fixed until 30 September 2027 Term length 12 month fixed term Current tariff started 1" },
+    dates: [
+      "TARIFF Tariff information — HAV-FIX-26-V3 Fixed until 30 September 2027 Term length 12 month",
+    ],
+  },
+  "broadband-order-confirmation-email.pdf": {
+    provider: "Your order is confirmed my.fibrelark.uk/orders/8820-1194 — printed 22/12/2026 14:32 1/3 From: Orders",
+    reference: "Please quote your account number 8820 1194 whenever you get in touch — it's the fastest way for us to find your",
+    subtype: "Important information about your contract This is a summary of the key terms only. Your full contract, including",
+    cost: { amount: "768.00", needle: "Minimum term 24 months (ends 13 January 2029) Monthly cost, months 1–6 £26.00 a month Monthly cost, months 7–24 £34.00 a month" },
+    recurrence: { months: 24, needle: "2026 Service start date 14 January 2027 Minimum term 24 months (ends 13 January 2029) Monthly cost," },
+    dates: [
+      "Order placed 22 December 2026 Service start date 14 January 2027 Minimum term 24 months",
+      "date 14 January 2027 Minimum term 24 months (ends 13 January 2029) Monthly cost, months",
+    ],
+  },
+  "water-account-portal-page.pdf": {
+    provider: "— water and wastewater https://my.bellrush.co.uk/account — printed 28/10/2026 09:14 Secure My Account Overview",
+    reference: "Usage Help Moving home ACCOUNT NUMBER 7719 0042 18 £142.55 due 12 November 2026 Pay now Welcome back. Your property",
+    subtype: "09:14 Secure My Account Overview Bills Usage Help Moving home ACCOUNT NUMBER 7719 0042 18 £142.55 due 12",
+    cost: { amount: "142.55", needle: "— printed 28/10/2026 09:14 Secure My Account Overview Bills Usage Help Moving home ACCOUNT NUMBER 7719 0042 18 £142.55 due 12 November 2026 Pay" },
+    dates: [
+      "Moving home ACCOUNT NUMBER 7719 0042 18 £142.55 due 12 November 2026 Pay now Welcome back.",
+    ],
+  },
+  "council-tax-band-adjustment-letter.pdf": {
+    provider: "Wexmoor District Council — Revised Council Tax Bill WX Wexmoor District Council COUNCIL OFFICES",
+    reference: "WX3 9LP COUNCIL TAX ACCOUNT NUMBER 68104472 PROPERTY REFERENCE 0091223345X Your Council Tax bill has changed 6",
+    subtype: "District Council — Revised Council Tax Bill WX Wexmoor District Council COUNCIL OFFICES , PRIORY GATE ,",
+    cost: { amount: "1,946.30", needle: "Fire and Rescue Authority precept £78.90 Ashcombe Parish Council precept £24.17 Revised Council Tax payable, 2026/27 £1,946.30 Your original bill for" },
+    dates: [
+      "instalments of £194.63, the first of which is due on 1 December 2026. The full instalment",
+    ],
+  },
+  "personal-loan-precontract-information.pdf": {
+    provider: "Drummond Vale Finance — Pre-contract Credit Information Drummond Vale Finance Drummond House",
+    reference: ".co.uk/loans Agreement number DVF/PL/2210934 PRE-CONTRACT CREDIT INFORMATION Standard European Consumer Credit",
+    subtype: "S1 4QT · drummondvale .co.uk/loans Agreement number DVF/PL/2210934 PRE-CONTRACT CREDIT INFORMATION",
+    cost: { amount: "14,392.20", needle: "borrowing rate 7.2% per annum Representative APR 7.4% APR Total charge for credit £2,392.20 Total amount payable £14,392.20 Charge for missed" },
+    dates: [
+      "it takes effect. If the agreement takes effect on 3 February 2027, your withdrawal period",
+      "takes effect 03/02/2027 Date of last repayment 03/01/2032 Number of repayment",
+    ],
+  },
+  "software-subscription-receipt.pdf": {
+    provider: "Payment receipt — INV-2026-0099142 app.stackhive.io/billing PAID Payment receipt Invoice number INV-2026-0099142 Invoice",
+    reference: "about this receipt, please quote SH-SUB-4471029 so we can find your subscription quickly. Your licence key,",
+    subtype: "£215.88 This is a 12 month term. Your subscription will automatically renew on 4 October 2027 unless you cancel before",
+    cost: { amount: "215.88", needle: "plan — period 4 October 2026 to 3 October 2027 £179.90 VAT at 20% (VAT number GB 344 1290 55) £35.98 Total paid £215.88 This is a 12 month term." },
+    recurrence: { months: 12, needle: "number GB 344 1290 55) £35.98 Total paid £215.88 This is a 12 month term. Your subscription will" },
+    dates: [
+      "term. Your subscription will automatically renew on 4 October 2027 unless you cancel before",
+    ],
+  },
+  "appliance-registration-guarantee-card.pdf": {
+    provider: "Registration Card — Fernhill Appliance Care Fernhill Appliance Care E XT E N D E D CO VE R FO R YO UR KIT CHE N",
+    reference: "PRICE PAID £149.00 GUARANTEE NUMBER FAC-EG-2291083 CARD PRINTED 26 May 2026 MANUFACTURER 'S GUARANTEE ENDS 8 May 2028",
+    subtype: "Appliance Care and your extended guarantee is confirmed. Registration identifier 5510983 was created when you",
+    cost: { amount: "149.00", needle: "Electricals, order no. HE-7712094 DATE PURCHASED 9 May 2026 APPLIANCE PRICE PAID £629.00 EXTENDED COVER PRICE PAID £149.00 GUARANTEE NUMBER" },
+    dates: [
+      "2028 REPLACEMENT LIMIT £700.00 EXTENDED COVER STARTS 9 May 2028 → EXTENDED COVER ENDS 8",
+      "COVER STARTS 9 May 2028 → EXTENDED COVER ENDS 8 May 2031 ALSO FROM FERNHILL Ask",
+    ],
+  },
+  "boiler-cover-renewal-notice.pdf": {
+    provider: "plan year is ending — renewal notice warmvale.co.uk BOILER AN D CON TROLS COVER Renewal notice Notice dated: 20",
+    reference: "the same. RENEWAL DETAILS PLAN NUMBER WV 2291 0834 PLAN RENEWS 1 March 2027 ANNUAL SERVICE DUE 14 March 2027 TOTAL FOR THE",
+    subtype: "Your plan year is ending — renewal notice warmvale.co.uk BOILER AN D CON TROLS",
+    cost: { amount: "282.00", needle: "DETAILS PLAN NUMBER WV 2291 0834 PLAN RENEWS 1 March 2027 ANNUAL SERVICE DUE 14 March 2027 TOTAL FOR THE PLAN YEAR £282.00 MONTHLY INSTALMENT" },
+    recurrence: { months: 12, needle: "of 3 What your plan covers Your annual service Once every 12 months, an engineer from Crayle Heating" },
+    dates: [
+      "RENEWAL DETAILS PLAN NUMBER WV 2291 0834 PLAN RENEWS 1 March 2027 ANNUAL SERVICE DUE 14",
+      "2291 0834 PLAN RENEWS 1 March 2027 ANNUAL SERVICE DUE 14 March 2027 TOTAL FOR THE PLAN YEAR",
+    ],
+  },
+  "vehicle-service-record.pdf": {
+    provider: "Job Card and Invoice — Pennard Autocentre Pennard Autocentre Servicing & MOT preparation · est. locally since",
+    reference: "ACCOUNT PA-1180 INVOICE NUMBER 2026-04417 WORK DATE 21 September 2026 BOOKED 16/09/2026 PREVIOUS SERVICE",
+    subtype: "2026 BOOKED 16/09/2026 PREVIOUS SERVICE 14/09/2025 VEHICLE Verano Astoria 1.6 ENGINE NUMBER K9K-22908 Work",
+    cost: { amount: "428.94", needle: "at this visit. Labour £180.00 Parts £177.45 Subtotal £357.45 Loyalty discount −£20.00 VAT at 20% £71.49 Invoice total £428.94 MOT test fee of £54.85" },
+    recurrence: { months: 12, needle: "your vehicle documents. Your next service is due every 12 months or 12,000 miles, whichever comes first" },
+    dates: [
+      "whichever comes first — on the figures above, that is 21 September 2027. Brake fluid is next due",
     ],
   },
 };
