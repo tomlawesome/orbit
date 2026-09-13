@@ -816,6 +816,11 @@ fast_docker:
     - orbit_lane_admits fast_docker || exit 0
     - *reuse_gate
     - *docker_cli
+    # test-e2e-local-reuse.test.mjs spawns the real scripts/test-e2e-local.sh,
+    # which checks its whole prerequisite list before the code under test runs
+    # -- and node:22-bookworm carries every one of them except jq (pipeline
+    # 1021). *docker_cli has just run `apt-get update`, so this is one package.
+    - apt-get install -y -qq --no-install-recommends jq
     - pnpm install --frozen-lockfile
     - *drop_to_node
     - orbit_as_node 'pnpm exec vitest run src/lib/install-script-adapters.test.ts src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs'
