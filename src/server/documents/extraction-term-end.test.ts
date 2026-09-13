@@ -28,4 +28,27 @@ describe("termEndRole", () => {
   it("expires when there is no text to read at all", () => {
     expect(termEndRole([], undefined)).toBe("expiry");
   });
+
+  it("decides every kind that bounds a term, not just the common ones", () => {
+    expect(termEndRole([bin("Identity document")], undefined)).toBe("renewal");
+    expect(termEndRole([bin("Certificate")], undefined)).toBe("renewal");
+    expect(termEndRole([bin("Benefit")], undefined)).toBe("renewal");
+    expect(termEndRole([bin("Savings")], undefined)).toBe("expiry");
+    expect(termEndRole([bin("Prescription")], undefined)).toBe("expiry");
+    expect(termEndRole([bin("Fine")], undefined)).toBe("expiry");
+  });
+
+  it("leaves a kind with no term of its own to the wording", () => {
+    expect(termEndRole([bin("Pension")], "reviewed annually")).toBe("renewal");
+    expect(termEndRole([bin("Bank account")], "the bond matures on the date shown")).toBe("expiry");
+  });
+
+  it("renews on a cycle word when the kind is unknown", () => {
+    expect(termEndRole([], "billed every 12 months at the price shown")).toBe("renewal");
+    expect(termEndRole([], "a rolling agreement charged per month")).toBe("renewal");
+  });
+
+  it("expires when the wording speaks more of an end than of a cycle", () => {
+    expect(termEndRole([], "this warranty renews nothing: one-off cover, final payment made")).toBe("expiry");
+  });
 });
