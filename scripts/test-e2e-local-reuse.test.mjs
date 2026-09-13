@@ -36,15 +36,17 @@ function runReuse(args) {
     }),
     { label: "runReuse" },
   );
-  // Without Docker the script fails at its preconditions instead, several
-  // steps before the code under test -- and the teardown assertion below
-  // still passes on that output, so the file would report green having
-  // proven nothing. Fail here instead, naming the lane, so a misplaced file
-  // is a red test rather than a silent hole (#947).
+  // The script checks its whole prerequisite list -- docker, node, git, curl,
+  // jq, openssl, pnpm -- several steps before the code under test, and the
+  // teardown assertion below still passes on the output of a run that stopped
+  // there, so the file would report half green having proven nothing. Assert
+  // on the list as a whole rather than on `docker` alone: the first cut named
+  // only docker and `fast_docker` then went red on jq instead (pipeline 1021),
+  // which is the same silent-hole risk one package along (#947).
   expect(
     result.stderr,
-    "this suite needs a real docker binary and daemon: it belongs in fast_docker, not fast",
-  ).not.toContain("missing prerequisite: docker");
+    "this suite needs every prerequisite scripts/test-e2e-local.sh checks, not just docker: the lane running it must install them",
+  ).not.toMatch(/missing prerequisite/);
   return result;
 }
 
