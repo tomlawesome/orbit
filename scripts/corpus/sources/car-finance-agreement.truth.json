@@ -27,7 +27,7 @@
         "Motor"
       ]
     },
-    "costMinor": 27942,
+    "costMinor": 2473016,
     "currency": "GBP",
     "recurrenceMonths": 48,
     "scheduleKind": "renewal"
@@ -36,12 +36,12 @@
     "dates: agreement date 20 February 2026 printed as 'Agreement date: 20 February 2026' (role start), and optional final payment date 5 March 2030 printed in the financial table row 'Optional final payment (due 5 March 2030)' (role renewal).",
     "provider is the finance house the household pays and contacts, Bracken Vale Finance plc, not the dealer.",
     "reference is the agreement number printed top right as 'BVF-PCP-208841'.",
-    "costMinor is the monthly payment '£279.42' i.e. 27942 pence.",
+    "costMinor is 'Total amount payable £24,730.16', everything paid over the term of the contract -- not the cash price of the car and not the monthly payment (owner, 2026-09-13: Orbit tracks long-term commitments; a PCP fits Orbit poorly on cost and well on dates, which is the primary function -- when the deal starts and when it ends).",
     "recurrenceMonths 48 printed as 'Number of monthly payments: 48'.",
     "scheduleKind renewal reflects the optional final payment / balloon structure ending 5 March 2030.",
     "trap: cash price of the vehicle '£18,995.00'.",
     "trap: deposit '£2,500.00' and part-exchange allowance '£1,200.00'.",
-    "trap: total amount payable '£24,730.16'.",
+    "trap: the monthly payment '£279.42', one of 48.",
     "trap: optional final payment amount '£8,245.00'.",
     "trap: representative APR '10.9% APR' and fixed rate of interest '7.5% per annum'.",
     "trap: date of first payment '05/04/2026'.",

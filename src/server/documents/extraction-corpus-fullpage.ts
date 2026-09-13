@@ -156,6 +156,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     subtype: {"kinds":["Contract","Subscription","Plan","Tariff","Utility","Service"],"qualifiers":["Broadband"]},
     costMinor: 83976,
     currency: "GBP",
+    costArithmetic: [[3499,24]],
     recurrenceMonths: 24,
     scheduleKind: "renewal",
     },
@@ -243,22 +244,23 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     subtype: {"kinds":["Lease"],"qualifiers":["Motor"]},
     costMinor: 1184400,
     currency: "GBP",
+    costArithmetic: [[32900,36]],
     },
   },
   {
     // Ground-truth notes:
     // - dates: installed 12 May 2026, the 25-year guarantee runs to 12 May 2051. Two other printed dates are deliberately not declared: the certificate issue date (19 May 2026, a week after installation and after the guarantee period already started) and the cavity survey date (28 Apr 2026). The superseded wording edition (6 Mar 2022) and the current edition date (1 Jan 2026) are print-run stamps, not dates about this job, and are also not declared.
-    // - provider is Bassington Energy Solutions Ltd, named only in the small print as the entity that 'is issued by' this guarantee -- 'WarmCore Insulation', printed large in the letterhead and everywhere else on the page, is stated in that same small print to be only its trading name, the same distinction the owner drew for a broker versus an underwriter (#989).
+    // - provider is 'WarmCore Insulation', the trading name printed large in the letterhead and everywhere else on the page: the household deals with the trading name, and the trading name is the more likely answer than the legal entity behind it (owner, 2026-09-13, generalising the gym's 'Cresswell Fitness Club' ruling in #989). 'Bassington Energy Solutions Ltd', named only in the small print as the entity the guarantee 'is issued by', is a trap.
     // - reference is the guarantee number WC-GTE-08823, not the job reference (WCI-2026-4471) or the insurance-backed scheme reference (GBW-771049).
     // - costMinor is the £2,340.00 contract price for the installation itself, the only amount on the page with a currency symbol that is plainly the cost of the thing.
     // - subtype: 'Guarantee' (the taxonomy group whose synonyms include 'Insurance-backed guarantee', matching the printed scheme) qualified by 'Building work', covering installation and workmanship.
     // - scheduleKind is not declared: neither dateRole is 'renewal' or 'service'.
-    name: "cavity wall insulation guarantee, the trading name on the letterhead is not who guarantees it",
+    name: "cavity wall insulation guarantee, the trading name on the letterhead is the provider, not the small-print company that issues it",
     filename: "fullpage-cavity-wall-insulation-guarantee.pdf",
     text: "Guarantee certificate WC-GTE-08823  \n\nWarmCore Insulation Cavity wall & loft insulation specialists · est. 2009 · www.warmcoreinsulation.example \n\nGUARANTEE CERTIFICATE Cavity wall insulation, installed to CIGA / BBA technical requirements \n\nProperty owner \n\nMr David Okafor 19 Fernhill Close, Aldreth Bay, Cravenshire CV6 4RP \n\nGuarantee number WC- GTE- 08823 \n\nJob reference WCI-2026-4471 Date of installation 12 May 2026 \n\nCertificate issued 19 May 2026 \n\nWHAT  THIS GUARANTEE COVERS \n\nThis guarantee covers defects in the cavity wall insulation materials and workmanship described below, installed at the address shown, for a period of 25 years from the date of installation. It does not cover pre-existing structural defects, penetrating damp not caused by the insulation, or damage arising from alterations carried out after installation without the installer's written agreement. \n\nInsulation material Blown mineral wool, EWI-certified batch 2026/0512 \n\nCavity width surveyed 75mm, confirmed by borescope survey 28 April 2026 \n\nGuarantee period 25 years, from 12 May 2026 to 12 May 2051 \n\nContract price £2,340.00, paid in full 12 May 2026 \n\nInsurance-backed guarantee scheme Registered with GuardBuild Warranty Ltd, scheme ref GBW-771049 \n\nMAKING  A CLAIM \n\nTo make a claim under this guarantee, contact the installer in the first instance using the details in the small print below. If the installer has ceased trading, the insurance-backed guarantee scheme referenced above will handle a valid claim instead; a separate policy document was issued for that scheme on 19 May 2026 and should be kept with this certificate. \n\n\"WarmCore Insulation\" is a trading name of Bassington Energy Solutions Ltd, registered in England and Wales No. 06612940, registered office 4 Colliery Road, \n\nBassington, Cravenshire CV11 3EF. This guarantee is issued by Bassington Energy Solutions Ltd and is not transferable to a subsequent owner of the property \n\nwithout written notice to the installer within 3 months of the change of ownership. Previous guarantee wording, edition dated 6 March 2022, is superseded by this \n\nedition, dated 1 January 2026. VAT registration number GB 442 1187 30. \n\nCIGA APPROVED\n",
     expected: {
     dates: ["2026-05-12","2051-05-12"],
-    provider: "Bassington Energy Solutions Ltd",
+    provider: "WarmCore Insulation",
     reference: "WC-GTE-08823",
     dateRoles: [
       { date: "2026-05-12", role: "issued" },
@@ -385,7 +387,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     // - subtype Domain+Subscription/Domain from the domain renewal control-panel content.
     // - Trap: hosting plan's own price and different renewal date 'Business Hosting Plan — £89.99 per year, renews 2 November 2026'.
     // - Trap: SSL certificate expiry 'Foxglove Domain SSL — expires 5 December 2026'.
-    // - Trap: the plain renewal line 'Domain renewal (12 months) £12.99', the total before VAT.
+    // - Trap: the plain renewal line 'Domain renewal (12 months) £12.99', the total before VAT (owner, 2026-09-12: "the total due is the right answer").
     // - Trap: invoice number 'INV-2027-004471', a rival reference.
     // - Trap: domain ID 'D4471982-EXPL', another rival reference.
     // - Trap: DNS TTL '3600'.
@@ -405,9 +407,6 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
       { date: "2027-01-18", role: "renewal" },
     ],
     subtype: {"kinds":["Domain","Subscription"],"qualifiers":["Domain"]},
-    // costMinor is 'Total due today £15.59', the renewal line plus its VAT,
-    // not the £12.99 line before VAT (owner, 2026-09-12: "the total due is
-    // the right answer").
     costMinor: 1559,
     currency: "GBP",
     recurrenceMonths: 12,
@@ -788,17 +787,17 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
   {
     // Ground-truth notes:
     // - dates: plan commenced 3 November 2024, certificate issued 10 November 2024, final instalment due 3 October 2026. Three other printed dates are deliberately not declared: the FCA's take-over of funeral plan regulation (29 Jul 2022, a regulatory milestone, not a date about this plan), and the two plan-document edition stamps (6 Jan 2026 and the superseded 2 Mar 2022).
-    // - provider is Millstone Prepaid Services Ltd, named in the small print as who 'Evergreen Funeral Plans' -- printed large on the certificate and used throughout -- is a trading name of, and as who is FCA-authorised to provide the plan; the nominated funeral director (Fenmouth & District Funeral Service) and the independent trust holding the funds (Cravenshire Funeral Planning Trust) are both named on the page and are neither of them the provider.
+    // - provider is 'Evergreen Funeral Plans', printed large on the certificate and used throughout: the household deals with the trading name, and the trading name is the more likely answer than the legal entity behind it (owner, 2026-09-13, generalising the gym's 'Cresswell Fitness Club' ruling in #989). 'Millstone Prepaid Services Ltd', named only in the small print as who the trading name belongs to and who is FCA-authorised, is a trap; so are the nominated funeral director (Fenmouth & District Funeral Service) and the independent trust holding the funds (Cravenshire Funeral Planning Trust).
     // - reference is the plan number EFP-0091234.
     // - costMinor is the £3,995.00 total plan price, fixed at today's prices, not the £166.46 monthly instalment amount.
     // - subtype: 'Plan' (matching the printed 'pre-paid funeral plan') qualified by 'Funeral'.
     // - scheduleKind is not declared: none of the three dateRoles is 'renewal' or 'service' -- a prepaid funeral plan does not renew.
-    name: "funeral plan certificate, the trading name on the parchment is not who is FCA-authorised",
+    name: "funeral plan certificate, the trading name on the parchment is the provider, not the FCA-authorised company behind it",
     filename: "fullpage-funeral-plan-certificate.pdf",
     text: "Evergreen Funeral Plans — certificate EFP-0091234  \n\nEvergreen Funeral Plans A pre-paid funeral plan, fixing today's cost against tomorrow's \n\nCERTIFICATE  OF  PLAN  OWNERSHIP \n\nPlan holder \n\nMrs Olwen Meredith \n\n16 Chapel Row, Bassington, Cravenshire CV11 5FT \n\nPlan number EFP-0091234 \n\nPlan commenced 3 November 2024 \n\nCertificate issued 10 November 2024 \n\nNominated director: Fenmouth & District Funeral Service \n\nPLAN DETAILS \n\nPlan type Simple Choice, unattended committal with optional service \n\nTotal plan price £3,995.00, fixed at today's prices \n\nPayment method 24 monthly instalments of £166.46 \n\nFinal instalment due 3 October 2026 \n\nFunds held by Cravenshire Funeral Planning Trust, an independent trust registered with the Funeral Planning Authority \n\nWHAT IS GUARANTEED \n\nOnce your plan is paid in full, the funeral director's services described in your plan documents are guaranteed at no further cost to your estate, however much prices rise before the plan is needed. Third-party costs such as a doctor's certification fee, a minister's fee or a burial plot are not fixed and are payable by your estate at the rate current when the funeral takes place. Your plan documents were last updated on 6 January 2026, replacing the edition dated 2 March 2022. \n\n\"Evergreen Funeral Plans\" is a trading name of Millstone Prepaid Services Ltd, registered in England and Wales No. 05712834, registered office 9 Millstone Yard, Bassington, Cravenshire CV11 2QE. Millstone Prepaid Services Ltd is authorised and regulated by the Financial Conduct Authority for the provision of funeral plan contracts, firm reference number 913204, following the transfer of funeral plan regulation to the FCA on 29 July 2022. This certificate is not a contract in itself; the plan terms and conditions, most recently issued 6 January 2026, form the whole agreement between you and Millstone Prepaid Services Ltd.\n",
     expected: {
     dates: ["2024-11-03","2024-11-10","2026-10-03"],
-    provider: "Millstone Prepaid Services Ltd",
+    provider: "Evergreen Funeral Plans",
     reference: "EFP-0091234",
     dateRoles: [
       { date: "2024-11-03", role: "start" },
@@ -847,6 +846,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     subtype: {"kinds":["Membership","Contract","Subscription","Plan"],"qualifiers":["Gym"]},
     costMinor: 51000,
     currency: "GBP",
+    costArithmetic: [[4250,12]],
     recurrenceMonths: 1,
     scheduleKind: "renewal",
     },
@@ -988,6 +988,7 @@ export const FULL_PAGE_CORPUS: CorpusDocument[] = [
     subtype: {"kinds":["Plan","Contract","Subscription","Tariff"],"qualifiers":["Mobile"]},
     costMinor: 49800,
     currency: "GBP",
+    costArithmetic: [[1400,6],[2300,18]],
     recurrenceMonths: 24,
     scheduleKind: "renewal",
     },
