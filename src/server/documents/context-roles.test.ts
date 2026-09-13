@@ -140,6 +140,15 @@ describe("the labels household paper prints beside its dates", () => {
     expect(roleOf("Final instalment due 3 October 2026", "3 October 2026")).toBe("due");
     expect(roleOf("show that your next service is due on 14 October 2026.", "14 October 2026")).toBe("service");
   });
+
+  it("reads a visit that is due, the day a sweep was done, a delivery and an agreement date", () => {
+    expect(roleOf("Annual Maintenance Visit Due 02/03/2027", "02/03/2027")).toBe("service");
+    expect(roleOf("Date swept 1 September 2026", "1 September 2026")).toBe("service");
+    expect(roleOf("Delivery date 9 September 2026, between 7am and 1pm", "9 September 2026")).toBe("start");
+    expect(roleOf("Agreement date: 20 February 2026", "20 February 2026")).toBe("start");
+    // A bill that is due is still a bill.
+    expect(roleOf("Payment due 30 June 2026", "30 June 2026")).toBe("due");
+  });
 });
 
 describe("default role", () => {
