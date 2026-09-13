@@ -15,8 +15,43 @@
 # validation.
 #
 # Usage:
-#   bash scripts/test-e2e-local.sh [--profile NAME] [--spec PATH] [--project NAME]
+#   bash scripts/test-e2e-local.sh [--profile NAME] [--spec PATH] [--project NAME] [--reuse PROJECT]
 #
+#   --reuse PROJECT Skip the image build, the OIDC sidecar build and
+#                    `compose up`; run Playwright straight against the
+#                    already-running stack under Compose project PROJECT --
+#                    the project name a prior `--keep` run logged at startup
+#                    ("starting the acceptance stack (profile ..., project
+#                    ..., app on ...)"). #947, following the owner's ruling on
+#                    #923 rec 22/finding 11: this makes a single-spec rerun
+#                    after a failure cost only the spec's own time (--spec)
+#                    instead of the full build-and-start every time.
+#                      bash scripts/test-e2e-local.sh --keep
+#                      # ... a spec fails; fix it, then:
+#                      bash scripts/test-e2e-local.sh --reuse <project> --spec tests/e2e/v19-mail-review.spec.ts
+#                    The stack is identified by Compose's own project/service
+#                    labels (`docker ps --filter label=com.docker.compose.project=PROJECT
+#                    --filter label=com.docker.compose.service=orbit-app`, and
+#                    likewise for orbit-db/orbit-oidc/orbit-greenmail) --
+#                    never by a name or port the caller has to remember right
+#                    -- then health-checked before anything runs: the
+#                    container's own Docker health status must be "healthy"
+#                    and its published port must answer `/api/health` with
+#                    `{"status":"ready","service":"orbit"}`, exactly the check
+#                    a fresh run does. Any of that failing -- no such
+#                    container, unhealthy, wrong profile for what's actually
+#                    running, health endpoint not answering -- is a loud
+#                    failure and a non-zero exit, never a silent fall-through
+#                    to starting a new stack or running Playwright against
+#                    nothing. The app's, OIDC provider's and GreenMail's
+#                    published host ports are read back from the running
+#                    containers themselves (never freed and reselected, and
+#                    never assumed to be the defaults), so ORBIT_PORT,
+#                    TEST_OIDC_PORT, TEST_SMTP_PORT and TEST_IMAPS_PORT need no
+#                    caller bookkeeping. A stack reused this way is never torn
+#                    down by this run, whatever --keep is set to -- this run
+#                    did not create it, so cleanup below leaves it exactly as
+#                    found, same as a permanent failure to identify it does.
 #   --profile NAME  Which stack to test against (#916). Default: oidc.
 #                    oidc        the stack above: a disposable OIDC provider,
 #                                GreenMail, and the whole suite.
@@ -116,11 +151,17 @@ spec=""
 playwright_project=""
 profile="oidc"
 keep=0
+reuse_project=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep)
       keep=1
       shift
+      ;;
+    --reuse)
+      [[ $# -ge 2 ]] || { printf 'test-e2e-local: --reuse requires a Compose project name.\n' >&2; exit 2; }
+      reuse_project="$2"
+      shift 2
       ;;
     --profile)
       [[ $# -ge 2 ]] || { printf 'test-e2e-local: --profile requires a value.\n' >&2; exit 2; }
@@ -141,7 +182,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help)
-      printf 'Usage: %s [--profile oidc|local-only] [--spec PATH] [--project desktop-chromium|mobile-chromium] [--keep]\n' "$0"
+      printf 'Usage: %s [--profile oidc|local-only] [--spec PATH] [--project desktop-chromium|mobile-chromium] [--keep] [--reuse PROJECT]\n' "$0"
       exit 0
       ;;
     *)
@@ -202,20 +243,16 @@ free_port() {
 # from whatever the kernel hands out (free_port() above, the same bind-then-
 # release approach the TEST_SMTP_PORT/TEST_OIDC_PORT/TEST_IMAPS_PORT
 # selection below uses). An explicit override already set in the caller's
-# environment -- COMPOSE_PROJECT_NAME or ORBIT_PORT -- always wins.
+# environment -- COMPOSE_PROJECT_NAME or ORBIT_PORT -- always wins. --reuse
+# names the project outright (#947) and outranks both: it is naming a stack
+# that already exists, not asking this run to derive its own.
 worktree_hash="$(printf '%s' "$repo_dir" | md5sum | cut -c1-8)"
-project_name="${COMPOSE_PROJECT_NAME:-orbit-e2e-local-${worktree_hash}-$$}"
+project_name="${reuse_project:-${COMPOSE_PROJECT_NAME:-orbit-e2e-local-${worktree_hash}-$$}}"
 readonly project_name
-app_port="${ORBIT_PORT:-$(free_port)}"
-readonly app_port
-# Exported rather than set per-invocation: compose/docker-compose.local-e2e.yml reads
-# it to build the application's own APP_URL and OIDC callback URL, so every
-# compose call in this script has to agree about the published port. The
-# "port already in use" bind-test below (the "${app_port}:the Orbit
-# application" entry in the port_check loop) confirms a freshly-picked port
-# is still free -- and rejects a bad override -- before anything starts.
-export ORBIT_PORT="$app_port"
-readonly base_url="http://127.0.0.1:${app_port}"
+# app_port (and, for --reuse, base_url) is set below: freshly picked in the
+# normal path, or read back from the running container's own published port
+# in the --reuse path (#947) -- never guessed and never left at whatever
+# ORBIT_PORT happened to default to.
 # The two profiles (#916). `local-only` is the acceptance overlay's absence as
 # much as its own overlay's presence: that file is what declares the
 # disposable `orbit-oidc` sidecar, and a Compose overlay cannot delete a
@@ -246,6 +283,15 @@ cleaned_up=0
 cleanup() {
   [[ "$cleaned_up" == 0 ]] || return 0
   cleaned_up=1
+  # --reuse (#947) means this run never created project "$project_name" --
+  # it is reusing a stack an earlier --keep run left up, or it failed before
+  # ever confirming one exists -- so, unlike --keep, this is not a choice
+  # this run's caller can override with --keep=0: it never fires the
+  # teardown below at all, whatever --keep was passed as.
+  if [[ -n "$reuse_project" ]]; then
+    log "not tearing down project ${project_name} (--reuse never cleans up a stack it did not create)"
+    return 0
+  fi
   if [[ "$keep" == 1 ]]; then
     log "leaving project ${project_name} up (--keep); tear it down with the command in this script's usage"
     return 0
@@ -293,102 +339,190 @@ port_free() {
   ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
 }
 
-# GreenMail's SMTP port and the disposable OIDC provider's port are fixed in
-# CI (3025 and 4443: tests/e2e/v19-mail-collection.spec.ts's SMTP_PORT,
-# compose/docker-compose.acceptance.yml's host bindings, and
-# tests/e2e/playwright.config.ts's host-resolver-rules all default to them
-# via TEST_SMTP_PORT/TEST_OIDC_PORT) but that is exactly what a real Orbit
-# deployment on this host already holds. Pick free ports instead and export
-# them so every one of those readers agrees -- the test and the compose host-binding must always
-# resolve to the SAME number, which is why this is one variable each rather
-# than two that could diverge. An explicit override from the caller's
-# environment is respected as-is. free_port() is defined above, alongside
-# the app port selection that uses it first.
-export TEST_SMTP_PORT="${TEST_SMTP_PORT:-$(free_port)}"
-export TEST_OIDC_PORT="${TEST_OIDC_PORT:-$(free_port)}"
-while [[ "$TEST_OIDC_PORT" == "$TEST_SMTP_PORT" ]]; do
-  TEST_OIDC_PORT="$(free_port)"
-done
-export TEST_OIDC_PORT
+if [[ -n "$reuse_project" ]]; then
+  # --- Reuse: identify and health-check an existing kept stack (#947) -------
+  #
+  # Identify project "$project_name" by Compose's own project/service labels,
+  # never by a container name or a port the caller has to remember right --
+  # the same labels the collision check below (and cleanup() above) trust,
+  # used here the safe way round: filtering by them instead of assuming a
+  # name refers to the right thing. `docker ps` lists running containers
+  # only, which doubles as the "is it actually still up" half of the check;
+  # Docker's own health status and the /api/health probe below cover "is it
+  # actually ready", the same bar a fresh `compose up --wait` holds a new
+  # stack to.
+  container_for_service() {
+    docker ps --filter "label=com.docker.compose.project=${project_name}" \
+      --filter "label=com.docker.compose.service=$1" --format '{{.Names}}' | head -n1
+  }
+  host_port_of() {
+    docker inspect --format "{{with index .NetworkSettings.Ports \"$2\"}}{{(index . 0).HostPort}}{{end}}" "$1" 2>/dev/null
+  }
 
-# The invitation journey (#481) reads its own mail back out of GreenMail over
-# IMAPS rather than SMTP-injecting it, so it needs a third host-published
-# port alongside the two above -- same reasoning, same pattern.
-export TEST_IMAPS_PORT="${TEST_IMAPS_PORT:-$(free_port)}"
-while [[ "$TEST_IMAPS_PORT" == "$TEST_SMTP_PORT" || "$TEST_IMAPS_PORT" == "$TEST_OIDC_PORT" ]]; do
-  TEST_IMAPS_PORT="$(free_port)"
-done
-export TEST_IMAPS_PORT
+  app_container="$(container_for_service orbit-app)"
+  [[ -n "$app_container" ]] ||
+    fail "--reuse ${project_name}: no running orbit-app container for this project. Start one first with --keep -- its startup log line names the project to pass here -- or check the project name."
+  db_container="$(container_for_service orbit-db)"
+  [[ -n "$db_container" ]] ||
+    fail "--reuse ${project_name}: found orbit-app but no running orbit-db container; the stack is only partly up. Refusing to reuse it."
 
-# The app's own port and the three ports just selected must be free before
-# anything starts -- refuse clearly rather than fail deep inside
-# `compose up` or hang waiting for health. TEST_SMTP_PORT/TEST_OIDC_PORT/
-# TEST_IMAPS_PORT are freshly chosen above, so this is normally a formality;
-# it still guards an explicit caller override and the narrow race between
-# selection and use.
-for port_check in "${TEST_SMTP_PORT}:GreenMail SMTP (TEST_SMTP_PORT)" \
-  "${TEST_OIDC_PORT}:the disposable OIDC provider (TEST_OIDC_PORT)" \
-  "${TEST_IMAPS_PORT}:GreenMail IMAPS (TEST_IMAPS_PORT)" \
-  "${app_port}:the Orbit application"; do
-  port="${port_check%%:*}"
-  label="${port_check#*:}"
-  port_free "$port" || fail "port ${port} (${label}) is already in use -- likely a real Orbit deployment on this host. Stop it before running the local acceptance suite."
-done
-log "using TEST_SMTP_PORT=${TEST_SMTP_PORT} TEST_OIDC_PORT=${TEST_OIDC_PORT} TEST_IMAPS_PORT=${TEST_IMAPS_PORT}"
+  app_health="$(docker inspect --format '{{.State.Health.Status}}' "$app_container" 2>/dev/null || true)"
+  [[ "$app_health" == "healthy" ]] ||
+    fail "--reuse ${project_name}: orbit-app is not healthy (Docker health status: ${app_health:-none}). Refusing to reuse it."
 
-# The renamed containers (compose/docker-compose.local-e2e.yml) must not already
-# exist under a different project; a name collision there would mean this
-# script is about to touch something it did not create.
-for fixed_name in "${project_name}-app" "${project_name}-db" "${project_name}-clamav"; do
-  if docker inspect "$fixed_name" >/dev/null 2>&1; then
-    label="$(docker inspect "$fixed_name" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
-    [[ "$label" == "$project_name" ]] || fail "container ${fixed_name} already exists and belongs to project '${label}', not '${project_name}'. Refusing to touch it."
+  app_port="$(host_port_of "$app_container" "3000/tcp")"
+  [[ -n "$app_port" ]] ||
+    fail "--reuse ${project_name}: could not read orbit-app's published host port."
+  export ORBIT_PORT="$app_port"
+
+  # Only the oidc profile has a provider or a mail sidecar to find (#916); a
+  # local-only kept stack has neither, and reusing it under --profile oidc
+  # would otherwise run the suite against a stack with no provider at all
+  # and fail confusingly deep inside a sign-in step instead of here.
+  if [[ "$profile" == "oidc" ]]; then
+    oidc_container="$(container_for_service orbit-oidc)"
+    [[ -n "$oidc_container" ]] ||
+      fail "--reuse ${project_name}: --profile oidc but no running orbit-oidc container for this project -- reuse it with --profile local-only if that is what is actually running, or start an oidc-profile stack with --keep."
+    oidc_port="$(host_port_of "$oidc_container" "4443/tcp")"
+    [[ -n "$oidc_port" ]] ||
+      fail "--reuse ${project_name}: could not read orbit-oidc's published host port."
+    export TEST_OIDC_PORT="$oidc_port"
+
+    # GreenMail is optional even in the oidc profile's own stack shape:
+    # missing it just means the kept stack's caller never needed mail, so a
+    # non-mail spec rerun (the common case) still works. A mail spec against
+    # a stack that lacks it fails later at the mail step itself, loudly.
+    mail_container="$(container_for_service orbit-greenmail)"
+    if [[ -n "$mail_container" ]]; then
+      smtp_port="$(host_port_of "$mail_container" "3025/tcp")"
+      imaps_port="$(host_port_of "$mail_container" "3993/tcp")"
+      [[ -z "$smtp_port" ]] || export TEST_SMTP_PORT="$smtp_port"
+      [[ -z "$imaps_port" ]] || export TEST_IMAPS_PORT="$imaps_port"
+    fi
   fi
-done
 
-# --- Local secrets and TLS material: generate only what is missing ----------
+  readonly app_port
+  readonly base_url="http://127.0.0.1:${app_port}"
+  # Only used to satisfy docker-compose.yml's `${ORBIT_IMAGE:?...}` guard so
+  # the diagnostic `compose ps`/`compose logs` calls at the bottom of this
+  # script still render if the reused suite run fails -- never built, never
+  # pulled, never compared against what is actually running.
+  orbit_image="reused-by-947:${project_name}"
 
-bash scripts/configure.sh
-[[ -f .env-orbit ]] || fail "scripts/configure.sh did not create .env-orbit."
+  response="$(curl --fail --silent --show-error --max-time 10 "${base_url}/api/health")" ||
+    fail "--reuse ${project_name}: health endpoint did not respond at ${base_url}/api/health -- this may not be the stack you think it is."
+  jq --exit-status '.status == "ready" and .service == "orbit"' <<< "$response" > /dev/null ||
+    fail "--reuse ${project_name}: health endpoint did not report ready: ${response}"
+  log "reusing project ${project_name} (profile ${profile}, app on ${base_url}); skipping image build, OIDC build and compose up"
+else
+  # GreenMail's SMTP port and the disposable OIDC provider's port are fixed in
+  # CI (3025 and 4443: tests/e2e/v19-mail-collection.spec.ts's SMTP_PORT,
+  # compose/docker-compose.acceptance.yml's host bindings, and
+  # tests/e2e/playwright.config.ts's host-resolver-rules all default to them
+  # via TEST_SMTP_PORT/TEST_OIDC_PORT) but that is exactly what a real Orbit
+  # deployment on this host already holds. Pick free ports instead and export
+  # them so every one of those readers agrees -- the test and the compose host-binding must always
+  # resolve to the SAME number, which is why this is one variable each rather
+  # than two that could diverge. An explicit override from the caller's
+  # environment is respected as-is. free_port() is defined above, alongside
+  # the app port selection that uses it first.
+  app_port="${ORBIT_PORT:-$(free_port)}"
+  readonly app_port
+  # Exported rather than set per-invocation: compose/docker-compose.local-e2e.yml
+  # reads it to build the application's own APP_URL and OIDC callback URL, so
+  # every compose call in this script has to agree about the published port.
+  # The "port already in use" bind-test below (the "${app_port}:the Orbit
+  # application" entry in the port_check loop) confirms a freshly-picked port
+  # is still free -- and rejects a bad override -- before anything starts.
+  export ORBIT_PORT="$app_port"
+  readonly base_url="http://127.0.0.1:${app_port}"
 
-# docker-compose.yml's orbit-oidc-client-secret Compose secret always needs a
-# host file to bind-mount, whether or not the container reads it.
-# configure.sh's ensure_oidc_secret_placeholder deliberately skips creating
-# one when .env-orbit already carries a direct-value OIDC_CLIENT_SECRET (a
-# real deployment form it must leave alone -- see the comment above that
-# function), which a worktree that reuses .env-orbit across runs can already
-# have from an earlier session (#857). Fill in the same placeholder the other
-# acceptance-style test scripts already write (test-install-acceptance.sh,
-# test-install-bootstrap.sh, test-repair-journeys.sh), only when it is
-# missing -- this script never overwrites an existing file under
-# .orbit-secrets/.
-if [[ ! -f .orbit-secrets/oidc-client-secret ]]; then
-  log "generating missing secret: .orbit-secrets/oidc-client-secret"
-  printf 'e2e-local-client-secret\n' > .orbit-secrets/oidc-client-secret
-  chmod 600 .orbit-secrets/oidc-client-secret
-fi
+  export TEST_SMTP_PORT="${TEST_SMTP_PORT:-$(free_port)}"
+  export TEST_OIDC_PORT="${TEST_OIDC_PORT:-$(free_port)}"
+  while [[ "$TEST_OIDC_PORT" == "$TEST_SMTP_PORT" ]]; do
+    TEST_OIDC_PORT="$(free_port)"
+  done
+  export TEST_OIDC_PORT
 
-if [[ ! -f .orbit-secrets/greenmail.p12 || ! -f .orbit-secrets/greenmail-ca.pem || ! -f .orbit-secrets/greenmail-key.pem ]]; then
-  log "generating GreenMail TLS material (missing from .orbit-secrets/)"
-  bash scripts/dev-greenmail-cert.sh
-fi
-for required in .orbit-secrets/greenmail.p12 .orbit-secrets/greenmail-ca.pem; do
-  [[ -f "$required" ]] || fail "missing GreenMail TLS material: ${required}"
-done
+  # The invitation journey (#481) reads its own mail back out of GreenMail over
+  # IMAPS rather than SMTP-injecting it, so it needs a third host-published
+  # port alongside the two above -- same reasoning, same pattern.
+  export TEST_IMAPS_PORT="${TEST_IMAPS_PORT:-$(free_port)}"
+  while [[ "$TEST_IMAPS_PORT" == "$TEST_SMTP_PORT" || "$TEST_IMAPS_PORT" == "$TEST_OIDC_PORT" ]]; do
+    TEST_IMAPS_PORT="$(free_port)"
+  done
+  export TEST_IMAPS_PORT
 
-# Only SMTP now: the inbound mailbox credential is set through the
-# administration screen and stored encrypted in the database (ADR-0017 slice
-# 2), so there is no host secret file for it and no alias key to generate --
-# Orbit makes its own. tests/e2e/v19-mail-collection.spec.ts configures the
-# mailbox as the administrator before it sends anything.
-for secret_file in smtp-password; do
-  path=".orbit-secrets/${secret_file}"
-  if [[ ! -f "$path" ]]; then
-    log "generating missing secret: ${path}"
-    (umask 077; openssl rand -hex 32 > "$path")
-    chmod 600 "$path"
+  # The app's own port and the three ports just selected must be free before
+  # anything starts -- refuse clearly rather than fail deep inside
+  # `compose up` or hang waiting for health. TEST_SMTP_PORT/TEST_OIDC_PORT/
+  # TEST_IMAPS_PORT are freshly chosen above, so this is normally a formality;
+  # it still guards an explicit caller override and the narrow race between
+  # selection and use.
+  for port_check in "${TEST_SMTP_PORT}:GreenMail SMTP (TEST_SMTP_PORT)" \
+    "${TEST_OIDC_PORT}:the disposable OIDC provider (TEST_OIDC_PORT)" \
+    "${TEST_IMAPS_PORT}:GreenMail IMAPS (TEST_IMAPS_PORT)" \
+    "${app_port}:the Orbit application"; do
+    port="${port_check%%:*}"
+    label="${port_check#*:}"
+    port_free "$port" || fail "port ${port} (${label}) is already in use -- likely a real Orbit deployment on this host. Stop it before running the local acceptance suite."
+  done
+  log "using TEST_SMTP_PORT=${TEST_SMTP_PORT} TEST_OIDC_PORT=${TEST_OIDC_PORT} TEST_IMAPS_PORT=${TEST_IMAPS_PORT}"
+
+  # The renamed containers (compose/docker-compose.local-e2e.yml) must not already
+  # exist under a different project; a name collision there would mean this
+  # script is about to touch something it did not create.
+  for fixed_name in "${project_name}-app" "${project_name}-db" "${project_name}-clamav"; do
+    if docker inspect "$fixed_name" >/dev/null 2>&1; then
+      label="$(docker inspect "$fixed_name" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+      [[ "$label" == "$project_name" ]] || fail "container ${fixed_name} already exists and belongs to project '${label}', not '${project_name}'. Refusing to touch it."
+    fi
+  done
+
+  # --- Local secrets and TLS material: generate only what is missing --------
+
+  bash scripts/configure.sh
+  [[ -f .env-orbit ]] || fail "scripts/configure.sh did not create .env-orbit."
+
+  # docker-compose.yml's orbit-oidc-client-secret Compose secret always needs a
+  # host file to bind-mount, whether or not the container reads it.
+  # configure.sh's ensure_oidc_secret_placeholder deliberately skips creating
+  # one when .env-orbit already carries a direct-value OIDC_CLIENT_SECRET (a
+  # real deployment form it must leave alone -- see the comment above that
+  # function), which a worktree that reuses .env-orbit across runs can already
+  # have from an earlier session (#857). Fill in the same placeholder the other
+  # acceptance-style test scripts already write (test-install-acceptance.sh,
+  # test-install-bootstrap.sh, test-repair-journeys.sh), only when it is
+  # missing -- this script never overwrites an existing file under
+  # .orbit-secrets/.
+  if [[ ! -f .orbit-secrets/oidc-client-secret ]]; then
+    log "generating missing secret: .orbit-secrets/oidc-client-secret"
+    printf 'e2e-local-client-secret\n' > .orbit-secrets/oidc-client-secret
+    chmod 600 .orbit-secrets/oidc-client-secret
   fi
-done
+
+  if [[ ! -f .orbit-secrets/greenmail.p12 || ! -f .orbit-secrets/greenmail-ca.pem || ! -f .orbit-secrets/greenmail-key.pem ]]; then
+    log "generating GreenMail TLS material (missing from .orbit-secrets/)"
+    bash scripts/dev-greenmail-cert.sh
+  fi
+  for required in .orbit-secrets/greenmail.p12 .orbit-secrets/greenmail-ca.pem; do
+    [[ -f "$required" ]] || fail "missing GreenMail TLS material: ${required}"
+  done
+
+  # Only SMTP now: the inbound mailbox credential is set through the
+  # administration screen and stored encrypted in the database (ADR-0017 slice
+  # 2), so there is no host secret file for it and no alias key to generate --
+  # Orbit makes its own. tests/e2e/v19-mail-collection.spec.ts configures the
+  # mailbox as the administrator before it sends anything.
+  for secret_file in smtp-password; do
+    path=".orbit-secrets/${secret_file}"
+    if [[ ! -f "$path" ]]; then
+      log "generating missing secret: ${path}"
+      (umask 077; openssl rand -hex 32 > "$path")
+      chmod 600 "$path"
+    fi
+  done
+fi
 
 # --- Dependencies -------------------------------------------------------------
 
@@ -431,50 +565,52 @@ else
   log "worktree dependencies already match the main checkout's installed lockfile; skipping pnpm install (#876)"
 fi
 
-# --- Build the application image ---------------------------------------------
+# --- Build and bring up the stack, unless --reuse named one already up ------
 
-orbit_short_sha="$(git rev-parse --short=12 HEAD)"
-orbit_revision="$(git rev-parse HEAD)"
-orbit_version="$(node scripts/calculate-version.mjs --channel preview)"
-readonly orbit_image="orbit-local:${orbit_short_sha}"
-readonly orbit_revision
-readonly orbit_version
-readonly orbit_channel="dev"
-
-log "building ${orbit_image} (version ${orbit_version})"
-env ORBIT_IMAGE="$orbit_image" ORBIT_VERSION="$orbit_version" ORBIT_REVISION="$orbit_revision" ORBIT_CHANNEL="$orbit_channel" \
-  docker compose -p "$project_name" --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.build.yml \
-  build orbit-app
-
-if [[ "$profile" == "local-only" ]]; then
-  log "local-only profile: no identity provider to build"
+if [[ -n "$reuse_project" ]]; then
+  : # already identified, health-checked and logged above (#947).
 else
-  log "building the disposable OIDC acceptance provider"
-  compose build orbit-oidc
+  orbit_short_sha="$(git rev-parse --short=12 HEAD)"
+  orbit_revision="$(git rev-parse HEAD)"
+  orbit_version="$(node scripts/calculate-version.mjs --channel preview)"
+  readonly orbit_image="orbit-local:${orbit_short_sha}"
+  readonly orbit_revision
+  readonly orbit_version
+  readonly orbit_channel="dev"
+
+  log "building ${orbit_image} (version ${orbit_version})"
+  env ORBIT_IMAGE="$orbit_image" ORBIT_VERSION="$orbit_version" ORBIT_REVISION="$orbit_revision" ORBIT_CHANNEL="$orbit_channel" \
+    docker compose -p "$project_name" --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.build.yml \
+    build orbit-app
+
+  if [[ "$profile" == "local-only" ]]; then
+    log "local-only profile: no identity provider to build"
+  else
+    log "building the disposable OIDC acceptance provider"
+    compose build orbit-oidc
+  fi
+
+  log "starting the acceptance stack (profile ${profile}, project ${project_name}, app on ${base_url})"
+  ORBIT_BIND_ADDRESS=127.0.0.1 ORBIT_PORT="$app_port" \
+    compose up --detach --no-build --wait --wait-timeout 180 || {
+    log "stack did not become healthy; service status and logs follow"
+    compose ps || true
+    compose logs --no-color || true
+    exit 1
+  }
+
+  response="$(curl --fail --silent --show-error --max-time 10 "${base_url}/api/health")" || fail "health endpoint did not respond at ${base_url}/api/health"
+  jq --exit-status '.status == "ready" and .service == "orbit"' <<< "$response" > /dev/null || fail "health endpoint did not report ready: ${response}"
+  log "application is healthy"
+
+  # The application hands the OIDC provider its own callback URL, and the browser
+  # follows it. If that URL names a port this script is not publishing, every
+  # sign-in dies at chrome-error://chromewebdata/ several minutes from now, with
+  # nothing in the health check to hint at it (#732). Compare them here instead.
+  configured_app_url="$(compose config --format json | jq -r '.services["orbit-app"].environment.APP_URL // empty')"
+  [[ "$configured_app_url" == "$base_url" ]] || fail "the application is configured with APP_URL=${configured_app_url:-<unset>} but this run publishes it on ${base_url}; browser sign-in would fail at the OIDC callback"
+  log "APP_URL agrees with the published port"
 fi
-
-# --- Bring up the stack ------------------------------------------------------
-
-log "starting the acceptance stack (profile ${profile}, project ${project_name}, app on ${base_url})"
-ORBIT_BIND_ADDRESS=127.0.0.1 ORBIT_PORT="$app_port" \
-  compose up --detach --no-build --wait --wait-timeout 180 || {
-  log "stack did not become healthy; service status and logs follow"
-  compose ps || true
-  compose logs --no-color || true
-  exit 1
-}
-
-response="$(curl --fail --silent --show-error --max-time 10 "${base_url}/api/health")" || fail "health endpoint did not respond at ${base_url}/api/health"
-jq --exit-status '.status == "ready" and .service == "orbit"' <<< "$response" > /dev/null || fail "health endpoint did not report ready: ${response}"
-log "application is healthy"
-
-# The application hands the OIDC provider its own callback URL, and the browser
-# follows it. If that URL names a port this script is not publishing, every
-# sign-in dies at chrome-error://chromewebdata/ several minutes from now, with
-# nothing in the health check to hint at it (#732). Compare them here instead.
-configured_app_url="$(compose config --format json | jq -r '.services["orbit-app"].environment.APP_URL // empty')"
-[[ "$configured_app_url" == "$base_url" ]] || fail "the application is configured with APP_URL=${configured_app_url:-<unset>} but this run publishes it on ${base_url}; browser sign-in would fail at the OIDC callback"
-log "APP_URL agrees with the published port"
 
 # --- Run the Playwright suite -------------------------------------------------
 # playwright_args was assembled right after argument parsing, above.
