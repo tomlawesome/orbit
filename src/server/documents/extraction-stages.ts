@@ -21,17 +21,34 @@ export const AMOUNT_TAGS = [
 ] as const;
 export type AmountTag = (typeof AMOUNT_TAGS)[number];
 
-/** What the page says an identifier is. `company` is the organisation's own
- * number (VAT, UTR, company registration, FCA firm reference): never the
- * household's reference, and a checksum pass is one way to know it. */
+/**
+ * What the page says an identifier is.
+ *
+ * The first seven can each be the household's own reference on a page of the
+ * right kind, and which of them wins is decided by that kind
+ * (`extraction-reference-kind.ts`). The six after them never can, whatever
+ * else is printed beside them (`extraction-reference-never.ts`): `company`
+ * is the organisation's own number (VAT, UTR, company registration, FCA firm
+ * reference, and a checksum pass is one way to know it), `phone` a telephone
+ * or fax number, `bank` the details a payment is sent to, `product` a model
+ * or promotion code, `page` a sheet number, `web` a number printed inside an
+ * address, `date` a printed date this sieve also matches.
+ */
 export const IDENTIFIER_TAGS = [
   "reference",
   "account",
   "policy",
+  "agreement",
   "customer",
   "invoice",
   "certificate",
   "company",
+  "phone",
+  "bank",
+  "product",
+  "page",
+  "web",
+  "date",
   "other",
 ] as const;
 export type IdentifierTag = (typeof IDENTIFIER_TAGS)[number];

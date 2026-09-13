@@ -38,26 +38,16 @@ import {
 } from "./extraction-choose-meaning";
 import { ADDS_UP, AMOUNT_LABEL } from "./extraction-amount-sieves";
 import { DATE_RANGE, WORDS_BEFORE } from "./extraction-date-sieves";
+import { referencePreference } from "./extraction-reference-kind";
+import { neverTheReference } from "./extraction-reference-never";
 import { bestSupported, type ShortlistEntry } from "./extraction-shortlist";
-import type { CandidateKind } from "./extraction-sieve";
 import type { ExtractedFields } from "./extraction-scoring";
-import type { ChooseStage, TaggedCandidate } from "./extraction-stages";
+import { STRENGTH_STATED, type ChooseStage, type Tag, type TaggedCandidate } from "./extraction-stages";
 import { subtypeGroupBins, subtypeSources } from "./extraction-subtype-bins";
 import { termEndRole } from "./extraction-term-end";
 import { chooseProviderFromPage } from "./provider-route";
 import { documentDateRoles, type DocumentDateRole } from "./suggestions";
 import { trimFieldValue } from "./value-trim";
-
-/**
- * Identifier tags that can carry the household's own reference, best first.
- *
- * `company` and `other` are absent deliberately and not as an oversight:
- * `company` is the organisation's number (VAT, company registration, FCA
- * firm reference), which is never the household's reference however alone
- * it stands on the page, and `other` is a candidate nothing on the page
- * explained.
- */
-const REFERENCE_PREFERENCE = ["reference", "certificate", "policy", "account", "customer", "invoice"];
 
 /**
  * Amount tags that can carry this document's cost, best first.
@@ -73,43 +63,6 @@ const AMOUNT_PREFERENCE = ["total", "due", "instalment"];
  * label stated. One sieve is one way of looking, and a page prints thirty
  * figures. */
 const AGREEING_AMOUNT_SIEVES = 2;
-
-/** The rank of a candidate's best tag in `preference`, or nothing when none
- * of its tags appear there. A candidate tagged both `total` and `rival` is
- * a `total`: the preference list says which tags may win, so the best one
- * present decides. */
-function bestRank(candidate: TaggedCandidate, preference: readonly string[]): number | undefined {
-  let best: number | undefined;
-  for (const tag of candidate.tags) {
-    const rank = preference.indexOf(tag.value);
-    if (rank === -1) continue;
-    if (best === undefined || rank < best) best = rank;
-  }
-  return best;
-}
-
-/** Every candidate of `kind` that ties for the best tag in `preference`, in
- * page order. More than one means the page made the same claim twice --
- * agreeing or not is the caller's question. */
-function bestTagged(
-  candidates: readonly TaggedCandidate[],
-  kind: CandidateKind,
-  preference: readonly string[],
-): TaggedCandidate[] {
-  let bestSoFar: number | undefined;
-  const winners: TaggedCandidate[] = [];
-  for (const candidate of candidates) {
-    if (candidate.kind !== kind) continue;
-    const rank = bestRank(candidate, preference);
-    if (rank === undefined) continue;
-    if (bestSoFar === undefined || rank < bestSoFar) {
-      bestSoFar = rank;
-      winners.length = 0;
-    }
-    if (rank === bestSoFar) winners.push(candidate);
-  }
-  return winners;
-}
 
 function isDateRole(value: string): value is DocumentDateRole {
   return (documentDateRoles as readonly string[]).includes(value);
@@ -346,46 +299,28 @@ function chooseRecurrenceMonths(candidates: readonly TaggedCandidate[]): number 
 }
 
 /**
- * Two identifiers labelled equally well, saying different things: the one
- * the page prints most often wins.
+ * The household's own reference: the top of the same ranking the model is
+ * shown (`referenceShortlistEntries`), or nothing.
  *
- * A reference is the number a household is told to quote, so the page puts
- * it in the header, in the footer of every sheet and in the payment
- * instructions; a number that appears beside it once -- the engineer's
- * licence, a meter read, a line in a URL -- does not get repeated. This
- * counts how often each value appears anywhere in the shortlist, which is
- * the page agreeing with itself, and not where on the page it sits. No
- * clear winner is still nothing.
+ * One ranking, not two. The shortlist already scores each number by the word
+ * the page labelled it with -- in the order this page's kind of thing puts
+ * those words -- and by how often the page printed it, which is the page
+ * agreeing with itself: a reference is the number a household is told to
+ * quote, so it appears in the header, in every sheet's footer and in the
+ * payment instructions, while the engineer's licence beside it is printed
+ * once.
+ *
+ * Two entries level at the top is the page printing two equally good claims,
+ * and the answer to that is nothing. A top entry no label spoke for is the
+ * page never saying which number is theirs, which is also nothing: the most
+ * repeated unlabelled number is a guess, and a guess costs twice a blank.
  */
-function mostRepeated(
-  tied: readonly TaggedCandidate[],
-  candidates: readonly TaggedCandidate[],
-): TaggedCandidate | undefined {
-  const appearances = (value: string) =>
-    candidates.filter((candidate) => candidate.kind === "identifier" && candidate.value === value).length;
-  let winner = tied[0];
-  let clear = true;
-  for (const candidate of tied.slice(1)) {
-    if (candidate.value === winner.value) continue;
-    const difference = appearances(candidate.value) - appearances(winner.value);
-    if (difference > 0) {
-      winner = candidate;
-      clear = true;
-    } else if (difference === 0) {
-      clear = false;
-    }
-  }
-  return clear ? winner : undefined;
-}
-
 function chooseReference(candidates: readonly TaggedCandidate[]): string | undefined {
-  const best = bestTagged(candidates, "identifier", REFERENCE_PREFERENCE);
-  if (best.length === 0) return undefined;
-  const winner = new Set(best.map((candidate) => candidate.value)).size === 1
-    ? best[0]
-    : mostRepeated(best, candidates);
-  if (!winner) return undefined;
-  return trimFieldValue("reference", winner.value, winner.line);
+  const ranked = referenceEntries(candidates);
+  const best = ranked[0];
+  if (best === undefined || !best.labelled) return undefined;
+  if (ranked[1] !== undefined && ranked[1].support === best.support) return undefined;
+  return trimFieldValue("reference", best.value, best.line);
 }
 
 /**
@@ -896,43 +831,125 @@ export function dateShortlistEntries(candidates: readonly TaggedCandidate[]): Sh
   return bestSupported(everyDate(candidates).map((date) => dateEntry(candidates, date)));
 }
 
-/** Every identifier the sieve found, the best-labelled first: the page's own
- * label decides the order, and how often the page repeated it breaks ties.
- * A number a checksum read as the company's own goes last. */
-export function referenceShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
-  const entries = new Map<string, ShortlistEntry>();
+// What the reference ranking is made of, in the order it decides. Several
+// reasons agreeing beat one stronger reason (ADR-0026 stage 2), and for a
+// reference the page repeating itself is one of those reasons: the number a
+// household is told to quote is printed in the header, in the footer of
+// every sheet and in the payment instructions, while the calibration
+// certificate beside it is printed once.
+
+/** A number some label spoke for always outranks one nothing did, however
+ * often the page printed it. A page laying out its sheets is not the page
+ * saying which number is the household's. */
+const A_LABEL_AT_ALL = 1_000;
+
+/** One step of the preference order: an account number where the kind of
+ * thing wanted a policy number, or a bare noun where the page could have
+ * spelled the label out. */
+const A_STEP_OF_THE_ORDER = 4;
+
+/** One more printing that carried a label of its own, worth the same as a
+ * step: the page saying the same thing twice is as good a reason as saying
+ * a slightly better thing once. A printing with no label behind it is worth
+ * 1, and only settles what is otherwise level. */
+const A_LABEL_PRINTED_AGAIN = 4;
+
+/** A shortlist entry with the one thing the rules need and the model does
+ * not: whether any label spoke for this number at all. */
+interface ReferenceEntry extends ShortlistEntry {
+  labelled: boolean;
+}
+
+/**
+ * Every identifier that could be the household's own, best-labelled first.
+ *
+ * Three things decide the order, and none of them is where the number sits
+ * on the page:
+ *
+ * 1. which word the page labelled it with, ranked by what kind of thing the
+ *    page is about (`extraction-reference-kind.ts`) -- a policy number on an
+ *    insurance schedule, an account number on a water bill, a certificate
+ *    number on a safety record;
+ * 2. whether the page spelled that label out ("Certificate number") or
+ *    merely printed the noun beside the number ("Certificate CSS-0417");
+ * 3. how often the page printed it with a label, because a reference is the
+ *    number the household is told to quote and a page repeats it.
+ *
+ * Numbers that can never be the household's reference -- the organisation's
+ * VAT or company registration, a telephone number, bank details, a product
+ * or promotion code, a sheet number, a number inside an address -- are not
+ * ranked last, they are not here at all (`extraction-reference-never.ts`).
+ * They are still in the tagged candidates, carrying the tag that says why.
+ */
+function referenceEntries(candidates: readonly TaggedCandidate[]): ReferenceEntry[] {
+  const preference: readonly string[] = referencePreference(subtypeGroupBins(subtypeSources(candidates)));
+  const dropped = new Set<string>();
   for (const candidate of candidates) {
-    if (candidate.kind !== "identifier") continue;
+    if (candidate.kind === "identifier" && neverTheReference(candidate.tags as Tag<"identifier">[])) {
+      dropped.add(candidate.value);
+    }
+  }
+
+  interface Working extends ReferenceEntry {
+    /** The best place in the order any printing of this number earned --
+     * two steps per tag, so that a bare noun sits between its own tag and
+     * the next one down -- or the end of the order where none did. */
+    step: number;
+    printings: number;
+    /** How many of those printings the page put a label beside. */
+    labelledPrintings: number;
+  }
+  const entries = new Map<string, Working>();
+  for (const candidate of candidates) {
+    if (candidate.kind !== "identifier" || dropped.has(candidate.value)) continue;
     const held = entries.get(candidate.value) ?? {
       value: candidate.value,
       display: candidate.value,
       line: candidate.line,
       why: [] as string[],
       support: 0,
+      labelled: false,
+      step: preference.length * 2,
+      printings: 0,
+      labelledPrintings: 0,
     };
     // Printed again is one more reason, whatever the label beside it says.
-    held.support += 1;
+    held.printings += 1;
+    let labelledHere = false;
     for (const tag of candidate.tags) {
-      const rank = REFERENCE_PREFERENCE.indexOf(tag.value);
-      const reason = `${tag.value}${tag.trigger.trim() ? ` from "${tag.trigger}"` : ""}`;
-      if (rank !== -1) {
-        held.support += (REFERENCE_PREFERENCE.length - rank) * 2;
-        if (!held.line) held.line = candidate.line;
-      } else if (tag.value === "company") {
-        // The organisation's own number -- a VAT or UTR the checksum
-        // recognised -- is never the household's reference.
-        held.support -= REFERENCE_PREFERENCE.length * 2;
-      } else {
-        continue;
+      const rank = preference.indexOf(tag.value);
+      if (rank === -1) continue;
+      // A bare noun beside the number ("Certificate CSS-0417") is heard one
+      // step behind the same word spelled out as a label ("Certificate
+      // number"), so a page that names the number in so many words beats a
+      // page that merely printed the word near it.
+      const step = rank * 2 + ((tag.strength ?? STRENGTH_STATED) < STRENGTH_STATED ? 1 : 0);
+      if (step < held.step) {
+        held.step = step;
+        // The block that carried the best label is the evidence for it.
+        held.line = candidate.line;
       }
+      held.labelled = true;
+      labelledHere = true;
+      const reason = `${tag.value}${tag.trigger.trim() ? ` from "${tag.trigger}"` : ""}`;
       if (!held.why.includes(reason)) held.why.push(reason);
     }
+    if (labelledHere) held.labelledPrintings += 1;
     entries.set(candidate.value, held);
   }
-  return bestSupported([...entries.values()].map((entry) => ({
+  return bestSupported([...entries.values()].map(({ step, printings, labelledPrintings, ...entry }) => ({
     ...entry,
+    support: (entry.labelled ? A_LABEL_AT_ALL : 0) +
+      (preference.length * 2 - step) * A_STEP_OF_THE_ORDER +
+      labelledPrintings * A_LABEL_PRINTED_AGAIN + printings,
     why: entry.why.length > 0 ? entry.why.slice(0, REASONS_SHOWN) : ["no label beside it"],
-  })));
+  }))) as ReferenceEntry[];
+}
+
+/** The reference shortlist as the model is shown it: `referenceEntries`
+ * without the rules' own note of which entries a label spoke for. */
+export function referenceShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
+  return referenceEntries(candidates);
 }
 
 /** The figure as the page would print it, which is how the model is asked
