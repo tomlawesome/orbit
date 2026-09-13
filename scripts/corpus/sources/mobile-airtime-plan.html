@@ -2,7 +2,7 @@
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
-<title>Fenwick Mobile – Mobile Plan Summary | My Account</title>
+<title>My Account – Mobile Plan Summary</title>
 <style>
 @font-face{font-family:"Corpus Screen";src:url("../fonts/Manrope.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
   @page { size: A4; margin: 0; }
@@ -13,7 +13,7 @@
   }
   .page {
     width: 210mm; min-height: 297mm; box-sizing: border-box;
-    padding: 8mm 16mm 12mm 16mm; position: relative;
+    padding: 8mm 16mm 10mm 16mm; position: relative;
     page-break-after: always;
   }
   .page:last-child { page-break-after: auto; }
@@ -50,8 +50,8 @@
 
   /* ---- cards ---- */
   .card {
-    background: #f5f5f7; border-radius: 3mm; padding: 3.2mm 6mm;
-    margin-bottom: 3mm; box-shadow: 0 1.2mm 2.4mm rgba(0,0,0,0.10);
+    background: #f5f5f7; border-radius: 3mm; padding: 2.6mm 6mm;
+    margin-bottom: 2.3mm; box-shadow: 0 1.2mm 2.4mm rgba(0,0,0,0.10);
   }
   .card-highlight { border: 0.9pt solid #c2185b; }
   .card-label {
@@ -92,7 +92,7 @@
 
 <div class="page">
   <div class="browser-header">
-    <span class="ph-title">Fenwick Mobile – Mobile Plan Summary | My Account</span>
+    <span class="ph-title">My Account – Mobile Plan Summary</span>
     <span class="ph-url">myaccount.fenwickmobile.example/billing/2026-03/summary</span>
   </div>
 
@@ -136,6 +136,11 @@
   </div>
 
   <div class="card">
+    <div class="card-label">Loyalty rewards</div>
+    <div class="card-text">You earn 1 reward point for every &pound;1 you spend on airtime, redeemable against accessories, data add-ons or a future upgrade. Points are added to your account within 5 working days of each bill.</div>
+  </div>
+
+  <div class="card">
     <div class="card-label">Handset upgrade</div>
     <div class="card-text">
       Your upgrade window opens on <b>20 February 2027</b>, one month before your
@@ -173,15 +178,228 @@
   </div>
 
   <div class="legal-footer">
-    Fenwick Mobile is a trading name of Anglia Communications Networks Ltd, registered
-    in England and Wales no. 07845213, and is a licensed mobile network operator
-    regulated by Ofcom. Registered office: 4 Redshank House, Ipswich Business Park,
-    Ipswich, IP3 9QT. &copy; 2026 Anglia Communications Networks Ltd.
+    Mobile services on this account are provided by Fenwick Mobile Networks Limited,
+    registered in England and Wales no. 07845213, part of the Anglia Communications
+    Networks group, and licensed as a mobile network operator regulated by Ofcom.
+    Registered office: 4 Redshank House, Ipswich Business Park, Ipswich, IP3 9QT.
+    VAT registration GB 402 1187 55. Company incorporated 1998. &copy; 2026 Anglia
+    Communications Networks Ltd.
   </div>
 
   <div class="browser-footer">
     <span>Printed 11/09/2026, 14:32</span>
-    <span>1/1</span>
+    <span>1/3</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="browser-header">
+    <span class="ph-title">My Account – Plans &amp; Tariffs</span>
+    <span class="ph-url">myaccount.fenwickmobile.example/plans/tariffs</span>
+  </div>
+
+  <div class="breadcrumbs">Home &gt; My Account &gt; Plans &gt; Tariffs &amp; add-ons</div>
+
+  <h1 class="page-title">Tariffs &amp; Add-ons</h1>
+
+  <div class="card">
+    <div class="card-label">SIM-only tariffs</div>
+    <table class="plan-table">
+      <tr><td>5GB Essential</td><td>&pound;10.00/mo</td></tr>
+      <tr><td>30GB Flex (your plan)</td><td>&pound;23.00/mo</td></tr>
+      <tr><td>100GB Max</td><td>&pound;29.00/mo</td></tr>
+      <tr><td>Unlimited data</td><td>&pound;34.00/mo</td></tr>
+    </table>
+    <div class="card-foot">All SIM-only tariffs run on a 24-month minimum term unless taken as a 1-month rolling plan for an extra &pound;3.00/month.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Handset plans (device + airtime)</div>
+    <table class="plan-table">
+      <tr><td>Handset Lite, 10GB</td><td>&pound;24.99/mo</td></tr>
+      <tr><td>Handset Plus, 50GB</td><td>&pound;32.99/mo</td></tr>
+      <tr><td>Handset Max, Unlimited</td><td>&pound;39.99/mo</td></tr>
+    </table>
+    <div class="card-foot">Handset plans require a 24-month agreement and an upfront device contribution shown at checkout.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Data add-ons</div>
+    <table class="rates-table">
+      <tr><td>1GB data top-up</td><td>&pound;5.00</td></tr>
+      <tr><td>5GB data top-up</td><td>&pound;15.00</td></tr>
+      <tr><td>Unlimited data day pass</td><td>&pound;3.00</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Roaming bundles</div>
+    <table class="rates-table">
+      <tr><td>Europe Roam, 10GB / 14 days</td><td>&pound;8.00</td></tr>
+      <tr><td>World Roam, 2GB / 7 days</td><td>&pound;15.00</td></tr>
+    </table>
+    <div class="card-foot">Outside a roaming bundle, the standard EU roaming charge of &pound;2.00/day shown on your plan summary applies.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Calls and texts to non-geographic numbers</div>
+    <table class="rates-table">
+      <tr><td>084 numbers</td><td>55p/min</td></tr>
+      <tr><td>087 numbers</td><td>65p/min</td></tr>
+      <tr><td>03 numbers</td><td>Included in your allowance</td></tr>
+      <tr><td>118 directory enquiries</td><td>&pound;3.50 connection + &pound;2.00/min</td></tr>
+      <tr><td>Texts to 084/087 numbers</td><td>25p each</td></tr>
+      <tr><td>Texts to short codes</td><td>up to &pound;1.50 each, set by the service</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Tariff price changes over time</div>
+    <table class="rates-table">
+      <tr><td>30GB Flex tariff, launched 1 March 2024</td><td>&pound;21.00/mo</td></tr>
+      <tr><td>30GB Flex tariff, revised 1 January 2025</td><td>&pound;22.00/mo</td></tr>
+    </table>
+    <div class="card-foot">Existing customers are told in writing at least 30 days before any price change takes effect.</div>
+  </div>
+
+  <div class="card card-highlight">
+    <div class="card-label">Ending your minimum term early</div>
+    <div class="card-text">If you leave before your minimum term ends, an early termination charge applies: your remaining monthly line rental for each month left, less a 5% early settlement discount. This does not apply once you reach the end of your minimum term.</div>
+  </div>
+
+  <div class="legal-footer">
+    Prices shown are correct as of 1 September 2026. Some customers on legacy tariffs may see a different rate; your plan summary always shows the rate that applies to your account.
+  </div>
+
+  <div class="browser-footer">
+    <span>Printed 11/09/2026, 14:32</span>
+    <span>2/3</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="browser-header">
+    <span class="ph-title">My Account – Coverage &amp; Help</span>
+    <span class="ph-url">myaccount.fenwickmobile.example/help/coverage</span>
+  </div>
+
+  <div class="breadcrumbs">Home &gt; My Account &gt; Help &gt; Coverage &amp; support</div>
+
+  <h1 class="page-title">Coverage, Accessibility &amp; Help</h1>
+
+  <div class="card">
+    <div class="card-label">Network coverage &amp; speed</div>
+    <div class="card-text">4G coverage reaches around 99% of UK premises outdoors; 5G is available in more than 750 towns and cities. Typical download speeds are 25&ndash;75Mbps on 4G and 150&ndash;300Mbps on 5G. Actual speeds depend on your location, time of day, device and local network demand.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Keeping your account secure</div>
+    <div class="card-text">Set a PIN or passcode on My Account to stop anyone else changing your settings. We will never call and ask you to read out a one-time passcode; if this happens, hang up and report it using the number on this page.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Your device</div>
+    <table class="rates-table">
+      <tr><td>eSIM serial (EID)</td><td>8944 0312 7200 1547 6392 1</td></tr>
+      <tr><td>Device IMEI</td><td>35 693803 564380 9</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Accessibility</div>
+    <div class="card-text">Bills and plan information are available in large print, braille and via British Sign Language video relay on request. Textphone: 18001 0800 316 4849. Ask any adviser to set an accessibility preference on your account.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Complaints</div>
+    <div class="card-text">If something goes wrong, contact us first. If we cannot put things right within 8 weeks, or you are unhappy with our final response, you can refer your complaint free of charge to Ombudsman Services: Communications under the Communications and Internet Services Alternative Dispute Resolution Scheme.</div>
+    <div class="card-foot">Example case reference format: FM-CC-220998.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Manage your account on the go</div>
+    <div class="card-text">Get the FM Connect app from the App Store or Google Play to check your usage, top up data and pay your bill, or visit fnwk.uk/app for a quick link. Follow @fmmobileuk for network status updates.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Other ways to get in touch</div>
+    <div class="card-text">Webchat is available through My Account, 8am&ndash;10pm every day. You can also write to Customer Care, PO Box 4471, Ipswich, IP3 9ZZ. Please allow 10 working days for a written reply.</div>
+  </div>
+
+  <div class="legal-footer">
+    Customer services: 0333 200 1187 (standard rate, usually included in your allowance). Textphone 18001 0333 200 1187. Lines open 8am&ndash;8pm Monday to Friday, 9am&ndash;6pm weekends.
+  </div>
+
+  <div class="browser-footer">
+    <span>Printed 11/09/2026, 14:32</span>
+    <span>3/4</span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="browser-header">
+    <span class="ph-title">My Account – Also Available</span>
+    <span class="ph-url">myaccount.fenwickmobile.example/products/other-services</span>
+  </div>
+
+  <div class="breadcrumbs">Home &gt; My Account &gt; Products</div>
+
+  <h1 class="page-title">Also Available on Your Account</h1>
+
+  <div class="card">
+    <div class="card-label">Home broadband</div>
+    <div class="card-text">Full Fibre broadband is available at your address from &pound;24.00/month (average 150Mbps) or &pound;32.00/month (average 500Mbps), both on an 18-month term. Add a broadband line and save &pound;3.00/month on this mobile plan.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">SIM protection plan</div>
+    <div class="card-text">Add SIM Protect for &pound;1.50/month to cover the cost of a replacement SIM if yours is lost, stolen or damaged, and to fast-track porting your number to a new device. A replacement SIM is usually despatched the same working day and arrives within 2 to 3 days by post.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Family &amp; multi-SIM discount</div>
+    <div class="card-text">Add a second SIM-only line to this account for &pound;12.00/month, or a third for &pound;10.00/month. Each additional line keeps its own data allowance and shares one Direct Debit collection date.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Device insurance</div>
+    <div class="card-text">Cover loss, theft and accidental damage from &pound;6.50/month, with a &pound;75 excess per claim and next-day replacement where stock allows. Cancel any time with 30 days&rsquo; notice.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Frequently asked questions</div>
+    <div class="card-text">
+      <b>How do I change my Direct Debit date?</b> Sign in to My Account and choose a new collection date under Billing; changes take effect from your next bill.<br><br>
+      <b>What happens if a Direct Debit fails?</b> We&rsquo;ll try again within 5 working days and may apply a &pound;7.50 failed-payment fee if it fails a second time.<br><br>
+      <b>Can I keep my number if I leave?</b> Yes. Request a PAC code free of charge by texting PAC to 65075, valid for 30 days.<br><br>
+      <b>How do I unlock my handset?</b> Handsets bought on a plan are unlocked automatically once the minimum term has been paid in full, or earlier on request.<br><br>
+      <b>Can I pay by bank transfer?</b> Yes, using sort code 20-05-17 and account number 88301144, quoting your account number as the payment reference.<br><br>
+      <b>Where can I pay in person?</b> Any PayPoint or Post Office branch accepts cash payments toward your account; ask for a receipt each time.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Your previous tariff</div>
+    <div class="card-text">Before you moved to SIM Only 30GB Flex, this account was billed on our SIM Only 20GB tariff at &pound;19.00/month. That legacy tariff closed to new and existing customers on 1 February 2025.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Our network, in numbers</div>
+    <div class="card-text">Serving mobile customers since 1998. Voted Best Value SIM-only Network by a national reader poll in 2025. Over 4,000 towns and villages within our coverage footprint, supported from three UK customer service centres.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Data protection &amp; your rights</div>
+    <div class="card-text">We process your account and usage data to provide your service, prevent fraud and meet regulatory obligations, as set out in our privacy notice. You can ask for a copy of the data we hold, ask us to correct it, or object to some uses of it, by writing to the Data Protection Officer at the address below.</div>
+  </div>
+
+  <div class="legal-footer">
+    Terms and conditions, our Ofcom-approved Code of Practice and the Fenwick Mobile Networks Limited privacy notice are available at myaccount.fenwickmobile.example/legal. This document is a summary and does not form part of your contract. Network status: status.fenwickmobile.example.
+  </div>
+
+  <div class="browser-footer">
+    <span>Printed 11/09/2026, 14:32</span>
+    <span>4/4</span>
   </div>
 </div>
 
