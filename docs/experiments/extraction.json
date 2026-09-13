@@ -5434,8 +5434,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E97",
@@ -5497,8 +5496,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E98",
@@ -5526,6 +5524,194 @@
         "reference": {
           "pct": 50,
           "net": 6,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E99",
+      "date": "2026-09-13",
+      "label": "reference: prefer the number the page carries through every sheet",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Item 98 (fa21bba). Tika runs sheets together, so sheet breaks are read from the page's own \"page 2 of 4\" marks (sheetMarks); each candidate is placed on a sheet and the count of distinct sheets it prints on is a band in the support sum, above the kind-of-thing label order and under the plain fact of a label. Tried first as a tie-break within the label order: nothing moved anywhere (ties at the top are rare). As a rank key: reference 55 → 56/60, two fixed and one regressed (a booklet whose publication code runs through every footer while the policy number sits on one schedule sheet). No other field moved. 4 tuning misses left: rival on every sheet too (label order picks wrong); document-level code in every footer; answer on two sheets of four beaten by another footer number; an unbroken tie (blank).",
+      "how": "npm run eval:stages",
+      "commit": "fa21bba",
+      "output": "tmp/e-seen60-stages-ref3.txt",
+      "scores": {
+        "overall": {
+          "pct": 85.6,
+          "net": 435,
+          "of": 508
+        },
+        "provider": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "reference": {
+          "pct": 93.3,
+          "net": 56,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 40,
+          "of": 60
+        },
+        "cost": {
+          "pct": 75.9,
+          "net": 41,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E100",
+      "date": "2026-09-13",
+      "label": "sheets rule (E99) on hold-out 3",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E99 on hold-out 3: no field moved.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "fa21bba",
+      "output": "tmp/e-holdout3-ref3.txt",
+      "scores": {
+        "overall": {
+          "pct": 79.1,
+          "net": 87,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E101",
+      "date": "2026-09-13",
+      "label": "sheets rule (E99) on hold-out 4",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E99 on hold-out 4: reference 6 → 7 of 12; no other field moved. First on the shortlist 7 → 8; on list unchanged at 10.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "fa21bba",
+      "output": "tmp/e-holdout4-ref3.txt",
+      "scores": {
+        "overall": {
+          "pct": 71.6,
+          "net": 83,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 58.3,
+          "net": 7,
           "of": 12
         },
         "dates": {
