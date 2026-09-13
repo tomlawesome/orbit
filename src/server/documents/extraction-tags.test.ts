@@ -282,13 +282,13 @@ describe("a date range", () => {
       .filter((c) => c.kind === "date")
       .map((c) => c.tags[0].value);
 
-  it("starts at the first date and renews at the second", () => {
+  it("starts at the first date and ends at the second", () => {
     expect(roles("Current period of insurance 15 October 2025 to 15 October 2026")).toEqual([
       "start",
-      "renewal",
+      "expiry",
     ]);
-    expect(roles("Charge for the year 1 April 2026 to 31 March 2027")).toEqual(["start", "renewal"]);
-    expect(roles("cover from 14 June 2026 until 13 June 2031")).toEqual(["start", "renewal"]);
+    expect(roles("Charge for the year 1 April 2026 to 31 March 2027")).toEqual(["start", "expiry"]);
+    expect(roles("cover from 14 June 2026 until 13 June 2031")).toEqual(["start", "expiry"]);
   });
 
   it("expires instead when the term is a guarantee, warranty or certificate", () => {
@@ -324,9 +324,16 @@ describe("a date that bounds a term without saying which kind", () => {
       .filter((c) => c.kind === "date")
       .map((c) => c.tags[0].value);
 
-  it("renews when the term is one the household takes again", () => {
-    expect(roles("Valid to 31 March 2027")).toEqual(["renewal"]);
-    expect(roles("VALID TO 04/11/2026")).toEqual(["renewal"]);
+  // A term end is an `expiry` here whatever kind of term it bounds; the
+  // chooser is what names it a renewal or an expiry, from the page's kind
+  // (extraction-term-end.ts).
+  it("is always an expiry at this stage, whatever kind of term it bounds", () => {
+    expect(roles("Valid to 31 March 2027")).toEqual(["expiry"]);
+    expect(roles("Minimum term 24 months — ends 20 March 2027")).toEqual(["expiry"]);
+    expect(roles("Cheddleton Rail — Season Ticket\n\nVALID FROM 01/09/2026\n\nVALID UNTIL 31/08/2027")).toEqual([
+      "start",
+      "expiry",
+    ]);
   });
 
   it("expires when the term simply runs out", () => {
@@ -337,18 +344,6 @@ describe("a date that bounds a term without saying which kind", () => {
   it("expires when the block says the thing is used up or given back", () => {
     expect(roles("Quote reference AMB-77410. Valid until: 6 November 2026")).toEqual(["expiry"]);
     expect(roles("Lesson credits are valid until 2 March 2027, after which any unused credit is forfeited")).toEqual(["expiry"]);
-  });
-
-  it("expires when the block is silent but the title says the page is a ticket or a lease", () => {
-    expect(roles("Cheddleton Rail — Season Ticket\n\nVALID FROM 01/09/2026\n\nVALID UNTIL 31/08/2027")).toEqual(["start", "expiry"]);
-    expect(roles("Lease statement WVF-PCH-220154\n\nAgreement end 31 May 2028")).toEqual(["expiry"]);
-    expect(roles("Annual Multi-Trip Travel Insurance Certificate\n\nValid to 31 March 2027")).toEqual(["renewal"]);
-  });
-
-  it("renews at the end of a contract's minimum term", () => {
-    expect(roles("Minimum term 24 months — ends 20 March 2027")).toEqual(["renewal"]);
-    expect(roles("Minimum term ends 21 April 2028")).toEqual(["renewal"]);
-    expect(roles("your membership will end on 2 March 2027 and continue monthly")).toEqual(["renewal"]);
   });
 
   it("says nothing when the period belongs to the organisation", () => {

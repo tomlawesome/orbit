@@ -6,7 +6,7 @@
     "provider": "WarmCore Insulation",
     "reference": "WC-GTE-08823",
     "dateRoles": [
-      { "date": "2026-05-12", "role": "issued" },
+      { "date": "2026-05-12", "role": "start" },
       { "date": "2051-05-12", "role": "expiry" }
     ],
     "subtype": { "kinds": ["Guarantee"], "qualifiers": ["Building work"] },
@@ -19,6 +19,7 @@
     "reference is the guarantee number WC-GTE-08823, not the job reference (WCI-2026-4471) or the insurance-backed scheme reference (GBW-771049).",
     "costMinor is the £2,340.00 contract price for the installation itself, the only amount on the page with a currency symbol that is plainly the cost of the thing.",
     "subtype: 'Guarantee' (the taxonomy group whose synonyms include 'Insurance-backed guarantee', matching the printed scheme) qualified by 'Building work', covering installation and workmanship.",
-    "scheduleKind is not declared: neither dateRole is 'renewal' or 'service'."
+    "scheduleKind is not declared: neither dateRole is 'renewal' or 'service'.",
+    "Owner 2026-09-13: a one-off guarantee, not a recurring thing -- kept as the page Orbit must not put on the schedule. The installation date is when the 25-year guarantee starts."
   ]
 }

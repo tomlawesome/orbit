@@ -179,16 +179,11 @@ export function printedTerms(text: string): Array<{ months: number; trigger: str
   return found.filter((term) => term.months > 0 && term.months <= 600);
 }
 
-/** The same reading `extraction-tags.ts` makes of a term's end: a guarantee,
- * a warranty or a certificate runs out; everything else the household holds
- * for a term has to be taken again. */
-const RUNS_OUT = /\b(?:guarantee|warranty|certificate|quot(?:e|ation)|ticket|forfeit(?:ed)?|returned|used within)\b|expir/iu;
-
 /** A term that ends in somebody coming round rather than in a bill: the
  * annual booster, the next inspection. Not "service charge", which is a bill
  * the household renews -- hence the words for a visit and not the word
  * "service" on its own. */
-const ENDS_IN_A_VISIT = /\bbooster\b|\bvaccinat|\binspect|\bcheck-?up\b|\bre-?test\b|next (?:service|visit|appointment)\b/iu;
+const ENDS_IN_A_VISIT = /\bbooster\b|\bvaccinat|\binspect|\bcheck-?up\b|\bre-?test\b|\bsweep\b|next (?:service|visit|appointment|test)\b/iu;
 
 /**
  * Words that say a period is one the page is REPORTING on -- a statement
@@ -200,9 +195,12 @@ const ENDS_IN_A_VISIT = /\bbooster\b|\bvaccinat|\binspect|\bcheck-?up\b|\bre-?te
 const REPORTING_PERIOD =
   /statement|billing|transaction|quarter|reading|scheme year|year ended|summary|history|benefit statement/iu;
 
+/** A term that ends in a visit is a `service`; any other term's end is an
+ * `expiry` here, and whether the household renews the thing is decided by
+ * what kind of thing the page is about, in the chooser
+ * (`extraction-term-end.ts`). */
 function termEndRole(context: string): DocumentDateRole {
-  if (ENDS_IN_A_VISIT.test(context)) return "service";
-  return RUNS_OUT.test(context) ? "expiry" : "renewal";
+  return ENDS_IN_A_VISIT.test(context) ? "service" : "expiry";
 }
 
 // --------------------------------------------------------------- words-after

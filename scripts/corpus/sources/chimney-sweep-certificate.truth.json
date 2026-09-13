@@ -6,8 +6,8 @@
     "provider": "CSS",
     "reference": "CSS-0417",
     "dateRoles": [
-      { "date": "2026-09-01", "role": "service" },
-      { "date": "2027-03-01", "role": "due" }
+      { "date": "2026-09-01", "role": "issued" },
+      { "date": "2027-03-01", "role": "service" }
     ],
     "subtype": { "kinds": ["Certificate"], "qualifiers": ["Chimney"] },
     "costMinor": 6500,
@@ -20,6 +20,7 @@
     "reference is the certificate number CSS-0417.",
     "costMinor is the £65.00 fee for this visit; the £2 million figure is a public liability insurance limit, not a cost.",
     "subtype: 'Certificate' (matching the printed 'Certificate of chimney sweeping') qualified by 'Chimney'.",
-    "scheduleKind is 'service': the earlier dateRole is 'service', for the sweep actually carried out."
+    "scheduleKind is 'service': the earlier dateRole is 'service', for the sweep actually carried out.",
+    "Owner convention 2026-09-13: the service role is for the visit the household must act on -- the next one. The day the work was done is the record's own date (issued)."
   ]
 }

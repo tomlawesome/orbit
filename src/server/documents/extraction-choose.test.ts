@@ -59,6 +59,9 @@ describe("choosing dates and their roles", () => {
       candidate("date", "2026-10-15", [{ value: "renewal", trigger: "Renewal date" }]),
       candidate("date", "2026-09-24", [{ value: "due", trigger: "payment due" }]),
       candidate("date", "2026-10-15", [{ value: "renewal", trigger: "renews on" }]),
+      // A heading in a renewing kind (extraction-term-end.ts) is what names
+      // the term end "renewal" rather than "expiry".
+      candidate("heading", "Home insurance schedule", ["title"]),
     ]);
 
     expect(chosen.dates).toEqual(["2026-10-15", "2026-09-24"]);
@@ -94,30 +97,35 @@ describe("choosing dates and their roles", () => {
     expect(chosen.dateRoles).toEqual([{ date: "2026-03-04", role: "expiry" }]);
   });
 
+  // Renewal and expiry are one family now (extraction-term-end.ts), so this
+  // is tested on two roles that stay distinct through the vote.
   it("lets the role more sieves agree on beat one a single sieve reached", () => {
     const chosen = chooseFields([
       candidate("date", "2026-05-01", [
-        { value: "renewal", trigger: "12 months", sieves: ["term-arithmetic", "heading-above"], strength: 1 },
-        { value: "expiry", trigger: "Expiry", sieves: ["heading-above"], strength: 1 },
+        { value: "due", trigger: "to pay by", sieves: ["term-arithmetic", "heading-above"], strength: 1 },
+        { value: "service", trigger: "next test", sieves: ["heading-above"], strength: 1 },
       ]),
     ]);
 
-    expect(chosen.dateRoles).toEqual([{ date: "2026-05-01", role: "renewal" }]);
+    expect(chosen.dateRoles).toEqual([{ date: "2026-05-01", role: "due" }]);
   });
 
   it("prefers the role whose tag quoted the page over one that guessed", () => {
     const chosen = chooseFields([
       candidate("date", "2026-05-01", ["expiry"]),
       candidate("date", "2026-05-01", [{ value: "renewal", trigger: "Renewal date" }]),
+      candidate("heading", "Home insurance schedule", ["title"]),
     ]);
 
     expect(chosen.dateRoles).toEqual([{ date: "2026-05-01", role: "renewal" }]);
   });
 
+  // Two quoted tags disagreeing used to blank a renewal-vs-expiry tie; the
+  // two are one family now, so this is tested on roles that stay distinct.
   it("keeps the date but drops the role when two quoted tags disagree", () => {
     const chosen = chooseFields([
-      candidate("date", "2026-05-01", [{ value: "renewal", trigger: "renews" }]),
-      candidate("date", "2026-05-01", [{ value: "expiry", trigger: "expires" }]),
+      candidate("date", "2026-05-01", [{ value: "due", trigger: "payment due" }]),
+      candidate("date", "2026-05-01", [{ value: "service", trigger: "next service" }]),
     ]);
 
     expect(chosen.dates).toEqual(["2026-05-01"]);
@@ -184,6 +192,7 @@ describe("deriving the schedule kind from the roles kept", () => {
     const chosen = chooseFields([
       candidate("date", "2026-02-01", [{ value: "service", trigger: "next service" }]),
       candidate("date", "2026-06-01", [{ value: "renewal", trigger: "renewal date" }]),
+      candidate("heading", "Home insurance schedule", ["title"]),
     ]);
 
     expect(chosen.scheduleKind).toBe("renewal");
@@ -215,13 +224,19 @@ describe("reading the cycle length off the block a candidate sits in", () => {
       candidate("date", "2027-03-31", [{ value: "renewal", trigger: "Charge for the year" }], {
         line: "Total council tax charge for the year £2,159.07",
       }),
+      // A renewing kind (extraction-term-end.ts), so the term end is a
+      // renewal and there is a schedule for a cycle length to belong to.
+      candidate("heading", "Council Tax bill", ["title"]),
     ]);
 
     expect(chosen.recurrenceMonths).toBe(12);
   });
 
   const withLine = (line: string) =>
-    chooseFields([candidate("date", "2026-06-01", [{ value: "renewal", trigger: "renewal date" }], { line })]);
+    chooseFields([
+      candidate("date", "2026-06-01", [{ value: "renewal", trigger: "renewal date" }], { line }),
+      candidate("heading", "Home insurance schedule", ["title"]),
+    ]);
 
   it("reads a figure in months", () => {
     expect(withLine("Renewal date 1 June 2026, every 12 months").recurrenceMonths).toBe(12);

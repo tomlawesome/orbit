@@ -5,13 +5,14 @@
     "dates": ["2026-07-01", "2027-06-30"],
     "dateRoles": [
       { "date": "2026-07-01", "role": "start" },
-      { "date": "2027-06-30", "role": "expiry" }
+      { "date": "2027-06-30", "role": "renewal" }
     ],
     "provider": "Marchford Borough Council",
     "reference": "RP-2026-118824",
     "subtype": { "kinds": ["Parking permit", "Permit"], "qualifiers": ["Parking", "Council"] },
     "costMinor": 4500,
-    "currency": "GBP"
+    "currency": "GBP",
+    "scheduleKind": "renewal"
   },
   "notes": [
     "Declared start date: the permit panel's 'Valid from 01/07/2026'.",
@@ -26,6 +27,7 @@
     "Trap: 'Penalty Charge Notice of £70, reduced to £35 if paid within 14 days' is a fine, not the permit fee.",
     "Trap: 'Zone F restrictions operate Monday to Saturday, 8:30am to 6:30pm' is the zone's operating hours, not part of the permit's own dates.",
     "Trap: 'Permits... are printed and posted on the council's behalf by Northgate Civic Services Ltd' names a contractor, not the issuing provider.",
-    "Trap: 'issued on production of a Council Tax bill dated 3 June 2026' is a proof-of-residency document with its own date."
+    "Trap: 'issued on production of a Council Tax bill dated 3 June 2026' is a proof-of-residency document with its own date.",
+    "Owner convention 2026-09-13: an end date is a renewal when the thing continues only if the household acts again (tax, MOT, licence, tenancy, insurance, subscription, season ticket, permit), and an expiry when it is simply over (guarantee, warranty, loan, lease, quote, course). The role follows the kind of thing, not the word on the page."
   ]
 }

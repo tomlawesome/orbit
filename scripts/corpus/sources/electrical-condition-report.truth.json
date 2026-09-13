@@ -11,7 +11,7 @@
     "dateRoles": [
       {
         "date": "2026-09-02",
-        "role": "service"
+        "role": "issued"
       },
       {
         "date": "2031-09-02",
@@ -36,6 +36,7 @@
   },
   "notes": [
     "Date of inspection (page 1 and repeated in the declaration on page 11) and the recommended date of next inspection (page 2 and repeated on page 11) are the only two dates a user would track, both roled 'service'. Three organisations appear and only the contracting firm, Thornleigh Electrical Contractors Ltd, is the provider: Priorswood Lettings & Property Management is the letting agent who commissioned the report (client field, page 1), and the National Electrical Installers Register is the invented certification scheme that publishes the form and guidance notes (page 12), neither of which is the provider. Rival dates deliberately planted against the two answers: the date the report was requested (18 August 2026), the date the report was signed (03 September 2026) and issued (04 September 2026), the previous EICR date (14 March 2021), the tenant's tenancy start date (1 July 2023), the contractor's scheme registration expiry (30 April 2027), the calibration and calibration-due dates of the four test instruments on page 5 (eight dates), the date the wiring code amendment came into force (28 September 2024), and the guidance notes' own issue/copyright date (1 April 2024). The circuit schedules on pages 6-10 also carry dozens of dd/dd- and d.dd/d.dd-shaped readings (CSA pairs, OCPD/RCD ratings like 32/30, Zs max/measured pairs like 1.15/0.34) that read like dates but are not. No cost or price appears anywhere on the document — this is a certificate, not an invoice — so costMinor and currency are omitted.",
-    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Electrical installation condition report')."
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Electrical installation condition report').",
+    "Owner convention 2026-09-13: the service role is for the visit the household must act on -- the next one. The day the work was done is the record's own date (issued)."
   ]
 }
