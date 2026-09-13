@@ -54,7 +54,7 @@ export const EXTRACTION_HOLDOUT3_FULLPAGE: CorpusDocument[] = [
     // - dates: agreement dated 5 September 2026, delivery and start 12 September 2026, minimum term ends 11 March 2028. The first Direct Debit collection date (18 September 2026) and the customer's unrelated previous tumble-dryer agreement's return date (30 August 2026) are undeclared.
     // - provider is Homestead Rental Solutions.
     // - reference is agreement HRS-AGR-661204.
-    // - costMinor is the weekly rental, 6.50, the recurring cost of the appliance itself; delivery (20.00, one-off, already paid), optional damage cover (1.20, not selected) and the early-termination charge (15.00) are traps.
+    // - costMinor is 50700, the 18-month minimum term x the £6.50 weekly rental: 78 Friday collections from 18 September 2026 to the term end on 11 March 2028 (18 months is 78 weeks), never printed (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x periodic price where it is not; only rolling, no-term contracts keep the periodic figure). The £6.50 weekly rental alone is the instalment and a trap, as under the old monthly convention it was the truth; delivery (20.00, one-off, already paid, excluded as a one-off fee), optional damage cover (1.20, not selected) and the early-termination charge (15.00) are traps too.
     // - recurrenceMonths is 18, printed in digits as the minimum term; scheduleKind is 'renewal', taken from the minimum-term-ending dateRole exactly as an earlier alarm monitoring agreement's minimum term does.
     // - subtype: Rental/Appliance.
     name: "rent-to-own appliance rental agreement, a returned tumble dryer as a decoy previous agreement",
@@ -70,7 +70,7 @@ export const EXTRACTION_HOLDOUT3_FULLPAGE: CorpusDocument[] = [
       { date: "2028-03-11", role: "renewal" },
     ],
     subtype: {"kinds":["Rental"],"qualifiers":["Appliance"]},
-    costMinor: 650,
+    costMinor: 50700,
     currency: "GBP",
     recurrenceMonths: 18,
     scheduleKind: "renewal",
