@@ -4255,8 +4255,8 @@
           "of": 22
         }
       },
-      "verdict": "kept",
-      "notes": "Neutral on the seen set, as expected: every seen kind was already in the table. Kept because the owner asked for full coverage plus a general catch (77)."
+      "verdict": "regression",
+      "notes": "Misread at first as neutral; it lost six seen points (dateRoles 77/85, scheduleKind 28/32, recurrence 15/22). Three of the added kinds are words every other kind's page uses -- an insurance schedule says 'claim' more than 'insurance', a TV invoice says 'fees', an EPC is a 'certificate' -- so they outranked the real kind. Trimmed in E79."
     },
     {
       "id": "E78",
@@ -4317,8 +4317,132 @@
           "of": 5
         }
       },
+      "verdict": "regression",
+      "notes": "Lost three hold-out points against E76 (dateRoles 17/26, scheduleKind 3/5, recurrence 3/5) for the same reason as E77. Trimmed in E80."
+    },
+    {
+      "id": "E79",
+      "date": "2026-09-13",
+      "label": "dateRoles: term-end tables trimmed to kinds that name the thing itself",
+      "corpus": "seen48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E77 minus the kinds whose words appear on every other kind's page (Certificate, Inspection, Service, Claim, Fees, Deposit, Appointment, Order, Delivery, Repair). Renews: the E75 list plus Identity document and Benefit. Ends: the E75 list plus Credit card, Savings, Investment, Prescription, Vaccination, Fine. Undecided kinds fall to the cycle-versus-end wording count from E77.",
+      "how": "npm run eval:stages",
+      "commit": "c34f5fe",
+      "output": "tmp/e-seen48-stages-te6.txt",
+      "scores": {
+        "overall": {
+          "pct": 86.3,
+          "net": 354,
+          "of": 410
+        },
+        "provider": {
+          "pct": 79.2,
+          "net": 38,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 94.1,
+          "net": 80,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 68.8,
+          "net": 33,
+          "of": 48
+        },
+        "cost": {
+          "pct": 97.6,
+          "net": 41,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 93.8,
+          "net": 30,
+          "of": 32
+        },
+        "recurrence": {
+          "pct": 72.7,
+          "net": 16,
+          "of": 22
+        }
+      },
       "verdict": "kept",
-      "notes": "Neutral: 70.9% (78/110), dateRoles 18/26, identical to E76 field by field."
+      "notes": "Same misses as E75, page for page. Lesson: a taxonomy kind can decide the term end only when its synonyms are words the page uses for the thing itself, not for a part of it."
+    },
+    {
+      "id": "E80",
+      "date": "2026-09-13",
+      "label": "hold-out 3: term-end tables trimmed",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Same code as E79 scored on hold-out 3.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "c34f5fe",
+      "output": "tmp/e-holdout3-te6.txt",
+      "scores": {
+        "overall": {
+          "pct": 71.8,
+          "net": 79,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "One point better than E76 (79/110): recurrence back to 5/5, dateRoles still 18/26. The cycle-word fallback wins the recurrence the plain 'renew' test had lost."
     }
   ],
   "measurements": [
