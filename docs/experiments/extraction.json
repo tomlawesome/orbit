@@ -5248,8 +5248,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E94",
@@ -5311,8 +5310,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E95",
@@ -5326,6 +5324,194 @@
       "how": "npm run eval:holdout -- --holdout4",
       "commit": "57a75f8",
       "output": "tmp/e-holdout4-ref2.txt",
+      "scores": {
+        "overall": {
+          "pct": 70.7,
+          "net": 82,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E96",
+      "date": "2026-09-13",
+      "label": "cost: a rival total ranks under the household's own charge",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Four ranking rules (82c3bba, b31278c, 4496cdd), tried one at a time on top of E93. Last time's figure — a total every printing of which the page dates (\"your last payment of\", \"previous price list\", \"payment received <date>\") sorts under any undated figure (cost 36 → 38/54). The other way of paying — a total whose block and heading price paying monthly ranks under those that do not; frames naming the year, the term or paying in one go are exempt (→ 39). A tier row no longer rules a figure out where another printing names it outright (→ 40). A price under an offers heading (OFFERS, ALSO AVAILABLE, ADD-ONS) ranks with the rivals (→ 41). Rivals stay on the shortlist, lower: five bands now. Tried and dropped: demoting the pay-monthly total against everything (38 → 36, sank real charges under fee rows); whole-commitment frame as a leading rank key (38 → 36, kept only as last tie-break); demoting minus-signed figures (no change); a sub-total reading (moved the miss). No other field moved. 13 tuning cost misses left: 4 another product priced in prose or an unannounced tariff row; 2 total never printed; 2 marketing prose beats the form's own row; 2 two figures spoken for equally (blank); 2 sieve reads the answer as something else; 1 subtotal beats invoice total.",
+      "how": "npm run eval:stages",
+      "commit": "4496cdd",
+      "output": "tmp/e-seen60-stages-cost2.txt",
+      "scores": {
+        "overall": {
+          "pct": 85.4,
+          "net": 434,
+          "of": 508
+        },
+        "provider": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "reference": {
+          "pct": 91.7,
+          "net": 55,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 40,
+          "of": 60
+        },
+        "cost": {
+          "pct": 75.9,
+          "net": 41,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E97",
+      "date": "2026-09-13",
+      "label": "rival-total rules (E96) on hold-out 3",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E96 on hold-out 3: no field moved (cost 9/12, tainted column).",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "4496cdd",
+      "output": "tmp/e-holdout3-cost2.txt",
+      "scores": {
+        "overall": {
+          "pct": 79.1,
+          "net": 87,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E98",
+      "date": "2026-09-13",
+      "label": "rival-total rules (E96) on hold-out 4",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E96 on hold-out 4, the clean cost judge: no field moved; cost stays 5/12, though the answer is now on the shortlist 10/12 (was 9).",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "4496cdd",
+      "output": "tmp/e-holdout4-cost2.txt",
       "scores": {
         "overall": {
           "pct": 70.7,
