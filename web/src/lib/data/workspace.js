@@ -1021,7 +1021,7 @@ export async function commandContact(command) {
  * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox, contact, rotation, metadata] = await Promise.all([
+  const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle] = await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
@@ -1050,6 +1050,16 @@ export async function readAdminScreen() {
       .then(
         (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
           body.health?.metadata ?? null,
+      )
+      .catch(() => null),
+    /* Whether a recovery bundle has been recorded for the current document
+       KEK (#968, slice 1 of #966). Additive on the same terms as the two
+       cards above: a route that cannot answer means no card, never a sunk
+       screen. */
+    json(await fetch("/api/admin/recovery-bundle", { credentials: "same-origin" }))
+      .then(
+        (/** @type {{ recoveryBundle?: { exported: boolean, exportedAt: string | null } }} */ body) =>
+          body.recoveryBundle ?? null,
       )
       .catch(() => null),
   ]);
@@ -1086,6 +1096,7 @@ export async function readAdminScreen() {
     contact,
     rotation,
     metadata,
+    recoveryBundle,
     owners,
   };
 }
