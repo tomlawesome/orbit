@@ -124,6 +124,12 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   { role: "service", direction: "forward", pattern: "next (?:vaccination|booster|check-?up|appointment|visit|test|inspection|examination)(?: recommended)?(?: due| by)?" },
   { role: "service", direction: "forward", pattern: "date\\(?s?\\)? of inspection(?: and testing)?" },
   { role: "service", direction: "forward", pattern: "inspect(?:ed|ion)(?: carried out)?(?: on)?" },
+  // A visit that is due without being called "next": the annual maintenance
+  // visit, the sweep, the inspection. Not a bill that is due.
+  { role: "service", direction: "forward", pattern: "(?:maintenance |service )?(?:visit|sweep|inspection|check-?up|test) due(?: on| by)?" },
+  // The day the work was done, written as the record a tradesperson leaves.
+  { role: "service", direction: "forward", pattern: "date (?:swept|serviced|inspected|tested|cleaned|fitted)" },
+  { role: "service", direction: "forward", pattern: "swept on" },
   { role: "service", direction: "forward", pattern: "service date" },
   { role: "service", direction: "forward", pattern: "serviced on" },
   { role: "service", direction: "backward", pattern: "is your next service date" },
@@ -151,6 +157,9 @@ export const CONTEXT_ROLE_TRIGGERS: readonly ContextRoleTrigger[] = [
   { role: "start", direction: "forward", pattern: "registered on" },
   { role: "start", direction: "forward", pattern: "(?:service|contract|cover|policy|plan|tenancy|membership) start" },
   { role: "start", direction: "forward", pattern: "date of installation" },
+  // A hire starts when the thing arrives; a credit agreement when it is made.
+  { role: "start", direction: "forward", pattern: "delivery date" },
+  { role: "start", direction: "forward", pattern: "agreement date" },
   { role: "start", direction: "backward", pattern: "is your start date" },
   { role: "start", direction: "backward", pattern: "is when (?:your cover|this) (?:begins|starts)" },
 ] as const satisfies readonly ContextRoleTrigger[];
