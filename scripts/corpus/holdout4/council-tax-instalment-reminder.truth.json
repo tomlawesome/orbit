@@ -1,0 +1,18 @@
+{
+  "name": "Council tax instalment reminder",
+  "filename": "council-tax-instalment-reminder.pdf",
+  "notes": ["Council tax reminder notice for a missed instalment"],
+  "expected": {
+    "dates": ["2026-09-04", "2026-09-01", "2026-10-01"],
+    "provider": "Brackenmoor",
+    "reference": "82914-0663",
+    "dateRoles": [
+      { "date": "2026-09-04", "role": "issued" },
+      { "date": "2026-09-01", "role": "due" },
+      { "date": "2026-10-01", "role": "due" }
+    ],
+    "subtype": { "kinds": ["Tax"], "qualifiers": ["Council tax"] },
+    "costMinor": 184266,
+    "currency": "GBP"
+  }
+}

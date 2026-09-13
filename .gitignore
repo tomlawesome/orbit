@@ -44,3 +44,8 @@ scripts/corpus/holdout3/*.txt
 scripts/corpus/holdout3/*.png
 scripts/corpus/holdout3/index.html
 scripts/corpus/holdout3/contact-sheet.html
+scripts/corpus/holdout4/*.pdf
+scripts/corpus/holdout4/*.txt
+scripts/corpus/holdout4/*.png
+scripts/corpus/holdout4/index.html
+scripts/corpus/holdout4/contact-sheet.html
