@@ -107,15 +107,18 @@ const test: TestUserConfig = {
           "scripts/compose-project-name-resolution.test.mjs",
           // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
           // unprivileged `big` lane, which has no `docker` binary on PATH.
+          // test-e2e-local-reuse.test.mjs joined the list on #947: it drives
+          // the real script, whose preconditions demand docker.
           // `--exclude` on the CLI does not reach a project defined through
           // `test.projects` -- verified directly: passing it alongside this
           // same list left both files collected and red -- so the exclusion
           // has to live in the project's own array instead, gated on the
-          // variable `fast_docker` sets. `fast_docker` runs both files.
+          // variable `fast_docker` sets. `fast_docker` runs all three.
           ...(process.env.ORBIT_TEST_SKIP_DOCKER === "true"
             ? [
                 "src/lib/install-script-adapters.test.ts",
                 "src/lib/recovery-bundle.parity.test.ts",
+                "scripts/test-e2e-local-reuse.test.mjs",
               ]
             : []),
         ],
