@@ -486,6 +486,10 @@ const printedThroughout: AmountSieve = {
 
 // -------------------------------------------------------- instalment-total
 
+/** Named, because stage 3 asks whether the page's own arithmetic spoke for
+ * a figure when two of them are otherwise level. */
+export const INSTALMENT_TOTAL = "instalment-total";
+
 /**
  * The figure the page's own instalments add up to. A demand that says "ten
  * monthly instalments of £215.91 (final instalment £215.88)" has stated its
@@ -493,12 +497,12 @@ const printedThroughout: AmountSieve = {
  * happened to land on.
  */
 const instalmentTotal: AmountSieve = {
-  name: "instalment-total",
+  name: INSTALMENT_TOTAL,
   read: (candidate, _all, page) => {
     const mine = Number(candidate.value);
     const found = page.instalmentTotals.find((total) => total.value === mine);
     if (!found) return [];
-    return [{ sieve: "instalment-total", tag: "total", trigger: found.trigger, weight: STRENGTH_STATED }];
+    return [{ sieve: INSTALMENT_TOTAL, tag: "total", trigger: found.trigger, weight: STRENGTH_STATED }];
   },
 };
 

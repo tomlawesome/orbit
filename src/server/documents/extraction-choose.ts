@@ -36,7 +36,7 @@ import {
   subtypeShortlist,
   type MeaningTransport,
 } from "./extraction-choose-meaning";
-import { ADDS_UP, AMOUNT_LABEL } from "./extraction-amount-sieves";
+import { ADDS_UP, AMOUNT_LABEL, INSTALMENT_TOTAL } from "./extraction-amount-sieves";
 import { DATE_RANGE, WORDS_BEFORE } from "./extraction-date-sieves";
 import { referencePreference } from "./extraction-reference-kind";
 import { neverTheReference } from "./extraction-reference-never";
@@ -369,6 +369,35 @@ function speaksAgainst(tag: { value: string; trigger: string }): boolean {
   return NOT_THE_COST.includes(tag.value) || (tag.value === "other" && tag.trigger.trim() !== "");
 }
 
+/** The period a figure is quoted by, and nothing else: "a year", "per
+ * annum", "each year", "annually". */
+const A_PERIOD_AND_NOTHING_ELSE = /^[\s·,.-]*(?:(?:per|a|each|every)\s+(?:year|annum)|annually|yearly)[\s·,.]*$/iu;
+
+/**
+ * Whether the block is a sentence rather than a row of a table or a form
+ * field: it closes with a full stop, or carries one mid-block with a space
+ * after it. "still on it pay £98.40 a year." is a sentence; "European
+ * breakdown, annual EU-AN £96.00" is a row.
+ */
+const A_SENTENCE = /[.!?](?:\s|$)/u;
+
+/**
+ * A rival price quoted in prose (#1006 class 1). "Members who are still on
+ * it pay £98.40 a year" tells the household what somebody else pays, and
+ * "a year" says how often that price falls due -- it does not say the
+ * figure is the total for this document.
+ *
+ * So where the only reason to read a figure as the whole price is the
+ * period beside it, and the page printed it in a sentence, the period is
+ * not a label and the reading is dropped. A table row headed "per year", a
+ * figure the page called a premium, and anything else a sieve read in words
+ * are all untouched: the tag's own trigger is what is tested, and stage 2
+ * puts the strongest reason it found there.
+ */
+function aPeriodMistakenForALabel(tag: { value: string; trigger: string }, line: string): boolean {
+  return tag.value === "total" && A_PERIOD_AND_NOTHING_ELSE.test(tag.trigger) && A_SENTENCE.test(line);
+}
+
 /** What one sieve said, kept at its best: a sieve that read the same
  * figure twice has one opinion about it. */
 type SieveReadings = Map<string, number>;
@@ -402,6 +431,7 @@ export function amountClaims(candidates: readonly TaggedCandidate[]): AmountClai
       const rank = AMOUNT_PREFERENCE.indexOf(tag.value);
       const against = speaksAgainst(tag);
       if (rank === -1 && !against) continue;
+      if (aPeriodMistakenForALabel(tag, candidate.line)) continue;
       const key = `${candidate.value} ${candidate.currency}`;
       const held = byValue.get(key) ?? {
         value: candidate.value,
@@ -467,6 +497,16 @@ function amountAgreement(claim: AmountClaim): number {
  * sieves agreeing, or the trigger table naming it in so many words. */
 function enoughReason(claim: AmountClaim): boolean {
   return amountAgreement(claim) >= AGREEING_AMOUNT_SIEVES || claim.labelStated;
+}
+
+/**
+ * Whether the page's own line items come to this figure: the row that adds
+ * up the rows above it, or the figure the printed instalments multiply out
+ * to. Either is the page doing the arithmetic itself, which is a better
+ * reason than however many sieves read words beside a rival.
+ */
+function lineItemsAddUp(claim: AmountClaim): boolean {
+  return claim.sieves.has(ADDS_UP) || claim.sieves.has(INSTALMENT_TOTAL);
 }
 
 /**
@@ -544,91 +584,6 @@ interface Derived<T> {
   ambiguous: boolean;
 }
 
-/** A term shorter than two months is a billing gap rather than a
- * commitment, and one longer than ten years is two unrelated dates that
- * happen to be a whole number of months apart. */
-const DATED_TERM_MIN = 2;
-const DATED_TERM_MAX = 120;
-
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/u;
-
-/** `date` moved on by whole months, or nothing where the arithmetic rolls
- * over into the next month (31 January plus one). A roll-over means the two
- * dates are not the same day of the month, which is exactly the case this
- * reading must not claim as a clean term. */
-function addMonths(date: string, months: number): string | undefined {
-  const parts = ISO_DATE.exec(date);
-  if (!parts) return undefined;
-  const moved = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1 + months, Number(parts[3])));
-  if (Number.isNaN(moved.getTime())) return undefined;
-  return moved.getUTCDate() === Number(parts[3]) ? moved.toISOString().slice(0, 10) : undefined;
-}
-
-function dayAfter(date: string): string | undefined {
-  const parts = ISO_DATE.exec(date);
-  if (!parts) return undefined;
-  const moved = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]) + 1));
-  return Number.isNaN(moved.getTime()) ? undefined : moved.toISOString().slice(0, 10);
-}
-
-/**
- * How many whole months a period runs for, or nothing where it is not a
- * whole number of them.
- *
- * Both of the ways a page draws a term count: "from 20 March 2025 to 20
- * March 2027" lands on the anniversary, and "from 1 April 2026 to 31 March
- * 2027" stops the day before it, which is the same year drawn inclusively.
- * Anything else -- a statement window, two dates that are simply near each
- * other -- is not a term and gets no answer.
- */
-function wholeMonthsBetween(start: string, end: string): number | undefined {
-  const from = ISO_DATE.exec(start);
-  const to = ISO_DATE.exec(end);
-  if (!from || !to) return undefined;
-  const rough = (Number(to[1]) - Number(from[1])) * 12 + (Number(to[2]) - Number(from[2]));
-  for (const months of [rough, rough + 1]) {
-    if (months < DATED_TERM_MIN || months > DATED_TERM_MAX) continue;
-    const landed = addMonths(start, months);
-    if (landed !== undefined && (landed === end || landed === dayAfter(end))) return months;
-  }
-  return undefined;
-}
-
-/**
- * The term a page shows through its dates rather than its words.
- *
- * Most pages never print "minimum term 24 months". They print the period
- * instead -- a start date and the date the term runs out -- and leave the
- * reader to count it. That is the same fact in a different form, so it
- * buys the same arithmetic, off the roles stage 3 has already chosen.
- *
- * An `expiry` and not a `renewal`, which is the difference the page's own
- * kind draws (`extraction-term-end.ts`): a term that expires is a
- * commitment running out, and what the household pays over it is the whole
- * of it. A date the thing RENEWS on is the opposite -- it rolls on, and a
- * rolling monthly arrangement keeps its monthly figure (owner, 2026-09-13).
- * Without that line the health plan, the pension and the mortgage all read
- * as two-year and one-year commitments they are not.
- *
- * Two pairs of dates giving two different terms is a page that has not said
- * which period its price runs over, and comes back ambiguous.
- */
-export function datedTermMonths(
-  dateRoles: ReadonlyArray<{ date: string; role: string }>,
-): Derived<number> {
-  const starts = dateRoles.filter((entry) => entry.role === "start");
-  const ends = dateRoles.filter((entry) => entry.role === "expiry");
-  const terms = new Set<number>();
-  for (const start of starts) {
-    for (const end of ends) {
-      const months = wholeMonthsBetween(start.date, end.date);
-      if (months !== undefined) terms.add(months);
-    }
-  }
-  const found = [...terms];
-  return found.length === 1 ? { value: found[0], ambiguous: false } : { ambiguous: found.length > 1 };
-}
-
 const MONEY = String.raw`[£€$]\s?(?<pounds>\d{1,3}(?:,\d{3})*|\d+)(?:\.(?<pence>\d{2}))?`;
 /** The figure is a rate and not a lump sum for the leg: "£300 for the first
  * 12 months" is what that leg costs in total, and reading it as a monthly
@@ -678,7 +633,6 @@ function introductoryLeg(text: string): Derived<{ minor: number; months: number 
 function chooseCost(
   candidates: readonly TaggedCandidate[],
   text?: string,
-  dateRoles: ReadonlyArray<{ date: string; role: string }> = [],
 ): {
   costMinor?: number;
   currency?: string;
@@ -688,10 +642,16 @@ function chooseCost(
   if (best === undefined) return {};
   if (!enoughReason(best)) return {};
   const rival = ranked[1];
+  // A tie on how well the page spoke for two figures is a genuine tie and
+  // blank is the answer -- unless the page's own arithmetic breaks it
+  // (#1006 class 3). Where one of the two is what the line items add up to
+  // and the other is not, the page has already said which is the bill, and
+  // answering blank would be throwing that away.
   if (rival &&
     amountAgreement(rival) === amountAgreement(best) &&
     rival.weight === best.weight &&
-    rival.rank === best.rank) {
+    rival.rank === best.rank &&
+    lineItemsAddUp(rival) === lineItemsAddUp(best)) {
     return {};
   }
   const minor = Number(best.value);
@@ -706,25 +666,25 @@ function chooseCost(
   // by the `term-multiple` sieve.
   const priced = { costMinor: minor, currency: best.currency };
   if (text === undefined || best.rank !== AMOUNT_PREFERENCE.indexOf("instalment")) return priced;
-  // Words first, then dates. A page that states its term in words has said
-  // so outright; the dates are the same fact for the far larger number of
-  // pages that only print the period they run for. A rolling monthly thing
-  // has neither, and keeps its monthly figure.
-  const stated = contractTermMonths(text);
-  const term = stated === undefined ? datedTermMonths(dateRoles) : { value: stated, ambiguous: false };
-  if (term.ambiguous) return {};
-  if (term.value === undefined) return priced;
+  // The multiplier has to be a term the page printed in so many words
+  // (#1006 class 5): "minimum term 24 months", "runs for 36 months". A span
+  // counted off two dates is not one -- a pension statement, an annual
+  // summary and a rolling agreement all cover a period, and none of them is
+  // a contract priced over it, so multiplying by the gap between their dates
+  // invents a commitment the page never stated.
+  const term = contractTermMonths(text);
+  if (term === undefined) return priced;
   const intro = introductoryLeg(text);
   if (intro.ambiguous) return {};
-  if (intro.value === undefined || intro.value.months >= term.value) {
-    return { costMinor: minor * term.value, currency: best.currency };
+  if (intro.value === undefined || intro.value.months >= term) {
+    return { costMinor: minor * term, currency: best.currency };
   }
   // The sum only means anything if the chosen figure is the standing rate:
   // where it is the introductory one, the page has not said through this
   // reading what the rest of the term costs, and blank beats a guess.
   if (intro.value.minor === minor) return {};
   return {
-    costMinor: intro.value.months * intro.value.minor + (term.value - intro.value.months) * minor,
+    costMinor: intro.value.months * intro.value.minor + (term - intro.value.months) * minor,
     currency: best.currency,
   };
 }
@@ -784,7 +744,7 @@ export const chooseFields: ChooseStage = (candidates, text): ExtractedFields => 
     ...(reference === undefined ? {} : { reference }),
     ...(provider === undefined ? {} : { provider }),
     ...(subtype === undefined ? {} : { subtype }),
-    ...chooseCost(candidates, text, dateRoles),
+    ...chooseCost(candidates, text),
   };
 };
 
