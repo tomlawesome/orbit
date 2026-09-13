@@ -486,7 +486,7 @@ policy should show the total amount." Applied to the tuning set:
   lone instalment by the one contract term the page states
   (`contractTermMonths`). The mobile plan's introductory rate makes its
   true total 6 x £14 + 18 x £23 = £498, not 24 x £23; the pipeline answers
-  £552 and the truth stays honest, flagged to the owner.
+  £552 and the truth is what is actually paid (owner, 2026-09-13).
 - An offered option is not the commitment: a renewal or schedule printing
   a paid-in-full premium beside "total if paying monthly" keeps the
   annual premium (car, home and pet insurance).
