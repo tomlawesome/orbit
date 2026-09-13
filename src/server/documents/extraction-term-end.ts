@@ -11,36 +11,69 @@
 //
 // The sieves and tags therefore say only that a date ENDS a term; the
 // chooser names the end with the page's kind, read from the same taxonomy
-// bins the subtype field uses (`extraction-subtype-bins.ts`).
+// bins the subtype field uses (`extraction-subtype-bins.ts`). Every kind in
+// the taxonomy that can bound a term has an answer here, so a page the kind
+// reader gets right is decided by its kind; a page it cannot read falls to
+// the wording, which is a weaker guide (owner: be specific where we can,
+// and catch the rest as well as we can).
 
 import type { GroupBin } from "./extraction-subtype-bins";
 import type { DocumentDateRole } from "./suggestions";
 
-/** Kinds the household takes out again when they end. */
+/** Kinds the household takes out again when they end: cover, a right to
+ * do something, a supply, a place to live, a standing that lapses. */
 const RENEWS = new Set([
   "Insurance", "Plan", "Contract", "Subscription", "Membership", "Tariff", "Utility",
   "Tax", "Licence", "Permit", "Mortgage", "Maintenance contract", "Tenancy", "Rental",
   "Registration", "Service charge", "Season ticket", "Parking permit", "Domain",
   "Software subscription",
+  // A certificate or inspection is valid for a while and must be done again
+  // while the household still needs it (an MOT, a gas safety record); a
+  // service plan is booked again; an identity document is renewed; a benefit
+  // award is reviewed or claimed again when it ends.
+  "Certificate", "Inspection", "Service", "Identity document", "Benefit",
 ]);
 
-/** Kinds that are over when their term is. */
-const ENDS = new Set(["Warranty", "Guarantee", "Loan", "Lease", "Course", "Quote"]);
+/** Kinds that are over when their term is: a promise about a thing already
+ * bought, money already lent, a fixed period the household simply sees out,
+ * or a one-off event. */
+const ENDS = new Set([
+  "Warranty", "Guarantee", "Loan", "Lease", "Course", "Quote",
+  // A card is replaced by the bank; savings and investments mature and the
+  // money comes back; a deposit is protected until the tenancy ends; a claim
+  // window, a prescription, a fine's discount period and a fee period close;
+  // an appointment, a vaccination, an order, a delivery and a repair happen.
+  "Credit card", "Savings", "Investment", "Deposit", "Claim", "Prescription",
+  "Vaccination", "Fine", "Fees", "Appointment", "Order", "Delivery", "Repair",
+]);
+
+// Kinds deliberately left undecided: Bill, Statement, Bank account, Pension,
+// Record, Deed and Will bound no term of their own. A page of one of those
+// kinds is decided by any more specific kind it also carries, else by the
+// words on it.
 
 /** Words for the piece of paper rather than the thing it is about: every
  * tenancy is an agreement, every quote is for something. These decide only
  * when nothing more specific is on the page. */
 const PAPER = new Set(["Contract", "Bill", "Statement", "Certificate", "Record", "Quote"]);
 
-/** A page that talks about renewing is about a thing that renews. */
-const TALKS_OF_RENEWING = /\brenew(?:al|ed|s|ing)?\b/iu;
+/** Wording that speaks of a thing going round again: renewing, a yearly
+ * or monthly cycle, a rolling term. */
+const SPEAKS_OF_A_CYCLE = /\brenew(?:al|ed|s|ing)?\b|\bannual(?:ly)?\b|\byearly\b|\b(?:each|every|per) (?:year|month)\b|\bevery \d{1,2} months\b|\brolling\b|\bauto-?renew/iu;
+
+/** Wording that speaks of a thing stopping: a one-off, a final payment,
+ * money maturing, a promise about a thing already bought. */
+const SPEAKS_OF_AN_END = /\bone-?off\b|\bsingle payment\b|\bfinal (?:payment|instalment)\b|\bmatur(?:es|ity)\b|\bnon-?renewable\b|\bwarrant(?:y|ies)\b|\bguarantee[ds]?\b/iu;
+
+function count(pattern: RegExp, text: string): number {
+  return text.match(new RegExp(pattern.source, "giu"))?.length ?? 0;
+}
 
 /**
  * The role of a date that ends the page's term. The best-supported kind
  * with a known answer decides, the paper words waiting their turn behind
- * the thing words. A page whose kind says nothing (a certificate, an
- * inspection, a statement) renews if it speaks of renewing anywhere, and
- * otherwise merely expires.
+ * the thing words. A page whose kind says nothing renews if its wording
+ * speaks more of a cycle than of an end, and otherwise merely expires.
  */
 export function termEndRole(kinds: ReadonlyArray<GroupBin>, text: string | undefined): DocumentDateRole {
   const things = kinds.filter(({ group }) => !PAPER.has(group));
@@ -49,5 +82,6 @@ export function termEndRole(kinds: ReadonlyArray<GroupBin>, text: string | undef
     if (RENEWS.has(group)) return "renewal";
     if (ENDS.has(group)) return "expiry";
   }
-  return text !== undefined && TALKS_OF_RENEWING.test(text) ? "renewal" : "expiry";
+  if (text === undefined) return "expiry";
+  return count(SPEAKS_OF_A_CYCLE, text) > count(SPEAKS_OF_AN_END, text) ? "renewal" : "expiry";
 }
