@@ -4071,6 +4071,130 @@
       },
       "verdict": "baseline",
       "notes": "73.2%, dateRoles 19/26: identical to E68. Six seen-set dateRoles gains, none on the unseen set."
+    },
+    {
+      "id": "E75",
+      "date": "2026-09-13",
+      "label": "dateRoles: the page's kind names a term end renewal or expiry (owner rule 2026-09-13)",
+      "corpus": "seen48",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "New extraction-term-end.ts. The sieves and tags now say only that a date ends a term (expiry); the chooser votes renewal and expiry as one family and names the winner from the page's taxonomy kind bins: kinds the household takes out again (insurance, tax, licence, tenancy, subscription...) renew, finite kinds (guarantee, warranty, loan, lease, course, quote) expire, paper words (contract, bill, certificate) decide only when no thing-kind is present, and a page with no deciding kind renews if it speaks of renewing. RUNS_OUT/TITLE_RUNS_OUT keyword rules removed. Loan gains the PCP names in the taxonomy; a sweep is a visit. Eight seen truths re-labelled under the same rule (MOT, lodge, season ticket, parking permit -> renewal; PCP -> expiry; done-dates on chimney and electrical -> issued, next sweep -> service; cavity installation -> start), so the denominator is 410.",
+      "how": "npm run eval:stages",
+      "commit": "943aabf",
+      "output": "tmp/e-seen48-stages-te3.txt",
+      "scores": {
+        "overall": {
+          "pct": 86.3,
+          "net": 354,
+          "of": 410
+        },
+        "provider": {
+          "pct": 79.2,
+          "net": 38,
+          "of": 48
+        },
+        "reference": {
+          "pct": 64.6,
+          "net": 31,
+          "of": 48
+        },
+        "dates": {
+          "pct": 100,
+          "net": 85,
+          "of": 85
+        },
+        "dateRoles": {
+          "pct": 94.1,
+          "net": 80,
+          "of": 85
+        },
+        "subtype": {
+          "pct": 68.8,
+          "net": 33,
+          "of": 48
+        },
+        "cost": {
+          "pct": 97.6,
+          "net": 41,
+          "of": 42
+        },
+        "scheduleKind": {
+          "pct": 93.8,
+          "net": 30,
+          "of": 32
+        },
+        "recurrence": {
+          "pct": 72.7,
+          "net": 16,
+          "of": 22
+        }
+      },
+      "verdict": "kept",
+      "notes": "Against the re-labelled truths 86.3%, dateRoles 80/85 (E73 was 85.3%, 79/85 on the old truths). Remaining end-date misses: critical illness quote (Insurance outranks Quote in the bins) and fixed-term life cover (Insurance renews; a 20-year term does not), and the chimney's guild membership period reads as a renewal."
+    },
+    {
+      "id": "E76",
+      "date": "2026-09-13",
+      "label": "Hold-out 3 under the kind-of-thing rule, truths re-checked by an author agent",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E75's rule. An author sub-agent re-checked hold-out 3's date-role truths under the same convention (commit 943aabf; 1 of 12 changed, its note sits beside the hold-out sources, unread by the tuning session).",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "943aabf",
+      "output": "tmp/e-holdout3-te4.txt",
+      "scores": {
+        "overall": {
+          "pct": 70.9,
+          "net": 78,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 33.3,
+          "net": 4,
+          "of": 12
+        },
+        "cost": {
+          "pct": 50,
+          "net": 6,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "70.9% (78/110), dateRoles 18/26. Fair comparison on the same re-checked truths: the code before this rule (8632790) scores 71.8% (79/110), dateRoles 18/26, recurrence 5/5 -- so the rule moves no hold-out date role and loses one recurrence. Kept on the owner's call that the role should follow the kind of thing, not the word on the page; the hold-out says that is not yet a measured gain."
     }
   ],
   "measurements": [

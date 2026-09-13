@@ -5,18 +5,19 @@
     "dates": ["2026-09-01", "2027-08-31"],
     "dateRoles": [
       { "date": "2026-09-01", "role": "start" },
-      { "date": "2027-08-31", "role": "expiry" }
+      { "date": "2027-08-31", "role": "renewal" }
     ],
     "provider": "Cheddleton Rail",
     "reference": "ST-0294817-6",
     "subtype": { "kinds": ["Season ticket"], "qualifiers": ["Transport"] },
     "costMinor": 341200,
-    "currency": "GBP"
+    "currency": "GBP",
+    "scheduleKind": "renewal"
   },
   "notes": [
     "Ticket valid from 01/09/2026 ('VALID FROM 01/09/2026') -- dateRoles start.",
     "Ticket valid until 31/08/2027 ('VALID UNTIL 31/08/2027') -- dateRoles expiry.",
-    "No scheduleKind or recurrenceMonths declared: an annual season ticket does not print a recurring instalment count.",
+    "scheduleKind renewal, no recurrenceMonths: an annual season ticket is bought again, but the page prints no cycle figure.",
     "provider is the issuing train operator 'ISSUED BY CHEDDLETON RAIL', who would be contacted.",
     "reference is the season ticket number 'ST-0294817-6'.",
     "costMinor is the price paid, 'Annual season ticket £3,412.00'.",
@@ -29,6 +30,7 @@
     "Trap: refund administration fee '£10.00', another rival amount.",
     "Trap: industry body name 'the Interoperator Ticketing Council', a rival organisation to the operator.",
     "Trap: station names 'MILLBROOK CROSS' and 'FENWICK PARKWAY'.",
-    "Trap: railcard discount code 'RC-229104', a rival reference-shaped code."
+    "Trap: railcard discount code 'RC-229104', a rival reference-shaped code.",
+    "Owner convention 2026-09-13: an end date is a renewal when the thing continues only if the household acts again (tax, MOT, licence, tenancy, insurance, subscription, season ticket, permit), and an expiry when it is simply over (guarantee, warranty, loan, lease, quote, course). The role follows the kind of thing, not the word on the page."
   ]
 }

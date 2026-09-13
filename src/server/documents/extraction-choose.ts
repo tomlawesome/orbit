@@ -42,6 +42,8 @@ import { bestSupported, type ShortlistEntry } from "./extraction-shortlist";
 import type { CandidateKind } from "./extraction-sieve";
 import type { ExtractedFields } from "./extraction-scoring";
 import type { ChooseStage, TaggedCandidate } from "./extraction-stages";
+import { subtypeGroupBins, subtypeSources } from "./extraction-subtype-bins";
+import { termEndRole } from "./extraction-term-end";
 import { chooseProviderFromPage } from "./provider-route";
 import { documentDateRoles, type DocumentDateRole } from "./suggestions";
 import { trimFieldValue } from "./value-trim";
@@ -233,11 +235,18 @@ export function datesWithoutARole(
  * longer dropped: the sieve found it on the page, and a rule that throws it
  * away takes the choice off the model that could still have made it.
  */
-function chooseDates(candidates: readonly TaggedCandidate[]): {
+function chooseDates(candidates: readonly TaggedCandidate[], text: string | undefined): {
   dates: string[];
   dateRoles: Array<{ date: string; role: DocumentDateRole }>;
 } {
-  const claims = roleClaims(candidates);
+  // `renewal` and `expiry` both say "the term ends here"; which it is
+  // depends on what kind of thing the page is about, not on the words
+  // around the date (`extraction-term-end.ts`). The two are voted on as
+  // one claim, and the winner is named afterwards from the page's kind.
+  const endsATerm = (role: DocumentDateRole) => role === "renewal" || role === "expiry";
+  const family = (role: DocumentDateRole): DocumentDateRole => (endsATerm(role) ? "expiry" : role);
+  const claims = roleClaims(candidates).map((claim) => ({ ...claim, role: family(claim.role) }));
+  const endRole = termEndRole(subtypeGroupBins(subtypeSources(candidates)).kinds, text);
 
   const claimed: string[] = [];
   for (const claim of claims) if (!claimed.includes(claim.date)) claimed.push(claim.date);
@@ -256,7 +265,7 @@ function chooseDates(candidates: readonly TaggedCandidate[]): {
     const opensAPeriod = forDate.some(
       (claim) => claim.role === "start" && claim.sieves.includes(DATE_RANGE),
     );
-    const closesAPeriod = forDate.some((claim) => claim.role === "renewal" || claim.role === "expiry");
+    const closesAPeriod = forDate.some((claim) => endsATerm(claim.role));
     if (opensAPeriod && closesAPeriod) {
       dateRoles.push({ date, role: "start" });
       continue;
@@ -293,7 +302,7 @@ function chooseDates(candidates: readonly TaggedCandidate[]): {
     const clear = winner.length === 1 ||
       winner[0].sieves > winner[1].sieves ||
       (winner[0].sieves === winner[1].sieves && winner[0].claims > winner[1].claims);
-    if (clear) dateRoles.push({ date, role: winner[0].role });
+    if (clear) dateRoles.push({ date, role: endsATerm(winner[0].role) ? endRole : winner[0].role });
   }
 
   const leftovers = OFFER_UNLABELLED_DATES ? datesWithoutARole(candidates, dateRoles) : [];
@@ -660,7 +669,7 @@ function scheduleFrom(
 }
 
 export const chooseFields: ChooseStage = (candidates, text): ExtractedFields => {
-  const { dates, dateRoles } = chooseDates(candidates);
+  const { dates, dateRoles } = chooseDates(candidates, text);
   const { scheduleKind, recurrenceMonths } = scheduleFrom(dateRoles, candidates);
   const reference = chooseReference(candidates);
   const provider = text === undefined ? chooseProviderByRules(candidates) : chooseProviderFromPage(text);

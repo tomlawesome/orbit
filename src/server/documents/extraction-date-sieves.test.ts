@@ -39,8 +39,11 @@ const roles = (name: string, text: string, value: string) =>
 
 describe("the words after a date", () => {
   it("reads a clause that says what the date is for", () => {
+    // A term end is an `expiry` here whatever the term is; the chooser
+    // names it a renewal or an expiry from the page's kind
+    // (extraction-term-end.ts).
     const text = "We will write to you again before 14 November 2026, when your cover ends.";
-    expect(roles("words-after", text, "2026-11-14")).toEqual(["renewal"]);
+    expect(roles("words-after", text, "2026-11-14")).toEqual(["expiry"]);
   });
 
   it("ends the term rather than renewing it when the term simply runs out", () => {
@@ -51,7 +54,7 @@ describe("the words after a date", () => {
   it("stops at the next date, so one date's clause cannot label another", () => {
     const text = "Cover runs from 14 June 2026 to 13 June 2031, when your cover ends.";
     expect(roles("words-after", text, "2026-06-14")).toEqual([]);
-    expect(roles("words-after", text, "2031-06-13")).toEqual(["renewal"]);
+    expect(roles("words-after", text, "2031-06-13")).toEqual(["expiry"]);
   });
 
   it("gives a clause leading into the next date to that date", () => {
@@ -105,12 +108,12 @@ describe("the arithmetic between two dates and a printed term", () => {
 
   it("reads the date a term ends at, and the one it starts at", () => {
     expect(roles("term-arithmetic", contract, "2026-04-22")).toEqual(["start"]);
-    expect(roles("term-arithmetic", contract, "2028-04-21")).toEqual(["renewal"]);
+    expect(roles("term-arithmetic", contract, "2028-04-21")).toEqual(["expiry"]);
   });
 
   it("counts a year the page called annual", () => {
     const cover = "Annual cover, starting 1 April 2026 and ending 1 April 2027.";
-    expect(roles("term-arithmetic", cover, "2027-04-01")).toEqual(["renewal"]);
+    expect(roles("term-arithmetic", cover, "2027-04-01")).toEqual(["expiry"]);
   });
 
   it("expires instead when the term is a guarantee", () => {
@@ -140,7 +143,7 @@ describe("the arithmetic between two dates and a printed term", () => {
       "Clause 4. Minimum term. Your membership has a minimum term of 12 months from the start date and you cannot cancel during it except as set out in clause 9.",
     ].join(" \n\n" + "Lorem ipsum. \n\n".repeat(12));
     expect(roles("term-arithmetic", gym, "2026-03-02")).toEqual(["start"]);
-    expect(roles("term-arithmetic", gym, "2027-03-01")).toEqual(["renewal"]);
+    expect(roles("term-arithmetic", gym, "2027-03-01")).toEqual(["expiry"]);
   });
 });
 
