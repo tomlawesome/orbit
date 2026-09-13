@@ -32,17 +32,18 @@ let nextIndex = 0;
 
 /** A tagged candidate. `index` rises with each call, so candidates read in
  * the order the test writes them; `line` defaults to the value, because
- * most rules never look at the block. */
+ * most rules never look at the block. Give `index` where the test hands
+ * stage 3 a page as well, so the two agree about where the figure sits. */
 function candidate<K extends CandidateKind>(
   kind: K,
   value: string,
   tags: Array<TagInput<K>>,
-  extra: { line?: string; currency?: string } = {},
+  extra: { line?: string; currency?: string; index?: number } = {},
 ): TaggedCandidate<K> {
   return {
     kind,
     value,
-    index: nextIndex++,
+    index: extra.index ?? nextIndex++,
     line: extra.line ?? value,
     ...(extra.currency === undefined ? {} : { currency: extra.currency }),
     tags: tags.map((tag): Tag<K> =>
@@ -569,6 +570,50 @@ describe("choosing the cost and its currency", () => {
     ]);
 
     expect(chosen.costMinor).toBe(68430);
+  });
+
+  // Class 3: a tier table comparing this plan with the two beside it
+  // borrows the premium into a "per condition" row, and the premium is
+  // still the premium.
+  it("keeps a figure another cell reads as a cover limit where its own cell names it", () => {
+    const chosen = chooseFields([
+      candidate("amount", "28764", [
+        { value: "total", trigger: "Annual premium", sieves: ["label"], strength: 2 },
+      ], { currency: "GBP", line: "Annual premium (paid in full): £287.64." }),
+      candidate("amount", "28764", [
+        { value: "other", trigger: "per condition", sieves: ["label"], strength: 2 },
+        { value: "total", trigger: "printed 3 times", sieves: ["printed-throughout"], strength: 1 },
+      ], { currency: "GBP", line: "Standard (this policy) £7,500 per condition £287.64" }),
+      candidate("amount", "27120", [
+        { value: "total", trigger: "Annual premium", sieves: ["label"], strength: 2 },
+      ], { currency: "GBP", line: "1 April 2025 to 31 March 2026 £271.20" }),
+    ]);
+
+    expect(chosen.costMinor).toBe(28764);
+  });
+
+  // Class 4: the panel of things the page also sells.
+  it("ranks a price under an offers heading below the page's own charge", () => {
+    const page = [
+      "RAILCARD OFFERS",
+      "16-25 Railcard — £30.00 for one year, code RC-1625.",
+      "SEASON TICKET",
+      "Annual season ticket £3,412.00",
+    ].join("\n");
+    const chosen = chooseFields([
+      candidate("amount", "3000", [
+        { value: "total", trigger: "for one year", sieves: ["label", "words-after", "period-adjacent"], strength: 2 },
+      ], {
+        currency: "GBP",
+        line: "16-25 Railcard — £30.00 for one year, code RC-1625.",
+        index: page.indexOf("£30.00"),
+      }),
+      candidate("amount", "341200", [
+        { value: "total", trigger: "Annual season ticket", sieves: ["label"], strength: 2 },
+      ], { currency: "GBP", line: "Annual season ticket £3,412.00", index: page.indexOf("£3,412.00") }),
+    ], page);
+
+    expect(chosen.costMinor).toBe(341200);
   });
 
   it("blanks when two totals disagree", () => {

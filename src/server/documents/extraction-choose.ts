@@ -372,6 +372,9 @@ interface AmountClaim {
   /** Whether the page frames the figure as the whole commitment: the year,
    * the term, the price paid in one go (`THE_WHOLE_COMMITMENT`). */
   wholeCommitment: boolean;
+  /** Whether every printing of the figure sits under a heading announcing
+   * something else on offer (`ANOTHER_THING_ON_OFFER`). */
+  anotherThingOnOffer: boolean;
 }
 
 /**
@@ -450,6 +453,63 @@ function everyPrintingPricesTheOtherWay(frames: readonly string[]): boolean {
     frames.every((frame) => THE_OTHER_WAY_OF_PAYING.test(frame) && !THE_WHOLE_COMMITMENT.test(frame));
 }
 
+/**
+ * A panel heading announcing something other than the page's own charge:
+ * "RAILCARD OFFERS", "ALSO AVAILABLE", "ADD-ONS", "OPTIONAL EXTRAS", "YOUR
+ * OTHER SERVICES". A figure under one is a real, labelled price for
+ * something the household has not committed to.
+ *
+ * One printing under such a heading is enough, where history and the other
+ * way of paying both need every printing. Those two are readings of a
+ * block, and a figure the page also prints plainly is not history; this is
+ * the page putting a price in its "things you could buy" box, which is a
+ * reason against the figure however many other printings agree about it --
+ * the same stance the module takes on every other reason against.
+ */
+const ANOTHER_THING_ON_OFFER =
+  /\b(?:also available|available (?:separately|to add|as an extra)|other (?:services|products|policies|plans|accounts|cover)|add[- ]?ons?|optional extras?|offers?|upgrades?|our (?:other|full) range|more from us|partner offers)\b/iu;
+
+function everyPrintingIsOnOffer(headings: readonly string[]): boolean {
+  return headings.length > 0 && headings.some((heading) => ANOTHER_THING_ON_OFFER.test(heading));
+}
+
+/** A block that heads a group rather than being one of them: a few short
+ * words, no figure of its own, not a sentence. */
+function aHeading(line: string): boolean {
+  return line.length > 1 && line.length <= 60 &&
+    line.split(" ").length <= HEADING_WORDS &&
+    !PRINTED_FIGURE.test(line) && !/[.!?;]$/u.test(line);
+}
+
+/** A heading is a name, not a sentence: a few words at most. */
+const HEADING_WORDS = 6;
+
+/** How far above a figure the page's heading for it may sit. */
+const HEADING_REACH_BLOCKS = 6;
+
+/**
+ * The nearest heading above each figure -- the panel it was printed in,
+ * which is what says whether the page is pricing its own charge or the
+ * things it also sells.
+ */
+function headingsOf(candidates: readonly TaggedCandidate[], text: string | undefined): Map<number, string> {
+  const headings = new Map<number, string>();
+  if (text === undefined) return headings;
+  const blocks = pageBlocks(text);
+  for (const candidate of candidates) {
+    let own = blocks.length;
+    for (let at = 0; at < blocks.length; at += 1) {
+      if (blocks[at].index > candidate.index) { own = at; break; }
+    }
+    for (let at = own - 1; at >= Math.max(0, own - 1 - HEADING_REACH_BLOCKS); at -= 1) {
+      if (!aHeading(blocks[at].line)) continue;
+      headings.set(candidate.index, blocks[at].line);
+      break;
+    }
+  }
+  return headings;
+}
+
 /** Tags that are a reason against a figure being the cost. `other` is one
  * too where a sieve said so in words (a cover limit, an excess, a penalty)
  * and not where it is the blank tag a figure nobody read carries. */
@@ -514,14 +574,23 @@ export function amountClaims(candidates: readonly TaggedCandidate[], text?: stri
     byTag: Map<string, SieveReadings>;
     against: SieveReadings;
     labelStated: boolean;
+    /** Whether a printing of the figure carries the page naming it in so
+     * many words and nothing reading it as something else: the cell the
+     * tier table borrowed the figure into is not that printing. */
+    namedInItsOwnCell: boolean;
+    /** Whether `previous` or `rival` spoke against it -- the readings that
+     * put a figure out of the running whatever else agrees. */
+    printedInsteadOfTheAnswer: boolean;
   }
   const byValue = new Map<string, Working>();
   // Every block each figure was printed in, with the heading over it, so a
   // reading of the printings as a whole -- history, or the other way of
   // paying -- can be taken once.
   const frames = framesOf(candidates, text);
+  const headings = headingsOf(candidates, text);
   const linesOf = new Map<string, string[]>();
   const framesOfValue = new Map<string, string[]>();
+  const headingsOfValue = new Map<string, string[]>();
   for (const candidate of candidates) {
     if (candidate.kind !== "amount" || !candidate.currency) continue;
     const key = `${candidate.value} ${candidate.currency}`;
@@ -530,6 +599,7 @@ export function amountClaims(candidates: readonly TaggedCandidate[], text?: stri
       ...(framesOfValue.get(key) ?? []),
       frames.get(candidate.index) ?? candidate.line,
     ]);
+    headingsOfValue.set(key, [...(headingsOfValue.get(key) ?? []), headings.get(candidate.index) ?? ""]);
   }
 
   for (const candidate of candidates) {
@@ -537,23 +607,37 @@ export function amountClaims(candidates: readonly TaggedCandidate[], text?: stri
     // and the scorer gives no half credit for one, so an amount without a
     // symbol or code is not half an answer -- it is none.
     if (candidate.kind !== "amount" || !candidate.currency) continue;
+    const key = `${candidate.value} ${candidate.currency}`;
+    // What this one printing says, kept apart until the tags of the cell
+    // have all been read: a cell that names the figure and a cell that
+    // reads it as something else are two different printings, and which of
+    // them is which is what tells a tier table from a cover limit.
+    let statedHere = false;
+    let againstHere = false;
+    let insteadOfTheAnswer = false;
+    let held: Working | undefined;
     for (const tag of candidate.tags) {
       const rank = AMOUNT_PREFERENCE.indexOf(tag.value);
       const against = speaksAgainst(tag);
       if (rank === -1 && !against) continue;
       if (aPeriodMistakenForALabel(tag, candidate.line)) continue;
-      const key = `${candidate.value} ${candidate.currency}`;
-      const held = byValue.get(key) ?? {
+      held = held ?? byValue.get(key) ?? {
         value: candidate.value,
         currency: candidate.currency,
         byTag: new Map<string, SieveReadings>(),
         against: new Map() as SieveReadings,
         labelStated: false,
+        namedInItsOwnCell: false,
+        printedInsteadOfTheAnswer: false,
       };
       const strength = tag.strength ?? claimStrength(tag.trigger);
       const sieves = tag.sieves ?? [AMOUNT_LABEL];
       if (against) {
         for (const sieve of sieves) record(held.against, sieve, strength);
+        if (strength >= STRENGTH_STATED) {
+          againstHere = true;
+          if (NOT_THE_COST.includes(tag.value)) insteadOfTheAnswer = true;
+        }
       } else {
         const readings = held.byTag.get(tag.value) ?? new Map() as SieveReadings;
         for (const sieve of sieves) record(readings, sieve, strength);
@@ -561,10 +645,16 @@ export function amountClaims(candidates: readonly TaggedCandidate[], text?: stri
         // The words in front of the figure, or the form's own heading
         // printed straight over its cell (`heading-above` at full
         // strength): either is the page naming the figure in so many words.
-        if ((sieves.includes(AMOUNT_LABEL) || sieves.includes("heading-above")) && strength >= 2) held.labelStated = true;
+        if ((sieves.includes(AMOUNT_LABEL) || sieves.includes("heading-above")) && strength >= STRENGTH_STATED) {
+          statedHere = true;
+        }
       }
-      byValue.set(key, held);
     }
+    if (held === undefined) continue;
+    held.labelStated ||= statedHere;
+    held.namedInItsOwnCell ||= statedHere && !againstHere;
+    held.printedInsteadOfTheAnswer ||= insteadOfTheAnswer;
+    byValue.set(key, held);
   }
 
   const claims: AmountClaim[] = [];
@@ -587,7 +677,16 @@ export function amountClaims(candidates: readonly TaggedCandidate[], text?: stri
       ...(working.currency === undefined ? {} : { currency: working.currency }),
       sieves: new Set(readings.keys()),
       against: new Set(working.against.keys()),
-      ruledOut: [...working.against.values()].some((strength) => strength >= 2),
+      // A figure the page printed to be read instead of the answer is out of
+      // the running whatever else agrees. An `other` reading -- a cover
+      // limit, an excess, a penalty -- does the same, unless another
+      // printing of the same figure is the page naming it in so many words
+      // with nothing reading that cell as anything else: a tier table
+      // comparing this plan with the two beside it borrows the premium into
+      // a "per condition" row, and the premium is still the premium.
+      ruledOut: working.printedInsteadOfTheAnswer ||
+        ([...working.against.values()].some((strength) => strength >= STRENGTH_STATED) &&
+          !working.namedInItsOwnCell),
       weight: totalStrength(readings),
       labelStated: working.labelStated,
       rank: headline === undefined ? AMOUNT_PREFERENCE.length : AMOUNT_PREFERENCE.indexOf(headline.tag),
@@ -597,6 +696,9 @@ export function amountClaims(candidates: readonly TaggedCandidate[], text?: stri
       ),
       wholeCommitment: (framesOfValue.get(`${working.value} ${working.currency}`) ?? [])
         .some((frame) => THE_WHOLE_COMMITMENT.test(frame)),
+      anotherThingOnOffer: everyPrintingIsOnOffer(
+        headingsOfValue.get(`${working.value} ${working.currency}`) ?? [],
+      ),
     });
   }
   return claims;
@@ -659,8 +761,13 @@ export function rankedAmounts(candidates: readonly TaggedCandidate[], text?: str
   // a rival TOTAL is demoted: an instalment already ranks under every
   // whole-price figure, and the monthly fee on a rolling agreement is the
   // answer rather than a rival to it.
+  // A figure printed under "RAILCARD OFFERS" or "ALSO AVAILABLE" is a real
+  // price for something the household has not committed to, and joins it.
   const commitment = (claim: AmountClaim): number =>
-    claim.theOtherWay && claim.rank < AMOUNT_PREFERENCE.indexOf("instalment") ? 0 : 1;
+    claim.anotherThingOnOffer ||
+      (claim.theOtherWay && claim.rank < AMOUNT_PREFERENCE.indexOf("instalment"))
+      ? 0
+      : 1;
   // Last, because being framed as the year or the term is a way of telling
   // two figures the page spoke for equally well apart, not a reason that
   // outranks how well it spoke for them.
@@ -788,6 +895,7 @@ function chooseCost(
     rival.lastTime === best.lastTime &&
     rival.theOtherWay === best.theOtherWay &&
     rival.wholeCommitment === best.wholeCommitment &&
+    rival.anotherThingOnOffer === best.anotherThingOnOffer &&
     lineItemsAddUp(rival) === lineItemsAddUp(best)) {
     return {};
   }
@@ -1101,13 +1209,14 @@ export function costShortlistEntries(candidates: readonly TaggedCandidate[], tex
           : []),
         ...(claim.lastTime ? ["printed only where the page is saying what was paid before"] : []),
         ...(claim.theOtherWay ? ["printed only where the page is pricing the other way of paying"] : []),
+        ...(claim.anotherThingOnOffer ? ["printed only under a heading offering something else"] : []),
       ],
       support: amountAgreement(claim) * 2 + claim.weight + (claim.labelStated ? 2 : 0) +
         (claim.ruledOut
           ? RULED_OUT_BAND
           : claim.lastTime
             ? LAST_TIME_BAND
-            : claim.theOtherWay ? THE_OTHER_WAY_BAND : 0),
+            : claim.theOtherWay || claim.anotherThingOnOffer ? THE_OTHER_WAY_BAND : 0),
     });
   }
 
