@@ -17,6 +17,7 @@
     "test:integration": "node scripts/test-integration.mjs",
     "test:web-pdfjs": "node scripts/web-pdfjs-runtime-check.mjs",
     "acceptance:mailbox": "node scripts/acceptance-mailbox.mjs",
+    "bundle:extract": "node scripts/extract-bundle/build.mjs",
     "eval:extraction": "node_modules/tsx/dist/cli.mjs src/server/documents/model-eval-cli.ts",
     "eval:sieve": "node_modules/tsx/dist/cli.mjs src/server/documents/sieve-recall-cli.ts",
     "eval:tags": "node_modules/tsx/dist/cli.mjs src/server/documents/tag-accuracy-cli.ts",
