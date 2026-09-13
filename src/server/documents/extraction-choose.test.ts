@@ -344,6 +344,42 @@ describe("choosing the household's reference", () => {
     expect(chosen.reference).toBe("CUS-88");
   });
 
+  it("lets the kind of thing the page is about decide which label wins", () => {
+    const identifiers = [
+      candidate("identifier", "REF-4491", [{ value: "reference", trigger: "Your reference" }]),
+      candidate("identifier", "MTR-8823-0145", [{ value: "policy", trigger: "Policy number" }]),
+    ];
+
+    // Nothing says what this page is about, so "your reference" wins.
+    expect(chooseFields(identifiers).reference).toBe("REF-4491");
+    // The page calls itself an insurance schedule, so the policy number is
+    // the number this household quotes (`extraction-reference-kind.ts`).
+    expect(chooseFields([
+      candidate("heading", "HOME INSURANCE SCHEDULE", [{ value: "title", trigger: "" }]),
+      ...identifiers,
+    ]).reference).toBe("MTR-8823-0145");
+  });
+
+  it("never takes a number that is somebody else's, even alone on the page", () => {
+    // A telephone number the page also called a reference: "call us on
+    // 0345 900 2277, quoting your reference" labels one number twice.
+    expect(chooseFields([
+      candidate("identifier", "0345 900 2277", [
+        { value: "reference", trigger: "reference" },
+        { value: "phone", trigger: "0345 900 2277", source: "shape" },
+      ]),
+    ]).reference).toBeUndefined();
+  });
+
+  it("does not offer a number that is somebody else's to the model either", () => {
+    const entries = referenceShortlistEntries([
+      candidate("identifier", "30-92-14", [{ value: "bank", trigger: "Sort code" }]),
+      candidate("identifier", "ACC-3348217", [{ value: "account", trigger: "Account number" }]),
+    ]);
+
+    expect(entries.map((entry) => entry.value)).toEqual(["ACC-3348217"]);
+  });
+
   it("trims the label off a value that carried one", () => {
     const chosen = chooseFields([
       candidate("identifier", "Policy number: HI-9284712", [{ value: "policy", trigger: "Policy number" }], {
@@ -680,14 +716,17 @@ describe("the shortlists stage 2 ranks for the model", () => {
     expect(entries[0].why.join(" ")).toContain(`renewal from "Renewal date" by words-before, term-arithmetic`);
   });
 
-  it("offers every identifier, the best-labelled first and the company's own number last", () => {
+  it("offers every identifier that could be theirs, the best-labelled first", () => {
     const entries = referenceShortlistEntries([
       candidate("identifier", "GB 442 8891 06", [{ value: "company", trigger: "VAT number" }]),
       candidate("identifier", "8845 6120 33", [{ value: "other", trigger: "" }]),
       candidate("identifier", "PN-88421-K", [{ value: "policy", trigger: "Policy number" }]),
     ]);
 
-    expect(entries.map((entry) => entry.value)).toEqual(["PN-88421-K", "8845 6120 33", "GB 442 8891 06"]);
+    // The company's own number is not ranked last, it is not offered: a
+    // shortlist carrying it lets a page with nothing else on it be answered
+    // with the organisation's VAT number (`extraction-reference-never.ts`).
+    expect(entries.map((entry) => entry.value)).toEqual(["PN-88421-K", "8845 6120 33"]);
   });
 
   it("offers every figure with a currency, and keeps last year's on the list rather than dropping it", () => {
