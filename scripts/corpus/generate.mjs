@@ -52,6 +52,7 @@ const entries = readdirSync(dir).filter((f) => f.endsWith(".truth.json")).sort()
   if (e.subtype) lines.push(`    subtype: ${JSON.stringify(e.subtype)},`);
   if (e.costMinor !== undefined) lines.push(`    costMinor: ${e.costMinor},`);
   if (e.currency) lines.push(`    currency: ${JSON.stringify(e.currency)},`);
+  if (e.costArithmetic) lines.push(`    costArithmetic: ${JSON.stringify(e.costArithmetic)},`);
   if (e.recurrenceMonths !== undefined) lines.push(`    recurrenceMonths: ${e.recurrenceMonths},`);
   if (e.scheduleKind) lines.push(`    scheduleKind: ${JSON.stringify(e.scheduleKind)},`);
   const notes = [].concat(truth.notes ?? []).map((n) => `   * - ${n.replace(/\*\//gu, "*\\/")}`).join("\n");

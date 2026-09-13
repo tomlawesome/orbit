@@ -10,14 +10,15 @@
       { "date": "2028-05-31", "role": "expiry" }
     ],
     "subtype": { "kinds": ["Lease"], "qualifiers": ["Motor"] },
-    "costMinor": 32900,
-    "currency": "GBP"
+    "costMinor": 1184400,
+    "currency": "GBP",
+    "costArithmetic": [[32900, 36]]
   },
   "notes": [
     "dates: agreement runs 1 June 2025 to 31 May 2028. Seven other printed dates are deliberately not declared: the statement date, the last service date, four monthly payment-history dates, a previous unrelated vehicle's return date, and a terms revision stamp.",
     "provider is Wraxall Vehicle Finance plc, stated plainly in the page's own text to be who provides the lease and the vehicle. DriveEasy Leasing Brokers Ltd, named in the letterhead, is described in the small print as an FCA-regulated credit broker acting on commission, not the lessor -- the same broker-versus-underwriter distinction the owner drew for a motor policy (#989).",
     "reference is the agreement number, not the vehicle registration or a previous unrelated vehicle's registration.",
-    "costMinor is the monthly rental, the only amount that is plainly the cost of the thing; the per-mile excess charge is a penalty rate, and the payment-history amounts repeat the same rental.",
+    "costMinor is 1184400, 36 months x the £329.00 monthly rental ('This agreement runs for 36 months') -- the total is never printed (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure); the per-mile excess charge is a penalty rate, and the payment-history amounts repeat the same rental.",
     "subtype: 'Lease' qualified by 'Motor'.",
     "recurrenceMonths is not declared: the rental is described as monthly in words, not in a printed digit count.",
     "scheduleKind is not declared: neither dateRole is 'renewal' or 'service'."
