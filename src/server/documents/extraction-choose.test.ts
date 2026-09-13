@@ -1130,6 +1130,35 @@ describe("the meaning-shaped fields", () => {
 
     expect(chosen.subtype).toBe("Mortgage");
   });
+
+  it("takes the word the title names over the word only the text repeats", () => {
+    // A document says what it is in its title; its text mentions everything
+    // else it has to do with -- how it may be paid, who regulates it, what
+    // else is for sale. However often the text says one of those words, it
+    // is not the page naming itself (#1015).
+    const chosen = chooseFields([
+      candidate("heading", "WATER BILL", [{ value: "title", trigger: "" }]),
+      candidate("heading", "Home emergency cover", [{ value: "section", trigger: "" }]),
+      candidate("heading", "Home emergency claims", [{ value: "section", trigger: "" }]),
+      candidate("heading", "Home emergency helpline", [{ value: "section", trigger: "" }]),
+    ]);
+
+    expect(chosen.subtype).toBe("Water Bill");
+  });
+
+  it("still counts, where the title names neither word", () => {
+    // The rule only says a word printed nowhere but the text cannot outvote
+    // one the document named itself with. Between two words the title is
+    // silent about, how often the page says them decides, as it always did.
+    const chosen = chooseFields([
+      candidate("heading", "YOUR ANNUAL BILL", [{ value: "title", trigger: "" }]),
+      candidate("heading", "Your water supply", [{ value: "section", trigger: "" }]),
+      candidate("heading", "Water meter readings", [{ value: "section", trigger: "" }]),
+      candidate("heading", "Home emergency cover", [{ value: "section", trigger: "" }]),
+    ]);
+
+    expect(chosen.subtype).toBe("Water Bill");
+  });
 });
 
 describe("the shortlists stage 2 ranks for the model", () => {

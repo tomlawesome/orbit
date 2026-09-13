@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { GENERIC_REFERENCE_PREFERENCE, referencePreference } from "./extraction-reference-kind";
 import type { GroupBin } from "./extraction-subtype-bins";
 
-const bin = (group: string): GroupBin => ({ group, count: 1, sources: [] });
+const bin = (group: string): GroupBin =>
+  ({ group, count: 1, places: { title: 0, heading: 0, body: 1 }, sources: [] });
 const kinds = (...groups: string[]) => ({ kinds: groups.map(bin), qualifiers: [] });
 const about = (kindGroups: string[], qualifierGroups: string[]) => ({
   kinds: kindGroups.map(bin),
