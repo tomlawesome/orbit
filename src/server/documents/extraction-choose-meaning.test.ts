@@ -143,21 +143,48 @@ describe("the shortlist the model is shown", () => {
     const excerpt = shortlistExcerpt("Organisations named on this page:", entries);
 
     // The run both mentions of the administrator carry leads, ahead of the
-    // names printed once -- and the count, the sieves and the blocks are
-    // what the model is shown about it. The fragments of that run are
-    // folded into it, so the names printed once keep their places.
+    // name printed once -- and the count, the sieves and the blocks are
+    // what the model is shown about it. The administrator's two wordings
+    // are one entry, so the page's second organisation is second.
     expect(entries[0].value).toBe("Colworth & Drake");
     expect(entries[0].support).toBe(2);
     expect(excerpt).toContain("1. Colworth & Drake");
     expect(excerpt).toContain("printed 2 times across the names on this page");
+    expect(excerpt).toContain("also written Colworth & Drake Insurance Services Ltd");
     expect(excerpt).toContain("sieves: language-fact, printed-throughout");
     expect(excerpt).toContain("Administered by");
     expect(entries.map((entry) => entry.value)).toEqual([
       "Colworth & Drake",
-      "Colworth & Drake Insurance Services Ltd",
       "Meridian General Insurance Company plc",
     ]);
     expect(excerpt.length).toBeLessThanOrEqual(1_500);
+  });
+
+  it("gives one organisation one slot, whichever company form the page put on it", () => {
+    // Three slots should hold three organisations (#1008). "Redhurst
+    // Insurance" and "Redhurst Insurance plc" are one, so the other two
+    // organisations on the page keep their places and the reader is told
+    // what else Redhurst was called.
+    const entries = providerShortlistEntries([
+      candidate("organisation", "Redhurst Insurance", [
+        { value: "provider", trigger: "printed 2 times", sieves: ["printed-throughout"] },
+      ], "Underwritten by Redhurst Insurance"),
+      candidate("organisation", "Redhurst Insurance", [
+        { value: "provider", trigger: "printed 2 times", sieves: ["printed-throughout"] },
+      ], "Redhurst Insurance, Claims"),
+      candidate("organisation", "Redhurst Insurance plc", [
+        { value: "provider", trigger: "printed 1 time", sieves: ["printed-throughout"] },
+      ], "Redhurst Insurance plc is authorised and regulated"),
+      candidate("organisation", "Halloway Electricals", [
+        { value: "provider", trigger: "printed 1 time", sieves: ["printed-throughout"] },
+      ], "Bought from Halloway Electricals"),
+    ]);
+
+    expect(entries.map((entry) => entry.value)).toEqual([
+      "Redhurst Insurance",
+      "Halloway Electricals",
+    ]);
+    expect(entries[0].why).toContain("also written Redhurst Insurance plc");
   });
 
   it("counts only the organisations a stage 2 sieve spoke for", () => {

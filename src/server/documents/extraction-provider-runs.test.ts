@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DESCRIBER_WORDS,
+  foldBriefForms,
   isNameWord,
   providerTaggedOrganisations,
   providerWordRuns,
@@ -150,6 +151,63 @@ describe("counting the runs", () => {
     const before = JSON.stringify(mentions);
     expect(runsOf(mentions)).toEqual(runsOf(mentions));
     expect(JSON.stringify(mentions)).toBe(before);
+  });
+});
+
+describe("a brief form of a name is the same organisation", () => {
+  const foldedOf = (mentions: readonly ProviderMention[]): string[] =>
+    foldBriefForms(providerWordRuns(mentions)).map((run) => `${run.display} (${run.count})`);
+
+  it("folds a fragment into the fuller name a page abbreviates, not against it", () => {
+    // The page says "Fernhill Appliance Care" twice and "Fernhill" alone
+    // once more -- a running head, a footer, "thank you for choosing
+    // Fernhill". One organisation, so one bin, and the rival named three
+    // times no longer sits above it on the fragment's count.
+    expect(foldedOf([
+      mention("Fernhill Appliance Care"),
+      mention("Fernhill Appliance Care"),
+      mention("Fernhill"),
+      mention("Redhurst Insurance"),
+      mention("Redhurst Insurance"),
+    ])).toEqual(["Fernhill (3)", "Redhurst Insurance (2)"]);
+  });
+
+  it("offers the wording the page uses most, and says what else it was called", () => {
+    const [fernhill] = foldBriefForms(providerWordRuns([
+      mention("Fernhill Appliance Care"),
+      mention("Fernhill Appliance Care"),
+      mention("Fernhill"),
+    ]));
+    expect(fernhill?.display).toBe("Fernhill");
+    expect(fernhill?.wordings).toEqual(["Fernhill Appliance Care"]);
+  });
+
+  it("keeps a brief form the page uses in its own right", () => {
+    // "Kestrel" is printed four times where nothing longer is, and the
+    // sentence it once fell into is not a name the page uses. A longer
+    // string printed once does not swallow a name printed five times.
+    expect(foldedOf([
+      mention("also from Kestrel"),
+      mention("Kestrel"),
+      mention("Kestrel"),
+      mention("Kestrel"),
+      mention("Kestrel"),
+    ])).toEqual(["Kestrel (5)", "also from Kestrel (1)"]);
+  });
+
+  it("carries a fragment's blocks to the name it folds into", () => {
+    const full = mention("Bramblewood Childcare Group", "Invoice from Bramblewood Childcare Group");
+    const brief = mention("Bramblewood", "Please make cheques payable to Bramblewood");
+    const [name] = foldBriefForms(providerWordRuns([full, full, brief]));
+    expect(name?.mentions).toEqual([full, brief]);
+  });
+
+  it("leaves a page that names two organisations as two bins", () => {
+    expect(foldedOf([
+      mention("Hallcroft Windows"),
+      mention("Hallcroft Windows"),
+      mention("Thornleigh Electrical"),
+    ])).toEqual(["Hallcroft Windows (2)", "Thornleigh Electrical (1)"]);
   });
 });
 

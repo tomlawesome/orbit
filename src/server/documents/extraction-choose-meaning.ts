@@ -43,8 +43,12 @@
 // shortlist does not carry leaves the field blank.
 
 import {
+  foldBriefForms,
   providerTaggedOrganisations,
   providerWordRuns,
+  COMPANY_FORM_WORDS,
+  type ProviderMention,
+  type WordRun,
 } from "./extraction-provider-runs";
 import { LANGUAGE_FACT } from "./extraction-provider-sieves";
 import {
@@ -266,21 +270,85 @@ export async function assertChooserReachable(modelName?: string): Promise<void> 
  * together. What the household's own organisation has, and a body named
  * once does not, is its words repeated across every one of those cuts.
  *
- * Ranked by count, so the entries near the top are several readings of the
- * same name -- which is the point: the model is choosing between the two or
- * three organisations the page keeps saying, in the wordings it said them.
+ * Ranked by count, and one entry per organisation: three slots should hold
+ * three different organisations, so two wordings of one name are one entry
+ * in the spelling the page uses most, with the rest named in its `why`
+ * (#1008, #1021). Before that, "Redhurst Insurance" and "Redhurst Insurance
+ * plc" took two of the reader's three slots and left one for every other
+ * organisation on the page.
+ *
  * The sieves and the words the page printed beside each mention ride along
  * as evidence; they no longer order anything.
  */
 export function providerShortlistEntries(candidates: readonly TaggedCandidate[]): ShortlistEntry[] {
   const kept = providerTaggedOrganisations(candidates);
-  return providerWordRuns(kept).slice(0, SHORTLIST_LIMIT).map((run) => ({
-    value: run.display,
-    display: run.display,
-    line: runBlocks(run.mentions),
-    why: [`printed ${run.count} times across the names on this page`, ...runEvidence(run.mentions)],
-    support: run.count,
-  }));
+  return oneEntryPerOrganisation(foldBriefForms(providerWordRuns(kept)))
+    .slice(0, SHORTLIST_LIMIT)
+    .map((run) => ({
+      value: run.display,
+      display: run.display,
+      line: runBlocks(run.mentions),
+      why: [
+        `printed ${run.count} times across the names on this page`,
+        ...alsoWritten(run.wordings),
+        ...runEvidence(run.mentions),
+      ],
+      support: run.count,
+    }));
+}
+
+/** What else the page called this organisation, for a reader deciding
+ * between three of them. Nothing where it only ever used one wording. */
+function alsoWritten(wordings: readonly string[]): string[] {
+  return wordings.length > 0 ? [`also written ${wordings.join(", ")}`] : [];
+}
+
+/**
+ * Whether two runs are wordings of one organisation's name: the same words
+ * once the words that say a name belongs to a company are set aside.
+ * "Redhurst Insurance" and "Redhurst Insurance plc" are one organisation,
+ * and a company form is never what tells two of them apart.
+ *
+ * Length is the other way a page rewords a name, and `foldBriefForms` has
+ * already settled that one from the page's own counts. Merging the pairs it
+ * left standing as well was measured on #1021 and is not kept: it took the
+ * tuning answer into the top three twice more, and cost hold-out 4 a page
+ * whose answer left the list altogether.
+ */
+function sameOrganisationName(left: string, right: string): boolean {
+  const bare = (run: string) =>
+    run.split(" ").filter((word) => !COMPANY_FORM_WORDS.includes(word)).join(" ");
+  const stripped = bare(left);
+  return stripped.length > 0 && stripped === bare(right);
+}
+
+/**
+ * One entry per organisation, best printed first.
+ *
+ * The runs arrive best first, so the first wording of a name is the one the
+ * page uses most and is the one offered; every later wording of that same
+ * name joins it as another wording and gives up its slot. The blocks come
+ * with it, so the evidence under the entry is everywhere the organisation
+ * was named, whichever wording was used there.
+ */
+function oneEntryPerOrganisation<M extends ProviderMention>(
+  runs: readonly WordRun<M>[],
+): Array<WordRun<M>> {
+  const kept: Array<WordRun<M>> = [];
+  for (const run of runs) {
+    const already = kept.find((other) => sameOrganisationName(other.run, run.run));
+    if (already === undefined) {
+      kept.push({ ...run, mentions: [...run.mentions], wordings: [...run.wordings] });
+      continue;
+    }
+    for (const wording of [run.display, ...run.wordings]) {
+      if (wording !== already.display && !already.wordings.includes(wording)) already.wordings.push(wording);
+    }
+    for (const mention of run.mentions) {
+      if (!already.mentions.includes(mention)) already.mentions.push(mention);
+    }
+  }
+  return kept;
 }
 
 /** At most this many of a run's blocks, so one entry cannot fill the
