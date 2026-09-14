@@ -6178,8 +6178,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E109",
@@ -6241,8 +6240,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E110",
@@ -6304,8 +6302,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E111",
@@ -6600,6 +6597,195 @@
       },
       "verdict": "dropped",
       "notes": ""
+    },
+    {
+      "id": "E118",
+      "date": "2026-09-14",
+      "label": "provider: a brief name is the same organisation said briefly; one organisation gets one slot",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "#1021, seen reading the top three by hand with the owner. A run printed inside a longer run is the same organisation said briefly (a running head, a footer, \"thank you for choosing Fernhill\"), not a rival: the gap between the two counts is how often the brief form stood alone, so a longer run printed at least that often swallows it, and a brief form that outnumbers every longer form keeps its bin. And two wordings a company-form word apart (Ltd/plc/Limited) are one entry, in the wording the page uses most, the others named as other wordings. The chosen answer does not move on any corpus (provider 42/60, 12/12, 10/12); what moves is the list the reader is offered: tuning top-two 41 → 46 of 60 and mean entries 5.9 → 5.4, hold-out 4 top-three 7 → 8 and mean 6.6 → 5.9. Three slots now hold three organisations instead of two spellings of one. Tried and not kept: the same fold in the rules route (tuning 42 → 44 but hold-out 3 12 → 11); offering the fuller wording rather than the most-printed (top-one 39 → 31); merging by containment in rule 2 (hold-out 4 answer left the list).",
+      "how": "npm run eval:stages",
+      "commit": "eae2d3d",
+      "output": "tmp/e-seen60-stages-prov-frag.txt",
+      "scores": {
+        "overall": {
+          "pct": 86.2,
+          "net": 438,
+          "of": 508
+        },
+        "provider": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "reference": {
+          "pct": 93.3,
+          "net": 56,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "cost": {
+          "pct": 77.8,
+          "net": 42,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E119",
+      "date": "2026-09-14",
+      "label": "provider fragments (E118) on hold-out 3",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E118 on hold-out 3: no field moved; provider shortlist mean entries 1.3 → 1.0.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "eae2d3d",
+      "output": "tmp/e-holdout3-prov-frag.txt",
+      "scores": {
+        "overall": {
+          "pct": 80,
+          "net": 88,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "cost": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E120",
+      "date": "2026-09-14",
+      "label": "provider fragments (E118) on hold-out 4",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "E118 on hold-out 4: no field moved; provider top-three 7 → 8 of 12 and mean entries 6.6 → 5.9.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "eae2d3d",
+      "output": "tmp/e-holdout4-prov-frag.txt",
+      "scores": {
+        "overall": {
+          "pct": 72.4,
+          "net": 84,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 8,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
     }
   ],
   "measurements": [
