@@ -6492,6 +6492,114 @@
       },
       "verdict": "set aside",
       "notes": ""
+    },
+    {
+      "id": "E114",
+      "date": "2026-09-14",
+      "label": "the owner's test: rules find, NuExtract picks from the best three",
+      "corpus": "tuning-60",
+      "model": "NuExtract 3 Q4_K_M",
+      "role": "chooser",
+      "route": "provider by model pick from bins (NuExtract), top three, 140 characters centred",
+      "what": "The owner's design (2026-09-14, #994): the rules' shortlist cut to the top three, each entry carrying 140 characters centred on that candidate's own printing, cut at whole words with an ellipsis where it drops text, marked between « ». Three rather than eight because one in three is better odds than one in eight, and the extra five entries buy at most two more reachable answers (46/60 on the list at three, 48/60 at eight). The rules alone score 42/60. The model scores 24/60. It never named anything off the list and declined only 4 times: on 32 documents it picked a real organisation on the page that is the wrong one. Sum of chunked runs (tmp/e-tuning60-provider-window-block-top3-nuextract.txt); windows cost about 128 characters each and nothing was truncated.",
+      "how": "docker run … provider-pick-cli.ts --route bins --window block --entries 3",
+      "commit": "ec944f1",
+      "output": "tmp/e-tuning60-provider-top3-nuextract-total.txt",
+      "scores": {
+        "overall": {
+          "pct": 40,
+          "net": 24,
+          "of": 60
+        },
+        "provider": {
+          "pct": 40,
+          "net": 24,
+          "of": 60
+        }
+      },
+      "verdict": "dropped",
+      "notes": ""
+    },
+    {
+      "id": "E116",
+      "date": "2026-09-14",
+      "label": "eight entries, 140 characters centred (before the test was cut down)",
+      "corpus": "tuning-60",
+      "model": "NuExtract 3 Q4_K_M",
+      "role": "chooser",
+      "route": "provider by model pick from bins (NuExtract), eight entries, 140 characters centred",
+      "what": "Run before the owner cut the grid: eight entries instead of three, same centred window. 24/60 — the same score as three entries, with the right name on the list 48/60. The excerpt limit of 1,500 characters truncated the list on 42 of 60 documents at this length.",
+      "how": "docker run … provider-pick-cli.ts --route bins --window block",
+      "commit": "ec944f1",
+      "output": "tmp/e-tuning60-provider-eight-block-total.txt",
+      "scores": {
+        "overall": {
+          "pct": 40,
+          "net": 24,
+          "of": 60
+        },
+        "provider": {
+          "pct": 40,
+          "net": 24,
+          "of": 60
+        }
+      },
+      "verdict": "dropped",
+      "notes": ""
+    },
+    {
+      "id": "E117",
+      "date": "2026-09-14",
+      "label": "eight entries, the whole sentence around each name",
+      "corpus": "tuning-60",
+      "model": "NuExtract 3 Q4_K_M",
+      "role": "chooser",
+      "route": "provider by model pick from bins (NuExtract), eight entries, whole sentence",
+      "what": "The largest window tried: the whole sentence each name sits in. 19/60, worse than the centred 140 characters, and a sentence averages 84 characters against 113 — real paper prints names in short table cells and headings, not sentences. Excerpt limit truncated 36 of 60.",
+      "how": "docker run … provider-pick-cli.ts --route bins --window sentence",
+      "commit": "ec944f1",
+      "output": "tmp/e-tuning60-provider-eight-sentence-total.txt",
+      "scores": {
+        "overall": {
+          "pct": 31.7,
+          "net": 19,
+          "of": 60
+        },
+        "provider": {
+          "pct": 31.7,
+          "net": 19,
+          "of": 60
+        }
+      },
+      "verdict": "dropped",
+      "notes": ""
+    },
+    {
+      "id": "E115",
+      "date": "2026-09-14",
+      "label": "the same three, chosen by qwen3:4b",
+      "corpus": "tuning-60",
+      "model": "qwen3:4b",
+      "role": "chooser",
+      "route": "provider by model pick from bins qwen3-4b, top three, 140 characters centred",
+      "what": "E114 rerun with qwen3:4b as the chooser, fed exactly the same three entries, windows, question and order. 18/60 against the rules 42/60: 39 wrong names, 3 declines, nothing off the list. Two different local models fail the same way, so the failure is selection itself, not one model.",
+      "how": "docker run … provider-pick-cli.ts --route bins --window block --entries 3 --chooser-model qwen3:4b",
+      "commit": "ec944f1",
+      "output": "tmp/e-tuning60-provider-top3-qwen-total.txt",
+      "scores": {
+        "overall": {
+          "pct": 30,
+          "net": 18,
+          "of": 60
+        },
+        "provider": {
+          "pct": 30,
+          "net": 18,
+          "of": 60
+        }
+      },
+      "verdict": "dropped",
+      "notes": ""
     }
   ],
   "measurements": [
