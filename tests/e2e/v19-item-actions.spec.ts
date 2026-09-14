@@ -80,6 +80,96 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
   return seeded;
 }
 
+/**
+ * #1014: a household with nothing on it — for the belt's own empty state,
+ * reached by /item with no id at all.
+ */
+async function seedEmptyHousehold(page: Page): Promise<{ householdId: string }> {
+  const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
+  const householdId = await page.evaluate(async (householdName) => {
+    const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+    const session = (await sessionResponse.json()) as { csrfToken: string };
+    const id = crypto.randomUUID();
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+      body: JSON.stringify({
+        type: "household.create",
+        household: {
+          id, name: householdName, timezone: "Europe/London", currency: "GBP",
+          memberCount: 1, canManage: true, onboardingComplete: true, sections: [], items: [],
+        },
+      }),
+    });
+    if (!response.ok) throw new Error(`command failed: ${response.status} ${await response.text()}`);
+    return id;
+  }, name);
+  households.track({ id: householdId, name });
+  return { householdId };
+}
+
+/**
+ * #1014: two items due on different dates, so the belt's own ascending-date
+ * order (beltManifestOf) picks a real winner for "which one is nearest due" —
+ * the earlier-due item, `soonId`.
+ */
+async function seedHouseholdWithTwoItems(
+  page: Page,
+): Promise<{ householdId: string; soonId: string; soonTitle: string; laterId: string }> {
+  const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
+  const seeded = await page.evaluate(async (householdName) => {
+    const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+    const session = (await sessionResponse.json()) as { csrfToken: string };
+    const command = async (payload: unknown) => {
+      const response = await fetch("/api/workspace/commands", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`command failed: ${response.status} ${await response.text()}`);
+    };
+    const householdId = crypto.randomUUID();
+    const sectionId = crypto.randomUUID();
+    await command({
+      type: "household.create",
+      household: {
+        id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
+        memberCount: 1, canManage: true, onboardingComplete: true,
+        sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
+        items: [],
+      },
+    });
+    const soonId = crypto.randomUUID();
+    const soonTitle = "Nearest due proving";
+    const soonDue = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+    await command({
+      type: "item.upsert",
+      householdId,
+      item: {
+        id: soonId, sectionId, title: soonTitle, currency: "GBP", scheduleKind: "service",
+        dueDate: soonDue, recurrenceMonths: 12, status: "active",
+      },
+      activity: { id: crypto.randomUUID(), itemId: soonId, kind: "created", occurredAt: new Date().toISOString() },
+    });
+    const laterId = crypto.randomUUID();
+    const laterDue = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
+    await command({
+      type: "item.upsert",
+      householdId,
+      item: {
+        id: laterId, sectionId, title: "Later due proving", currency: "GBP", scheduleKind: "service",
+        dueDate: laterDue, recurrenceMonths: 12, status: "active",
+      },
+      activity: { id: crypto.randomUUID(), itemId: laterId, kind: "created", occurredAt: new Date().toISOString() },
+    });
+    return { householdId, soonId, soonTitle, laterId };
+  }, name);
+  households.track({ id: seeded.householdId, name });
+  return seeded;
+}
+
 test("completing an item from the v19 view moves its orbit", async ({ page }) => {
   await signInAsAdmin(page);
 
@@ -153,6 +243,46 @@ test("a stale version is refused and the view says so", async ({ page }) => {
     // Refused in the server's own words, and the view re-reads the truth.
     await expect(page.locator(".problem")).toContainText("changed on another device");
     await expect(page.locator(".item-card")).toContainText("3 March 2027");
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
+ * #1014: /item is the belt's own front door — the same mounted surface as
+ * /item/<id>, entered with no apex named yet. Arriving with items on the
+ * household seats the nearest-due one and replaces the address to match, so
+ * a reader who typed /item never sees a bare, addressless belt and Back
+ * still leaves the way they came in.
+ */
+test("/item with no id seats the nearest-due item and rewrites the address", async ({ page }) => {
+  await signInAsAdmin(page);
+
+  const { soonId, soonTitle } = await seedHouseholdWithTwoItems(page);
+
+  try {
+    await page.goto("/item");
+    await page.waitForURL(new RegExp(`/item/${soonId}$`));
+    await expect(page.getByRole("heading", { name: soonTitle })).toBeVisible();
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
+ * #1014: a household with nothing on it is not a 404 at /item — the belt's
+ * own empty-household card renders instead, with a way into the inbox.
+ */
+test("/item on an empty household shows the empty state, not a 404", async ({ page }) => {
+  await signInAsAdmin(page);
+
+  await seedEmptyHousehold(page);
+
+  try {
+    await page.goto("/item");
+    await expect(page.getByRole("heading", { name: "Nothing in orbit yet." })).toBeVisible();
+    await expect(page.getByRole("link", { name: "open inbox" })).toHaveAttribute("href", /\/inbox$/);
+    await expect(page.getByText("This page fell into a gravity well.")).toHaveCount(0);
   } finally {
     await households.sweep(page);
   }
