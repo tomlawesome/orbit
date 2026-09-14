@@ -1,7 +1,9 @@
-import { readOperations } from "$lib/data/workspace.js";
+import { redirect } from "@sveltejs/kit";
 
-/** The observatory reads through the seam (#446); GET /api/admin/operations
- *  already serves this shape when the flip comes. */
-export async function load() {
-  return { operations: await readOperations() };
+/**
+ * /admin was the fixture-backed duplicate of /administration (#1013); this
+ * redirect exists so anything already pointing at /admin still arrives.
+ */
+export function load() {
+  redirect(308, "/administration");
 }

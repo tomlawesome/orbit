@@ -547,7 +547,6 @@ export async function activeHousehold() {
  * are fetches, and making callers async NOW means flipping a body from
  * fixture to fetch changes no caller's shape later.
  */
-import { operationsFixture } from "./fixtures/operations.js";
 import { adminFixture } from "./fixtures/admin.js";
 import { ago } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
@@ -839,52 +838,6 @@ export async function readInboxScreen() {
     reading: receipts.filter((receipt) => !receipt.canApprove && receipt.classification === "waiting"),
     failed: receiptFailuresOf(receipts),
     suggestions: receiptSuggestionsOf(receipts),
-  };
-}
-
-/**
- * Everything the archive renders (#462): the workspace, every attached
- * document (the API only speaks per-item, so the seam fans out over items
- * that report documents), and the relay's approvable catches. Per-item
- * failures are additive — a household that can't answer loses its rows, not
- * the screen.
- */
-export async function readDocumentsScreen() {
-  const [workspace, session, inbox] = await Promise.all([
-    readWorkspace(),
-    readSession(),
-    readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
-  ]);
-  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  /** @type {Record<string, DocumentSummary[]>} */
-  const documentsByItem = {};
-  await Promise.all(
-    workspace.households.flatMap((household) =>
-      (household.items ?? [])
-        .filter((item) => (item.documentCount ?? 0) > 0)
-        .map(async (item) => {
-          try {
-            /** @type {{ documents?: DocumentSummary[] }} */
-            const body = await json(
-              await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
-                credentials: "same-origin",
-              }),
-            );
-            documentsByItem[item.id] = body.documents ?? [];
-          } catch {
-            documentsByItem[item.id] = [];
-          }
-        }),
-    ),
-  );
-  return {
-    workspace,
-    primary,
-    household: workspace.households.find((one) => one.id === primary) ?? null,
-    user: session?.user ?? null,
-    today: todayOf(workspace),
-    receipts: inbox.receipts ?? [],
-    documentsByItem,
   };
 }
 
@@ -1194,11 +1147,6 @@ export async function readItem(id) {
     /* the inbox being unreachable must read as "no such item", not a crash */
   }
   return null;
-}
-
-/** Operational state and recent deliveries. Live source: GET /api/admin/operations. */
-export async function readOperations() {
-  return operationsFixture;
 }
 
 /**
@@ -2027,7 +1975,7 @@ export async function withdrawInvitation(householdId, invitationId) {
  * request out of the URL, so an unknown id is a 404 and not a probe (#451).
  *
  * Documents come from the per-item route, fanned out over the items that
- * report carrying any — readDocumentsScreen's pattern, and additive in the
+ * report carrying any — the pattern the retired archive used, and additive in the
  * same way: an item whose papers cannot be read loses its papers, not the
  * screen. They are read for the whole household rather than for the centred
  * item alone because every item's rock wears CON-1's belt ellipse when it has
