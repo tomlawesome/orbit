@@ -195,7 +195,7 @@ describe("packs.css text-grade companions clear WCAG 2 AA on their pack's ground
  *             over --bg the way html body{background:var(--bg)} + a
  *             translucent panel actually paints (belt.css, item.css) — a
  *             plain "over" blend, no gamma correction.
- *   --act     on /item/[id], .acts button and .btn-quiet (item.css, belt.css)
+ *   --act     on /item/[[id]], .acts button and .btn-quiet (item.css, belt.css)
  *             use one inline custom property for text, border and fill at
  *             once (+page.svelte, Suggestion.svelte): color:var(--act,...).
  *             The values bound to it for those buttons are --overdue,
