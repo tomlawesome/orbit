@@ -267,7 +267,18 @@ body.showwarp #warp{opacity:1;transition:opacity .45s ease}
 #dusk .gate-wrap>*{opacity:0;transform:translateY(10px);
       transition:opacity .9s ease,transform .9s ease,filter .35s ease,box-shadow .3s ease}
 body.farewell #dusk .gate-wrap>*{opacity:1;transform:none}
-#dusk .farewell{position:absolute;left:0;right:0;bottom:26vh;text-align:center;
+/* THE FAREWELL RIDES WITH THE RING (#1011). `bottom:26vh` measured the
+   farewell from the VIEWPORT'S bottom edge while the ring is centred on the
+   viewport's height, so on a short window the two drifted together and under
+   about 800px tall collided, catching the "Sign back in" button between them
+   (~60px of overlap at 670px). Measuring from the centre instead ties the
+   farewell to the ring: `.loginchrome` fills the viewport, so 50% is the
+   ring's centre line, and 240px below it is exactly where 26vh put the
+   farewell's bottom edge on the 1000px-tall window the mockup and the
+   fidelity gate use — the ratified screen is pixel-identical there, and a
+   short window now gets the same gap a tall one always had. The ring itself
+   stays centred, as the mockup draws it. */
+#dusk .farewell{position:absolute;left:0;right:0;bottom:calc(50% - 240px);text-align:center;
       opacity:0;transform:translateY(9px);transition:opacity .9s ease,transform .9s ease}
 body.farewell #dusk .farewell{opacity:1;transform:none}
 #dusk .farewell .said{font:600 15px var(--display);color:#cfd3e4;letter-spacing:.01em}
