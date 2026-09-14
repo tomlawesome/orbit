@@ -64,7 +64,9 @@ import {
   entryChosen,
   replyLines,
   shortlistExcerpt,
+  DEFAULT_WINDOW,
   SHORTLIST_LIMIT,
+  type ContextWindow,
   type EntryMatch,
   type ShortlistEntry,
 } from "./extraction-shortlist";
@@ -423,7 +425,7 @@ export function chooseSubtypeByRules(candidates: readonly TaggedCandidate[]): st
  * What one question says: the field's own name for what is being chosen,
  * and the heading over the list.
  */
-interface ShortlistQuestion {
+export interface ShortlistQuestion {
   /** The one thing being chosen, in the household's words. */
   asks: string;
   /** What the list is, printed above it. */
@@ -448,13 +450,14 @@ export async function pickFromShortlist(
   entries: readonly ShortlistEntry[],
   transport: MeaningTransport,
   match: EntryMatch = {},
+  window: ContextWindow = DEFAULT_WINDOW,
 ): Promise<ShortlistEntry | undefined> {
   if (entries.length === 0) return undefined;
   const asked = [
     question.asks,
     HOW_TO_ANSWER,
     "",
-    shortlistExcerpt(question.heading, entries),
+    shortlistExcerpt(question.heading, entries, { window }),
   ].join("\n");
   const raw = await transport(asked);
   for (const line of replyLines(raw)) {
@@ -467,6 +470,15 @@ export async function pickFromShortlist(
 
 // ---------------------------------------------------------------- provider
 
+/** The words provider's pick is put in, exported so an evaluation can
+ * measure the excerpt the model was shown without writing them out again. */
+export const PROVIDER_QUESTION: ShortlistQuestion = {
+  asks: "Which of these organisations does this household hold the thing with -- who they pay, " +
+    "who writes to them? Not the regulator, the underwriter or the installer.",
+  heading: "Organisations named on this page, with the words around each printing " +
+    "(the name itself between « and »):",
+};
+
 /**
  * Which of the organisations the sieves kept is the one the household deals
  * with. The pick is trimmed against the block it was printed in, as every
@@ -475,16 +487,14 @@ export async function pickFromShortlist(
 export async function chooseProviderWithModel(
   entries: readonly ShortlistEntry[],
   transport: MeaningTransport,
+  window: ContextWindow = DEFAULT_WINDOW,
 ): Promise<string | undefined> {
   const chosen = await pickFromShortlist(
-    {
-      asks: "Which of these organisations does this household hold the thing with -- who they pay, " +
-        "who writes to them? Not the regulator, the underwriter or the installer.",
-      heading: "Organisations named on this page, with the line each was printed on:",
-    },
+    PROVIDER_QUESTION,
     entries,
     transport,
     { matches: (answer, entry) => sameOrganisation(entry.value, answer) },
+    window,
   );
   return chosen === undefined ? undefined : trimFieldValue("provider", chosen.value, chosen.line);
 }
