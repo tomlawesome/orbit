@@ -144,6 +144,10 @@ export interface WordRun<M extends ProviderMention = ProviderMention> {
   count: number;
   /** The mentions it was found in, first seen first, each once. */
   mentions: M[];
+  /** The other wordings the page used for this same organisation, most
+   * printed first, once `foldBriefForms` has gathered them. Empty until
+   * then: the bins themselves know only one run each. */
+  wordings: string[];
 }
 
 interface Bin<M extends ProviderMention> {
@@ -180,6 +184,117 @@ function isRunOf(part: readonly string[], whole: readonly string[]): boolean {
 }
 
 /**
+ * The fuller form a briefer run is a short version of, or nothing.
+ *
+ * Every printing of a longer run is also a printing of every run inside it,
+ * so a contained run is always printed at least as often as the run that
+ * contains it, and the difference between the two counts is how often the
+ * page said the brief form *by itself*. That difference is the test: a
+ * longer run the page prints at least as often as the brief form stands
+ * alone is the organisation's fuller name, and the brief form is the same
+ * organisation said briefly.
+ *
+ * The escape is the other side of the same test. Where the brief form by
+ * itself outnumbers the longer run, the longer run is not a name the page
+ * uses: it is a sentence the name fell into ("also from Fernhill"), or a
+ * line of OCR that ran two things together. Then the brief form is a name
+ * in its own right and keeps its own bin.
+ *
+ * Among the fuller forms that pass, the best printed wins, by the order the
+ * runs are already in.
+ */
+function fullerForm<M extends ProviderMention>(
+  run: WordRun<M>,
+  runs: readonly WordRun<M>[],
+  words: ReadonlyMap<string, string[]>,
+): WordRun<M> | undefined {
+  let best: WordRun<M> | undefined;
+  for (const other of runs) {
+    if (other === run) continue;
+    if (!isRunOf(words.get(run.run) as string[], words.get(other.run) as string[])) continue;
+    if (other.count < run.count - other.count) continue;
+    if (best === undefined || other.count > best.count ||
+      (other.count === best.count && other.run.length > best.run.length)) {
+      best = other;
+    }
+  }
+  return best;
+}
+
+/**
+ * One organisation's wordings as one run: a page that says "Fernhill" after
+ * saying "Fernhill Appliance Care" is naming one organisation, briefly -- a
+ * running head, a footer, "thank you for choosing Fernhill" -- so the brief
+ * form is not a rival to the fuller one and neither ranks against the other
+ * (owner, 2026-09-14, #1021).
+ *
+ * The wordings are gathered by what contains what, and then the gathered
+ * run is offered as `oneOrganisation` decides. Nothing is added up: a name
+ * printed five ways in one place was still printed once, so the run counts
+ * as often as the page printed that organisation under any one wording.
+ *
+ * Which run is the fuller form of which is read off the page before
+ * anything moves, so one merge never drags another after it; then the
+ * wordings travel up, briefest first, and a fragment reaches the fullest
+ * name through every form in between.
+ *
+ * `providerWordRuns` folds only where two runs are printed exactly as often
+ * (owner, 2026-09-11), which any page abbreviating itself even once
+ * defeats. This is that guard generalised, and it is applied where three
+ * slots are offered to a reader rather than where one name is answered:
+ * measured on the rules route it cost hold-out 3 a page, and the report on
+ * #1021 says so.
+ */
+export function foldBriefForms<M extends ProviderMention>(
+  runs: readonly WordRun<M>[],
+): Array<WordRun<M>> {
+  const words = new Map(runs.map((run) => [run.run, run.run.split(" ")]));
+  const fuller = new Map(runs.map((run) => [run, fullerForm(run, runs, words)]));
+  const group = new Map(runs.map((run) => [run, [run]]));
+  const briefest = [...runs].sort((left, right) =>
+    (words.get(left.run) as string[]).length - (words.get(right.run) as string[]).length);
+  const folded = new Set<WordRun<M>>();
+  for (const run of briefest) {
+    const into = fuller.get(run);
+    if (into === undefined) continue;
+    (group.get(into) as Array<WordRun<M>>).push(...group.get(run) as Array<WordRun<M>>);
+    folded.add(run);
+  }
+  return runs
+    .filter((run) => !folded.has(run))
+    .map((run) => oneOrganisation(group.get(run) as Array<WordRun<M>>))
+    .sort((left, right) => right.count - left.count || right.run.length - left.run.length);
+}
+
+/**
+ * One organisation's runs as one bin: printed as often as the page printed
+ * the name at all, offered in the spelling the page used most, and carrying
+ * the rest of its wordings and all its blocks.
+ *
+ * Most printed, not fullest, because the fuller form is the page's own
+ * expansion of a name and not necessarily the one on the contract: a page
+ * headed "Hedgerow Direct" belongs to Hedgerow Home Insurance Services Ltd,
+ * and offering either wording names the same organisation, but the wording
+ * the page keeps repeating is the one a reader will recognise. Where two
+ * wordings are printed as often -- which is what happens when a page never
+ * abbreviates -- the fuller one wins, as it did before.
+ */
+function oneOrganisation<M extends ProviderMention>(runs: readonly WordRun<M>[]): WordRun<M> {
+  const wordings = [...runs].sort((left, right) =>
+    right.count - left.count || right.run.length - left.run.length);
+  const name = wordings[0] as WordRun<M>;
+  const mentions: M[] = [];
+  for (const run of runs) for (const mention of run.mentions) if (!mentions.includes(mention)) mentions.push(mention);
+  return {
+    run: name.run,
+    display: name.display,
+    count: name.count,
+    mentions,
+    wordings: wordings.slice(1).map((run) => run.display).filter((wording) => wording !== name.display),
+  };
+}
+
+/**
  * The word-run bins over the mentions the caller kept, best first.
  *
  * Every run of consecutive words in every mention is counted, case folded,
@@ -194,7 +309,8 @@ function isRunOf(part: readonly string[], whole: readonly string[]): boolean {
  * "colworth &", "& drake" and "colworth" at ten fold into "colworth &
  * drake" at ten. Without that, eight places on a shortlist go to eight
  * cuts of one name, and the answer is pushed off the end by a rival the
- * page printed once more.
+ * page printed once more. `foldBriefForms` is the same fold for a page
+ * that abbreviates itself, and is applied by whoever offers the runs.
  *
  * Pure: the same mentions always give the same bins, and nothing here reads
  * the page, the document or where anything sits on it.
@@ -244,6 +360,7 @@ export function providerWordRuns<M extends ProviderMention>(
       display: bestPrinting(bin.spellings),
       count: bin.count,
       mentions: bin.mentions,
+      wordings: [],
     }));
 }
 
