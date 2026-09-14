@@ -328,7 +328,7 @@ describe("asking a model which figure the document costs", () => {
     const chosen = await chooseCostWithModel(shortlist, model);
 
     expect(model.prompts[0]).toContain("1. £412.99");
-    expect(model.prompts[0]).toContain("Total premium £412.99");
+    expect(model.prompts[0]).toContain("Total premium «£412.99»");
     expect(chosen).toEqual({ costMinor: 41299, currency: "GBP" });
   });
 

@@ -7,19 +7,46 @@
 // provider's own stage 2 (`readProviders`, #996). Scored with
 // `classifyProvider`, so a short form of the name counts.
 //
+// `--window` is what the model is shown around each name (owner, 2026-09-14):
+// `block` is the control, `sentence` the whole sentence the name sits in, and
+// `w15`/`w10`/`w5` that many words either side. Every window is centred on the
+// name's own printing and marked with « »; `EXCERPT_LIMIT` is unchanged, so a
+// wider window pays for itself by dropping entries off the bottom of the list,
+// and the run says how often that happened.
+//
 //   npm run eval:provider-pick                             # NuExtract, both lists
 //   npm run eval:provider-pick -- --chooser-model qwen3:4b # another model
 //   npm run eval:provider-pick -- --route bins|own         # one list only
+//   npm run eval:provider-pick -- --window sentence        # what it is shown
 //   npm run eval:provider-pick -- --limit 6                # first N documents
+//   npm run eval:provider-pick -- --from 21 --limit 20     # documents 21 to 40
 //   npm run eval:provider-pick -- --holdout3               # the 12 unseen pages
+//   npm run eval:provider-pick -- --holdout4               # the other 12
+//
+// On a hold-out the progress line counts documents rather than naming them:
+// a hold-out document's name is as much not ours to read as its text.
 //
 // Asks the model, so it must run in a container on
 // `orbit_orbit-document-processing` (AGENTS.md, "stages-rerun" pattern).
-import { assertChooserReachable, chooseProviderWithModel, chooserTransport, providerShortlistEntries } from "./extraction-choose-meaning";
+import {
+  assertChooserReachable,
+  chooseProviderWithModel,
+  chooserTransport,
+  providerShortlistEntries,
+  PROVIDER_QUESTION,
+} from "./extraction-choose-meaning";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
+import { EXTRACTION_HOLDOUT4_FULLPAGE } from "./extraction-holdout4-fullpage";
 import { classifyProvider } from "./extraction-scoring";
-import type { ShortlistEntry } from "./extraction-shortlist";
+import {
+  contextWindow,
+  shortlistExcerpt,
+  CONTEXT_WINDOWS,
+  DEFAULT_WINDOW,
+  type ContextWindow,
+  type ShortlistEntry,
+} from "./extraction-shortlist";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
 import { providerCandidates } from "./provider-stage1-sieve";
@@ -36,8 +63,21 @@ const modelNamed = flag("--chooser-model");
 const route = flag("--route") ?? "both";
 const limit = Number(flag("--limit") ?? Number.MAX_SAFE_INTEGER);
 const holdout3 = process.argv.includes("--holdout3");
-const documents = (holdout3 ? EXTRACTION_HOLDOUT3_FULLPAGE : EXTRACTION_CORPUS).slice(0, limit);
-const prefix = holdout3 ? "hold-out 3: " : "";
+const holdout4 = process.argv.includes("--holdout4");
+const onHoldout = holdout3 || holdout4;
+const windowNamed = (flag("--window") ?? DEFAULT_WINDOW) as ContextWindow;
+if (!CONTEXT_WINDOWS.includes(windowNamed)) {
+  console.error(`--window must be one of: ${CONTEXT_WINDOWS.join(", ")}`);
+  process.exit(1);
+}
+
+// A whole corpus is more model calls than one sitting affords, so a run can
+// take the documents from the Nth on and the tallies be added up afterwards.
+const from = Math.max(1, Number(flag("--from") ?? 1));
+const heldOut = holdout4 ? EXTRACTION_HOLDOUT4_FULLPAGE : EXTRACTION_HOLDOUT3_FULLPAGE;
+const corpus = onHoldout ? heldOut : EXTRACTION_CORPUS;
+const documents = corpus.slice(from - 1, from - 1 + limit);
+const prefix = holdout4 ? "hold-out 4: " : holdout3 ? "hold-out 3: " : "";
 
 /** The first block the name is printed in, as the evidence the model sees. */
 function blockPrinting(text: string, name: string): string {
@@ -63,33 +103,69 @@ function ownStage2Entries(text: string): ShortlistEntry[] {
   }));
 }
 
-interface Tally { hits: number; of: number; onList: number; blank: number }
+interface Tally {
+  hits: number;
+  of: number;
+  onList: number;
+  blank: number;
+  /** Documents whose list the excerpt limit cut short. */
+  truncated: number;
+  /** Characters of window handed over, and entries they were handed for. */
+  windowChars: number;
+  windowEntries: number;
+}
+
+function emptyTally(): Tally {
+  return { hits: 0, of: 0, onList: 0, blank: 0, truncated: 0, windowChars: 0, windowEntries: 0 };
+}
+
+/** How many of a list's entries survived `EXCERPT_LIMIT`: the excerpt is the
+ * heading and one line per entry, so its lines are what the model was shown. */
+function entriesShown(entries: readonly ShortlistEntry[], window: ContextWindow): number {
+  return shortlistExcerpt(PROVIDER_QUESTION.heading, entries, { window }).split("\n").length - 1;
+}
 
 async function main(): Promise<void> {
   await assertChooserReachable(modelNamed);
   const transport = chooserTransport(modelNamed);
   const model = modelNamed ?? "NuExtract";
   const routes: Array<{ name: string; entries: (text: string) => ShortlistEntry[]; tally: Tally }> = [];
-  if (route !== "own") routes.push({ name: "bins", entries: (text) => providerShortlistEntries(tagCandidates(text, sieve(text))), tally: { hits: 0, of: 0, onList: 0, blank: 0 } });
-  if (route !== "bins") routes.push({ name: "own stage 2", entries: ownStage2Entries, tally: { hits: 0, of: 0, onList: 0, blank: 0 } });
+  if (route !== "own") routes.push({ name: "bins", entries: (text) => providerShortlistEntries(tagCandidates(text, sieve(text))), tally: emptyTally() });
+  if (route !== "bins") routes.push({ name: "own stage 2", entries: ownStage2Entries, tally: emptyTally() });
 
   const started = Date.now();
+  let at = 0;
   for (const document of documents) {
+    at += 1;
     const wanted = document.expected.provider;
     if (wanted === undefined) continue;
     for (const { entries, tally } of routes) {
       const list = entries(document.text);
       tally.of += 1;
       if (list.some((entry) => classifyProvider(wanted, entry.value) === "correct")) tally.onList += 1;
-      const chosen = await chooseProviderWithModel(list, transport);
+      const shown = entriesShown(list, windowNamed);
+      if (shown < list.length) tally.truncated += 1;
+      for (const entry of list) {
+        tally.windowChars += contextWindow(entry, windowNamed).length;
+        tally.windowEntries += 1;
+      }
+      const chosen = await chooseProviderWithModel(list, transport, windowNamed);
       if (chosen === undefined) tally.blank += 1;
       else if (classifyProvider(wanted, chosen) === "correct") tally.hits += 1;
     }
-    process.stderr.write(`${document.name.split(",")[0]}: ${((Date.now() - started) / 1000).toFixed(0)}s\n`);
+    const seconds = ((Date.now() - started) / 1000).toFixed(0);
+    const named = onHoldout
+      ? `document ${from + at - 1} of ${corpus.length}`
+      : document.name.split(",")[0];
+    process.stderr.write(`${named}: ${seconds}s\n`);
   }
 
   for (const { name, tally } of routes) {
     const percent = tally.of === 0 ? "0" : ((tally.hits / tally.of) * 100).toFixed(0);
+    const perEntry = tally.windowEntries === 0
+      ? "0"
+      : (tally.windowChars / tally.windowEntries).toFixed(0);
+    console.log(`window ${windowNamed}: ${perEntry} characters an entry; list cut by the excerpt limit on ${tally.truncated}/${tally.of}`);
     console.log(`right answer on the ${name} list: ${tally.onList}/${tally.of}; model left blank: ${tally.blank}/${tally.of}`);
     console.log(`${prefix}provider by model pick from ${name} (${model}): ${percent}% (${tally.hits}/${tally.of}) [provider ${tally.hits}/${tally.of}]`);
   }
