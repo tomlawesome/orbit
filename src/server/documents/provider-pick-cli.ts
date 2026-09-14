@@ -18,6 +18,7 @@
 //   npm run eval:provider-pick -- --chooser-model qwen3:4b # another model
 //   npm run eval:provider-pick -- --route bins|own         # one list only
 //   npm run eval:provider-pick -- --window sentence        # what it is shown
+//   npm run eval:provider-pick -- --entries 3              # a shorter list
 //   npm run eval:provider-pick -- --limit 6                # first N documents
 //   npm run eval:provider-pick -- --from 21 --limit 20     # documents 21 to 40
 //   npm run eval:provider-pick -- --holdout3               # the 12 unseen pages
@@ -54,6 +55,11 @@ import { readProviders } from "./provider-stage2-sieves";
 
 const LIST_LIMIT = 8;
 
+/** Whether a reply that chose nothing was the model declining or the model
+ * naming something the list does not carry. Both leave the field blank and
+ * only one of them is an answer. */
+type Refusal = "none" | "off the list";
+
 function flag(name: string): string | undefined {
   const at = process.argv.indexOf(name);
   return at === -1 ? undefined : process.argv[at + 1];
@@ -65,6 +71,10 @@ const limit = Number(flag("--limit") ?? Number.MAX_SAFE_INTEGER);
 const holdout3 = process.argv.includes("--holdout3");
 const holdout4 = process.argv.includes("--holdout4");
 const onHoldout = holdout3 || holdout4;
+/** How many of the rules' entries the model is asked to choose between.
+ * Eight is the shipped list; the owner's comparison of 2026-09-14 is over
+ * the best three. */
+const entriesOffered = Number(flag("--entries") ?? LIST_LIMIT);
 const windowNamed = (flag("--window") ?? DEFAULT_WINDOW) as ContextWindow;
 if (!CONTEXT_WINDOWS.includes(windowNamed)) {
   console.error(`--window must be one of: ${CONTEXT_WINDOWS.join(", ")}`);
@@ -107,7 +117,10 @@ interface Tally {
   hits: number;
   of: number;
   onList: number;
-  blank: number;
+  /** The model declined: it answered none, or it answered nothing at all. */
+  saidNone: number;
+  /** The model answered, but named something the list does not carry. */
+  offList: number;
   /** Documents whose list the excerpt limit cut short. */
   truncated: number;
   /** Characters of window handed over, and entries they were handed for. */
@@ -116,7 +129,14 @@ interface Tally {
 }
 
 function emptyTally(): Tally {
-  return { hits: 0, of: 0, onList: 0, blank: 0, truncated: 0, windowChars: 0, windowEntries: 0 };
+  return { hits: 0, of: 0, onList: 0, saidNone: 0, offList: 0, truncated: 0, windowChars: 0, windowEntries: 0 };
+}
+
+/** Which kind of blank a reply that chose nothing was. A reply with no
+ * words in it is the model declining as much as one that says so. */
+function refusal(reply: string): Refusal {
+  const said = reply.trim().toLowerCase();
+  return said === "" || said.includes("none") ? "none" : "off the list";
 }
 
 /** How many of a list's entries survived `EXCERPT_LIMIT`: the excerpt is the
@@ -140,7 +160,7 @@ async function main(): Promise<void> {
     const wanted = document.expected.provider;
     if (wanted === undefined) continue;
     for (const { entries, tally } of routes) {
-      const list = entries(document.text);
+      const list = entries(document.text).slice(0, entriesOffered);
       tally.of += 1;
       if (list.some((entry) => classifyProvider(wanted, entry.value) === "correct")) tally.onList += 1;
       const shown = entriesShown(list, windowNamed);
@@ -149,9 +169,15 @@ async function main(): Promise<void> {
         tally.windowChars += contextWindow(entry, windowNamed).length;
         tally.windowEntries += 1;
       }
-      const chosen = await chooseProviderWithModel(list, transport, windowNamed);
-      if (chosen === undefined) tally.blank += 1;
-      else if (classifyProvider(wanted, chosen) === "correct") tally.hits += 1;
+      let reply = "";
+      const chosen = await chooseProviderWithModel(list, transport, {
+        window: windowNamed,
+        heard: (raw) => { reply = raw; },
+      });
+      if (chosen === undefined) {
+        if (refusal(reply) === "none") tally.saidNone += 1;
+        else tally.offList += 1;
+      } else if (classifyProvider(wanted, chosen) === "correct") tally.hits += 1;
     }
     const seconds = ((Date.now() - started) / 1000).toFixed(0);
     const named = onHoldout
@@ -165,8 +191,8 @@ async function main(): Promise<void> {
     const perEntry = tally.windowEntries === 0
       ? "0"
       : (tally.windowChars / tally.windowEntries).toFixed(0);
-    console.log(`window ${windowNamed}: ${perEntry} characters an entry; list cut by the excerpt limit on ${tally.truncated}/${tally.of}`);
-    console.log(`right answer on the ${name} list: ${tally.onList}/${tally.of}; model left blank: ${tally.blank}/${tally.of}`);
+    console.log(`window ${windowNamed}, ${entriesOffered} entries offered: ${perEntry} characters an entry; list cut by the excerpt limit on ${tally.truncated}/${tally.of}`);
+    console.log(`right answer on the ${name} list: ${tally.onList}/${tally.of}; model answered none: ${tally.saidNone}/${tally.of}; model named something off the list: ${tally.offList}/${tally.of}`);
     console.log(`${prefix}provider by model pick from ${name} (${model}): ${percent}% (${tally.hits}/${tally.of}) [provider ${tally.hits}/${tally.of}]`);
   }
 }

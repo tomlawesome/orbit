@@ -437,6 +437,17 @@ export interface ShortlistQuestion {
 const HOW_TO_ANSWER =
   "Answer with the number of one entry from the list, and nothing else. Answer none if none of them is it.";
 
+/** How a question is put, beyond the words of it. */
+export interface PickOptions {
+  /** What the model is shown around each candidate (owner, 2026-09-14). */
+  window?: ContextWindow;
+  /** The model's reply as it arrived. An evaluation needs it to tell a
+   * model that answered `none` from one that named something the list
+   * does not carry: both leave the field blank, and only one of them is
+   * the model declining to choose. */
+  heard?: (reply: string) => void;
+}
+
 /**
  * One field's question, put to the model over its shortlist.
  *
@@ -450,16 +461,17 @@ export async function pickFromShortlist(
   entries: readonly ShortlistEntry[],
   transport: MeaningTransport,
   match: EntryMatch = {},
-  window: ContextWindow = DEFAULT_WINDOW,
+  options: PickOptions = {},
 ): Promise<ShortlistEntry | undefined> {
   if (entries.length === 0) return undefined;
   const asked = [
     question.asks,
     HOW_TO_ANSWER,
     "",
-    shortlistExcerpt(question.heading, entries, { window }),
+    shortlistExcerpt(question.heading, entries, { window: options.window ?? DEFAULT_WINDOW }),
   ].join("\n");
   const raw = await transport(asked);
+  options.heard?.(raw);
   for (const line of replyLines(raw)) {
     const chosen = entryChosen(line, entries, match);
     if (chosen) return chosen;
@@ -487,14 +499,14 @@ export const PROVIDER_QUESTION: ShortlistQuestion = {
 export async function chooseProviderWithModel(
   entries: readonly ShortlistEntry[],
   transport: MeaningTransport,
-  window: ContextWindow = DEFAULT_WINDOW,
+  options: PickOptions = {},
 ): Promise<string | undefined> {
   const chosen = await pickFromShortlist(
     PROVIDER_QUESTION,
     entries,
     transport,
     { matches: (answer, entry) => sameOrganisation(entry.value, answer) },
-    window,
+    options,
   );
   return chosen === undefined ? undefined : trimFieldValue("provider", chosen.value, chosen.line);
 }
