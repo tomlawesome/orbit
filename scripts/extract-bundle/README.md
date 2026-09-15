@@ -27,6 +27,9 @@ It prints one block per document as it goes, then leaves:
 - `out\results.txt` — the same blocks.
 - `out\results.csv` — one row per document, with an empty "right?" column
   for ticking off in a spreadsheet, and a "top three" column per field.
+- `out\truth.csv` — the same answers again, for correcting by hand so the
+  reader can be scored against them, and `out\truth-help.txt` explaining
+  the columns. See "Telling it the right answers" below.
 
 Under each document's answers come the **top three** for provider,
 reference, subtype, cost and dates: the answer it chose first, marked `*`,
@@ -60,10 +63,49 @@ never on the shortlist, or was on it and passed over.
 - **text characters: 0** — Tika got no text at all, usually a scanned image;
   Orbit does not read those either (no OCR).
 
+## Telling it the right answers, and getting a score
+
+The reader cannot mark its own homework, so the first run also writes
+`out\truth.csv`: one row per document, pre-filled with the answers it just
+gave, plus `out\truth-help.txt` saying what each column is for.
+
+1. Open `out\truth.csv` in Excel.
+2. Correct the cells that are wrong. Blank the ones the page does not
+   answer -- a blank means "there is no right answer here", and those are
+   passed over rather than counted against the reader.
+3. Save it, then run `.\run.cmd --score` (from a PowerShell or command
+   prompt in the unzipped folder).
+
+Nothing ever writes over `truth.csv` once it exists: those are your answers,
+and every later run leaves them alone. Delete the file if you want a fresh
+pre-filled one.
+
+`--score` reads it back, reads the same documents again, and prints:
+
+    real 23: sieve+tag+choose: 74.1% (152/205) [provider 78.3% (18/23), ...]
+
+Twenty-three documents; of the 205 answers the truth file asks for, 152 were
+right; then the same per field. It is the same measurement, by the same code,
+that the project's own test documents get -- so this number can be put beside
+theirs and mean the same thing.
+
+Under it comes a table: per field, how often the right answer was the one
+offered first, in the first two, in the first three, or anywhere on the list
+the reader weighed. The review screen offers three, so "top-3" is how often
+you would find the right answer without typing it in yourself.
+
+Then every miss, naming the document and the field.
+
+The same lines go to `out\score.txt`. The score line and the table say
+nothing about your documents except how many there are, so they are safe to
+send us; the misses under them quote your own paperwork, so send the top of
+the file rather than the whole of it.
+
 ## Privacy
 
-`out` holds names, references and amounts from your documents. It stays on
-this machine; do not copy it into the repository or an issue.
+`out` holds names, references and amounts from your documents -- in
+`results.txt`, `results.csv`, `truth.csv` and the misses in `score.txt`. It
+stays on this machine; do not copy it into the repository or an issue.
 
 Tika 4.0.0 (Apache 2.0) and Node 22 (MIT) are redistributed with their
 licences in `tika` and `node`.

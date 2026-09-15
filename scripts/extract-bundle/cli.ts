@@ -4,12 +4,20 @@
 // be checked against the paper by hand.
 //
 //   node orbit-extract.cjs [--docs ./docs] [--out ./out] [--tika http://host:9998] [--keep-text] [--candidates]
+//   node orbit-extract.cjs --score
 //
 // Under each document's answers come the top three candidates per field,
 // in the order the ranking put them, the chosen one marked with `*` -- the
 // list the review screen will offer (#1008). The CSV carries the same three
 // per field. --candidates lengthens the lists to the whole shortlist (up to
 // eight) and adds each candidate's tags.
+//
+// A plain run also leaves `out\truth.csv`, one row per document, pre-filled
+// with what the reader made of it, for the owner to correct by hand. The
+// owner's corrections are the truth for these documents and nothing here
+// ever overwrites that file. `--score` reads it back and scores the same
+// folder against it with the repository's own scorer, so the number means
+// what the corpus numbers mean, and prints the shortlist recall beside it.
 //
 // The reading is the one being tuned in `src/server/documents/`: Tika turns
 // the file into text exactly as the deployed stack does (same Tika version,
@@ -26,7 +34,7 @@
 // to the documents, on the owner's machine, and belong nowhere else.
 
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import {
   chooseFields,
@@ -35,13 +43,21 @@ import {
   referenceShortlistEntries,
 } from "../../src/server/documents/extraction-choose";
 import { providerShortlistEntries, subtypeShortlist } from "../../src/server/documents/extraction-choose-meaning";
+import type { CorpusDocument } from "../../src/server/documents/extraction-corpus";
 import type { ShortlistEntry } from "../../src/server/documents/extraction-shortlist";
+import {
+  countShortlistRecall,
+  emptyRecallTallies,
+  formatRecallTable,
+  recallMisses,
+} from "../../src/server/documents/extraction-shortlist-recall";
 import { sieve } from "../../src/server/documents/extraction-sieve";
 import { tagCandidates } from "../../src/server/documents/extraction-tags";
 import { repairLetterSpacing } from "../../src/server/documents/extraction-text-repair";
-import type { ExtractedFields } from "../../src/server/documents/extraction-scoring";
+import { formatRunScore, scoreCorpus, type ExtractedFields } from "../../src/server/documents/extraction-scoring";
 import type { TaggedCandidate } from "../../src/server/documents/extraction-stages";
 import { undoTikaMarkdownEscapes } from "../../src/server/documents/tika";
+import { readTruthFile, TRUTH_HELP, truthCsv } from "./truth";
 
 /** As the application: what Tika sends past this point is not read. */
 const MAX_EXTRACTED_CHARACTERS = 250_000;
@@ -284,6 +300,8 @@ function recurrence(fields: ExtractedFields): string {
 interface Row {
   file: string;
   characters: number;
+  /** The text Tika gave back, kept for `--score`. */
+  text?: string;
   fields?: ExtractedFields;
   lists?: FieldLists;
   problem?: string;
@@ -333,11 +351,71 @@ function csv(rows: Row[]): string {
   return [header, ...rows.map(line)].join("\r\n") + "\r\n";
 }
 
+/**
+ * The score for these documents against the owner's truth: the repository's
+ * own scorer over `CorpusDocument`s built from the truth rows, then the
+ * shortlist recall the review screen depends on (#1008), then the misses.
+ */
+async function scoreReport(rows: Row[], truthFile: string): Promise<string> {
+  const truth = readTruthFile(readFileSync(truthFile, "utf8"));
+  const problems = [...truth.problems];
+  const read = new Map(rows.map((row) => [row.file, row]));
+  const documents: CorpusDocument[] = [];
+  for (const entry of truth.entries) {
+    const row = read.get(entry.file);
+    if (row === undefined || row.text === undefined || row.fields === undefined) {
+      problems.push(`${entry.file}: in truth.csv but not read from the docs folder, so it is not scored`);
+      continue;
+    }
+    if (entry.scorable) {
+      documents.push({ name: entry.file, filename: entry.file, text: row.text, expected: entry.expected });
+    }
+  }
+  const known = new Set(truth.entries.map((entry) => entry.file));
+  for (const row of rows) {
+    if (row.fields !== undefined && !known.has(row.file)) {
+      problems.push(`${row.file}: no row in truth.csv, so it is not scored`);
+    }
+  }
+  if (documents.length === 0) throw new Error(`no document in ${truthFile} matches a file in the docs folder`);
+
+  // The fields are the ones already printed above, handed to the scorer as
+  // they stand: scoring re-reads nothing, so the number is about what the
+  // owner just saw.
+  const score = await scoreCorpus(documents, (_text, filename) => read.get(filename)?.fields ?? { dates: [] });
+
+  const tallies = emptyRecallTallies();
+  for (const document of documents) {
+    countShortlistRecall(tallies, {
+      name: document.name,
+      text: repairLetterSpacing(document.text),
+      expected: document.expected,
+    });
+  }
+  const shortlistMisses = recallMisses(tallies);
+
+  return [
+    ...(problems.length > 0 ? [`truth file:\n- ${problems.join("\n- ")}`] : []),
+    formatRunScore(`real ${documents.length}: sieve+tag+choose`, score),
+    formatRecallTable("", tallies),
+    shortlistMisses.length === 0
+      ? "every answer was somewhere on its shortlist"
+      : `shortlist misses:\n- ${shortlistMisses.join("\n- ")}`,
+  ].join("\n\n");
+}
+
 async function main(): Promise<void> {
   const bundleDir = __dirname;
   const docsDir = resolve(option("--docs") ?? join(bundleDir, "docs"));
   const outDir = resolve(option("--out") ?? join(bundleDir, "out"));
   const keepText = process.argv.includes("--keep-text");
+  const wantsScore = process.argv.includes("--score");
+  const truthFile = join(outDir, "truth.csv");
+  if (wantsScore && !existsSync(truthFile)) {
+    console.error(`no ${truthFile} yet: run it without --score first, then correct the answers in that file`);
+    process.exitCode = 1;
+    return;
+  }
   const files = readdirSync(docsDir)
     .filter((name) => MEDIA_TYPES[extname(name).toLowerCase()] !== undefined)
     .sort((a, b) => a.localeCompare(b));
@@ -357,6 +435,7 @@ async function main(): Promise<void> {
       try {
         const text = await extractText(tika.url, readFileSync(join(docsDir, file)), MEDIA_TYPES[extname(file).toLowerCase()]);
         row.characters = text.length;
+        row.text = text;
         if (keepText) writeFileSync(join(outDir, "text", `${basename(file)}.txt`), text);
         const { fields, lists } = readFields(text);
         row.fields = fields;
@@ -372,7 +451,26 @@ async function main(): Promise<void> {
   }
   writeFileSync(join(outDir, "results.txt"), rows.map(block).join("\n\n") + "\n");
   writeFileSync(join(outDir, "results.csv"), csv(rows));
+  writeFileSync(join(outDir, "truth-help.txt"), TRUTH_HELP.join("\r\n") + "\r\n");
   console.log(`\n${rows.length} documents read; results in ${outDir}`);
+
+  // Never over a truth file that exists: those are the owner's own answers,
+  // and a second run must not quietly replace them with the reader's.
+  if (!existsSync(truthFile)) {
+    writeFileSync(truthFile, truthCsv(rows));
+    console.log(
+      `\nwrote ${truthFile}, pre-filled with the answers above.\n` +
+      "Correct the cells that are wrong, blank the ones the page does not answer\n" +
+      `(truth-help.txt explains the columns), then run  run.cmd --score  to score them.`,
+    );
+  }
+
+  if (wantsScore) {
+    const report = await scoreReport(rows, truthFile);
+    console.log(`\n${report}`);
+    writeFileSync(join(outDir, "score.txt"), `${report}\n`.replaceAll("\n", "\r\n"));
+    console.log(`\nthe same lines are in ${join(outDir, "score.txt")}`);
+  }
 }
 
 main().catch((error: unknown) => {
