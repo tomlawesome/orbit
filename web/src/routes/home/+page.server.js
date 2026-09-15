@@ -40,10 +40,21 @@ import { readHome } from "$lib/data/workspace.js";
  * layer replaces the composite entry (#450), which served this app only for the
  * paths in its table and went with the cut (#735).
  *
+ * ---- THE SYSTEM-STATUS DRAWER (#863) ----
+ *
+ * Read here rather than fetched client-side, for the same reason as the view
+ * above: a server-rendered value is present at first paint, with no flash
+ * between a neutral placeholder and the real content, and the fidelity gate's
+ * screens never wait on a client fetch to settle. A failed read gives
+ * `systemStatus: null`, and the drawer renders no service rows rather than
+ * inventing any -- the same "drop it, don't guess" rule the endpoint itself
+ * already follows.
+ *
  * @type {import("./$types").PageServerLoad}
  */
 export async function load({ fetch }) {
-  return { fixtures: env.ORBIT_FIXTURES === "1", view: await homeView(fetch) };
+  const [view, systemStatus] = await Promise.all([homeView(fetch), systemStatusView(fetch)]);
+  return { fixtures: env.ORBIT_FIXTURES === "1", view, systemStatus };
 }
 
 /**
@@ -53,6 +64,20 @@ export async function load({ fetch }) {
 async function homeView(fetch) {
   try {
     return await readHome(fetch);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {typeof globalThis.fetch} fetch
+ * @returns {Promise<import("orbit/server/system-status").SystemStatus | null>}
+ */
+async function systemStatusView(fetch) {
+  try {
+    const response = await fetch("/api/system-status");
+    if (!response.ok) return null;
+    return (await response.json()).status;
   } catch {
     return null;
   }

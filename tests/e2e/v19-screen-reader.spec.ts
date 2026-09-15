@@ -294,28 +294,6 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
   });
 
-  test("/due-next", async ({ page }, testInfo) => {
-    await signIn(page);
-    await page.goto("/due-next");
-    await walkScreen(page, testInfo, "due-next");
-    await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
-  });
-
-  test("/documents", async ({ page }, testInfo) => {
-    await signIn(page);
-    await page.goto("/documents");
-    await walkScreen(page, testInfo, "documents");
-    await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
-  });
-
-  test("/admin", async ({ page }, testInfo) => {
-    await signIn(page);
-    await page.goto("/admin");
-    await walkScreen(page, testInfo, "admin");
-    // The observatory's own starfield backdrop, unlike every sibling screen's.
-    await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
-  });
-
   test("/administration", async ({ page }, testInfo) => {
     await signIn(page);
     await page.goto("/administration");

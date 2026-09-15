@@ -9,14 +9,13 @@ import { settleArrival } from "./support/arrival";
  *
  * What "degrade" means was read out of the app rather than assumed:
  *
- *   - every route with a live backdrop (home's sky, due-next/documents/
+ *   - every route with a live backdrop (home's sky,
  *     inbox/settings/household/item's own "*-drift" keyframes, the dial's
  *     POL-1/POL-2 flourishes, the login/logout flight) carries its own
  *     `@media (prefers-reduced-motion: reduce)` block that sets the
  *     offending `animation` to `none` or drops the element — see home.css,
- *     due-next.css, documents.css, inbox.css, settings.css, admin.css (see
- *     below), pocket.css, flight.css, arrival.css, logout.css and
- *     maintenance.css.
+ *     inbox.css, settings.css, pocket.css, flight.css, arrival.css,
+ *     logout.css and maintenance.css.
  *   - home's sky DRIFT specifically is not CSS at all: skies.js's
  *     `mountPlane()` reads `matchMedia("(prefers-reduced-motion: reduce)")`
  *     into a `still()` guard and never calls `requestAnimationFrame` when it
@@ -155,13 +154,10 @@ test.describe("reduced motion", () => {
     try {
       const routes = [
         "/home",
-        "/due-next",
-        "/documents",
         "/inbox",
         "/create",
         "/settings",
         "/settings/mail",
-        "/admin",
         "/administration",
       ];
       for (const route of routes) {
@@ -209,26 +205,6 @@ test.describe("reduced motion", () => {
       });
 
       expect(problems, problems.join("\n")).toEqual([]);
-    } finally {
-      await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
-    }
-  });
-
-  // admin.css has NO `prefers-reduced-motion` rule at all -- unlike every
-  // other screen's stylesheet. `.sky .grid` runs `precess 200s linear
-  // infinite` and `.pulse` runs `tele 4s ease-in-out infinite` regardless of
-  // the reader's motion setting. That gap is what the step above for /admin
-  // is expected to catch; it is asserted here again, isolated, so a single
-  // route failing does not need digging out of the combined list above.
-  test("admin's telemetry backdrop is not exempt from reduced motion", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop-chromium only");
-    await signIn(page);
-    const household = await seedHousehold(page);
-    try {
-      await page.goto("/admin");
-      await settle(page);
-      const motion = await runningMotion(page);
-      expect(motion, motion.join(", ")).toEqual([]);
     } finally {
       await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
     }

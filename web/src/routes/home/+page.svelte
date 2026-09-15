@@ -14,7 +14,7 @@
   import { markDoor } from "../household/[id]/door.js";
   import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin, signOut } from "$lib/data/workspace.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { money } from "$lib/format.js";
+  import { ago, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
@@ -52,6 +52,35 @@
   /** @type {HomeView | null} */
   // svelte-ignore state_referenced_locally
   let view = $state(data?.view ?? null);
+  /* The system-status drawer's real data (#863), read server-side alongside
+     `view` (see +page.server.js). Null only when that read failed; the
+     drawer then shows no service rows rather than the fake, always-degraded
+     markup it used to carry. */
+  /** @type {import('orbit/server/system-status').SystemStatus | null} */
+  // svelte-ignore state_referenced_locally
+  let systemStatus = $state(data?.systemStatus ?? null);
+  /* The handle's colour is CSS, keyed off this body class exactly as the
+     mockup's own demo toggle was (design/v19/home.html) -- only now driven by
+     the real word instead of a fixed one. Effect, not onMount: it has to
+     react to a later `systemStatus` (a retry after a failed first read), and
+     its own cleanup is what stops a stale colour riding to the next screen. */
+  $effect(() => {
+    document.body.classList.toggle("health-degraded", systemStatus?.handle === "degraded");
+    return () => document.body.classList.remove("health-degraded");
+  });
+  /** Every word the drawer draws maps to one of three dot colours; anything unrecognised reads as unknown, not healthy. */
+  /** @type {Record<string, string>} */
+  const STATUS_DOT = {
+    healthy: "var(--ok)", ready: "var(--ok)", maintenance: "var(--ok)",
+    unreachable: "var(--degraded)", failed: "var(--degraded)", degraded: "var(--degraded)",
+    starting: "var(--ink-faint)", not_enabled: "var(--ink-faint)", disabled: "var(--ink-faint)",
+  };
+  /** @param {string} word */
+  const statusDot = (word) => STATUS_DOT[word] ?? "var(--ink-faint)";
+  /** @param {string} word */
+  const statusWord = (word) => (word === "not_enabled" ? "not enabled" : word);
+  /** @param {{observedAt?: string}} row */
+  const observedLabel = (row) => (row.observedAt ? ago(row.observedAt, view?.now ?? new Date().toISOString()) : null);
   /* Some of the $derived expressions below build a value from `view` inside a
      single ternary, and svelte-check's control-flow narrowing does not carry
      the `view ? ... : ...` guard through into the branch in that position —
@@ -86,7 +115,10 @@
    */
   /* The fixture harness (see +page.server.js): drives either journey to one
      millisecond and holds it there. Off unless the server says ORBIT_FIXTURES,
-     so the query string is inert in the product. */
+     so the query string is inert in the product. Reading `data` here once,
+     deliberately: the flight it drives is decided at load and held there
+     (see the launch note below), never recomputed off a later `data`. */
+  // svelte-ignore state_referenced_locally
   const fixtureFlight = browser && data?.fixtures ? page.url.searchParams.get("flight") : null;
   const fixtureAt = Number(page.url.searchParams.get("at") ?? 0) || 0;
 
@@ -1180,18 +1212,18 @@
 
 <aside class="drawer drawer-left" id="statusdrawer" role="region" aria-live="polite" aria-label="System status">
   <button class="handle" id="edge-health" aria-expanded="false">
-    <i></i><span>degraded</span></button>
+    <i></i><span>{systemStatus?.handle ?? "unknown"}</span></button>
   <h2>System status</h2>
-  <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy &middot; 40s ago</small></div>
-  <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy &middot; 40s ago</small></div>
-  <div class="svc"><i style="background:var(--degraded)"></i><b>orbit-clamav</b><small>unreachable &middot; 2m ago</small></div>
-  <div class="svc"><i style="background:var(--ink-faint)"></i><b>orbit-tika</b><small>not enabled</small></div>
-  <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running &middot; 12s ago</small></div>
-  <h2>Last health check</h2>
-  <div class="svc"><i style="background:var(--degraded)"></i><b>scan readiness</b><small>failed &middot; scanner-unreachable</small></div>
-  <div class="svc"><i style="background:var(--ok)"></i><b>application</b><small>ready</small></div>
-  <h2>Full diagnostics</h2>
-  <div class="svc" style="color:var(--ink-quiet)">container logs &middot; or the launcher repair flow</div>
+  {#each systemStatus?.services ?? [] as row (row.service)}
+    <div class="svc"><i style="background:{statusDot(row.state)}"></i><b>{row.service}</b><small>{statusWord(row.state)}{#if observedLabel(row)} &middot; {observedLabel(row)}{/if}</small></div>
+  {/each}
+  {#if systemStatus?.lastCheck}
+    <h2>Last health check</h2>
+    {#if systemStatus.lastCheck.scan}
+      <div class="svc"><i style="background:{statusDot(systemStatus.lastCheck.scan)}"></i><b>scan readiness</b><small>{statusWord(systemStatus.lastCheck.scan)}</small></div>
+    {/if}
+    <div class="svc"><i style="background:{statusDot(systemStatus.lastCheck.application)}"></i><b>application</b><small>{statusWord(systemStatus.lastCheck.application)}</small></div>
+  {/if}
 </aside>
 {#if !view?.emptySky}
 <aside class="drawer drawer-right" id="keydrawer" role="region" aria-label="Chart key">

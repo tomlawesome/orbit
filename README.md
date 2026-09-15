@@ -560,6 +560,18 @@ bash scripts/test-e2e-local.sh
 bash scripts/test-e2e-local.sh --spec tests/e2e/v19-mail-review.spec.ts --project mobile-chromium
 ```
 
+Re-running one failing spec need not pay for a fresh build and start each
+time: `--keep` leaves the stack up, and a later `--reuse PROJECT` (the
+project name that run's startup log line names) skips straight to Playwright
+against it. `--reuse` identifies and health-checks that stack itself --
+never assumes it is still healthy, and never tears it down:
+
+```sh
+bash scripts/test-e2e-local.sh --keep
+# ... a spec fails; fix it, then:
+bash scripts/test-e2e-local.sh --reuse <project> --spec tests/e2e/v19-mail-review.spec.ts
+```
+
 Only assemble the Compose commands by hand -- as that script's own `--keep`
 output does when it prints the exact teardown line -- when you need to inspect
 a stack between steps. `docker-compose.yml`'s `name: orbit` and `.env-orbit`'s

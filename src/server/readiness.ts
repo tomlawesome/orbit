@@ -21,6 +21,22 @@ async function checkDatabase(): Promise<unknown> {
   return getDb().execute(sql`select 1`);
 }
 
+/**
+ * Whether the database itself answered, on its own -- unlike
+ * {@link getPublicReadiness}, which folds an unreachable database and an
+ * unreadable maintenance state into the same `degraded` word. The
+ * system-status drawer (#863) reports the database as its own row, so it
+ * needs this distinction where `/api/health` deliberately does not.
+ */
+export async function checkDatabaseReachable(): Promise<boolean> {
+  try {
+    await checkDatabase();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function readMaintenance(): Promise<{ effectivelyActive: boolean }> {
   if (readinessDependenciesForTests?.readMaintenance) return readinessDependenciesForTests.readMaintenance();
   return readEffectiveMaintenance();
