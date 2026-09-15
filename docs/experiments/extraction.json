@@ -6658,8 +6658,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E119",
@@ -6721,8 +6720,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E120",
@@ -6736,6 +6734,194 @@
       "how": "npm run eval:holdout -- --holdout4",
       "commit": "eae2d3d",
       "output": "tmp/e-holdout4-prov-frag.txt",
+      "scores": {
+        "overall": {
+          "pct": 72.4,
+          "net": 84,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 8,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E121",
+      "date": "2026-09-15",
+      "label": "corpus: the provider truth is the name on the door",
+      "corpus": "tuning-60",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "The owner's ruling (2026-09-14): where a page prints a trading name and the company behind it, the answer is the trading name — what the household would say if asked who their water company is. Eight tuning pages print the pair; five truths named the company and are corrected to the door (Halcyon Energy, FeelGood Cash Plan, Hedgerow Direct, Brightwell Insulation Services, Kestrel Cover). No rule changed: provider reads 47/60 against 42/60 because four answers the rules already gave were being marked wrong. Hold-out 3 and hold-out 4 truths still follow the old convention and cannot be corrected from this session — their provider figures are not comparable with this one until an author applies the same ruling.",
+      "how": "npm run eval:stages",
+      "commit": "e0437d3",
+      "output": "tmp/e-seen60-stages-door.txt",
+      "scores": {
+        "overall": {
+          "pct": 87.2,
+          "net": 443,
+          "of": 508
+        },
+        "provider": {
+          "pct": 78.3,
+          "net": 47,
+          "of": 60
+        },
+        "reference": {
+          "pct": 93.3,
+          "net": 56,
+          "of": 60
+        },
+        "dates": {
+          "pct": 100,
+          "net": 102,
+          "of": 102
+        },
+        "dateRoles": {
+          "pct": 91.2,
+          "net": 93,
+          "of": 102
+        },
+        "subtype": {
+          "pct": 70,
+          "net": 42,
+          "of": 60
+        },
+        "cost": {
+          "pct": 77.8,
+          "net": 42,
+          "of": 54
+        },
+        "scheduleKind": {
+          "pct": 92.5,
+          "net": 37,
+          "of": 40
+        },
+        "recurrence": {
+          "pct": 80,
+          "net": 24,
+          "of": 30
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E122",
+      "date": "2026-09-15",
+      "label": "hold-out 3 after the door ruling (truths not yet corrected)",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Unchanged code and unchanged hold-out truths: 80.0%, provider 12/12. Recorded so the tuning jump is not mistaken for a rules gain.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "e0437d3",
+      "output": "tmp/e-holdout3-door.txt",
+      "scores": {
+        "overall": {
+          "pct": 80,
+          "net": 88,
+          "of": 110
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "cost": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E123",
+      "date": "2026-09-15",
+      "label": "hold-out 4 after the door ruling (truths not yet corrected)",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Unchanged code and unchanged hold-out truths: 72.4%, provider 10/12.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "e0437d3",
+      "output": "tmp/e-holdout4-door.txt",
       "scores": {
         "overall": {
           "pct": 72.4,
