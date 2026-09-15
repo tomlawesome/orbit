@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Rent review notice</title>
+<style>
+@font-face{font-family:"Corpus Quenby";src:url("../fonts/Cardo-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Quenby";src:url("../fonts/Cardo-Bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Quenby Display";src:url("../fonts/ArchivoBlack-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@page { size: A4; margin: 0; }
+html, body { margin: 0; padding: 0; background: #fff; }
+.page { position: relative; width: 794px; min-height: 1123px; box-sizing: border-box; padding: 44px 52px; }
+body { font-family: "Corpus Quenby", serif; font-size: 9.5pt; color: #1b1b1b; }
+.sans { font-family: "Corpus Quenby Display", sans-serif; }
+.masthead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 4px solid #1b1b1b; padding-bottom: 8px; margin-bottom: 14px; }
+.agency-name { font-family: "Corpus Quenby Display", sans-serif; font-size: 20pt; font-weight: bold; letter-spacing: 0.5px; }
+.agency-sub { font-size: 8pt; margin-top: 2px; }
+.contact { text-align: right; font-size: 8pt; line-height: 1.4; }
+.notice-box { border: 3px double #1b1b1b; padding: 10px 14px; margin-bottom: 12px; }
+.notice-title { font-family: "Corpus Quenby Display", sans-serif; font-size: 13pt; font-weight: bold; text-align: center; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.notice-sub { font-family: "Corpus Quenby Display", sans-serif; font-size: 8pt; text-align: center; }
+table.details { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 8.7pt; }
+table.details td { border: 1px solid #999; padding: 3px 6px; vertical-align: top; }
+table.details td.label { font-family: "Corpus Quenby Display", sans-serif; font-size: 7.6pt; text-transform: uppercase; color: #333; width: 34%; background: #f2f0ec; }
+.rent-panel { display: flex; gap: 10px; margin: 10px 0; }
+.rent-box { flex: 1; border: 1px solid #1b1b1b; padding: 6px 8px; text-align: center; }
+.rent-box .lbl { font-family: "Corpus Quenby Display", sans-serif; font-size: 7.4pt; text-transform: uppercase; }
+.rent-box .amt { font-size: 14pt; font-weight: bold; margin-top: 2px; }
+ol.clauses { padding-left: 18px; margin: 8px 0; }
+ol.clauses li { margin-bottom: 6px; text-align: justify; }
+.sig-block { margin-top: 16px; border-top: 1px solid #999; padding-top: 10px; }
+.sig-line { display: inline-block; width: 46%; }
+.sig-rule { border-bottom: 1px solid #1b1b1b; height: 26px; }
+.sig-cap { font-family: "Corpus Quenby Display", sans-serif; font-size: 7.4pt; text-transform: uppercase; margin-top: 2px; }
+.footer { position: absolute; bottom: 20px; left: 52px; right: 52px; font-size: 6.8pt; color: #555; border-top: 1px solid #ccc; padding-top: 4px; display: flex; justify-content: space-between; }
+h2.section { font-family: "Corpus Quenby Display", sans-serif; font-size: 12pt; border-bottom: 2px solid #1b1b1b; padding-bottom: 3px; margin: 14px 0 6px; }
+h3.sub { font-family: "Corpus Quenby Display", sans-serif; font-size: 9.5pt; margin: 10px 0 3px; }
+table.comparables { width: 100%; border-collapse: collapse; font-size: 8.2pt; margin: 6px 0 10px; }
+table.comparables th { font-family: "Corpus Quenby Display", sans-serif; font-size: 7.4pt; text-transform: uppercase; background: #1b1b1b; color: #fff; padding: 4px 6px; text-align: left; }
+table.comparables td { border-bottom: 1px solid #ccc; padding: 4px 6px; }
+.callout { background: #f2f0ec; border-left: 3px solid #1b1b1b; padding: 6px 10px; font-size: 8.4pt; margin: 8px 0; }
+p { margin: 5px 0; text-align: justify; }
+table.fees { width: 100%; border-collapse: collapse; font-size: 8.2pt; margin: 6px 0; }
+table.fees th { font-family: "Corpus Quenby Display", sans-serif; font-size: 7.4pt; text-transform: uppercase; background: #ece8e0; padding: 3px 6px; text-align: left; border: 1px solid #bbb; }
+table.fees td { border: 1px solid #bbb; padding: 3px 6px; }
+.small { font-size: 7.4pt; color: #444; }
+.cols { display: flex; gap: 18px; }
+.cols > div { flex: 1; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="masthead">
+    <div>
+      <div class="agency-name">QUENBY FOLD LETTINGS</div>
+      <div class="agency-sub">Residential lettings and property management &#8212; established 2009</div>
+    </div>
+    <div class="contact">
+      14 Overstone Parade, Redhill, Surrey RH1 2NF<br>
+      Lettings office: 01737 400 221 &#183; Accounts: 01737 400 229<br>
+      quenbyfold.co.uk &#183; lettings@quenbyfold.co.uk
+    </div>
+  </div>
+
+  <div class="notice-box">
+    <div class="notice-title">Notice of a proposed new rent for a periodic assured shorthold tenancy</div>
+    <div class="notice-sub">Served by the managing agent on behalf of the landlord named below</div>
+  </div>
+
+  <table class="details">
+    <tr><td class="label">Tenancy reference</td><td>QF/TEN/10-2244</td>
+        <td class="label">Property reference</td><td>PR-6631-RD</td></tr>
+    <tr><td class="label">Landlord</td><td>Marcham Vale Property Holdings Limited</td>
+        <td class="label">Landlord account no.</td><td>LA-402198</td></tr>
+    <tr><td class="label">Tenant</td><td>Mr S. Whitlock</td>
+        <td class="label">Notice served</td><td>1 October 2026</td></tr>
+    <tr><td class="label">Property</td><td colspan="3">Flat 2, 14 Barnfield Road, Redhill, Surrey RH1 6QT</td></tr>
+    <tr><td class="label">Tenancy began</td><td>1 June 2023</td>
+        <td class="label">Fixed term ended</td><td>31 May 2024</td></tr>
+  </table>
+
+  <p>This notice is given because the fixed term referred to above has ended and the tenancy is now
+  continuing as a monthly periodic assured shorthold tenancy, with no fixed end date, on the same terms
+  save as varied below. Quenby Fold Lettings acts as managing agent for Marcham Vale Property Holdings
+  Limited and is authorised to serve this notice on the landlord&#8217;s behalf.</p>
+
+  <div class="rent-panel">
+    <div class="rent-box"><div class="lbl">Present rent (per calendar month)</div><div class="amt">&pound;985.00</div></div>
+    <div class="rent-box"><div class="lbl">Proposed new rent (per calendar month)</div><div class="amt">£1,045.00</div></div>
+    <div class="rent-box"><div class="lbl">Weekly equivalent of new rent</div><div class="amt">&pound;241.15</div></div>
+  </div>
+
+  <p>The last day of the rental period charged at the present rent is 30 November 2026. The proposed
+  new rent of £1,045.00 takes effect from and including <strong>1 December 2026</strong> and falls due
+  monthly in advance on the first of each month thereafter.</p>
+
+  <ol class="clauses">
+    <li>This notice proposes a new rent for the property under the periodic tenancy identified above. It
+    does not itself increase the rent; the increase takes effect only from the date stated unless you
+    refer the proposal to the appropriate tribunal within the time allowed and the tribunal directs
+    otherwise.</li>
+    <li>The proposed rent has been set by reference to rents currently achieved for comparable
+    properties in the local area, a summary of which is set out in the accompanying guidance notes.</li>
+    <li>If you agree to the new rent you do not need to reply; the tenancy will continue on the varied
+    rent from the date shown and no further paperwork is required from you.</li>
+    <li>If you consider the proposed rent is higher than the open-market rent for the property, you may
+    apply to the tribunal to determine the rent before the date the new rent is due to take effect.</li>
+    <li>Nothing in this notice affects any other term of the tenancy, including the deposit held, the
+    obligations to report repairs, or the arrangements for gas safety and inventory checks described in
+    the accompanying pages.</li>
+  </ol>
+
+  <div class="sig-block">
+    <div class="sig-line">
+      <div class="sig-rule"></div>
+      <div class="sig-cap">Signed for and on behalf of the landlord, by the managing agent</div>
+    </div>
+    &nbsp;&nbsp;
+    <div class="sig-line">
+      <div class="sig-rule"></div>
+      <div class="sig-cap">Date of signing &#8212; 1 October 2026</div>
+    </div>
+    <p class="small" style="margin-top:10px;">R. Aldous, Lettings Manager, Quenby Fold Lettings, 14 Overstone
+    Parade, Redhill, Surrey RH1 2NF. Quenby Fold Lettings Limited, registered in England and Wales no.
+    07734521. VAT registration GB 245 7710 33.</p>
+  </div>
+
+  <div class="footer">
+    <span>Quenby Fold Lettings &#8212; notice of proposed rent &#8212; tenancy QF/TEN/10-2244</span>
+    <span>Page 1 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <h2 class="section">Guidance notes for the tenant</h2>
+  <p>These notes explain what the attached notice means and what you can do about it. They are provided
+  as general guidance only and are not a substitute for independent advice, which you can obtain free of
+  charge from a local Citizens Advice office or a solicitor specialising in housing law.</p>
+
+  <h3 class="sub">What the notice means</h3>
+  <p>Your tenancy has moved from a fixed term into a periodic tenancy running month to month. Because
+  there is no fixed term left to run, the landlord can propose a new rent using the notice procedure
+  described overleaf rather than by agreeing a new fixed-term agreement with you. The new rent set out
+  in the notice will apply automatically from the date given unless you refer the matter to the
+  tribunal in time and the tribunal sets a different figure.</p>
+
+  <h3 class="sub">The tribunal route and time limits</h3>
+  <p>You have the right to apply to the First-tier Tribunal (Property Chamber) to determine the rent
+  that a landlord might reasonably be expected to obtain for the property under a new periodic tenancy.
+  Any application must be made before the date the proposed rent takes effect. Based on the dates on
+  this notice, an application would need to reach the tribunal no later than <strong>30 November
+  2026</strong>. If you do nothing by that date, the new rent shown on the notice takes effect
+  automatically. The tribunal cannot normally set a rent higher than the one proposed in the notice.</p>
+  <div class="callout">Applying to the tribunal does not end your tenancy and the tribunal&#8217;s
+  decision is binding on both you and the landlord for the period it covers. There is a fee to apply,
+  and further guidance and the application form are available from the tribunal&#8217;s own website
+  rather than from Quenby Fold Lettings.</div>
+
+  <h3 class="sub">How the proposed rent was worked out</h3>
+  <p>Quenby Fold Lettings reviews rents against a basket of comparable local lettings agreed or
+  advertised within the last six months. The table below sets out three comparable properties used in
+  reaching the figure proposed for your home; sizes and exact specifications vary and are given for
+  general guidance only.</p>
+
+  <table class="comparables">
+    <tr><th>Address</th><th>Type</th><th>Rent achieved</th><th>Let agreed</th></tr>
+    <tr><td>22 Barnfield Road, Redhill</td><td>2-bed first-floor flat</td><td>&pound;1,075 pcm</td><td>July 2026</td></tr>
+    <tr><td>8 Overton Close, Redhill</td><td>2-bed conversion flat</td><td>&pound;1,025 pcm</td><td>May 2026</td></tr>
+    <tr><td>41 Station Approach, Redhill</td><td>2-bed purpose-built flat</td><td>&pound;1,060 pcm</td><td>August 2026</td></tr>
+  </table>
+
+  <h3 class="sub">If your circumstances have changed</h3>
+  <p>If you are struggling to meet the rent, tell us as early as possible. We can discuss a payment
+  plan and point you towards independent debt and benefits advice. Housing costs support may be
+  available through Universal Credit or a discretionary housing payment from the local authority;
+  eligibility depends on your own circumstances and Quenby Fold Lettings cannot advise on entitlement.</p>
+
+  <h3 class="sub">Other help available to you</h3>
+  <p>Our tenant portal at portal.quenbyfold.co.uk lets you view tenancy documents, report a repair and
+  see payments received. Our self-service line is on 0330 660 1204 during office hours. Complaints about
+  how we have handled your tenancy are dealt with under the procedure at quenbyfold.co.uk/complaints;
+  unresolved complaints can in some circumstances be referred to our redress scheme, overleaf. Calls to
+  our office numbers may be recorded for training and quality purposes.</p>
+
+  <p class="small">Quenby Fold Lettings also manages holiday lets and student accommodation in the wider
+  Redhill and Reigate area under the trading style QF Short Stays; these notes do not apply to those
+  agreements, which are governed by separate licence terms.</p>
+
+  <div class="footer">
+    <span>Quenby Fold Lettings &#8212; guidance for tenants &#8212; tenancy QF/TEN/10-2244</span>
+    <span>Page 2 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <h2 class="section">Tenancy information and agent disclosures</h2>
+
+  <div class="cols">
+    <div>
+      <h3 class="sub">How rent is paid</h3>
+      <p>Rent is collected by standing order or Direct Debit into the Quenby Fold Lettings client
+      account, sort code 30-91-04, account number 71048826, quoting reference QF/TEN/10-2244, mandate
+      DD-QFL-55910. Cheque or cash is not accepted. Rent overdue by more than five working days accrues
+      interest at 3% above the Bank of England base rate, calculated daily.</p>
+
+      <h3 class="sub">Deposit protection</h3>
+      <p>A deposit of &pound;1,203.00 is protected with the Hallcroft Deposit Protection Scheme, a
+      Government-authorised custodial scheme, certificate HDP-2023-778341, case HDPC/000556219, protected
+      12 June 2023. A holding deposit of &pound;227.31, one week&#8217;s rent at the rent then payable,
+      was taken before the tenancy began and later credited against the first month&#8217;s rent.</p>
+
+      <h3 class="sub">Inventory and check-out</h3>
+      <p>An independent inventory was prepared at the start of the tenancy. A check-out inspection will
+      be arranged at the end of the tenancy, fee &pound;96.00 including VAT, payable by the landlord; no
+      check-out fee is charged to the tenant. A missed appointment charge of &pound;30.00 applies where
+      access cannot be gained for a pre-arranged visit through no fault of the agent.</p>
+
+      <h3 class="sub">Repairs reporting</h3>
+      <p>Repairs should be reported through the tenant portal or by calling 01737 400 225; gas and
+      electrical issues are emergencies and should also be reported by phone. The last gas safety check
+      was carried out on 14 April 2026, record GSR-8847213. The energy performance certificate, reference
+      EPC-8021-4459-0210, was issued on 2 March 2019.</p>
+    </div>
+    <div>
+      <h3 class="sub">Right to rent</h3>
+      <p>Quenby Fold Lettings carried out a right to rent check on behalf of the landlord before the
+      tenancy began, in line with Home Office guidance, and holds copies on file.</p>
+
+      <h3 class="sub">Client money protection</h3>
+      <p>Client money held by Quenby Fold Lettings, including rent and deposits in transit, is protected
+      under the Ashworth Client Money Protection Scheme, membership ACMP/2026/0093. A summary of cover is
+      available at quenbyfold.co.uk/cmp.</p>
+
+      <h3 class="sub">Redress scheme membership</h3>
+      <p>Quenby Fold Lettings is a member of the National Lettings Redress Service, membership
+      NLRS-11824, as required for letting and managing agents in England. Our complaints procedure
+      explains how to bring an unresolved complaint to the redress service.</p>
+
+      <h3 class="sub">Data protection</h3>
+      <p>Quenby Fold Lettings is registered with the Information Commissioner&#8217;s Office, registration
+      ZA331987, and processes personal data as described at quenbyfold.co.uk/privacy. Data may be shared
+      with the landlord, referencing and deposit providers, and, where required, local authorities.</p>
+
+      <h3 class="sub">Letting or selling another property?</h3>
+      <p>Thinking of letting a property in the Redhill, Reigate or Horley area? Our team offers full
+      management, rent collection only and tenant-find services, landlord insurance and a free rental
+      valuation at quenbyfold.co.uk/landlords. Follow @quenbyfoldlettings, or browse vacancies through our
+      partner portal at findaflat.example.</p>
+    </div>
+  </div>
+
+  <table class="fees">
+    <tr><th>Charge</th><th>Amount</th></tr>
+    <tr><td>Lost key or fob replacement</td><td>&pound;45.00</td></tr>
+    <tr><td>Missed appointment (no access given)</td><td>&pound;30.00</td></tr>
+    <tr><td>Tenancy variation, at the tenant&#8217;s request (e.g. adding a permitted occupier)</td><td>&pound;50.00</td></tr>
+    <tr><td>Check-out inspection (payable by landlord)</td><td>&pound;96.00</td></tr>
+    <tr><td>Late payment interest</td><td>3% above Bank of England base rate</td></tr>
+  </table>
+
+  <p class="small">Quenby Fold Lettings Limited, company number 07734521, registered office 14
+  Overstone Parade, Redhill, Surrey RH1 2NF. VAT registration GB 245 7710 33. Marcham Vale Property
+  Holdings Limited, company number 11029884, registered office 9 Cadwell Court, Reigate, Surrey RH2 8AN.
+  Keep this page with the two preceding pages and your tenancy agreement.</p>
+
+  <div class="footer">
+    <span>Quenby Fold Lettings &#8212; agent disclosures &#8212; tenancy QF/TEN/10-2244</span>
+    <span>Page 3 of 3</span>
+  </div>
+</div>
+
+</body>
+</html>

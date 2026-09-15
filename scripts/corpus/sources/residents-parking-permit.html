@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Residents Parking Permit</title>
+<style>
+@font-face{font-family:"Corpus Permit";src:url("../fonts/RedHatDisplay.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Permit Mono";src:url("../fonts/SpaceMono-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Permit Mono";src:url("../fonts/SpaceMono-Bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:block}
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  @page { size: A4; margin: 0; }
+  .page {
+    width: 794px;
+    height: 1123px;
+    box-sizing: border-box;
+    position: relative;
+    overflow: hidden;
+    padding: 34px 50px 34px 50px;
+    background: #ffffff;
+    color: #17202a;
+    font-family: "Corpus Permit", sans-serif;
+    font-size: 12.5px;
+    line-height: 1.45;
+    page-break-after: always;
+  }
+  .page:last-child { page-break-after: auto; }
+  table.charges { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 11.5px; }
+  table.charges th { text-align: left; background: #eef3f8; border: 1px solid #ccc; padding: 4px 8px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px; color: #16406b; }
+  table.charges td { border: 1px solid #ccc; padding: 4px 8px; }
+  table.charges td.amt { font-family: "Corpus Permit Mono", monospace; text-align: right; white-space: nowrap; }
+
+  /* ---- permit panel ---- */
+  .permit {
+    background: #16406b;
+    color: #fff;
+    border-radius: 6px;
+    padding: 18px 26px 20px 26px;
+    position: relative;
+  }
+  .permit-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255,255,255,0.35);
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+  }
+  .council-name {
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.3px;
+  }
+  .permit-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    background: #fff;
+    color: #16406b;
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-weight: 700;
+  }
+  .zone-title {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    margin-bottom: 14px;
+  }
+  .permit-grid {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+  .permit-cell .plabel {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #cfe0f0;
+    margin-bottom: 3px;
+  }
+  .permit-cell .pvalue {
+    font-family: "Corpus Permit Mono", monospace;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: 1px;
+  }
+  .permit-cell .pvalue.small { font-size: 16px; }
+  .permit-dates {
+    display: flex;
+    justify-content: space-between;
+    background: rgba(255,255,255,0.12);
+    border-radius: 4px;
+    padding: 10px 16px;
+    margin-top: 6px;
+  }
+  .permit-dates .pd-block .plabel {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #cfe0f0;
+    margin-bottom: 3px;
+  }
+  .permit-dates .pd-block .pd-date {
+    font-family: "Corpus Permit Mono", monospace;
+    font-weight: 700;
+    font-size: 19px;
+  }
+  .fee-line {
+    margin-top: 10px;
+    font-size: 11px;
+    color: #dce8f5;
+  }
+  .fee-line strong { color: #fff; font-family: "Corpus Permit Mono", monospace; }
+
+  .perforation {
+    border-top: 2px dashed #999;
+    margin: 18px 0 16px 0;
+    text-align: center;
+    position: relative;
+  }
+  .perforation span {
+    position: relative;
+    top: -9px;
+    background: #fff;
+    padding: 0 10px;
+    font-size: 10px;
+    color: #666;
+    letter-spacing: 0.5px;
+  }
+
+  /* ---- covering notice ---- */
+  .notice-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+  .notice-head h1 {
+    font-size: 15px;
+    margin: 0;
+  }
+  .notice-head .notice-ref {
+    font-family: "Corpus Permit Mono", monospace;
+    font-size: 11px;
+    color: #333;
+  }
+  .notice p { margin: 0 0 8px 0; }
+  .notice h2 {
+    font-size: 12px;
+    margin: 14px 0 5px 0;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 2px;
+  }
+  table.vt {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 8px;
+    font-size: 11.5px;
+  }
+  table.vt td {
+    border: 1px solid #ccc;
+    padding: 4px 8px;
+  }
+  table.vt td.k { color: #555; width: 34%; }
+  table.vt td.v { font-family: "Corpus Permit Mono", monospace; }
+  ul.rules { margin: 0 0 8px 18px; padding: 0; }
+  ul.rules li { margin-bottom: 4px; }
+  .small-print {
+    font-size: 10px;
+    color: #555;
+    margin-top: 10px;
+    border-top: 1px solid #ccc;
+    padding-top: 6px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="permit">
+    <div class="permit-top">
+      <div class="council-name">MARCHFORD BOROUGH COUNCIL — PARKING SERVICES</div>
+      <div class="permit-label">Resident Permit</div>
+    </div>
+    <div class="zone-title">ZONE F — MARCHFORD NORTH</div>
+    <div class="permit-grid">
+      <div class="permit-cell">
+        <div class="plabel">Vehicle registration</div>
+        <div class="pvalue">LT19 KXM</div>
+      </div>
+      <div class="permit-cell">
+        <div class="plabel">Permit number</div>
+        <div class="pvalue small">RP-2026-118824</div>
+      </div>
+      <div class="permit-cell">
+        <div class="plabel">Vehicle make/model</div>
+        <div class="pvalue small">FORD FOCUS</div>
+      </div>
+    </div>
+    <div class="permit-dates">
+      <div class="pd-block">
+        <div class="plabel">Valid from</div>
+        <div class="pd-date">01/07/2026</div>
+      </div>
+      <div class="pd-block">
+        <div class="plabel">Expires</div>
+        <div class="pd-date">30/06/2027</div>
+      </div>
+    </div>
+    <div class="fee-line">Annual permit fee paid: <strong>£45.00</strong></div>
+  </div>
+
+  <div class="perforation"><span>✂ detach along this line and display in the windscreen, facing outward</span></div>
+
+  <div class="notice">
+    <div class="notice-head">
+      <h1>Covering notice — your residents' parking permit</h1>
+      <div class="notice-ref">Council ref: PKS/2026/07182</div>
+    </div>
+    <p>Dear Mr Whitfield,</p>
+    <p>We received your application on 14 June 2026 and your permit was issued on 22 June 2026, on production of a Council Tax bill dated 3 June 2026 as proof of residency. Your permit is enclosed above; please detach it along the perforation and display it flat on your dashboard so that the registration and expiry date are clearly visible through the windscreen.</p>
+
+    <h2>Vehicle details held on file</h2>
+    <table class="vt">
+      <tr><td class="k">Registration</td><td class="v">LT19 KXM</td></tr>
+      <tr><td class="k">Vehicle tax due</td><td class="v">01/09/2026</td></tr>
+      <tr><td class="k">MOT expiry</td><td class="v">14/03/2027</td></tr>
+    </table>
+
+    <h2>Zone F rules</h2>
+    <ul class="rules">
+      <li>This permit is valid only for parking within Zone F — Marchford North, in marked resident bays.</li>
+      <li>Zone F restrictions operate Monday to Saturday, 8:30am to 6:30pm. Parking is unrestricted outside these hours.</li>
+      <li>A second permit for another vehicle at this household costs £90.00 per year.</li>
+      <li>A book of 20 visitor permits, for guests without their own permit, costs £25.00.</li>
+      <li>Vehicles parked in Zone F without a valid permit displayed may receive a Penalty Charge Notice of £70, reduced to £35 if paid within 14 days.</li>
+    </ul>
+
+    <h2>If your details change</h2>
+    <p>Tell us straight away if you change your vehicle or move address, so your permit can be reissued. Write to Marchford Borough Council, Parking Services, 40 Guildhall Square, Marchford, MF2 1AA, call 01632 960223, or email parking@marchford.example.</p>
+
+    <div class="small-print">Permits for Marchford Borough Council are printed and posted on the council's behalf by Northgate Civic Services Ltd. This notice is not a VAT invoice.</div>
+  </div>
+
+</div>
+
+<div class="page">
+  <div class="notice">
+    <div class="notice-head">
+      <h1>Parking zones, permit conditions and charges</h1>
+      <div class="notice-ref">Page 2 of 4</div>
+    </div>
+
+    <h2>Where this permit is valid</h2>
+    <p>Zone F — Marchford North is bounded by Foundry Street to the north, the River Marchen to the south, Guildhall Square to the east and the ring road (the A1198) to the west. It covers the residential streets off Kestrel Road and Linnet Avenue, including Swift Terrace, Heron Walk and the western end of Foundry Street itself. A Zone F permit is not valid in any neighbouring zone: Zone E covers the Bramcote side west of the ring road, Zone G covers the streets south of the river around the retail park, and Zone D covers the station approach. Each zone's bays are marked with its own letter on the kerbside sign. A bay map showing every marked resident bay in Zone F is displayed on the community noticeboard outside Marchford Library and can be posted to you on request.</p>
+
+    <h2>Permit conditions</h2>
+    <ul class="rules">
+      <li>The permit must be displayed flat against the windscreen with the registration mark and expiry date clearly visible at all times the vehicle is parked in the zone.</li>
+      <li>The permit is valid only for the vehicle registration and zone printed on it; it cannot be transferred to another vehicle, another household or another zone.</li>
+      <li>Holding a permit gives permission to park in an available marked resident bay; it does not reserve a specific space or guarantee one will be free.</li>
+      <li>The council may suspend, vary or withdraw bays for roadworks, events or emergency works at short notice. No refund is given for suspensions totalling less than 5 working days across the permit year.</li>
+      <li>A permit found on a vehicle other than the one it was issued for may be confiscated and the permit cancelled without refund.</li>
+      <li>A third or subsequent vehicle kept at the same address cannot be issued a resident permit; a business permit or off-street parking must be arranged instead.</li>
+    </ul>
+
+    <h2>Permit and add-on charges, 2026/27</h2>
+    <table class="charges">
+      <tr><th>Item</th><th style="text-align:right;">Charge</th></tr>
+      <tr><td>Resident permit, first vehicle (this permit)</td><td class="amt">£45.00 a year</td></tr>
+      <tr><td>Resident permit, second vehicle at the same address</td><td class="amt">£90.00 a year</td></tr>
+      <tr><td>Business permit, per vehicle</td><td class="amt">£120.00 a year</td></tr>
+      <tr><td>Replacement permit (lost, stolen or damaged)</td><td class="amt">£12.50</td></tr>
+      <tr><td>Visitor permits, book of 10</td><td class="amt">£13.00</td></tr>
+      <tr><td>Visitor permits, book of 20</td><td class="amt">£25.00</td></tr>
+      <tr><td>Visitor permits, book of 50</td><td class="amt">£58.00</td></tr>
+    </table>
+    <p>Permit and visitor permit charges are reviewed every April; the rates above applied from 1 April 2026 and replace the 2025/26 rates, under which a first resident permit cost £42.00.</p>
+  </div>
+</div>
+
+<div class="page">
+  <div class="notice">
+    <div class="notice-head">
+      <h1>Blue Badge, visitor permits and other council accounts</h1>
+      <div class="notice-ref">Page 3 of 4</div>
+    </div>
+
+    <h2>Blue Badge parking</h2>
+    <p>A vehicle displaying a valid Blue Badge does not need a resident permit to park in a marked resident bay in Zone F for up to three hours, and may park without charge or time limit in an on-street disabled bay showing the Blue Badge symbol. A Blue Badge does not exempt a vehicle from loading restrictions, from bays reserved for a different zone, or from the Zone F operating hours shown on the reverse.</p>
+
+    <h2>Visitor permits</h2>
+    <p>Visitor permits are scratch-style day permits for guests without their own resident permit. Scratch off the day, month and year before your visitor parks, and display the permit alongside your resident permit, front side up, on the dashboard. A book cannot be reused once every permit in it has been scratched, and lost or stolen books are not replaced or refunded. Visitor permits from another zone, or from another Marchford ward, are not valid in Zone F.</p>
+
+    <h2>Trade and contractor permits</h2>
+    <p>Tradespeople working at a Zone F address may buy a day permit from the same online account for £6.00, or a book of 10 trade day permits for £48.00. These are separate from the business permit above, which is for a vehicle kept and used from a Zone F business address all year round.</p>
+
+    <h2>Council tax and garden waste</h2>
+    <p>Permit charges are billed and collected separately from Council Tax and from the council's garden waste subscription. Your Council Tax account reference (in the form CT-654321) is shown on your Council Tax bill and is not the same as your permit number. Garden waste subscriptions run from 1 April to 31 March each year and currently cost £58.00 a season; the next renewal window opens on 1 February 2027. Both can be managed from the same online account as your parking permit — see page 4 for how to sign in.</p>
+  </div>
+</div>
+
+<div class="page">
+  <div class="notice">
+    <div class="notice-head">
+      <h1>Traffic order, appeals, payments and your data</h1>
+      <div class="notice-ref">Page 4 of 4</div>
+    </div>
+
+    <h2>The traffic order behind this zone</h2>
+    <p>Zone F's parking restrictions are made under Traffic Regulation Order MBC-TRO-2024-17 (The Marchford (Zone F Parking Places) Order 2024), made under section 6 of the Road Traffic Regulation Act 1984. The order was advertised for public consultation between 3 March 2024 and 14 April 2024. A copy of the order and the consultation report can be inspected at the address below or on the council's website.</p>
+
+    <h2>If you disagree with a Penalty Charge Notice</h2>
+    <p>You may make informal representations to the council within 14 days of a Notice, and if these are not accepted, formal representations within 28 days of a Notice to Owner. If the council rejects formal representations, you may appeal free of charge to the independent adjudicator at the Traffic Penalty Tribunal, which is not part of the council and whose decision is final.</p>
+
+    <h2>Paying online, by phone or in person</h2>
+    <p>Permits, visitor permit books and Penalty Charge Notices can be ordered or paid online at mbc-parking.uk/account, signing in with your permit number or vehicle registration. Payments can also be made at any time on our automated payment line, 0345 646 0002, or in person at the Guildhall Square customer centre, Monday to Friday, 8:45am to 5:00pm. Your payment for this permit (reference PSPR-6620871) was processed on 22 June 2026.</p>
+
+    <h2>Complaints</h2>
+    <p>If you are unhappy with the service you have received from Parking Services, write to the Complaints Team, Marchford Borough Council, 40 Guildhall Square, Marchford, MF2 1AA, quoting your complaint reference if one has already been given (in the form PKS-COMP-2026-0417), or use the online form at mbc-parking.uk/complaints. Complaints are acknowledged within 10 working days.</p>
+
+    <h2>Data protection</h2>
+    <p>The council holds vehicle and applicant details for parking permits under its statutory function of managing on-street parking, in line with our registration with the Information Commissioner's Office, registration number Z6820044. Permit records are kept for the life of the permit plus two years, then destroyed.</p>
+
+    <h2>Accessibility</h2>
+    <p>This notice is available in large print, audio or Braille on request; call 01632 960223 or email parking@marchford.example. If you need help completing an appeal to the Traffic Penalty Tribunal because of a disability, Parking Services can help you complete the paper form instead.</p>
+
+    <h2>Freedom of Information</h2>
+    <p>Requests for information the council holds about parking in Marchford, other than your own personal data, can be made under the Freedom of Information Act 2000 to foi@marchford.example, or in writing to the address above. We aim to respond within 20 working days.</p>
+
+    <div class="small-print">Marchford Borough Council, 40 Guildhall Square, Marchford, MF2 1AA. This is page 4 of a 4 page notice; if any page is missing, contact Parking Services before relying on the permit conditions shown.</div>
+  </div>
+</div>
+
+</body>
+</html>

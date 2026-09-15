@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Marlestone Workplace Pensions Ltd — Annual Benefit Statement</title>
+<style>
+@font-face{font-family:"Corpus Actuary";src:url("../fonts/Vollkorn.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Actuary Sans";src:url("../fonts/Bitter.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Actuary", serif; font-size: 9.4pt; color: #000;
+    background: #fff;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always; background: #fff;
+    padding: 12mm 14mm 16mm 14mm;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  table { font-family: "Corpus Actuary Sans", sans-serif; }
+
+  .masthead {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding-bottom: 3mm; border-bottom: 3px solid #1e3a5f;
+  }
+  .brand { font-size: 15pt; font-weight: 700; color: #1e3a5f; letter-spacing: 0.2px; }
+  .brand small { display: block; font-family: "Corpus Actuary Sans", sans-serif; font-size: 7pt; font-weight: 400; color: #333; margin-top: 0.8mm; }
+  .runbox { font-family: "Corpus Actuary Sans", sans-serif; font-size: 7.6pt; color: #000; text-align: right; line-height: 1.75; }
+  .runbox .k { color: #333; }
+
+  h1.doctitle {
+    font-size: 14pt; font-weight: 700; color: #000; margin: 5mm 0 1mm 0;
+  }
+  .docsub { font-family: "Corpus Actuary Sans", sans-serif; font-size: 8.6pt; color: #222; margin-bottom: 4mm; }
+
+  h2 {
+    font-size: 10.5pt; font-weight: 700; color: #1e3a5f; margin: 5mm 0 1.8mm 0;
+    border-bottom: 1.4px solid #1e3a5f; padding-bottom: 0.9mm;
+  }
+
+  table.grid { width: 100%; border-collapse: collapse; font-size: 8.6pt; margin-bottom: 1mm; }
+  table.grid th, table.grid td { border: 0.75px solid #1e3a5f; padding: 1.5mm 2.4mm; text-align: left; vertical-align: top; }
+  table.grid th { background: #1e3a5f; color: #fff; font-weight: 700; width: 40%; }
+  table.grid td.num { text-align: right; }
+
+  .retire-panel {
+    border: 1.6px solid #1e3a5f; padding: 3mm 5mm; margin: 3.5mm 0; text-align: center;
+  }
+  .retire-panel .lab { font-family: "Corpus Actuary Sans", sans-serif; font-size: 8.2pt; text-transform: uppercase; letter-spacing: 0.5px; color: #1e3a5f; font-weight: 700; }
+  .retire-panel .val { font-size: 20pt; font-weight: 700; color: #000; margin-top: 1mm; }
+  .retire-panel .sub { font-family: "Corpus Actuary Sans", sans-serif; font-size: 7.4pt; color: #333; margin-top: 1mm; }
+
+  .fund-panel {
+    display: flex; justify-content: space-between; align-items: center;
+    border: 1.4px solid #1e3a5f; background: #eef2f6; padding: 3.2mm 5mm; margin: 3.5mm 0;
+  }
+  .fund-panel .lab { font-family: "Corpus Actuary Sans", sans-serif; font-size: 8.6pt; color: #000; font-weight: 700; }
+  .fund-panel .amt { font-family: "Corpus Actuary Sans", sans-serif; font-size: 19pt; font-weight: 700; color: #1e3a5f; }
+
+  .controw { display: flex; gap: 4mm; margin: 3mm 0; }
+  .conbox { flex: 1; border: 0.9px solid #1e3a5f; padding: 2.4mm 3.2mm; font-family: "Corpus Actuary Sans", sans-serif; }
+  .conbox .lab { font-size: 7.2pt; text-transform: uppercase; letter-spacing: 0.3px; color: #333; }
+  .conbox .val { font-size: 12.5pt; font-weight: 700; color: #000; margin-top: 0.6mm; }
+  .conbox.combined { background: #1e3a5f; }
+  .conbox.combined .lab { color: #dfe6ee; }
+  .conbox.combined .val { color: #fff; font-size: 15pt; }
+
+  table.data { width: 100%; border-collapse: collapse; font-size: 7.9pt; }
+  table.data thead th {
+    text-align: left; font-weight: 700; font-size: 7.6pt;
+    border: 0.75px solid #1e3a5f; padding: 1.5mm 2mm; background: #1e3a5f; color: #fff;
+  }
+  table.data thead th.r { text-align: right; }
+  table.data tbody td { padding: 1.2mm 2mm; border: 0.6px solid #1e3a5f; }
+  table.data tbody td.r { text-align: right; }
+  table.data tbody tr:nth-child(even) td { background: #eef2f6; }
+  table.data tfoot td { border: 0.75px solid #1e3a5f; padding: 1.4mm 2mm; font-weight: 700; }
+  table.data tfoot td.r { text-align: right; }
+
+  .footstrip {
+    position: absolute; left: 14mm; right: 14mm; bottom: 8mm;
+    display: flex; justify-content: space-between; font-family: "Corpus Actuary Sans", sans-serif;
+    font-size: 7pt; color: #333; border-top: 0.75px solid #1e3a5f; padding-top: 1.6mm;
+  }
+
+  .small { font-size: 8pt; line-height: 1.5; color: #000; }
+  .sans-small { font-family: "Corpus Actuary Sans", sans-serif; font-size: 7.6pt; line-height: 1.5; color: #000; }
+  .cols2 { column-count: 2; column-gap: 7mm; }
+  .cols2 p { margin: 0 0 2.2mm 0; }
+  sup { font-size: 65%; color: #1e3a5f; }
+
+  ol.assum { font-family: "Corpus Actuary Sans", sans-serif; font-size: 7.6pt; line-height: 1.55; padding-left: 4.2mm; margin: 1mm 0 3mm 0; }
+  ol.assum li { margin-bottom: 1mm; }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+  <div class="masthead">
+    <div class="brand">Marlestone Workplace Pensions Ltd
+      <small>Trustee-administered defined contribution pension scheme</small>
+    </div>
+    <div class="runbox">
+      <div><span class="k">STATEMENT DATE</span> 5 April 2026</div>
+      <div><span class="k">PLAN NUMBER</span> WPP-0077410-6</div>
+      <div><span class="k">PAGE</span> 1 OF 4</div>
+    </div>
+  </div>
+
+  <h1 class="doctitle">Annual Benefit Statement</h1>
+  <div class="docsub">For the scheme year 6 April 2025 to 5 April 2026 &mdash; The Corvedale Logistics Ltd Pension Scheme</div>
+
+  <table class="grid">
+    <tr><th>Member</th><td>Mr D. Fairweather</td></tr>
+    <tr><th>Member number</th><td>MEM-4471083</td></tr>
+    <tr><th>Date of birth</th><td>12 March 1985</td></tr>
+    <tr><th>National Insurance number</th><td>NX 44 71 08 B</td></tr>
+    <tr><th>Date joined the scheme</th><td>1 June 2012</td></tr>
+    <tr><th>Employer</th><td>Corvedale Logistics Ltd</td></tr>
+    <tr><th>Employer's PAYE reference</th><td>475/CL04471</td></tr>
+    <tr><th>Scheme tax reference (HM Revenue &amp; Customs)</th><td>00841173RT</td></tr>
+    <tr><th>Default investment fund</th><td>Ashcombe Balanced Growth Fund, managed by Ashcombe Asset Management Ltd</td></tr>
+  </table>
+
+  <div class="retire-panel">
+    <div class="lab">Your selected retirement date</div>
+    <div class="val">12 March 2053</div>
+    <div class="sub">You will be aged 68. You may be able to take your pension from as early as 12 March 2040 (age 55) &mdash; see page 3.</div>
+  </div>
+
+  <div class="fund-panel">
+    <div class="lab">Your pension fund value as at 5 April 2026</div>
+    <div class="amt">&pound;58,412.67</div>
+  </div>
+  <p class="small">Your previous statement, dated 5 April 2025, showed your fund valued at &pound;51,204.19. Your cash transfer value on 5 April 2026, the amount that would be paid to another registered pension scheme if you moved your pension, is &pound;58,412.67; there is no charge for transferring out. If you took your whole pension as cash today, before any tax due, you could get an income of around &pound;2,430 a year<sup>1</sup> &mdash; see page 3 for what your pension could be worth at your selected retirement date.</p>
+
+  <h2>Your contributions</h2>
+  <div class="controw">
+    <div class="conbox">
+      <div class="lab">Your monthly contribution</div>
+      <div class="val">&pound;215.42</div>
+    </div>
+    <div class="conbox">
+      <div class="lab">Employer's monthly contribution</div>
+      <div class="val">&pound;129.25</div>
+    </div>
+    <div class="conbox combined">
+      <div class="lab">Combined monthly total</div>
+      <div class="val">&pound;344.67</div>
+    </div>
+  </div>
+  <p class="sans-small">Your contribution is 5% of pensionable pay and Corvedale Logistics Ltd's is 3%, both before the tax relief HM Revenue &amp; Customs adds to your pot. A month-by-month record of contributions received during the scheme year is set out on page 2, and what your fund could grow to by your selected retirement date is set out on page 3.</p>
+
+  <div class="footstrip">
+    <span>Marlestone Workplace Pensions Ltd &middot; Plan WPP-0077410-6</span>
+    <span>Page 1 of 4</span>
+  </div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+  <div class="masthead">
+    <div class="brand">Marlestone Workplace Pensions Ltd
+      <small>Trustee-administered defined contribution pension scheme</small>
+    </div>
+    <div class="runbox">
+      <div><span class="k">STATEMENT DATE</span> 5 April 2026</div>
+      <div><span class="k">PLAN NUMBER</span> WPP-0077410-6</div>
+      <div><span class="k">PAGE</span> 2 OF 4</div>
+    </div>
+  </div>
+
+  <h2>Contributions received</h2>
+  <p class="small">Contributions received during the 12 months of the scheme year, 6 April 2025 to 5 April 2026. Your contribution is shown net of relief at source; tax relief is added by us after we claim it from HM Revenue &amp; Customs.</p>
+  <table class="data">
+    <thead>
+      <tr><th>Date received</th><th class="r">Your contribution (&pound;)</th><th class="r">Employer contribution (&pound;)</th><th class="r">Tax relief added (&pound;)</th><th class="r">Running total (&pound;)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>06/04/2025</td><td class="r">172.34</td><td class="r">129.25</td><td class="r">43.08</td><td class="r">344.67</td></tr>
+      <tr><td>06/05/2025</td><td class="r">172.34</td><td class="r">129.25</td><td class="r">43.08</td><td class="r">689.34</td></tr>
+      <tr><td>06/06/2025</td><td class="r">172.34</td><td class="r">129.25</td><td class="r">43.08</td><td class="r">1,034.01</td></tr>
+      <tr><td>06/07/2025</td><td class="r">175.90</td><td class="r">131.93</td><td class="r">43.98</td><td class="r">1,385.82</td></tr>
+      <tr><td>06/08/2025</td><td class="r">172.34</td><td class="r">129.25</td><td class="r">43.08</td><td class="r">1,730.49</td></tr>
+      <tr><td>06/09/2025</td><td class="r">172.34</td><td class="r">129.25</td><td class="r">43.08</td><td class="r">2,075.16</td></tr>
+      <tr><td>06/10/2025</td><td class="r">172.34</td><td class="r">129.25</td><td class="r">43.08</td><td class="r">2,419.83</td></tr>
+      <tr><td>06/11/2025</td><td class="r">172.34</td><td class="r">129.25</td><td class="r">43.08</td><td class="r">2,764.50</td></tr>
+      <tr><td>06/12/2025</td><td class="r">191.60</td><td class="r">143.70</td><td class="r">47.90</td><td class="r">3,147.70</td></tr>
+      <tr><td>06/01/2026</td><td class="r">172.34</td><td class="r">129.25</td><td class="r">43.08</td><td class="r">3,492.37</td></tr>
+      <tr><td>06/02/2026</td><td class="r">172.34</td><td class="r">129.25</td><td class="r">43.08</td><td class="r">3,837.04</td></tr>
+      <tr><td>06/03/2026</td><td class="r">172.34</td><td class="r">129.25</td><td class="r">43.08</td><td class="r">4,181.71</td></tr>
+    </tbody>
+    <tfoot>
+      <tr><td>Total for the scheme year</td><td class="r">2,111.44</td><td class="r">1,584.13</td><td class="r">528.16</td><td class="r">4,223.73</td></tr>
+    </tfoot>
+  </table>
+  <p class="small" style="margin-top:2.5mm;">The July and December contributions are higher because they include pension on overtime and a Christmas bonus paid through Corvedale Logistics Ltd's payroll that month. This record covers contributions received into this plan only and does not include any pension you built up with a previous employer.</p>
+
+  <div class="footstrip">
+    <span>Marlestone Workplace Pensions Ltd &middot; Plan WPP-0077410-6</span>
+    <span>Page 2 of 4</span>
+  </div>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page">
+  <div class="masthead">
+    <div class="brand">Marlestone Workplace Pensions Ltd
+      <small>Trustee-administered defined contribution pension scheme</small>
+    </div>
+    <div class="runbox">
+      <div><span class="k">STATEMENT DATE</span> 5 April 2026</div>
+      <div><span class="k">PLAN NUMBER</span> WPP-0077410-6</div>
+      <div><span class="k">PAGE</span> 3 OF 4</div>
+    </div>
+  </div>
+
+  <h2>What your pension could be worth</h2>
+  <p class="small">These figures are illustrations, not promises. They assume you keep contributing to your selected retirement date of 12 March 2053 and that you buy a level, single-life annuity<sup>2</sup> with your fund at that date. "Today's money" adjusts the future amount for the effect of inflation<sup>3</sup> so you can compare it with prices now; "future money" is the amount you might actually see on your statement in 2053.</p>
+
+  <table class="data">
+    <thead>
+      <tr><th>Assumed growth<sup>4</sup></th><th class="r">Fund at retirement<br>(future money)</th><th class="r">Fund at retirement<br>(today's money)</th><th class="r">Annual income<sup>5</sup><br>(future money)</th><th class="r">Annual income<sup>5</sup><br>(today's money)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Lower assumed growth &mdash; 2% a year</td><td class="r">&pound;64,900</td><td class="r">&pound;38,700</td><td class="r">&pound;3,120</td><td class="r">&pound;1,860</td></tr>
+      <tr><td>Mid assumed growth &mdash; 5% a year</td><td class="r">&pound;112,400</td><td class="r">&pound;67,000</td><td class="r">&pound;5,400</td><td class="r">&pound;3,220</td></tr>
+      <tr><td>Higher assumed growth &mdash; 8% a year</td><td class="r">&pound;196,800</td><td class="r">&pound;117,300</td><td class="r">&pound;9,450</td><td class="r">&pound;5,630</td></tr>
+    </tbody>
+  </table>
+
+  <p class="small" style="margin-top:2.5mm;">These illustrations use the Statutory Money Purchase Illustration basis<sup>6</sup> and assume you continue paying &pound;344.67 a month between you and Corvedale Logistics Ltd, increasing each year in line with assumed earnings growth. Charges are deducted before the figures above are calculated &mdash; see page 4.</p>
+
+  <h2>Taking your pension early or late</h2>
+  <p class="small">The earliest age you can normally draw a workplace pension is 55, which for you falls on 12 March 2040. Drawing your pension earlier than your selected retirement date will usually reduce the amounts shown above, because your fund has less time to grow and your pension is expected to be paid for longer. You do not have to draw your pension on 12 March 2053; you can choose to keep contributing beyond that date, or draw it sooner from age 55.</p>
+
+  <h2>Where your money is invested</h2>
+  <p class="small">Unless you have chosen otherwise, your contributions are invested in the Ashcombe Balanced Growth Fund, the scheme's default arrangement, managed on the trustees' behalf by Ashcombe Asset Management Ltd. As you approach retirement, the default arrangement automatically starts moving your fund into lower-risk assets, beginning ten years before your selected retirement date, on 12 March 2043. You can switch funds at any time free of charge by writing to us or using the online portal at the address on page 4.</p>
+
+  <table class="data">
+    <thead>
+      <tr><th>Fund (fund code)</th><th class="r">Annual management charge</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Ashcombe Balanced Growth Fund (default arrangement) &mdash; AGB4471</td><td class="r">0.42%</td></tr>
+      <tr><td>Ashcombe Cautious Fund &mdash; ACF2201</td><td class="r">0.38%</td></tr>
+      <tr><td>Ashcombe Adventurous Growth Fund &mdash; AAG5518</td><td class="r">0.55%</td></tr>
+      <tr><td>Ashcombe Ethical Fund &mdash; AEF3390</td><td class="r">0.61%</td></tr>
+      <tr><td>Ashcombe Pre-Retirement Fund &mdash; APR7742</td><td class="r">0.40%</td></tr>
+    </tbody>
+  </table>
+  <p class="small" style="margin-top:2mm;">There is no charge to transfer into this scheme. If you later take your pension as drawdown rather than buying an annuity, a drawdown administration charge of &pound;150 applies each time you request a withdrawal; this is not reflected in the projections on this page.</p>
+
+  <div class="footstrip">
+    <span>Marlestone Workplace Pensions Ltd &middot; Plan WPP-0077410-6</span>
+    <span>Page 3 of 4</span>
+  </div>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page">
+  <div class="masthead">
+    <div class="brand">Marlestone Workplace Pensions Ltd
+      <small>Trustee-administered defined contribution pension scheme</small>
+    </div>
+    <div class="runbox">
+      <div><span class="k">STATEMENT DATE</span> 5 April 2026</div>
+      <div><span class="k">PLAN NUMBER</span> WPP-0077410-6</div>
+      <div><span class="k">PAGE</span> 4 OF 4</div>
+    </div>
+  </div>
+
+  <h2>Assumptions used in this statement</h2>
+  <ol class="assum">
+    <li><sup>1</sup> The income if you took your pension today assumes you used your whole fund to buy a level, single-life annuity from an insurer at current market annuity rates, with no guarantee period and no dependant's pension. Actual annuity rates change daily and vary between providers.</li>
+    <li><sup>2</sup> The annuity used for the projections on page 3 is a level, single-life annuity with no guarantee period, purchased on the date you reach your selected retirement date. Buying a different type of annuity, or taking your money in another way such as drawdown or as a lump sum, would produce different figures.</li>
+    <li><sup>3</sup> Today's money figures assume price inflation of 2.5% a year between 5 April 2026 and your selected retirement date, in line with guidance published by the Financial Reporting Council.</li>
+    <li><sup>4</sup> The three growth rates are set out in Actuarial Standard Technical Memorandum 1 (AS TM1), version 4.2, which came into effect on 1 October 2018 and prescribes the rates that occupational schemes must use for statutory illustrations. They are not a forecast, minimum or guarantee of what your investments will actually return.</li>
+    <li><sup>5</sup> Annual income figures are shown before income tax and assume the annuity is paid monthly in advance and does not increase once in payment.</li>
+    <li><sup>6</sup> This statement has been prepared on the Statutory Money Purchase Illustration (SMPI) basis required by the Occupational and Personal Pension Schemes (Disclosure of Information) Regulations 2013, a requirement introduced for money purchase pensions on 6 April 2003.</li>
+  </ol>
+
+  <h2>Charges</h2>
+  <p class="small">An annual management charge of 0.42% of the value of your fund is deducted by Ashcombe Asset Management Ltd, calculated daily and already reflected in the fund value and the projections shown in this statement. There is no charge for joining, leaving or transferring out of the scheme; see page 3 for the charges on other funds and on drawdown. This statement was prepared using illustration assumptions in force on 6 April 2026.</p>
+
+  <h2>Risk warnings</h2>
+  <div class="small cols2">
+    <p>The value of your pension can go down as well as up, and you may get back less than has been paid in. Past performance is not a guide to future performance.</p>
+    <p>The illustrations in this statement are not guaranteed. They are based on assumptions about investment growth, inflation and annuity rates that may not happen. Your actual pension could be higher or lower.</p>
+    <p>Tax relief and the tax treatment of pensions depend on your individual circumstances and may change in the future. Legislation governing workplace pensions may also change before your selected retirement date.</p>
+    <p>If you leave Corvedale Logistics Ltd, your benefits in this scheme remain invested and continue to be subject to charges and investment risk, whether or not you keep contributing.</p>
+  </div>
+
+  <h2>Important information</h2>
+  <div class="sans-small cols2">
+    <p><b>Marlestone Workplace Pensions Ltd</b> is registered in England and Wales, company number 07741029, registered office 8 Cathedral Yard, Exeter, Devon, EX1 1HB. Marlestone Workplace Pensions Ltd is authorised and regulated by the Financial Conduct Authority, register number 558112. VAT registration number GB 774 1029 41.</p>
+    <p>Our member helpline is open Monday to Friday, 8am to 6pm, on 0345 608 2200. You can also view your plan, switch funds or update your details through the online portal at myplan.marlestonepensions.example, or using the Marlestone Pensions app for iOS and Android.</p>
+    <p>Free, impartial guidance on your options at retirement is available from PensionWayfinder, the government-backed guidance service, at pensionwayfinder.example.org or by phone; it is not provided by Marlestone Workplace Pensions Ltd and does not give personal financial advice.</p>
+    <p>If you are unhappy with any aspect of the service you have received, please write to our Customer Relations team at the address above, or telephone 0345 608 2210. If our final response does not resolve your complaint, you may be entitled to refer it to the Financial Ombudsman Service or the Pensions Ombudsman, free of charge, normally within six months of that response.</p>
+    <p>This statement was produced on 5 April 2026 and is based on information held by us on that date. Your next annual statement will be issued after 5 April 2027.</p>
+    <p>&copy; 2026 Marlestone Workplace Pensions Ltd. All rights reserved.</p>
+  </div>
+
+  <div class="footstrip">
+    <span>Marlestone Workplace Pensions Ltd &middot; Plan WPP-0077410-6</span>
+    <span>Page 4 of 4</span>
+  </div>
+</div>
+
+</body>
+</html>

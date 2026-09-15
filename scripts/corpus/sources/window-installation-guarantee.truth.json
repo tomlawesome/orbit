@@ -1,0 +1,38 @@
+{
+  "name": "window installation guarantee, four registration-strip numbers and the answer is third",
+  "filename": "fullpage-window-installation-guarantee.pdf",
+  "expected": {
+    "dates": [
+      "2026-03-14",
+      "2036-03-14"
+    ],
+    "provider": "National Fenestration Guarantee Scheme Ltd",
+    "reference": "IBG-2026-337215",
+    "dateRoles": [
+      {
+        "date": "2026-03-14",
+        "role": "start"
+      },
+      {
+        "date": "2036-03-14",
+        "role": "expiry"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Guarantee",
+        "Warranty",
+        "Certificate",
+        "Insurance"
+      ],
+      "qualifiers": [
+        "Windows",
+        "Building work"
+      ]
+    }
+  },
+  "notes": [
+    "The registration strip prints four differently-purposed numbers in identical styling: the installer's scheme membership number (NFGS-INST-04471), the building regulations compliance certificate number (BR-2026-118824), the guarantee certificate number (IBG-2026-337215, printed third), and the scheme's own policy number (GPS-0417-2261). Only the guarantee certificate number is 'reference' — it is what a claim must quote, as the guarantee wording itself states. Provider is the scheme (National Fenestration Guarantee Scheme Ltd), which issues and insures the guarantee, not Hallcroft Windows & Conservatories Ltd, the installer, whose name is larger (10pt vs the scheme's body-text size), appears in the address panel, and recurs through the guarantee wording more often than the scheme's own name — but the guarantee is with the scheme, and the wording is explicit that a claim goes to the scheme, not the installer. dates deliberately excludes: the date the work was completed (17 March 2026, three days after the installation date and easily confused with it), the date the compliance notification was lodged with the local authority (2 April 2026), the date this certificate was issued (9 April 2026), the installer's scheme registration expiry (30 June 2027), the date the installer first joined the scheme (12 May 2011), the guarantee wording's own revision date (1 January 2024), and the scheme's incorporation date (3 February 2009) — none of which a user tracking this guarantee would want. The ten-year term is stated in the guarantee wording only as 'ten years from the date of installation', never restated as a literal date there; the literal expiry date 14 March 2036 is findable only in the registration strip's second row, alongside the installation date, which is why both survive as answers despite the prose being vague. No price, fee or premium appears anywhere on the document, so costMinor and currency are omitted. The guarantee runs for a fixed ten-year term and is not serviced or renewed, so recurrenceMonths and scheduleKind are both omitted.",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Insurance-backed guarantee')."
+  ]
+}

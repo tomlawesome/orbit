@@ -1,0 +1,37 @@
+{
+  "name": "private music tuition invoice, an exam fee and a missed-lesson charge that are not both in the total",
+  "filename": "fullpage-music-tuition-invoice.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-02",
+      "2026-09-16"
+    ],
+    "provider": "C. Marchetti Piano & Guitar Tuition",
+    "reference": "CM-INV-0341",
+    "dateRoles": [
+      {
+        "date": "2026-09-02",
+        "role": "issued"
+      },
+      {
+        "date": "2026-09-16",
+        "role": "due"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Course"
+      ]
+    },
+    "costMinor": 22500,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: invoice date 2 September 2026, payment due 16 September 2026. The term dates (7 September to 11 December 2026), the missed-lesson date (24 August 2026) and the half-term return date (2 November 2026) are printed but not declared.",
+    "provider is C. Marchetti Piano & Guitar Tuition, the sole trader's own brand, printed across the heading and subheading together.",
+    "reference is invoice CM-INV-0341.",
+    "costMinor is the total due, 225.00 (the 210.00 term fee plus a 15.00 missed-lesson charge); the Grade 3 exam fee (46.00, passed to the exam board and invoiced separately) and keyboard hire (12.00, not taken) are traps that are explicitly not part of the total.",
+    "subtype: Course. No qualifier in the taxonomy names music tuition closely enough to declare one, the same reasoning as a self-storage agreement declaring only 'Rental'.",
+    "No recurrence or scheduleKind is declared: neither dateRole is 'renewal' or 'service'."
+  ]
+}

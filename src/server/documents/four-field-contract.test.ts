@@ -4,6 +4,7 @@ import { workspaceItemSchema } from "@/lib/workspace";
 import { buildDocumentSuggestions, itemDocumentSuggestionFields } from "@/server/item-document-inspection";
 import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
+import { isSubtypeSpec } from "./extraction-scoring";
 import {
   documentDateRoles,
   proposalFromText,
@@ -157,6 +158,17 @@ describe("the four model-owned fields round-trip to a reviewed item", () => {
 describe("corpus ground truth for the four fields is consistent with the contract", () => {
   const documents = EXTRACTION_CORPUS.map((document) => [document.name, document] as const);
 
+  // A fixed-term contract costs everything paid over its term (owner,
+  // 2026-09-13), and some pages print only the monthly price and the term.
+  // For those the truth declares `costArithmetic` instead: each factor is a
+  // printed amount in minor units and a printed count of months, and the
+  // products add up to the declared cost (`scripts/corpus/verify.mjs` checks
+  // the same). An unprinted cost without it is still a corpus bug.
+  const printedForms = (minor: number): string[] => {
+    const printed = (minor / 100).toFixed(2);
+    return [printed, printed.replace(/\.00$/u, ""), printed.replace(/\B(?=(\d{3})+\.)/gu, ",")];
+  };
+
   it.each(documents)("%s", (_name, document) => {
     const { expected, text } = document;
     const roles = expected.dateRoles ?? [];
@@ -182,10 +194,20 @@ describe("corpus ground truth for the four fields is consistent with the contrac
     if (expected.costMinor !== undefined) {
       expect(expected.currency).toBe("GBP");
       expect(text).toContain("£");
-      const printed = (expected.costMinor / 100).toFixed(2);
-      const withoutTrailingZeros = printed.replace(/\.00$/u, "");
-      const grouped = printed.replace(/\B(?=(\d{3})+\.)/gu, ",");
-      expect([printed, withoutTrailingZeros, grouped].some((form) => text.includes(form))).toBe(true);
+      const arithmetic = expected.costArithmetic;
+      if (arithmetic === undefined) {
+        expect(printedForms(expected.costMinor).some((form) => text.includes(form))).toBe(true);
+      } else {
+        // Each price is printed; the term is, or the split of it is (the
+        // mobile plan prints "first 6 months" of a 24-month term).
+        const termPrinted = (months: number) => new RegExp(`\\b${months}\\s*-?\\s*months?\\b`, "iu").test(text);
+        const whole = arithmetic.reduce((sum, [, months]) => sum + months, 0);
+        for (const [minor, months] of arithmetic) {
+          expect(printedForms(minor).some((form) => text.includes(form))).toBe(true);
+          expect(termPrinted(months) || termPrinted(whole)).toBe(true);
+        }
+        expect(arithmetic.reduce((sum, [minor, months]) => sum + minor * months, 0)).toBe(expected.costMinor);
+      }
     }
 
     // A recurrence needs a schedule to repeat, and needs its digits on the
@@ -196,11 +218,18 @@ describe("corpus ground truth for the four fields is consistent with the contrac
     }
 
     // A subtype the page does not print is not something any grounded
-    // extractor could return.
-    if (expected.subtype !== undefined) {
-      expect(expected.subtype.length).toBeLessThanOrEqual(80);
-      expect(text.replace(/\s+/gu, " ").toLowerCase())
-        .toContain(expected.subtype.replace(/\s+/gu, " ").toLowerCase());
+    // extractor could return. Ground truth may declare a set of acceptable
+    // phrases (#989/#992); every member of the set must still be printed.
+    // That check does not apply to the taxonomy object form (#989): a kind
+    // such as "Insurance" need not be printed anywhere -- naming what type
+    // of thing the page is does not require the page to use that word.
+    if (expected.subtype !== undefined && !isSubtypeSpec(expected.subtype)) {
+      const subtypes = Array.isArray(expected.subtype) ? expected.subtype : [expected.subtype];
+      for (const subtype of subtypes) {
+        expect(subtype.length).toBeLessThanOrEqual(80);
+        expect(text.replace(/\s+/gu, " ").toLowerCase())
+          .toContain(subtype.replace(/\s+/gu, " ").toLowerCase());
+      }
     }
   });
 });

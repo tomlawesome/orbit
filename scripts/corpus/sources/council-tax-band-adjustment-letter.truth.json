@@ -1,0 +1,22 @@
+{
+  "name": "council tax adjustment letter after a band change, with a revised instalment table",
+  "filename": "council-tax-band-adjustment-letter.pdf",
+  "expected": {
+    "dates": ["2026-12-01"],
+    "provider": "Wexmoor District Council",
+    "reference": "68104472",
+    "dateRoles": [
+      { "date": "2026-12-01", "role": "due" }
+    ],
+    "subtype": { "kinds": ["Tax", "Bill"], "qualifiers": ["Council tax", "Council"] },
+    "costMinor": 194630,
+    "currency": "GBP"
+  },
+  "notes": [
+    "provider is Wexmoor District Council, the authority that bills and collects. It is not the Valuation Office Agency, which decided the band, not the Wexmoor Police and Crime Commissioner, the Wexmoor Fire and Rescue Authority or Ashcombe Parish Council, whose precepts appear as lines in the charge, not the outsourced revenues partner Northgate Revenues Services, not the enforcement agents Carrick Enforcement and not the Valuation Tribunal Service.",
+    "reference is the council tax account number 68104472, printed beside the address and on the payment slip. Rivals: the property reference 0091223345X, the Valuation Office case number VOA/CT/5510983, the payment card number 6330 4411 8820 1194, the direct debit reference 68104472A, the previous summons number SUM-2026-0417, the benefits claim reference HB-772190, the council's own department code REV/CT/09 and the telephone and textphone numbers.",
+    "dates and dateRoles carry only the date the first revised instalment must be paid, 1 December 2026. Rivals the letter prints: the letter date (6 November 2026), the date the band change takes effect (1 April 2026), the Valuation Office decision date (28 October 2026), the original bill date (12 March 2026), the last day to appeal (6 December 2026), the end of the financial year (31 March 2027), the ten instalment dates and the date the discount was last reviewed (19/08/2026).",
+    "costMinor is the revised council tax payable for 2026/27, £1,946.30. It is not the original charge of £2,104.55, not the £158.25 credited back, not the £194.63 monthly instalment, not the parish precept £24.17, the adult social care precept £182.44, the police precept £246.11 or the fire precept £78.90, and not the £70.00 costs added to a previous summons.",
+    "scheduleKind and recurrenceMonths are omitted: the tracked date is a payment due date, not a renewal or a service, and the ten instalments are a payment frequency."
+  ]
+}

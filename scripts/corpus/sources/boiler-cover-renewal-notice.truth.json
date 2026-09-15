@@ -1,0 +1,25 @@
+{
+  "name": "boiler cover renewal notice with a tear-off slip, provider named only in addresses",
+  "filename": "boiler-cover-renewal-notice.pdf",
+  "expected": {
+    "dates": ["2027-03-01", "2027-03-14"],
+    "provider": "Warmvale",
+    "reference": "WV 2291 0834",
+    "dateRoles": [
+      { "date": "2027-03-01", "role": "renewal" },
+      { "date": "2027-03-14", "role": "service" }
+    ],
+    "subtype": { "kinds": ["Plan", "Maintenance contract"], "qualifiers": ["Boiler"] },
+    "costMinor": 28200,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "provider is Warmvale. The trading name is never printed as a plain name: it is only ever inside warmvale.co.uk/renew, my.warmvale.co.uk, care@warmvale.co.uk, warmvale.co.uk/app and the handle @warmvalehome. The small print names Pellow Domestic Services Limited, a different form of words, as the company that arranges and administers the plan. Other organisations: the insurer Ardmore Insurance Company Limited, the engineer network Crayle Heating Contractors, the boiler maker Thorburn Heating, Gas Safe Register and the Financial Ombudsman Service.",
+    "reference is the plan number WV 2291 0834, printed in the renewal panel and on the tear-off slip. Rivals: the customer number 5510983, the engineer job number JOB-77120, the boiler serial number 22-K-991083, the appliance GC number 47-311-92, the direct debit reference 22910834, the renewal quotation reference RQ-44710, the Gas Safe registration number 552190, the company registration number 08812207 and the VAT number GB 118 2290 77.",
+    "dates and dateRoles carry the date the plan renews, 1 March 2027, and the date the annual service falls due, 14 March 2027. Rivals printed on the notice: the notice date (20 January 2027), the date the plan first started (1 March 2022), the last service (18 March 2026), the last engineer visit (04/11/2026), the reply-by date on the slip (15 February 2027), the date prices change (1 April 2027), the boiler installation year and the date the terms were last revised (1 October 2026).",
+    "costMinor is £282.00, the total payable over the 12 month plan year printed on the notice. It is not the £23.50 monthly instalment, not last year's £254.40, not the £60.00 excess for each repair, not the £199.00 one-off repair price, not the £96.00 service-only visit, not the £3.50 a month drains add-on, not the £31.00 a month landlord plan and not the £500.00 boiler replacement contribution.",
+    "recurrenceMonths is 12, the printed 12 month plan year, and the same interval the service is carried out at. scheduleKind is renewal, the first scheduled role the notice prints."
+  ]
+}
