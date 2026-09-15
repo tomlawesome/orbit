@@ -5,7 +5,7 @@
     "dates": [
       "2026-11-14"
     ],
-    "provider": "Kittiwake Energy Ltd",
+    "provider": "Halcyon Energy",
     "reference": "7724 6650 18",
     "dateRoles": [
       {
@@ -36,7 +36,7 @@
     "Also excluded from `dates`: the plan start date (3 October 2024), the new fixed offer's own term end printed inside the tariff box (14 November 2027), the last statement date, the meter-reading-due date, the Ofgem price cap change date and the Ofgem consultation closing date (all four in the footer) — all texture a careful human would not report as the document's governing date.",
     "costMinor is the current fixed plan's annual cost shown first in the tinted comparison box (£1,284.00), not the standard variable projection shown second (£1,512.00) nor the new fixed offer shown third (£1,336.00).",
     "reference is the customer's account number printed in the address block (7724 6650 18), not the Energy Ombudsman's scheme reference (EOM/2026/774213) named in the footer, which belongs to a different organisation entirely.",
-    "provider is Kittiwake Energy Ltd, the supplier issuing the letter and named in both the wordmark and the footer's registered-office text, not the Energy Ombudsman.",
+    "provider is Halcyon Energy, the name on the door: the wordmark, the greeting and the letter throughout (owner, 2026-09-14: 'the right answer is always the door'). Kittiwake Energy Ltd is the company behind it, named once in the footer's registered-office text — 'Halcyon Energy is a trading name of Kittiwake Energy Ltd' — and is not the answer. Nor is the Energy Ombudsman.",
     "scheduleKind is 'renewal' because the letter concerns the customer's tariff-renewal decision at the end of a fixed term, not a service or inspection visit.",
     " ",
     "T",
