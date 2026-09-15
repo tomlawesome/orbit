@@ -1,4 +1,4 @@
-import { error } from "@sveltejs/kit";
+import { error, redirect } from "@sveltejs/kit";
 import { readBelt, readSession, readWorkspace } from "$lib/data/workspace.js";
 import { beltManifestOf } from "$lib/data/belt.js";
 
@@ -49,11 +49,14 @@ async function primaryArrival() {
 export async function load({ params }) {
   if (!params.id) {
     const { household, nearestId } = await primaryArrival();
-    if (nearestId) {
-      const view = await readBelt(nearestId);
-      if (!view) error(404, "No such item");
-      return view;
-    }
+    /* Seating a body means wearing its address: +page.svelte's own rule is
+       that the address follows the apex (REPLACE, never push), and arriving
+       at /item is the apex moving from nothing to something. Redirect rather
+       than render here, so the bar never shows a bare /item for a belt that
+       has an item seated, and ← → from that first body keep writing addresses
+       of the same shape. 307, not the 308 the retired routes above use: which
+       item is nearest is today's answer, not a permanent one. */
+    if (nearestId) redirect(307, `/item/${encodeURIComponent(nearestId)}`);
     /* Nothing active in the household (or no household at all): the belt's
        own "empty household" card (+page.svelte) renders off `bodies.length`,
        which beltManifestOf already made zero above -- no id to seat means no

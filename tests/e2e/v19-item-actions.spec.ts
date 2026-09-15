@@ -83,6 +83,11 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
 /**
  * #1014: a household with nothing on it — for the belt's own empty state,
  * reached by /item with no id at all.
+ *
+ * One section, no items: `household.create` requires at least one section
+ * (422 `too_small` on `household.sections` without it), and that matches what
+ * the empty state is actually for. A real household always has somewhere to
+ * put things; what it can lack is anything to put there.
  */
 async function seedEmptyHousehold(page: Page): Promise<{ householdId: string }> {
   const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
@@ -98,7 +103,9 @@ async function seedEmptyHousehold(page: Page): Promise<{ householdId: string }> 
         type: "household.create",
         household: {
           id, name: householdName, timezone: "Europe/London", currency: "GBP",
-          memberCount: 1, canManage: true, onboardingComplete: true, sections: [], items: [],
+          memberCount: 1, canManage: true, onboardingComplete: true,
+          sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
+          items: [],
         },
       }),
     });
