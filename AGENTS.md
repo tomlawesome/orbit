@@ -395,6 +395,13 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   numbers, once every field has been tuned on its own. Until then, a change
   that helps one field and is not measured on the others does not go into
   anything the others read. #996 is the first of these.
+- **Non-commercial data and dependencies are acceptable** (owner,
+  2026-09-15: *"Non commercial is usable here. I am happy to ditch the
+  possibility of an orbit commercial license."*). Orbit will not be offered
+  commercially, so a CC BY-NC or CC BY-NC-SA dataset or model may be used.
+  The rest of the dependencies-and-data skill still applies: record the
+  exact licence, and share-alike still binds anything the project
+  redistributes, which AGPL-3.0-or-later makes likelier than it sounds.
 - **Document-scanning rules are kept for what they say about paper, not
   for the pages they fix** (owner, 2026-09-13: *"what I wanted were generic
   rule improvements, not tunes"*). This is about the extraction rules in
