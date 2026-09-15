@@ -3,7 +3,7 @@
   "filename": "fullpage-cavity-wall-insulation-guarantee.pdf",
   "expected": {
     "dates": ["2026-05-12", "2051-05-12"],
-    "provider": "WarmCore Insulation",
+    "provider": "Brightwell Insulation Services",
     "reference": "WC-GTE-08823",
     "dateRoles": [
       { "date": "2026-05-12", "role": "start" },
@@ -15,7 +15,7 @@
   },
   "notes": [
     "dates: installed 12 May 2026, the 25-year guarantee runs to 12 May 2051. Two other printed dates are deliberately not declared: the certificate issue date (19 May 2026, a week after installation and after the guarantee period already started) and the cavity survey date (28 Apr 2026). The superseded wording edition (6 Mar 2022) and the current edition date (1 Jan 2026) are print-run stamps, not dates about this job, and are also not declared.",
-    "provider is 'WarmCore Insulation', the trading name printed large in the letterhead and everywhere else on the page: the household deals with the trading name, and the trading name is the more likely answer than the legal entity behind it (owner, 2026-09-13, generalising the gym's 'Cresswell Fitness Club' ruling in #989). 'Bassington Energy Solutions Ltd', named only in the small print as the entity the guarantee 'is issued by', is a trap.",
+    "provider is 'Brightwell Insulation Services', the name on the door: the letterhead, the web address and eight printings across the page. 'WarmCore Insulation Ltd' is the company behind it -- 'Brightwell Insulation Services is a trading name of WarmCore Insulation Ltd', three printings, all in small print -- and is not the answer (owner, 2026-09-14: 'the right answer is always the door'). Corrected 2026-09-14: this truth previously named WarmCore and described it as the letterhead name, which the page contradicts.",
     "reference is the guarantee number WC-GTE-08823, not the job reference (WCI-2026-4471) or the insurance-backed scheme reference (GBW-771049).",
     "costMinor is the £2,340.00 contract price for the installation itself, the only amount on the page with a currency symbol that is plainly the cost of the thing.",
     "subtype: 'Guarantee' (the taxonomy group whose synonyms include 'Insurance-backed guarantee', matching the printed scheme) qualified by 'Building work', covering installation and workmanship.",
