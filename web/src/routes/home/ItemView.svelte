@@ -103,7 +103,7 @@
     {/if}
     <div class="ivfoot">
       <button class="ivcopy" onclick={onCopyAddress}>{copied ? "link copied" : "copy link"}</button>
-      <a class="ivfull" href={resolve("/item/[id]", { id: row.id })}>manage this item →</a>
+      <a class="ivfull" href={resolve("/item/[[id]]", { id: row.id })}>manage this item →</a>
     </div>
   {/if}
 </div>

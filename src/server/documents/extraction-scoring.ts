@@ -71,6 +71,8 @@
 // point total rather than the extractor being let off the new fields.
 
 import type { CorpusDocument } from "./extraction-corpus";
+import { selectedExtractionModel } from "./model-extraction";
+import type { DocumentProposal } from "./suggestions";
 
 /** ADR-0025 section 6: five runs, and the minimum is the score. */
 export const SCORING_RUNS = 5;
@@ -439,6 +441,23 @@ export async function scoreCorpus(
   };
 }
 
+/** Shared by `scoreCorpusRepeated` and the three-way scorer below: minimum,
+ * mean and maximum over a set of runs already scored (ADR-0025 section 6).
+ * The minimum is the number every gate uses, so run-to-run variance counts
+ * against the extractor, never for it. */
+function summariseRuns(scored: RunScore[]): RepeatedScore {
+  const accuracies = scored.map((score) => score.accuracy);
+  const minimum = Math.min(...accuracies);
+  const worst = scored.find((score) => score.accuracy === minimum) ?? scored[0];
+  return {
+    runs: scored,
+    minimum,
+    mean: accuracies.reduce((total, value) => total + value, 0) / accuracies.length,
+    maximum: Math.max(...accuracies),
+    worst,
+  };
+}
+
 /**
  * Score a corpus `runs` times and report minimum, mean and maximum. The
  * minimum is the number ADR-0025's gate uses.
@@ -452,16 +471,7 @@ export async function scoreCorpusRepeated(
   for (let run = 0; run < runs; run += 1) {
     scored.push(await scoreCorpus(corpus, extractor));
   }
-  const accuracies = scored.map((score) => score.accuracy);
-  const minimum = Math.min(...accuracies);
-  const worst = scored.find((score) => score.accuracy === minimum) ?? scored[0];
-  return {
-    runs: scored,
-    minimum,
-    mean: accuracies.reduce((total, value) => total + value, 0) / accuracies.length,
-    maximum: Math.max(...accuracies),
-    worst,
-  };
+  return summariseRuns(scored);
 }
 
 const percent = (value: number): string => `${(value * 100).toFixed(1)}%`;
@@ -484,4 +494,250 @@ export function formatRepeatedScore(label: string, repeated: RepeatedScore): str
     `(${worst.earned}/${worst.possible}); mean ${percent(mean)}, maximum ${percent(maximum)}` +
     ` [${formatFieldScores(worst.fields)}]` +
     (worst.misses.length ? `\n  misses in the worst run:\n  - ${worst.misses.join("\n  - ")}` : "");
+}
+
+// ADR-0025 section 6 / issue #959: the three-way measurement. "Three numbers
+// are kept, never two" (section 4): the heuristics alone (above, unchanged),
+// the model's blind pass, and the model's adjudicated answer -- reported
+// separately, never averaged into one score. Beside them, a diagnostic:
+// among the fields where the blind pass and the heuristic disagreed AND the
+// blind reading was the one ground truth supports, how often adjudication
+// sided with the heuristic (the wrong reading) anyway. That diagnostic is
+// reporting only -- it is never a threshold, and it never fails a test.
+//
+// A blind score at or below the heuristic baseline is NOT a failure here or
+// anywhere downstream: nothing in this file compares the blind number to the
+// heuristic number or fails on the relationship between them. The model's
+// value is as a judge over both readings, not as a solo extractor.
+//
+// The model path is a genuinely separate path, run only where the `ai`
+// profile exists (`selectedExtractionModel`): CI runners do not carry it, so
+// `scoreCorpusThreeWay` returns `model: null` -- a clean skip, not a failure
+// -- rather than attempting a live model when none is configured. The
+// heuristics-only score is computed unconditionally either way, so a caller
+// that only wants today's fast-lane number is unaffected.
+
+/** The only two adjudicated fields (`./adjudication.ts`'s `AdjudicatedField`)
+ * the corpus carries ground truth for -- `title` has none, so it cannot
+ * feature in the resolution-accuracy diagnostic. */
+type ResolvableField = "provider" | "reference";
+const RESOLVABLE_FIELDS: readonly ResolvableField[] = ["provider", "reference"];
+
+function classifyResolvable(field: ResolvableField, expected: string, actual: string | undefined): Classification {
+  return field === "provider" ? classifyProvider(expected, actual) : classifyScalar(expected, actual);
+}
+
+/** The shape of one field comparison this harness reads. Deliberately
+ * narrower than `./adjudication.ts`'s `FieldComparison` -- structurally
+ * compatible with it, so the real `adjudicateProposal` result can be passed
+ * straight through -- so a test can hand-build one without importing the
+ * model plumbing. */
+export interface ThreeWayComparison {
+  field: string;
+  comparison: "agreed" | "disagreed" | "neither";
+  outcome?: string;
+}
+
+/** The per-document result of the model's blind-then-adjudicate flow.
+ * Structurally compatible with `./adjudication.ts`'s `AdjudicationResult`
+ * (`blind`, `proposal` and `comparisons` line up), so `adjudicateProposal`
+ * can be adapted with a one-line wrapper rather than a bespoke shape. */
+export interface ThreeWayResult {
+  /** `null` when the blind pass was skipped or failed for this document --
+   * scored as a blank on every field, exactly as "the extractor offered
+   * nothing" already is. */
+  blind: ExtractedFields | null;
+  /** What the reviewer would actually see. */
+  adjudicated: ExtractedFields;
+  comparisons: ThreeWayComparison[];
+}
+
+/** Runs the model's blind-then-adjudicate flow for one document. In
+ * production this wraps `adjudicateProposal` from `./adjudication`; tests may
+ * supply a hand-built fake instead. */
+export type ThreeWayExtractor = (
+  text: string,
+  filename: string,
+  heuristic: DocumentProposal,
+) => Promise<ThreeWayResult>;
+
+const EMPTY_FIELDS: ExtractedFields = { dates: [] };
+
+/**
+ * Per-disagreement resolution accuracy (ADR-0025 section 6): the sharper
+ * diagnostic that detects adjudication laundering the heuristic's answer
+ * instead of judging it. Reporting only -- never a threshold.
+ */
+export interface ResolutionAccuracy {
+  /** Disagreements where the blind reading was the one ground truth supports. */
+  blindCorrectDisagreements: number;
+  /** Of those, how many adjudication resolved toward the heuristic anyway. */
+  resolvedTowardHeuristic: number;
+  /** `undefined` when there were no such disagreements to measure. */
+  rate: number | undefined;
+}
+
+function resolutionAccuracyOf(blindCorrectDisagreements: number, resolvedTowardHeuristic: number): ResolutionAccuracy {
+  return {
+    blindCorrectDisagreements,
+    resolvedTowardHeuristic,
+    rate: blindCorrectDisagreements === 0 ? undefined : resolvedTowardHeuristic / blindCorrectDisagreements,
+  };
+}
+
+interface ThreeWayRun {
+  blind: RunScore;
+  adjudicated: RunScore;
+  blindCorrectDisagreements: number;
+  resolvedTowardHeuristic: number;
+}
+
+async function scoreCorpusThreeWayOnce(
+  corpus: readonly CorpusDocument[],
+  heuristic: (text: string, filename: string) => DocumentProposal,
+  threeWay: ThreeWayExtractor,
+): Promise<ThreeWayRun> {
+  let blindEarned = 0;
+  let blindPossible = 0;
+  let adjudicatedEarned = 0;
+  let adjudicatedPossible = 0;
+  const blindMisses: string[] = [];
+  const adjudicatedMisses: string[] = [];
+  const blindFieldTotals = emptyFieldTotals();
+  const adjudicatedFieldTotals = emptyFieldTotals();
+  let blindCorrectDisagreements = 0;
+  let resolvedTowardHeuristic = 0;
+
+  for (const document of corpus) {
+    const heuristicProposal = heuristic(document.text, document.filename);
+    const result = await threeWay(document.text, document.filename, heuristicProposal);
+
+    const blindScore = scoreDocument(document, result.blind ?? EMPTY_FIELDS);
+    blindEarned += blindScore.earned;
+    blindPossible += blindScore.possible;
+    blindMisses.push(...blindScore.misses);
+    for (const field of FIELD_NAMES) {
+      blindFieldTotals[field].earned += blindScore.fieldTotals[field].earned;
+      blindFieldTotals[field].possible += blindScore.fieldTotals[field].possible;
+    }
+
+    const adjudicatedScore = scoreDocument(document, result.adjudicated);
+    adjudicatedEarned += adjudicatedScore.earned;
+    adjudicatedPossible += adjudicatedScore.possible;
+    adjudicatedMisses.push(...adjudicatedScore.misses);
+    for (const field of FIELD_NAMES) {
+      adjudicatedFieldTotals[field].earned += adjudicatedScore.fieldTotals[field].earned;
+      adjudicatedFieldTotals[field].possible += adjudicatedScore.fieldTotals[field].possible;
+    }
+
+    for (const field of RESOLVABLE_FIELDS) {
+      const expected = document.expected[field];
+      if (expected === undefined) continue;
+      const comparison = result.comparisons.find((entry) => entry.field === field);
+      if (!comparison || comparison.comparison !== "disagreed") continue;
+      const blindValue = result.blind ? result.blind[field] : undefined;
+      if (classifyResolvable(field, expected, blindValue) !== "correct") continue;
+      blindCorrectDisagreements += 1;
+      if (comparison.outcome === "endorsed_heuristic") resolvedTowardHeuristic += 1;
+    }
+  }
+
+  return {
+    blind: {
+      earned: blindEarned,
+      possible: blindPossible,
+      accuracy: blindPossible === 0 ? 1 : blindEarned / blindPossible,
+      misses: blindMisses,
+      fields: buildFieldScores(blindFieldTotals),
+    },
+    adjudicated: {
+      earned: adjudicatedEarned,
+      possible: adjudicatedPossible,
+      accuracy: adjudicatedPossible === 0 ? 1 : adjudicatedEarned / adjudicatedPossible,
+      misses: adjudicatedMisses,
+      fields: buildFieldScores(adjudicatedFieldTotals),
+    },
+    blindCorrectDisagreements,
+    resolvedTowardHeuristic,
+  };
+}
+
+export interface ThreeWayScore {
+  /** Unconditional: the heuristics run on every upload regardless (ADR-0025
+   * section 4), and this is exactly `scoreCorpusRepeated`'s result. */
+  heuristic: RepeatedScore;
+  /** `null` exactly when the model is not configured for this environment --
+   * a clean skip, never a failure (ADR-0025 section 6). */
+  model: {
+    blind: RepeatedScore;
+    adjudicated: RepeatedScore;
+    resolution: ResolutionAccuracy;
+  } | null;
+}
+
+/**
+ * ADR-0025 section 6's three-way measurement. Scores the corpus
+ * `SCORING_RUNS` times exactly as `scoreCorpusRepeated` always has, reporting
+ * minimum, mean and maximum for the heuristics alone; where (and only where)
+ * `selectedExtractionModel` reports the model as configured, it does the same
+ * for the model's blind pass and its adjudicated answer, plus the
+ * resolution-accuracy diagnostic summed across every run. Model evaluation
+ * must never become a required pipeline gate: `model` is `null`, not a
+ * failure, when the `ai` profile is absent, and the heuristic number is
+ * unaffected either way.
+ */
+export async function scoreCorpusThreeWay(
+  corpus: readonly CorpusDocument[],
+  args: {
+    heuristic: (text: string, filename: string) => DocumentProposal;
+    threeWay: ThreeWayExtractor;
+    environment?: NodeJS.ProcessEnv;
+    runs?: number;
+  },
+): Promise<ThreeWayScore> {
+  const runs = args.runs ?? SCORING_RUNS;
+  const heuristicExtractor: CorpusExtractor = (text, filename) => args.heuristic(text, filename);
+  const heuristicScore = await scoreCorpusRepeated(corpus, heuristicExtractor, runs);
+
+  if (!selectedExtractionModel(args.environment ?? process.env)) {
+    return { heuristic: heuristicScore, model: null };
+  }
+
+  const blindRuns: RunScore[] = [];
+  const adjudicatedRuns: RunScore[] = [];
+  let blindCorrectDisagreements = 0;
+  let resolvedTowardHeuristic = 0;
+  for (let run = 0; run < runs; run += 1) {
+    const result = await scoreCorpusThreeWayOnce(corpus, args.heuristic, args.threeWay);
+    blindRuns.push(result.blind);
+    adjudicatedRuns.push(result.adjudicated);
+    blindCorrectDisagreements += result.blindCorrectDisagreements;
+    resolvedTowardHeuristic += result.resolvedTowardHeuristic;
+  }
+
+  return {
+    heuristic: heuristicScore,
+    model: {
+      blind: summariseRuns(blindRuns),
+      adjudicated: summariseRuns(adjudicatedRuns),
+      resolution: resolutionAccuracyOf(blindCorrectDisagreements, resolvedTowardHeuristic),
+    },
+  };
+}
+
+export function formatThreeWayScore(label: string, score: ThreeWayScore): string {
+  const lines = [formatRepeatedScore(`${label} (heuristic alone)`, score.heuristic)];
+  if (!score.model) {
+    lines.push(`${label} (model): skipped -- no model configured`);
+    return lines.join("\n");
+  }
+  lines.push(formatRepeatedScore(`${label} (model blind)`, score.model.blind));
+  lines.push(formatRepeatedScore(`${label} (model adjudicated)`, score.model.adjudicated));
+  const { blindCorrectDisagreements, resolvedTowardHeuristic, rate } = score.model.resolution;
+  lines.push(
+    `${label} (resolution accuracy): ${resolvedTowardHeuristic}/${blindCorrectDisagreements} blind-correct ` +
+    "disagreements resolved toward the heuristic anyway" +
+    (rate === undefined ? " (no such disagreements)" : ` (${percent(rate)})`),
+  );
+  return lines.join("\n");
 }

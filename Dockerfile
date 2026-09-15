@@ -11,7 +11,7 @@
 # `apk upgrade` this replaces is no longer needed here. #649 also stops
 # applying: that upgrade froze behind the layer cache, and there is no upgrade
 # layer left to freeze.
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7bc734dba7d353f2a03dba82d82c45aa017e4e215ade61426e95e5c8115066e7 AS base
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7c28800b7c86d593241be2bdc798c231a0b51f48eb8ac5058ab31f1b957abfb7 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -79,7 +79,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7bc734dba7d353f2a03dba82d82c45aa017e4e215ade61426e95e5c8115066e7 AS runner
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7c28800b7c86d593241be2bdc798c231a0b51f48eb8ac5058ab31f1b957abfb7 AS runner
 
 ARG ORBIT_VERSION
 ARG ORBIT_REVISION
@@ -102,6 +102,12 @@ RUN . /opt/orbit/scripts/release-metadata-patterns.sh \
   && printf '%s\n' "${ORBIT_VERSION}" | grep -Eq "$ORBIT_VERSION_PATTERN" \
   && printf '%s\n' "${ORBIT_REVISION}" | grep -Eq "$ORBIT_REVISION_PATTERN" \
   && printf '%s\n' "${ORBIT_CHANNEL}" | grep -Eq "$ORBIT_CHANNEL_PATTERN"
+# Carried from build ARG to runtime ENV so the running server can read its own
+# release metadata (#1000, GET /api/admin/health) — an ARG is a build-time-only
+# value and is invisible to `process.env` once the container is running.
+ENV ORBIT_VERSION=${ORBIT_VERSION}
+ENV ORBIT_REVISION=${ORBIT_REVISION}
+ENV ORBIT_CHANNEL=${ORBIT_CHANNEL}
 ENV NODE_ENV=production
 ENV PORT=3000
 # adapter-node's own variables (#735). It reads HOST, not Next's HOSTNAME;

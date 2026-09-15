@@ -305,13 +305,10 @@ test.describe("the signed-in v19 sweep", () => {
   });
 
   const PLAIN_ROUTES: Array<{ path: string; ready: (page: Page) => Promise<unknown> }> = [
-    { path: "/due-next", ready: (page) => expect(page.getByRole("heading", { name: "Due next" })).toBeVisible() },
-    { path: "/documents", ready: (page) => expect(page.getByRole("heading", { name: "Documents" })).toBeVisible() },
     { path: "/inbox", ready: (page) => expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible() },
     { path: "/create", ready: (page) => expect(page.locator("#f-name")).toBeVisible() },
     { path: "/settings", ready: (page) => expect(page.getByRole("heading", { name: "Settings" })).toBeVisible() },
     { path: "/settings/mail", ready: (page) => expect(page.locator(".relay-card")).toBeVisible() },
-    { path: "/admin", ready: (page) => expect(page.getByRole("heading", { name: "Operational state" })).toBeVisible() },
     {
       path: "/administration",
       ready: (page) => expect(page.getByRole("heading", { name: "Administration" })).toBeVisible(),

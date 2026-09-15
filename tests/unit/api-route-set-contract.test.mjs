@@ -45,6 +45,8 @@ const EXPECTED_ROUTES = [
   "/api/admin/documents/health",
   // Whether a document-KEK rotation is open and since when (#956).
   "/api/admin/documents/rotation",
+  // The real Operations panel rows and build stamp (#1000).
+  "/api/admin/health",
   "/api/admin/mailbox",
   "/api/admin/maintenance",
   "/api/admin/operations",
@@ -123,6 +125,10 @@ const EXPECTED_ROUTES = [
   "/api/settings/mail-relay/verify",
   "/api/settings/reminders",
   "/api/settings/tour",
+  // The system-status drawer's own data (#863): any signed-in reader, not
+  // only an administrator (#869's ruling put per-subsystem truth "behind
+  // sign-in"), called by /home's #statusdrawer.
+  "/api/system-status",
   "/api/workspace",
   "/api/workspace/commands",
 ].sort();
@@ -163,7 +169,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 65 route families -- no fewer, no more", () => {
+  it("has exactly the expected 68 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

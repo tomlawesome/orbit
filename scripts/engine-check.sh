@@ -65,6 +65,7 @@ repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
 readonly environment_file=".env-orbit"
+readonly compose_file="docker-compose.yml"
 
 if [[ "${ORBIT_ENGINE_CHECK:-}" != container ]]; then
   exec bash "$repo_dir/scripts/configure.sh" --check
@@ -96,10 +97,46 @@ read_environment_value() {
   printf '%s' "$value"
 }
 
+# read_compose_project_name <compose-manifest>
+#
+# Prints <compose-manifest>'s own top-level `name:` value and returns 0, or
+# returns 1 with nothing printed when the file has no such line -- the
+# caller's directory-basename fallback then runs exactly as before (#921:
+# docker-compose.yml:1 declares `name: orbit`, but this derivation used to
+# fall from an explicit COMPOSE_PROJECT_NAME straight to a guess from the
+# current directory's basename, never reading the compose file's own name,
+# so a worktree or an operator directory not literally called "orbit"
+# addressed a Compose project that was never created). Deliberately a
+# top-level-key line read, not a YAML parse -- `name:` is Compose's own
+# top-level scalar key, so a line anchored at column 0 is enough, and this
+# must stay dependency-free (no docker, no node) since it runs inside the
+# same standalone, source-less scripts as read_environment_value above.
+# Identical text in end-maintenance.sh and repair.sh --
+# scripts/compose-project-name-resolution.test.mjs proves that.
+read_compose_project_name() {
+  local compose_manifest="$1" line value
+  [[ -f "$compose_manifest" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]%%#*}"
+      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      value="${value%\"}"
+      value="${value#\"}"
+      value="${value%\'}"
+      value="${value#\'}"
+      [[ -n "$value" ]] || return 1
+      printf '%s' "$value"
+      return 0
+    fi
+  done < "$compose_manifest"
+  return 1
+}
+
 # Compose project-name derivation, mirroring scripts/repair.sh's own "Step
 # 6: Compose project name derivation (read-only)" precedence exactly:
 # .env-orbit's own COMPOSE_PROJECT_NAME, then the caller's environment, then
-# a sanitized fallback from the current directory's own basename.
+# docker-compose.yml's own `name:` (#921), then a sanitized fallback from
+# the current directory's own basename.
 project=""
 candidate="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null || true)"
 if [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
@@ -108,6 +145,12 @@ fi
 if [[ -z "$project" && -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
   if [[ "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
     project="$COMPOSE_PROJECT_NAME"
+  fi
+fi
+if [[ -z "$project" ]]; then
+  candidate="$(read_compose_project_name "$compose_file" 2>/dev/null || true)"
+  if [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    project="$candidate"
   fi
 fi
 if [[ -z "$project" ]]; then
