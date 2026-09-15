@@ -1,0 +1,23 @@
+{
+  "name": "pre-contract credit information for a personal loan, boxed form with lender marketing",
+  "filename": "personal-loan-precontract-information.pdf",
+  "expected": {
+    "dates": ["2027-02-03", "2032-01-03"],
+    "provider": "Drummond Vale Finance",
+    "reference": "DVF/PL/2210934",
+    "dateRoles": [
+      { "date": "2027-02-03", "role": "start" },
+      { "date": "2032-01-03", "role": "expiry" }
+    ],
+    "subtype": { "kinds": ["Loan"], "qualifiers": ["Credit"] },
+    "costMinor": 1439220,
+    "currency": "GBP"
+  },
+  "notes": [
+    "provider is Drummond Vale Finance, the lender the agreement is with. It is not the introducer Compare and Save Loans, not the servicing company DV Credit Services Limited, not the funding bank Tarnside Bank plc, not the credit reference agencies Cresta and Callidus, not the payment protection administrator Holbeck Protect, not the Financial Conduct Authority and not the free advice charity Debt Support Line.",
+    "reference is the agreement number DVF/PL/2210934, printed in the first box of the form and in the footer. Rivals: the application reference APP-88201, the quotation reference QT-559023, the customer number 4471029, the FCA firm reference number 664218, the company registration number 05512907, the sort code 40-22-19 and account number 88201194 the repayments leave from, the direct debit reference 2210934 and the Consumer Credit Act section references.",
+    "dates and dateRoles carry the date the agreement takes effect, 3 February 2027, and the date the last repayment falls, 3 January 2032, after which the agreement is simply over and nothing is renewed. Rivals: the date the form was produced (20 January 2027), the date the quotation stops being valid (17 February 2027), the first repayment date (3 March 2027), the last day of the withdrawal period (17 February 2027), the date the rates quoted were set (20 January 2027) and the year the lender was founded.",
+    "costMinor is the total amount payable of £14,392.20, the whole commitment printed in the form. It is not the £12,000.00 amount of credit, not the £2,392.20 total charge for credit, not the £239.87 monthly repayment, not the £12.00 missed payment fee, not the £58.00 early settlement interest figure and not the 7.4 per cent APR or the 7.2 per cent fixed rate.",
+    "scheduleKind and recurrenceMonths are omitted: the agreement ends rather than renews, so no scheduled kind derives, and the 60 monthly repayments are a payment schedule rather than a repeating cycle of the thing."
+  ]
+}

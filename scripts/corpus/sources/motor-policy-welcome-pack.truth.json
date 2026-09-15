@@ -1,0 +1,25 @@
+{
+  "name": "motor insurance welcome pack, posted after a new policy is bought",
+  "filename": "motor-policy-welcome-pack.pdf",
+  "expected": {
+    "dates": ["2026-10-12", "2027-10-11"],
+    "provider": "Harroway Direct",
+    "reference": "HD/MT/6621043/01",
+    "dateRoles": [
+      { "date": "2026-10-12", "role": "start" },
+      { "date": "2027-10-11", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Insurance"], "qualifiers": ["Motor"] },
+    "costMinor": 68430,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "provider is the trading name the household bought from and would ring, Harroway Direct. It is not the underwriter Pennine Mutual Insurance Company Limited, not the parent Harroway Group Holdings plc named in the registered-company small print, not the legal expenses provider Askew Legal Services, not the breakdown partner Roadmate Assistance, not the windscreen firm Clearview Auto Glass, not the claims handler Lansdale Claims Management, and not the Motor Insurers' Bureau, the Financial Conduct Authority or the Financial Ombudsman Service.",
+    "reference is the policy number HD/MT/6621043/01, printed in the schedule panel and repeated in the running footer. The page prints eight other numbers that each identify something real: the customer number 40028817, the quote reference QR-559102, the certificate of motor insurance number CMI 6621043, the direct debit reference 8831042, the VAT registration GB 412 9903 27, the company registration number 07712209, the FCA firm reference number 305118, and the document code 2091-WP-05 in the print run stamp.",
+    "dates and dateRoles carry the start of the period of insurance, 12 October 2026, and the day the cover runs to and must be renewed, 11 October 2027. The page also prints the pack's own issue date (28 September 2026), the proposal date (21/09/2026), the previous insurer's expiry (11/10/2026), the deadline for sending proof of no claims discount (12/11/2026), the first direct debit collection (15/10/2026), the car's MOT expiry (04/03/2027), the licence check date (19/09/2026), a prices-correct-as-at stamp (1 September 2026), the date the firm was authorised (14/01/2005) and the year it was founded.",
+    "costMinor is the total annual premium of £684.30 including insurance premium tax. An offered instalment option is not the commitment (owner, 2026-09-13), so the £741.96 total if paying by twelve instalments is a rival, as are the £61.83 monthly instalment, the £350 compulsory excess, the £150 voluntary excess, the £75 windscreen excess, the £29.99 legal expenses add-on, the £54.00 breakdown add-on, the £19.99 key cover, the £18.50 courtesy car upgrade, the £25.00 mid-term adjustment fee and the £45.00 cancellation fee.",
+    "recurrenceMonths is 12, the printed 12 month period of insurance. scheduleKind is renewal: the household must act again when the period of insurance ends."
+  ]
+}

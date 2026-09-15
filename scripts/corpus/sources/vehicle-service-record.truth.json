@@ -1,0 +1,24 @@
+{
+  "name": "garage service record and invoice on a workshop job card",
+  "filename": "vehicle-service-record.pdf",
+  "expected": {
+    "dates": ["2027-09-21"],
+    "provider": "Pennard Autocentre",
+    "reference": "2026-04417",
+    "dateRoles": [
+      { "date": "2027-09-21", "role": "service" }
+    ],
+    "subtype": { "kinds": ["Service", "Record"], "qualifiers": ["Motor"] },
+    "costMinor": 42894,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "service"
+  },
+  "notes": [
+    "provider is Pennard Autocentre, the garage that did the work and issued the invoice. It is not the parent Pennard Motor Group Limited in the registered-office line, not the vehicle maker Verano, not the parts factor Kelso Motor Factors, not the oil brand Tarnol, not the buying group Autocare Network whose logo and warranty scheme appear on the page, not the tyre supplier Ridgeway Tyres and not The Motor Ombudsman.",
+    "reference is the invoice number 2026-04417, printed in the invoice box and repeated on the service stamp. Rivals: the job card number JC-55219, the customer account PA-1180, the registration mark KX68 HTM, the last MOT test number 9912 2078 4471, the vehicle identification number, the engine number, the parts numbers on each line, the VAT number GB 991 2207 88, the company registration number 04417029 and the recorded mileage 62,481.",
+    "dates and dateRoles carry only the date the next service falls due, 21 September 2027. Rivals: the invoice and work date (21 September 2026), the previous service (14/09/2025), the MOT expiry (02/10/2027), the parts warranty end (20 September 2027, one day before the service is due), the brake fluid change due (21 September 2028), the cambelt due date, the booking date (16/09/2026) and the date the price list was last changed (1 July 2026).",
+    "costMinor is the invoice total of £428.94 including VAT. It is not the £357.45 subtotal, not the £180.00 labour or the £177.45 parts that make it up, not the £71.49 VAT, not the £54.85 MOT test fee shown as paid separately, not the £268.40 quoted for the advisory work the customer declined, not the £310.00 estimate for the next service and not the £20.00 discount line.",
+    "recurrenceMonths is 12, the printed 12 month or 12,000 mile service interval. scheduleKind is service."
+  ]
+}

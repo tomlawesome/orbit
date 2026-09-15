@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Little Acorns Day Nursery - Invoice</title>
+<style>
+@font-face{font-family:"Corpus Nursery";src:url("../fonts/JosefinSans.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Nursery Serif";src:url("../fonts/Gelasio.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; font-family: "Corpus Nursery Serif", serif; color: #111; }
+  .page {
+    width: 794px; height: 1123px; box-sizing: border-box;
+    position: relative; overflow: hidden;
+    padding: 36px 44px;
+    background: #fff;
+  }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #2c6e49; padding-bottom: 10px; margin-bottom: 14px; }
+  .wordmark { font-family: "Corpus Nursery", sans-serif; }
+  .wordmark h1 { font-size: 22px; margin: 0; color: #2c6e49; }
+  .wordmark .tag { font-size: 10.5px; color: #555; margin-top: 2px; }
+  .addr { font-size: 11px; margin-top: 8px; line-height: 1.4; }
+  .grid {
+    font-family: "Corpus Nursery", sans-serif;
+    border: 1.5px solid #2c6e49; font-size: 11px;
+  }
+  .grid table { border-collapse: collapse; width: 240px; }
+  .grid td { padding: 4px 8px; border-bottom: 1px solid #cfe3d6; }
+  .grid td.k { color: #444; }
+  .grid td.v { text-align: right; font-weight: bold; }
+  .grid tr:last-child td { border-bottom: none; }
+
+  h2.section { font-family: "Corpus Nursery", sans-serif; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.3px; color: #2c6e49; border-bottom: 1px solid #2c6e49; padding-bottom: 3px; margin: 16px 0 8px 0; }
+
+  table.lines { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 6px; }
+  table.lines th { font-family: "Corpus Nursery", sans-serif; text-align: left; font-size: 10.5px; text-transform: uppercase; color: #444; border-bottom: 1.5px solid #2c6e49; padding: 4px 6px; }
+  table.lines td { padding: 5px 6px; border-bottom: 1px solid #ddd; }
+  table.lines td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .totals { width: 300px; margin-left: auto; font-size: 12.5px; margin-top: 4px; }
+  .totals table { width: 100%; border-collapse: collapse; }
+  .totals td { padding: 4px 6px; }
+  .totals td.amt { text-align: right; }
+  .totals tr.grand td { border-top: 2px solid #2c6e49; font-weight: bold; font-size: 14px; }
+
+  .notes { font-size: 10.5px; color: #333; margin-top: 12px; line-height: 1.5; }
+  .notes p { margin: 3px 0; }
+
+  .remit { font-family: "Corpus Nursery Serif", serif; margin-top: 16px; border: 1.5px dashed #888; padding: 10px 14px; font-size: 11px; }
+  .remit h3 { font-family: "Corpus Nursery", sans-serif; font-size: 11px; text-transform: uppercase; margin: 0 0 6px 0; }
+  .remit .cols { display: flex; gap: 24px; }
+  .remit .cols div { flex: 1; }
+
+  table.rates { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px; }
+  table.rates th { font-family: "Corpus Nursery", sans-serif; text-align: left; font-size: 10px; text-transform: uppercase; color: #444; border-bottom: 1.5px solid #2c6e49; padding: 4px 6px; }
+  table.rates td { padding: 5px 6px; border-bottom: 1px solid #ddd; }
+  table.rates td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  .panel { border: 1px solid #cfe3d6; background: #f5faf6; padding: 8px 12px; margin: 10px 0; font-size: 10.5px; line-height: 1.5; }
+  .panel h3 { font-family: "Corpus Nursery", sans-serif; font-size: 10.5px; text-transform: uppercase; color: #2c6e49; margin: 0 0 5px 0; }
+  .pfoot { position: absolute; left: 44px; right: 44px; bottom: 20px; font-size: 9px; color: #666; border-top: 1px solid #cfe3d6; padding-top: 5px; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="head">
+    <div class="wordmark">
+      <h1>Little Acorns Day Nursery</h1>
+      <div class="tag">part of the Bramblewood Childcare Group</div>
+      <div class="addr">
+        22 Orchard Lane, Bexdale BX3 7QL<br>
+        Tel: 01632 960774 &nbsp;|&nbsp; billing@littleacorns-bexdale.example<br>
+        Early years registration: EY-558214
+      </div>
+    </div>
+    <div class="grid">
+      <table>
+        <tr><td class="k">Invoice number</td><td class="v">INV-045821</td></tr>
+        <tr><td class="k">Account number</td><td class="v">1044829</td></tr>
+        <tr><td class="k">Invoice date</td><td class="v">02/09/2026</td></tr>
+        <tr><td class="k">Due date</td><td class="v">15/09/2026</td></tr>
+        <tr><td class="k">Child</td><td class="v">Freddie Marsh</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2 class="section">Fees for September 2026</h2>
+  <table class="lines">
+    <thead>
+      <tr><th>Description</th><th>Qty</th><th>Rate</th><th style="text-align:right">Amount</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Full day sessions (8:00&ndash;18:00), 18 days</td><td>18</td><td>&pound;68.50 / day</td><td class="amt">&pound;1,233.00</td></tr>
+      <tr><td>Funded hours credit (15 hrs/week government funding)</td><td>&ndash;</td><td>&ndash;</td><td class="amt">&minus;&pound;190.40</td></tr>
+      <tr><td>Balance brought forward from August 2026</td><td>&ndash;</td><td>&ndash;</td><td class="amt">&pound;45.00</td></tr>
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <table>
+      <tr><td>Subtotal</td><td class="amt">&pound;1,087.60</td></tr>
+      <tr class="grand"><td>Total payable</td><td class="amt">&pound;1,087.60</td></tr>
+    </table>
+  </div>
+
+  <div class="notes">
+    <p>Autumn term dates: 2 September 2026 to 18 December 2026.</p>
+    <p>Please note: fees will increase from 1 January 2027. Revised rates will be sent separately.</p>
+    <p>A late payment charge of &pound;25.00 applies to any balance left unpaid 7 days after the due date.</p>
+    <p>Registration fees (one-off, charged on enrolment) are non-refundable and are not included on this invoice.</p>
+    <p>Childcare vouchers: we accept salary-sacrifice childcare vouchers. Please ask your voucher provider to quote account number 1044829.</p>
+  </div>
+
+  <div class="remit">
+    <h3>Remittance advice</h3>
+    <div class="cols">
+      <div>
+        Pay to: Little Acorns Day Nursery<br>
+        Sort code: 40-51-62<br>
+        Account number: 20194837<br>
+        Reference: 1044829
+      </div>
+      <div>
+        Amount due: &pound;1,087.60<br>
+        Due date: 15 September 2026<br>
+        Please quote your account number 1044829 with all payments.
+      </div>
+    </div>
+  </div>
+  <div class="pfoot"><span>Little Acorns Day Nursery, part of Bramblewood Childcare Group</span><span>Page 1 of 4</span></div>
+</div>
+
+<div class="page">
+  <div class="head">
+    <div class="wordmark">
+      <h1>Little Acorns Day Nursery</h1>
+      <div class="tag">Fees and charges schedule &mdash; effective from 1 September 2026</div>
+    </div>
+    <div class="grid">
+      <table>
+        <tr><td class="k">Account number</td><td class="v">1044829</td></tr>
+        <tr><td class="k">Schedule ref</td><td class="v">FCS-2026-3</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2 class="section">Session and full-day rates by room</h2>
+  <table class="rates">
+    <thead><tr><th>Room</th><th>Age band</th><th style="text-align:right">Full day (8:00&ndash;18:00)</th><th style="text-align:right">Morning (8:00&ndash;13:00)</th><th style="text-align:right">Afternoon (13:00&ndash;18:00)</th></tr></thead>
+    <tbody>
+      <tr><td>Baby Room</td><td>0&ndash;2 years</td><td class="amt">&pound;74.00</td><td class="amt">&pound;42.00</td><td class="amt">&pound;40.00</td></tr>
+      <tr><td>Toddler Room</td><td>2&ndash;3 years</td><td class="amt">&pound;70.00</td><td class="amt">&pound;40.00</td><td class="amt">&pound;38.00</td></tr>
+      <tr><td>Preschool Room</td><td>3&ndash;5 years</td><td class="amt">&pound;68.50</td><td class="amt">&pound;39.00</td><td class="amt">&pound;37.00</td></tr>
+    </tbody>
+  </table>
+  <div class="panel">
+    <h3>Funded hours</h3>
+    <p>Eligible three- and four-year-olds can claim up to 30 hours a week of government-funded early
+    education during term time; two-year-olds and working families of younger children may qualify
+    for fewer hours under the expanding entitlement. Funding is claimed through Bexdale Council and
+    credited against your invoice as a "funded hours credit" line; it does not cover meals, nappies
+    or consumables, which continue to be charged as below. Parents must confirm their funding code
+    with the nursery office at the start of each term or the credit cannot be applied.</p>
+  </div>
+
+  <h2 class="section">Registration, deposit and holiday club</h2>
+  <table class="rates">
+    <tbody>
+      <tr><td>Registration fee (one-off, on offer of a place)</td><td></td><td class="amt">&pound;75.00</td><td></td><td></td></tr>
+      <tr><td>Deposit (held against final invoice, refundable within 28 days of leaving)</td><td></td><td class="amt">&pound;272.00</td><td></td><td></td></tr>
+      <tr><td>Holiday club, half-term (per day)</td><td></td><td class="amt">&pound;34.50</td><td></td><td></td></tr>
+      <tr><td>Holiday club, Easter week (5 days)</td><td></td><td class="amt">&pound;160.00</td><td></td><td></td></tr>
+      <tr><td>Holiday club, summer week (5 days)</td><td></td><td class="amt">&pound;295.00</td><td></td><td></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section">Additional charges</h2>
+  <table class="rates">
+    <tbody>
+      <tr><td>Late collection: first 15 minutes after 18:00</td><td></td><td class="amt">&pound;15.00</td><td></td><td></td></tr>
+      <tr><td>Late collection: each further minute</td><td></td><td class="amt">&pound;1.00</td><td></td><td></td></tr>
+      <tr><td>Breakfast (occasional, outside booked sessions)</td><td></td><td class="amt">&pound;2.60</td><td></td><td></td></tr>
+      <tr><td>Cooked lunch (occasional, outside booked sessions)</td><td></td><td class="amt">&pound;4.30</td><td></td><td></td></tr>
+      <tr><td>Tea (occasional, outside booked sessions)</td><td></td><td class="amt">&pound;2.80</td><td></td><td></td></tr>
+      <tr><td>Disposable nappies and wipes, if not supplied by parent</td><td></td><td class="amt">&pound;3.00 / day</td><td></td><td></td></tr>
+    </tbody>
+  </table>
+  <p class="notes">This schedule replaces the rates dated 1 September 2025 and remains in force until the
+  fee increase already notified for 1 January 2027 takes effect. Room rates are reviewed each September
+  and January; parents moving room part-way through a month are charged the higher of the two rates for
+  that month.</p>
+  <div class="pfoot"><span>Little Acorns Day Nursery, part of Bramblewood Childcare Group</span><span>Page 2 of 4</span></div>
+</div>
+
+<div class="page">
+  <div class="head">
+    <div class="wordmark">
+      <h1>Little Acorns Day Nursery</h1>
+      <div class="tag">Information for parents and carers</div>
+    </div>
+  </div>
+
+  <h2 class="section">Term dates 2026/27</h2>
+  <table class="rates">
+    <thead><tr><th>Term</th><th>Dates</th><th>Half-term / closure</th></tr></thead>
+    <tbody>
+      <tr><td>Autumn term</td><td>2 September 2026 to 18 December 2026</td><td>26&ndash;30 October 2026</td></tr>
+      <tr><td>Christmas closure</td><td>22&ndash;31 December 2026</td><td>Nursery closed, bank holidays and one further week</td></tr>
+      <tr><td>Spring term</td><td>5 January 2027 to 26 March 2027</td><td>15&ndash;19 February 2027</td></tr>
+      <tr><td>Summer term</td><td>12 April 2027 to 18 July 2027</td><td>31 May&ndash;4 June 2027</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section">Ofsted, safeguarding and how to raise a concern</h2>
+  <p class="notes">Little Acorns Day Nursery is registered with Ofsted on the Early Years Register,
+  Ofsted URN 154823, and was last inspected on 14 May 2024, when the setting was judged "Good". Our
+  designated safeguarding lead is available at the nursery office during opening hours. If you have a
+  concern about your child's welfare that has not been resolved by nursery staff or the manager, you
+  can contact Ofsted on 0300 123 1231, or the Bexdale Safeguarding Children Partnership. Complaints
+  should be made in writing to the nursery manager in the first instance; unresolved complaints are
+  escalated to Bramblewood Childcare Group's head office, which acknowledges within 5 working days
+  under complaints reference format BCG-C-nnnnn.</p>
+
+  <h2 class="section">Paying your invoice</h2>
+  <p class="notes">Manage your account, book extra sessions and view past invoices at
+  parents.littleacorns-bexdale.example, using your account number 1044829 to register. We accept
+  childcare vouchers from Edenred, Enjoy Benefits and Sodexo, and payments made through Tax-Free
+  Childcare (the HMRC scheme); please quote account number 1044829 to your voucher provider or
+  when setting up your Tax-Free Childcare payment.</p>
+
+  <div class="panel">
+    <h3>Also at Little Acorns</h3>
+    <p>Wraparound care for older siblings at Bexdale Primary School, forest school afternoons for
+    Preschool Room children each Wednesday, and a parents' coffee morning on the first Friday of
+    every month. Ask at the office for current availability.</p>
+  </div>
+  <div class="pfoot"><span>Little Acorns Day Nursery, part of Bramblewood Childcare Group</span><span>Page 3 of 4</span></div>
+</div>
+
+<div class="page">
+  <div class="head">
+    <div class="wordmark">
+      <h1>Little Acorns Day Nursery</h1>
+      <div class="tag">Accessibility, general terms and how to contact us</div>
+    </div>
+  </div>
+
+  <h2 class="section">Accessibility</h2>
+  <p class="notes">The ground floor of the nursery, including the Baby Room and the main garden, is
+  step-free from the car park; the Toddler Room and Preschool Room are reached by a short ramp. A
+  hearing loop is fitted at the sign-in desk. We can provide key policies in large print or in
+  community languages spoken by our families on request to the nursery office; please allow five
+  working days. Guide dogs and assistance dogs are welcome throughout the setting.</p>
+
+  <h2 class="section">General terms</h2>
+  <p class="notes">Places are offered subject to four weeks' written notice to end a place, given to
+  the nursery manager; fees continue to be charged during the notice period whether or not the child
+  attends. Fees are payable in advance, monthly, whether or not the child is absent through illness or
+  holiday, except where a funded-hours credit applies. A missed direct debit or returned payment
+  incurs an administration charge of &pound;10.00 in addition to any late payment charge already
+  shown on your invoice. The nursery closes for bank holidays and the week between Christmas and New
+  Year; no credit is given for these closure days.</p>
+
+  <h2 class="section">Contacts</h2>
+  <table class="rates">
+    <tbody>
+      <tr><td>Nursery office</td><td></td><td class="amt">01632 960774</td><td></td><td></td></tr>
+      <tr><td>Billing enquiries</td><td></td><td class="amt">billing@littleacorns-bexdale.example</td><td></td><td></td></tr>
+      <tr><td>Bramblewood Childcare Group head office</td><td></td><td class="amt">01632 555 0142</td><td></td><td></td></tr>
+      <tr><td>Parent portal</td><td></td><td class="amt">parents.littleacorns-bexdale.example</td><td></td><td></td></tr>
+      <tr><td>Ofsted general enquiries</td><td></td><td class="amt">0300 123 1231</td><td></td><td></td></tr>
+    </tbody>
+  </table>
+  <p class="notes">Bramblewood Childcare Group was founded in 2009 and operates eleven nurseries
+  across Cravenshire. Little Acorns Day Nursery joined the group in 2016. A recent example complaint,
+  reference BCG-C-20458, concerning a September 2025 invoicing query, was resolved and closed within
+  twelve working days.</p>
+
+  <h2 class="section">Food, allergies and nappies</h2>
+  <p class="notes">All meals are cooked on site and menus are displayed weekly on the parent
+  noticeboard and on the parent portal. Please tell your child's key worker in writing about any
+  allergy or dietary requirement before their first session; the nursery cannot guarantee an
+  allergen-free kitchen but takes reasonable steps to avoid cross-contamination. Reusable nappies are
+  welcome; where the nursery supplies disposable nappies and wipes the daily charge shown on page 2
+  applies from the child's next full day.</p>
+
+  <h2 class="section">If your child is unwell</h2>
+  <p class="notes">Children with sickness or diarrhoea should stay away for 48 hours after the last
+  episode, and children with a temperature, chickenpox or a contagious rash should not attend until a
+  key worker confirms they are fit to return. Fees are still payable for sessions missed through
+  illness, in line with the general terms above; there is no separate sickness discount.</p>
+
+  <p class="notes">Follow us for updates on events, closures and photos of the children's activities
+  (with parental consent) &mdash; search "Little Acorns Bexdale" on our usual social channels, or
+  look for the Bramblewood Childcare Group app on your phone's app store.</p>
+
+  <h2 class="section">Data protection</h2>
+  <p class="notes">Little Acorns Day Nursery and Bramblewood Childcare Group process personal data
+  about your child and family in line with our privacy notice, available at the nursery office or on
+  the parent portal, to run the nursery, claim funded hours from Bexdale Council, and administer
+  billing and safeguarding records. Records are normally kept for three years after a child leaves,
+  except where a longer retention period is required by safeguarding or funding rules. Requests for a
+  copy of your child's records should be made in writing to the nursery manager. This schedule was
+  last reprinted on 2 September 2026 and replaces any earlier fees information sent to you.</p>
+  <div class="pfoot"><span>Little Acorns Day Nursery, part of Bramblewood Childcare Group</span><span>Page 4 of 4</span></div>
+</div>
+
+</body>
+</html>

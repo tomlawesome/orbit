@@ -1,0 +1,24 @@
+{
+  "name": "annual energy summary, a fixed tariff among network and regulator numbers",
+  "filename": "energy-annual-summary.pdf",
+  "expected": {
+    "dates": ["2027-09-30"],
+    "provider": "Haverfield Energy",
+    "reference": "2201 8834 09",
+    "dateRoles": [
+      { "date": "2027-09-30", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Tariff", "Utility", "Bill"], "qualifiers": ["Energy"] },
+    "costMinor": 142824,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "provider is Haverfield Energy, the supplier the household has its contract with. It is not the parent Haverfield Utilities Group plc in the small print, not the distribution network operator Kestrel Grid Networks, not the meter operator Larkhill Metering Services, not the smart meter installer Fielden Install, not Ofgem, the Energy Ombudsman or Citizens Advice, and not the comparison service switchwise.uk named in the cheaper tariff box.",
+    "reference is the account number 2201 8834 09, printed in the summary header and on the payment slip. The page prints nine other numbers that each mean something: the electricity supply number (MPAN) 20 8834 5521 09, the gas supply number (MPRN) 8825510, the electricity meter serial E19K220841, the gas meter serial G4K09912, the summary document number 00921107, the tariff code HAV-FIX-26-V3, the VAT number GB 651 2290 44, the company registration number 06621092 and the supply licence number ELEC-2288.",
+    "dates and dateRoles carry the tariff end date, 30 September 2027, when the fixed term stops and the household must choose again. Everything else date-like is a rival: the summary date (05/10/2026), the twelve months the summary reports (1 October 2025 to 30 September 2026), the date the fixed tariff started (1 October 2026), the date the previous tariff ended (30 September 2026), the last meter readings (28/09/2026 and 29/09/2026), the monthly direct debit date, the annual review date (1 April 2027), the date the price cap last changed (1 July 2026) and the chart's twelve month labels.",
+    "costMinor is the personal projection for the fixed term, £1,428.24, the figure the page gives for what the household will pay over the twelve months to 30 September 2027. It is not last year's spend £1,312.87, not the monthly direct debit £119.02, not the £87.43 credit balance, not the cheapest available tariff's £1,377.60, not the £30.00 per fuel exit fee, and not any unit rate or standing charge.",
+    "recurrenceMonths is 12, the printed 12 month fixed term. scheduleKind is renewal."
+  ]
+}

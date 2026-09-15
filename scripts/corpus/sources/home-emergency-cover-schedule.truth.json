@@ -1,0 +1,25 @@
+{
+  "name": "home emergency schedule, the scheme's generic title carries no provider name at all",
+  "filename": "fullpage-home-emergency-cover-schedule.pdf",
+  "expected": {
+    "dates": ["2026-10-04", "2027-10-04"],
+    "provider": "HomeGuard365",
+    "reference": "HG365-POL-552017",
+    "dateRoles": [
+      { "date": "2026-10-04", "role": "start" },
+      { "date": "2027-10-04", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Insurance"], "qualifiers": ["Home"] },
+    "costMinor": 18600,
+    "currency": "GBP",
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "dates: cover starts 4 October 2026 and renews 4 October 2027. Two other printed dates are deliberately not declared: the schedule issue date (21 Sep 2026) and the no-claims history review date (1 Sep 2026). The scheme terms edition stamp (3 Jul 2024) is a print-run date, not a policy date, and is also not declared.",
+    "provider is HomeGuard365, which never appears as ordinary text anywhere on the page -- the letterhead only carries the generic scheme title 'Home Emergency Response Scheme' -- and is findable solely inside the claims e-mail address and the claims-portal web address in the 'Making a claim' section. Two other named organisations are deliberately not the provider: Casterbridge Insurance plc, the underwriter, and Millrace Home Assist Brokers Ltd, the broker that arranged the policy; the customer's day-to-day dealings (the claims line and portal) are with HomeGuard365, the same test the owner applied to a motor policy's broker versus its underwriter (#989).",
+    "reference is the policy number HG365-POL-552017.",
+    "costMinor is the £186.00 annual premium, not last year's premium of £171.00 or any of the five per-claim callout limits in the cover table.",
+    "subtype: 'Insurance' qualified by 'Home'.",
+    "scheduleKind is 'renewal': the later dateRole is 'renewal', which the policy itself confirms ('Your policy renews automatically each year')."
+  ]
+}

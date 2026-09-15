@@ -1,0 +1,40 @@
+{
+  "name": "domestic cleaning contract, a six-month price fix with five rival prices around it",
+  "filename": "fullpage-domestic-cleaning-contract.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-07",
+      "2027-03-07"
+    ],
+    "provider": "Brightwell Home Cleaning Services",
+    "reference": "BHC-CL-004417",
+    "dateRoles": [
+      {
+        "date": "2026-09-07",
+        "role": "start"
+      },
+      {
+        "date": "2027-03-07",
+        "role": "other"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Contract"
+      ],
+      "qualifiers": [
+        "Cleaning"
+      ]
+    },
+    "costMinor": 2800,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: contract start 7 September 2026, next price review 7 March 2027 (labelled 'other': a price review is not a renewal or a service visit). The pre-contract one-off deep clean (31 August 2026) is undeclared.",
+    "provider is Brightwell Home Cleaning Services, the trading name in the brand bar, not BHC Domestic Services Ltd (the registered company, named only in the small print).",
+    "reference is the client reference BHC-CL-004417.",
+    "costMinor is the regular weekly visit price, 28.00, the recurring cost of the service itself; the deep clean (85.00), additional hour (13.00), late-cancellation charge (14.00), holiday surcharge (9.00) and key charge (15.00) are all traps.",
+    "subtype: Contract/Cleaning. No recurrence is declared: the price review date is not a scheduled renewal or service event, so no recurrenceMonths is kept even though six months is mentioned in words.",
+    "scheduleKind is not declared: neither dateRole is 'renewal' or 'service'."
+  ]
+}

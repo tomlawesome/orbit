@@ -1,0 +1,24 @@
+{
+  "name": "university halls invoice, the university's own name outshines its managing agent",
+  "filename": "fullpage-university-halls-invoice.pdf",
+  "expected": {
+    "dates": ["2026-09-03", "2026-10-01"],
+    "provider": "Bridgewater Living Services Ltd",
+    "reference": "BLS-INV-24-1187",
+    "dateRoles": [
+      { "date": "2026-09-03", "role": "issued" },
+      { "date": "2026-10-01", "role": "due" }
+    ],
+    "subtype": { "kinds": ["Fees"], "qualifiers": ["School"] },
+    "costMinor": 245000,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: invoice issued 3 September 2026, this instalment due 1 October 2026. Nine other printed dates are deliberately not declared: the previous invoice date (2 Jun 2026), the two future instalment due dates (14 Jan 2027, 22 Apr 2027), halls arrivals day (27 Sep 2026), term start (29 Sep 2026), term end (12 Dec 2026), spring term reopening (10 Jan 2027), the tenancy agreement signing date (18 Aug 2026), the room condition report date (27 Sep 2026, same calendar date as arrivals but a different event), and the fire alarm test date (15 Sep 2026).",
+    "provider is Bridgewater Living Services Ltd, the managing agent that actually issues and administers this invoice (named only in the small print and the page footer), not Aldreth Bay University, whose name appears in the letterhead and every heading but which does not itself invoice the resident for accommodation -- the same distinction the owner drew for a broker versus an underwriter (#989).",
+    "reference is the invoice number BLS-INV-24-1187, not the tenancy reference (AB-KC-214-26) or the student number.",
+    "costMinor is the £2,450.00 total due this instalment (the sum of room, insurance and levy charges), not the room charge alone (£2,180.00), the previous year's termly charge (£2,290.00), or the £35.00 late payment charge.",
+    "subtype: 'Fees' (matching the printed 'invoice') qualified by 'School', the taxonomy group covering education and tuition-adjacent charges, since this is a student's accommodation billing rather than a general rental.",
+    "scheduleKind is not declared: neither dateRole is 'renewal' or 'service'."
+  ]
+}
