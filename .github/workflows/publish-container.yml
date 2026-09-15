@@ -2,52 +2,54 @@ name: Validate Orbit and publish previews
 
 # Since the mirror flip (#801 step 5) this repository is a push mirror of
 # gitlab.tomlawson.io ai/orbit, where every merge is decided and .gitlab-ci.yml
-# runs the whole gate. This workflow is GitHub's second opinion on the same
-# commits: it still runs everything, but a failure here blocks nothing, and it
-# no longer publishes. The image operators pull from GHCR is copied there by
-# publish-from-gitlab.yml, by the digest GitLab tested, so nothing built here
-# can reach a registry. Pull-request triggers are kept for the rare pull request
-# opened here directly; the day-to-day trigger is the mirror's push.
+# runs the whole gate. This workflow was GitHub's second opinion on the same
+# commits, running everything automatically on every mirrored push; a failure
+# here never blocked anything, and it never published (the image operators
+# pull from GHCR is copied there by publish-from-gitlab.yml, by the digest
+# GitLab tested, so nothing built here can reach a registry either way).
+#
+# #948: manual dispatch only now. The automatic run duplicated coverage that
+# GitLab already provides as the primary, blocking gate, at real per-push
+# minutes cost with no corresponding benefit -- and the second opinion is
+# still one `gh workflow run publish-container.yml --ref <branch>` away
+# whenever someone wants it. CodeQL (codeql.yml) and GitHub's native secret
+# scanning are unaffected: they are the reason this mirror exists and neither
+# is a job in this file. Job-for-job, what this workflow's jobs cover and
+# where the same check now runs as the primary gate on GitLab
+# (`.gitlab-ci.yml`):
+#
+#   changes            -> classify
+#   base_image         -> base_image
+#   fast               -> fast
+#   supply_chain_source -> supply_chain_source (+ licence_policy, which covers
+#                          the licence half actions/dependency-review-action
+#                          used to and supply_chain_source never did, #815)
+#   sidecar_images     -> sidecar_images
+#   fidelity           -> fidelity
+#   integration        -> integration
+#   smoke              -> smoke (+ smoke_local_only)
+#   repair_journeys    -> repair_journeys
+#   verify_preview     -> promote_stable's scripts/ci/promote-stable.sh, which
+#                          runs the same scripts/stable-promotion-policy.mjs
+#                          check before a stable promotion
+#   publish_preview    -> record_image / publish_channel (GitLab publishes;
+#                          this job only ever validated, never pushed)
+#
+# verify_preview and publish_preview only ever ran on a pull-request-to-main
+# or push-to-preview/hotfix event; under workflow_dispatch their own `if`
+# stays false, so they no longer run even when this workflow is dispatched by
+# hand. That is not a coverage loss -- see the mapping above -- but it means
+# dispatching this workflow now only ever exercises `changes` through
+# `repair_journeys`.
 on:
-  pull_request:
-    # Deliberately no `labeled` (#757). It fired one whole run per label, so
-    # `gh pr create --label a --label b` started three; the concurrency group
-    # cancelled two, and because branch protection reads the newest check run
-    # of each name, a cancelled run with a higher id could leave every real
-    # green check reported as CANCELLED and the pull request BLOCKED.
-    #
-    # GitHub cannot filter an event by label name, and there is no
-    # workflow-level `if`, so the alternatives were both worse: gating the
-    # jobs still creates a run whose SKIPPED results replace the real ones,
-    # and a helper workflow cannot dispatch this one because events raised
-    # with GITHUB_TOKEN start no run.
-    #
-    # Asking for the on-demand lanes after opening is therefore a dispatch:
-    # `gh workflow run publish-container.yml --ref <branch>`. The
-    # `ci: acceptance` label still opts a run in whenever one happens for
-    # another reason, so labelling before the first push works as before.
-    types:
-      - opened
-      - synchronize
-      - reopened
-    branches:
-      - main
-      - dev
-      - preview
-  push:
-    branches:
-      - dev
-      - preview
-      - main
-      - "hotfix/**"
   workflow_dispatch: {}
 
 concurrency:
-  group: orbit-container-${{ github.ref }}-${{ github.event.pull_request.number || github.sha }}
-  # Cancel only a superseded pull-request commit. A push must never cancel the
-  # validation of an earlier merge: the delivery model requires trusted evidence
-  # for that exact merge SHA, and a cancelled run leaves it permanently without.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Manual dispatch only (#948): each dispatched run gets its own group, so
+  # queuing a second one never cancels a run already in flight rather than
+  # superseding a stale pull-request commit, which no longer applies.
+  group: orbit-container-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   # Least-privilege default for anything added later: every job below already

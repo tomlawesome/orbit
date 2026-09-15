@@ -215,7 +215,7 @@
     if (!routerReady || !itemId || itemId === addressId) return;
     addressId = itemId;
     try {
-      replaceState(resolve("/item/[id]", { id: encodeURIComponent(itemId) }), {});
+      replaceState(resolve("/item/[[id]]", { id: encodeURIComponent(itemId) }), {});
     } catch {
       /* No router (a direct render, a test harness): the belt still works. */
     }
@@ -443,7 +443,8 @@
       <!-- The empty household. The band is still a belt — ambient rock and
            dust, thinner, because nothing here has swept anything yet. -->
       <article class="glass item-card">
-        <h2>Nothing in orbit yet</h2>
+        <h2>Nothing in orbit yet.</h2>
+        <a class="back" href={resolve("/inbox")}>open inbox</a>
         <div class="sub">{data.household?.name ?? "your system"} · an empty manifest</div>
         <div class="note">the belt IS the manifest. every item you add takes a seat in it,
           in the order it comes due — sooner to the left, later to the right — and the one

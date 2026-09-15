@@ -101,7 +101,7 @@
       }
       acceptOpId = null;
       /* Accepted: it is an item now, so it has a seat in the belt. */
-      await goto(result.itemId ? resolve("/item/[id]", { id: result.itemId }) : resolve("/home"));
+      await goto(result.itemId ? resolve("/item/[[id]]", { id: result.itemId }) : resolve("/home"));
     } catch (error) {
       problem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
     } finally {

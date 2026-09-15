@@ -23,8 +23,8 @@ import {
 } from "../../web/src/lib/data/metadata-status.js";
 
 const read = (path) => readFileSync(new URL(`../../web/src/${path}`, import.meta.url), "utf8");
-const ITEM_PAGE = read("routes/item/[id]/+page.svelte");
-const SUGGESTION = read("routes/item/[id]/Suggestion.svelte");
+const ITEM_PAGE = read("routes/item/[[id]]/+page.svelte");
+const SUGGESTION = read("routes/item/[[id]]/Suggestion.svelte");
 const INBOX = read("routes/inbox/+page.svelte");
 const ADMINISTRATION = read("routes/administration/+page.svelte");
 const HOME_DETAIL = read("routes/home/ItemView.svelte");

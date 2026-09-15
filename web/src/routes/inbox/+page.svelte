@@ -164,7 +164,7 @@
       <div class="group">
         <h2>Filed{view.filed.length ? ` · ${view.filed.length}` : ""}</h2>
         {#each view.filed as entry (entry.itemId)}
-          <a class="item" href={resolve("/item/[id]", { id: entry.itemId })}>
+          <a class="item" href={resolve("/item/[[id]]", { id: entry.itemId })}>
             <span class="dot" style="background:var({TONES[entry.band]})" aria-hidden="true"></span>
             <div class="flex"><b>{entry.title}</b><span>from {entry.sourceDocument} · added {filedDate(/** @type {string} */ (entry.filedAt))}</span></div>
           </a>
@@ -218,7 +218,7 @@
               </button>
               <span class="twotap">— both ask twice</span>
               {#if !locked(receipt)}
-                <a href={resolve("/item/[id]", { id: receipt.id })}>review &amp; amend →</a>
+                <a href={resolve("/item/[[id]]", { id: receipt.id })}>review &amp; amend →</a>
               {/if}
             </div>
             {#if problem && armed.id === receipt.id}

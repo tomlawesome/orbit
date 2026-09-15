@@ -546,7 +546,7 @@ this image's index digest, ${trusted_digest}, the moment its push succeeded;
 ${pinned_tag} currently resolves that index to ${live_platform_digest} for
 linux/amd64, which is what the Dockerfile pins. scripts/check-base-image-current.sh
 passes against it.
-$($packages_stale && printf '\nPackages inside the new image were still reported behind at build time; see #706.\n')
+$(if $packages_stale; then printf '\nPackages inside the new image were still reported behind at build time; see #706.\n'; fi)
 Opened automatically by the base_image_repin schedule (#708). Nothing here
 merges itself.
 "

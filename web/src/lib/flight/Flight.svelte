@@ -102,7 +102,23 @@
   /* the mark leaves the lockup and rides to the centre of the screen — and the
      dial's sun, 2s later, blooms out of exactly that point. `size` is where it
      ARRIVES, not a multiplier: the lockup's ring is the 420px hero now, so the
-     ride contracts rather than grows (see MARK_ARRIVE). */
+     ride contracts rather than grows (see MARK_ARRIVE).
+
+     THE RIDE ITSELF IS `transform`, NOT `left`/`top`/`width`/`height` (#873).
+     The element is set to its RESTING geometry once, with no transition — the
+     motion is a FLIP overlay (see `flip()` below): a `translate()+scale()`
+     that stands the mark visually at the source rect, played off via the Web
+     Animations API back to identity. Same start point, same end point, same
+     curve as the box-geometry transition this replaces; the only thing that
+     changed is that the compositor can now play it without asking the main
+     thread to lay out or paint again on every frame — which matters because
+     the canvas engine's own rAF loop (`engine.js`) is already spending the
+     frame on the star field for the whole length of this ride. Using the Web
+     Animations API rather than a second CSS transition also means nothing is
+     left on `markEl.style.transition` that could shadow `dropMark()`'s own
+     `.collapse` rule (flight.css) the way a lingering `transition` shorthand
+     would; the `.4s ease` opacity fallback below is exactly what the old
+     left/top/width/height transition also left behind for it. */
   /**
    * @param {SVGElement | null} srcSvg
    * @param {number} toY
@@ -113,27 +129,43 @@
   function liftMark(srcSvg, toY, size, ms, instant) {
     if (!srcSvg) return;
     const r = srcSvg.getBoundingClientRect();
+    const left = innerWidth / 2 - size / 2, top = toY - size / 2;
     markEl.style.transition = "none";
     markEl.style.left = r.left + "px"; markEl.style.top = r.top + "px";
     markEl.style.width = r.width + "px"; markEl.style.height = r.height + "px";
     markEl.classList.remove("collapse");
     markEl.classList.add("on");
     srcSvg.style.visibility = "hidden";
-    const settle = () => {
-      markEl.style.transition = instant ? "none" : rideTransition(ms);
-      markEl.style.left = (innerWidth / 2 - size / 2) + "px";
-      markEl.style.top = (toY - size / 2) + "px";
-      markEl.style.width = size + "px"; markEl.style.height = size + "px";
-    };
-    if (instant) settle();
-    else requestAnimationFrame(settle);
+    /* the box stands at rest here — where it ARRIVES — from this point on;
+       only the visual overlay (instant: none, live: the FLIP below) differs */
+    markEl.style.left = left + "px"; markEl.style.top = top + "px";
+    markEl.style.width = size + "px"; markEl.style.height = size + "px";
+    if (!instant) flip(r, left, top, size, size, ms);
   }
-  /** @param {number} ms */
-  function rideTransition(ms) {
-    return "left " + ms + "ms cubic-bezier(.35,0,.2,1)," +
-      "top " + ms + "ms cubic-bezier(.35,0,.2,1)," +
-      "width " + ms + "ms cubic-bezier(.35,0,.2,1)," +
-      "height " + ms + "ms cubic-bezier(.35,0,.2,1),opacity .4s ease";
+  /**
+   * THE FLIP (#873). `markEl` already stands at its resting geometry
+   * (`toLeft`/`toTop`/`toWidth`/`toHeight`, set by the caller just above) —
+   * this pins it visually to `from` with one `transform`, then plays that
+   * transform back to identity over `ms` on its own Web Animation, which
+   * composites independently of `style.transition`/`style.transform` and
+   * leaves neither set once it is done.
+   * @param {{ left: number, top: number, width: number, height: number }} from
+   * @param {number} toLeft @param {number} toTop
+   * @param {number} toWidth @param {number} toHeight
+   * @param {number} ms
+   */
+  function flip(from, toLeft, toTop, toWidth, toHeight, ms) {
+    const dx = (from.left + from.width / 2) - (toLeft + toWidth / 2);
+    const dy = (from.top + from.height / 2) - (toTop + toHeight / 2);
+    const sx = from.width / toWidth, sy = from.height / toHeight;
+    /* left behind for dropMark()'s own `.collapse` rule to inherit exactly
+       what the box-geometry transition used to leave it: opacity alone, at
+       the same .4s ease, and no override of `transform` at all. */
+    markEl.style.transition = "opacity .4s ease";
+    markEl.animate(
+      [{ transform: `translate(${dx}px,${dy}px) scale(${sx},${sy})` }, { transform: "none" }],
+      { duration: ms, easing: "cubic-bezier(.35,0,.2,1)", fill: "none" },
+    );
   }
   function dropMark() {
     markEl.classList.remove("on");
@@ -142,25 +174,24 @@
       document.querySelectorAll("#login-glyph svg,#dusk-glyph svg")
     )) el.style.visibility = "";
   }
-  /* the way down: the mark appears at centre and rides to the lockup's glyph */
+  /* the way down: the mark appears at centre and rides to the lockup's glyph.
+     Same FLIP treatment as liftMark above, mirrored: the box goes straight to
+     its resting geometry (the glyph's own rect) and the visual start (centre
+     screen, 36px) is the transform overlay `flip()` plays off. */
   /** @param {boolean} instant */
   function landMark(instant) {
+    const from = { left: innerWidth / 2 - 18, top: innerHeight / 2 - 18, width: 36, height: 36 };
     markEl.style.transition = "none";
-    markEl.style.left = (innerWidth / 2 - 18) + "px";
-    markEl.style.top = (innerHeight / 2 - 18) + "px";
-    markEl.style.width = "36px"; markEl.style.height = "36px";
+    markEl.style.left = from.left + "px"; markEl.style.top = from.top + "px";
+    markEl.style.width = from.width + "px"; markEl.style.height = from.height + "px";
     markEl.classList.remove("collapse"); markEl.classList.add("on");
     const glyph = /** @type {SVGElement | null} */ (document.querySelector("#dusk-glyph svg"));
     if (!glyph) return;
     const g = glyph.getBoundingClientRect();
     glyph.style.visibility = "hidden";
-    const settle = () => {
-      markEl.style.transition = instant ? "none" : rideTransition(MARK_RIDE_DOWN);
-      markEl.style.left = g.left + "px"; markEl.style.top = g.top + "px";
-      markEl.style.width = g.width + "px"; markEl.style.height = g.height + "px";
-    };
-    if (instant) settle();
-    else requestAnimationFrame(settle);
+    markEl.style.left = g.left + "px"; markEl.style.top = g.top + "px";
+    markEl.style.width = g.width + "px"; markEl.style.height = g.height + "px";
+    if (!instant) flip(from, g.left, g.top, g.width, g.height, MARK_RIDE_DOWN);
   }
 
   /** @param {number | undefined} pinned */

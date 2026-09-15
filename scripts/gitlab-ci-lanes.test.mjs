@@ -36,7 +36,7 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 // before `classify`, so it never sees ORBIT_LANE and always runs.
 const laneMembers = {
   [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "supply_chain_source"],
-  [CI_LANE.CI]: ["fast", "gitleaks", "supply_chain_source"],
+  [CI_LANE.CI]: ["fast", "fast_docker", "gitleaks", "supply_chain_source"],
 };
 
 function guardedJobs() {
@@ -148,6 +148,7 @@ describe("pipeline lanes", () => {
       "base_image",
       "build_image",
       "fast",
+      "fast_docker",
       "fidelity",
       "integration",
       "licence_policy",

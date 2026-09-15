@@ -67,6 +67,14 @@ const PLATFORM_KEYS = new Set([
   "IMAP_ALIAS_PREVIOUS_GENERATION",
   "IMAP_ALIAS_PREVIOUS_EXPIRES_AT",
   "IMAP_ALIAS_PREVIOUS_EXPIRY",
+  // Release metadata baked into the image at build time (Dockerfile's
+  // runner stage, from the ORBIT_VERSION/ORBIT_REVISION/ORBIT_CHANNEL
+  // ARGs), read back by GET /api/admin/health (#1000,
+  // src/server/admin-health.ts). Never written to .env-orbit and never
+  // operator-set, the same reasoning as NODE_ENV above.
+  "ORBIT_VERSION",
+  "ORBIT_CHANNEL",
+  "ORBIT_REVISION",
 ]);
 
 function sourceFiles(dir: string): string[] {

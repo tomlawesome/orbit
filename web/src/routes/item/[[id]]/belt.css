@@ -380,7 +380,7 @@
    The mockup draws the action pills but leaves them inert: it has no forms
    behind the "Renew", "Snooze" etc. buttons. So the panel grammar below is
    not lifted from item-belt.html at all — it is copied from the retired
-   item view's own sheet, web/src/routes/item/[id]/item.css, where it was
+   item view's own sheet, web/src/routes/item/[[id]]/item.css, where it was
    already composed from create.html's ratified field vocabulary (.field,
    .row2, .save-row, .btn-primary, .cancel-link). Only the rules the belt
    actually needs for its panels are copied, each prefixed with .belt-page;

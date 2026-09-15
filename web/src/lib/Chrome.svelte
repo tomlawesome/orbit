@@ -23,8 +23,13 @@
   } = $props();
 
   /* §14: due-next and documents retired — the manifest is the corridor and
-     the belt is the document surface. */
+     the belt is the document surface.
+     #1014: the belt (/item/[[id]]) has no front door of its own elsewhere in
+     the chrome, so it gets one here, above Inbox. This only wires the menu
+     entry -- the belt itself does not render Chrome (that is #1010's job),
+     so "item" never actually reaches `current` from that screen yet. */
   const NAV = [
+    ["item", "Items", "/item"],
     ["inbox", "Inbox", "/inbox"],
     ["settings", "Settings", "/settings"],
     ["administration", "Administration", "/administration"],
@@ -132,7 +137,8 @@
   <div class="who"><b>{user?.displayName ?? ""}</b><span>{role}</span></div>
   <nav>
     {#each NAV as [key, label, href] (key)}
-      <a href={href === "/inbox" ? resolve("/inbox")
+      <a href={href === "/item" ? resolve("/item")
+          : href === "/inbox" ? resolve("/inbox")
           : href === "/settings" ? resolve("/settings")
           : resolve("/administration")} aria-current={key === current ? "page" : undefined}>{label}</a>
     {/each}

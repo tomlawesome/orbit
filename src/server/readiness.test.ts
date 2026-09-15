@@ -10,7 +10,7 @@ vi.mock("@/db", () => ({
 }));
 vi.mock("@/lib/logger", () => ({ log: mocks.log }));
 
-import { getPublicReadiness, setReadinessDependenciesForTests } from "./readiness";
+import { checkDatabaseReachable, getPublicReadiness, setReadinessDependenciesForTests } from "./readiness";
 
 describe("public readiness", () => {
   afterEach(() => {
@@ -63,5 +63,24 @@ describe("public readiness", () => {
   it("supports deterministic dependency failure characterization", async () => {
     setReadinessDependenciesForTests({ checkDatabase: async () => { throw new Error("synthetic failure"); } });
     await expect(getPublicReadiness()).resolves.toEqual({ status: "degraded" });
+  });
+});
+
+describe("database reachability", () => {
+  afterEach(() => {
+    mocks.checkDatabase.mockReset();
+    setReadinessDependenciesForTests(undefined);
+  });
+
+  it("reports true once the database answers", async () => {
+    mocks.checkDatabase.mockResolvedValueOnce([]);
+    await expect(checkDatabaseReachable()).resolves.toBe(true);
+  });
+
+  it("reports false, not the error, when the database is unreachable (#863)", async () => {
+    setReadinessDependenciesForTests({
+      checkDatabase: async () => { throw new Error("postgres://secret@example.invalid/private"); },
+    });
+    await expect(checkDatabaseReachable()).resolves.toBe(false);
   });
 });
