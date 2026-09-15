@@ -206,11 +206,14 @@ export class MetadataCipher {
 
   /**
    * The blind index for a column that needs exact-match lookup (ADR-0024
-   * decision 2), or null when there is nothing to index. Only two columns do:
-   * `items.reference`, and `household_invitations.email`, whose database rule
-   * "one open invitation per address" would otherwise be lost with the
-   * plaintext. Nothing else is indexed, deliberately — an index that serves no
-   * query leaks equality for nothing.
+   * decision 2), or null when there is nothing to index. Four columns do:
+   * `items.reference`; `household_invitations.email`, whose database rule "one
+   * open invitation per address" would otherwise be lost with the plaintext;
+   * and `users.email` and `mail_in_sender_addresses.address` (#969), which are
+   * both looked up by exact address on every sign-in and every attributed
+   * mail-in, and carry a uniqueness rule across the same way. Nothing else is
+   * indexed, deliberately — an index that serves no query leaks equality for
+   * nothing.
    */
   blindIndex(column: MetadataColumn, value: string | null | undefined): string | null {
     const key = this.requireKey();
@@ -220,6 +223,20 @@ export class MetadataCipher {
   /** `blindIndex` for `items.reference`, kept for the Tier 1 callers that read best that way. */
   referenceIndex(value: string | null | undefined): string | null {
     return this.blindIndex("items.reference", value);
+  }
+
+  /**
+   * `blindIndex` for `users.email` (#969). A locked instance cannot produce
+   * one, which is what makes sign-in by address refusable rather than merely
+   * unsuccessful: the caller distinguishes "no key" from "no such account".
+   */
+  emailIndex(value: string | null | undefined): string | null {
+    return this.blindIndex("users.email", value);
+  }
+
+  /** `blindIndex` for `mail_in_sender_addresses.address` (#969). */
+  senderAddressIndex(value: string | null | undefined): string | null {
+    return this.blindIndex("mail_in_sender_addresses.address", value);
   }
 }
 
@@ -300,6 +317,48 @@ export async function openMetadataReader(
   const scope = receiptKeyScope(householdId);
   try {
     return new MetadataCipher(await loadMetadataKey(scope.scope, scope.householdId, executor));
+  } catch (error) {
+    if (error instanceof MetadataKeyLockedError) return new MetadataCipher(undefined);
+    throw error;
+  }
+}
+
+/**
+ * The instance-scope cipher, for the values no household owns: account
+ * addresses (#969). Same key as an unattributed receipt's — there is one
+ * instance key — but named for what the caller is doing, because "the receipt
+ * writer" reads as the wrong tool when the row is a user.
+ */
+export async function requireInstanceMetadataWriter(
+  executor: MetadataExecutor = getDb(),
+): Promise<MetadataCipher> {
+  return requireReceiptMetadataWriter(null, executor);
+}
+
+/** The reading half of `requireInstanceMetadataWriter`. Never throws for want of a key. */
+export async function openInstanceMetadataReader(
+  executor: MetadataExecutor = getDb(),
+): Promise<MetadataCipher> {
+  return openMetadataReader(null, executor);
+}
+
+/**
+ * An instance cipher that can read AND write when the instance holds a usable
+ * KEK, and is locked rather than throwing when it does not (#969).
+ *
+ * The sign-in paths need exactly this: they must keep working with no key at
+ * all — an identity provider matches on issuer and subject, never on the
+ * address — while still refreshing the stored address when the key is there.
+ * `openInstanceMetadataReader` is not enough, because it will not MINT the
+ * instance key on an instance that has never written one, and
+ * `requireInstanceMetadataWriter` is too much, because it refuses.
+ */
+export async function openInstanceMetadataCipher(
+  executor: MetadataExecutor = getDb(),
+): Promise<MetadataCipher> {
+  if (!metadataCryptoAvailable()) return new MetadataCipher(undefined);
+  try {
+    return await openReceiptMetadataWriter(null, executor);
   } catch (error) {
     if (error instanceof MetadataKeyLockedError) return new MetadataCipher(undefined);
     throw error;

@@ -474,7 +474,7 @@ describe("the backfill converts rows that predate encryption (ADR-0024 decision 
 
     // Resumable and idempotent: a second run finds nothing left to do.
     const second = await runMetadataBackfillBatch(100);
-    expect(second).toEqual({ items: 0, receipts: 0, invitations: 0 });
+    expect(second).toEqual({ items: 0, receipts: 0, invitations: 0, users: 0, senderAddresses: 0 });
   });
 
   it("leaves an empty receipt draft alone rather than encrypting an empty object", async () => {

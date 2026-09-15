@@ -309,6 +309,13 @@
       "when": 1788739200000,
       "tag": "0043_metadata_key_outages",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788825600000,
+      "tag": "0044_account_address_encryption",
+      "breakpoints": true
     }
   ]
 }
