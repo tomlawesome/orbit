@@ -76,7 +76,17 @@ const auditColumns = {
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
-  email: text("email").notNull(),
+  /**
+   * Tier 2 metadata (ADR-0024, #969). `email_enc` holds the `mdv1.` envelope
+   * and `email_index` the blind index; the plaintext column stands only until
+   * the backfill reaches the row, and an encrypted row clears it.
+   *
+   * Under the INSTANCE key, not a household one: a user belongs to several
+   * households, so no household owns their address.
+   */
+  email: text("email"),
+  emailEnc: text("email_enc"),
+  emailIndex: text("email_index"),
   emailVerified: boolean("email_verified").notNull().default(false),
   displayName: text("display_name").notNull(),
   avatarUrl: text("avatar_url"),
@@ -89,6 +99,13 @@ export const users = pgTable("users", {
   // identity regardless of case (ADR-0023 §2). There are no existing rows,
   // so this ships as a plain index rather than a migration risk.
   uniqueIndex("user_email_unique_ci").on(sql`lower(${table.email})`),
+  // The blind index carries "one account per address" across the encryption
+  // (#969). Without it, clearing the plaintext would quietly retire that rule:
+  // PostgreSQL treats every NULL as distinct, so the case-insensitive index
+  // above stops constraining a row the moment its plaintext goes. Both stand
+  // through the expand release — that one still holds the rows the backfill
+  // has not reached.
+  uniqueIndex("user_email_unique_index").on(table.emailIndex),
 ]);
 
 export const userPreferences = pgTable("user_preferences", {
@@ -905,8 +922,17 @@ export const mailInRelays = pgTable("mail_in_relays", {
 export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  /** Normalised on the way in: trimmed, unwrapped, case-folded. */
-  address: text("address").notNull(),
+  /**
+   * Normalised on the way in: trimmed, unwrapped, case-folded.
+   *
+   * Tier 2 metadata (ADR-0024, #969), under the INSTANCE key: attribution
+   * matches a sender before any household is known. `address_enc` holds the
+   * envelope, `address_index` the blind index that exact-match attribution
+   * looks up, and the plaintext stands only until the backfill reaches it.
+   */
+  address: text("address"),
+  addressEnc: text("address_enc"),
+  addressIndex: text("address_index"),
   source: mailInSenderSource("source").notNull().default("manual"),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   /** The one-use link's token, digested. The token itself is never stored. */
@@ -915,6 +941,9 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   ...auditColumns,
 }, (table) => [
   uniqueIndex("mail_in_sender_address_unique").on(table.address),
+  // Carries "one account per sender address" across the encryption, for the
+  // same reason as `user_email_unique_index` above (#969).
+  uniqueIndex("mail_in_sender_address_unique_index").on(table.addressIndex),
   index("mail_in_sender_address_user_idx").on(table.userId, table.verifiedAt),
   check("mail_in_sender_address_verification_pair", sql`(${table.verificationTokenDigest} IS NULL) = (${table.verificationExpiresAt} IS NULL)`),
 ]);

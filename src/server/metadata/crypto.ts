@@ -27,9 +27,15 @@ export type MetadataKeyScope = "household" | "instance";
 
 /**
  * The tables and columns encrypted metadata covers — Tier 1 (#931) and Tier 2
- * (#963) together, because they share one key hierarchy, one envelope and one
- * rewrap path. Bound into the content AAD, so a value cannot be replayed into
- * another row or another column.
+ * (#963, extended by #969) together, because they share one key hierarchy, one
+ * envelope and one rewrap path. Bound into the content AAD, so a value cannot
+ * be replayed into another row or another column.
+ *
+ * The last two are account addresses and sit under the INSTANCE key, not a
+ * household one (#969): a user belongs to several households, so no household
+ * owns their address, and a sender address is matched before any household is
+ * known. Everything above them is household-scoped except an unattributed
+ * mail-in receipt, which already reads under the instance key.
  */
 export type MetadataColumn =
   | "items.notes"
@@ -39,7 +45,9 @@ export type MetadataColumn =
   | "items.cost_minor"
   | "imap_ingestion_messages.proposal"
   | "imap_ingestion_messages.field_evidence"
-  | "household_invitations.email";
+  | "household_invitations.email"
+  | "users.email"
+  | "mail_in_sender_addresses.address";
 
 /** Identifies exactly one value: which column, and which row of it. */
 export interface MetadataValueContext {

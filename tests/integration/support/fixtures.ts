@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
+import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
 import { closeDatabase, getDb } from "@/db";
 import {
   auditLog,
@@ -14,6 +15,7 @@ import {
   households,
   imapIngestionMessages,
   instanceAuthority,
+  metadataKeys,
   items,
   memberships,
   portableArchives,
@@ -32,6 +34,13 @@ process.env.DOCUMENTS_ROOT = storageRoot;
 process.env.DOCUMENTS_QUARANTINE_ROOT = quarantineRoot;
 process.env.DOCUMENT_KEK = "00".repeat(32);
 process.env.DOCUMENT_SCAN_MODE = "disabled";
+/* The settings above are read once and cached, and something else in the
+   import graph may already have read them — so setting the variables is not
+   enough on its own, the cache has to be dropped here too. Nothing noticed
+   while the fixture had no use for the key; since #969 it creates accounts
+   with encrypted addresses, so a stale "there is no key" made whole files
+   fail, and which files depended on import order. */
+resetDocumentConfigForTests();
 
 export interface IntegrationSession {
   userId: string;
@@ -95,6 +104,14 @@ export async function cleanupIntegrationEnvironment(): Promise<void> {
   await db.delete(households);
   // mail_in_relays cascades from users, so deleting users clears it.
   await db.delete(users);
+  /* The metadata keys go too (#969). A household's key leaves with its
+     household, but the instance's is nobody's child and outlives the file that
+     minted it — and a file that rotates or removes the encryption key leaves
+     that row wrapped under a key the next file does not have, which then meets
+     an instance it cannot unlock on its very first account. Nothing encrypted
+     under it survives this function, so dropping it loses nothing and the next
+     writer mints a fresh one. */
+  await db.delete(metadataKeys);
   await closeDatabase();
   await Promise.all([
     rm(storageRoot, { recursive: true, force: true }),
@@ -108,13 +125,26 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
   const householdSuffix = randomUUID().slice(0, 8);
   const issuer = "https://oidc.invalid.example";
 
+  /* Written encrypted, exactly as the application writes it (#969). A fixture
+     that inserted plaintext would still pass every test — the dual read falls
+     back to it — while proving nothing about the path real accounts take, so
+     the whole integration suite would be green on the pre-release shape alone.
+     A test that wants the un-backfilled shape makes it deliberately, as
+     `metadata-addresses.test.ts` does. */
   async function createUser(role: string, isInstanceAdmin = false): Promise<FixtureUser> {
-    const [user] = await db.insert(users).values({
-      email: `${namespace}-${role}@example.invalid`,
+    const email = `${namespace}-${role}@example.invalid`;
+    const userId = randomUUID();
+    const cipher = await requireInstanceMetadataWriter();
+    await db.insert(users).values({
+      id: userId,
+      email: null,
+      emailEnc: cipher.encryptText("users.email", userId, email),
+      emailIndex: cipher.emailIndex(email),
       emailVerified: true,
       displayName: `Integration ${role}`,
       isInstanceAdmin,
-    }).returning({ id: users.id, email: users.email });
+    });
+    const user: FixtureUser = { id: userId, email };
     await db.insert(userPreferences).values({ userId: user.id });
     await db.insert(externalIdentities).values({
       userId: user.id,

@@ -616,6 +616,79 @@ describe("PostgreSQL migration evidence", () => {
     )).resolves.toBeDefined();
   });
 
+  it("adds the account address columns without touching a single existing value (0044, ADR-0024)", async () => {
+    const database = await createMigrationTestDatabase("account-address-expand");
+    databases.push(database);
+    await verifyMigrationPrefix("drizzle");
+    const throughTagDirectory = await createMigrationDirectoryThroughTag("drizzle", "0043_metadata_key_outages");
+    temporaryDirectories.push(throughTagDirectory);
+    await runMigrations(database.url, throughTagDirectory.path);
+
+    /* An account and a verified sending address as the release before this one
+       wrote them: both addresses plaintext, both columns still NOT NULL. */
+    const [userRow] = await database.client.unsafe(
+      `INSERT INTO "users" ("email", "display_name") VALUES ('legacy@example.invalid', 'Legacy person') RETURNING "id"`,
+    );
+    const [senderRow] = await database.client.unsafe(
+      `INSERT INTO "mail_in_sender_addresses" ("user_id", "address", "source", "verified_at")
+       VALUES ($1, 'legacy-sender@example.invalid', 'manual', now()) RETURNING "id"`,
+      [String(userRow.id)],
+    );
+
+    await runMigrations(database.url, "drizzle");
+
+    /* The same guarantee 0040 and 0041 give: SQL cannot encrypt, so all this
+       migration may do to an existing row is leave it exactly as readable as
+       it was, in the state the running release dual-reads. */
+    const [user] = await database.client.unsafe(
+      `SELECT "email", "email_enc", "email_index" FROM "users" WHERE "id" = $1`,
+      [String(userRow.id)],
+    );
+    expect(user).toEqual({ email: "legacy@example.invalid", email_enc: null, email_index: null });
+    const [sender] = await database.client.unsafe(
+      `SELECT "address", "address_enc", "address_index" FROM "mail_in_sender_addresses" WHERE "id" = $1`,
+      [String(senderRow.id)],
+    );
+    expect(sender).toEqual({ address: "legacy-sender@example.invalid", address_enc: null, address_index: null });
+
+    /* The backfill clears the plaintext as it encrypts, so a surviving NOT
+       NULL would make every conversion fail on its last statement. */
+    await expect(database.client.unsafe(
+      `UPDATE "users" SET "email" = NULL, "email_enc" = 'mdv1.a.b.c' WHERE "id" = $1`,
+      [String(userRow.id)],
+    )).resolves.toBeDefined();
+    await expect(database.client.unsafe(
+      `UPDATE "mail_in_sender_addresses" SET "address" = NULL, "address_enc" = 'mdv1.a.b.c' WHERE "id" = $1`,
+      [String(senderRow.id)],
+    )).resolves.toBeDefined();
+  });
+
+  it("carries 'one account per address' onto the blind index (0044, ADR-0024 decision 2)", async () => {
+    const database = await createMigrationTestDatabase("account-address-blind-index");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const [first] = await database.client.unsafe(
+      `INSERT INTO "users" ("email", "email_index", "display_name")
+       VALUES (NULL, 'shared-index-value', 'First') RETURNING "id"`,
+    );
+    expect(first.id).toBeDefined();
+
+    /* The rule the plaintext unique index used to enforce. Without this index
+       it would have gone quietly when the plaintext was cleared, because
+       PostgreSQL counts every NULL as distinct. */
+    await expect(database.client.unsafe(
+      `INSERT INTO "users" ("email", "email_index", "display_name")
+       VALUES (NULL, 'shared-index-value', 'Second')`,
+    )).rejects.toMatchObject({ constraint_name: "user_email_unique_index" });
+
+    /* And two accounts with no index yet — rows the backfill has not reached —
+       still coexist, or the expand release could not run at all. */
+    await expect(database.client.unsafe(
+      `INSERT INTO "users" ("email", "display_name") VALUES ('a@example.invalid', 'A'), ('b@example.invalid', 'B')`,
+    )).resolves.toBeDefined();
+  });
+
   it("carries 'one open invitation per address' onto the blind index (0041, ADR-0024 decision 2)", async () => {
     const database = await createMigrationTestDatabase("tier2-invitation-blind-index");
     databases.push(database);
