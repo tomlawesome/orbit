@@ -395,6 +395,12 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   numbers, once every field has been tuned on its own. Until then, a change
   that helps one field and is not measured on the others does not go into
   anything the others read. #996 is the first of these.
+- **An internal test harness is not product UX** (owner, 2026-09-15:
+  *"This is a basic functional ui so it goes to you. We don't need fable
+  for test harnesses."*). The global rule routing UI and architecture calls
+  to the top model covers what a household sees, not tooling the owner and
+  the agents use -- a labelling harness, an evaluation page, a debug view.
+  Build those in the ordinary way; #1025 was filed to Fable in error.
 - **Non-commercial data and dependencies are acceptable** (owner,
   2026-09-15: *"Non commercial is usable here. I am happy to ditch the
   possibility of an orbit commercial license."*). Orbit will not be offered
