@@ -1308,6 +1308,11 @@ print_completion_screen() {
   # start-up log -- it has no file, no Compose secret and no installer-visible
   # form, so this is a pointer to where to read it, never the code itself.
   printf 'Claim this instance: run "docker compose --env-file %s logs orbit-app" and open the link on its last line to create the first administrator.\n' "$environment_file"
+  # #968 (slice 1 of #966): a hard block here was considered and rejected --
+  # it would fail an offline install -- so this is an instruction, not a
+  # gate. The administration screen carries its own persistent reminder
+  # until a bundle is actually recorded.
+  printf 'Export a recovery bundle now: run "orbit backup" then "orbit export-recovery-bundle <backup.tar>" -- see "Exporting a recovery bundle" in the administrator guide. It is the only way back in if the encryption key is ever lost.\n'
 }
 
 installer_ui_event host host starting host-tools check

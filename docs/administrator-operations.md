@@ -537,6 +537,39 @@ malformed or incomplete proof, and emits no raw provider material.
 ordinary CI only. Its record is explicitly non-representative and cannot be
 used as live provider or release acceptance.
 
+## Exporting a recovery bundle
+
+Orbit does not export a recovery bundle for you. If `DOCUMENT_KEK` is ever
+lost with no bundle to recover it, every document, all encrypted metadata,
+and — once account addresses are encrypted — every stored address are gone
+for good, by design (see "Restoring the document key-encryption key" below).
+Making a bundle is a deliberate step, and it is one every deployment should
+take before it holds real data:
+
+```sh
+orbit backup
+orbit export-recovery-bundle <backup.tar>
+```
+
+`orbit export-recovery-bundle` wraps the live `DOCUMENT_KEK` under a
+passphrase you choose (scrypt-derived key, AES-256-GCM) and packages it with
+the backup you just made into one bundle file, `orbit-recovery-<timestamp>.tar`.
+
+Keep its two parts apart: the bundle file on storage separate from this
+instance, and its passphrase in a password manager or on paper — never both
+together, because that separation is what keeps anyone who gets hold of the
+file alone from being able to use it.
+
+The administration screen carries a persistent "No recovery bundle exported"
+card until a bundle has been recorded, and again after every `DOCUMENT_KEK`
+rotation, because a bundle wrapped under the previous key can no longer
+recover the current one. The card is a reminder, not a gate: it never blocks
+use of the instance, and it clears the moment `orbit export-recovery-bundle`
+completes.
+
+To use a recovery bundle, see `orbit import-recovery-bundle` and "Restoring
+the document key-encryption key" below.
+
 ## Restoring the document key-encryption key
 
 An instance that starts without `DOCUMENT_KEK` is **locked**, not damaged.

@@ -91,6 +91,10 @@ class FakeAdapter implements BackupDockerAdapter {
   collectDocumentsArchive(outputPath: string): void {
     writeFileSync(outputPath, this.documentsTarBytes);
   }
+  recordExportedCalls = 0;
+  recordRecoveryBundleExported(): void {
+    this.recordExportedCalls += 1;
+  }
 }
 
 function emptyDocumentsTar(dir: string): Buffer {
@@ -455,6 +459,9 @@ const fakeDockerScript = [
   "    tar -cf - -T /dev/null",
   "    exit 0",
   "    ;;",
+  "  *psql*)",
+  '    exit "${ORBIT_TEST_PSQL_EXIT:-0}"',
+  "    ;;",
   "  *)",
   "    # Not a docker refusal: 99 is this fake's own sentinel for a call it does",
   "    # not model, deliberately a status no real docker produces so an",
@@ -668,6 +675,40 @@ describe("createDockerComposeBackupAdapter (PATH-shim fake docker, no real daemo
     const adapter = createDockerComposeBackupAdapter({ envFile, env: shimEnv(binDir, { ORBIT_TEST_TAR_EXIT: "1" }) });
 
     expect(() => adapter.collectDocumentsArchive(join(sandbox, "documents.tar"))).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("recordRecoveryBundleExported spawns the exact psql-over-exec argv (#968: what the administration card reads back)", () => {
+    const sandbox = newSandbox("orbit-adapter-record-export-");
+    const binDir = makeFakeDockerBin();
+    const logPath = join(sandbox, "argv.log");
+    const envFile = join(sandbox, ".env-orbit");
+    writeFileSync(envFile, "FAKE=1\n");
+    const adapter = createDockerComposeBackupAdapter({ envFile, env: shimEnv(binDir, { ORBIT_DOCKER_ARGV_LOG: logPath }) });
+
+    adapter.recordRecoveryBundleExported();
+
+    const [call] = readArgvLog(logPath);
+    expect(call).toEqual([
+      "compose",
+      "--env-file",
+      envFile,
+      "exec",
+      "-T",
+      "orbit-db",
+      "sh",
+      "-c",
+      `exec psql -v ON_ERROR_STOP=1 --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -c "insert into audit_log (entity_type, entity_id, action, changes) values ('recovery_bundle', gen_random_uuid(), 'recovery_bundle_exported', '{}'::jsonb)"`,
+    ]);
+  });
+
+  it("recordRecoveryBundleExported refuses as recovery-bundle-record-failed on a nonzero exit", () => {
+    const sandbox = newSandbox("orbit-adapter-record-export-fail-");
+    const binDir = makeFakeDockerBin();
+    const envFile = join(sandbox, ".env-orbit");
+    writeFileSync(envFile, "FAKE=1\n");
+    const adapter = createDockerComposeBackupAdapter({ envFile, env: shimEnv(binDir, { ORBIT_TEST_PSQL_EXIT: "1" }) });
+
+    expect(() => adapter.recordRecoveryBundleExported()).toThrow(RecoveryBundleRefusal);
   });
 
   it("end-to-end: createBackupBundle against the real adapter through the PATH shim produces a bundle validateBackupBundleContents accepts", () => {
