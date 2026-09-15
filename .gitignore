@@ -57,5 +57,10 @@ scripts/corpus/holdout4/contact-sheet.html
 documents/
 specimens/
 uk-specimens/
+# ...but `documents/` with no leading slash matches a directory of that name at
+# any depth, and src/server/documents is the extractor's own source. Tracked
+# files there were unaffected, since ignoring never untracks; a NEW file there
+# was silently unaddable until this line (caught on !929, 2026-09-15).
+!src/server/documents/
 scripts/extract-bundle/docs/
 scripts/extract-bundle/out/
