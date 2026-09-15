@@ -5,6 +5,7 @@ import { auditLog, externalIdentities, instanceAuthority, localCredentials, memb
 import { AppError } from "@/lib/app-error";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY, ADMINISTRATOR_LOCK_KEY } from "@/lib/auth/authority-locks";
 import type { RecentAuthentication } from "@/lib/auth/recent-auth";
+import { openInstanceMetadataReader, type MetadataCipher, type MetadataFieldState } from "@/server/metadata/fields";
 import { requireInstanceAdministrator } from "@/server/authorization";
 
 const uuidSchema = z.uuid();
@@ -12,7 +13,14 @@ const uuidSchema = z.uuid();
 export interface InstanceUser {
   id: string;
   displayName: string;
-  email: string;
+  /**
+   * Null when there is no readable address (#969): a locked instance, or a
+   * damaged stored value. Never an empty string and never an invented one —
+   * `metadataStatus.email` is what says why it is missing, exactly as an
+   * item's title does (`workspace-repository.ts`, ADR-0024 decision 5).
+   */
+  email: string | null;
+  metadataStatus?: { email?: MetadataFieldState };
   isInstanceAdmin: boolean;
   isPrimaryAdministrator: boolean;
   disabledAt: Date | null;
@@ -47,10 +55,43 @@ async function primaryAdministratorId(transaction: Transaction): Promise<string 
 const instanceUserColumns = {
   id: users.id,
   displayName: users.displayName,
+  /* Dual read for the length of the expand release (#969): `email_enc` when
+     the backfill has reached the row, the plaintext column when it has not. */
   email: users.email,
+  emailEnc: users.emailEnc,
   isInstanceAdmin: users.isInstanceAdmin,
   disabledAt: users.disabledAt,
 };
+
+type InstanceUserRow = {
+  id: string;
+  displayName: string;
+  email: string | null;
+  emailEnc: string | null;
+  isInstanceAdmin: boolean;
+  disabledAt: Date | null;
+};
+
+function toInstanceUser(row: InstanceUserRow, cipher: MetadataCipher, primaryUserId: string | null): InstanceUser {
+  const email = cipher.text("users.email", row.id, { encrypted: row.emailEnc, plaintext: row.email });
+  return {
+    id: row.id,
+    displayName: row.displayName,
+    email: email.value,
+    metadataStatus: email.state ? { email: email.state } : undefined,
+    isInstanceAdmin: row.isInstanceAdmin,
+    isPrimaryAdministrator: row.id === primaryUserId,
+    disabledAt: row.disabledAt,
+  };
+}
+
+/** Addresses last when they cannot be read, which is where `asc(users.email)` put a null too. */
+function compareEmail(left: string | null, right: string | null): number {
+  if (left === right) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left.localeCompare(right);
+}
 
 export async function listInstanceUsers(actorUserId: string): Promise<InstanceUserList> {
   await requireInstanceAdministrator(actorUserId);
@@ -65,32 +106,49 @@ export async function listInstanceUsers(actorUserId: string): Promise<InstanceUs
     db
       .select(instanceUserColumns)
       .from(users)
-      .orderBy(asc(users.displayName), asc(users.email))
+      /* Display name only (#969): the address is ciphertext, so SQL cannot
+         order by it any more. The tiebreak between equal display names moves
+         below, after decryption. */
+      .orderBy(asc(users.displayName))
       .limit(ADMIN_USER_LIST_CAP),
     db.select({ totalCount: sql<number>`count(*)::int` }).from(users),
   ]);
+
+  // One instance-key unwrap for the whole list (ADR-0024 decision 1), not one
+  // per row. Account addresses are instance-scope: no household owns them.
+  const cipher = await openInstanceMetadataReader();
+  /* The order the query used to produce whole: display name from SQL, address
+     as the tiebreak here. The SQL position is what separates two different
+     display names, so the database's own collation still decides that half —
+     this only reorders rows the database considers equal. */
+  const listed = rows
+    .map((row, position) => ({ position, user: toInstanceUser(row, cipher, primaryUserId) }))
+    .sort((left, right) => (
+      left.user.displayName === right.user.displayName
+        ? compareEmail(left.user.email, right.user.email)
+        : left.position - right.position
+    ))
+    .map((entry) => entry.user);
 
   // The cap above is a display-name-ordered page: on its own, a primary
   // administrator whose display name sorts past the cap would silently
   // disappear from the administration surface (#592) — the exact failure
   // that let an operator lose sight of the account holding final authority.
   // Guarantee they are always reachable, independent of sort order.
-  let listedRows = rows;
-  if (primaryUserId && !rows.some((row) => row.id === primaryUserId)) {
+  if (primaryUserId && !listed.some((user) => user.id === primaryUserId)) {
     const [primaryRow] = await db
       .select(instanceUserColumns)
       .from(users)
       .where(eq(users.id, primaryUserId))
       .limit(1);
-    if (primaryRow) listedRows = [primaryRow, ...rows];
+    // First, deliberately, and outside the sort: this row is past the cap, so
+    // ordering it back into the page is exactly the disappearance #592 forbids.
+    if (primaryRow) listed.unshift(toInstanceUser(primaryRow, cipher, primaryUserId));
   }
 
   return {
-    users: listedRows.map((row) => ({
-      ...row,
-      isPrimaryAdministrator: row.id === primaryUserId,
-    })),
-    totalCount: countRow?.totalCount ?? listedRows.length,
+    users: listed,
+    totalCount: countRow?.totalCount ?? listed.length,
     truncated: (countRow?.totalCount ?? 0) > ADMIN_USER_LIST_CAP,
   };
 }
