@@ -366,7 +366,7 @@ const HEADLINE_CORPUS = new Map([
   ["tuning-48", "tuning 48 (retired)"],
 ]);
 
-function renderHeadline(experiments, fields, corpora) {
+function renderHeadline(experiments, fields) {
   const rows = experiments.filter((experiment) => experiment.headline);
   if (rows.length === 0) return "";
   // A one-field row has no overall, here as in the tables below: its
@@ -645,7 +645,7 @@ export function renderHtml(register) {
 <body>
   <h1>${escapeHtml(title)}</h1>
   <p>${escapeHtml(scoring)}</p>
-  ${renderHeadline(experiments, fields, corpora)}
+  ${renderHeadline(experiments, fields)}
   <details class="drawer">
     <summary>The working-out: every run, every corpus, every measurement</summary>
     <p class="key">A cell's colour says how the number reads:
