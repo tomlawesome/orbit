@@ -547,7 +547,6 @@ export async function activeHousehold() {
  * are fetches, and making callers async NOW means flipping a body from
  * fixture to fetch changes no caller's shape later.
  */
-import { operationsFixture } from "./fixtures/operations.js";
 import { adminFixture } from "./fixtures/admin.js";
 import { ago } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
@@ -843,52 +842,6 @@ export async function readInboxScreen() {
 }
 
 /**
- * Everything the archive renders (#462): the workspace, every attached
- * document (the API only speaks per-item, so the seam fans out over items
- * that report documents), and the relay's approvable catches. Per-item
- * failures are additive — a household that can't answer loses its rows, not
- * the screen.
- */
-export async function readDocumentsScreen() {
-  const [workspace, session, inbox] = await Promise.all([
-    readWorkspace(),
-    readSession(),
-    readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
-  ]);
-  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  /** @type {Record<string, DocumentSummary[]>} */
-  const documentsByItem = {};
-  await Promise.all(
-    workspace.households.flatMap((household) =>
-      (household.items ?? [])
-        .filter((item) => (item.documentCount ?? 0) > 0)
-        .map(async (item) => {
-          try {
-            /** @type {{ documents?: DocumentSummary[] }} */
-            const body = await json(
-              await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
-                credentials: "same-origin",
-              }),
-            );
-            documentsByItem[item.id] = body.documents ?? [];
-          } catch {
-            documentsByItem[item.id] = [];
-          }
-        }),
-    ),
-  );
-  return {
-    workspace,
-    primary,
-    household: workspace.households.find((one) => one.id === primary) ?? null,
-    user: session?.user ?? null,
-    today: todayOf(workspace),
-    receipts: inbox.receipts ?? [],
-    documentsByItem,
-  };
-}
-
-/**
  * Everything the helm renders (#464): who you are, your systems and roles,
  * the relay summary with how many arrivals wait, and the reminder timing —
  * the last live from #468's route.
@@ -1013,6 +966,29 @@ export async function commandContact(command) {
 }
 
 /**
+ * One row of `GET /api/admin/health`'s `services` array
+ * (src/server/admin-health.ts, AdministratorServiceHealth) — states and
+ * timestamps only, never a hostname, URL or error string.
+ *
+ * @typedef {object} AdminServiceHealth
+ * @property {"database" | "notification-worker" | "mailbox-ingestion" | "virus-scanner" | "document-parser"} id
+ * @property {"ok" | "warn" | "down" | "off"} state
+ * @property {string} checkedAt
+ * @property {?string} [lastSuccessAt]
+ * @property {?string} [lastErrorAt]
+ */
+
+/**
+ * What `GET /api/admin/health` answers (#1000): the real Operations panel
+ * rows and the running build's own version stamp, replacing the five
+ * invented "healthy" rows `adminFixture.services` drew for the mockup.
+ *
+ * @typedef {object} AdminHealth
+ * @property {{ version: ?string, channel: ?string, revision: ?string }} build
+ * @property {AdminServiceHealth[]} services
+ */
+
+/**
  * Everything mission control renders (#465): the instance's people (real
  * route), its systems from the workspace (admins see everything, §11), the
  * live mailbox settings (#743), and the parts no route can answer yet —
@@ -1021,7 +997,8 @@ export async function commandContact(command) {
  * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle] = await Promise.all([
+  const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle, health] =
+    await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
@@ -1062,6 +1039,13 @@ export async function readAdminScreen() {
           body.recoveryBundle ?? null,
       )
       .catch(() => null),
+    /* The real Operations panel and instance strip (#1000). Additive on the
+       same terms as the rotation and metadata above: a route that cannot
+       answer (fixture harness, older server) keeps the fixture's rows, so
+       the fixture-mode screen the fidelity gate photographs is unchanged. */
+    json(await fetch("/api/admin/health", { credentials: "same-origin" }))
+      .then((/** @type {{ health?: AdminHealth }} */ body) => body.health ?? null)
+      .catch(() => null),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   /* Real owner names where the members route answers (#453); the fixture's
@@ -1080,6 +1064,9 @@ export async function readAdminScreen() {
       } catch { /* additive: a household that cannot answer keeps its label */ }
     }),
   );
+  /* Pinned under the fidelity gate exactly like the rest of this file's "ago"
+     text (#1000); a real deployment has no fixtureToday and reads the clock. */
+  const now = workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString();
   return {
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
@@ -1092,6 +1079,11 @@ export async function readAdminScreen() {
        so the fixture-mode screen the fidelity gate photographs is unchanged
        (#465, §15) while a real deployment shows its real mailbox. */
     relay: mailbox ? relayRowsOf(mailbox) : adminFixture.relay,
+    /* Same contract, for the Operations panel and instance strip (#1000):
+       the five invented "healthy" rows and the hard-coded version string only
+       render where the route genuinely cannot answer. */
+    services: health ? serviceRowsOf(health, now) : adminFixture.services,
+    instance: health ? instanceLineOf(health.build) : adminFixture.instance,
     mailbox,
     contact,
     rotation,
@@ -1138,6 +1130,78 @@ function relayRowsOf(mailbox) {
     ["credential", mailbox.hasPassword ? "stored, encrypted" : "not set", null],
     ["last check", mailbox.health.status.replaceAll("_", " "), null],
   ];
+}
+
+/** Plain-English names for the Operations panel rows (#1000). */
+const SERVICE_NAMES = /** @type {Record<AdminServiceHealth["id"], string>} */ ({
+  database: "database",
+  "notification-worker": "notification worker",
+  "mailbox-ingestion": "mailbox ingestion",
+  "virus-scanner": "virus scanner",
+  "document-parser": "document parser",
+});
+
+/**
+ * The dot colour for each state, named for the CSS custom properties the
+ * `.svc i` rule reads via `var(--{tone})` (administration.css) — this
+ * palette's tone words, not a generic ok/warn/bad the theme has never
+ * defined. `--ink-quiet` (a muted grey, used elsewhere as inactive text) doubles
+ * as the "off" dot: deliberately disabled or unconfigured is not a fault.
+ */
+const SERVICE_TONES = /** @type {Record<AdminServiceHealth["state"], string>} */ ({
+  ok: "ok",
+  warn: "warm",
+  down: "overdue",
+  off: "ink-quiet",
+});
+
+/** Rows for the workers (notification, mailbox ingestion): last outcome, in words. */
+const WORKER_IDS = /** @type {const} */ (["notification-worker", "mailbox-ingestion"]);
+
+/** @param {AdminServiceHealth} service @param {string} now */
+function serviceDetailOf(service, now) {
+  const isWorker = /** @type {readonly string[]} */ (WORKER_IDS).includes(service.id);
+  if (service.state === "off") return "not enabled";
+  if (service.state === "down") return isWorker ? "stopped" : "unreachable";
+  if (service.state === "warn") {
+    return service.lastErrorAt ? `retrying · last error ${ago(service.lastErrorAt, now)}` : "retrying";
+  }
+  if (isWorker && service.lastSuccessAt) return `running · last success ${ago(service.lastSuccessAt, now)}`;
+  return "healthy";
+}
+
+/**
+ * The Operations panel rows, from `GET /api/admin/health` (#1000). Same tuple
+ * shape the fixture used (`[tone, name, detail]`), so the template that reads
+ * `view.services` is unchanged either way.
+ *
+ * @param {AdminHealth} health
+ * @param {string} now
+ * @returns {[string, string, string][]}
+ */
+function serviceRowsOf(health, now) {
+  return health.services.map((service) => [
+    SERVICE_TONES[service.state] ?? "ink-quiet",
+    SERVICE_NAMES[service.id] ?? service.id,
+    serviceDetailOf(service, now),
+  ]);
+}
+
+/**
+ * The instance strip, from the running build's own version stamp rather than
+ * the fixture's literal "ORBIT v1.3.0 · CHANNEL preview · REVISION fd6a7e6"
+ * (#1000). Any part the build does not know is omitted, never invented.
+ *
+ * @param {{ version: ?string, channel: ?string, revision: ?string }} build
+ * @returns {string}
+ */
+function instanceLineOf(build) {
+  const parts = [];
+  if (build.version) parts.push(`ORBIT ${build.version}`);
+  if (build.channel) parts.push(`CHANNEL ${build.channel}`);
+  if (build.revision) parts.push(`REVISION ${build.revision.slice(0, 7)}`);
+  parts.push("self-hosted — nothing leaves this machine");
+  return parts.join(" · ");
 }
 
 /** @param {string} iso */
@@ -1205,11 +1269,6 @@ export async function readItem(id) {
     /* the inbox being unreachable must read as "no such item", not a crash */
   }
   return null;
-}
-
-/** Operational state and recent deliveries. Live source: GET /api/admin/operations. */
-export async function readOperations() {
-  return operationsFixture;
 }
 
 /**
@@ -2038,7 +2097,7 @@ export async function withdrawInvitation(householdId, invitationId) {
  * request out of the URL, so an unknown id is a 404 and not a probe (#451).
  *
  * Documents come from the per-item route, fanned out over the items that
- * report carrying any — readDocumentsScreen's pattern, and additive in the
+ * report carrying any — the pattern the retired archive used, and additive in the
  * same way: an item whose papers cannot be read loses its papers, not the
  * screen. They are read for the whole household rather than for the centred
  * item alone because every item's rock wears CON-1's belt ellipse when it has

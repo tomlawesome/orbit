@@ -1,9 +1,3 @@
-# web/ is a workspace member (#419). Before this it sat outside, which meant
-# pnpm silently ignored web/pnpm-lock.yaml unless --ignore-workspace was
-# passed: a `pnpm add` there wrote the ROOT lockfile and left web's stale, so
-# local installs passed while a clean --frozen-lockfile failed. It also kept
-# web's dependency graph outside the overrides below, outside the SBOM, and
-# outside scripts/classify-changed-paths.mjs.
 packages:
   - "."
   - "web"
@@ -42,4 +36,4 @@ overrides:
   # this tree, so the unscoped key selects the same package and goes on
   # selecting it after a postcss bump. scripts/check-override-pins.mjs fails
   # the build if any override key here stops matching the lockfile.
-  nanoid: 3.3.18
+  nanoid: 6.0.1

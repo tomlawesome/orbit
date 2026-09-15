@@ -11,7 +11,7 @@ import {
   MIN_GAP, RAD, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, docSpread,
   geometryOf, itemOffsetsOf, lehmer, matchesOf, nearestMatchOf, reachableAt,
   rollRangeOf, seatOf, shortName, stepFrom, warpOf, AMBIENT_SEED,
-} from "../../web/src/routes/item/[id]/band.js";
+} from "../../web/src/routes/item/[[id]]/band.js";
 import { beltManifestOf, sizeLabel } from "../../web/src/lib/data/belt.js";
 import { DOCUMENTS_FIXTURE, WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
@@ -374,8 +374,8 @@ describe("stepping and arriving", () => {
 describe("the belt reads no clock and rolls no dice", () => {
   it("has no Math.random, Date.now or bare new Date in anything the gate sees", () => {
     const sources = [
-      "web/src/routes/item/[id]/band.js",
-      "web/src/routes/item/[id]/belt.behaviour.js",
+      "web/src/routes/item/[[id]]/band.js",
+      "web/src/routes/item/[[id]]/belt.behaviour.js",
       "web/src/lib/data/belt.js",
     ];
     for (const path of sources) {

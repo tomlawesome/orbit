@@ -19,6 +19,7 @@ import {
 import { AppError } from "@/lib/app-error";
 import { type HomeItem } from "@/lib/domain";
 import { workspaceItemSchema } from "@/lib/workspace";
+import type { AdjudicatedField } from "@/server/documents/adjudication";
 import type { DocumentProposal } from "@/server/documents/suggestions";
 import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
@@ -110,10 +111,23 @@ function boundedProposalField(field: ProposalField, value: unknown): unknown {
   return undefined;
 }
 
+export interface ReviewDraftFieldEvidence {
+  source: string;
+  confidence: string;
+  /**
+   * The validated value adjudication rejected in favour of the proposed one
+   * (ADR-0025 section 4, owner ruling 2026-09-10): only for a field that was
+   * actually disputed, and only for the life of this pending review — it
+   * rides inside this same blob and is discarded with it when the review is
+   * approved or abandoned (`clearedReviewDraftMetadata`).
+   */
+  alternative?: string;
+}
+
 /** Keeps only bounded fields and coarse provenance; raw extraction never enters durable metadata. */
 export function sanitizeReviewDraftMetadata(input: unknown): {
   proposal: Record<string, unknown>;
-  fieldEvidence: Record<string, { source: string; confidence: string }>;
+  fieldEvidence: Record<string, ReviewDraftFieldEvidence>;
 } {
   const source = record(input);
   const proposalInput = record(source?.proposal);
@@ -124,11 +138,13 @@ export function sanitizeReviewDraftMetadata(input: unknown): {
   }
 
   const evidenceInput = record(source?.fieldEvidence);
-  const fieldEvidence: Record<string, { source: string; confidence: string }> = {};
+  const fieldEvidence: Record<string, ReviewDraftFieldEvidence> = {};
   for (const field of proposalFields) {
     const candidate = record(evidenceInput?.[field]);
     const parsed = z.object({ source: evidenceSource, confidence: evidenceConfidence }).safeParse(candidate);
-    if (parsed.success) fieldEvidence[field] = parsed.data;
+    if (!parsed.success) continue;
+    const alternative = boundedText(candidate?.alternative, proposalTextMaximum[field] ?? 100);
+    fieldEvidence[field] = alternative ? { ...parsed.data, alternative } : parsed.data;
   }
   return { proposal, fieldEvidence };
 }
@@ -144,9 +160,12 @@ export function sanitizeReviewDraftMetadata(input: unknown): {
  * It goes back out through `sanitizeReviewDraftMetadata`, so nothing
  * reaches durable metadata by a route that skips that boundary.
  */
-export function reviewDraftMetadataFromProposal(proposal: DocumentProposal): {
+export function reviewDraftMetadataFromProposal(
+  proposal: DocumentProposal,
+  alternatives: Partial<Record<AdjudicatedField, string>> = {},
+): {
   proposal: Record<string, unknown>;
-  fieldEvidence: Record<string, { source: string; confidence: string }>;
+  fieldEvidence: Record<string, ReviewDraftFieldEvidence>;
 } {
   const offered: Record<ProposalField, unknown> = {
     title: proposal.title,
@@ -160,17 +179,35 @@ export function reviewDraftMetadataFromProposal(proposal: DocumentProposal): {
     scheduleKind: proposal.scheduleKind,
     recurrenceMonths: proposal.recurrenceMonths,
   };
-  const fieldEvidence: Record<string, { source: string; confidence: string }> = {};
+  const fieldEvidence: Record<string, ReviewDraftFieldEvidence> = {};
   for (const field of proposalFields) {
     if (offered[field] === undefined) continue;
     // Title still comes from the file name; every other field is read out of
     // the document text, which is what the reviewer is being asked to check.
-    fieldEvidence[field] = field === "title"
+    const base: ReviewDraftFieldEvidence = field === "title"
       ? { source: "filename", confidence: "high" }
       : { source: "document_text", confidence: "medium" };
+    const alternative = (field === "title" || field === "provider" || field === "reference")
+      ? alternatives[field as AdjudicatedField]
+      : undefined;
+    fieldEvidence[field] = alternative ? { ...base, alternative } : base;
   }
   return sanitizeReviewDraftMetadata({ proposal: offered, fieldEvidence });
 }
+
+/**
+ * The four columns cleared wherever a receipt's pending review ends —
+ * approved, discarded or expired. The rejected reading is only ever kept
+ * for the life of the pending review (ADR-0025 section 4), and it rides
+ * inside this same blob, so nothing extra is needed to make it go with
+ * everything else the review held.
+ */
+export const clearedReviewDraftMetadata = {
+  proposal: {},
+  proposalEnc: null,
+  fieldEvidence: {},
+  fieldEvidenceEnc: null,
+} as const;
 
 function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem {
   return workspaceItemSchema.parse({
@@ -676,6 +713,9 @@ async function finishMailboxApproval(
       approvedItemId: itemId,
       approvedAt: partial ? null : new Date(),
       updatedAt: new Date(),
+      // The review is only actually over once this reaches "completed"; a
+      // partial success is still retryable and keeps its draft meanwhile.
+      ...(partial ? {} : clearedReviewDraftMetadata),
     }).where(and(
       eq(imapIngestionMessages.id, input.source.receiptId),
       eq(imapIngestionMessages.approvalOperationId, input.operationId),

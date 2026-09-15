@@ -326,9 +326,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     /** @type {HTMLElement} */ (document.getElementById("docview")).classList.add("open");
   }
   callout.addEventListener("mouseleave", () => callout.classList.remove("show"));
-  /* The ratified screen shows the degraded state (the markup's handle already
-     reads "degraded"); real health wiring is deferred functionality (#410). */
-  document.body.classList.add("health-degraded");
+  /* The status-drawer handle's `health-degraded` body class is now owned by
+     +page.svelte's own `$effect`, reactive to the real `systemStatus` read
+     (#863) -- set unconditionally here before, which is what made the
+     handle always say "degraded" regardless of the instance's real state. */
   /** @param {HTMLElement} button */
   function toggleAccount(button){
     const card = /** @type {HTMLElement} */ (document.getElementById("account"));

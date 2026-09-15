@@ -7,7 +7,7 @@ import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { requestDocumentDeletion } from "@/server/document-repository";
-import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
+import { clearedReviewDraftMetadata, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/server/workspace-access";
 import {
@@ -478,7 +478,7 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
     const [current] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken))).for("update").limit(1);
     if (!current) return false;
-    await transaction.update(imapIngestionMessages).set({ status: "discarded", receiptStatus: "cancelled", failureCode: null, discardedAt: now, attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, updatedAt: now })
+    await transaction.update(imapIngestionMessages).set({ status: "discarded", receiptStatus: "cancelled", failureCode: null, discardedAt: now, attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, updatedAt: now, ...clearedReviewDraftMetadata })
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken)));
     return true;
   });
@@ -685,6 +685,10 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
       attachmentProcessingLeaseToken: null,
       attachmentProcessingNextAttemptAt: failed ? new Date(now.getTime() + IMAP_STAGING_PURGE_RETRY_DELAY_MS) : null,
       updatedAt: now,
+      // This attempt at purging is itself still retryable when `failed`: the
+      // review has not actually ended yet, so its draft stays put. Reaching
+      // "expired" or the terminal "failed" state is the review ending.
+      ...(failed ? {} : clearedReviewDraftMetadata),
     }).where(and(eq(imapIngestionMessages.id, claim.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, claim.token)));
   }
 }
