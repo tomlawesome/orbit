@@ -6907,8 +6907,7 @@
         }
       },
       "verdict": "kept",
-      "notes": "",
-      "headline": true
+      "notes": ""
     },
     {
       "id": "E123",
@@ -6922,6 +6921,131 @@
       "how": "npm run eval:holdout -- --holdout4",
       "commit": "e0437d3",
       "output": "tmp/e-holdout4-door.txt",
+      "scores": {
+        "overall": {
+          "pct": 72.4,
+          "net": 84,
+          "of": 116
+        },
+        "provider": {
+          "pct": 83.3,
+          "net": 10,
+          "of": 12
+        },
+        "reference": {
+          "pct": 58.3,
+          "net": 7,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 28,
+          "of": 28
+        },
+        "dateRoles": {
+          "pct": 57.1,
+          "net": 16,
+          "of": 28
+        },
+        "subtype": {
+          "pct": 66.7,
+          "net": 8,
+          "of": 12
+        },
+        "cost": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "scheduleKind": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        },
+        "recurrence": {
+          "pct": 83.3,
+          "net": 5,
+          "of": 6
+        }
+      },
+      "verdict": "kept",
+      "notes": ""
+    },
+    {
+      "id": "E124",
+      "date": "2026-09-15",
+      "label": "hold-out 3 after a ground-truth cost was withdrawn",
+      "corpus": "holdout3-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "A hold-out author found and fixed a truth that declared a cost its own page does not print (4d70f68). No rule changed. The cost denominator drops by one, because a document with no declared cost is not scored for cost: 80.0% (88/110) becomes 80.7% (88/109), cost 9/12 becomes 9/11. Details of the document are deliberately unknown to this session.",
+      "how": "npm run eval:holdout -- --holdout3",
+      "commit": "4d70f68",
+      "output": "tmp/e-holdout3-costfix.txt",
+      "scores": {
+        "overall": {
+          "pct": 80.7,
+          "net": 88,
+          "of": 109
+        },
+        "provider": {
+          "pct": 100,
+          "net": 12,
+          "of": 12
+        },
+        "reference": {
+          "pct": 75,
+          "net": 9,
+          "of": 12
+        },
+        "dates": {
+          "pct": 100,
+          "net": 26,
+          "of": 26
+        },
+        "dateRoles": {
+          "pct": 69.2,
+          "net": 18,
+          "of": 26
+        },
+        "subtype": {
+          "pct": 41.7,
+          "net": 5,
+          "of": 12
+        },
+        "cost": {
+          "pct": 81.8,
+          "net": 9,
+          "of": 11
+        },
+        "scheduleKind": {
+          "pct": 80,
+          "net": 4,
+          "of": 5
+        },
+        "recurrence": {
+          "pct": 100,
+          "net": 5,
+          "of": 5
+        }
+      },
+      "verdict": "kept",
+      "notes": "",
+      "headline": true
+    },
+    {
+      "id": "E125",
+      "date": "2026-09-15",
+      "label": "hold-out 4 after the cost truth fix",
+      "corpus": "holdout4-12",
+      "model": "—",
+      "role": "no model",
+      "route": "sieve+tag+choose",
+      "what": "Unchanged: 72.4%. Recorded alongside E124 so both hold-outs are on the same commit.",
+      "how": "npm run eval:holdout -- --holdout4",
+      "commit": "4d70f68",
+      "output": "tmp/e-holdout4-costfix.txt",
       "scores": {
         "overall": {
           "pct": 72.4,
