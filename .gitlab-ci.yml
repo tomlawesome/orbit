@@ -211,17 +211,19 @@ variables:
   #                  -> gitleaks, licence_policy, supply_chain_source
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
   #                  tests that read this file
-  #                  -> fast, gitleaks, supply_chain_source
+  #                  -> fast, fast_docker, gitleaks, supply_chain_source
   #
   # `gitleaks` is in both and needs no call: it starts before `classify` and so
   # never sees ORBIT_LANE. Membership is unconditional -- a member runs whether
   # or not its own axis would also have asked for it, which is the point of a
-  # lane naming the job.
+  # lane naming the job. `fast_docker` joined the `ci` lane's membership when
+  # #950 split it out of `fast`: both are the pipeline-definition change's own
+  # coverage, same as before the split.
   orbit_lane_admits() {
     case "${ORBIT_LANE:-full}:$1" in
       full:*) return 0 ;;
       ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:supply_chain_source) return 0 ;;
-      ci:fast | ci:gitleaks | ci:supply_chain_source) return 0 ;;
+      ci:fast | ci:fast_docker | ci:gitleaks | ci:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
     return 1
@@ -269,38 +271,55 @@ variables:
 #
 # The acceptance stage used to start beside `fast` and the policy jobs, so a
 # red `fast` still cost a full image build, a browser suite, an installer run
-# and a launcher install before anyone read the first failure. Waiting for the
-# four cheap checks costs about seven minutes on a green pipeline and saves the
-# whole acceptance stage on a red one.
+# and a launcher install before anyone read the first failure. Waiting for
+# `fast` costs nothing extra on a green pipeline and saves the whole
+# acceptance stage on a red one.
 #
-# `optional: true` on all four, because a pipeline that does not create one of
-# them -- a lane, a future rule -- must skip the wait rather than fail to build.
+# `gitleaks`, `licence_policy` and `supply_chain_source` used to be in this
+# wait too. #923 finding 8 measured them queuing 541-1105 s on the shared
+# `light` lane for about 68 s of actual policy work -- holding the whole
+# acceptance stage back by over five minutes for jobs that do not read their
+# output. #945 (owner ruling on #923 rec 16b, 2026-09-09) drops them here:
+# `build_image` and `sidecar_images` (both `.needs_gated`) and the six jobs
+# that test the image (`.needs_gated_image`) now wait only on `classify` and
+# `fast`. A red `gitleaks`/`licence_policy`/`supply_chain_source` still fails
+# the pipeline overall -- none of them is `allow_failure: true` -- it just no
+# longer holds up a job that never reads their result. Accepted risk: a late
+# policy finding can now arrive after the acceptance stage has already
+# started on unvetted input; auto_cancel (#923 rec 13, above) cancels that run
+# rather than it never starting.
+#
+# `fidelity` and `integration` (`.needs_gated_with_fast_artifacts`) keep the
+# full wait, unchanged by #945.
+#
+# `fast_docker` (#950) joins every wait `fast` is in: it is the other half of
+# what `fast` used to be, on the coverage and correctness side, so a job that
+# had to wait for `fast` to pass must wait for both halves now, or a red
+# `fast_docker` would stop blocking anything.
+#
+# `optional: true`, because a pipeline that does not create one of these jobs
+# -- a lane, a future rule -- must skip the wait rather than fail to build.
 # `artifacts: false` where the job reads nothing from them: a `needs` is a
 # waiting order here, not a delivery.
-#
-# None of the four is `allow_failure: true`, which is what makes this work: a
-# job allowed to fail does not hold up what needs it.
 .needs_gated: &needs_gated
   - job: classify
     artifacts: true
   - job: fast
     artifacts: false
     optional: true
-  - job: gitleaks
-    artifacts: false
-    optional: true
-  - job: licence_policy
-    artifacts: false
-    optional: true
-  - job: supply_chain_source
+  - job: fast_docker
     artifacts: false
     optional: true
 
-# The same wait, for the two jobs that already took `fast`'s artefacts.
+# The same wait, for the two jobs that already took `fast`'s artefacts, and
+# that still wait on the policy jobs (#945 did not touch this anchor).
 .needs_gated_with_fast_artifacts: &needs_gated_with_fast_artifacts
   - job: classify
     artifacts: true
   - job: fast
+  - job: fast_docker
+    artifacts: false
+    optional: true
   - job: gitleaks
     artifacts: false
     optional: true
@@ -311,7 +330,7 @@ variables:
     artifacts: false
     optional: true
 
-# And for the five jobs that test the image `build_image` handed on.
+# And for the six jobs that test the image `build_image` handed on.
 .needs_gated_image: &needs_gated_image
   - job: classify
     artifacts: true
@@ -320,13 +339,7 @@ variables:
   - job: fast
     artifacts: false
     optional: true
-  - job: gitleaks
-    artifacts: false
-    optional: true
-  - job: licence_policy
-    artifacts: false
-    optional: true
-  - job: supply_chain_source
+  - job: fast_docker
     artifacts: false
     optional: true
 
@@ -697,33 +710,39 @@ classify:
 
 # --- fast --------------------------------------------------------------------
 
-# Docker, because five of the suites here shell out to Orbit's own scripts and
-# those scripts require it. GitHub's ubuntu-latest ships a CLI, the Compose v2
-# plugin and a running daemon; $NODE_IMAGE ships none of the three, which is
-# why 16 tests in five files failed on the first GitLab run (pipeline 163).
+# Split from one Docker-requiring job into two (#950, owner ruling on #923
+# rec 15a, 2026-09-09). It used to occupy the privileged `orbit-build` slot
+# for 219-312 s a pipeline, but per #923 finding 10 almost none of that work
+# touches Docker: `tsc`, `eslint`, the coverage-bearing Vitest run and the web
+# build all run unprivileged on `big`.
 #
-# The dind *service* rather than the in-job daemon, because nothing reachable
-# from these tests bind-mounts a checkout or tmpdir path into a container.
-# src/lib/install-script-adapters.test.ts is the test that forced a real
-# daemon: its beforeAll runs `docker build --target vapid-generator .` and
-# scripts/configure.sh then really runs that image to generate a key pair, so a
-# PATH shim will not satisfy it -- but it passes the build context over the API
-# and uses no `--volume`, so a daemon in another container is fine. The two
-# checkout mounts that do exist in the scripts are both unreachable from here:
-# the recovery-bundle parity fixtures are rejected in preflight, before
-# scripts/import-recovery-bundle.sh gets to its `--volume` line, and
-# scripts/repair.test.mjs intercepts scripts/repair.sh's mount with a fake
-# `docker` ahead of the real one on PATH. The image stays $NODE_IMAGE: the Node
-# these unit tests run under is the thing this job exists to pin.
-#
-# 20m rather than 10m: the same suite now also waits for the dind service,
-# installs the client, and pulls Orbit's base image to build that one target.
+# What genuinely needs a daemon was re-checked against the code rather than
+# trusted from the original count of five (pipeline 163, 2026-09-04, when
+# $NODE_IMAGE had no Docker CLI at all -- a coarser signal than a real gap
+# check): running the full candidate set with `docker` entirely absent from
+# PATH -- the actual `big`-lane condition, built from /usr/bin minus the
+# `docker` binary rather than a `docker` that merely exits nonzero, because a
+# present-but-failing shim still satisfies `command -v docker` -- two files
+# came back red, not one and not five.
+# src/lib/install-script-adapters.test.ts: its beforeAll runs
+# `docker build --target vapid-generator .` and scripts/configure.sh then
+# really runs that image to generate a key pair, so no PATH shim satisfies it.
+# src/lib/recovery-bundle.parity.test.ts: its two "no Docker daemon reachable"
+# describe blocks are true to their name -- they never reach a live daemon --
+# but they spawn the real import-recovery-bundle.sh/backup.sh, and both
+# scripts gate on `command -v docker`/`docker compose version` in their own
+# preflight, before the archive-validation logic under test. Every other file
+# that mentions `docker` -- scripts/repair.test.mjs and the three
+# *.docker-adapter.test.ts suites among them -- puts its own fake `docker`
+# ahead of the real one on PATH (or, database-volume-safety.parity.test.ts, a
+# stub script) and never reaches an absent one, which is also why the dind
+# *service* (rather than an in-job daemon) is enough for `fast_docker`: nothing
+# reachable from either of its two files bind-mounts a checkout or tmpdir path
+# into a container, only passes a build context over the API.
 fast:
   stage: fast
-  extends:
-    - .node
-    - .dind_service
-  timeout: 20m
+  extends: .node
+  timeout: 10m
   rules:
     - *not_scheduled
     - when: on_success
@@ -739,12 +758,12 @@ fast:
     - *reach_helpers
     - orbit_lane_admits fast || exit 0
     - *reuse_gate
-    - *docker_cli
     - pnpm install --frozen-lockfile
     # Everything from here runs unprivileged, because two of these tests assert
     # a permission refusal that root does not receive. See .drop_to_node.
     - *drop_to_node
-    - orbit_as_node 'ORBIT_TEST_COVERAGE=true bash scripts/test-backend.sh'
+    # ORBIT_TEST_SKIP_DOCKER excludes the suites fast_docker owns, below.
+    - orbit_as_node 'ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh'
     # The production build and the render proof, run here as well as inside the
     # image: the container build is the authoritative gate but it is minutes
     # away, and this fails in seconds when a packaging change breaks previews.
@@ -759,6 +778,56 @@ fast:
     name: orbit-coverage
     paths:
       - coverage/
+      - ci-evidence/
+    expire_in: 14 days
+    when: on_success
+
+# The other half: the suites that need a real `docker` binary, on the
+# privileged `orbit-build` lane so `fast` no longer has to be. Not
+# `.docker_in_job`: nothing here binds a checkout or tmpdir path into a
+# container, so the dind *service* (`.dind_service`) is enough, and is what
+# `fast` used to carry for both.
+#
+# No `--coverage`: the coverage-bearing run is `fast`'s, and stays whole so
+# the ratchet floors in vitest.config.ts measure one consistent run rather
+# than two partial ones with no merge step. Neither src/lib file's own coverage
+# contribution is currently double-counted or dropped in a way verified
+# against a live pipeline -- watch the first real run after this split for a
+# `src/lib/**` floor regression before assuming it is clear (most of
+# install-script-adapters.ts is also reached through install-orchestrator.ts
+# and its own test, and recovery-bundle.ts's exported functions are also
+# called directly from recovery-bundle.test.ts, both of which stay in `fast`).
+fast_docker:
+  stage: fast
+  extends:
+    - .node
+    - .dind_service
+  timeout: 15m
+  rules:
+    - *not_scheduled
+    - when: on_success
+  needs:
+    - job: classify
+      artifacts: true
+  variables:
+    COREPACK_HOME: $CI_BUILDS_DIR/.corepack
+  script:
+    - *reach_helpers
+    - orbit_lane_admits fast_docker || exit 0
+    - *reuse_gate
+    - *docker_cli
+    # test-e2e-local-reuse.test.mjs spawns the real scripts/test-e2e-local.sh,
+    # which checks its whole prerequisite list before the code under test runs
+    # -- and node:22-bookworm carries every one of them except jq (pipeline
+    # 1021). *docker_cli has just run `apt-get update`, so this is one package.
+    - apt-get install -y -qq --no-install-recommends jq
+    - pnpm install --frozen-lockfile
+    - *drop_to_node
+    - orbit_as_node 'pnpm exec vitest run src/lib/install-script-adapters.test.ts src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs'
+    - *reuse_evidence
+  artifacts:
+    name: orbit-fast-docker
+    paths:
       - ci-evidence/
     expire_in: 14 days
     when: on_success
@@ -2078,6 +2147,7 @@ record_image:
     - job: repair_journeys
     - job: supply_chain_source
     - job: fast
+    - job: fast_docker
     - job: base_image
     - job: integration
   variables:

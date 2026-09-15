@@ -16,8 +16,8 @@ vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const script = fileURLToPath(new URL("./test-e2e-local.sh", import.meta.url));
 
-function dryRunArgs(args) {
-  const result = failOnProcessDeadline(
+function dryRunArgsRaw(args) {
+  return failOnProcessDeadline(
     spawnSync("bash", [script, ...args], {
       encoding: "utf8",
       env: { ...process.env, TEST_E2E_LOCAL_DRY_RUN: "1" },
@@ -25,9 +25,29 @@ function dryRunArgs(args) {
     }),
     { label: "dryRunArgs" },
   );
+}
+
+function dryRunArgs(args) {
+  const result = dryRunArgsRaw(args);
   expect(result.status, `stderr: ${result.stderr}`).toBe(0);
   return result.stdout.split("\n").filter((line) => line.length > 0);
 }
+
+// The two --reuse tests that drive the real discovery code, and so need a
+// real docker binary, live in test-e2e-local-reuse.test.mjs: `fast` has no
+// docker, `fast_docker` does (#950). Only argument handling is tested here,
+// which the dry-run hook answers before the script checks its preconditions.
+describe("test-e2e-local.sh --reuse", () => {
+  it("accepts a value without disturbing Playwright argument assembly", () => {
+    expect(dryRunArgs(["--reuse", "some-project"])).toEqual(dryRunArgs([]));
+  });
+
+  it("requires a value", () => {
+    const result = dryRunArgsRaw(["--reuse"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("--reuse requires a Compose project name");
+  });
+});
 
 describe("test-e2e-local.sh Playwright argument assembly", () => {
   it("keeps the spec out of --project's value when both flags are given", () => {
