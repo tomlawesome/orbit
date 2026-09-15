@@ -257,7 +257,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-cavity-wall-insulation-guarantee.pdf": {
-    provider: "Services is a trading name of WarmCore Insulation Ltd, registered in England and Wales No. 06612940, registered office 4",
+    provider: "Guarantee certificate WC-GTE-08823 Brightwell Insulation Services Cavity wall & loft insulation",
     reference: "Guarantee certificate WC-GTE-08823 Brightwell Insulation Services Cavity wall & loft insulation",
     subtype: "Guarantee certificate WC-GTE-08823 Brightwell Insulation Services Cavity wall &",
     cost: { amount: "2,340.00", needle: "confirmed by borescope survey 28 April 2026 Guarantee period 25 years, from 12 May 2026 to 12 May 2051 Contract price £2,340.00, paid in full 12 May" },
@@ -389,7 +389,7 @@ const EVIDENCE: Record<string, DocEvidence> = {
     ],
   },
   "fullpage-health-cash-plan-certificate.pdf": {
-    provider: "Cash Plan is a trading name of Bramwell Friendly Society Ltd, incorporated under the Friendly Societies Act 1992, registered number",
+    provider: "FeelGood Cash Plan — membership certificate FGP-MEM-338420 FeelGood Cash Plan Everyday healthcare cover for you and your family",
     reference: "Cash Plan — membership certificate FGP-MEM-338420 FeelGood Cash Plan Everyday healthcare cover for you and your family",
     subtype: "FeelGood Cash Plan — membership certificate FGP-MEM-338420 FeelGood Cash Plan Everyday",
     cost: { amount: "14.50", needle: "osteopathy £400 Consultations and diagnostic tests £300 Health screening (once every 2 years) £120 MONTHLY PREMIUM £14.50 Your plan is billed 1" },
