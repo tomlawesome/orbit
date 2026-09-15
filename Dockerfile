@@ -102,6 +102,12 @@ RUN . /opt/orbit/scripts/release-metadata-patterns.sh \
   && printf '%s\n' "${ORBIT_VERSION}" | grep -Eq "$ORBIT_VERSION_PATTERN" \
   && printf '%s\n' "${ORBIT_REVISION}" | grep -Eq "$ORBIT_REVISION_PATTERN" \
   && printf '%s\n' "${ORBIT_CHANNEL}" | grep -Eq "$ORBIT_CHANNEL_PATTERN"
+# Carried from build ARG to runtime ENV so the running server can read its own
+# release metadata (#1000, GET /api/admin/health) — an ARG is a build-time-only
+# value and is invisible to `process.env` once the container is running.
+ENV ORBIT_VERSION=${ORBIT_VERSION}
+ENV ORBIT_REVISION=${ORBIT_REVISION}
+ENV ORBIT_CHANNEL=${ORBIT_CHANNEL}
 ENV NODE_ENV=production
 ENV PORT=3000
 # adapter-node's own variables (#735). It reads HOST, not Next's HOSTNAME;
