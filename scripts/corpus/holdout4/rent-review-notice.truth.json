@@ -1,0 +1,17 @@
+{
+  "name": "Rent review notice",
+  "filename": "rent-review-notice.pdf",
+  "notes": ["Letting agent's rent review notice for a periodic assured shorthold tenancy, with tenant guidance and agent disclosures"],
+  "expected": {
+    "dates": ["2026-10-01", "2026-12-01"],
+    "provider": "Quenby Fold Lettings",
+    "reference": "QF/TEN/10-2244",
+    "dateRoles": [
+      { "date": "2026-10-01", "role": "issued" },
+      { "date": "2026-12-01", "role": "start" }
+    ],
+    "subtype": { "kinds": ["Tenancy"] },
+    "costMinor": 104500,
+    "currency": "GBP"
+  }
+}

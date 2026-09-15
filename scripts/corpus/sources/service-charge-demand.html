@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Service Charge Demand — Thornfield Court</title>
+<style>
+@font-face{font-family:"Corpus Letter";src:url("../fonts/EBGaramond.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Letter";src:url("../fonts/EBGaramond-Italic.ttf") format("truetype");font-weight:100 900;font-style:italic;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Letter", serif;
+    font-size: 10pt; line-height: 1.55; color: #1a1a1a;
+  }
+  .page {
+    width: 210mm; height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always; background: #ffffff;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---- Letterhead (page 1) ---- */
+  .letterhead { padding: 10mm 20mm 0 20mm; text-align: center; }
+  .crest {
+    width: 8mm; height: 8mm; margin: 0 auto 1.5mm auto; border-radius: 50%;
+    border: 0.9pt solid #1f3b2f; display: flex; align-items: center; justify-content: center;
+    font-size: 5.5pt; font-weight: 700; color: #1f3b2f; font-variant: small-caps; letter-spacing: 0.5px;
+  }
+  .firmname {
+    font-variant: small-caps; letter-spacing: 3px; font-size: 14pt; font-weight: 700; color: #1f3b2f;
+    line-height: 1.15;
+  }
+  .headrule { width: 70mm; margin: 1.5mm auto; border: none; border-top: 0.8pt solid #1f3b2f; }
+  .regdetails { font-size: 6.8pt; line-height: 1.35; color: #3a3a3a; max-width: 150mm; margin: 0 auto; }
+
+  .address-block {
+    position: absolute; top: 45mm; left: 20mm; font-size: 10pt; line-height: 1.45; color: #1a1a1a;
+  }
+
+  .letterbody { padding: 0 20mm 14mm 20mm; margin-top: 37mm; }
+  .contbody { padding: 0 20mm 14mm 20mm; }
+  .conthead {
+    padding: 14mm 20mm 3mm 20mm; margin: 0 0 5mm 0; font-size: 8pt; font-variant: small-caps;
+    letter-spacing: 1.5px; color: #1f3b2f; font-weight: 700;
+  }
+  .conthead .rule { border: none; border-top: 0.6pt solid #cdd4cf; margin-top: 3mm; }
+  .dateline { text-align: right; margin-bottom: 7mm; }
+  .salutation { margin-bottom: 1mm; }
+  .refline {
+    font-size: 8.6pt; color: #1f3b2f; margin-bottom: 5mm; line-height: 1.5;
+  }
+  .refline .re { font-weight: 700; }
+  .letterbody p { margin: 0 0 4mm 0; text-align: left; }
+  .paydetails { font-size: 9.4pt; margin: 0 0 4mm 6mm; line-height: 1.5; }
+  .paydetails div { margin-bottom: 0.5mm; }
+  .paydetails b { display: inline-block; min-width: 34mm; font-weight: 700; }
+  .closing { margin-top: 7mm; }
+  .sigspace { height: 14mm; }
+  .signame { font-weight: 700; }
+  .sigtitle { font-size: 9.2pt; }
+
+  /* ---- Appendix pages ---- */
+  .apxpage { padding: 16mm 20mm 16mm 20mm; }
+  .apxlabel {
+    font-size: 8pt; letter-spacing: 1.5px; text-transform: uppercase; color: #1f3b2f;
+    font-weight: 700; margin-bottom: 1mm;
+  }
+  h2 {
+    font-size: 11.5pt; font-weight: 700; color: #1f3b2f; margin: 0 0 3.5mm 0;
+    font-variant: normal;
+  }
+  h3 {
+    font-size: 9.6pt; font-weight: 700; color: #1f3b2f; margin: 6mm 0 2mm 0;
+  }
+  .apxpage > p, .apxintro { font-size: 8.8pt; line-height: 1.5; margin: 0 0 4mm 0; text-align: left; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 8.6pt; margin-bottom: 3mm; }
+  th {
+    text-align: left; font-weight: 700; padding: 1.6mm 1.8mm;
+    border-top: 0.9pt solid #1f3b2f; border-bottom: 0.7pt solid #1f3b2f;
+  }
+  td { padding: 1.4mm 1.8mm; border-bottom: 0.4pt solid #cdd4cf; vertical-align: top; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  tr.total td { font-weight: 700; border-top: 0.8pt solid #1f3b2f; border-bottom: none; }
+
+  .fine { font-size: 7.6pt; color: #444; line-height: 1.5; margin-bottom: 3mm; }
+
+  .statute {
+    font-size: 7.3pt; line-height: 1.5; text-align: justify; column-count: 1; color: #1a1a1a;
+  }
+  .statute p { margin: 0 0 2.6mm 0; }
+
+  .pagefoot {
+    position: absolute; left: 20mm; right: 20mm; bottom: 10mm; font-size: 7pt; color: #555;
+    border-top: 0.6pt solid #cdd4cf; padding-top: 1.6mm; display: flex; justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1: LETTER -->
+<div class="page">
+  <div class="letterhead">
+    <div class="crest">P&amp;V</div>
+    <div class="firmname">Purbeck &amp; Vane Property Management Ltd</div>
+    <hr class="headrule">
+    <div class="regdetails">
+      14 Cathedral Approach, Wexbridge, WX2 1TP &middot; 01926 774 220 &middot; accounts@purbeckvane.example<br>
+      Registered in England &amp; Wales No. 08841772 &middot; VAT registration No. GB 204 7731 55<br>
+      Member of the National Property Agents Redress Panel, ref NPARP-44188<br>
+      Managing agents for Thornfield Court (Freehold) Ltd
+    </div>
+  </div>
+
+  <div class="address-block">
+    Ms Eleanor Vance<br>
+    Flat 14, Thornfield Court<br>
+    22 Petersgate Road<br>
+    Alderwick<br>
+    WX7 4LP
+  </div>
+
+  <div class="letterbody">
+    <div class="dateline">10 March 2026</div>
+    <div class="salutation">Dear Ms Vance,</div>
+    <div class="refline">
+      <span class="re">Re: Service charge demand — Flat 14, Thornfield Court</span><br>
+      Account reference TFC-014-2627 &middot; Lease reference TFC/14/LR-1998 &middot; First instalment (1 of 2)<br>
+      Demand number SCD-2026-04471 &middot; Unit reference TFC-U014
+    </div>
+
+    <p>We write as managing agents for Thornfield Court (Freehold) Ltd, the landlord and
+    freeholder of Thornfield Court, whose registered office is c/o this office at the
+    address above, to demand payment of the service charge apportioned to your property
+    for the service charge year running from 1 April 2026 to 31 March 2027. This demand
+    is issued under clause 4 of your lease and section 21B of the Landlord and Tenant Act
+    1985. Ground rent, where applicable under your lease, is invoiced separately under
+    ground rent account GR-TFC-014 and does not form part of this demand.</p>
+
+    <p>Thornfield Court comprises 24 flats at 22 Petersgate Road, Alderwick, WX7 4LP.
+    Your lease reference is TFC/14/LR-1998, and this account is held under reference
+    TFC-014-2627, which should be quoted in all correspondence. Your fixed contribution
+    under the lease is a 1/24th share of the development&rsquo;s service charge, equivalent
+    to 4.1667% of the total. Please continue to send any correspondence about this account
+    to you at the address shown above.</p>
+
+    <p>This demand covers the service charge year running for a 12-month period from
+    1 April 2026 to 31 March 2027. Under the terms of your lease, contributions for
+    that year are collected in two equal instalments, due on 1 April 2026 and
+    1 October 2026, together with any balancing adjustment carried forward from the
+    year ended 31 March 2026. At the end of the service charge year we will send you
+    the certified accounts for the year ending 31 March 2027 and the budget for the
+    following service charge year, with a further demand for the instalment then
+    falling due.</p>
+
+    <p>Your apportioned share of the service charge budgeted for the development for
+    that year is £3,930.00, as shown in the schedule at Appendix A, payable in two equal
+    instalments of £1,965.00 each. Together with a balancing charge of £25.83 brought
+    forward from the year ended 31 March 2026, shown at Appendix B, the total amount now
+    due from you is £1,990.83, payable by 1 April 2026. Your second instalment of
+    £1,965.00 for this service charge year will fall due on 1 October 2026.</p>
+  </div>
+
+  <div class="pagefoot">
+    <span>Purbeck &amp; Vane Property Management Ltd &middot; Account TFC-014-2627</span>
+    <span>Page 1 of 4</span>
+  </div>
+</div>
+
+<!-- PAGE 2: LETTER, CONTINUED -->
+<div class="page">
+  <div class="conthead">
+    Purbeck &amp; Vane Property Management Ltd
+    <hr class="rule">
+  </div>
+  <div class="contbody">
+    <p>Payment may be made by bank transfer to the client account below, quoting your
+    account reference with every payment:</p>
+    <div class="paydetails">
+      <div><b>Account name</b> Purbeck &amp; Vane Client Account &mdash; Thornfield Court</div>
+      <div><b>Sort code</b> 40-11-22</div>
+      <div><b>Account number</b> 83291006</div>
+      <div><b>Payment reference</b> TFC-014-2627</div>
+      <div><b>Client ledger</b> PV-CL-0091447</div>
+    </div>
+    <p>Alternatively you may pay by cheque, made payable to &ldquo;Purbeck &amp; Vane
+    Client Account&rdquo;, or set up a standing order for the half-yearly instalments by
+    contacting us at accounts@purbeckvane.example. You can also view this account and pay
+    online at purbeckvane.example/leaseholders, or via the Purbeck &amp; Vane Leaseholder
+    app.</p>
+
+    <p>For your reference, the budget for the whole development is set out at Appendix
+    A, the calculation of the balancing charge and the instalment schedule for this
+    service charge year at Appendix B, and a Summary of Tenants&rsquo; Rights and
+    Obligations, which forms part of this demand, at the end of this letter.</p>
+
+    <div class="closing">
+      Yours sincerely,
+      <div class="sigspace"></div>
+      <div class="signame">Declan Osei</div>
+      <div class="sigtitle">Property Manager<br>for Purbeck &amp; Vane Property Management Ltd</div>
+    </div>
+  </div>
+
+  <div class="pagefoot">
+    <span>Purbeck &amp; Vane Property Management Ltd &middot; Account TFC-014-2627</span>
+    <span>Page 2 of 4</span>
+  </div>
+</div>
+
+<!-- PAGE 3: APPENDIX A -->
+<div class="page apxpage">
+  <div class="apxlabel">Appendix A</div>
+  <h2>Budget for the service charge year ending 31 March 2027</h2>
+  <p class="apxintro">
+    The table below shows the actual cost for the development for the year ended
+    31 March 2026, the budgeted cost for the year ending 31 March 2027, and your
+    apportioned share of this year&rsquo;s budget at your fixed contribution of
+    1/24th (4.1667%) of the total. Individual line shares are rounded to the nearest
+    penny, which may leave the column up to a penny short of the total shown.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Expenditure head</th>
+        <th class="num">Actual, year ended 31 Mar 2026</th>
+        <th class="num">Budget, year ending 31 Mar 2027</th>
+        <th class="num">Flat 14 share (4.1667%)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Buildings insurance premium</td><td class="num">£18,420.00</td><td class="num">£19,650.00</td><td class="num">£818.75</td></tr>
+      <tr><td>Communal electricity (landings, hallways, external lighting)</td><td class="num">£6,140.00</td><td class="num">£6,800.00</td><td class="num">£283.33</td></tr>
+      <tr><td>Lift maintenance contract and LOLER thorough examinations</td><td class="num">£7,850.00</td><td class="num">£8,200.00</td><td class="num">£341.67</td></tr>
+      <tr><td>Grounds maintenance and gardening contract</td><td class="num">£5,200.00</td><td class="num">£5,450.00</td><td class="num">£227.08</td></tr>
+      <tr><td>Communal cleaning contract</td><td class="num">£4,200.00</td><td class="num">£4,350.00</td><td class="num">£181.25</td></tr>
+      <tr><td>Window cleaning contract</td><td class="num">£780.00</td><td class="num">£800.00</td><td class="num">£33.33</td></tr>
+      <tr><td>Door entry system maintenance and call points</td><td class="num">£1,340.00</td><td class="num">£1,400.00</td><td class="num">£58.33</td></tr>
+      <tr><td>Fire risk assessment and fire equipment servicing</td><td class="num">£2,150.00</td><td class="num">£2,300.00</td><td class="num">£95.83</td></tr>
+      <tr><td>Communal water rates</td><td class="num">£1,860.00</td><td class="num">£1,950.00</td><td class="num">£81.25</td></tr>
+      <tr><td>Reactive repairs and communal maintenance</td><td class="num">£9,000.00</td><td class="num">£7,650.00</td><td class="num">£318.75</td></tr>
+      <tr><td>Pest control contract</td><td class="num">£400.00</td><td class="num">£350.00</td><td class="num">£14.58</td></tr>
+      <tr><td>Health and safety compliance (incl. Legionella risk assessment)</td><td class="num">£980.00</td><td class="num">£1,050.00</td><td class="num">£43.75</td></tr>
+      <tr><td>Management fee</td><td class="num">£16,800.00</td><td class="num">£17,520.00</td><td class="num">£730.00</td></tr>
+      <tr><td>Reserve (sinking) fund contribution</td><td class="num">£12,000.00</td><td class="num">£13,200.00</td><td class="num">£550.00</td></tr>
+      <tr><td>Accountancy and audit fee</td><td class="num">£2,400.00</td><td class="num">£2,500.00</td><td class="num">£104.17</td></tr>
+      <tr><td>Out-of-hours emergency call-out contract</td><td class="num">£1,100.00</td><td class="num">£1,150.00</td><td class="num">£47.92</td></tr>
+      <tr class="total"><td>Total, whole development</td><td class="num">£90,620.00</td><td class="num">£94,320.00</td><td class="num">£3,930.00</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">
+    Development-wide totals are shown for information only and are not the sum
+    charged to any one flat. Your service charge for the year ending 31 March 2027
+    is your apportioned share shown in the right-hand column, totalling £3,930.00.
+    The buildings insurance policy for the development renews on 1 September 2026.
+  </div>
+
+  <h3>Notes on the budget</h3>
+  <p class="apxintro">The reactive repairs and maintenance budget has been set below last year&rsquo;s
+  actual spend because the year ended 31 March 2026 included the one-off cost of
+  repairing storm damage to the communal roof, which is not expected to recur.
+  The reserve fund contribution has increased to build up provision for external
+  redecoration works anticipated to be required within the next three years; a
+  section 20 notice of intention regarding these works was issued to leaseholders
+  on 5 January 2026, and a further notice will follow once quotations have been
+  obtained. The board of Thornfield Court (Freehold) Ltd approved this budget at
+  its meeting on 24 February 2026.</p>
+
+  <div class="pagefoot">
+    <span>Purbeck &amp; Vane Property Management Ltd &middot; Account TFC-014-2627</span>
+    <span>Page 3 of 4</span>
+  </div>
+</div>
+
+<!-- PAGE 4: APPENDIX B, TRIBUNAL, QUERIES, SUMMARY -->
+<div class="page apxpage">
+  <div class="apxlabel">Appendix B</div>
+  <h2>Balancing charge and instalment schedule</h2>
+
+  <h3>Balancing charge — year ended 31 March 2026</h3>
+  <table>
+    <thead>
+      <tr><th>Item</th><th class="num">Amount</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Actual expenditure, whole development, year ended 31 March 2026</td><td class="num">£90,620.00</td></tr>
+      <tr><td>Flat 14 apportioned share (4.1667%)</td><td class="num">£3,775.83</td></tr>
+      <tr><td>Less: instalments already collected on account from Flat 14 during that year (2 &times; £1,875.00)</td><td class="num">&minus;£3,750.00</td></tr>
+      <tr class="total"><td>Balancing charge due from Flat 14, carried forward to this demand</td><td class="num">£25.83</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">
+    Had the on-account instalments exceeded the apportioned actual cost, the
+    difference would have been shown as a credit and set against your first
+    instalment for the year ending 31 March 2027 instead. The certified service
+    charge accounts for the year ended 31 March 2026 are available on request from
+    the managing agent free of charge.
+  </div>
+
+  <h3>Instalment schedule for the year ending 31 March 2027</h3>
+  <table>
+    <thead>
+      <tr><th>Instalment</th><th>Due date</th><th class="num">Amount</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>First instalment plus balancing charge (this demand)</td><td>1 April 2026</td><td class="num">£1,990.83</td></tr>
+      <tr><td>Second instalment</td><td>1 October 2026</td><td class="num">£1,965.00</td></tr>
+    </tbody>
+  </table>
+  <div class="fine">
+    Instalments not paid within 14 days of the due date accrue interest at 4% above
+    the Bank of England Bank Rate, under clause 6 of your lease, until payment is
+    received.
+  </div>
+
+  <h3>The First-tier Tribunal</h3>
+  <p class="apxintro">If you consider any of the charges set out in this demand to be
+  unreasonable, or you dispute your liability to pay them, you may apply to the
+  First-tier Tribunal (Property Chamber) for a determination under section 27A
+  of the Landlord and Tenant Act 1985. The Tribunal can decide whether a charge
+  is payable, and if so, the amount, the date it is payable, and to whom. Making
+  an application does not relieve you of the obligation to pay the amount
+  demanded pending the Tribunal&rsquo;s decision, and does not by itself
+  suspend the due date shown in this letter. Details of how to apply are available
+  from HM Courts &amp; Tribunals Service, or from the managing agent on request.</p>
+
+  <h3>Queries about this demand</h3>
+  <p class="apxintro">Please direct queries about this account to the property manager for
+  Thornfield Court, Mr Declan Osei, at Purbeck &amp; Vane Property Management
+  Ltd, 14 Cathedral Approach, Wexbridge, WX2 1TP, telephone 01926 774 220
+  extension 214, or accounts@purbeckvane.example, quoting account reference
+  TFC-014-2627. A complaints procedure is available on request and, if a
+  complaint is not resolved to your satisfaction, you may refer it to the
+  National Property Agents Redress Panel.</p>
+
+  <h3>Summary of Tenants&rsquo; Rights and Obligations</h3>
+  <div class="statute">
+    <p>This summary must accompany a service charge demand and is provided in general
+    terms only; it does not describe your particular rights and obligations, which
+    depend on the terms of your lease and current legislation.</p>
+    <p><b>Right to a written summary of costs.</b> You may ask in writing for a
+    written summary of the costs making up any service charge demanded from you in
+    the preceding twelve months. The landlord must provide this within one month
+    of the request, or within six months of the end of the relevant accounting
+    period, whichever is later.</p>
+    <p><b>Right to inspect supporting documents.</b> Within six months of receiving a
+    written summary you may require the landlord to allow you to inspect the
+    accounts, receipts and other documents supporting it, or to provide copies, on
+    reasonable notice.</p>
+    <p><b>Right to challenge reasonableness.</b> You may apply to the appropriate
+    tribunal for a determination whether a service charge is payable, and if so,
+    by whom, to whom, how much, and when. Your right to apply is not affected by
+    having already paid the charge.</p>
+    <p><b>Withholding payment.</b> A tenant may have the right to withhold payment of
+    a service charge if this summary is not provided with the demand. If you
+    withhold a service charge in these circumstances, you may still be asked to
+    pay interest once this summary is provided.</p>
+    <p><b>Insolvency.</b> Where a tenant is an individual, non-payment of a service
+    charge, or of an administration charge, may in certain circumstances entitle
+    the landlord to seek forfeiture of the lease. A demand for a service charge
+    must be accompanied by this summary and, where it is not, all or part of the
+    charge may not be payable until it is provided.</p>
+    <p>Advice can be obtained from a solicitor, a citizens advice bureau, or a
+    residential property lawyer. This notice is a general guide and is not a
+    substitute for individual legal advice.</p>
+  </div>
+
+  <div class="pagefoot">
+    <span>Purbeck &amp; Vane Property Management Ltd &middot; Account TFC-014-2627</span>
+    <span>Page 4 of 4</span>
+  </div>
+</div>
+
+</body>
+</html>

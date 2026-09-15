@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Job Card and Invoice — Pennard Autocentre</title>
+<style>
+@font-face{font-family:"Corpus Works Mono";src:url("../fonts/FiraMono-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Works";src:url("../fonts/Chivo.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; }
+  .page { width: 794px; height: 1123px; box-sizing: border-box; position: relative; overflow: hidden; padding: 38px 46px; font-family: "Corpus Works", sans-serif; color: #1a1a1a; font-size: 10.2px; line-height: 1.4; }
+
+  .headstrip { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #1e4d2b; padding-bottom: 8px; margin-bottom: 10px; }
+  .brand { font-weight: 700; font-size: 22px; color: #1e4d2b; letter-spacing: 0.3px; }
+  .brand .sub { display: block; font-size: 9px; font-weight: 400; color: #555; margin-top: 2px; }
+  .headaddr { font-size: 8.4px; text-align: right; color: #444; line-height: 1.55; }
+
+  .jobheader { display: flex; gap: 12px; margin-bottom: 10px; }
+  .jh-panel { flex: 1; border: 1px solid #999; padding: 6px 9px; }
+  .jh-panel .t { font-size: 7.6px; text-transform: uppercase; letter-spacing: 0.4px; color: #666; }
+  .jh-panel .v { font-size: 10.6px; font-weight: 700; margin-top: 1px; }
+  .jh-panel .v.mono { font-family: "Corpus Works Mono", monospace; }
+  .invbox { border: 2px solid #1e4d2b; padding: 6px 10px; background: #f2f7f3; }
+  .invbox .t { font-size: 7.6px; text-transform: uppercase; color: #1e4d2b; }
+  .invbox .v { font-family: "Corpus Works Mono", monospace; font-size: 12px; font-weight: 700; white-space: nowrap; }
+
+  table.jobs { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 9.4px; }
+  table.jobs th { background: #1e4d2b; color: #fff; font-size: 8px; text-transform: uppercase; text-align: left; padding: 4px 6px; }
+  table.jobs td { border-bottom: 0.6px solid #ccc; padding: 4px 6px; vertical-align: top; }
+  table.jobs td.mono, table.jobs th.mono { font-family: "Corpus Works Mono", monospace; }
+  table.jobs td.n { text-align: right; font-family: "Corpus Works Mono", monospace; }
+
+  h3.sub-h { font-size: 10px; color: #1e4d2b; margin: 10px 0 4px 0; border-bottom: 1px solid #1e4d2b; padding-bottom: 2px; }
+  table.advisory { width: 100%; border-collapse: collapse; font-size: 9px; margin-bottom: 8px; }
+  table.advisory th { background: #eee; text-align: left; padding: 3px 6px; font-size: 7.8px; text-transform: uppercase; }
+  table.advisory td { border-bottom: 0.5px solid #ddd; padding: 3px 6px; }
+
+  .totalsbox { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+  .totals { width: 260px; font-family: "Corpus Works Mono", monospace; font-size: 9.6px; }
+  .totals .row { display: flex; justify-content: space-between; padding: 2px 0; }
+  .totals .row.grand { border-top: 2px solid #1e4d2b; font-weight: 700; font-size: 12.5px; margin-top: 3px; padding-top: 4px; white-space: nowrap; }
+
+  .stamprow { display: flex; gap: 12px; margin-bottom: 10px; }
+  .stamp { border: 2px dashed #1e4d2b; border-radius: 50%; width: 92px; height: 92px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-size: 7px; color: #1e4d2b; flex-shrink: 0; }
+  .stamp .big { font-size: 9px; font-weight: 700; margin: 2px 0; }
+  .stampnote { font-size: 8.6px; color: #333; align-self: center; }
+
+  .small { font-size: 8px; color: #555; }
+  .footlinks { font-size: 8px; color: #555; border-top: 0.6px solid #ccc; padding-top: 4px; margin-top: 6px; }
+
+  h2.sechead { font-size: 14px; color: #1e4d2b; border-bottom: 1.6px solid #1e4d2b; padding-bottom: 4px; margin: 0 0 8px 0; }
+  .prose { font-family: "Corpus Works", sans-serif; font-size: 9.2px; }
+  .prose h4 { font-size: 9.8px; color: #1e4d2b; margin: 8px 0 3px 0; }
+  .prose p, .prose ul { margin: 0 0 5px 0; }
+  .prose ul { padding-left: 15px; }
+  .prose li { margin-bottom: 2px; }
+  .twocol { column-count: 2; column-gap: 18px; }
+  .pagenum { position: absolute; bottom: 12px; right: 46px; font-size: 7.6px; color: #888; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="headstrip">
+    <div class="brand">Pennard Autocentre<span class="sub">Servicing &amp; MOT preparation &middot; est. locally since 1988</span></div>
+    <div class="headaddr">Unit 12, Foundry Way<br>Trowbridge, BA14 8LT<br>pennardauto.co.uk/booking &middot; 01225 960442</div>
+  </div>
+
+  <div class="jobheader">
+    <div class="jh-panel"><div class="t">Registration mark</div><div class="v mono">KX68 HTM</div></div>
+    <div class="jh-panel"><div class="t">Recorded mileage</div><div class="v mono">62,481</div></div>
+    <div class="jh-panel"><div class="t">Job card number</div><div class="v mono">JC-55219</div></div>
+    <div class="jh-panel"><div class="t">Customer account</div><div class="v mono">PA-1180</div></div>
+    <div class="invbox"><div class="t">Invoice number</div><div class="v">2026-04417</div></div>
+  </div>
+
+  <div class="jobheader">
+    <div class="jh-panel"><div class="t">Work date</div><div class="v">21 September 2026</div></div>
+    <div class="jh-panel"><div class="t">Booked</div><div class="v">16/09/2026</div></div>
+    <div class="jh-panel"><div class="t">Previous service</div><div class="v">14/09/2025</div></div>
+    <div class="jh-panel"><div class="t">Vehicle</div><div class="v">Verano Astoria 1.6</div></div>
+    <div class="jh-panel"><div class="t">Engine number</div><div class="v mono">K9K-22908</div></div>
+  </div>
+
+  <h3 class="sub-h">Work carried out</h3>
+  <table class="jobs">
+    <tr><th>Operation</th><th class="mono">Part no.</th><th>Labour</th><th class="mono">Rate</th><th class="mono">Amount</th></tr>
+    <tr><td>Full service — oil, filters, fluid checks, road test</td><td class="mono">8820119</td><td>2.0 hrs</td><td class="mono">£60.00</td><td class="n">£120.00</td></tr>
+    <tr><td>Front brake pads, both sides, replaced</td><td class="mono">4471029</td><td>0.6 hrs</td><td class="mono">£60.00</td><td class="n">£36.00</td></tr>
+    <tr><td>Cabin pollen filter renewed</td><td class="mono">5510983</td><td>0.4 hrs</td><td class="mono">£60.00</td><td class="n">£24.00</td></tr>
+    <tr><td>Engine oil, 5W-30, 4.5 litres (Tarnol)</td><td class="mono">TAR-5W30</td><td>&mdash;</td><td class="mono">&mdash;</td><td class="n">£38.20</td></tr>
+    <tr><td>Oil filter and air filter, Kelso Motor Factors</td><td class="mono">KMF-2298</td><td>&mdash;</td><td class="mono">&mdash;</td><td class="n">£19.95</td></tr>
+    <tr><td>Front brake pads, Ridgeway-approved compound</td><td class="mono">RW-BP-441</td><td>&mdash;</td><td class="mono">&mdash;</td><td class="n">£58.10</td></tr>
+    <tr><td>Cabin filter, genuine Verano part</td><td class="mono">VER-CF-77</td><td>&mdash;</td><td class="mono">&mdash;</td><td class="n">£11.20</td></tr>
+    <tr><td>Total labour: 3.0 hours at £60.00 an hour</td><td class="mono">&mdash;</td><td>3.0 hrs</td><td class="mono">£60.00</td><td class="n">£180.00</td></tr>
+  </table>
+
+  <h3 class="sub-h">Advisory notes from the inspection</h3>
+  <table class="advisory">
+    <tr><th>Item</th><th>Note</th><th>Tyre depth</th></tr>
+    <tr><td>Rear brake discs</td><td>Lightly corroded, monitor at next service</td><td>&mdash;</td></tr>
+    <tr><td>Nearside front tyre</td><td>Wearing evenly, within limits</td><td>4.2mm</td></tr>
+    <tr><td>Offside front tyre</td><td>Wearing evenly, within limits</td><td>4.0mm</td></tr>
+    <tr><td>Rear tyres</td><td>Advisory: approaching legal minimum, replace soon</td><td>2.1mm</td></tr>
+    <tr><td>Cambelt</td><td>Due at 2029 or 100,000 miles, whichever comes first</td><td>&mdash;</td></tr>
+  </table>
+  <p class="small">Advisory work quoted at £268.40 (rear tyres and brake disc protection treatment) was declined by the customer at this visit.</p>
+
+  <div class="totalsbox">
+    <div class="totals">
+      <div class="row"><span>Labour</span><span>£180.00</span></div>
+      <div class="row"><span>Parts</span><span>£177.45</span></div>
+      <div class="row"><span>Subtotal</span><span>£357.45</span></div>
+      <div class="row"><span>Loyalty discount</span><span>&minus;£20.00</span></div>
+      <div class="row"><span>VAT at 20%</span><span>£71.49</span></div>
+      <div class="row grand"><span>Invoice total</span><span>£428.94</span></div>
+    </div>
+  </div>
+  <p class="small">MOT test fee of £54.85 was paid separately and is not included in the invoice total above. Next service estimated at £310.00 based on current prices.</p>
+
+  <div class="stamprow">
+    <div class="stamp">SERVICE STAMP<div class="big" style="white-space:nowrap;">2026-04417</div>Next service due<div class="big" style="white-space:nowrap;">21/09/2027</div></div>
+    <div class="stampnote">Please keep this card with your vehicle documents. Your next service is due <strong>every 12 months or 12,000 miles</strong>, whichever comes first &mdash; on the figures above, that is <strong>21 September 2027</strong>. Brake fluid is next due 21 September 2028. Your MOT expires 02/10/2027 and your parts warranty on today's work runs until 20 September 2027.</div>
+  </div>
+
+  <div class="footlinks">VAT no. GB 991 2207 88 &middot; Company reg. no. 04417029 &middot; Pennard Motor Group Limited, registered office Unit 12, Foundry Way, Trowbridge, BA14 8LT &middot; pnrd.co/mot &middot; @pennardauto &middot; service@pennardauto.co.uk</div>
+  <div class="pagenum">Page 1 of 3</div>
+</div>
+
+<div class="page">
+  <h2 class="sechead">What a full service covers, and your warranty</h2>
+  <div class="prose twocol">
+    <h4>What we check</h4>
+    <p>A full service at Pennard Autocentre covers an oil and filter change, a check of all fluid levels, a visual inspection of brakes, tyres, suspension and steering components, a check of lights and electrical systems, and a road test. Findings that do not need immediate work are recorded as advisories, as shown on the previous page.</p>
+    <p>Vehicle identification number VRN4471029912207 and the last MOT test number, 9912 2078 4471, are recorded against this job card for our records and are not needed for routine enquiries.</p>
+    <h4>Parts and labour warranty</h4>
+    <p>Parts fitted by Pennard Autocentre carry a twelve month parts and labour warranty from the date of fitting, unless a different period is stated on the invoice. For the work on this invoice, that warranty runs until 20 September 2027, one day before your next service falls due.</p>
+    <p>Where we fit a part supplied through the Autocare Network buying group, that part may also carry the Autocare Network's own warranty scheme, details of which are available at autocarenetwork.co.uk/warranty. This is in addition to, not instead of, our own warranty.</p>
+    <h4>Genuine and equivalent parts</h4>
+    <p>Where possible we fit parts to the original specification of your vehicle's manufacturer, Verano. Where a manufacturer part is not economical or readily available, we may fit an equivalent part from Kelso Motor Factors, Tarnol or Ridgeway Tyres, each a supplier we have used for many years.</p>
+    <h4>Booking your next visit</h4>
+    <p>You can book your next service, MOT or repair at pennardauto.co.uk/booking, by calling 01225 960442, or using the short link pnrd.co/mot for MOT bookings specifically. A courtesy car is available for booked work at £15.00 a day, subject to availability.</p>
+    <h4>Our other services</h4>
+    <ul>
+      <li>MOT testing, including free retest within ten working days of a fail</li>
+      <li>Air conditioning service and re-gas</li>
+      <li>Full diagnostics using manufacturer-level equipment</li>
+      <li>Tyre fitting and balancing, including Ridgeway Tyres stock</li>
+      <li>Cambelt and water pump replacement, ahead of the 2029 or 100,000 mile interval</li>
+    </ul>
+    <h4>How we price a job</h4>
+    <p>Our standard labour rate is £60.00 an hour, charged in tenths of an hour, plus the cost of parts at the prices shown on your invoice. Where a job is quoted in advance, such as the £268.40 advisory work on this visit, the quoted price is held for thirty days from the date of the quote.</p>
+    <h4>Loyalty discount</h4>
+    <p>Customers who have used Pennard Autocentre for more than one service receive a loyalty discount on labour, shown as a deduction on the invoice; on this visit that discount was £20.00. The discount does not apply to MOT fees, which are set independently of our labour rate.</p>
+    <h4>Recalls and manufacturer bulletins</h4>
+    <p>We check for open manufacturer recalls affecting your vehicle, identified by engine number K9K-22908 and VIN VRN4471029912207, at every visit. No open recall was found for this vehicle at the time of this service.</p>
+    <h4>Courtesy cars and collection</h4>
+    <p>A courtesy car can be booked in advance for £15.00 a day, subject to a valid driving licence and availability. We can also collect and return your vehicle within a five mile radius of Trowbridge at no extra charge, by arrangement.</p>
+    <h4>Understanding your advisory notes</h4>
+    <p>An advisory is not a fault that needs immediate attention, but something we recommend you keep an eye on before your next visit. Tyre tread depths are measured across the tyre and the lowest reading is recorded; the legal minimum in Great Britain is 1.6mm across the centre three-quarters of the tread.</p>
+  </div>
+  <div class="pagenum">Page 2 of 3</div>
+</div>
+
+<div class="page">
+  <h2 class="sechead">Payment terms, your rights and our data policy</h2>
+  <div class="prose twocol">
+    <h4>Payment</h4>
+    <p>Payment is due in full on collection of your vehicle unless other arrangements have been agreed in advance. We accept cash, cheque and card payment. A vehicle left uncollected for more than seven days after work is complete may be subject to a storage charge.</p>
+    <p>Our price list, including the standard labour rate of £60.00 an hour, was last changed on 1 July 2026 and applies to all work booked from that date.</p>
+    <h4>Estimates and authorisation</h4>
+    <p>Where advisory work is identified, such as the £268.40 quoted on this visit, we will not carry it out without your authorisation. Prices quoted for future work, including the £310.00 estimate for your next service, are estimates only and may change by the time the work is carried out.</p>
+    <h4>Your rights</h4>
+    <p>Nothing in these terms affects your statutory rights as a consumer. If you are unhappy with work carried out by Pennard Autocentre, please raise it with us in the first instance, in writing or by calling 01225 960442.</p>
+    <h4>Complaints and the Motor Ombudsman</h4>
+    <p>If we are unable to resolve your complaint to your satisfaction, you may refer it to The Motor Ombudsman at themotorombudsman.org, an independent body that oversees garages operating under a recognised code of practice, which Pennard Autocentre follows.</p>
+    <h4>MOT history and checks</h4>
+    <p>You can check your vehicle's MOT history at any time at gov.uk/check-mot-history using your registration mark, KX68 HTM.</p>
+    <h4>Your data</h4>
+    <p>Pennard Autocentre keeps a record of the work carried out on your vehicle, including the details on this job card, to support future servicing, warranty claims and any recall notices from Verano. We do not share your details with third parties for marketing purposes without your consent.</p>
+    <h4>Company details</h4>
+    <p>Pennard Autocentre is a trading name of Pennard Motor Group Limited, registered office Unit 12, Foundry Way, Trowbridge, BA14 8LT, company number 04417029, VAT registration number GB 991 2207 88.</p>
+    <h4>Storage and uncollected vehicles</h4>
+    <p>Where a vehicle is not collected within seven days of us notifying you that work is complete, a storage charge may apply for each additional day, at a rate available on request. This is to keep space available on our premises for other customers' vehicles.</p>
+    <h4>Buying group parts</h4>
+    <p>Pennard Autocentre is a member of the Autocare Network buying group, which allows us to source parts, including those from Kelso Motor Factors, Tarnol and Ridgeway Tyres, at competitive prices while maintaining the warranty cover described earlier in this document.</p>
+    <h4>Accessibility</h4>
+    <p>If you need this invoice or our terms in a different format, such as large print, please ask at reception or call 01225 960442 and we will arrange this free of charge.</p>
+    <h4>Cancelled and missed appointments</h4>
+    <p>We ask for at least 24 hours' notice if you need to cancel or rearrange a booked appointment. Repeated missed appointments without notice may result in us asking for payment in advance for future bookings.</p>
+    <h4>Data retention</h4>
+    <p>We keep job card and invoice records, including this one under invoice number 2026-04417, for at least six years to meet our accounting and warranty obligations, after which they are securely destroyed unless you ask us to keep them for longer.</p>
+    <h4>Feedback</h4>
+    <p>We welcome feedback on the service you received today. You can leave a review, get in touch through @pennardauto, or speak to a member of staff directly at Unit 12, Foundry Way, Trowbridge.</p>
+    <h4>Insurance work and older vehicles</h4>
+    <p>We also carry out insurance approved repair work and can advise on servicing older or higher-mileage vehicles, including this Verano Astoria, which is now beyond its original manufacturer warranty. Ask at reception about a health check ahead of a long journey.</p>
+    <h4>Opening hours</h4>
+    <p>We are open Monday to Friday 8am to 6pm and Saturday 8am to 1pm. Bookings can be made at pennardauto.co.uk/booking at any time, including outside these hours, and we will confirm your appointment by phone or email.</p>
+  </div>
+  <div class="pagenum">Page 3 of 3</div>
+</div>
+
+</body>
+</html>

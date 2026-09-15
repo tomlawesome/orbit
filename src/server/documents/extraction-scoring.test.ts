@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { CorpusDocument } from "./extraction-corpus";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import {
+  classifyProvider,
+  classifySubtype,
   formatThreeWayScore,
   scoreCorpusRepeated,
   scoreCorpusThreeWay,
@@ -10,6 +12,33 @@ import {
   type ThreeWayResult,
 } from "./extraction-scoring";
 import { proposalFromText, type DocumentProposal } from "./suggestions";
+
+// Owner decision 2026-09-11 (#989/#992): a page can support more than one
+// right subtype, so ground truth may carry a set of acceptable phrases
+// instead of one, and a match against any member of the set is correct.
+describe("classifySubtype accepts a set of acceptable phrases (#989/#992)", () => {
+  it("is correct when the actual value matches the second entry of the set", () => {
+    expect(classifySubtype(["Home insurance", "Buildings insurance"], "Buildings insurance")).toBe("correct");
+  });
+
+  it("ignores case and whitespace runs when matching against the set", () => {
+    expect(classifySubtype(["Home insurance", "Buildings insurance"], "  BUILDINGS   INSURANCE ")).toBe("correct");
+  });
+
+  it("is wrong when the actual value matches none of the set", () => {
+    expect(classifySubtype(["Home insurance", "Buildings insurance"], "Motor insurance")).toBe("wrong");
+  });
+
+  it("is blank when nothing was extracted, same as the single-string form", () => {
+    expect(classifySubtype(["Home insurance", "Buildings insurance"], undefined)).toBe("blank");
+  });
+
+  it("keeps the single-string form working unchanged", () => {
+    expect(classifySubtype("Home insurance", "Home insurance")).toBe("correct");
+    expect(classifySubtype("Home insurance", "Motor insurance")).toBe("wrong");
+    expect(classifySubtype("Home insurance", undefined)).toBe("blank");
+  });
+});
 
 // ADR-0025 section 6 / issue #959: the three-way measurement built on top of
 // the repeated-run harness `extraction-accuracy.test.ts` already exercises.
@@ -85,14 +114,15 @@ describe("scoreCorpusThreeWay (#959, ADR-0025 section 6)", () => {
     // Always print the measurement, as the neighbouring accuracy test does.
     console.info(formatThreeWayScore("three-way fixture", score));
 
-    // Heuristic alone: both fields wrong (0/2).
-    expect(score.heuristic.minimum).toBeCloseTo(0, 10);
-    // Model blind: both fields correct (2/2) -- a different number from the
+    // Heuristic alone: the two dates right, provider and reference wrong --
+    // 2 of 4, since a wrong answer earns nothing rather than costing a point.
+    expect(score.heuristic.minimum).toBeCloseTo(0.5, 10);
+    // Model blind: everything right (4/4) -- a different number from the
     // heuristic's, proving the two are not the same score in disguise.
     expect(score.model!.blind.minimum).toBeCloseTo(1, 10);
-    // Adjudicated: one endorsed the wrong heuristic reading, one endorsed the
-    // correct blind reading -- 1/2, distinct from both of the above.
-    expect(score.model!.adjudicated.minimum).toBeCloseTo(0.5, 10);
+    // Adjudicated: it endorsed the wrong provider and the right reference --
+    // 3 of 4, distinct from both of the above.
+    expect(score.model!.adjudicated.minimum).toBeCloseTo(0.75, 10);
   });
 
   it("does not fail anything when the blind score sits below the heuristic baseline", async () => {
@@ -206,5 +236,36 @@ describe("scoreCorpusThreeWay (#959, ADR-0025 section 6)", () => {
     expect(score.heuristic.minimum).toBeCloseTo(expected.minimum, 10);
     expect(score.heuristic.worst.earned).toBe(expected.worst.earned);
     expect(score.heuristic.worst.possible).toBe(expected.worst.possible);
+  });
+});
+
+// Owner, 2026-09-12 (#994): the provider ruler was "far too strict". A short
+// form of the name -- what the page itself calls the organisation -- is the
+// same answer; a different organisation, or a mere description, is not.
+describe("classifyProvider accepts a short form of the name", () => {
+  it("counts a name with its trailing company form dropped, either way round", () => {
+    expect(classifyProvider("Northfield Gas & Energy Ltd", "Northfield Gas & Energy")).toBe("correct");
+    expect(classifyProvider("Northfield Gas & Energy", "northfield gas & energy ltd")).toBe("correct");
+  });
+  it("counts a leading run of the name that names the organisation", () => {
+    expect(classifyProvider("Cresswell Fitness Club", "Cresswell")).toBe("correct");
+    expect(classifyProvider("Colworth & Drake Insurance Services Ltd", "Colworth & Drake")).toBe("correct");
+    expect(classifyProvider("Thornleigh Electrical Contractors Ltd", "Thornleigh Electrical")).toBe("correct");
+  });
+  it("counts the long form when the short one was expected", () => {
+    expect(classifyProvider("Kestrel Broadband", "Kestrel Broadband Limited")).toBe("correct");
+    expect(classifyProvider("Foxglove Hosting", "The Foxglove Hosting Company")).toBe("correct");
+  });
+  it("does not count a description with no name in it", () => {
+    expect(classifyProvider("Colworth & Drake Insurance Services Ltd", "Insurance Services")).toBe("wrong");
+    expect(classifyProvider("Wexley Water plc", "Water")).toBe("wrong");
+  });
+  it("does not count a different organisation, or words out of order", () => {
+    expect(classifyProvider("Wexley Water plc", "Direct Debit")).toBe("wrong");
+    expect(classifyProvider("Bracken Vale Finance", "Vale Finance Bracken")).toBe("wrong");
+    expect(classifyProvider("Hedgerow Assurance", "Thornfield Assurance")).toBe("wrong");
+  });
+  it("is blank when nothing was extracted", () => {
+    expect(classifyProvider("Wexley Water plc", undefined)).toBe("blank");
   });
 });

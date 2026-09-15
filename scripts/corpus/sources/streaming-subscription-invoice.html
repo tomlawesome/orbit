@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Your payment receipt</title>
+<style>
+@font-face{font-family:"Corpus Mail";src:url("../fonts/PlusJakartaSans.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; }
+  * { font-family: "Corpus Mail", sans-serif; }
+  .page {
+    width: 794px;
+    height: 1123px;
+    box-sizing: border-box;
+    position: relative;
+    overflow: hidden;
+    padding: 0;
+    background: #f2f3f5;
+    color: #202124;
+  }
+  .print-chrome { padding: 14px 28px 10px; font-size: 11px; color: #5f6368; border-bottom: 1px solid #dadce0; background: #fff; display: flex; justify-content: space-between; }
+  .mail-header { background: #fff; padding: 14px 28px 18px; border-bottom: 1px solid #dadce0; }
+  .mail-header table { border-collapse: collapse; font-size: 12.5px; }
+  .mail-header td { padding: 2px 0; vertical-align: top; }
+  .mail-header td.k { color: #5f6368; width: 60px; }
+  .mail-subject { font-size: 17px; font-weight: 400; margin: 0 0 8px; color: #202124; }
+
+  .mail-body { background: #fff; margin: 12px 60px; padding: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .brand-bar { background: #0b3d5c; color: #ffffff; padding: 16px 32px; }
+  .brand-name { font-size: 24px; font-weight: bold; letter-spacing: 1px; }
+  .body-content { padding: 18px 32px 6px; font-size: 12.5px; line-height: 1.45; }
+  .greeting { margin: 0 0 6px; }
+  .lede { margin: 0 0 12px; }
+
+  table.summary { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 12px; }
+  table.summary td { padding: 6px 4px; border-bottom: 1px solid #e8eaed; }
+  table.summary td.label { color: #5f6368; width: 45%; }
+  table.summary td.val { font-weight: bold; text-align: right; }
+  table.summary tr.total td { border-bottom: none; padding-top: 8px; font-size: 15px; }
+
+  .btn-wrap { text-align: center; margin: 12px 0 16px; }
+  .btn { display: inline-block; background: #1a73e8; color: #ffffff; padding: 11px 30px; border-radius: 4px; font-size: 13px; font-weight: bold; text-decoration: none; }
+
+  .fine-block { padding: 0 32px 14px; font-size: 10.5px; color: #5f6368; line-height: 1.5; border-top: 1px solid #e8eaed; margin-top: 4px; }
+  .fine-block p { margin: 7px 0 0; }
+
+  .mail-footer { padding: 10px 32px 14px; font-size: 9.5px; color: #9aa0a6; line-height: 1.5; }
+  .mail-footer a { color: #9aa0a6; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="print-chrome">
+    <span>mail.example/mail/u/0/#inbox/17c9f2a41d</span>
+    <span>1 of 4</span>
+  </div>
+
+  <div class="mail-header">
+    <div class="mail-subject">Your payment receipt</div>
+    <table>
+      <tr><td class="k">From:</td><td>N+ Billing, billing@northlightplus.example</td></tr>
+      <tr><td class="k">To:</td><td>Priya Chandra, priya.chandra83@mailbox.example</td></tr>
+      <tr><td class="k">Date:</td><td>3 August 2026, 09:14</td></tr>
+    </table>
+  </div>
+
+  <div class="mail-body">
+    <div class="brand-bar"><span class="brand-name">N+</span></div>
+    <div class="body-content">
+      <p class="greeting">Hi Priya,</p>
+      <p class="lede">Thanks for being an N+ member. We've taken your monthly payment for your 12 month plan &mdash; here's your receipt.</p>
+
+      <table class="summary">
+        <tr><td class="label">Plan</td><td class="val">N+ Standard (12 month plan)</td></tr>
+        <tr><td class="label">Account number</td><td class="val">NL-ACC-771049-2</td></tr>
+        <tr><td class="label">Payment date</td><td class="val">3 August 2026</td></tr>
+        <tr><td class="label">Plan renews on</td><td class="val">3 August 2027</td></tr>
+        <tr class="total"><td class="label">Amount charged</td><td class="val">£9.99</td></tr>
+      </table>
+
+      <div class="btn-wrap"><a class="btn" href="#">Manage your plan</a></div>
+    </div>
+
+    <div class="fine-block">
+      <p><strong>Invoice number:</strong> NL-INV-2208453 &nbsp;&middot;&nbsp; <strong>VAT registration:</strong> GB 234 5678 90</p>
+      <p>Your payment of £9.99 includes VAT of £1.67. This charge was billed by Meridian Payments Limited on behalf of N+ and was taken from your debit card ending 4471 (expires 09/28) on 4 August 2026.</p>
+      <p>Paid monthly, your 12 month plan is equivalent to £119.88 a year. Fancy more channels? N+ Ultra is available for £13.99 a month.</p>
+      <p>Quote code SUMMER26 before the offer ends 31 August 2026 to add a second screen at no extra cost.</p>
+      <p>Subscribed through the app store instead? Manage and cancel your plan via your device account settings rather than through N+ directly.</p>
+      <p>Questions about this receipt? Contact our support team at support@northlight-help.example.</p>
+      <p>Your next payment of £9.99 will be taken on or around 3 September 2026, unless you change or cancel your plan before then.</p>
+      <p>This receipt confirms payment only. It is not a VAT invoice; if you need a full VAT invoice for your records, request one from Account &gt; Billing history within 90 days of payment.</p>
+    </div>
+
+    <div class="mail-footer">
+      Payments on this receipt are processed for Northlight+ Media Group Limited, company number 09876543, registered in England and Wales, 4 Aldergate House, Brentmoor, BM1 6QF.<br>
+      You're receiving this email because you have an active N+ subscription. <a href="#">Unsubscribe from receipts</a> &nbsp;|&nbsp; <a href="#">Privacy policy</a>
+    </div>
+  </div>
+
+</div>
+
+<div class="page">
+
+  <div class="print-chrome">
+    <span>mail.example/mail/u/0/#inbox/17c9f2a41d</span>
+    <span>2 of 4</span>
+  </div>
+
+  <div class="mail-body">
+    <div class="brand-bar"><span class="brand-name">N+</span></div>
+    <div class="body-content">
+      <p class="lede">More from your N+ membership</p>
+
+      <table class="summary">
+        <tr><td class="label">N+ Basic (ads, 1 screen, SD)</td><td class="val">£6.99/mo</td></tr>
+        <tr><td class="label">N+ Standard (your plan, 2 screens, HD)</td><td class="val">£9.99/mo</td></tr>
+        <tr><td class="label">N+ Ultra (4 screens, 4K)</td><td class="val">£13.99/mo</td></tr>
+      </table>
+
+      <p class="greeting">Pay annually and save</p>
+      <p>Switch N+ Standard to annual billing for £99.99 a year, paid upfront &mdash; less than paying £9.99 a month across the year. Switch any time from your account settings; your new annual date will match your next renewal.</p>
+
+      <p class="greeting">New this month</p>
+      <p>A new season of our flagship drama landed 15 August 2026, alongside a documentary strand added every Friday and a classic film collection refreshed on the first of each month.</p>
+
+      <p class="greeting">Add-on channels</p>
+      <p>Add the Drama Add-on for £3.99/month or the Kids Add-on for £2.99/month, both cancel any time. Add-ons appear as separate lines on your next receipt and can be removed from Account &gt; Add-ons at any point.</p>
+
+      <p class="greeting">Partner offer</p>
+      <p>N+ Standard is included free for 6 months with qualifying broadband and mobile bundles from our partner Cavendish Broadband &mdash; check bundles.cavendish-broadband.example to see if you qualify.</p>
+
+      <p class="greeting">Watch on any device</p>
+      <p>Watch on your smart TV, tablet, phone, games console or streaming stick. For set-up help visit help.northlightplus.example/devices, or search &ldquo;N+ setup&rdquo; in the App Store or Google Play. Most devices support up to 4K where your plan and connection allow.</p>
+
+      <p class="greeting">Gift cards</p>
+      <p>N+ gift cards are available in £10, £25 and £50 denominations from participating supermarkets and online at giftcards.example/nplus &mdash; a good gift for someone without a card to pay with. Gift card balances do not expire.</p>
+
+      <p class="greeting">Subtitles and audio description</p>
+      <p>Subtitles are available in 12 languages on most titles. Audio description is available on titles marked AD in the guide, and can be turned on by default in your accessibility settings.</p>
+
+    </div>
+
+    <div class="fine-block">
+      <p>N+ has been streaming in the UK since 2015. Follow @nplusstreaming on social media for new release alerts and outage updates.</p>
+      <p>Prices on this page were correct on 3 August 2026 and may change; we will always email you at least 30 days before a price change affecting your plan takes effect.</p>
+    </div>
+
+    <div class="mail-footer">
+      Northlight+ Media Group Limited, 4 Aldergate House, Brentmoor, BM1 6QF. <a href="#">Unsubscribe from receipts</a> &nbsp;|&nbsp; <a href="#">Privacy policy</a>
+    </div>
+  </div>
+
+</div>
+
+<div class="page">
+
+  <div class="print-chrome">
+    <span>mail.example/mail/u/0/#inbox/17c9f2a41d</span>
+    <span>3 of 4</span>
+  </div>
+
+  <div class="mail-body">
+    <div class="brand-bar"><span class="brand-name">N+</span></div>
+    <div class="body-content">
+      <p class="lede">Getting more from your account</p>
+
+      <p class="greeting">Profiles and downloads</p>
+      <p>Create up to 5 profiles on one account, including a Kids profile with parental controls. Download shows and films to watch offline on up to 5 devices at once with N+ Standard; downloads expire 30 days after saving, or 48 hours after you start watching.</p>
+
+      <p class="greeting">Refer a friend</p>
+      <p>Share your referral code PRIYA-8842 and you'll both get a month free when they complete their first payment. Referral credit is applied to your next bill within 5 working days.</p>
+
+      <p class="greeting">Frequently asked questions</p>
+      <p><strong>How do I change my payment method?</strong> Go to Account &gt; Payment details in the app or at northlightplus.example/account.</p>
+      <p><strong>Can I pause my subscription?</strong> Yes, pause for up to 3 months once every 12 months from your account settings; your renewal date moves back by the length of the pause.</p>
+      <p><strong>How do I download this receipt?</strong> Every receipt is also saved to Account &gt; Billing history as a PDF for 3 years.</p>
+
+      <p class="greeting">Our library</p>
+      <p>Over 10,000 titles across film, series and documentaries, with new content added every Friday. Winner of Best Streaming Service at the Home Entertainment Awards 2025, and a finalist in the same category in 2023 and 2024.</p>
+
+      <p class="greeting">Need help?</p>
+      <p>Visit help.northlightplus.example or call our support team on 0333 011 4420 (standard rate, included in most mobile and landline allowances), 8am to 10pm every day. Webchat is also available through the app, usually with a wait of under 2 minutes.</p>
+
+      <p class="greeting">Complaints</p>
+      <p>If you're unhappy with the service, contact support first. If we can't resolve things between us, unresolved billing complaints can be referred to an independent alternative dispute resolution provider; details are given in our complaints procedure at northlightplus.example/complaints.</p>
+
+      <p class="greeting">Gifting and vouchers</p>
+      <p>As well as gift cards, you can send a friend a free trial voucher good for their first month, redeemable once per household at northlightplus.example/invite. Vouchers expire 12 months after issue.</p>
+    </div>
+
+    <div class="fine-block">
+      <p>Available in the UK and Ireland only. Streaming quality depends on your plan and connection: up to 4K on N+ Ultra, up to HD on N+ Standard, and SD on N+ Basic.</p>
+    </div>
+
+    <div class="mail-footer">
+      Northlight+ Media Group Limited, 4 Aldergate House, Brentmoor, BM1 6QF. <a href="#">Unsubscribe from receipts</a> &nbsp;|&nbsp; <a href="#">Privacy policy</a>
+    </div>
+  </div>
+
+</div>
+
+<div class="page">
+
+  <div class="print-chrome">
+    <span>mail.example/mail/u/0/#inbox/17c9f2a41d</span>
+    <span>4 of 4</span>
+  </div>
+
+  <div class="mail-body">
+    <div class="brand-bar"><span class="brand-name">N+</span></div>
+    <div class="body-content">
+      <p class="lede">Terms, cancellation and your data</p>
+
+      <p class="greeting">Cancelling your plan</p>
+      <p>You can cancel at any time from Account &gt; Manage plan. You'll keep access until the end of the billing period you've already paid for; we do not offer part-month refunds when you cancel partway through a period.</p>
+
+      <p class="greeting">Changing plan</p>
+      <p>Upgrades take effect immediately and are charged pro-rata for the rest of the current period. Downgrades take effect from your next renewal date, so you keep your current plan's features until then. You can switch plan as often as once a day, though we'd expect most people to change far less often than that.</p>
+
+      <p class="greeting">Keeping your account secure</p>
+      <p>Never share your password or one-time codes with anyone, including someone claiming to be from N+ support. We will never call and ask for your full password.</p>
+
+      <p class="greeting">Your data</p>
+      <p>We use your account and viewing data to run your subscription, recommend titles and meet our legal obligations, as set out in our privacy policy at northlightplus.example/privacy. You can ask for a copy of the data we hold about you, or ask us to delete it, from Account &gt; Privacy. Requests are usually completed within 30 days.</p>
+
+      <p class="greeting">Family sharing</p>
+      <p>N+ Standard and N+ Ultra can be used on up to 2 devices watching at the same time; N+ Basic is limited to 1 device at a time. Trying to watch on an extra device will pause the oldest active stream. Sharing your account outside your own household may result in a request to verify your address.</p>
+
+      <p class="greeting">Write to us</p>
+      <p>You can also write to N+ Customer Care, PO Box 2299, Brentmoor, BM1 9ZZ. Please allow 10 working days for a reply and include your account number so we can find your account quickly.</p>
+
+      <p class="greeting">Bereavement and financial hardship</p>
+      <p>If you're dealing with a bereavement or financial hardship, our support team can pause billing, arrange a payment plan, or close an account without the usual notice period &mdash; contact us and we'll talk you through your options.</p>
+
+      <p class="greeting">Content ratings</p>
+      <p>Every title carries a BBFC-style age rating and a short content guidance note in the info panel before you press play, so you can decide what's right for your household and set up profile restrictions accordingly.</p>
+
+      <p class="greeting">Data usage</p>
+      <p>Streaming uses roughly 1GB per hour in standard definition, 3GB per hour in HD and up to 7GB per hour in 4K &mdash; worth checking against any home broadband data cap before you binge a whole series.</p>
+    </div>
+
+    <div class="fine-block">
+      <p>These terms are a summary. Full terms and conditions are available at northlightplus.example/terms and do not form part of this receipt.</p>
+    </div>
+
+    <div class="mail-footer">
+      Northlight+ Media Group Limited, 4 Aldergate House, Brentmoor, BM1 6QF. <a href="#">Unsubscribe from receipts</a> &nbsp;|&nbsp; <a href="#">Privacy policy</a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{
+  "name": "school meals account statement, autumn-term ledger with a refund and a residential-trip decoy",
+  "filename": "fullpage-school-meals-account-statement.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-12"
+    ],
+    "provider": "SchoolPurse",
+    "reference": "SP-774102-6",
+    "dateRoles": [
+      {
+        "date": "2026-09-12",
+        "role": "issued"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Fees"
+      ],
+      "qualifiers": [
+        "School"
+      ]
+    },
+    "costMinor": 740,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: only the statement date 12 September 2026 is declared. The statement period start (1 September 2026), the half-term dates (26-30 October 2026), the autumn term dates (2 September to 18 December 2026), and every per-meal ledger date are printed but not the document's own governing date, so none is declared.",
+    "provider is SchoolPurse, the cashless catering platform that issues the statement, not the school (Bramwell Primary School) whose kitchen the meals are bought from.",
+    "reference is the account number SP-774102-6, not the pupil's class or the residential-trip deposit amount.",
+    "costMinor is the current balance, 7.40, the only amount printed with a pound sign as a running total rather than a single ledger line; the recommended top-up (22.50) and the trip deposit (18.00) are traps.",
+    "subtype: Fees/School. No recurrence is declared: meals are charged daily, not on a fixed month count in digits.",
+    "scheduleKind is not declared: no dateRole is 'renewal' or 'service'."
+  ]
+}

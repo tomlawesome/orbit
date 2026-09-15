@@ -1,0 +1,36 @@
+{
+  "name": "Northlight+ payment receipt",
+  "filename": "streaming-subscription-invoice.pdf",
+  "expected": {
+    "dates": ["2026-08-03", "2027-08-03"],
+    "dateRoles": [
+      { "date": "2026-08-03", "role": "issued" },
+      { "date": "2027-08-03", "role": "renewal" }
+    ],
+    "provider": "Northlight+",
+    "reference": "NL-ACC-771049-2",
+    "subtype": { "kinds": ["Subscription"], "qualifiers": ["Streaming", "TV"] },
+    "costMinor": 11988,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "Issued date 2026-08-03 is printed as the mail Date header '3 August 2026, 09:14' and again as the summary table's 'Payment date'.",
+    "Renewal date 2027-08-03 is printed in the summary table as 'Plan renews on 3 August 2027'.",
+    "recurrenceMonths 12 is the plan's own term, printed in digits twice as '12 month plan' — not the monthly billing frequency.",
+    "Provider is the streaming brand Northlight+, shown in the brand bar and From address — not the billing entity named later.",
+    "Reference is the account number 'NL-ACC-771049-2' printed in the summary table, not the invoice number.",
+    "costMinor 11988 is 'your 12 month plan is equivalent to £119.88 a year', the whole 12-month plan paid monthly (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure).",
+    "Trap: an 'Invoice number: NL-INV-2208453' sits beside the account number as a rival reference.",
+    "Trap: a 'VAT registration: GB 234 5678 90' is a rival identifier, and 'VAT of £1.67' is a rival money figure within the same charge.",
+    "Trap: the charge is described as 'billed by Meridian Payments Limited on behalf of Northlight+', a rival provider name.",
+    "Trap: 'debit card ending 4471 (expires 09/28)' gives a rival date in card-expiry form.",
+    "Trap: the card was 'taken ... on 4 August 2026', a rival date one day after the stated payment date.",
+    "Trap: the 'Amount charged £9.99' in the summary table is one monthly payment, not the commitment.",
+    "Trap: 'Northlight+ Ultra is available for £13.99 a month' is a rival plan and price.",
+    "Trap: the promotion 'offer ends 31 August 2026' is a rival date.",
+    "Trap: the app store mention directs cancellation elsewhere, a rival management channel.",
+    "Trap: the support address 'support@northlight-help.example' uses a different domain from the billing address 'billing@northlightplus.example'."
+  ]
+}

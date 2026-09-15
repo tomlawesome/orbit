@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cheddleton Rail — Season Ticket</title>
+<style>
+@font-face{font-family:"Corpus Ticket";src:url("../fonts/MartianMono.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Ticket Sans";src:url("../fonts/LibreFranklin.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; font-family: "Corpus Ticket Sans", sans-serif; color: #1a1a1a; }
+  .page {
+    width: 794px; height: 1123px; box-sizing: border-box; position: relative;
+    overflow: hidden; padding: 34px 46px; background: #fff;
+  }
+  .ticket {
+    font-family: "Corpus Ticket", monospace; border: 2px solid #222; padding: 14px 18px;
+    width: 660px; margin: 0 auto 16px auto; background: #fbfbf6;
+  }
+  .ticket .row { display: flex; justify-content: space-between; font-size: 12px; margin: 3px 0; letter-spacing: 0.5px; }
+  .ticket .title { font-size: 15px; font-weight: bold; letter-spacing: 2px; text-align: center; margin-bottom: 8px; }
+  .ticket .sep { border-top: 1px dashed #666; margin: 8px 0; }
+  .stripe {
+    height: 26px; margin-top: 10px;
+    background: repeating-linear-gradient(90deg, #111 0 3px, #444 3px 5px, #111 5px 8px);
+  }
+  .photocard { font-family: "Corpus Ticket", monospace; font-size: 11px; text-align: center; margin: 8px auto 20px auto;
+               width: 660px; border: 1px solid #999; padding: 6px 12px; background: #f2f2ec; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid #444; padding-bottom: 3px; margin: 16px 0 8px 0; }
+  .receipt p { font-size: 11px; line-height: 1.5; margin: 3px 0; }
+  table.priceline { width: 100%; border-collapse: collapse; font-size: 11px; margin: 6px 0 10px 0; }
+  table.priceline td { padding: 3px 4px; border-bottom: 1px solid #ddd; }
+  table.priceline td.amt { text-align: right; }
+  .small { font-size: 9px; line-height: 1.5; color: #333; }
+  .footerline { position: absolute; bottom: 16px; left: 46px; right: 46px; font-size: 8.5px; color: #666;
+                border-top: 1px solid #ccc; padding-top: 6px; }
+  .pagehead2 { display: flex; justify-content: space-between; font-size: 8.5px; color: #666;
+               letter-spacing: 0.4px; text-transform: uppercase; border-bottom: 1px solid #ccc;
+               padding-bottom: 5px; margin-bottom: 10px; }
+  .secbox { border: 1px solid #999; padding: 8px 12px; margin: 8px 0 14px 0; font-size: 10.5px;
+            line-height: 1.5; background: #fbfbf6; }
+  .secbox b { color: #000; }
+  table.faretab { width: 100%; border-collapse: collapse; font-size: 10px; margin: 6px 0 12px 0; }
+  table.faretab th { text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px;
+                      border-bottom: 1px solid #444; padding: 3px 4px; font-family: "Corpus Ticket Sans", sans-serif; }
+  table.faretab td { padding: 3px 4px; border-bottom: 1px solid #ddd; font-family: "Corpus Ticket", monospace; }
+  table.faretab td.r, table.faretab th.r { text-align: right; }
+  h2.tight { margin: 12px 0 6px 0; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="ticket">
+    <div class="title">ANNUAL SEASON TICKET</div>
+    <div class="row"><span>TICKET NO.</span><span>ST-0294817-6</span></div>
+    <div class="sep"></div>
+    <div class="row"><span>FROM</span><span>MILLBROOK CROSS</span></div>
+    <div class="row"><span>TO</span><span>FENWICK PARKWAY</span></div>
+    <div class="row"><span>ROUTE</span><span>ANY PERMITTED</span></div>
+    <div class="sep"></div>
+    <div class="row"><span>VALID FROM</span><span>01/09/2026</span></div>
+    <div class="row"><span>VALID UNTIL</span><span>31/08/2027</span></div>
+    <div class="row"><span>CLASS</span><span>STANDARD</span></div>
+    <div class="row"><span>RAILCARD</span><span>COASTWAY SAVER  RC-229104</span></div>
+    <div class="sep"></div>
+    <div class="row"><span>ISSUED BY</span><span>CHEDDLETON RAIL</span></div>
+    <div class="stripe"></div>
+  </div>
+
+  <div class="photocard">PHOTOCARD PC 552013847 &nbsp;&nbsp;—&nbsp;&nbsp; EXPIRES 14/02/2028</div>
+
+  <div class="receipt">
+    <h2>Ticket Office Receipt</h2>
+    <p>Issued at Millbrook Cross ticket office — till 4, agent ID 118.</p>
+    <p>Date of purchase: 24 August 2026.</p>
+    <p>Item: Annual Season Ticket, Millbrook Cross to Fenwick Parkway, Standard Class.</p>
+    <p>Railcard discount applied: Coastway Saver Railcard, code RC-229104.</p>
+
+    <table class="priceline">
+      <tr><td>Annual season ticket</td><td class="amt">£3,412.00</td></tr>
+      <tr><td>Equivalent monthly price (for comparison only)</td><td class="amt">£322.50</td></tr>
+      <tr><td>First class upgrade, per year, if purchased separately</td><td class="amt">£5,120.00</td></tr>
+      <tr><td>Refund administration fee (applies to any refund)</td><td class="amt">£10.00</td></tr>
+    </table>
+    <p>Payment method: debit card ending 4471. Amount charged today: £3,412.00.</p>
+
+    <h2>Conditions of Use</h2>
+    <p class="small">This ticket is issued subject to Cheddleton Rail's Conditions of Carriage and the rules of the
+    Interoperator Ticketing Council. It is not transferable and must be produced, together with your photocard,
+    whenever asked by railway staff. If your photocard is lost or damaged, a replacement must be obtained before
+    you travel; your photocard shown above expires separately from this season ticket.</p>
+    <p class="small">Claims for delay compensation must be submitted within 28 days of the date of travel affected,
+    quoting your season ticket number.</p>
+    <p class="small">Refunds on unused season tickets are calculated on a daily basis from the date the ticket is
+    returned, less the refund administration fee shown above.</p>
+  </div>
+
+  <div class="footerline">Cheddleton Rail. Lost photocards: 01632 960774. www.cheddletonrail.example</div>
+</div>
+
+<div class="page">
+  <div class="pagehead2"><span>Cheddleton Rail &mdash; fares and railcards</span><span>Page 2 of 4</span></div>
+
+  <h2 class="tight">Your smartcard</h2>
+  <div class="secbox">
+    Smartcard serial <b>SC-4471-2093-88</b> carries this season ticket. Touch it on a yellow reader at the start
+    and end of every journey; a missed touch-out may be charged at the maximum standard fare for your route.
+    Report a lost or faulty smartcard on 01632 960774 so it can be stopped and a replacement issued. Smartcards
+    typically last five years before needing renewal; yours is valid until the printed expiry date on the card.
+  </div>
+
+  <h2 class="tight">Annual season ticket fares from Millbrook Cross</h2>
+  <table class="faretab">
+    <thead><tr><th>Destination</th><th class="r">Standard, annual</th><th class="r">Standard, monthly</th><th class="r">Standard, weekly</th></tr></thead>
+    <tbody>
+      <tr><td>Fenwick Parkway (this ticket)</td><td class="r">&pound;3,412.00</td><td class="r">&pound;341.20</td><td class="r">&pound;98.50</td></tr>
+      <tr><td>Overdene Central</td><td class="r">&pound;2,876.00</td><td class="r">&pound;287.60</td><td class="r">&pound;83.00</td></tr>
+      <tr><td>Bridcombe Junction</td><td class="r">&pound;4,190.00</td><td class="r">&pound;419.00</td><td class="r">&pound;121.00</td></tr>
+      <tr><td>Fenwick Parkway, First Class</td><td class="r">&pound;5,120.00</td><td class="r">&pound;512.00</td><td class="r">&pound;148.00</td></tr>
+      <tr><td>Overdene Central, First Class</td><td class="r">&pound;4,340.00</td><td class="r">&pound;434.00</td><td class="r">&pound;125.00</td></tr>
+      <tr><td>Bridcombe Junction, First Class</td><td class="r">&pound;5,890.00</td><td class="r">&pound;589.00</td><td class="r">&pound;170.00</td></tr>
+    </tbody>
+  </table>
+  <p class="small">Fares shown are correct at the date of issue and are reviewed each January; a new fares table takes effect from the first Sunday after New Year and is published in advance at stations and online.</p>
+
+  <h2 class="tight">Season ticket loans</h2>
+  <div class="secbox">
+    Many employers offer an interest-free season ticket loan, repaid from salary over the year. Ask your
+    employer's payroll team; Cheddleton Rail provides a loan quotation letter on request at the ticket office,
+    quoting your season ticket number.
+  </div>
+
+  <h2 class="tight">If you only travel occasionally</h2>
+  <p class="small">If your travel pattern changes, an off-peak day return between Millbrook Cross and Fenwick
+  Parkway costs &pound;14.20, and an anytime day return costs &pound;22.80; these may work out cheaper than a
+  season ticket if you travel fewer than three days a week. Ask at the ticket office to compare.</p>
+
+  <h2 class="tight">Railcard offers</h2>
+  <div class="secbox">
+    <b>16-25 Railcard</b> &mdash; &pound;30.00 for one year or &pound;70.00 for three years, code RC-1625. Saves
+    a third on most adult fares. Not valid before 10:00 on weekdays without the minimum fare shown at the
+    ticket office.<br><br>
+    <b>Two Together Railcard</b> &mdash; &pound;30.00 per year, code RC-2TGR, for two named adults travelling
+    together; saves a third on both fares when used together.<br><br>
+    Railcards are added to a season ticket at renewal only; ask at the ticket office when you renew.<br><br>
+    <b>Network Explorer Railcard</b> &mdash; &pound;24.00 per year, code RC-NETX, for off-peak leisure travel
+    across the wider regional network; not valid in conjunction with season ticket travel on weekdays before 09:30.
+  </div>
+
+  <div class="footerline">Cheddleton Rail. Lost photocards: 01632 960774. www.cheddletonrail.example</div>
+</div>
+
+<div class="page">
+  <div class="pagehead2"><span>Cheddleton Rail &mdash; getting there and getting help</span><span>Page 3 of 4</span></div>
+
+  <h2 class="tight">Station car parking</h2>
+  <table class="faretab">
+    <thead><tr><th>Car park</th><th class="r">Daily</th><th class="r">Weekly</th><th class="r">Season permit</th></tr></thead>
+    <tbody>
+      <tr><td>Millbrook Cross, main car park</td><td class="r">&pound;6.50</td><td class="r">&pound;28.00</td><td class="r">&pound;420.00/yr</td></tr>
+      <tr><td>Millbrook Cross, overflow (Fri &ndash; Sun)</td><td class="r">&pound;4.00</td><td class="r">&pound;16.00</td><td class="r">&mdash;</td></tr>
+      <tr><td>Fenwick Parkway, station car park</td><td class="r">&pound;5.50</td><td class="r">&pound;24.00</td><td class="r">&pound;360.00/yr</td></tr>
+      <tr><td>Bridcombe Junction, station car park</td><td class="r">&pound;7.00</td><td class="r">&pound;30.00</td><td class="r">&pound;460.00/yr</td></tr>
+    </tbody>
+  </table>
+  <p class="small">Season parking permits are sold separately from your season ticket; quote permit scheme code PK-04471 when applying at the car park office. Permit holders are not guaranteed a space and should arrive
+  before 08:15 on weekdays during busy periods.</p>
+
+  <h2 class="tight">Passenger assistance</h2>
+  <div class="secbox">
+    Book assistance at a station, on board, or changing trains by calling our Passenger Assistance line on
+    0800 032 4471, available 24 hours a day, or via the Passenger Assist app. We recommend booking at least
+    two hours before travel, though we will always try to help without notice.
+  </div>
+
+  <h2 class="tight">Cycle storage</h2>
+  <div class="secbox">
+    Covered cycle racks are available free of charge at Millbrook Cross and Fenwick Parkway. A season place
+    in the locked cycle compound at Millbrook Cross costs &pound;48.00 a year; apply at the ticket office
+    quoting your season ticket number.
+  </div>
+
+  <h2 class="tight">Lost or damaged tickets</h2>
+  <div class="secbox">
+    A lost season ticket or photocard can be replaced on payment of a &pound;10.00 administration charge on
+    production of proof of purchase; a damaged ticket that can still be read is replaced free of charge.
+    A duplicate receipt for this purchase carries a separate &pound;3.50 charge. A replacement issued at a
+    station other than Millbrook Cross carries an additional &pound;5.00 handling charge.
+  </div>
+
+  <h2 class="tight">Conditions of Carriage</h2>
+  <p class="small">Travel on this ticket is subject to the National Rail Conditions of Travel and Cheddleton
+  Rail's own Conditions of Carriage, reference COC/2024/07, copies of which are available free of charge at any
+  staffed station or at cheddletonrail.example/conditions. The Conditions of Carriage also set out the rules
+  for penalty fares, which may apply if you travel without a valid ticket or fail to touch your smartcard on a
+  reader where one is provided.</p>
+
+  <div class="footerline">Cheddleton Rail. Lost photocards: 01632 960774. www.cheddletonrail.example</div>
+</div>
+
+<div class="page">
+  <div class="pagehead2"><span>Cheddleton Rail &mdash; Delay Repay</span><span>Page 4 of 4</span></div>
+
+  <h2 class="tight">Delay Repay compensation</h2>
+  <p class="small">If a train you use is delayed, Cheddleton Rail will pay compensation under the Delay Repay
+  scheme shown below, based on the length of the delay to your journey, regardless of the cause.</p>
+  <table class="faretab">
+    <thead><tr><th>Length of delay</th><th class="r">Compensation, season ticket</th></tr></thead>
+    <tbody>
+      <tr><td>15 to 29 minutes</td><td class="r">25% of the daily equivalent fare</td></tr>
+      <tr><td>30 to 59 minutes</td><td class="r">50% of the daily equivalent fare</td></tr>
+      <tr><td>60 to 119 minutes</td><td class="r">100% of the daily equivalent fare</td></tr>
+      <tr><td>120 minutes or more</td><td class="r">100% of the daily equivalent fare, doubled</td></tr>
+    </tbody>
+  </table>
+  <p class="small">For a season ticket, the daily equivalent fare used to calculate compensation is
+  &pound;9.35, worked out by dividing the annual fare by the number of working days in the year. Claims should
+  be made within 28 days of the affected journey using your season ticket number, quoting reference DR at the
+  start of your claim number.</p>
+  <p class="small">Compensation is normally paid as rail travel vouchers within 10 working days, or as a bank
+  transfer or cheque if you ask for cash compensation instead. Delay Repay does not apply to delays caused by
+  disruption announced more than 24 hours in advance, for which a separate refund process applies.</p>
+
+  <h2 class="tight">Feedback and complaints</h2>
+  <div class="secbox">
+    Write to Customer Relations, Cheddleton Rail, FREEPOST CHEDDLETON RAIL, or use the contact form at
+    cheddletonrail.example/contact. If you remain unhappy after our final response, you can ask the independent
+    Rail Ombudsman to look at your complaint, free of charge. Please allow 20 working days for a full reply to
+    a written complaint.
+  </div>
+
+  <h2 class="tight">Manage your season ticket</h2>
+  <div class="secbox">
+    View your ticket, top up your smartcard or set a renewal reminder in the Cheddleton Rail app, or online at
+    cheddletonrail.example/myaccount using your online account reference OA-774411. Follow @CheddletonRail
+    for service updates and engineering works. Renewal reminders are sent by e-mail and text message 21 days
+    before your ticket runs out, so keep your contact details up to date in your online account.
+  </div>
+
+  <div class="footerline">Cheddleton Rail. Lost photocards: 01632 960774. www.cheddletonrail.example</div>
+</div>
+
+</body>
+</html>

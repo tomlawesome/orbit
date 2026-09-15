@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Cresswell Fitness Club — Membership Agreement</title>
+<style>
+@font-face{font-family:"Corpus Club";src:url("../fonts/Mulish.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Hand Fill";src:url("../fonts/Caveat.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Club", sans-serif;
+    font-size: 9pt; line-height: 1.35; color: #111; background: #fdfdfd;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    padding: 9mm 15mm 10mm 15mm; position: relative; page-break-after: always;
+    background: #fdfdfd;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  .hand {
+    font-family: "Corpus Hand Fill", serif; font-style: italic; color: #111;
+  }
+
+  /* ---- stamp ---- */
+  .stamp {
+    position: absolute; top: 14mm; right: 15mm; border: 1.6pt solid #c0392b;
+    color: #c0392b; padding: 1.6mm 4mm; font-weight: 700; letter-spacing: 2px;
+    font-size: 10pt; transform: rotate(-7deg); text-transform: uppercase;
+  }
+
+  /* ---- letterhead ---- */
+  .letterhead { text-align: center; margin-bottom: 4mm; }
+  .crest {
+    width: 11mm; height: 11mm; margin: 0 auto 1.6mm auto; border: 1.4pt solid #111;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 8.5pt; letter-spacing: -0.5px;
+  }
+  .clubname { font-size: 18pt; font-weight: 700; letter-spacing: 0.5px; }
+  .clubtag { font-size: 8pt; letter-spacing: 1.5px; text-transform: uppercase; color: #333; margin-top: 0.6mm; }
+  .clubaddr { font-size: 7.4pt; color: #333; margin-top: 1.6mm; line-height: 1.4; }
+  .hrule { border: none; border-top: 1.1pt solid #111; margin: 2.6mm 0; }
+
+  .doctitle {
+    text-align: center; font-size: 12.5pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; margin: 3mm 0 3.5mm 0;
+  }
+
+  /* ---- membership no. strip ---- */
+  .memstrip {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border: 1pt solid #111; padding: 1.6mm 3mm; margin-bottom: 4mm; font-size: 8.4pt;
+  }
+  .memstrip .flabel { font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+  .memstrip .fline { border-bottom: 1px solid #111; display: inline-block; min-width: 42mm; position: relative; height: 4.6mm; margin-left: 2mm; }
+  .memstrip .hand { position: absolute; left: 1mm; bottom: -1.2mm; font-size: 11.5pt; transform: rotate(-0.5deg); }
+
+  h2.sect {
+    font-size: 8.6pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px;
+    background: #111; color: #fdfdfd; margin: 3mm 0 1.8mm 0; padding: 0.9mm 2mm;
+  }
+
+  /* ---- field rows ---- */
+  .field { display: flex; align-items: flex-end; margin-bottom: 2.4mm; }
+  .flabel {
+    width: 46mm; flex: 0 0 auto; font-size: 7.8pt; text-transform: uppercase;
+    letter-spacing: 0.3px; color: #111; padding-bottom: 0.6mm;
+  }
+  .fline { flex: 1; border-bottom: 1px solid #111; position: relative; height: 5mm; }
+  .fline .hand { position: absolute; left: 2mm; font-size: 11pt; white-space: nowrap; }
+  .h1 { bottom: -1.6px; transform: rotate(-0.6deg); }
+  .h2 { bottom: -2.6px; transform: rotate(0.5deg); left: 3mm; }
+  .h3 { bottom: -1px; transform: rotate(-0.3deg); }
+  .h4 { bottom: -3px; transform: rotate(0.8deg); }
+  .h5 { bottom: -0.5px; transform: rotate(-0.9deg); }
+
+  .row2 { display: flex; gap: 6mm; }
+  .row2 .field { flex: 1; }
+
+  /* ---- membership type tick row ---- */
+  .ticks { display: flex; gap: 5mm; margin: 1mm 0 4mm 0; }
+  .tickopt { display: flex; align-items: center; gap: 1.6mm; font-size: 8.4pt; }
+  .box {
+    width: 4mm; height: 4mm; border: 1.2pt solid #111; display: flex;
+    align-items: center; justify-content: center; flex: 0 0 auto; position: relative;
+  }
+  .box .hand { position: absolute; font-size: 10pt; top: -1.6mm; left: 0.1mm; transform: rotate(-4deg); }
+
+  /* ---- payment table ---- */
+  table.fees { width: 100%; border-collapse: collapse; font-size: 8.2pt; margin-bottom: 2mm; }
+  table.fees th {
+    text-align: left; border-bottom: 1.1pt solid #111; padding: 1.2mm 1.4mm; font-size: 7.6pt;
+    text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  table.fees td { padding: 1.2mm 1.4mm; border-bottom: 0.5pt solid #999; }
+  table.fees td.num { text-align: right; white-space: nowrap; }
+  .feenote { font-size: 6.8pt; color: #444; margin-bottom: 3mm; }
+
+  .healthbox { border: 1pt solid #111; padding: 2mm 3mm; margin-bottom: 4mm; font-size: 8.2pt; }
+  .healthbox .field { margin: 1.6mm 0 0 0; }
+  .healthbox .flabel { width: 52mm; }
+
+  .decl { font-size: 8pt; line-height: 1.45; margin-bottom: 4mm; }
+
+  .sigrow { display: flex; gap: 8mm; }
+  .sigrow .field { flex: 1; }
+  .sigrow .siglabel-small { font-size: 6.8pt; text-transform: none; color: #333; }
+  .signame { font-size: 15pt; }
+
+  .pagefoot {
+    position: absolute; left: 15mm; right: 15mm; bottom: 6mm; font-size: 6.6pt; color: #444;
+    border-top: 0.6pt solid #999; padding-top: 1.4mm; display: flex; justify-content: space-between;
+  }
+
+  /* ---- page 2: terms ---- */
+  .p2head { text-align: center; margin-bottom: 3.5mm; }
+  .p2head .clubname2 { font-size: 11pt; font-weight: 700; }
+  .p2head .p2sub { font-size: 8pt; margin-top: 0.8mm; color: #333; }
+  .p2title {
+    text-align: center; font-size: 10.5pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 3mm; border-bottom: 1.1pt solid #111;
+    padding-bottom: 1.6mm;
+  }
+  .clauses { font-size: 7.2pt; line-height: 1.34; }
+  .clauses p { margin: 0 0 1.5mm 0; text-align: justify; }
+  .clauses b.cn { font-weight: 700; }
+  .clauses .hand { font-size: 8.2pt; border-bottom: 0.7px solid #111; padding: 0 0.6mm; }
+
+  .twocol3 { display: flex; gap: 8mm; }
+  .twocol3 > div { flex: 1; }
+  .refgrid3 { display: flex; flex-wrap: wrap; gap: 1.4mm 7mm; font-size: 7.2pt; margin: 1.6mm 0 3mm 0; }
+  .refgrid3 span { border-left: 1.4pt solid #111; padding-left: 1.8mm; }
+  .small3 { font-size: 6.8pt; line-height: 1.4; }
+  .small3 p { margin: 0 0 1.8mm 0; text-align: justify; }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+  <div class="stamp">Member Copy</div>
+
+  <div class="letterhead">
+    <div class="crest">CFC</div>
+    <div class="clubname">Cresswell Fitness Club</div>
+    <div class="clubtag">Independent Health &amp; Fitness Club</div>
+    <div class="clubaddr">14 Foundry Lane, Bournholt, BH3 7QP &middot; 01284 660 512 &middot; desk@cresswellfitness.example</div>
+  </div>
+  <hr class="hrule">
+  <div class="doctitle">Gym Membership Agreement</div>
+
+  <div class="memstrip">
+    <span><span class="flabel">Membership No.</span><span class="fline"><span class="hand">CFC-004821</span></span></span>
+  </div>
+
+  <h2 class="sect">Member details</h2>
+  <div class="field">
+    <span class="flabel">Full name</span>
+    <span class="fline"><span class="hand h1">Daniel Ostrowski</span></span>
+  </div>
+  <div class="field">
+    <span class="flabel">Address</span>
+    <span class="fline"><span class="hand h2">12 Vale Road, Bournholt, BH4 2LN</span></span>
+  </div>
+  <div class="field">
+    <span class="flabel">Date of birth</span>
+    <span class="fline"><span class="hand h3">14 July 1988</span></span>
+  </div>
+  <div class="row2">
+    <div class="field">
+      <span class="flabel">Home telephone</span>
+      <span class="fline"><span class="hand h4">01284 771 903</span></span>
+    </div>
+    <div class="field">
+      <span class="flabel">Mobile telephone</span>
+      <span class="fline"><span class="hand h5">07700 900 442</span></span>
+    </div>
+  </div>
+  <div class="field">
+    <span class="flabel">Email address</span>
+    <span class="fline"><span class="hand h1">d.ostrowski@mailbox.example</span></span>
+  </div>
+  <div class="field">
+    <span class="flabel">Membership start date</span>
+    <span class="fline"><span class="hand h2">02 March 2026</span></span>
+  </div>
+  <div class="field">
+    <span class="flabel">Emergency contact</span>
+    <span class="fline"><span class="hand h3">Anna Ostrowski, 07700 900 118</span></span>
+  </div>
+
+  <h2 class="sect">Membership type</h2>
+  <div class="ticks">
+    <div class="tickopt"><span class="box"></span> Off-Peak</div>
+    <div class="tickopt"><span class="box"><span class="hand">X</span></span> Full</div>
+    <div class="tickopt"><span class="box"></span> Student</div>
+    <div class="tickopt"><span class="box"></span> Corporate</div>
+  </div>
+
+  <h2 class="sect">Payment terms</h2>
+  <table class="fees">
+    <thead><tr><th>Item</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Joining fee (payable on signing, non-refundable)</td><td class="num">&pound;25.00</td></tr>
+      <tr><td>Monthly membership fee, collected by Direct Debit</td><td class="num">&pound;42.50</td></tr>
+      <tr><td>Annual membership, paid in full in advance</td><td class="num">&pound;459.00</td></tr>
+      <tr><td>Day-pass / guest rate, per visit</td><td class="num">&pound;12.00</td></tr>
+      <tr><td>Cancellation administration fee</td><td class="num">&pound;60.00</td></tr>
+    </tbody>
+  </table>
+  <div class="feenote">Prices shown are those on current price list PL-2026-03, displayed at reception, and are subject to change under clause 6 overleaf. Payment method: Direct Debit, collected in advance on the 1st of each month.</div>
+
+  <div class="healthbox">
+    I confirm that I have completed the Club's health declaration questionnaire and disclosed any condition relevant to my use of the facilities.
+    <div class="field"><span class="flabel">Questionnaire completed</span><span class="fline"><span class="hand h4">20 February 2026</span></span></div>
+  </div>
+
+  <h2 class="sect">Declaration and signature</h2>
+  <div class="decl">I confirm that the details given above are correct and that I have read and agree to be bound by the terms and conditions of membership overleaf, which form part of this agreement.</div>
+  <div class="sigrow">
+    <div class="field">
+      <span class="flabel">Member's signature</span>
+      <span class="fline"><span class="hand h5 signame">D Ostrowski</span></span>
+    </div>
+    <div class="field">
+      <span class="flabel">Date signed</span>
+      <span class="fline"><span class="hand h1">27 February 2026</span></span>
+    </div>
+  </div>
+  <div class="sigrow">
+    <div class="field">
+      <span class="flabel siglabel-small">Staff member (for office use)</span>
+      <span class="fline"><span class="hand h3" style="font-size:10pt;">J. Traynor</span></span>
+    </div>
+  </div>
+
+  <div class="pagefoot">
+    <span>Cresswell Fitness Club &middot; 14 Foundry Lane, Bournholt, BH3 7QP</span>
+    <span>Page 1 of 3</span>
+  </div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+  <div class="p2head">
+    <div class="clubname2">Cresswell Fitness Club</div>
+    <div class="p2sub">Membership No. CFC-004821 &middot; Daniel Ostrowski</div>
+  </div>
+  <div class="p2title">Terms and Conditions of Membership</div>
+
+  <div class="clauses">
+    <p><b class="cn">1. Definitions.</b> In this agreement, "the Club" means Cresswell Fitness Club, a trading name referred to throughout this agreement; "you" and "your" mean the member named overleaf; "membership year" means each successive 12-month period of your membership; "we", "us" and "our" mean the operator of the Club identified in clause 19.</p>
+    <p><b class="cn">2. Membership categories.</b> Membership is available as Full, Off-Peak, Student and Corporate, as marked overleaf. Off-Peak membership permits access Monday to Friday 09:00&ndash;16:00 only; Student membership requires proof of full-time enrolment; all other categories permit access during all published opening hours.</p>
+    <p><b class="cn">3. Commencement.</b> Your membership begins on the start date shown overleaf ("your start date") and is personal to you; it may not be transferred to, or used by, any other person.</p>
+    <p><b class="cn">4. Minimum term.</b> Full, Off-Peak and Student memberships are subject to an initial minimum term of 12 months from your start date. Your minimum term will end on <span class="hand">2 March 2027</span>, after which your membership will continue automatically on a rolling monthly basis until cancelled by you or by us in accordance with clause 12.</p>
+    <p><b class="cn">5. Fees and payment.</b> The joining fee is payable in full on signing and is non-refundable. Your monthly membership fee is collected by Direct Debit in advance on the 1st of each month for as long as your membership continues, including after your minimum term has ended. You may instead pay the annual fee in full in advance; the annual fee is discounted against twelve monthly payments but is non-refundable once paid.</p>
+    <p><b class="cn">6. Price changes.</b> We review our membership fees each January; your next scheduled review is due in January 2027. We will give you not less than 1 month's written notice of any increase, which will take effect from your next payment collection date.</p>
+    <p><b class="cn">7. Day passes and guests.</b> Non-members may use the Club as the day guest of a member on payment of the day-pass rate shown on the current price list at reception, to a maximum of four guest visits per member per calendar month.</p>
+    <p><b class="cn">8. Freezing your membership.</b> You may freeze your membership on medical or other reasonable grounds for a maximum of 3 months in any period of 12 months, on written application to the Club Manager. No fee is payable during an approved freeze period.</p>
+    <p><b class="cn">9. Health declaration.</b> You must complete a health declaration questionnaire before your first use of the Club's facilities and update it if your health changes materially. The Club may require a further declaration at renewal or after a freeze period.</p>
+    <p><b class="cn">10. Induction.</b> New members must complete a facility induction with a member of staff within 14 days of their start date before making unsupervised use of resistance or cardiovascular equipment.</p>
+    <p><b class="cn">11. Opening hours.</b> The Club's core opening hours are Monday to Friday 06:00&ndash;22:00 and Saturday and Sunday 08:00&ndash;20:00, save that the Club is closed on 25 December, 26 December and 1 January each year.</p>
+    <p><b class="cn">12. Cancellation after your minimum term.</b> After the end of your minimum term, you may cancel your membership by giving us not less than 1 calendar month's written notice, to take effect from your next payment collection date.</p>
+    <p><b class="cn">13. Suspension for non-payment.</b> If a Direct Debit payment is returned unpaid, we may suspend your access to the Club until payment, together with the applicable administration fee, is received in full.</p>
+    <p><b class="cn">14. Code of conduct.</b> Members must observe the Club's code of conduct, displayed at reception, including rules on equipment use, appropriate footwear and towel use in the fitness suite.</p>
+    <p><b class="cn">15. Guests and children.</b> Guests and children under 16 are admitted only in accordance with the Club's guest and junior access policy, available at reception, and must at all times be accompanied by a member.</p>
+    <p><b class="cn">16. Property and lockers.</b> The Club accepts no responsibility for loss of, or damage to, personal property, including items left in lockers, save where caused by our negligence.</p>
+    <p><b class="cn">17. Data protection.</b> Personal data provided on this form is processed in accordance with our privacy notice, available at reception and on request, and is used to administer your membership and for no other purpose without your consent.</p>
+    <p><b class="cn">18. CCTV.</b> Closed-circuit television operates throughout the Club's public areas for the safety of members and staff; footage is retained for 31 days unless required for an investigation.</p>
+    <p><b class="cn">19. The Club operator.</b> Cresswell Fitness Club is a trading name of Cresswell Leisure Ltd, a company registered in England and Wales under company number 08823410, whose registered office is at 14 Foundry Lane, Bournholt, BH3 7QP.</p>
+    <p><b class="cn">20. Complaints.</b> Complaints should be addressed in the first instance to the Club Manager. Unresolved complaints may be referred in writing to Cresswell Leisure Ltd at the registered office given in clause 19.</p>
+    <p><b class="cn">21. Closure.</b> We may close the Club, or any part of it, for maintenance, refurbishment or events beyond our reasonable control, and will give reasonable notice where practicable.</p>
+    <p><b class="cn">22. Variation of terms.</b> We may vary these terms on not less than 1 month's notice, displayed at reception and, where practicable, notified to you in writing or by email.</p>
+    <p><b class="cn">23. Governing law.</b> This agreement is governed by the law of England and Wales, and the courts of England and Wales have exclusive jurisdiction over any dispute arising from it.</p>
+  </div>
+
+  <div class="pagefoot">
+    <span>Form CFC-MA-07, terms reviewed January 2026</span>
+    <span>Page 2 of 3</span>
+  </div>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page">
+  <div class="p2head">
+    <div class="clubname2">Cresswell Fitness Club</div>
+    <div class="p2sub">Membership plans, add-ons and further information</div>
+  </div>
+  <div class="p2title">Price list and account references</div>
+
+  <h2 class="sect">Other membership plans</h2>
+  <table class="fees">
+    <thead><tr><th>Plan</th><th class="num">Monthly</th></tr></thead>
+    <tbody>
+      <tr><td>Off-Peak membership (Mon&ndash;Fri, 09:00&ndash;16:00)</td><td class="num">&pound;29.50</td></tr>
+      <tr><td>Student membership (with valid enrolment proof)</td><td class="num">&pound;32.00</td></tr>
+      <tr><td>Corporate membership (via participating employer)</td><td class="num">&pound;37.00</td></tr>
+      <tr><td>Family add-on, second adult at same address</td><td class="num">&pound;34.00</td></tr>
+      <tr><td>Junior add-on, under 16, swimming and classes only</td><td class="num">&pound;18.00</td></tr>
+    </tbody>
+  </table>
+  <div class="feenote">Plans above are shown on the current price list PL-2026-03 and are
+  reviewed each January; the last review took effect January 2026 and the next scheduled review
+  is due in January 2027. A member who joined under the previous price list, withdrawn 31
+  December 2025, may still be paying &pound;39.00 a month on a legacy Full plan until they next
+  renew.</div>
+
+  <h2 class="sect">Add-ons and other charges</h2>
+  <div class="twocol3">
+    <div>
+      <table class="fees">
+        <thead><tr><th>Item</th><th class="num">Charge</th></tr></thead>
+        <tbody>
+          <tr><td>Personal training, single session</td><td class="num">&pound;38.00</td></tr>
+          <tr><td>Personal training, block of 10</td><td class="num">&pound;340.00</td></tr>
+          <tr><td>Class pass, single visit (non-member)</td><td class="num">&pound;9.50</td></tr>
+          <tr><td>Locker rental, per month</td><td class="num">&pound;4.00</td></tr>
+          <tr><td>Replacement membership card</td><td class="num">&pound;6.00</td></tr>
+          <tr><td>Car park overstay charge</td><td class="num">&pound;20.00</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <p class="small3">Prices above exclude the joining fee and monthly membership fee shown
+      overleaf, and are correct as at the January 2026 price review. Members can book classes and
+      personal training through the member app or at
+      <b>cresswellfitness.example/book</b>.</p>
+      <p class="small3">A free taster class is offered to new members in their first month;
+      quote code <b>CFC-TASTER-26</b> at reception. The introductory offer for new members who
+      join before 30 April 2026 waives the &pound;25.00 joining fee.</p>
+    </div>
+  </div>
+
+  <h2 class="sect">Account references</h2>
+  <div class="refgrid3">
+    <span>Customer number: <b>CU-772140</b></span>
+    <span>Direct debit SUN: <b>664120</b></span>
+    <span>Sort code: <b>30-55-18</b></span>
+    <span>VAT registration: <b>GB 220 4471 08</b></span>
+    <span>Company number: <b>08823410</b></span>
+    <span>Locker key deposit ref: <b>LK-004821</b></span>
+    <span>Parking permit no.: <b>PP-11742</b></span>
+    <span>Last invoice: <b>INV-2026-05512</b>, issued 01/03/2026</span>
+  </div>
+
+  <h2 class="sect">Getting in touch and putting things right</h2>
+  <div class="small3">
+    <p><b>Reception.</b> 14 Foundry Lane, Bournholt, BH3 7QP, open Monday to Friday
+    06:00&ndash;22:00 and weekends 08:00&ndash;20:00, except 25 December, 26 December and 1
+    January. Telephone 01284 660 512 or e-mail desk@cresswellfitness.example.</p>
+
+    <p><b>Complaints.</b> Address complaints to the Club Manager in the first instance, or
+    e-mail complaints@cresswellfitness.example, quoting your membership number. We aim to
+    acknowledge within five working days and resolve within 28 days. Unresolved complaints about
+    billing may be referred to Cresswell Leisure Ltd at the registered office given overleaf.</p>
+
+    <p><b>Accessibility.</b> The Club has step-free access, an accessible changing room and a
+    hoist for the pool. Members who need adjustments to classes or induction should speak to the
+    Club Manager, who can arrange a tailored session.</p>
+
+    <p><b>Your data.</b> Membership and attendance data are held for the duration of your
+    membership and for two years afterwards. We are registered with the Information
+    Commissioner under number <b>ZA772140</b>. Full privacy notice at
+    <b>cresswellfitness.example/privacy</b>, last updated 4 January 2026.</p>
+
+    <p><b>Refer a friend.</b> Existing members who refer a friend who joins on a Full
+    membership receive one month's membership free once the new member's second payment has
+    been collected. Quote code <b>CFC-FRIEND-26</b> at <b>cresswellfitness.example/refer</b>.</p>
+  </div>
+
+  <div class="pagefoot">
+    <span>Cresswell Fitness Club &middot; Membership No. CFC-004821</span>
+    <span>Page 3 of 3</span>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "Motor insurance welcome pack",
+  "filename": "motor-insurance-welcome-pack.pdf",
+  "notes": ["Motor insurance welcome pack posted after buying a car insurance policy through a broker"],
+  "expected": {
+    "dates": ["2026-10-01", "2027-09-30"],
+    "provider": "Larkspur Brook Insurance Services",
+    "reference": "LB/MTR/4471-20X",
+    "dateRoles": [
+      { "date": "2026-10-01", "role": "start" },
+      { "date": "2027-09-30", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Insurance"], "qualifiers": ["Motor"] },
+    "costMinor": 68430,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  }
+}

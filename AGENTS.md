@@ -302,6 +302,25 @@ such block. Run `node --test scripts/lockfile-no-pnpm-exe.test.mjs` before
 committing a lockfile change — discard the diff if it fails, never commit it.
 CI activates 12.3.4 through corepack, so it never sees this (#884, #901).
 
+## Only ten fonts exist on this host, and the rest fail silently
+
+Rendering anything to PDF or an image — a mockup, a test document, a
+screenshot — uses the host's fonts. Only these are installed:
+
+    Bitstream Charter   Courier 10 Pitch   Liberation Serif
+    Liberation Sans     Liberation Mono    FreeSerif
+    FreeSans            FreeMono           Loma
+    WenQuanYi Zen Hei
+
+Anything else falls back with no warning. Ask for Helvetica, Arial, Georgia
+or Times New Roman and you get a substitute, and nothing tells you.
+
+This is not cosmetic. Six extraction-corpus documents were built in parallel
+to look deliberately unlike each other, every one specified a font from that
+uninstalled list, and all six rendered in the same face — the variety was
+requested but never existed (#981, 2026-09-11). Check with `fc-list : family`
+rather than assuming a common font is present.
+
 ## The demo stack is disposable
 
 The demo deployment (`compose/docker-compose.demo.yml`) carries only test data, so
@@ -346,6 +365,106 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   Risk fields have no GitLab equivalent and nothing replaces them (owner,
   2026-09-04, #814): the milestone says what is scheduled and open/closed
   says what is done.
+- Document extraction: read #992 (extraction lessons, running record) before
+  touching `src/server/documents/extraction-*`; add an entry there when a
+  session learns something the next would otherwise relearn. Every scored
+  run (`eval:stages`, `eval:holdout`, `eval:extraction`) is an experiment
+  and goes in `docs/experiments/extraction.json` the same session, with a
+  plain-English "what we did" (owner, 2026-09-12: "we can only improve if
+  we keep track"): `node scripts/experiment-log.mjs record …` parses the
+  score line and renders the page. Runs that ask the model must be run
+  inside a container on `orbit_orbit-document-processing` (the
+  `stages-rerun` pattern: `docker run --network … -v $PWD:/app -w /app
+  --entrypoint sh node:22 -c '…'`); from the host `orbit-ollama` does not
+  resolve, every answer is blank and the run scores 0% in seconds. The
+  owner reads the log at http://192.168.11.30:8090/ (container
+  `orbit-experiments`, nginx over `tmp/experiment-log/`); re-render after
+  recording.
+- How extraction work is tested (owner, 2026-09-12), which is not a ruling on
+  what the pipeline ends up doing: heuristics only, no model, one field at a
+  time. What the full pipeline does is decided later, once the fields have
+  been measured this way. The page's front table is the blind whole-page model
+  against the heuristics on the twelve unseen pages; a run joins it with
+  `"headline": true` in the register.
+- **Every field gets its own copy of every stage** (owner, 2026-09-12): its
+  own sieve, its own tagging, its own chooser, in its own files. Not one
+  shared stage 1 with per-field choosers on top — provider's sieve is
+  provider's, and making it greedier must not change a single candidate
+  subtype sees. Copy rather than import: a shared helper cannot be tuned for
+  one field without moving the other, which is the whole point of separating
+  them. Duplication is expected and is not a defect to clean up.
+
+  Whether anything can be merged back is decided at the end, from the
+  numbers, once every field has been tuned on its own. Until then, a change
+  that helps one field and is not measured on the others does not go into
+  anything the others read. #996 is the first of these.
+- **An internal test harness is not product UX** (owner, 2026-09-15:
+  *"This is a basic functional ui so it goes to you. We don't need fable
+  for test harnesses."*). The global rule routing UI and architecture calls
+  to the top model covers what a household sees, not tooling the owner and
+  the agents use -- a labelling harness, an evaluation page, a debug view.
+  Build those in the ordinary way; #1025 was filed to Fable in error.
+- **Collected documents stay out of the repository** (owner, 2026-09-15:
+  *"None of our treatments from any source need to be committed, any that
+  carry license terms saying they do shouldn't be used."*). Specimen and
+  real documents gathered for measuring the extractor live outside git --
+  `~/projects/.scratch/uk-specimens/` for the collected British specimens,
+  the owner's own machine for their paperwork -- and are used locally
+  only. A source whose licence would oblige us to publish or redistribute
+  anything is not used at all, whatever else it offers. Counts, score
+  lines and licence records are what travel.
+- **Non-commercial data and dependencies are acceptable** (owner,
+  2026-09-15: *"Non commercial is usable here. I am happy to ditch the
+  possibility of an orbit commercial license."*). Orbit will not be offered
+  commercially, so a CC BY-NC or CC BY-NC-SA dataset or model may be used.
+  The rest of the dependencies-and-data skill still applies: record the
+  exact licence, and share-alike still binds anything the project
+  redistributes, which AGPL-3.0-or-later makes likelier than it sounds.
+- **Document-scanning rules are kept for what they say about paper, not
+  for the pages they fix** (owner, 2026-09-13: *"what I wanted were generic
+  rule improvements, not tunes"*). This is about the extraction rules in
+  `src/server/documents/extraction-*` — the sieves, tagging and choosers
+  that read a scanned household document — not about project rules in
+  general. A scanning rule states a fact about household paper in general
+  ("a total the page dates is history"; "the number carried on every sheet
+  is the item's own") and the commit and experiment note say that fact. A
+  scanning rule that names a heading word, a phrase or a layout seen on one
+  page is a tune: it needs a class of paper it is true of, or it stays out.
+  Hold-outs
+  are a check, not the judge — keeping a rule by its hold-out score alone
+  is selecting on the hold-out, and twelve pages make one page eight points
+  of a field. The judge is the owner's own documents through
+  `scripts/extract-bundle/`: rebuild after a batch of rules and compare
+  right / in top three / wrong counts with the previous run (#1007).
+- **The unseen documents are locked, not just off limits** (owner,
+  2026-09-12: *"You need to be locked out from the unseen documents."*).
+  `~/agent-hooks/holdout-gate.py` refuses to read a hold-out document, its
+  ground truth or its generated module, and refuses to RUN an eval carrying
+  `--misses` or `--answers` — the flags that print each page's expected value beside
+  what was extracted. Staging, counting, moving, building and writing about
+  those files is all still allowed; reading them out is not. Score them and
+  read the score line.
+
+  Asking permission cannot help: the hook screens the command, not the
+  intent. Authoring a hold-out is the one exempt role, and it is declared
+  rather than inferred — write `ORBIT_HOLDOUT_AUTHOR=1` into the command
+  itself, which says "I am writing these and will never tune against them".
+  A session that writes it has spent its right to tune on that set.
+
+  It must be in the command text. The hook runs as its own process, so a
+  variable exported around the command is not set when the hook reads its
+  environment — the first version checked only the environment and so locked
+  the author out along with everyone else. Declaring it in the command is
+  better anyway: the exemption shows up in the transcript on the line that
+  used it. Only Bash can carry it, so a hold-out author reads with `cat` and
+  writes with a heredoc; Read, Write and Edit stay shut on those paths.
+
+  The first hold-out was lost on 2026-09-12 without a single file being
+  opened: an eval printed the answers, they were read, and the next change
+  was designed knowing them (#996, #997). That is why the flags are gated and
+  not only the files. `~/agent-hooks/holdout-gate_test.py` proves both halves
+  fire, and that neither blocks ordinary work.
+
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not

@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Annual Multi-Trip Travel Insurance Certificate</title>
+<style>
+@font-face{font-family:"Corpus Travel";src:url("../fonts/Arvo-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Travel Serif";src:url("../fonts/Spectral-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Travel", sans-serif; font-size: 8pt; color: #000000; line-height: 1.3;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always; background: #ffffff;
+    padding: 10mm 14mm 12mm 14mm;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---- Page 1: topbar ---- */
+  .topbar {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    border-bottom: 2.4pt solid #0f766e; padding-bottom: 2mm; margin-bottom: 3mm;
+  }
+  .topbar .brand { color: #0f766e; }
+  .topbar .brand .name { font-size: 13pt; font-weight: 700; letter-spacing: 0.3px; }
+  .topbar .brand .tag { font-size: 6.6pt; color: #333333; margin-top: 0.6mm; }
+  .topbar .certref { text-align: right; font-size: 7pt; color: #333333; line-height: 1.5; }
+  .topbar .certref .big { font-size: 9.4pt; font-weight: 700; color: #0f766e; }
+
+  h1.doctitle {
+    font-size: 12pt; font-weight: 700; color: #0f766e; text-align: center;
+    margin: 0 0 3mm 0; letter-spacing: 0.3px; text-transform: uppercase;
+  }
+
+  /* ---- Certificate panel ---- */
+  .certpanel {
+    border: 1.6pt solid #0f766e; background: #f8fafc; padding: 3mm 5mm; margin-bottom: 3.5mm;
+  }
+  .certgrid { display: flex; gap: 6mm; }
+  .certcol { flex: 1; }
+  .cfield { margin-bottom: 1.3mm; font-size: 7.6pt; }
+  .cfield .clabel { color: #33534f; font-size: 6.4pt; text-transform: uppercase; letter-spacing: 0.3px; display: block; }
+  .cfield .cval { font-size: 8.2pt; color: #000000; }
+  .cfield .cval.strong { font-weight: 700; }
+  .certdivider { border: none; border-top: 0.6pt solid #99c2bd; margin: 2mm 0; }
+  .premrow { display: flex; justify-content: space-between; font-size: 7.8pt; margin-bottom: 0.8mm; }
+  .premrow.total { font-weight: 700; font-size: 8.6pt; border-top: 0.8pt solid #0f766e; padding-top: 0.8mm; margin-top: 0.5mm; }
+  .certfoot { font-size: 6.6pt; color: #33534f; margin-top: 2mm; line-height: 1.4; }
+
+  /* ---- Emergency band ---- */
+  .emergency-band {
+    background: #fb923c; color: #1a1200; padding: 3mm 5mm; margin-bottom: 3mm;
+    border: 1.6pt solid #b45309;
+  }
+  .emergency-band .eyebrow {
+    font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px;
+  }
+  .emergency-band .bignum {
+    font-size: 20pt; font-weight: 700; letter-spacing: 0.5px; margin: 1mm 0;
+  }
+  .emergency-band .sub { font-size: 7pt; line-height: 1.4; }
+
+  /* ---- Assistance numbers ---- */
+  .assist-head { font-size: 8.4pt; font-weight: 700; color: #0f766e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 1.6mm; }
+  .assist-grid { display: flex; flex-wrap: wrap; gap: 0; border-top: 0.7pt solid #0f766e; border-left: 0.7pt solid #0f766e; margin-bottom: 3mm; }
+  .assist-cell {
+    width: 50%; box-sizing: border-box; border-right: 0.7pt solid #0f766e; border-bottom: 0.7pt solid #0f766e;
+    padding: 1.8mm 3mm;
+  }
+  .assist-cell .country { font-size: 6.8pt; text-transform: uppercase; letter-spacing: 0.3px; color: #33534f; }
+  .assist-cell .num { font-size: 10.4pt; font-weight: 700; color: #0f766e; margin-top: 0.4mm; }
+  .otherlines { font-size: 7.2pt; line-height: 1.55; margin-bottom: 2.4mm; }
+  .otherlines .oline { display: flex; justify-content: space-between; border-bottom: 0.4pt dotted #99c2bd; padding: 0.6mm 0; }
+  .fine { font-size: 6.6pt; color: #333333; line-height: 1.4; }
+  .pagefoot {
+    position: absolute; left: 14mm; right: 14mm; bottom: 6mm; font-size: 6.2pt; color: #555555;
+    display: flex; justify-content: space-between; border-top: 0.5pt solid #cccccc; padding-top: 1mm;
+  }
+
+  /* ---- Page 2 ---- */
+  .pagehead {
+    display: flex; justify-content: space-between; font-size: 6.6pt; color: #33534f;
+    border-bottom: 0.8pt solid #0f766e; padding-bottom: 1.4mm; margin-bottom: 3mm;
+  }
+  h2.sechead {
+    font-size: 9.4pt; font-weight: 700; color: #0f766e; text-transform: uppercase;
+    letter-spacing: 0.4px; margin: 0 0 1.6mm 0; border-bottom: 1pt solid #0f766e; padding-bottom: 0.8mm;
+  }
+  table.benefits { width: 100%; border-collapse: collapse; font-size: 6.9pt; margin-bottom: 3mm; }
+  table.benefits th {
+    text-align: left; font-weight: 700; padding: 1mm 1.6mm; background: #f8fafc;
+    border-top: 0.9pt solid #0f766e; border-bottom: 0.7pt solid #0f766e; color: #0f766e;
+    text-transform: uppercase; font-size: 6.2pt; letter-spacing: 0.2px;
+  }
+  table.benefits td { padding: 0.9mm 1.6mm; border-bottom: 0.4pt solid #d9e2e0; vertical-align: top; }
+  table.benefits td.num, table.benefits th.num { text-align: right; white-space: nowrap; }
+  table.benefits tr:nth-child(even) td { background: #f8fafc; }
+  .benefitsnote { font-size: 6.4pt; color: #333333; line-height: 1.4; margin: -1mm 0 3mm 0; }
+
+  .conditions { font-family: "Corpus Travel Serif", serif; font-size: 7.6pt; line-height: 1.42; color: #000000; }
+  .conditions h3 { font-size: 8.2pt; font-weight: 700; margin: 2.4mm 0 1mm 0; color: #0f766e; font-family: "Corpus Travel", sans-serif; text-transform: uppercase; letter-spacing: 0.3px; }
+  .conditions p { margin: 0 0 1.8mm 0; text-align: justify; }
+  .conditions .cols2 { column-count: 2; column-gap: 6mm; }
+  .conditions .cols2 p { margin: 0 0 1.8mm 0; }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1: CERTIFICATE + EMERGENCY NUMBERS -->
+<div class="page">
+  <div class="topbar">
+    <div class="brand">
+      <div class="name">KESTREL COVER</div>
+      <div class="tag">Administrator of your annual multi-trip travel insurance policy</div>
+    </div>
+    <div class="certref">
+      Certificate number<br><span class="big">KTL/AMT/449108</span>
+    </div>
+  </div>
+
+  <h1 class="doctitle">Annual Multi-Trip Travel Insurance Certificate</h1>
+
+  <div class="certpanel">
+    <div class="certgrid">
+      <div class="certcol">
+        <div class="cfield"><span class="clabel">Policyholder</span><span class="cval">Mr Callum Whitfield</span></div>
+        <div class="cfield"><span class="clabel">Policy number</span><span class="cval">AMT-2026-556812</span></div>
+        <div class="cfield"><span class="clabel">Address</span><span class="cval">22 Oakfield Rise, Nettlecombe, Somerset TA5 1QF</span></div>
+        <div class="cfield"><span class="clabel">Certificate issued on</span><span class="cval">18 March 2026</span></div>
+        <div class="cfield"><span class="clabel">Continuous cover held with us since</span><span class="cval">1 April 2023</span></div>
+        <div class="cfield"><span class="clabel">Area of cover</span><span class="cval">Worldwide, excluding the United States, Canada, the Caribbean and Mexico</span></div>
+      </div>
+      <div class="certcol">
+        <div class="cfield"><span class="clabel">Period of insurance</span><span class="cval strong">12 months, from 1 April 2026 to 1 April 2027</span></div>
+        <div class="cfield"><span class="clabel">Renewal date &mdash; cover ends unless renewed</span><span class="cval strong">1 April 2027</span></div>
+        <div class="cfield"><span class="clabel">Maximum duration of any one trip</span><span class="cval">31 days</span></div>
+        <div class="cfield"><span class="clabel">Maximum duration of any one winter sports trip</span><span class="cval">17 days</span></div>
+        <div class="cfield"><span class="clabel">Cover under each trip begins</span><span class="cval">24 hours before your scheduled departure time</span></div>
+      </div>
+    </div>
+    <hr class="certdivider">
+    <div class="premrow"><span>Insurance Premium Tax (IPT), charged at 20% of the net premium</span><span>&pound;26.60</span></div>
+    <div class="premrow"><span>Optional winter sports upgrade (if purchased)</span><span>&pound;34.50</span></div>
+    <div class="premrow"><span>Optional cruise cover upgrade (if purchased)</span><span>&pound;18.00</span></div>
+    <div class="premrow"><span>Optional gadget cover upgrade (if purchased)</span><span>&pound;22.50</span></div>
+    <div class="premrow"><span>Optional excess waiver upgrade (if purchased)</span><span>&pound;29.00</span></div>
+    <div class="premrow"><span>Standard excess, per person, per incident</span><span>&pound;95.00</span></div>
+    <div class="premrow"><span>Premium excluding Insurance Premium Tax</span><span>&pound;133.00</span></div>
+    <div class="premrow total"><span>Annual premium, including Insurance Premium Tax</span><span>&pound;159.60</span></div>
+    <div class="certfoot">
+      Underwritten by Palisade Insurance Company plc, authorised by the Prudential Regulation Authority
+      and regulated by the Financial Conduct Authority and the Prudential Regulation Authority, firm
+      reference number 148820. This certificate is issued by Kestrel Cover, of
+      14 Harbourage Street, Poole, Dorset BH15 1TA, company number 07741108, as agent of the insurer and
+      administrator of this policy. Kestrel Cover has been authorised and regulated by
+      the Financial Conduct Authority since 4 January 2005, firm reference number 552817. VAT
+      registration number GB 552 8172 04.
+    </div>
+  </div>
+
+  <div class="emergency-band">
+    <div class="eyebrow">In a medical emergency abroad, call for assistance before you go to hospital if you can</div>
+    <div class="bignum">+44 (0)345 646 0891</div>
+    <div class="sub">Worldreach Assistance Ltd operates this line 24 hours a day, every day of the year. Have your certificate number and, if you have one, your medical case reference to hand.</div>
+  </div>
+
+  <div class="assist-head">Calling the assistance line while abroad</div>
+  <div class="assist-grid">
+    <div class="assist-cell"><span class="country">From the United Kingdom</span><div class="num">0345 646 0891</div></div>
+    <div class="assist-cell"><span class="country">From the USA or Canada (toll-free)</span><div class="num">1 800 745 1102</div></div>
+    <div class="assist-cell"><span class="country">From Spain</span><div class="num">900 802 217</div></div>
+    <div class="assist-cell"><span class="country">From France</span><div class="num">0800 91 2280</div></div>
+    <div class="assist-cell"><span class="country">From Australia</span><div class="num">1800 774 512</div></div>
+    <div class="assist-cell"><span class="country">From the Republic of Ireland</span><div class="num">1800 555 044</div></div>
+    <div class="assist-cell"><span class="country">Anywhere else &mdash; reverse the charges to</span><div class="num">+44 345 646 0891</div></div>
+    <div class="assist-cell"><span class="country">Medical case reference format, once issued</span><div class="num">MCR-774512</div></div>
+  </div>
+
+  <div class="assist-head">Other numbers you may need</div>
+  <div class="otherlines">
+    <div class="oline"><span>Policy service and enquiries (Kestrel Cover, UK office hours)</span><span><b>0345 604 8817</b></span></div>
+    <div class="oline"><span>Claims line (Kestrel Cover)</span><span><b>0345 604 2291</b></span></div>
+    <div class="oline"><span>Group scheme reference for this certificate</span><span><b>GS-2291</b></span></div>
+    <div class="oline"><span>Worldreach Assistance Ltd, registered office, Lakeside House, 4 Priory Retail Park, Croydon CR0 4XB</span><span><b>020 8946 1102</b></span></div>
+  </div>
+  <div class="fine">
+    When dialling a UK number from abroad, replace the leading 0 with the UK country code, for example
+    0345 604 8817 becomes +44 345 604 8817. Calls to 03 numbers cost no more than a call to a UK
+    landline number and are included in most UK call packages. Calls to the medical assistance line
+    are charged at your provider's standard international rate when dialled from abroad; ask the
+    operator to call you back if you are concerned about cost.
+  </div>
+
+  <div class="pagefoot">
+    <span>Kestrel Cover &middot; Certificate KTL/AMT/449108</span>
+    <span>Page 1 of 2</span>
+  </div>
+</div>
+
+<!-- PAGE 2: TABLE OF BENEFITS + CONDITIONS -->
+<div class="page">
+  <div class="pagehead">
+    <span>Kestrel Cover &middot; Annual Multi-Trip Travel Insurance Certificate</span>
+    <span>Certificate KTL/AMT/449108 &middot; Page 2 of 2</span>
+  </div>
+
+  <h2 class="sechead">Table of benefits</h2>
+  <table class="benefits">
+    <thead>
+      <tr><th>Section of cover</th><th class="num">Limit</th><th class="num">Excess</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Cancellation or cutting short your trip</td><td class="num">&pound;5,000 per person</td><td class="num">&pound;95</td></tr>
+      <tr><td>Emergency medical treatment and repatriation</td><td class="num">&pound;10,000,000</td><td class="num">&pound;95</td></tr>
+      <tr><td>Hospital benefit, per 24 hours as an in-patient (maximum &pound;600)</td><td class="num">&pound;20</td><td class="num">Nil</td></tr>
+      <tr><td>Baggage and personal effects (single article limit &pound;300)</td><td class="num">&pound;1,500</td><td class="num">&pound;95</td></tr>
+      <tr><td>Delayed baggage, more than 12 hours</td><td class="num">&pound;150</td><td class="num">Nil</td></tr>
+      <tr><td>Travel delay, per full 12 hours (maximum &pound;150)</td><td class="num">&pound;25</td><td class="num">Nil</td></tr>
+      <tr><td>Missed departure</td><td class="num">&pound;500</td><td class="num">&pound;95</td></tr>
+      <tr><td>Personal accident</td><td class="num">&pound;25,000</td><td class="num">Nil</td></tr>
+      <tr><td>Personal liability</td><td class="num">&pound;2,000,000</td><td class="num">&pound;250</td></tr>
+      <tr><td>Legal expenses</td><td class="num">&pound;25,000</td><td class="num">&pound;250</td></tr>
+      <tr><td>Winter sports equipment (upgrade only, hired or owned)</td><td class="num">&pound;750</td><td class="num">&pound;150</td></tr>
+      <tr><td>Winter sports piste closure (upgrade only), per day (maximum &pound;250)</td><td class="num">&pound;30</td><td class="num">Nil</td></tr>
+      <tr><td>Scheduled airline failure</td><td class="num">&pound;1,500</td><td class="num">&pound;95</td></tr>
+      <tr><td>Cruise cover, if selected and shown on your certificate</td><td class="num">&pound;750</td><td class="num">&pound;95</td></tr>
+      <tr><td>Wedding cover, if selected and shown on your certificate</td><td class="num">&pound;1,000</td><td class="num">&pound;95</td></tr>
+    </tbody>
+  </table>
+  <div class="benefitsnote">
+    The standard excess of &pound;95 per person, per incident applies to each section above unless a
+    different excess is shown against it. Where a claim involves more than one section, an excess is
+    payable under each section that applies. Limits and excesses shown here summarise policy booklet
+    KTL-TRV-2026, which takes precedence in the event of any inconsistency.
+  </div>
+
+  <div class="conditions">
+    <h3>Trip length and when your cover applies</h3>
+    <div class="cols2">
+      <p>
+        Cover under this certificate applies to trips of up to 31 days, or up to 17 days for a trip that
+        includes winter sports, beginning from your home in the United Kingdom and ending on your return
+        to the United Kingdom. Cover for each trip starts 24 hours before your scheduled departure time and
+        ends on your return, or on expiry of the maximum trip length shown above, whichever happens first.
+        For example, if you leave the United Kingdom on 3 June 2026, your trip must end, and you must be
+        back in the United Kingdom, by 4 July 2026 to remain within the standard 31-day limit. In the same
+        way, a winter sports holiday beginning on 5 January 2027 must end, and you must be back in the
+        United Kingdom, by 22 January 2027 to remain within the 17-day winter sports limit. A trip that
+        runs beyond the applicable limit is not covered for the days beyond it.
+      </p>
+      <p>
+        This certificate provides continuous cover for any number of trips within the period of insurance
+        shown overleaf, provided no single trip exceeds the relevant maximum duration. It does not cover a
+        single trip planned, at the time of booking, to last longer than the applicable limit, even if only
+        the days beyond the limit are eventually used.
+      </p>
+      <h3>Your health and medical screening</h3>
+      <p>
+        Cover for a medical condition you already have when you take out or renew this policy depends on
+        your having completed our medical screening. Your most recent screening was completed on
+        11 January 2026, screening reference MSC-118820, and remains valid for a period of 12 months,
+        until 10 January 2027. If your screening has expired before you travel, or if you have not been
+        screened, we may not cover claims relating to an existing medical condition.
+      </p>
+      <p>
+        You must tell us about any change in your health, or in that of anyone whose health could lead to a
+        claim, before 1 December 2026, or before you next travel if that is earlier, whichever comes first.
+        We will tell you whether the change affects your cover or premium. If you do not tell us, we may
+        not pay a claim connected with the change.
+      </p>
+      <h3>Making a claim</h3>
+      <p>
+        Contact the assistance line overleaf as soon as possible if you need emergency medical treatment or
+        repatriation while abroad, so that we can support you and manage the cost of your treatment
+        directly with the hospital wherever we can. For all other claims, write to the claims line overleaf
+        within 31 days of returning home, enclosing your certificate number and any receipts, reports or
+        other evidence supporting your claim. Once registered, your claim is given its own reference in
+        the format CLM-654200, which you should quote in any further correspondence. As an example of
+        our usual service standard, a claim notified
+        to us on 2 August 2025 was assessed and settled within ten working days of our receiving all the
+        information we needed; the time a genuine claim takes will depend on its own circumstances.
+      </p>
+      <h3>Cancelling this policy</h3>
+      <p>
+        You may cancel this policy within 14 days of the certificate issue date shown overleaf, or the day
+        you receive your policy documents if later, and receive a full refund provided you have not
+        travelled and have no claim to make. After this cooling-off period, you may cancel at any time by
+        writing to Kestrel Cover, but no refund is due once the period of insurance
+        has begun.
+      </p>
+      <h3>How to complain</h3>
+      <p>
+        If you are unhappy with this policy or with the handling of a claim, contact Kestrel
+        Cover in the first instance, using the policy service number overleaf. If your
+        complaint is not resolved to your satisfaction, you may refer it to the Financial Ombudsman
+        Service, free of charge, normally within six months of our final response. Referring a complaint
+        does not affect your right to take legal action.
+      </p>
+      <p class="fine" style="font-family:'Liberation Sans', sans-serif;">
+        Kestrel Travel Insurance Services Ltd, trading as Kestrel Cover, registered in England and Wales,
+        company number 07741108, registered office 14 Harbourage Street, Poole, Dorset BH15 1TA. Authorised
+        and regulated by the Financial Conduct Authority since 4 January 2005, firm reference
+        number 552817. Underwritten by Palisade Insurance
+        Company plc, registered office Palisade House, 3 Anchor Quay, Bristleport BR2 9QP, company number
+        04412207. Worldreach Assistance Ltd, registered office Lakeside House, 4 Priory Retail Park,
+        Croydon CR0 4XB, company number 05528817, provides the 24-hour assistance service under contract
+        to the insurer. This policy booklet was last updated on 3 March 2026 and your personal data is
+        handled in accordance with our privacy notice, reviewed on 12 May 2026 and available at
+        kestrelcover.example/privacy. Data protection registration ZA552817. The Kestrel Assist app,
+        available for iOS and Android, gives you a digital copy of this certificate and one-tap access
+        to the assistance line.
+      </p>
+    </div>
+  </div>
+
+  <div class="pagefoot">
+    <span>Kestrel Cover &middot; Certificate KTL/AMT/449108</span>
+    <span>Page 2 of 2</span>
+  </div>
+</div>
+
+</body>
+</html>

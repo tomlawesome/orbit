@@ -1,0 +1,24 @@
+{
+  "name": "driving lessons invoice, the instructor signs by hand and the business only lives in an e-mail address",
+  "filename": "fullpage-driving-lessons-invoice.pdf",
+  "expected": {
+    "dates": ["2026-09-02", "2027-03-02"],
+    "provider": "Pass2Drive",
+    "reference": "PL-INV-2249",
+    "dateRoles": [
+      { "date": "2026-09-02", "role": "issued" },
+      { "date": "2027-03-02", "role": "expiry" }
+    ],
+    "subtype": { "kinds": ["Course"], "qualifiers": ["Driving"] },
+    "costMinor": 36000,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: invoice issued (and paid) 2 September 2026; the lesson-block credit expires 2 March 2027, six months later. Five other printed dates are deliberately not declared: the previous block's payment date (14 Mar 2026) and its use-by-date's actual use (3 Jun 2026), the practical test booking (20 Nov 2026), the recommended mock test date (6 Nov 2026), the price-increase date (1 Jan 2026), and the ADI certificate renewal dates (4 May 2024, running to 4 May 2028).",
+    "provider is 'Pass2Drive', which never appears as ordinary text on the page -- the header signature and instructor line name only the individual instructor, C. Lewis -- and is findable solely inside the booking e-mail address and the website address.",
+    "reference is the invoice number PL-INV-2249, not the ADI badge number (449213) or the driving-association membership number (DIA-77420).",
+    "costMinor is the £360.00 total paid for the block of ten lessons, not the £34 or £36 hourly rate mentioned in the small print.",
+    "subtype: 'Course' (matching a paid block of lessons) qualified by 'Driving'.",
+    "scheduleKind is not declared: neither dateRole is 'renewal' or 'service'."
+  ]
+}

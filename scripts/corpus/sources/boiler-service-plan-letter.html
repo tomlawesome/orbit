@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Boiler Service Plan Letter</title>
+<style>
+@font-face{font-family:"Corpus Boiler";src:url("../fonts/Faustina.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Boiler Sans";src:url("../fonts/Inter.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  @page { size: A4; margin: 0; }
+  .page {
+    width: 794px;
+    min-height: 1123px;
+    box-sizing: border-box;
+    position: relative;
+    page-break-after: always;
+    padding: 46px 58px 40px 58px;
+    background: #ffffff;
+    color: #1a1a1a;
+    font-family: "Corpus Boiler", serif;
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  .letterhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 2px solid #0c5c53;
+    padding-bottom: 10px;
+    margin-bottom: 18px;
+  }
+  .brand {
+    font-family: "Corpus Boiler Sans", sans-serif;
+    font-weight: 700;
+    font-size: 22px;
+    letter-spacing: 0.5px;
+    color: #0c5c53;
+  }
+  .brand span { font-weight: 400; color: #1a1a1a; }
+  .brand .strap {
+    display: block;
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 1.5px;
+    color: #555;
+    margin-top: 2px;
+  }
+  .refbox {
+    font-family: "Corpus Boiler Sans", sans-serif;
+    font-size: 11px;
+    text-align: right;
+    border: 1px solid #999;
+    padding: 8px 12px;
+    background: #f4f7f6;
+    line-height: 1.6;
+  }
+  .refbox strong { font-weight: 700; }
+  .address-window {
+    margin: 0 0 22px 0;
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  .letter-body h1 {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 0 0 12px 0;
+  }
+  .letter-body p { margin: 0 0 10px 0; text-align: left; }
+  .salutation { margin-bottom: 14px !important; }
+  .sign-off { margin-top: 18px !important; margin-bottom: 2px !important; }
+  .signature { font-weight: 700; margin-bottom: 0 !important; }
+  .role { font-size: 12px; color: #333; }
+  .footer-note {
+    font-family: "Corpus Boiler Sans", sans-serif;
+    font-size: 9.5px;
+    color: #555;
+    margin-top: 14px;
+    border-top: 1px solid #ccc;
+    padding-top: 6px;
+  }
+  .perforation {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 232px;
+    border-top: 2px dashed #999;
+    display: flex;
+    justify-content: center;
+  }
+  .perforation span {
+    background: #fff;
+    font-family: "Corpus Boiler Sans", sans-serif;
+    font-size: 10px;
+    color: #666;
+    transform: translateY(-9px);
+    padding: 0 10px;
+    letter-spacing: 0.5px;
+  }
+  .slip {
+    position: absolute;
+    left: 58px;
+    right: 58px;
+    bottom: 40px;
+    height: 178px;
+    font-family: "Corpus Boiler Sans", sans-serif;
+  }
+  .slip-title {
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 8px;
+    color: #0c5c53;
+  }
+  .slip-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 18px;
+    margin-bottom: 12px;
+  }
+  .slip-cell {
+    border: 1px solid #bbb;
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+  .slip-cell .label {
+    display: block;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #666;
+    margin-bottom: 3px;
+  }
+  .slip-cell .value { font-weight: 700; font-size: 13px; }
+  .ocr-line {
+    font-family: "Corpus Boiler Sans", sans-serif;
+    font-size: 15px;
+    letter-spacing: 3px;
+    border: 1px solid #333;
+    padding: 8px 12px;
+    text-align: center;
+    background: #f8f8f8;
+  }
+  .slip-foot {
+    font-size: 9.5px;
+    color: #666;
+    margin-top: 6px;
+  }
+  .page:last-child { page-break-after: auto; }
+  .insert { font-family: "Corpus Boiler Sans", sans-serif; font-size: 10.5px; line-height: 1.45; color: #1a1a1a; }
+  .insert h2 { font-family: "Corpus Boiler", serif; font-size: 20px; color: #0c5c53; margin: 0 0 6px; }
+  .insert h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.8px; color: #0c5c53; margin: 14px 0 5px; border-bottom: 1px solid #cfe0dd; padding-bottom: 3px; }
+  .insert p { margin: 0 0 7px; }
+  .insert ul { margin: 0 0 8px 16px; padding: 0; }
+  .insert li { margin-bottom: 3px; }
+  .strip { display: flex; justify-content: space-between; font-size: 9.5px; letter-spacing: 0.6px; text-transform: uppercase; color: #666; border-bottom: 2px solid #0c5c53; padding-bottom: 6px; margin-bottom: 14px; font-family: "Corpus Boiler Sans", sans-serif; }
+  .two { display: flex; gap: 22px; }
+  .two > div { flex: 1; }
+  table.plans { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 8px; }
+  table.plans th { background: #0c5c53; color: #fff; text-align: left; padding: 4px 6px; font-size: 9.5px; letter-spacing: 0.4px; }
+  table.plans td { border-bottom: 1px solid #ddd; padding: 4px 6px; vertical-align: top; }
+  table.plans td.r { text-align: right; white-space: nowrap; }
+  .panel { border: 1px solid #0c5c53; background: #f4f7f6; padding: 9px 12px; font-size: 10px; line-height: 1.5; margin: 9px 0; }
+  .idlist { font-size: 9.6px; line-height: 1.7; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; padding: 7px 0; margin: 10px 0; }
+  .idlist b { color: #0c5c53; }
+  .pfoot { position: absolute; left: 58px; right: 58px; bottom: 26px; font-size: 9px; color: #666; border-top: 1px solid #ccc; padding-top: 5px; display: flex; justify-content: space-between; font-family: "Corpus Boiler Sans", sans-serif; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="letterhead">
+    <div class="brand">THE BOILER <span>CARE PLAN</span>
+      <span class="strap">BOILER &amp; CONTROLS COVER &nbsp;&middot;&nbsp; hearthwell-homecare.example</span>
+    </div>
+    <div class="refbox">
+      Plan reference: <strong>HHC-4471-2298</strong><br>
+      Account no: 3300 5521<br>
+      Customer no: 118 240 77<br>
+      Date of this letter: 2 September 2026<br>
+      Sheet 1 of 3
+    </div>
+  </div>
+
+  <div class="address-window">
+    Mr J. Whitfield<br>
+    14 Sycamore Close<br>
+    Hallowfield<br>
+    HF3 2QT
+  </div>
+
+  <div class="letter-body">
+    <p class="salutation">Dear Mr Whitfield,</p>
+    <h1>Your annual boiler service is due</h1>
+    <p>As a member of the Boiler Care Plan, your boiler and controls are serviced every 12 months. Our records show that your next service is due on <strong>14 October 2026</strong>.</p>
+    <p>One of our Gas Safe registered engineers (registration number 745213) will call to carry out the service. Your last visit was on 16 October 2025, when your Thermex Pro 30 boiler (installed 2019) was found to be in good working order.</p>
+    <p>To book your appointment, please telephone us within 28 days of the date of this letter on 01632 960112. If you do not hear from us within that time, please call anyway, as our booking lines are frequently busy at this time of year.</p>
+    <p>Your plan covers your boiler and controls, and is paid monthly by Direct Debit, collected on the 1st of each month. Members are not charged a callout fee for their annual service; non-members pay a callout charge of £90, and this service would otherwise cost £148 if booked separately from the plan.</p>
+    <p>If your boiler breaks down before your service date, please do not use the number above — call our 24-hour emergency line on 01632 960455 instead.</p>
+    <p class="sign-off">Yours sincerely,</p>
+    <p class="signature">R. Pengelly, Customer Services</p>
+    <p class="role">for the Boiler Care Plan servicing team &nbsp;&middot;&nbsp; service@hearthwell-homecare.example</p>
+  </div>
+
+  <div class="footer-note">
+    Hearthwell Home Care is a trading name of Castlemere Assurance Group plc, registered in England and Wales. Registered office: 8 Foundry Row, Hallowfield, HF1 9AB.
+  </div>
+
+  <div class="perforation"><span>✂ please detach and return the slip below with your payment</span></div>
+
+  <div class="slip">
+    <div class="slip-title">Boiler Care Plan — Payment Slip</div>
+    <div class="slip-grid">
+      <div class="slip-cell"><span class="label">Plan reference</span><span class="value">HHC-4471-2298</span></div>
+      <div class="slip-cell"><span class="label">Next service due</span><span class="value">14/10/2026</span></div>
+      <div class="slip-cell"><span class="label">This month's instalment</span><span class="value">£14.99</span></div>
+      <div class="slip-cell"><span class="label">Annual total if paid monthly</span><span class="value">£179.88</span></div>
+    </div>
+    <div class="ocr-line">⑆ 4471 2298 07 ⑆ 001499 ⑆</div>
+    <div class="slip-foot">Please quote your plan reference on all correspondence and payments.</div>
+  </div>
+
+</div>
+
+<div class="page">
+  <div class="insert">
+
+    <div class="strip"><span>Your plan &mdash; cover, plans and charges</span><span>Plan HHC-4471-2298 &middot; Sheet 2 of 3</span></div>
+
+    <h2>What the plan pays for</h2>
+    <p>The plan you hold is the Boiler &amp; Controls level. The table on this sheet shows all four levels sold at
+    present, so that you can see what moving up or down would mean. Levels may be changed at any time; a change
+    takes effect from the next collection date and does not restart your minimum term.</p>
+
+    <div class="two">
+      <div>
+        <h3>Included at your level</h3>
+        <ul>
+          <li>An annual service and safety check by a Gas Safe registered engineer</li>
+          <li>Parts and labour on the boiler, including the heat exchanger, fan and gas valve</li>
+          <li>Programmer, room thermostat, cylinder thermostat and motorised valves</li>
+          <li>Unlimited call-outs, with no excess on a repair</li>
+          <li>A 24-hour emergency line, answered every day of the year</li>
+          <li>Priority attendance if the household has no heating and no hot water</li>
+        </ul>
+        <h3>Not included</h3>
+        <ul>
+          <li>Radiators, pipework and the hot water cylinder itself</li>
+          <li>Powerflushing, descaling and sludge removal &mdash; quoted separately from &pound;395</li>
+          <li>A boiler more than 20 years old, or one for which parts are no longer made</li>
+          <li>Damage caused by frost where the system was drained down incorrectly</li>
+          <li>Anything found unsafe at the first visit, until it has been put right</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Levels and monthly prices</h3>
+        <table class="plans">
+          <tr><th>Level</th><th>Code</th><th class="r">Monthly</th></tr>
+          <tr><td>Service only, one visit a year</td><td>SP-SO</td><td class="r">&pound;8.25</td></tr>
+          <tr><td>Boiler &amp; Controls (your level)</td><td>SP-BC</td><td class="r">&pound;14.99</td></tr>
+          <tr><td>Central Heating, including radiators</td><td>SP-CH</td><td class="r">&pound;21.40</td></tr>
+          <tr><td>Whole Home, plumbing, drains and wiring</td><td>SP-WH</td><td class="r">&pound;29.95</td></tr>
+          <tr><td>Landlord Gas Safety plus service</td><td>SP-LL</td><td class="r">&pound;17.60</td></tr>
+        </table>
+        <h3>Charges outside the plan</h3>
+        <table class="plans">
+          <tr><th>Item</th><th class="r">Charge</th></tr>
+          <tr><td>Call-out for a household with no plan</td><td class="r">&pound;90.00</td></tr>
+          <tr><td>One-off boiler service, booked singly</td><td class="r">&pound;148.00</td></tr>
+          <tr><td>Missed appointment, no notice given</td><td class="r">&pound;45.00</td></tr>
+          <tr><td>Failed direct debit, per representation</td><td class="r">&pound;12.00</td></tr>
+          <tr><td>Magnetic filter, supplied and fitted</td><td class="r">&pound;168.00</td></tr>
+          <tr><td>Smart thermostat, supplied and fitted</td><td class="r">&pound;229.00</td></tr>
+          <tr><td>Carbon monoxide alarm, fitted at a visit</td><td class="r">&pound;32.00</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <b>Prices and when they change.</b> Monthly prices were last reviewed on 1 April 2026 and rose by an
+      average of 3.9%. The next review is 1 April 2027; we write to you at least 30 days before any increase. The
+      withdrawn Warm Winter level, closed to new members on 31 March 2025, is charged at &pound;12.10 a month for
+      those still on it and closes altogether on 31 March 2027.
+    </div>
+
+    <div class="idlist">
+      <b>Plan reference:</b> HHC-4471-2298 &nbsp;&middot;&nbsp;
+      <b>Account no:</b> 3300 5521 &nbsp;&middot;&nbsp;
+      <b>Customer no:</b> 118 240 77 &nbsp;&middot;&nbsp;
+      <b>Direct debit service user number:</b> 947226 &nbsp;&middot;&nbsp;
+      <b>Bank:</b> sort code 30-96-01, account 44712298 &nbsp;&middot;&nbsp;
+      <b>Last collection:</b> 01/09/2026, &pound;14.99 &nbsp;&middot;&nbsp;
+      <b>Boiler serial:</b> TXP30-2019-004821 &nbsp;&middot;&nbsp;
+      <b>Gas meter:</b> G4-88230145 &nbsp;&middot;&nbsp;
+      <b>Engineer Gas Safe registration:</b> 745213 &nbsp;&middot;&nbsp;
+      <b>Job number, last visit:</b> JOB-2025-77410
+    </div>
+
+    <p style="font-size:9.6px;">Manage the plan, move level or change the address it covers at
+    <b>hearthwell-homecare.example/myplan</b>. Appointments can be rebooked once without charge up to 24 hours
+    before the slot. Engineer arrival is notified by text on the morning of the visit; add a mobile number at
+    <b>hhc.example/alerts</b>.</p>
+
+  </div>
+  <div class="pfoot"><span>Plan documents &mdash; cover and charges</span><span>Sheet 2 of 3</span></div>
+</div>
+
+<div class="page">
+  <div class="insert">
+
+    <div class="strip"><span>Booking, complaints and the small print</span><span>Plan HHC-4471-2298 &middot; Sheet 3 of 3</span></div>
+
+    <h2>How to reach the plan</h2>
+
+    <div class="two">
+      <div>
+        <h3>Telephone</h3>
+        <ul>
+          <li>Bookings and general enquiries: 01632 960112, Monday to Friday 8am&ndash;8pm, Saturday 9am&ndash;1pm</li>
+          <li>Emergencies, 24 hours: 01632 960455</li>
+          <li>Payments and direct debits: 0330 100 2298</li>
+          <li>Landlord and letting agent desk: 0345 900 4471</li>
+          <li>Text relay: dial 18001 first</li>
+        </ul>
+        <p>Calls to 01632 and 0330 numbers cost no more than a call to a standard landline and are included in
+        inclusive minutes. Calls may be recorded for training.</p>
+
+        <h3>Complaints</h3>
+        <p>Write to the Customer Care Team, 8 Foundry Row, Hallowfield, HF1 9AB, or e-mail
+        complaints@hearthwell-homecare.example, quoting the plan reference at the top of this sheet. We
+        acknowledge within five working days and aim to answer within four weeks. If eight weeks pass without a
+        final answer, or you are unhappy with the one you get, the Financial Ombudsman Service will look at the
+        matter free of charge. Its address and time limits are set out at
+        <b>hearthwell-homecare.example/complaints</b>.</p>
+
+        <h3>Cancelling</h3>
+        <p>Cancel at any time by telephone or in writing; cover ends at the end of the month already paid for.
+        If a service visit has been carried out in the plan year and the plan is cancelled inside 12 months of
+        joining, the difference between the instalments paid and the one-off service price of &pound;148.00
+        becomes payable.</p>
+      </div>
+      <div>
+        <h3>Extra help</h3>
+        <p>Households where someone is over 75, has a disability, or depends on heating for a medical reason can
+        join the priority register and are attended first in a cold snap. Documents are issued in large print,
+        Braille or audio within ten working days at no charge. Ask on the telephone or at
+        <b>hearthwell-homecare.example/priority</b>.</p>
+
+        <h3>Your information</h3>
+        <p>Service records, engineer reports and call recordings are kept for six years after the plan ends;
+        recordings for 13 months. Registered with the Information Commissioner under ZA204561. The privacy
+        notice, revised 4 February 2026, is at <b>hearthwell-homecare.example/privacy</b>.</p>
+
+        <h3>Also available from this office</h3>
+        <ul>
+          <li>Boiler replacement, quoted free, with finance over 24 to 120 months</li>
+          <li>Landlord gas safety records &mdash; &pound;79.00 per property per year</li>
+          <li>Powerflush, from &pound;395.00, with a 12 month workmanship warranty</li>
+          <li>Electrical safety inspections through a partner, <b>voltwise-checks.example</b></li>
+          <li>Chimney and flue sweeping, arranged through an approved local sweep</li>
+        </ul>
+
+        <div class="panel">
+          <b>Recommend a neighbour.</b> Both households receive &pound;25 credit once the new plan has run for
+          three months. Quote <b>PLAN-INTRO-26</b> at <b>hhc.example/introduce</b>. Closes 31 December 2026.
+        </div>
+      </div>
+    </div>
+
+    <h3>Small print</h3>
+    <p style="font-size:9.6px;">Hearthwell Home Care is a trading name of Castlemere Assurance Group plc,
+    registered in England and Wales, company number 02918440, registered office 8 Foundry Row, Hallowfield,
+    HF1 9AB. VAT registration GB 418 2290 55. Authorised and regulated by the Financial Conduct Authority, firm
+    reference 512837; permissions can be checked on the Financial Services Register. The plan is a service
+    contract, not a contract of insurance, except for the emergency attendance element, which is underwritten by
+    Corvane Insurance plc. Terms in force are edition BCP/2026-04 dated 1 April 2026, available at
+    <b>hearthwell-homecare.example/terms</b>. The group has traded since 1987. Printed 2 September 2026.
+    Nothing in these terms affects your statutory rights.</p>
+
+  </div>
+  <div class="pfoot"><span>Contact and small print</span><span>Sheet 3 of 3</span></div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>SchoolPurse account statement</title>
+<style>
+@font-face{font-family:"Corpus Meals";src:url("../fonts/RedHatText.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Meals Mono";src:url("../fonts/VT323-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: "Corpus Meals", sans-serif; font-size: 9.2pt; line-height: 1.4; color: #202020; }
+  .page { width: 210mm; min-height: 297mm; box-sizing: border-box; padding: 12mm 14mm 16mm 14mm; position: relative; background: #fff; }
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2pt solid #1b5e3a; padding-bottom: 3mm; margin-bottom: 4mm; }
+  .brand { font-size: 19pt; font-weight: 700; color: #1b5e3a; }
+  .brandsub { font-size: 8pt; color: #555; margin-top: 1mm; }
+  .meta { text-align: right; font-size: 8.4pt; color: #333; }
+  h1 { font-size: 12.5pt; margin: 2mm 0 3mm 0; color: #1b5e3a; }
+  .pupilgrid { display: flex; justify-content: space-between; margin-bottom: 4mm; font-size: 8.6pt; }
+  .balancebox { border: 1pt solid #1b5e3a; background: #f2f8f4; padding: 3mm 4mm; margin: 3mm 0 4mm 0; display: flex; justify-content: space-between; align-items: center; }
+  .balancebox .amt { font-size: 15pt; font-weight: 700; color: #1b5e3a; }
+  table.ledger { width: 100%; border-collapse: collapse; font-size: 8.4pt; margin-bottom: 4mm; font-family: "Corpus Meals Mono", monospace; }
+  table.ledger th { font-family: "Corpus Meals", sans-serif; }
+  table.ledger th { background: #1b5e3a; color: #fff; text-align: left; padding: 1.4mm 2mm; font-weight: 600; }
+  table.ledger td { padding: 1.3mm 2mm; border-bottom: 0.5pt solid #ddd; }
+  table.ledger td.amt, table.ledger th.amt { text-align: right; }
+  .lowfunds { font-size: 8.2pt; background: #fdf3e0; border: 0.6pt solid #d9a441; padding: 2.4mm 3mm; margin-bottom: 4mm; }
+  .note { font-size: 7.8pt; color: #444; line-height: 1.5; margin: 2mm 0; }
+  .pagefoot { position: absolute; left: 14mm; right: 14mm; bottom: 8mm; font-size: 6.6pt; color: #666; border-top: 0.6pt solid #bbb; padding-top: 1.4mm; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <div>
+      <div class="brand">SchoolPurse</div>
+      <div class="brandsub">Cashless catering &amp; top-up account &middot; www.schoolpurse.example</div>
+    </div>
+    <div class="meta">
+      Statement date 12 September 2026<br>
+      Account SP-774102-6<br>
+      School Bramwell Primary School
+    </div>
+  </div>
+
+  <h1>Meal account statement</h1>
+  <div class="pupilgrid">
+    <div>
+      Pupil<br><b>Freya Marchetti</b><br>
+      Class 4B &middot; Bramwell Primary School, Fenmouth, Cravenshire CV3 8QL
+    </div>
+    <div style="text-align:right;">
+      Statement period<br>
+      1 September 2026 to 12 September 2026
+    </div>
+  </div>
+
+  <div class="balancebox">
+    <div>Current balance</div>
+    <div class="amt">&pound;7.40</div>
+  </div>
+
+  <div class="lowfunds">
+    Your balance is below the &pound;10.00 low-funds threshold. A top-up of at least &pound;22.50 is recommended
+    to cover meals through to the October half term, which begins 26 October 2026.
+  </div>
+
+  <table class="ledger">
+    <thead><tr><th>Date</th><th>Description</th><th class="amt">Amount</th><th class="amt">Balance</th></tr></thead>
+    <tbody>
+      <tr><td>01/09/2026</td><td>Balance brought forward from summer term</td><td class="amt">&ndash;</td><td class="amt">&pound;3.10</td></tr>
+      <tr><td>02/09/2026</td><td>Top-up by parent, card ending 4471</td><td class="amt">+&pound;20.00</td><td class="amt">&pound;23.10</td></tr>
+      <tr><td>03/09/2026</td><td>School meal &mdash; Freya Marchetti</td><td class="amt">&ndash;&pound;2.45</td><td class="amt">&pound;20.65</td></tr>
+      <tr><td>04/09/2026</td><td>School meal &mdash; Freya Marchetti</td><td class="amt">&ndash;&pound;2.45</td><td class="amt">&pound;18.20</td></tr>
+      <tr><td>07/09/2026</td><td>School meal &mdash; Freya Marchetti</td><td class="amt">&ndash;&pound;2.45</td><td class="amt">&pound;15.75</td></tr>
+      <tr><td>08/09/2026</td><td>Breakfast club &mdash; Freya Marchetti</td><td class="amt">&ndash;&pound;1.50</td><td class="amt">&pound;14.25</td></tr>
+      <tr><td>09/09/2026</td><td>School meal &mdash; Freya Marchetti</td><td class="amt">&ndash;&pound;2.45</td><td class="amt">&pound;11.80</td></tr>
+      <tr><td>10/09/2026</td><td>School meal &mdash; Freya Marchetti</td><td class="amt">&ndash;&pound;2.45</td><td class="amt">&pound;9.35</td></tr>
+      <tr><td>11/09/2026</td><td>Refund &mdash; INSET day, kitchen closed</td><td class="amt">+&pound;2.45</td><td class="amt">&pound;11.80</td></tr>
+      <tr><td>12/09/2026</td><td>School meal &mdash; Freya Marchetti</td><td class="amt">&ndash;&pound;2.45</td><td class="amt">&pound;9.35</td></tr>
+      <tr><td>12/09/2026</td><td>Breakfast club &mdash; Freya Marchetti</td><td class="amt">&ndash;&pound;1.95</td><td class="amt">&pound;7.40</td></tr>
+    </tbody>
+  </table>
+
+  <p class="note">
+    Meals are charged automatically each morning at &pound;2.45 for Key Stage 2 pupils. Breakfast club is
+    a separate optional charge, billed on the day. The kitchen is closed for an INSET day on 11 September
+    2026, and no meal charge is made on that date; a credit already taken in error is refunded the same day.
+    Autumn term runs from 2 September 2026 to 18 December 2026, with a half-term break from 26 October
+    2026 to 30 October 2026 inclusive.
+  </p>
+
+  <p class="note">
+    Top up online at schoolpurse.example/topup using account SP-774102-6, or ask at the school office.
+    A separate one-off charge of &pound;18.00 for the Year 4 residential trip deposit was invoiced directly by
+    the school and does not appear on this catering account.
+  </p>
+
+  <div class="pagefoot">
+    <span>SchoolPurse &middot; account SP-774102-6</span>
+    <span>Page 1 of 1</span>
+  </div>
+</div>
+</body>
+</html>

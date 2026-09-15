@@ -1,0 +1,23 @@
+{
+  "name": "holiday lodge pitch licence, the reply-by stamp and season dates are not the licence period",
+  "filename": "fullpage-holiday-lodge-site-licence.pdf",
+  "expected": {
+    "dates": ["2026-01-14", "2027-01-10"],
+    "provider": "Fenwater Shores Holiday Park Ltd",
+    "reference": "FSH-0412",
+    "dateRoles": [
+      { "date": "2026-01-14", "role": "issued" },
+      { "date": "2027-01-10", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Licence"] },
+    "costMinor": 415000,
+    "currency": "GBP",
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "dates: the licence is issued 14 January 2026 and its period runs to 10 January 2027 (the 'Period of this licence' field). Six other printed dates are deliberately not declared: the superseded licence's issue date (12 Jan 2025), the previous licence's end date (13 Jan 2026, one day before this one starts), the park rules revision dates (6 Nov 2025 and 14 Feb 2023), the fire risk assessment (3 Sep 2025), the electrical bollard inspection (18 Oct 2025), the park insurance renewal (1 Oct 2025), the gas safety check (29 Aug 2025), the council site licence renewal (1 Apr 2024), the pitch fee due date (1 Mar 2026, a payment deadline not a licence date), the unit's original siting date (22 Apr 2019), and the wording edition date (3 Jul 2024). provider is the park operator that issued the licence, not the council that issued the underlying site licence referenced in the subtitle. reference is the licence number FSH-0412, not the pitch number (412), the council licence ref (CDC/SL/00417), or any of the compliance-table reference codes. costMinor is the annual pitch fee of £4,150.00, printed with a currency symbol as the cost of the thing itself.",
+    "subtype is a set of kinds/qualifiers naming groups in src/server/documents/subtype-taxonomy.json, per the owner's ruling (#989): 'Licence' matches the printed 'Pitch site licence' title directly; no qualifier group in the taxonomy fits a holiday-park pitch closely enough to declare one, so qualifiers is omitted.",
+    "scheduleKind renewal: the licence is offered again each season and the pitch is kept only by renewing it.",
+    "Owner convention 2026-09-13: an end date is a renewal when the thing continues only if the household acts again (tax, MOT, licence, tenancy, insurance, subscription, season ticket, permit), and an expiry when it is simply over (guarantee, warranty, loan, lease, quote, course). The role follows the kind of thing, not the word on the page."
+  ]
+}

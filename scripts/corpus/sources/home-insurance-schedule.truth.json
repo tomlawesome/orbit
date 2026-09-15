@@ -1,0 +1,42 @@
+{
+  "name": "home insurance schedule, premium among many amounts",
+  "filename": "fullpage-home-insurance-schedule.pdf",
+  "expected": {
+    "dates": [
+      "2026-03-14",
+      "2027-03-14"
+    ],
+    "provider": "Hedgerow Direct",
+    "reference": "TA-HH-7734291",
+    "dateRoles": [
+      {
+        "date": "2026-03-14",
+        "role": "start"
+      },
+      {
+        "date": "2027-03-14",
+        "role": "renewal"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Insurance"
+      ],
+      "qualifiers": [
+        "Home",
+        "Buildings",
+        "Contents",
+        "Buildings and contents"
+      ]
+    },
+    "costMinor": 41299,
+    "currency": "GBP",
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "Declared only the renewal date (14 March 2027), matching the task-specified shape; the date of issue (20 February 2026) and period-of-insurance start (14 March 2026) are printed on the schedule but left out of `dates`, even though a sibling corpus entry ('home insurance schedule, labelled fields') does surface a period start as a `start` role — flagging this as the judgement call most worth a second look. costMinor is the 'Annual premium' total (£412.99, net premium plus IPT) rather than the net-of-tax figure, since that is the line a policyholder would read as what they actually owe for the year; net premium, IPT, sums insured, excesses, optional-extra prices, and all monthly-instalment/APR/total-payable-if-monthly figures were left undeclared as distractors per the costMinor rule. provider is 'Hedgerow Home Insurance Services Ltd', not 'Thornfield Assurance plc': \"we can't call the underwriters directly, they won't deal with us. We deal with the company that sold us the policy.\" (owner, 2026-09-11, #989). reference is the policy number rather than the separate schedule reference (SCH-2027-4417).",
+    "Period start 2026-03-14 added. The page prints 'Period of insurance 14 March 2026 to 14 March 2027', and the existing 'home insurance schedule, labelled fields' corpus entry declares both ends of the period. The agent that wrote this file declared only the renewal date and flagged the inconsistency; the existing convention wins.",
+    "The date of issue (20 February 2026) is deliberately NOT declared, matching the same existing entry.",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Policy schedule')."
+  ]
+}

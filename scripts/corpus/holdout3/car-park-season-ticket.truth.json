@@ -1,0 +1,42 @@
+{
+  "name": "multi-storey car park season ticket, a removed second vehicle and a renewal-reminder date as decoys",
+  "filename": "fullpage-car-park-season-ticket.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-14",
+      "2027-09-14"
+    ],
+    "provider": "Questmoor Parking",
+    "reference": "QMP-ST-771049",
+    "dateRoles": [
+      {
+        "date": "2026-09-14",
+        "role": "start"
+      },
+      {
+        "date": "2027-09-14",
+        "role": "renewal"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Season ticket"
+      ],
+      "qualifiers": [
+        "Parking"
+      ]
+    },
+    "costMinor": 78000,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "dates: ticket valid from 14 September 2026, renewal date 14 September 2027. The printed period-end date one day earlier (13 September 2027), the second vehicle's removal date (2 July 2026) and the renewal-reminder start date (14 August 2027) are traps, undeclared.",
+    "provider is Questmoor Parking, the operator; Bramgate Multi-Storey is the car park's own name, not the operator.",
+    "reference is the ticket number QMP-ST-771049.",
+    "costMinor is the annual season ticket price, 780.00; the day-ticket (9.50), casual weekly ticket (38.00) and lost-ticket charge (25.00) are traps.",
+    "recurrenceMonths is 12, printed in digits as 'This 12-month season ticket'.",
+    "subtype: Season ticket/Parking. scheduleKind is 'renewal'."
+  ]
+}
