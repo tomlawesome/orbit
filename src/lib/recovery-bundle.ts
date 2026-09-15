@@ -108,7 +108,8 @@ export type RecoveryBundleRefusalCode =
   | "document-archive-collection-failed"
   | "app-stop-failed"
   | "app-start-failed"
-  | "bundle-already-exists";
+  | "bundle-already-exists"
+  | "recovery-bundle-record-failed";
 
 /**
  * Thrown for every fail-closed refusal this module makes. Never carries
@@ -781,6 +782,19 @@ export interface BackupDockerAdapter {
   pgRestoreListOk(dumpPath: string): boolean;
   /** backup.sh:154 — `tar -C /var/lib/orbit/documents -cf -` collected via a one-off `orbit-app` container, written to `outputPath`. */
   collectDocumentsArchive(outputPath: string): void;
+  /**
+   * Records that a recovery bundle export just completed (#968, slice 1 of
+   * #966): one `audit_log` row (`entity_type = 'recovery_bundle'`,
+   * `action = 'recovery_bundle_exported'`), written the same way `dumpDatabase`
+   * reaches Postgres — a `psql` call shelled through `orbit-db`, because
+   * `orbit export-recovery-bundle` runs on the host (`refuseDockerInContainer`
+   * forbids it inside `orbit-app`) and the host has no other path to the
+   * database. Carries no bundle content, no passphrase and no key material —
+   * `changes` is the empty object — because the fact and the timestamp are
+   * everything the administration card needs, and everything the issue's
+   * "nothing about the bundle or its passphrase is persisted" line allows.
+   */
+  recordRecoveryBundleExported(): void;
 }
 
 export interface DockerComposeAdapterOptions {
@@ -898,6 +912,23 @@ export function createDockerComposeBackupAdapter(options: DockerComposeAdapterOp
         if (result.status !== 0) refuse("document-archive-collection-failed", "The document archive could not be collected.");
       } finally {
         closeSync(descriptor);
+      }
+    },
+    recordRecoveryBundleExported(): void {
+      const result = spawnSync(
+        dockerBinary,
+        composeArgs(
+          "exec",
+          "-T",
+          "orbit-db",
+          "sh",
+          "-c",
+          `exec psql -v ON_ERROR_STOP=1 --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -c "insert into audit_log (entity_type, entity_id, action, changes) values ('recovery_bundle', gen_random_uuid(), 'recovery_bundle_exported', '{}'::jsonb)"`,
+        ),
+        { cwd, env, stdio: ["ignore", "ignore", "inherit"] },
+      );
+      if (result.status !== 0) {
+        refuse("recovery-bundle-record-failed", "The recovery bundle was created but could not be recorded; the administration card will not clear.");
       }
     },
   };

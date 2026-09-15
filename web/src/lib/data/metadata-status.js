@@ -44,6 +44,14 @@ export const DAMAGED_PLACEHOLDER = "damaged — whatever you save replaces it";
 export const PANEL_LOCKED = "Editing is paused — this item's encrypted details are locked until an administrator restores Orbit's encryption key. Nothing is lost.";
 
 /**
+ * As `PANEL_LOCKED`, for the complete panel, where locked pauses only the
+ * cost figure (#972): `item.complete` only reaches for the encryption key
+ * when a cost is given, so completing with no cost is still accepted and the
+ * rest of the panel stays live.
+ */
+export const COST_LOCKED = "Cost is locked — this item's encrypted details are locked until an administrator restores Orbit's encryption key. Complete without a cost, or wait.";
+
+/**
  * The stale submit: a panel opened before the key went away, sent afterwards.
  * The server refuses it with a 503 and this is that refusal in the member's
  * words, in the `.problem` alert the panel already has.

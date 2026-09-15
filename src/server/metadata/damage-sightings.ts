@@ -112,6 +112,31 @@ export async function clearMetadataDamageForRow(
   }
 }
 
+/**
+ * Drops the sighting against one column of one row, in the caller's own
+ * transaction. Unlike `clearMetadataDamageForRow`, this is for a repair that
+ * rewrites columns one at a time rather than the whole row in one statement
+ * — `rekeyReceiptDraft` re-keys `imap_ingestion_messages.proposal` and
+ * `.field_evidence` independently, and a damaged value it deliberately left
+ * alone must keep its sighting even though its sibling column just cleared
+ * (#971).
+ */
+export async function clearMetadataDamageForColumn(
+  column: MetadataColumn,
+  rowId: string,
+  executor: MetadataExecutor = getDb(),
+): Promise<void> {
+  const sighting = sightingOf(column, rowId);
+  const key = keyOf(sighting);
+  await executor.delete(metadataDamageSightings).where(and(
+    eq(metadataDamageSightings.tableName, sighting.tableName),
+    eq(metadataDamageSightings.columnName, sighting.columnName),
+    eq(metadataDamageSightings.rowId, sighting.rowId),
+  ));
+  pendingSeen.delete(key);
+  recorded.delete(key);
+}
+
 async function runFlush(): Promise<void> {
   const seen = [...pendingSeen.values()];
   const cleared = [...pendingCleared.values()];

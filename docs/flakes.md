@@ -28,6 +28,7 @@ fixing the cause deletes the heading in the same commit.
   - `v19-keyboard.spec.ts:463` "inbox: reachable via the account panel, and keyboard-navigable" (desktop-chromium) — `home account panel: Tab never reached the requested control within 60 presses`.
   - `v19-keyboard-pocket.spec.ts:276` "home (pocket): the account menu's Inbox link is reachable by Tab and navigates on Enter" (mobile-chromium) — failed, and its one retry failed too, with `expect(locator).toHaveClass(expected)` and then `page.goto: net::ERR_ABORTED at http://127.0.0.1:3000/home`.
   - `v19-first-run-door.spec.ts:250` "a claimed local-only instance shows the sign-in card in the ring" (mobile-chromium) — `expect(locator).toBeVisible()` failed, element not found.
+- 2026-09-15 · 332f237 · pipeline 1127 / smoke (job 13931, !918) · `v19-keyboard-pocket.spec.ts:262` "home (pocket): the account menu is light-dismiss by keyboard" (mobile-chromium) — `expect(locator).toHaveClass(/open/)` on the sheet. Passed on the retried job 13936 on the same commit, in 1.4s.
 
 The 60-press cap is the same one the `v19-keyboard.spec.ts:432` heading above
 records, and that entry's diagnosis — an unbounded sessions list eating the cap
@@ -35,6 +36,23 @@ on a reused stack — is the first thing to check here. `net::ERR_ABORTED` on a
 navigation points elsewhere though: to specs sharing one Orbit instance, which
 is #949. Grouped under one heading until a second sighting says whether these
 are one cause or three; split it then.
+
+The 2026-09-15 sighting is that second one, and it does not settle the split so
+much as narrow it. It exhausted no Tab cap and aborted no navigation: the sheet
+simply did not carry `open` when the assertion looked, and the same test passed
+in 1.4s on a retry of the same commit. That is the shape of a sheet asserted on
+before its transition has committed, which is a different fault from either the
+60-press cap or the shared instance — and it is the second `v19-keyboard-pocket`
+test to fail this way. Split the heading on the next sighting: the pocket sheet
+timing looks like its own flake, not a member of this family.
+
+## v19-tour.spec.ts:354 "journey 1: the first landing on home gets the walk, and skipping ends it"
+
+- 2026-09-15 · 332f237 · pipeline 1127 / smoke (job 13936, !918) · desktop-chromium — `page.evaluate: Execution context was destroyed, most likely because of a navigation`. Playwright reported it flaky: it failed once and passed on its own retry inside the same run, so the job was green.
+
+A `page.evaluate` racing a navigation is the spec reading the page while the
+walk is still moving it, not a product fault on the evidence so far. One
+sighting proves nothing either way.
 
 ## migrations.test.ts "migrates every current migration into a fresh PostgreSQL 18 database"
 
