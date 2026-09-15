@@ -401,6 +401,15 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   to the top model covers what a household sees, not tooling the owner and
   the agents use -- a labelling harness, an evaluation page, a debug view.
   Build those in the ordinary way; #1025 was filed to Fable in error.
+- **Collected documents stay out of the repository** (owner, 2026-09-15:
+  *"None of our treatments from any source need to be committed, any that
+  carry license terms saying they do shouldn't be used."*). Specimen and
+  real documents gathered for measuring the extractor live outside git --
+  `~/projects/.scratch/uk-specimens/` for the collected British specimens,
+  the owner's own machine for their paperwork -- and are used locally
+  only. A source whose licence would oblige us to publish or redistribute
+  anything is not used at all, whatever else it offers. Counts, score
+  lines and licence records are what travel.
 - **Non-commercial data and dependencies are acceptable** (owner,
   2026-09-15: *"Non commercial is usable here. I am happy to ditch the
   possibility of an orbit commercial license."*). Orbit will not be offered
