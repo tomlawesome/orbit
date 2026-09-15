@@ -49,3 +49,13 @@ scripts/corpus/holdout4/*.txt
 scripts/corpus/holdout4/*.png
 scripts/corpus/holdout4/index.html
 scripts/corpus/holdout4/contact-sheet.html
+
+# Documents collected for measuring the extractor -- specimen British paperwork
+# and the owner's own documents. They stay out of git whatever their licence
+# (owner, 2026-09-15); only counts, score lines and the licence record travel.
+# The collection itself lives outside any repo, in ~/projects/.scratch/uk-specimens/.
+documents/
+specimens/
+uk-specimens/
+scripts/extract-bundle/docs/
+scripts/extract-bundle/out/
