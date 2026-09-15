@@ -75,3 +75,26 @@ amount payable, (6) annual things unchanged.
 - The generated module was edited by hand to match the source
   `.truth.json` (only the `costMinor` line and its note), since regenerating
   needs Playwright and Tika; `text` is untouched.
+
+## Amendment, 2026-09-15: the appliance rental declares no cost
+
+`verify.mjs` failed the appliance rental agreement on the 50700 this re-check
+gave it: the whole-term total is never printed, and the only unprinted cost the
+corpus allows is a fixed-term total left as price x months, declared as
+`costArithmetic` so each printed price and month count can be checked. That
+form cannot state this page. The price is weekly and the term is in months, so
+there is no printed monthly price and no printed week count for the arithmetic
+to stand on; `[650, 78]` would claim 78 months, which the page does not say.
+
+Rule 2 applies to the commitment but the page does not support it in any form
+the corpus can verify, and the page prints several rival amounts (weekly
+rental, one-off delivery, unselected damage cover, early-termination charge).
+Under the standing rule that a page with rival amounts and no supportable
+commitment figure is left undeclared rather than guessed at, `costMinor` and
+`currency` were removed and the note now says why. The weekly rental is not
+restored: this is a fixed-term agreement, so the instalment was never the
+commitment.
+
+The note in the row above stands as the record of what was tried; the truth is
+now no cost. Nothing else about the document changed -- same HTML, same text,
+same dates, roles, provider, reference and subtype.
