@@ -203,10 +203,11 @@
   .belt-page .cap-name{font:11.5px var(--mono);fill:var(--ink-mid);text-anchor:middle}
   .belt-page .cap-t{font:10px var(--mono);letter-spacing:.06em;text-anchor:middle;
          font-variant-numeric:tabular-nums}
-  /* The two end-caps: the band's compass. Which way is time? They sit at the
-     far corners of the sky on the search field's own baseline, because that
-     is the one line across this screen the band never reaches — anywhere on
-     the band itself, a jumbled body would eventually sit on top of them. */
+  /* The two end-caps: the band's compass. Which way is time? They ride the
+     band where it leaves the frame, held above its upper edge (#1010): the
+     far corners they used to keep went to the shared chrome, and above the
+     band is the one side of it a jumbled body never reaches -- rocks sit in
+     the band, their labels hang below it. */
   .belt-page .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-quiet);
           text-transform:uppercase}
 
