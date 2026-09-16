@@ -271,6 +271,12 @@ must be empty in the main checkout; repair with `CI=true pnpm install` from
 the main checkout root (breaks other sessions' builds while it runs — agree a
 window first).
 
+**The web type check says SKIPPED in most worktrees, and that is correct
+(#1029).** `web/node_modules/orbit` usually links to the main checkout, so
+`orbit/server/*` would be read from whatever branch *that* has out — a wrong
+answer either way, and a passing one is the dangerous half. Run it in the main
+checkout or let CI answer; it is not a fault to fix.
+
 **A red compose smoke job can be hiding the next failure.** Its steps run in
 one job and it stops at the first, so fixing that step reveals what was behind
 it rather than turning the job green — the favicon 404 hid nine e2e failures
