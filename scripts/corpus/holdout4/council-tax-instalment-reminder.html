@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Council Tax Reminder Notice</title>
+<style>
+@font-face{font-family:"Corpus Ellerby";src:url("../fonts/Oswald.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Ellerby Text";src:url("../fonts/Asap.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@page { size: A4; margin: 0; }
+html, body { margin: 0; padding: 0; background: #fff; }
+.page { position: relative; width: 794px; min-height: 1123px; box-sizing: border-box; padding: 44px 52px; }
+
+body { font-family: "Corpus Ellerby Text", serif; font-size: 9.5pt; color: #1a1a1a; }
+h1, h2, h3, .sans { font-family: "Corpus Ellerby", sans-serif; }
+
+.page { border-bottom: 1px dashed #999; }
+.page:last-child { border-bottom: none; }
+
+.masthead { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 4px solid #10314f; padding-bottom: 8px; margin-bottom: 10px; }
+.masthead .wordmark { font-family: "Corpus Ellerby", sans-serif; font-size: 21pt; font-weight: bold; color: #10314f; letter-spacing: 0.5px; }
+.masthead .wordmark small { display: block; font-size: 10pt; font-weight: normal; color: #444; letter-spacing: 2px; text-transform: uppercase; }
+.masthead .returnaddr { font-family: "Corpus Ellerby", sans-serif; font-size: 7.6pt; text-align: right; line-height: 1.35; color: #333; }
+
+.metastrip { font-family: "Corpus Ellerby", sans-serif; font-size: 7.8pt; color: #333; display: flex; justify-content: space-between; border-bottom: 1px solid #999; padding-bottom: 4px; margin-bottom: 10px; }
+
+.window-row { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.address-window { border: 1px solid #999; padding: 8px 12px; width: 300px; font-size: 9.5pt; line-height: 1.45; }
+.acctbox { font-family: "Corpus Ellerby", sans-serif; font-size: 7.8pt; width: 300px; border: 1px solid #999; padding: 8px 10px; line-height: 1.6; }
+.acctbox .lbl { color: #555; }
+.acctbox .val { font-weight: bold; color: #111; }
+
+.notice-panel { border: 3px solid #10314f; padding: 12px 16px; margin-bottom: 12px; }
+.notice-panel h2 { font-size: 14pt; margin: 0 0 6px 0; color: #7a1414; text-transform: uppercase; letter-spacing: 0.5px; }
+.notice-panel p { margin: 0 0 7px 0; line-height: 1.4; text-align: justify; }
+.notice-panel .figrow { font-family: "Corpus Ellerby", sans-serif; display: flex; justify-content: space-between; background: #f2f2f2; border: 1px solid #ccc; padding: 6px 10px; margin: 8px 0; font-size: 9.5pt; }
+.notice-panel .figrow b { font-size: 11pt; }
+
+.slip { border-top: 2px dashed #333; margin-top: 10px; padding-top: 8px; position: relative; }
+.slip .scissor { position: absolute; top: -9px; left: -2px; font-size: 11px; color: #333; background: #fff; padding: 0 4px; }
+.slip h3 { font-family: "Corpus Ellerby", sans-serif; font-size: 9.5pt; margin: 0 0 6px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+.slip-grid { display: flex; gap: 14px; }
+.slip-col { font-family: "Corpus Ellerby", sans-serif; font-size: 8pt; line-height: 1.55; }
+.slip-col.amt { border: 2px solid #10314f; padding: 6px 10px; text-align: center; }
+.slip-col.amt .big { font-size: 15pt; font-weight: bold; color: #10314f; display:block; }
+.barcode { display: flex; align-items: flex-end; gap: 1px; height: 30px; margin: 6px 0 2px 0; }
+.barcode div { background: #111; width: 2px; }
+.barcode-text { font-family: "Corpus Ellerby", sans-serif; font-size: 8.5pt; letter-spacing: 3px; }
+
+.footer-strip { position: absolute; bottom: 30px; left: 52px; right: 52px; font-family: "Corpus Ellerby", sans-serif; font-size: 7.3pt; color: #555; border-top: 1px solid #ccc; padding-top: 5px; display:flex; justify-content: space-between; }
+
+h2.sheet-head { font-size: 13pt; color: #10314f; border-bottom: 2px solid #10314f; padding-bottom: 4px; margin: 0 0 10px 0; }
+h3.sub { font-size: 10pt; color: #10314f; margin: 14px 0 4px 0; }
+
+table.fintab { width: 100%; border-collapse: collapse; font-size: 9pt; margin-bottom: 10px; }
+table.fintab th { font-family: "Corpus Ellerby", sans-serif; text-align: left; background: #10314f; color: #fff; padding: 4px 8px; font-size: 8pt; }
+table.fintab td { padding: 3px 8px; border-bottom: 1px solid #ddd; }
+table.fintab td.num, table.fintab th.num { text-align: right; }
+table.fintab tr.total td { font-weight: bold; border-top: 2px solid #10314f; border-bottom: none; }
+
+table.insttab { width: 100%; border-collapse: collapse; font-size: 8.3pt; }
+table.insttab th { font-family: "Corpus Ellerby", sans-serif; background: #eee; padding: 3px 7px; text-align: left; border-bottom: 1px solid #999; }
+table.insttab td { padding: 2.5px 7px; border-bottom: 1px solid #eee; }
+table.insttab td.num { text-align: right; }
+table.insttab tr.overdue td { background: #fce8e8; font-weight: bold; }
+table.insttab tr.nextdue td { background: #fff6d8; }
+
+.twocol { column-count: 2; column-gap: 22px; font-size: 8.5pt; line-height: 1.4; }
+.twocol h3.sub { column-span: none; margin-top: 10px; }
+.twocol p { margin: 0 0 6px 0; text-align: justify; }
+.smallcaps { font-family: "Corpus Ellerby", sans-serif; font-size: 7.6pt; color: #666; }
+.reg-list { font-family: "Corpus Ellerby", sans-serif; font-size: 7.4pt; line-height: 1.5; background: #f7f7f7; border: 1px solid #ddd; padding: 6px 9px; margin: 8px 0; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="masthead">
+    <div class="wordmark">Council Tax<small>Reminder Notice</small></div>
+    <div class="returnaddr">
+      Council Tax Service<br>
+      The Council of the District of Ellerby Vale<br>
+      Registered office: Moot Hall, Kirkby Road<br>
+      PO Box 147, Ellerby Vale, YO61 9ZZ<br>
+      General enquiries 0300 123 0456, lines open Monday to Friday, 8.30am to 5pm<br>
+      www.brackenmoor.gov.uk &nbsp;|&nbsp; counciltax@brackenmoor.gov.uk
+    </div>
+  </div>
+  <div class="metastrip">
+    <span>Sheet 1 of 3 &mdash; keep this notice for your records</span>
+    <span>Date of this notice: 4 September 2026</span>
+  </div>
+
+  <div class="window-row">
+    <div class="address-window">
+      Mr J A Fenwick<br>
+      14 Sycamore Grove<br>
+      Mossgate<br>
+      Ellerby Vale<br>
+      YO61 4JN
+    </div>
+    <div class="acctbox">
+      <div><span class="lbl">Council tax account:</span> <span class="val">82914-0663</span></div>
+      <div><span class="lbl">Property reference (UPRN):</span> 100062178453</div>
+      <div><span class="lbl">Valuation band:</span> C</div>
+      <div><span class="lbl">Billing authority code:</span> 4415</div>
+      <div><span class="lbl">Council tax support ref:</span> CTS/224417</div>
+      <div><span class="lbl">Original bill issued:</span> 14 March 2026</div>
+    </div>
+  </div>
+
+  <div class="notice-panel">
+    <h2>An instalment has not been received</h2>
+    <p>Our records show that the instalment due on <b>1 September 2026</b> has not reached us. This reminder is sent because a payment is overdue under your council tax instalment scheme for the year 2026/27, for which the total charge is £1,842.66.</p>
+    <div class="figrow"><span>Amount now overdue</span><b>£153.55</b></div>
+    <p>If the amount above is not paid in full within 21 days of the date of this notice, that is by <b>25 September 2026</b>, you will lose the right to pay the remainder of the year's charge by instalments, and the whole outstanding balance may become payable immediately without further reminder. Should the account remain unpaid we may apply to the Magistrates' Court for a summons, adding a summons cost of £88.50. If a liability order is then granted, a further cost of £27.00 is added, and your case may be passed to Cardwell Enforcement Services, whose enforcement agents add a compliance fee of £75.00 as soon as your account is referred to them, before any visit is arranged.</p>
+    <p>Your next instalment of £153.55 remains due as normal on <b>1 October 2026</b>, in addition to clearing the amount shown above. Paying both amounts now keeps your account up to date before the account is next reviewed.</p>
+    <div class="figrow"><span>Next instalment due 1 October 2026</span><b>£153.55</b></div>
+  </div>
+
+  <div class="slip">
+    <span class="scissor">&#9986;</span>
+    <h3>Payment slip &mdash; detach and return with a cheque, or quote the reference below</h3>
+    <div class="slip-grid">
+      <div class="slip-col" style="flex:1">
+        Account: <b>82914-0663</b><br>
+        Payment reference: 8291406635<br>
+        Name on account: Mr J A Fenwick<br>
+        Cheques payable to: The Council of the District of Ellerby Vale<br>
+        Text PAY plus your account number to 78901 to pay by card<br>
+        Automated card payment line: 0300 123 0457
+      </div>
+      <div class="slip-col amt" style="width:150px">
+        Pay this amount<span class="big">&pound;153.55</span>
+        by 25 September 2026
+      </div>
+    </div>
+    <div class="barcode" aria-hidden="true">
+      <div style="height:100%"></div><div style="height:60%"></div><div style="height:100%"></div><div style="height:40%"></div><div style="height:100%"></div><div style="height:80%"></div><div style="height:100%"></div><div style="height:55%"></div><div style="height:100%"></div><div style="height:100%"></div><div style="height:35%"></div><div style="height:100%"></div><div style="height:70%"></div><div style="height:100%"></div><div style="height:45%"></div><div style="height:100%"></div><div style="height:90%"></div><div style="height:100%"></div><div style="height:50%"></div><div style="height:100%"></div><div style="height:65%"></div><div style="height:100%"></div><div style="height:100%"></div><div style="height:30%"></div><div style="height:100%"></div><div style="height:75%"></div><div style="height:100%"></div>
+    </div>
+    <div class="barcode-text">829140 6635 0153 55D</div>
+  </div>
+
+  <p class="sans" style="font-size:8pt; color:#333; margin: 10px 0 0 0; line-height:1.4">
+    <b>Other ways to pay:</b> direct debit, set up via MyBrackenmoor or by calling 0300 123 0456; online card payment at www.brackenmoor.gov.uk, processed for us by our payment partner, Merrow Pay Ltd; cash or cheque at any shop showing the PayPoint or Payzone sign, quoting the barcode above; or bank transfer to sort code 40-12-34, account 12345678, account name Ellerby Vale DC Collection Account, using your account number as the reference.
+  </p>
+
+  <div class="footer-strip">
+    <span>MyBrackenmoor &mdash; view this notice, your instalment plan and past bills any time at www.brackenmoor.gov.uk</span>
+    <span>Page 1 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <h2 class="sheet-head">How your 2026/27 council tax is worked out</h2>
+  <p style="font-size:8.6pt; margin-top:0">Account 82914-0663 &mdash; 14 Sycamore Grove, Mossgate, Ellerby Vale, YO61 4JN &mdash; Valuation band C, based on the property's value on the statutory valuation date of 1 April 1991, as set by the Valuation Office Agency, not by this council.</p>
+
+  <table class="fintab">
+    <tr><th>Who sets this part of your bill</th><th class="num">Amount for 2026/27</th></tr>
+    <tr><td>The Council of the District of Ellerby Vale (district services)</td><td class="num">&pound;1,265.39</td></tr>
+    <tr><td>Adult social care precept</td><td class="num">&pound;221.40</td></tr>
+    <tr><td>Police and crime precept</td><td class="num">&pound;248.31</td></tr>
+    <tr><td>North Moor Fire and Rescue Authority precept</td><td class="num">&pound;79.62</td></tr>
+    <tr><td>Mossgate Parish Council precept</td><td class="num">&pound;27.94</td></tr>
+    <tr class="total"><td>Total charge for the year</td><td class="num">&pound;1,842.66</td></tr>
+  </table>
+  <p style="font-size:8pt; color:#444">For comparison, the law requires us to show what a Band D property in this area would pay for the same services in 2026/27: <b>&pound;2,072.99</b>. All precepting authorities increased their share from 1 April 2026; the adult social care precept and the police and crime precept were both raised to the maximum allowed before a local referendum would be required.</p>
+
+  <h3 class="sub">Your instalment plan for 2026/27</h3>
+  <p style="font-size:8.3pt; margin-top:0">Twelve instalments were set when your bill was issued on 14 March 2026, covering the financial year 1 April 2026 to 31 March 2027. The instalment due on 1 September 2026 is shown as overdue below; the next instalment due, on 1 October 2026, remains payable as normal alongside it.</p>
+  <table class="insttab">
+    <tr><th>Instalment</th><th>Due date</th><th class="num">Amount</th><th>Status</th></tr>
+    <tr><td>1</td><td>1 April 2026</td><td class="num">&pound;163.26</td><td>Paid</td></tr>
+    <tr><td>2</td><td>1 May 2026</td><td class="num">&pound;153.55</td><td>Paid</td></tr>
+    <tr><td>3</td><td>1 June 2026</td><td class="num">&pound;153.55</td><td>Paid</td></tr>
+    <tr><td>4</td><td>1 July 2026</td><td class="num">&pound;153.55</td><td>Paid</td></tr>
+    <tr><td>5</td><td>1 August 2026</td><td class="num">&pound;153.55</td><td>Paid</td></tr>
+    <tr class="overdue"><td>6</td><td>1 September 2026</td><td class="num">&pound;153.55</td><td>Overdue</td></tr>
+    <tr class="nextdue"><td>7</td><td>1 October 2026</td><td class="num">&pound;153.55</td><td>Due next</td></tr>
+    <tr><td>8</td><td>1 November 2026</td><td class="num">&pound;153.55</td><td>Not yet due</td></tr>
+    <tr><td>9</td><td>1 December 2026</td><td class="num">&pound;153.55</td><td>Not yet due</td></tr>
+    <tr><td>10</td><td>1 January 2027</td><td class="num">&pound;153.55</td><td>Not yet due</td></tr>
+    <tr><td>11</td><td>1 February 2027</td><td class="num">&pound;153.55</td><td>Not yet due</td></tr>
+    <tr><td>12</td><td>1 March 2027</td><td class="num">&pound;143.90</td><td>Not yet due</td></tr>
+  </table>
+
+  <h3 class="sub">If you disagree with your band</h3>
+  <p style="font-size:8.3pt">This council does not set your valuation band and cannot change it. Bands are set by the Valuation Office Agency based on the property's estimated value on 1 April 1991. You can ask the Valuation Office Agency to review your band at www.gov.uk/voa; this does not allow you to withhold payment while a review is in progress.</p>
+
+  <h3 class="sub">Other ways your instalments could change</h3>
+  <p style="font-size:8.3pt">If you are awarded a discount, an exemption or council tax support after this notice was issued, we will send a revised bill and a new instalment plan; any instalments already shown here are cancelled by that revised bill. Direct debit payers can choose the 1st, 8th, 15th or 22nd of the month; this account is not currently paying by direct debit. Ellerby Vale District Council was constituted in 1974 under local government reorganisation and has collected council tax, and its predecessor rates, for the district since then. Precept figures above are set independently by each authority and this council has no discretion to alter them once notified.</p>
+
+  <p class="sans" style="font-size:8pt; color:#333; margin: 10px 0 0 0; line-height:1.4">
+    <b>Other services:</b> report missed bins, apply for a blue badge or check school admissions via MyBrackenmoor, or search "MyBrackenmoor" on the App Store or Google Play. Follow @EllerbyValeCC for local updates. Commercial and trade waste services are provided by our trading arm, Ellerby Vale Trading Ltd, company number 08453217, VAT registration GB 745 3021 66. Sign up for paperless billing by 31 October 2026 at evdc.info/mybill and we will plant a tree locally for every household that switches.
+  </p>
+
+  <div class="footer-strip">
+    <span>Sign in to MyBrackenmoor at www.brackenmoor.gov.uk to view this plan online and switch to paperless billing</span>
+    <span>Page 2 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <h2 class="sheet-head">Ways to pay, support available, and what to do next</h2>
+  <div class="twocol">
+    <h3 class="sub">Discounts and exemptions</h3>
+    <p>A single person discount of 25% applies if you live alone; on a Band C property like this one that would cut the annual charge by &pound;460.67. Students, apprentices, care leavers and people who are severely mentally impaired may be disregarded when counting adults in a household. Empty, unfurnished properties may qualify for a short exemption before an empty homes premium applies; long-term empty homes and second homes can instead attract a premium of up to 100%. Apply through MyBrackenmoor or by calling 0300 123 0458; a discount is normally backdated to the date you became entitled, for example a change reported on 1 April 2024 would be backdated to that date.</p>
+
+    <h3 class="sub">Council tax support</h3>
+    <p>If you are on a low income you may be entitled to council tax support, whether working, unemployed or retired. Awards are means-tested and can cover part or all of your charge; the average award under the local scheme last year was &pound;642.18. Your existing claim reference is CTS/224417. Tell us within 21 days of any change in income, household or capital, or you may have to repay support you were not entitled to. The scheme is reviewed each 1 January; full details are published on www.brackenmoor.gov.uk. You may also be able to claim universal credit; see www.gov.uk/apply-council-tax-reduction.</p>
+
+    <h3 class="sub">If you disagree with a decision</h3>
+    <p>If you disagree with a decision about a discount, an exemption or council tax support, write to the Council Tax Service at the address above within one calendar month. If we cannot resolve it, you may appeal to the Valuation Tribunal for England within two months of our written decision, free of charge, at www.valuationtribunal.gov.uk. If you remain unhappy with how your complaint was handled, you can contact the Local Government and Social Care Ombudsman at www.lgo.org.uk.</p>
+
+    <h3 class="sub">Recovery and enforcement</h3>
+    <p>Arrears are recovered under the Council Tax (Administration and Enforcement) Regulations 1992. Once a liability order is granted, we may recover the debt by deduction from earnings or certain benefits, insolvency proceedings, or by instructing enforcement agents. Cardwell Enforcement Services acts for us under the Taking Control of Goods Regulations 2013; fees are fixed by law at &pound;75.00 for the compliance stage, rising sharply once an agent attends. Case reference CES-2026-05531 would be quoted in any further enforcement correspondence.</p>
+
+    <h3 class="sub">Data protection and how we use your information</h3>
+    <p>We use your information to bill and collect council tax, to check entitlement to discounts, exemptions and support, and to prevent and detect fraud, sharing data with the Department for Work and Pensions, the Valuation Office Agency and other public bodies where the law allows. Our privacy notice was last reviewed on 1 January 2026 and is published on www.brackenmoor.gov.uk. Calls to our numbers may be recorded for training and monitoring purposes. We are registered with the Information Commissioner's Office under registration number Z5541287.</p>
+
+  </div>
+
+  <div class="reg-list">
+    Textphone 01924 456780 &nbsp;|&nbsp; Emergency out-of-hours line 01924 456999 &nbsp;|&nbsp; Registered office: Moot Hall, Kirkby Road, Ellerby Vale, YO61 2AA &nbsp;|&nbsp; This notice relates to account 82914-0663 only and does not cover business rates, billed separately.
+  </div>
+
+  <div class="footer-strip">
+    <span>The Council of the District of Ellerby Vale, billing authority for council tax in this area</span>
+    <span>Page 3 of 3</span>
+  </div>
+</div>
+
+</body>
+</html>

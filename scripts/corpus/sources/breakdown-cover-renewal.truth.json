@@ -1,0 +1,38 @@
+{
+  "name": "breakdown cover renewal, upgrade tier comparison outshines the current-cover price",
+  "filename": "fullpage-breakdown-cover-renewal.pdf",
+  "expected": {
+    "dates": [
+      "2026-11-04"
+    ],
+    "provider": "Milldown Motoring Club",
+    "reference": "MDC-4471-8823",
+    "dateRoles": [
+      {
+        "date": "2026-11-04",
+        "role": "renewal"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Insurance",
+        "Membership",
+        "Subscription",
+        "Plan",
+        "Registration"
+      ],
+      "qualifiers": [
+        "Breakdown",
+        "Motor"
+      ]
+    },
+    "costMinor": 8499,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "dates: the only date declared is 4 November 2026, the day the member's current cover ends, printed once as 'VALID TO 04/11/2026' on the membership card mock and nowhere else in that exact form — it is never restated in a labelled field. Six other printed dates are deliberately not declared: the letter's own preparation date (2 September 2026), the 'renew by' deadline to avoid a break in cover (14 October 2026), the price-lock deadline on the upgrade tier ('renew before 5 October 2026'), the start of the current (outgoing) membership period (4 November 2025), the price-basis stamp ('correct as at 28 August 2026'), the date the terms and conditions were last updated (3 March 2026), the data protection policy review date (1 February 2026), and the award date (12 May 2026); the member-joined year (2018) and the testimonial-giver's membership year (2011) and review month (June 2026) are also left undeclared. provider is 'Milldown Motoring Club', the trading name on the letterhead and the card mock, not 'Castlebridge Assistance Underwriting Ltd', the company that actually underwrites the cover and is named only in the page 2 small print alongside its FCA reference. reference is the membership number MDC-4471-8823, printed on the card mock and repeated on the payment slip; the slip also carries a rival code in the same dash-grouped format, MDC-7734-1102, labelled 'Offer code' for phone payment — that is a campaign code, not the membership number, and is not declared. subtype is 'Breakdown cover renewal', printed in running text on page 1 ('Your breakdown cover renewal notice') rather than as its own heading. costMinor is £84.99, the coming year's price for Roadside Assist, the tier the member is already on and the cheapest of the three, marked only with a small 'Your current cover' tag. It is not any of the rival amounts sitting beside it: last year's price for the same tier (£74.99), the 'most popular' middle tier's discounted price (£129.99) or its struck-through 'was' price (£159.99) or its monthly instalment (£11.99) or its 'save £30' figure, the top tier's annual price (£169.99) or its monthly instalment (£15.99), the £19.99 Home Start add-on, or the £5 cancellation admin charge. recurrenceMonths is 12, printed in digits on the payment slip ('Roadside Assist, 12 months'), not from the several spelled-out 'twelve months' references. scheduleKind is 'renewal' because the only dateRole is 'renewal'.",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Breakdown cover renewal')."
+  ]
+}

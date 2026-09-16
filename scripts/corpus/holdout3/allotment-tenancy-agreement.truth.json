@@ -1,0 +1,40 @@
+{
+  "name": "allotment plot tenancy agreement, rent due the day before the tenancy it pays for begins",
+  "filename": "fullpage-allotment-tenancy-agreement.pdf",
+  "expected": {
+    "dates": [
+      "2026-10-01",
+      "2026-09-30"
+    ],
+    "provider": "Barrowfield Allotment & Garden Association",
+    "reference": "Plot 23",
+    "dateRoles": [
+      {
+        "date": "2026-10-01",
+        "role": "start"
+      },
+      {
+        "date": "2026-09-30",
+        "role": "due"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Tenancy"
+      ],
+      "qualifiers": [
+        "Garden"
+      ]
+    },
+    "costMinor": 3800,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: tenancy start 1 October 2026, rent due 30 September 2026 (the day before, being the association's standard prepayment date for the year commencing). The AGM date (7 February 2026), the key deposit date (14 September 2024) and the previous tenant's end date (30 September 2025) are printed but not declared.",
+    "provider is the letting association's full name, printed in the letterhead.",
+    "reference is Plot 23, the tenant's own plot; the neighbouring Plot 24 rent is a rival number shown only for comparison.",
+    "costMinor is the annual plot rent, 38.00, printed with a pound sign; the water rate (9.50) and key deposit (5.00) are separate charges and traps.",
+    "subtype: Tenancy/Garden. No recurrence is declared: neither dateRole is 'renewal' or 'service', so the contract keeps no recurrenceMonths even though the rent is in fact annual.",
+    "scheduleKind is not declared: neither dateRole is 'renewal' or 'service'."
+  ]
+}

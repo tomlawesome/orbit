@@ -18,7 +18,15 @@ import { describe, it } from "node:test";
 // before the next `@` or `'` -- is the artifact.
 const PNPM_EXE_ARTIFACT = /@pnpm\/exe(?!\.)/;
 
-const lockfilePath = new URL("../pnpm-lock.yaml", import.meta.url);
+// Defaults to this checkout's lockfile, which is what `node --test
+// scripts/lockfile-no-pnpm-exe.test.mjs` should answer for before a commit.
+// ORBIT_LOCKFILE_PATH points it at another copy instead, so the same regex can
+// judge the COMMITTED lockfile rather than the working tree (#1024): local
+// pnpm pollutes the working copy constantly, and only what is committed is a
+// defect. scripts/test-backend.sh uses both readings.
+const lockfilePath = process.env.ORBIT_LOCKFILE_PATH
+  ? new URL(`file://${process.env.ORBIT_LOCKFILE_PATH}`)
+  : new URL("../pnpm-lock.yaml", import.meta.url);
 
 describe("pnpm-lock.yaml has no @pnpm/exe packageManagerDependencies artifact", () => {
   it("contains no bare @pnpm/exe entry", () => {

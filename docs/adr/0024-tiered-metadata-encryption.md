@@ -204,6 +204,66 @@ decrypted values and therefore itself requires a working KEK.
 Nothing in the six questions is left open for the owner; ratification of
 this record is the remaining decision.
 
+## Amendment (#969, 2026-09-15)
+
+Slice 2 of #966 ships two more columns under the same design: `users.email`
+and `mail_in_sender_addresses.address` join `MetadataColumn`
+(`src/server/metadata/crypto.ts`), with
+`drizzle/0044_account_address_encryption.sql` as the expand phase (decision 3).
+
+**Both sit under the instance DEK, not a household one (decision 1).** A user
+belongs to several households, so no household owns their address, and a
+mail-in sender is attributed before any household is known — the same
+condition that already puts an unattributed mail-in receipt under the
+instance DEK. This adds no key and no new cipher construction: both columns
+simply use the instance row decision 1 already reserved.
+
+**Two new blind indexes (decision 2): `user_email_unique_index` and
+`mail_in_sender_address_unique_index`.** They exist because clearing the
+plaintext would otherwise silently retire two database rules — "one account
+per address" (`user_email_unique_ci`) and "one account per sender address" —
+since PostgreSQL treats every NULL as distinct. Both plaintext indexes stand
+through the expand release, constraining the rows the backfill has not yet
+reached. The blind index normalises through `normalizeComparableMetadata`
+(NFKC, whitespace collapsed, trimmed, lowercased), which is slightly wider
+than the `lower()` the old SQL index used; for values that pass the
+application's own email validation the difference does not arise.
+
+**Audit payloads reference, they do not copy.** The owner's ruling of
+2026-09-10: an address that does not need storing is not stored. An audit
+record identifies the account by user id, which already does the job, so
+audit payloads carry no address rather than gaining a third encrypted
+column.
+
+**The sweep, and its one deliberate exception.** Every remaining
+address-bearing column was checked. `instance_contact.public_address` is
+deliberately NOT encrypted and is not an oversight: it is the instance's own
+public contact address, shown on the signed-out sign-in door, deliberately
+never defaulted from any user's account address, and it must stay readable
+precisely when the key is missing — that is the state it exists to serve.
+Said plainly here so the next reader does not "fix" it.
+
+**Behaviour with no usable key, the part that matters most and the reason
+slice 3 (#970) exists (decision 5).** Local password sign-in returns a new,
+distinct verdict — `locked`, surfaced as the `instance_locked` auth error —
+and never `credentials_invalid`. The "every failure looks the same" rule of
+ADR-0021 §5 exists so a verdict cannot be turned into "that address exists",
+and this verdict says nothing about any address because it is true of the
+whole instance before any comparison happens: the operator must be able to
+tell "Orbit cannot read any address" from "your password is wrong". An
+identity provider's existing users still sign in, because `external_identities`
+matches on issuer and subject and never touches the address; a locked
+instance skips the refresh of the stored address rather than clearing it.
+Registering a new account, and claiming the instance, both refuse with
+`instance_locked`: they write the first address, so they genuinely cannot
+proceed. Redeeming a household invitation fails as a mismatch when either
+address cannot be read — a comparison that cannot be made must never pass.
+
+**Rotation is unchanged, and that is the point (decision 4).** A KEK
+rotation rewraps the DEK and rewrites no value and no index, so these two
+columns cost it nothing. `tests/integration/metadata-addresses.test.ts`
+proves it rather than assuming it — the #955 failure.
+
 ## Consequences
 
 - Slices 2 and 3 of #365 can be filed: slice 2 implements sections 1–3 and

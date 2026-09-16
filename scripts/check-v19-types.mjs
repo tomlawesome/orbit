@@ -12,6 +12,7 @@
  * file, fails the fast checks. No per-file tolerance is left anywhere.
  */
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -52,7 +53,56 @@ function runSvelteCheck() {
   }
 }
 
+/**
+ * Whether `orbit/server/*` resolves to THIS checkout (#1029).
+ *
+ * `web/node_modules` is a workspace link, and in a worktree it usually points
+ * at the main checkout: `web/node_modules/orbit -> /home/codex/projects/orbit`.
+ * The `.svelte` and `.js` files being checked are then read from the worktree
+ * while the server modules they import are read from whatever branch the main
+ * checkout happens to have out. The answer belongs to neither branch.
+ *
+ * Both failure modes are bad and the second is worse. A false error — the
+ * other branch lacks a module this one added — is merely costly, and invites
+ * "fixing" an import that was already right. A false pass — the other branch
+ * still has a module this one deleted or renamed — lets a genuinely broken
+ * import go green locally and fail in CI.
+ *
+ * Returns the path it resolved to when that is somewhere else, or null when
+ * the resolution is sound.
+ */
+export function foreignWorkspaceRoot(repositoryRoot) {
+  try {
+    const linked = realpathSync(`${repositoryRoot}web/node_modules/orbit`);
+    const here = realpathSync(repositoryRoot).replace(/\/$/u, "");
+    return linked === here ? null : linked;
+  } catch {
+    // No link at all: nothing resolves outside this tree, so nothing to warn
+    // about. A missing dependency is svelte-check's own error to report.
+    return null;
+  }
+}
+
 function main() {
+  /* CI checks out one self-contained tree, so this never fires there; it is
+     the local check, run before the expensive suites, that this protects. */
+  const foreign = foreignWorkspaceRoot(repositoryRoot);
+  if (foreign) {
+    console.error("\nv19 type check: SKIPPED -- it cannot answer for this checkout.\n");
+    console.error(`  web/node_modules/orbit resolves to ${foreign}`);
+    console.error(`  which is not ${realpathSync(repositoryRoot).replace(/\/$/u, "")}\n`);
+    console.error("  So `orbit/server/*` would be read from whatever branch THAT directory has");
+    console.error("  checked out, and the result would belong to neither branch -- a wrong answer,");
+    console.error("  in either direction, and a passing one is the dangerous half (#1029).\n");
+    console.error("  Run this check in the main checkout, or give this worktree its own");
+    console.error("  node_modules, or let CI answer it -- CI checks out one tree and is unaffected.\n");
+    /* Deliberately not an error. Thirty worktrees share this host, so failing
+       here would abort the fast gate in most of them -- the #1024 mistake of
+       making a known, understood condition fatal. "Cannot check here" is the
+       honest answer; a wrong one is what this exists to prevent. */
+    return;
+  }
+
   const counts = parseMachineOutput(runSvelteCheck());
   const { total, lines } = summarize(counts);
 

@@ -164,6 +164,16 @@ const YEAR_FIRST_NUMERIC = /\b(20\d{2})([/.-])(\d{1,2})\2(\d{1,2})(?!\d)/gu;
 // dates are read day-first, matching the product's UK deployment reality; a
 // date whose parts cannot be told apart is dropped rather than guessed.
 function extractDates(bounded: string): string[] {
+  return locateDates(bounded)
+    .map((entry) => entry.value)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .slice(0, 12);
+}
+
+/** Every date on the page with where it sits, uncapped and in page order.
+ * The sieve (ADR-0026 stage 1) draws from this; `extractDates` is the
+ * one-shot reading built on top of it. */
+export function locateDates(bounded: string): Array<{ index: number; value: string }> {
   const found: Array<{ index: number; value: string }> = [];
   const push = (index: number, value: string | undefined) => {
     if (value) found.push({ index, value });
@@ -216,11 +226,7 @@ function extractDates(bounded: string): string[] {
       MONTH_NAMES[match[1].slice(0, 3).toLowerCase()];
     push(match.index ?? 0, month ? isoFromParts(match[3], month, match[2]) : undefined);
   }
-  return found
-    .sort((a, b) => a.index - b.index)
-    .map((entry) => entry.value)
-    .filter((value, index, values) => values.indexOf(value) === index)
-    .slice(0, 12);
+  return found.sort((a, b) => a.index - b.index);
 }
 
 // How a label says "the value after me is the identifier".

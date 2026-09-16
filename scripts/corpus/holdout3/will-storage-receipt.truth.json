@@ -1,0 +1,39 @@
+{
+  "name": "will storage receipt, an unrelated deed box closure sits beside the annual storage fee",
+  "filename": "fullpage-will-storage-receipt.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-09",
+      "2027-09-09"
+    ],
+    "provider": "Hawksmoor & Reed Solicitors",
+    "reference": "HRS-DB-2261",
+    "dateRoles": [
+      {
+        "date": "2026-09-09",
+        "role": "issued"
+      },
+      {
+        "date": "2027-09-09",
+        "role": "renewal"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Will"
+      ]
+    },
+    "costMinor": 1500,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "dates: receipt issued 9 September 2026 (the same day the will was deposited, printed twice under different labels but declared once), next storage fee due 9 September 2027. The will's own drafting date (2 September 2026), the unrelated closed deed box date (3 June 2025) and the firm's indemnity-insurance renewal (31 December 2026) are undeclared.",
+    "provider is Hawksmoor & Reed Solicitors.",
+    "reference is the storage reference HRS-DB-2261.",
+    "costMinor is the annual storage fee, 15.00; no fee was charged for the initial deposit, which is why it is the recurring fee, not zero, that is declared.",
+    "recurrenceMonths is 12, printed in digits as 'every 12 months thereafter'.",
+    "subtype: Will. scheduleKind is 'renewal', derived from the renewal dateRole."
+  ]
+}

@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Your order is confirmed</title>
+<style>
+@font-face{font-family:"Corpus Order";src:url("../fonts/Barlow-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Order Mono";src:url("../fonts/JetBrainsMono.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; }
+  .page { width: 794px; height: 1123px; box-sizing: border-box; position: relative; overflow: hidden; padding: 30px 40px; font-family: "Corpus Order", sans-serif; color: #1c1c1c; font-size: 10.2px; line-height: 1.42; }
+
+  .printfurniture { font-size: 7.6px; color: #888; border-bottom: 1px solid #ddd; padding-bottom: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; }
+  .headers { font-size: 9px; color: #333; margin-bottom: 10px; border-bottom: 1px solid #e2e2e2; padding-bottom: 8px; }
+  .headers .hrow { display: flex; }
+  .headers .hk { width: 52px; color: #888; flex-shrink: 0; }
+  .headers .hv { flex: 1; }
+  .subject { font-size: 15px; font-weight: 700; margin: 8px 0 12px; }
+
+  .mono { font-family: "Corpus Order Mono", monospace; }
+
+  .ordercard { border: 1px solid #d3d9e6; background: #f6f8fc; border-radius: 4px; padding: 12px 14px; margin-bottom: 12px; }
+  .ordercard .oc-title { font-size: 11px; font-weight: 700; color: #1a3f8f; margin-bottom: 6px; }
+  .oc-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 9.4px; border-bottom: 1px dotted #cdd4e2; }
+  .oc-row .ref { font-family: "Corpus Order Mono", monospace; white-space: nowrap; }
+
+  .steps { margin: 10px 0; }
+  .steps li { margin-bottom: 6px; font-size: 9.2px; }
+
+  .appt { border: 1.5px solid #1a8f5c; background: #f0faf4; padding: 8px 12px; margin: 10px 0; font-size: 9.6px; }
+  .appt b { color: #14683f; }
+
+  .cta { display: inline-block; background: #1a3f8f; color: #fff; padding: 6px 14px; font-size: 9.6px; font-weight: 700; border-radius: 3px; margin: 8px 0; text-decoration: none; }
+
+  h2.sec { font-size: 10.4px; color: #1a3f8f; border-bottom: 1px solid #d3d9e6; padding-bottom: 3px; margin: 14px 0 6px; }
+
+  .pricetbl { width: 100%; border-collapse: collapse; font-size: 9px; margin: 6px 0 10px; }
+  .pricetbl th { background: #eef1f8; text-align: left; padding: 3px 6px; }
+  .pricetbl td { padding: 3px 6px; border-bottom: 1px dotted #ccc; }
+  .pricetbl td.num, .pricetbl th.num { text-align: right; white-space: nowrap; }
+
+  .smallprint { font-size: 7.4px; color: #666; line-height: 1.55; }
+  .smallprint h3 { font-size: 8.6px; color: #333; margin: 8px 0 3px; }
+
+  .footer { margin-top: 14px; border-top: 1px solid #ddd; padding-top: 8px; font-size: 7.2px; color: #888; }
+  .badges { display: flex; gap: 8px; margin: 6px 0; }
+  .badge { border: 1px solid #999; border-radius: 3px; padding: 3px 8px; font-size: 7.4px; color: #444; }
+  .social { font-size: 7.6px; color: #666; margin: 4px 0; }
+
+  .pagefoot { position: absolute; bottom: 12px; left: 40px; right: 40px; font-size: 6.8px; color: #999; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="printfurniture"><span>my.fibrelark.uk/orders/8820-1194 — printed 22/12/2026 14:32</span><span>1/3</span></div>
+  <div class="headers">
+    <div class="hrow"><div class="hk">From:</div><div class="hv">Orders &lt;hello@fibrelark.uk&gt;</div></div>
+    <div class="hrow"><div class="hk">To:</div><div class="hv">t.lawson@example.co.uk</div></div>
+    <div class="hrow"><div class="hk">Date:</div><div class="hv">Tuesday 22 December 2026, 14:31</div></div>
+    <div class="hrow"><div class="hk">Subject:</div><div class="hv">Your order is confirmed — installation booked for 13 January</div></div>
+  </div>
+
+  <div class="subject">Thanks — your order is confirmed</div>
+  <p>Hi Tom,</p>
+  <p>Great news — we've confirmed your new full-fibre broadband order and booked in an engineer visit. Here's everything in one place, and there's nothing else you need to do before then.</p>
+
+  <div class="ordercard">
+    <div class="oc-title">Order summary</div>
+    <div class="oc-row"><span>Order number</span><span class="ref mono">ORD-77120934</span></div>
+    <div class="oc-row"><span>Order placed</span><span>22 December 2026</span></div>
+    <div class="oc-row"><span>Service start date</span><span>14 January 2027</span></div>
+    <div class="oc-row"><span>Minimum term</span><span>24 months (ends 13 January 2029)</span></div>
+    <div class="oc-row"><span>Monthly cost, months 1–6</span><span>£26.00 a month</span></div>
+    <div class="oc-row"><span>Monthly cost, months 7–24</span><span>£34.00 a month</span></div>
+    <div class="oc-row"><span>Activation fee</span><span>£19.99</span></div>
+  </div>
+
+  <p><b>Please quote your account number 8820 1194 whenever you get in touch</b> — it's the fastest way for us to find your order.</p>
+
+  <div class="appt">
+    <b>Engineer appointment</b> — Wednesday 13 January 2027, 08:00–13:00. Appointment code <span class="mono">AP-6612</span>. Someone aged 18 or over needs to be home for the visit; it usually takes 1–2 hours. Job reference <span class="mono">JOB-55219</span>.
+  </div>
+
+  <h2 class="sec">What happens next</h2>
+  <ol class="steps">
+    <li><b>Now to 13 January</b> — we'll order your line from our network partner, Cotwell Fibre, who build and maintain the fibre network in your street.</li>
+    <li><b>Installation day, 13 January 2027</b> — our installer, Ryeland Field Services, fits an optical network terminal (serial <span class="mono">FLK-2291-8834</span>) and your new router.</li>
+    <li><b>Router setup</b> — your Vantis router (serial <span class="mono">VTS-40119227</span>) is pre-configured; just plug it in and follow the on-screen light sequence.</li>
+    <li><b>14 January 2027</b> — your new service goes live and your old provider's service stops the day before, 12 January 2027.</li>
+  </ol>
+
+  <a class="cta" href="https://my.fibrelark.uk/orders">Manage your order</a>
+
+  <p style="font-size:8.6px; color:#555;">Changed your mind? You have until <b>5 January 2027</b> to cancel free of charge under your right to cancel. After that, our standard cancellation terms apply — see page 2.</p>
+
+  <div class="pagefoot">Order ORD-77120934 · Account 8820 1194 · fibrelark.uk</div>
+</div>
+
+<div class="page">
+  <div class="printfurniture"><span>my.fibrelark.uk/orders/8820-1194 — printed 22/12/2026 14:32</span><span>2/3</span></div>
+
+  <h2 class="sec" style="margin-top:0;">Your monthly cost, in full</h2>
+  <table class="pricetbl">
+    <tr><th>Period</th><th class="num">Monthly price</th></tr>
+    <tr><td>Months 1–6 (introductory rate)</td><td class="num">£26.00</td></tr>
+    <tr><td>Months 7–24 (remaining minimum term)</td><td class="num">£34.00</td></tr>
+    <tr><td>Faster tier, if you upgrade</td><td class="num">£41.00</td></tr>
+    <tr><td>TV add-on (optional)</td><td class="num">£12.00</td></tr>
+    <tr><td>Line rental</td><td class="num">£6.00</td></tr>
+  </table>
+  <p style="font-size:8.4px;">Your first bill will be issued on <b>28 January 2027</b> and will include a part-month adjustment. After your minimum term, and each year on <b>1 April</b>, we may increase your monthly price in line with our annual price review — your first review under this plan would be 1 April 2027. Details of how the annual increase is calculated are at fibrelark.uk/legal.</p>
+  <p style="font-size:8.4px;">Direct Debit reference <span class="mono">DD-882011</span>. Offer valid for orders placed by <b>31 December 2026</b>; quote code WELCOME120 for £120.00 cashback, paid via bank transfer around 90 days after activation.</p>
+
+  <h2 class="sec">Important information about your contract</h2>
+  <div class="smallprint">
+    <p>This is a summary of the key terms only. Your full contract, including our terms and conditions and pricing guide, is available at fibrelark.uk/legal and was also provided before you placed your order. This service is provided by Marsden Networks Limited, registered in England and Wales, company number 09912774, VAT number GB 288 4411 92. Registered office: Unit 4, Colworth Business Park, Sharnbrook, MK44 1LZ.</p>
+
+    <h3>Charges if things change</h3>
+    <p>If you cancel after your cancellation period but before the end of your 24 month minimum term, an early termination charge applies: £22.00 for each remaining month of your term. If you miss a booked engineer appointment without giving us at least 24 hours' notice, a missed appointment charge of £65.00 may apply. Full details of all charges are set out in our pricing guide.</p>
+
+    <h3>Speed and service guarantee</h3>
+    <p>We estimate your minimum download speed at the point of order based on the Cotwell Fibre network available at your address. If your actual speed falls below the guaranteed minimum after engineer checks, you can exit your contract without an early termination charge, in line with Ofcom's voluntary broadband speed code of practice.</p>
+
+    <h3>Comparing providers</h3>
+    <p>You're welcome to compare this order against other providers at any time, including via comparison sites such as pricebadger.co.uk. If you switch away within your minimum term, the early termination charge above will still apply.</p>
+
+    <h3>Complaints</h3>
+    <p>If something's gone wrong, contact us first on 0330 041 5510 so we can put it right. If we can't resolve your complaint within eight weeks, or we've issued a deadlock letter, you can ask the Communications Ombudsman to look into it independently and free of charge, in line with Ofcom's general conditions on complaints handling.</p>
+  </div>
+
+  <div class="pagefoot">Order ORD-77120934 · Account 8820 1194 · fibrelark.uk</div>
+</div>
+
+<div class="page">
+  <div class="printfurniture"><span>my.fibrelark.uk/orders/8820-1194 — printed 22/12/2026 14:32</span><span>3/4</span></div>
+
+  <h2 class="sec" style="margin-top:0;">While you wait</h2>
+  <p style="font-size:8.8px;">Download the app to track your installation, message support and manage your Direct Debit from your phone — search for it in your app store or head to help.fibrelark.uk for a direct link. You can also follow @fibrelark for network status updates and outage alerts in your area.</p>
+
+  <h3 style="font-size:9px; color:#1a3f8f;">Other things we do</h3>
+  <p style="font-size:8.6px;">As well as broadband, we offer SIM-only mobile plans from £8.00 a month on the Cotwell Fibre-backed network, and a TV add-on bundling over 60 channels for £12.00 a month with no extra box needed if you already have our router. Existing customers get a discount on mobile if you add it to your broadband account.</p>
+
+  <h3 style="font-size:9px; color:#1a3f8f;">Tell a friend</h3>
+  <p style="font-size:8.6px;">Refer a friend using your account number and you'll both get a bill credit once their service has been live for 30 days. There's no limit on how many friends you can refer. Terms apply — see fibrelark.uk/legal.</p>
+
+  <div class="smallprint">
+    <h3>Data protection</h3>
+    <p>Marsden Networks Limited processes your personal data to provide this service, to bill you correctly, and, where you've agreed, to tell you about other products. You can withdraw marketing consent at any time without affecting your service. See our privacy notice at fibrelark.uk/legal for how long we keep data and who we share it with, including network partners such as Cotwell Fibre and our installer Ryeland Field Services.</p>
+
+    <h3>Why am I getting this e-mail?</h3>
+    <p>You're receiving this because you placed an order with us on 22 December 2026. This is a transactional message about your account, not marketing, so it isn't affected by any marketing preferences you've set. General marketing emails can be turned off at any time from your account settings.</p>
+
+    <h3>Accessibility</h3>
+    <p>This message is available in large print or another accessible format on request. Call 0330 041 5510 and we'll arrange it.</p>
+  </div>
+
+  <div class="badges">
+    <div class="badge">App Store</div>
+    <div class="badge">Google Play</div>
+  </div>
+  <div class="social">Follow @fibrelark · help.fibrelark.uk · fibrelark.uk/legal</div>
+
+  <div class="footer">This is an automated message sent to t.lawson@example.co.uk regarding order ORD-77120934. If you believe you received this in error, contact hello@fibrelark.uk. Marsden Networks Limited, company number 09912774, registered in England and Wales.</div>
+
+  <div class="pagefoot">Order ORD-77120934 · Account 8820 1194 · fibrelark.uk</div>
+</div>
+
+<div class="page">
+  <div class="printfurniture"><span>my.fibrelark.uk/orders/8820-1194 — printed 22/12/2026 14:32</span><span>4/4</span></div>
+
+  <h2 class="sec" style="margin-top:0;">Frequently asked questions about your order</h2>
+  <div class="smallprint" style="font-size:8.4px;">
+    <h3>What if I'm not in on installation day?</h3>
+    <p>If nobody aged 18 or over is available for your booked slot on 13 January 2027, our installer, Ryeland Field Services, won't be able to complete the visit, and a missed appointment charge of £65.00 may apply. If your plans change, rearrange the visit at my.fibrelark.uk/orders at least 24 hours beforehand at no cost.</p>
+
+    <h3>What does the engineer do?</h3>
+    <p>The engineer runs a new fibre lead from the Cotwell Fibre network cabinet or pole into your property, fits a small optical network terminal on an internal wall (serial FLK-2291-8834), and connects your Vantis router (serial VTS-40119227). Most visits take one to two hours and involve some light drilling; the engineer will discuss the best route with you before starting.</p>
+
+    <h3>Do I need a phone line?</h3>
+    <p>No — this is a full-fibre service and does not need an existing phone line. If you'd like to keep a landline number, line rental is available for an extra £6.00 a month and can be added from your account at any time.</p>
+
+    <h3>Can I add TV or a faster speed later?</h3>
+    <p>Yes. You can add the TV package for £12.00 a month, or move to our faster tier at £41.00 a month, at any point during your contract from my.fibrelark.uk/orders. Changing tier does not restart your 24 month minimum term.</p>
+
+    <h3>What if I want to leave early?</h3>
+    <p>Within your cancellation period, ending 5 January 2027, you can cancel free of charge. After that and before your minimum term ends on 13 January 2029, an early termination charge of £22.00 applies for each remaining month. Comparison sites such as pricebadger.co.uk can help you weigh this up against a new provider's offer.</p>
+
+    <h3>How do I get help?</h3>
+    <p>Call us on 0330 041 5510, message us through the app, or visit help.fibrelark.uk for guides on router setup, troubleshooting slow speeds, and managing your Direct Debit (reference DD-882011). Our lines are open every day except Christmas Day and New Year's Day.</p>
+
+    <h3>Regulatory information</h3>
+    <p>This service is regulated under Ofcom's general conditions of entitlement, which set out rules on contract length, complaints handling, and speed guarantees. Marsden Networks Limited is registered in England and Wales, company number 09912774, and holds the necessary Ofcom code powers to build and maintain telecommunications infrastructure where required.</p>
+
+    <h3>Keeping your account secure</h3>
+    <p>We'll never call you out of the blue and ask for your full banking password or a one-time passcode sent to your phone. If you're contacted by someone claiming to be from us asking for these details, hang up and call us back on 0330 041 5510 using the number on our website, not one given to you by the caller. You can review recent sign-ins to your account, and set up two-step verification, from your account security settings at my.fibrelark.uk/orders.</p>
+
+    <h3>If you're moving home</h3>
+    <p>If you're moving to a new address, let us know at least two weeks before your move date so we can arrange to transfer your service, or close your account if we don't cover your new area. Taking your router and optical network terminal with you isn't usually necessary — a new installation is normally required at your new home, and our installer, Ryeland Field Services, or the relevant network builder in your new area will arrange a fresh appointment.</p>
+  </div>
+
+  <div class="pagefoot">Order ORD-77120934 · Account 8820 1194 · fibrelark.uk</div>
+</div>
+
+</body>
+</html>

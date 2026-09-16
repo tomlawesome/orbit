@@ -76,7 +76,17 @@ const auditColumns = {
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
-  email: text("email").notNull(),
+  /**
+   * Tier 2 metadata (ADR-0024, #969). `email_enc` holds the `mdv1.` envelope
+   * and `email_index` the blind index; the plaintext column stands only until
+   * the backfill reaches the row, and an encrypted row clears it.
+   *
+   * Under the INSTANCE key, not a household one: a user belongs to several
+   * households, so no household owns their address.
+   */
+  email: text("email"),
+  emailEnc: text("email_enc"),
+  emailIndex: text("email_index"),
   emailVerified: boolean("email_verified").notNull().default(false),
   displayName: text("display_name").notNull(),
   avatarUrl: text("avatar_url"),
@@ -89,6 +99,13 @@ export const users = pgTable("users", {
   // identity regardless of case (ADR-0023 §2). There are no existing rows,
   // so this ships as a plain index rather than a migration risk.
   uniqueIndex("user_email_unique_ci").on(sql`lower(${table.email})`),
+  // The blind index carries "one account per address" across the encryption
+  // (#969). Without it, clearing the plaintext would quietly retire that rule:
+  // PostgreSQL treats every NULL as distinct, so the case-insensitive index
+  // above stops constraining a row the moment its plaintext goes. Both stand
+  // through the expand release — that one still holds the rows the backfill
+  // has not reached.
+  uniqueIndex("user_email_unique_index").on(table.emailIndex),
 ]);
 
 export const userPreferences = pgTable("user_preferences", {
@@ -559,6 +576,37 @@ export const metadataDamageSightings = pgTable("metadata_damage_sightings", {
   uniqueIndex("metadata_damage_sighting_value_unique").on(table.tableName, table.columnName, table.rowId),
 ]);
 
+/**
+ * One row per interval in which `metadataCryptoAvailable()`
+ * (src/server/metadata/keys.ts) was false — the instance KEK absent, so
+ * every Tier 1 field reads locked rather than blank. Modelled on
+ * `maintenanceWindows` above: same shape, and the same partial-unique-index
+ * trick for "at most one open at a time" (`status` filtered to `'open'`,
+ * since a plain unique index cannot constrain a nullable `ended_at` — every
+ * NULL is distinct to PostgreSQL).
+ *
+ * This is what lets the mail-in retention reaper (#964,
+ * src/server/mail-in/imap-inbox.ts) credit a still-pending receipt's
+ * `expires_at` for the part of an outage it existed for, per the owner's
+ * 2026-09-10 ruling: the 45-day clock counts elapsed time the receipt was
+ * *available and ignored*, not wall-clock time, so a locked receipt's clock
+ * does not run for the outage and resumes when the key returns.
+ *
+ * `started_at` is only as precise as the reaper's own poll cycle — it can
+ * lag the real outage by a few minutes either way, which errs in the
+ * member's favour and is accepted (owner ruling, #964).
+ */
+export const metadataKeyOutages = pgTable("metadata_key_outages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  status: text("status").notNull().default("open"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [
+  check("metadata_key_outage_status_valid", sql`${table.status} IN ('open', 'closed')`),
+  uniqueIndex("metadata_key_outage_open_unique").on(table.status).where(sql`${table.status} = 'open'`),
+]);
+
 /** Durable, idempotent worker jobs for document lifecycle operations. */
 export const documentJobs = pgTable("document_jobs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -874,8 +922,17 @@ export const mailInRelays = pgTable("mail_in_relays", {
 export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  /** Normalised on the way in: trimmed, unwrapped, case-folded. */
-  address: text("address").notNull(),
+  /**
+   * Normalised on the way in: trimmed, unwrapped, case-folded.
+   *
+   * Tier 2 metadata (ADR-0024, #969), under the INSTANCE key: attribution
+   * matches a sender before any household is known. `address_enc` holds the
+   * envelope, `address_index` the blind index that exact-match attribution
+   * looks up, and the plaintext stands only until the backfill reaches it.
+   */
+  address: text("address"),
+  addressEnc: text("address_enc"),
+  addressIndex: text("address_index"),
   source: mailInSenderSource("source").notNull().default("manual"),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   /** The one-use link's token, digested. The token itself is never stored. */
@@ -884,6 +941,9 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   ...auditColumns,
 }, (table) => [
   uniqueIndex("mail_in_sender_address_unique").on(table.address),
+  // Carries "one account per sender address" across the encryption, for the
+  // same reason as `user_email_unique_index` above (#969).
+  uniqueIndex("mail_in_sender_address_unique_index").on(table.addressIndex),
   index("mail_in_sender_address_user_idx").on(table.userId, table.verifiedAt),
   check("mail_in_sender_address_verification_pair", sql`(${table.verificationTokenDigest} IS NULL) = (${table.verificationExpiresAt} IS NULL)`),
 ]);

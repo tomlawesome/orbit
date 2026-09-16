@@ -1,0 +1,44 @@
+{
+  "name": "dental plan statement, three printed intervals and a hidden administrator",
+  "filename": "fullpage-dental-plan-statement.pdf",
+  "expected": {
+    "dates": [
+      "2027-03-01"
+    ],
+    "provider": "Northgate Dental Plan Administration Ltd",
+    "reference": "NDPA-208467",
+    "dateRoles": [
+      {
+        "date": "2027-03-01",
+        "role": "renewal"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Plan",
+        "Insurance",
+        "Membership",
+        "Subscription",
+        "Statement",
+        "Maintenance contract"
+      ],
+      "qualifiers": [
+        "Dental",
+        "Health"
+      ]
+    },
+    "costMinor": 11400,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "provider is Northgate Dental Plan Administration Ltd, the scheme administrator named only in the panel's small print and in the Direct Debit Guarantee wording. Aldermoor Dental Practice, named largest at the top of the panel as the masthead, is the practice where treatment happens, not the organisation the plan is with, so it is not the provider.",
+    "reference is the membership number NDPA-208467, which is how the member's own record is filed with the administrator, not the plan product name (Aldermoor Complete Care Plan) or the administrator's company number (04471102) or the Direct Debit originator's identification number (934218), none of which a member would quote to identify their plan.",
+    "dates/dateRoles carry only the plan renewal date (1 March 2027), role 'renewal': Orbit tracks the plan, not the appointments (owner ruling 2026-09-11: 'The check up date is unrelated, Orbit is to track the plan!'; the truth previously tracked the next check-up, 12 November 2026, as 'service'). The statement prints seven other dates -- the statement date (14 August 2026), the plan start date (1 March 2020), the last check-up (12 May 2026), the next check-up (12 November 2026), the last hygienist visit (30 June 2026), the last payment taken (1 August 2026), the next payment due (1 September 2026) and the fee price-list effective date (1 April 2026) -- none of which is the answer.",
+    "costMinor is 11400 (the £114.00 'Plan year value', twelve £9.50 monthly Direct Debit payments) (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure); not the £9.50 instalment, not the practice's £62.00 private examination fee, not the £58.00 hygienist fee, and not the £1,000,000 worldwide dental trauma cover limit -- all printed on the same panel as rival amounts.",
+    "recurrenceMonths is 12, the plan year the page states as running 12 months: the cycle of the plan, not the 6-month check-up interval and not the monthly payment, both also printed.",
+    "scheduleKind is 'renewal' because the tracked date is when the plan year renews.",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Dental plan statement')."
+  ]
+}

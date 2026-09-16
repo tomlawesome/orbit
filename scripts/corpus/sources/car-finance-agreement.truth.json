@@ -1,0 +1,54 @@
+{
+  "name": "Personal Contract Purchase Agreement - Bracken Vale Finance",
+  "filename": "car-finance-agreement.pdf",
+  "expected": {
+    "dates": [
+      "2026-02-20",
+      "2030-03-05"
+    ],
+    "dateRoles": [
+      {
+        "date": "2026-02-20",
+        "role": "start"
+      },
+      {
+        "date": "2030-03-05",
+        "role": "expiry"
+      }
+    ],
+    "provider": "Bracken Vale Finance plc",
+    "reference": "BVF-PCP-208841",
+    "subtype": {
+      "kinds": [
+        "Loan",
+        "Contract"
+      ],
+      "qualifiers": [
+        "Motor"
+      ]
+    },
+    "costMinor": 2473016,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: agreement date 20 February 2026 printed as 'Agreement date: 20 February 2026' (role start), and optional final payment date 5 March 2030 printed in the financial table row 'Optional final payment (due 5 March 2030)' (role expiry).",
+    "provider is the finance house the household pays and contacts, Bracken Vale Finance plc, not the dealer.",
+    "reference is the agreement number printed top right as 'BVF-PCP-208841'.",
+    "costMinor is 'Total amount payable £24,730.16', everything paid over the term of the contract -- not the cash price of the car and not the monthly payment (owner, 2026-09-13: Orbit tracks long-term commitments; a PCP fits Orbit poorly on cost and well on dates, which is the primary function -- when the deal starts and when it ends).",
+    "No scheduleKind or recurrence: the agreement ends on 5 March 2030 (owner, 2026-09-13: the date the contract ends, not a payment date); 48 monthly payments is how it is paid, not a cycle that repeats.",
+    "trap: cash price of the vehicle '£18,995.00'.",
+    "trap: deposit '£2,500.00' and part-exchange allowance '£1,200.00'.",
+    "trap: the monthly payment '£279.42', one of 48.",
+    "trap: optional final payment amount '£8,245.00'.",
+    "trap: representative APR '10.9% APR' and fixed rate of interest '7.5% per annum'.",
+    "trap: date of first payment '05/04/2026'.",
+    "trap: 14-day right to withdraw, 'You may withdraw from this agreement ... within 14 days'.",
+    "trap: annual mileage allowance '8,000 miles' and excess mileage charge '6p per mile'.",
+    "trap: option-to-purchase fee '£10.00'.",
+    "trap: dealer name, address and own reference, 'Thornfield Motors Limited ... Dealer reference: TM-CAR-55021'.",
+    "trap: vehicle registration 'OV72 KLM', first registered '14/06/2022' and mileage '21,340 miles'.",
+    "trap: FCA authorisation sentence naming FRN 305512.",
+    "trap: company number '04471822'.",
+    "Owner convention 2026-09-13: an end date is a renewal when the thing continues only if the household acts again (tax, MOT, licence, tenancy, insurance, subscription, season ticket, permit), and an expiry when it is simply over (guarantee, warranty, loan, lease, quote, course). The role follows the kind of thing, not the word on the page."
+  ]
+}
