@@ -28,3 +28,7 @@ typing box straight away.
 
 Fable's recommendation: **D**. It reads like a finished record until the
 reader doubts a value, and one tap turns it into C for that field only.
+
+## Verdicts (owner, 2026-09-16)
+
+- "1008 C" — C · list is the design. Every reading always visible; no fold.
