@@ -43,6 +43,7 @@ import {
   type LocalUser,
 } from "@/server/local-credentials";
 import { renderSetupMail } from "@/server/local-credentials/mail";
+import { openInstanceMetadataReader, type MetadataFieldState } from "@/server/metadata/fields";
 
 /** The mail provider seam, so a test can hand this module a fake one. */
 export type SetupMailer = InvitationMailer;
@@ -84,11 +85,38 @@ export interface SendSetupLinkOptions {
   now?: Date;
 }
 
-/** The one user this module is allowed to know anything about. */
+/**
+ * The one user this module is allowed to know anything about.
+ *
+ * `email` is nullable since #969: the registered address is ciphertext, and a
+ * locked instance or a damaged value means there is genuinely no address to
+ * send to. `issueAndSend` refuses in that case rather than mailing nowhere.
+ */
 interface Recipient {
   id: string;
-  email: string;
+  email: string | null;
   displayName: string;
+}
+
+/**
+ * The refusal when the address cannot be read (#969). Two causes, told apart
+ * because only one of them mends itself: a locked instance is a 503 the
+ * administrator retries after restoring the encryption key, and a damaged
+ * stored address is a 409 that stays refused until the address is set again.
+ * Neither ever sends to an empty or invented address.
+ */
+function unreadableAddressError(state: MetadataFieldState | undefined): AppError {
+  return state === "metadata_locked"
+    ? new AppError(
+      "metadata_locked",
+      "The setup link cannot be sent until Orbit's encryption key is available",
+      503,
+    )
+    : new AppError(
+      "recipient_address_unreadable",
+      "This account has no readable email address, so a setup link cannot be sent",
+      409,
+    );
 }
 
 /**
@@ -105,17 +133,23 @@ async function issueAndSend(
   purpose: CredentialSetupTokenPurpose,
   actorUserId: string,
   options: SendSetupLinkOptions,
+  addressState?: MetadataFieldState,
 ): Promise<SetupLinkDelivery> {
+  /* Before the token, not after it: a link minted for an address nobody can
+     read would kill the previous link and replace it with one that cannot be
+     delivered. */
+  if (!recipient.email) throw unreadableAddressError(addressState);
+  const email = recipient.email;
   const { token, expiresAt } = await issueSetupToken(recipient.id, purpose, {
     createdByUserId: actorUserId,
     expiresInDays: options.expiresInDays,
   });
 
   const outcome = await sendBoundedMail(
-    recipient.email,
+    email,
     renderSetupMail({
       displayName: recipient.displayName,
-      email: recipient.email,
+      email,
       link: setupLink(token),
       expiresAt,
       purpose,
@@ -135,7 +169,7 @@ async function issueAndSend(
     });
   }
 
-  return { sentTo: recipient.email, expiresAt, sendError: outcome.sendError };
+  return { sentTo: email, expiresAt, sendError: outcome.sendError };
 }
 
 export interface CreatedLocalUser extends SetupLinkDelivery {
@@ -186,7 +220,10 @@ export async function sendSetupLink(
   const [recipient] = await db
     .select({
       id: users.id,
+      /* Dual read (#969): `email_enc` once the backfill has reached the row,
+         the plaintext column until it has. */
       email: users.email,
+      emailEnc: users.emailEnc,
       displayName: users.displayName,
       credential: localCredentials.userId,
     })
@@ -198,5 +235,13 @@ export async function sendSetupLink(
     throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
   }
 
-  return issueAndSend(recipient, recipient.credential ? "recovery" : "setup", actorUserId, options);
+  const address = (await openInstanceMetadataReader(db))
+    .text("users.email", recipient.id, { encrypted: recipient.emailEnc, plaintext: recipient.email });
+  return issueAndSend(
+    { ...recipient, email: address.value },
+    recipient.credential ? "recovery" : "setup",
+    actorUserId,
+    options,
+    address.state,
+  );
 }

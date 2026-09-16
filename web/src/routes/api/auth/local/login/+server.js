@@ -48,6 +48,19 @@ export const POST = api(
     if (verdict.outcome === "throttled") {
       throw new AuthError("too_many_attempts", "Too many sign-in attempts; try again shortly", 429);
     }
+    /* The instance holds no usable encryption key, so no address can be
+       matched at all (#969). Told apart from a wrong password deliberately:
+       flattening it into `credentials_invalid` below would send an operator
+       whose key is missing looking for a fault in their own password. It
+       names no account and is true before any comparison happens, so it
+       gives away nothing the generic answer protects. */
+    if (verdict.outcome === "locked") {
+      throw new AuthError(
+        "instance_locked",
+        "This Orbit instance cannot sign anybody in until its encryption key is available",
+        503,
+      );
+    }
     if (verdict.outcome !== "verified") {
       throw new AuthError("credentials_invalid", INVALID_MESSAGE, 401);
     }

@@ -270,6 +270,56 @@ administrator at any time (ADR-0022 §6). That is the trust boundary this
 command sits inside, not a gap it introduces: host access to the running
 deployment already means full control of it.
 
+## When the encryption key and the recovery bundle are both lost
+
+This is the last resort, and it recovers nothing. Read the whole section
+before running it.
+
+Orbit encrypts documents and personal details — including everyone's email
+address — under one key. If that key and the recovery bundle are both gone,
+those things are gone with them, permanently. Nothing here brings them back.
+
+What it does fix is the second problem that follows: Orbit finds an account by
+its email address, and it can no longer read any address, so **nobody can sign
+in at all**. Without this command the instance is a locked box with everyone's
+accounts intact inside it.
+
+```sh
+docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth clear-addresses
+```
+
+It asks you to type `CLEAR ADDRESSES` before doing anything, and then:
+
+- removes every account address it cannot read — **the accounts themselves
+  survive**, with their households, memberships and history intact;
+- removes every mail-forwarding address it cannot read; members add and prove
+  those again afterwards;
+- leaves alone any address it *can* still read.
+
+Then get back in and put the addresses back:
+
+```sh
+docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth recovery-link
+```
+
+Open that link to set the primary administrator's password and sign in, then
+re-enter members' addresses by hand from the users screen. Each member sets
+their own password through a setup link as usual.
+
+**It refuses to run while the key still works.** This is deliberate, and it is
+the guard that matters most. If members cannot sign in and the key is fine,
+the fault is something else entirely, and running this would destroy addresses
+that were never in danger — so the command checks first and stops. If you have
+the recovery bundle, restore that instead: it brings the key back and nothing
+is lost.
+
+It can only be run from the host shell. No page, no button and no API request
+can reach it, deliberately: reachable over the network it would be a single
+request that wipes every account's identity. It needs a real terminal, so a
+script or scheduled job cannot run it either. Each run is recorded in the
+audit log as `account_addresses_cleared`, with counts only — the addresses
+could not be read, so there is nothing to record.
+
 ## Provider tests
 
 The SMTP test verifies connection and authentication only. It does not send a

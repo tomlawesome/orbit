@@ -114,6 +114,10 @@ async function actorFor(userId: string): Promise<Actor> {
     config,
   );
   if (!session) throw new Error("The session was not persisted");
+  /* Readable here by construction: these journeys run with a working key, and
+     the address is encrypted now (#969), so a null would mean the fixture lost
+     the key rather than that the account has no address. Fail loudly. */
+  if (session.user.email === null) throw new Error("The account address could not be read");
   return {
     id: userId,
     email: session.user.email,

@@ -377,7 +377,13 @@ function stateOf(
 
 export interface RedeemingUser {
   userId: string;
-  email: string;
+  /**
+   * Null when the instance cannot read the signed-in account's own address
+   * (#969). The match below then has nothing to compare, and the redemption
+   * fails as a mismatch — the invitation stays open for whoever it was
+   * addressed to, which is the safe way for this to fail.
+   */
+  email: string | null;
   /** The session whose active household is set on success. */
   sessionId: string;
 }
@@ -433,8 +439,12 @@ export async function redeemInvitation(token: string, user: RedeemingUser): Prom
        An address that will not decrypt is null, and null matches nobody — the
        invitation stays open and the reader is told to sign out, which is the
        right way for this to fail. */
+    /* Both halves can now be unreadable: the invitation under the household's
+       key (#963), and the reader's own account address under the instance key
+       (#969). Either one missing is a mismatch, never a match — a comparison
+       that cannot be made must not pass. */
     const invitedAddress = invitationEmail(await openMetadataReader(row.householdId, transaction), row);
-    if (!invitedAddress || normaliseInvitationEmail(user.email) !== invitedAddress) {
+    if (!invitedAddress || user.email === null || normaliseInvitationEmail(user.email) !== invitedAddress) {
       return { state: "mismatch", inviterName, householdId: null, householdName: null };
     }
 

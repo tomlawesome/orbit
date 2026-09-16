@@ -1,9 +1,10 @@
 /**
  * The encrypted-metadata backfill (ADR-0024 decision 3), in the resumable-job
- * mould of ADR-0010. It covers Tier 1 (#931) and Tier 2 (#963) together, in
- * one pass over each table, because both tiers share one key and one envelope.
+ * mould of ADR-0010. It covers Tier 1 (#931) and Tier 2 (#963, extended by
+ * #969) together, in one pass over each table, because every tier shares one
+ * key hierarchy and one envelope.
  *
- * Migrations 0040 and 0041 cannot do this work: encrypting needs the key-encryption key,
+ * Migrations 0040, 0041 and 0044 cannot do this work: encrypting needs the key-encryption key,
  * which is an application secret and is not available to SQL. What the
  * migration guarantees is that every pre-existing row stays readable — the
  * plaintext column stands until this job replaces it — and what this job does
@@ -17,7 +18,7 @@
  */
 import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { householdInvitations, imapIngestionMessages, items } from "@/db/schema";
+import { householdInvitations, imapIngestionMessages, items, mailInSenderAddresses, users } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { MetadataKeyLockedError, resolveMetadataKey } from "@/server/metadata/keys";
 import { MetadataCipher, type MetadataExecutor } from "@/server/metadata/fields";
@@ -29,11 +30,14 @@ export interface MetadataBackfillBatch {
   items: number;
   receipts: number;
   invitations: number;
+  users: number;
+  senderAddresses: number;
 }
 
 /** True when this batch converted nothing, so there is no more work. */
 export function backfillComplete(batch: MetadataBackfillBatch): boolean {
-  return batch.items === 0 && batch.receipts === 0 && batch.invitations === 0;
+  return batch.items === 0 && batch.receipts === 0 && batch.invitations === 0
+    && batch.users === 0 && batch.senderAddresses === 0;
 }
 
 async function cipherFor(
@@ -65,6 +69,8 @@ export async function runMetadataBackfillBatch(
     let convertedItems = 0;
     let convertedReceipts = 0;
     let convertedInvitations = 0;
+    let convertedUsers = 0;
+    let convertedSenderAddresses = 0;
 
     // One pass converts both tiers of a row. Selecting on "any plaintext still
     // present with its ciphertext missing" is what makes the job resumable
@@ -166,7 +172,59 @@ export async function runMetadataBackfillBatch(
       convertedInvitations += updated.length;
     }
 
-    return { items: convertedItems, receipts: convertedReceipts, invitations: convertedInvitations };
+    // Account addresses (#969), both under the instance key. Unlike the rows
+    // above, these are the ones sign-in and attribution look up, so the blind
+    // index is written in the same statement that clears the plaintext: a row
+    // is never findable by neither.
+    const userRows = await transaction.select({
+      id: users.id,
+      email: users.email,
+    }).from(users).where(and(
+      isNotNull(users.email),
+      isNull(users.emailEnc),
+    )).limit(batchSize);
+
+    for (const row of userRows) {
+      const cipher = await cipherFor(ciphers, null, transaction);
+      const updated = await transaction.update(users).set({
+        email: null,
+        emailEnc: cipher.encryptText("users.email", row.id, row.email),
+        emailIndex: cipher.emailIndex(row.email),
+      }).where(and(
+        eq(users.id, row.id),
+        isNull(users.emailEnc),
+      )).returning({ id: users.id });
+      convertedUsers += updated.length;
+    }
+
+    const senderRows = await transaction.select({
+      id: mailInSenderAddresses.id,
+      address: mailInSenderAddresses.address,
+    }).from(mailInSenderAddresses).where(and(
+      isNotNull(mailInSenderAddresses.address),
+      isNull(mailInSenderAddresses.addressEnc),
+    )).limit(batchSize);
+
+    for (const row of senderRows) {
+      const cipher = await cipherFor(ciphers, null, transaction);
+      const updated = await transaction.update(mailInSenderAddresses).set({
+        address: null,
+        addressEnc: cipher.encryptText("mail_in_sender_addresses.address", row.id, row.address),
+        addressIndex: cipher.senderAddressIndex(row.address),
+      }).where(and(
+        eq(mailInSenderAddresses.id, row.id),
+        isNull(mailInSenderAddresses.addressEnc),
+      )).returning({ id: mailInSenderAddresses.id });
+      convertedSenderAddresses += updated.length;
+    }
+
+    return {
+      items: convertedItems,
+      receipts: convertedReceipts,
+      invitations: convertedInvitations,
+      users: convertedUsers,
+      senderAddresses: convertedSenderAddresses,
+    };
   });
 }
 

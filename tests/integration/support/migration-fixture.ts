@@ -78,7 +78,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   sections: ["id", "household_id", "slug", "name", "icon", "accent", "position", "visible", "archived_at", "created_at", "updated_at"],
   sessions: ["id", "user_id", "token_hash", "active_household_id", "expires_at", "rotated_at", "created_at", "user_agent", "last_seen_at"],
   user_preferences: ["user_id", "theme_mode", "theme_id", "text_size", "urgency_palette", "email_notifications", "push_notifications", "first_warning_days", "final_warning_days", "tour_seen_at", "updated_at"],
-  users: ["id", "email", "email_verified", "display_name", "avatar_url", "is_instance_admin", "disabled_at", "created_at", "updated_at"],
+  users: ["id", "email", "email_enc", "email_index", "email_verified", "display_name", "avatar_url", "is_instance_admin", "disabled_at", "created_at", "updated_at"],
   imap_recipient_aliases: ["id", "user_id", "generation", "alias_sha256", "alias_key_secret_id", "status", "active_until", "created_at", "updated_at"],
   instance_authority: ["singleton", "primary_user_id", "updated_at"],
   instance_maintenance: ["singleton", "id", "active", "current_window_id", "expected_end_at", "version", "updated_at"],
@@ -94,7 +94,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   mail_in_secrets: ["id", "kind", "ciphertext", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "created_by_user_id", "created_at", "updated_at"],
   mail_in_mailbox: ["singleton", "id", "host", "port", "account_user", "mailbox", "tls_server_name", "provider_profile", "auth_method", "trusted_recipient_header", "poll_seconds", "enabled", "verification_state", "verified_at", "password_secret_id", "alias_key_secret_id", "version", "created_at", "updated_at", "trusted_authserv_id"],
   mail_in_relays: ["user_id", "current_generation", "previous_generation", "previous_expires_at", "ingest_paused_at", "rotated_at", "version", "created_at", "updated_at"],
-  mail_in_sender_addresses: ["id", "user_id", "address", "source", "verified_at", "verification_token_digest", "verification_expires_at", "created_at", "updated_at"],
+  mail_in_sender_addresses: ["id", "user_id", "address", "address_enc", "address_index", "source", "verified_at", "verification_token_digest", "verification_expires_at", "created_at", "updated_at"],
   mail_in_unattributed_replies: ["address_sha256", "last_replied_at", "created_at", "updated_at"],
   local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "created_at", "updated_at"],
   credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
@@ -152,6 +152,10 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   imap_recipient_alias_user_generation_unique: { table: "imap_recipient_aliases", columns: ["user_id", "generation"], unique: true },
   imap_recipient_alias_user_status_idx: { table: "imap_recipient_aliases", columns: ["user_id", "status"], unique: false },
   mail_in_sender_address_unique: { table: "mail_in_sender_addresses", columns: ["address"], unique: true },
+  // The blind index carrying "one account per sender address" across the
+  // encryption (#969). The plaintext index above stands through the expand
+  // release, for the rows the backfill has not reached.
+  mail_in_sender_address_unique_index: { table: "mail_in_sender_addresses", columns: ["address_index"], unique: true },
   mail_in_sender_address_user_idx: { table: "mail_in_sender_addresses", columns: ["user_id", "verified_at"], unique: false },
   // Partial: at most one open window, enforced by the database (orbit#585).
   maintenance_window_open_unique: { table: "maintenance_windows", columns: ["status"], unique: true },
@@ -187,6 +191,10 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   section_household_slug: { table: "sections", columns: ["household_id", "slug"], unique: true },
   sessions_token_hash_unique: { table: "sessions", columns: ["token_hash"], unique: true },
   user_email_lookup_idx: { table: "users", columns: ["email"], unique: false },
+  // "One account per address", carried across the encryption (#969). Unlike
+  // user_email_unique_ci below this one is over a plain column, so it does
+  // appear in the contract.
+  user_email_unique_index: { table: "users", columns: ["email_index"], unique: true },
   credential_setup_tokens_user_idx: { table: "credential_setup_tokens", columns: ["user_id"], unique: false },
   step_up_proofs_session_idx: { table: "step_up_proofs", columns: ["session_id"], unique: false },
   // user_email_unique_ci is a functional index (lower(email)): PostgreSQL
@@ -840,7 +848,13 @@ function snapshotColumns(tableName: string): string[] {
   // migration. Snapshot only columns present on both sides so migration data
   // comparisons remain stable while explicit migration assertions cover the
   // transformed legacy rows and newly added columns.
-  if (tableName === "users") return EXPECTED_TABLE_COLUMNS.users;
+  // `email_enc` and `email_index` arrive with 0044 (#969), so they exist on
+  // the current side only and cannot appear in a before-and-after comparison.
+  // What 0044 does to existing rows is asserted directly, below this file's
+  // Tier 1 and Tier 2 cases.
+  if (tableName === "users") {
+    return EXPECTED_TABLE_COLUMNS.users.filter((column) => column !== "email_enc" && column !== "email_index");
+  }
   if (tableName === "imap_ingestion_messages") return fixtureColumns(tableName).filter((column) => column !== "recipient_alias_generation");
   return fixtureColumns(tableName);
 }
