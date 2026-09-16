@@ -10,7 +10,8 @@ const bytea = customType<{ data: Buffer }>({
 
 export const membershipRole = pgEnum("membership_role", ["owner", "member"]);
 export const itemStatus = pgEnum("item_status", ["active", "expired", "cancelled", "archived"]);
-export const eventKind = pgEnum("event_kind", ["renewal", "service"]);
+/** #1005: `expiry` is the one-off -- an end date that never comes round. */
+export const eventKind = pgEnum("event_kind", ["renewal", "service", "expiry"]);
 export const deliveryChannel = pgEnum("delivery_channel", ["email", "web_push"]);
 export const deliveryStatus = pgEnum("delivery_status", ["pending", "processing", "sent", "retry", "failed", "cancelled"]);
 export const themeMode = pgEnum("theme_mode", ["system", "light", "dark"]);

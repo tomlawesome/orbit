@@ -24,6 +24,9 @@ const activityKinds = [
   "cancelled",
   "restored",
   "archived",
+  /* #1005: written by the worker's daily sweep, never by a member -- an
+     expiry's fortnight ran out and the item became an ended thing. */
+  "expired",
 ] as const;
 
 /**
@@ -78,6 +81,12 @@ export const workspaceItemSchema = z.object({
   }
   if (item.recurrenceMonths && !item.scheduleKind) {
     context.addIssue({ code: "custom", path: ["recurrenceMonths"], message: "Recurrence requires a schedule type" });
+  }
+  /* #1005: an expiry is the one-off kind. It ends on its day and does not come
+     round, so a recurrence on one is a contradiction rather than a default to
+     quietly drop -- the reviewer is told, exactly as an unscheduled one is. */
+  if (item.recurrenceMonths && item.scheduleKind === "expiry") {
+    context.addIssue({ code: "custom", path: ["recurrenceMonths"], message: "An expiry happens once and does not come round" });
   }
 });
 
