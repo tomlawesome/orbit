@@ -91,6 +91,13 @@ const test: TestUserConfig = {
           ".claude/worktrees/**",
           "tests/e2e/**",
           "tests/integration/**",
+          // Scratch prototypes (#995), for the same reason tsconfig excludes
+          // and eslint ignores them: AGENTS.md sends agents to tmp/ to
+          // prototype, the directory is gitignored, and a *.test.ts left
+          // there is collected and run like any other — failing the suite
+          // over work that was never meant to ship. Guarded by
+          // scripts/scratch-dir-ignored.test.mjs.
+          "tmp/**",
           // web/ is a separate project with its own runners: its fidelity and
           // behaviour suites are Playwright, so collecting them here calls
           // Playwright's test() outside a Playwright runner and fails to
@@ -105,6 +112,9 @@ const test: TestUserConfig = {
           // standalone with `node --test
           // scripts/compose-project-name-resolution.test.mjs`.
           "scripts/compose-project-name-resolution.test.mjs",
+          // Same reason (#995): uses node:test. Run standalone with
+          // `node --test scripts/scratch-dir-ignored.test.mjs`.
+          "scripts/scratch-dir-ignored.test.mjs",
           // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
           // unprivileged `big` lane, which has no `docker` binary on PATH.
           // test-e2e-local-reuse.test.mjs joined the list on #947: it drives
