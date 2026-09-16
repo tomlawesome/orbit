@@ -19,14 +19,14 @@
  * manifest's four short words (over / soon / up / ok) rather than the chart
  * key's long ones.
  */
-import { bandOf, daysUntil } from "./chart.js";
+import { bandOfKind, daysUntil, kindOfItem } from "./chart.js";
 /* Relative, like chart.js's own imports: this module is pure and is exercised
    straight from node by the unit suite, which knows no SvelteKit aliases. */
 import { longDate, tminus } from "../format.js";
 
 /**
  * chart.js's bands, in the belt's own four-letter vocabulary.
- * @type {Record<string, "over" | "soon" | "up" | "ok">}
+ * @type {Record<string, "over" | "soon" | "up" | "ok" | "ended">}
  */
 export const BELT_BAND = {
   overdue: "over",
@@ -34,6 +34,8 @@ export const BELT_BAND = {
   upcoming: "up",
   ok: "ok",
   unscheduled: "ok",
+  /* #1005: a one-off past its date has ended, not fallen overdue. */
+  ended: "ended",
 };
 
 /* The band's captions carry the short date the manifest uses — "29 Aug" —
@@ -85,12 +87,22 @@ const kindOfFile = (mediaType) => {
  * @param {import('./workspace.js').WorkspaceItem} item
  * @returns {string}
  */
-export const kindOf = (item) =>
-  item.subtype === "inspection"
-    ? "inspection"
-    : item.scheduleKind === "renewal"
-      ? "renewal"
-      : "service";
+export const kindOf = (item) => kindOfItem(/** @type {any} */ (item));
+
+/**
+ * What the band's caption says about the date. A renewal or a service simply
+ * names the day; a one-off (#1005) says what the day IS -- "ends 29 Aug" while
+ * it is still ahead, "ended 29 Aug" once it has passed.
+ *
+ * @param {string} kind
+ * @param {?number} days
+ * @param {string} date  the short date, "29 Aug"
+ * @returns {string}
+ */
+export const whenOf = (kind, days, date) => {
+  if (kind !== "expiry") return date;
+  return `${days !== null && days < 0 ? "ended" : "ends"} ${date}`;
+};
 
 /**
  * One document, as a body in the band and as its own card.
@@ -150,7 +162,7 @@ function documentRowOf(doc) {
  * @property {?string} snoozedUntil
  * @property {?string} due
  * @property {number} days
- * @property {"over" | "soon" | "up" | "ok"} urg
+ * @property {"over" | "soon" | "up" | "ok" | "ended"} urg
  * @property {string} t
  * @property {string} when
  * @property {string} longWhen
@@ -185,12 +197,13 @@ export function beltManifestOf({ household, documentsByItem = {}, today, keepId 
     .filter((item) => item.status === "active" || item.id === keepId)
     .map((item) => {
       const days = daysUntil(item.dueDate, today);
-      const urg = BELT_BAND[bandOf(days)];
+      const kind = kindOf(item);
+      const urg = BELT_BAND[bandOfKind(kind, days)];
       return {
         id: item.id,
         title: item.title,
         section: sections.get(item.sectionId) ?? null,
-        kind: kindOf(item),
+        kind,
         provider: item.provider ?? null,
         reference: item.reference ?? null,
         notes: item.notes ?? null,
@@ -205,7 +218,7 @@ export function beltManifestOf({ household, documentsByItem = {}, today, keepId 
         days: days ?? Number.MAX_SAFE_INTEGER,
         urg,
         t: item.dueDate ? tminus(item.dueDate, today) : "—",
-        when: item.dueDate ? shortDate(item.dueDate) : "unscheduled",
+        when: item.dueDate ? whenOf(kind, days, shortDate(item.dueDate)) : "unscheduled",
         longWhen: item.dueDate ? longDate(item.dueDate) : "unscheduled",
         cost: item.costMinor ?? null,
         /* costIsEstimate is not in WorkspaceItem's own typedef (workspace.js,

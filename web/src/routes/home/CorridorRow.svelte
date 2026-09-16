@@ -62,10 +62,15 @@
       ? new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" })
       : "";
 
+  /* #1005: a renewal comes round, a one-off ends -- and once its date is past
+     it has ended. The suggestion's own schedule kind is what says which. */
+  const dateWord = $derived(
+    suggestionMatch?.scheduleKind === "expiry" ? (row.days < 0 ? "ended" : "ends") : "renews",
+  );
   const suggestionMeta = $derived(
     [
       `Found in ${row.sourceDocument}`,
-      row.dueDate ? `renews ${short(row.dueDate)}` : null,
+      row.dueDate ? `${dateWord} ${short(row.dueDate)}` : null,
       row.costMinor ? money(row.costMinor, row.currency, true) : null,
     ].filter(Boolean),
   );
@@ -113,6 +118,7 @@
      href={resolve(`/home?item=${encodeURIComponent(row.id)}`)} aria-expanded={expanded === row.id}
      aria-controls="{row.id}-view" onclick={(event) => onRowClick(event, row.id)}>
     <span class="planet" class:ter={row.kind === "inspection"} class:con={row.kind === "renewal"}
+          class:exp={row.kind === "expiry"}
           style="color:var({BAND_VAR[row.band]})" aria-hidden="true"><i></i></span>
     <div class="body"><b>{row.title}</b><span>{meta.join(" · ")}</span></div>
     {#if row.dueDate}

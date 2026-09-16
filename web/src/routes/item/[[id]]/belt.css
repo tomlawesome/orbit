@@ -266,6 +266,8 @@
   .belt-page .kv b{color:var(--ink);font-weight:500;text-align:right}
   .belt-page .kv b.clean{color:var(--ok-text)}
   .belt-page .kv b.over{color:var(--overdue-text)} .belt-page .kv b.soon{color:var(--warm)}
+  /* #1005: an expiry past its date reads quietly, never as an alarm. */
+  .belt-page .kv b.ended{color:var(--ink-mid)}
   .belt-page .kv b.up{color:var(--upcoming)} .belt-page .kv b.ok{color:var(--ok-text)}
   /* #941, and no new vocabulary: the same b.<state> family as .clean and .over
      above, in the two tones the ruling names. Damaged carries inbox.css's

@@ -23,6 +23,9 @@ export function receiptSuggestionsOf(receipts = []) {
       householdId: receipt.householdId ?? null,
       title: receipt.proposal?.title ?? "Forwarded email",
       renewsOn: receipt.proposal?.dueDate ?? null,
+      /* #1005: which word that date takes on the screens -- a renewal comes
+         round, a one-off ends. */
+      scheduleKind: receipt.proposal?.scheduleKind ?? null,
       provider: receipt.proposal?.provider ?? null,
       expiresAt: receipt.expiresAt ?? null,
       receivedAt: receipt.receivedAt ?? null,

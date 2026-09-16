@@ -515,14 +515,17 @@
       <article class="glass item-card">
         <h2>{row.title}</h2>
         <div class="sub">{[row.section, row.kind].filter(Boolean).join(" · ")}</div>
-        <div class="kv"><span>due</span><b class={row.urg}>{row.t} · {row.longWhen}</b></div>
+        <!-- #1005: a one-off ends on its day; nothing is due on it. -->
+        <div class="kv"><span>{row.kind === "expiry" ? "ends" : "due"}</span><b class={row.urg}>{row.t} · {row.longWhen}</b></div>
         {#if row.snoozedUntil}
           <div class="kv"><span>snoozed until</span><b>{longDate(row.snoozedUntil)}</b></div>
         {/if}
         {#if row.status !== "active"}
           <div class="kv"><span>status</span><b>{row.status}</b></div>
         {/if}
-        {#if row.months}
+        {#if row.kind === "expiry"}
+          <div class="kv"><span>orbital period</span><b>one-off — does not come round</b></div>
+        {:else if row.months}
           <div class="kv"><span>orbital period</span><b>{every(row.months)}</b></div>
         {/if}
         <div class="kv"><span>cost</span><b>{money(row.cost, row.currency, row.costIsEstimate)}</b></div>
