@@ -72,10 +72,14 @@
 #                    the acceptance stack (profile ..., project ..., app on
 #                    ...)"); tear that project down afterwards with the file
 #                    set its profile used -- the oidc profile's is:
-#                      docker compose -p <project> --env-file .env-orbit \
+#                      COMPOSE_PROFILES=processing \
+#                        docker compose -p <project> --env-file .env-orbit \
 #                        -f docker-compose.yml -f docker-compose.mail.yml \
 #                        -f compose/docker-compose.acceptance.yml \
 #                        -f compose/docker-compose.local-e2e.yml down --volumes
+#                    COMPOSE_PROFILES is not optional there: without it
+#                    Compose does not consider the `processing` profile's
+#                    orbit-tika part of the project and leaves it running.
 #
 # #875: the Compose project name and app port used to be fixed
 # ("orbit-e2e-local" on 13777), so two concurrent runs -- two worktrees, two
@@ -268,9 +272,44 @@ else
   readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.local-e2e.yml)
 fi
 
+# COMPOSE_PROFILES=processing is what turns the `orbit-tika` document parser
+# on (#920). CI gets it from .env-orbit, which
+# scripts/ci/create-test-configuration.sh appends it to; this script must
+# never write to .env-orbit, so it goes in the environment instead, where
+# Compose ranks it above the --env-file's own (empty) value. It is set here,
+# on the one wrapper every compose call goes through, rather than on `up`
+# alone: `down`, `ps`, `logs` and `config` all have to see the same service
+# set, or teardown leaves the parser behind and the diagnostics do not show
+# it. compose/docker-compose.local-e2e.yml carries the other half -- the
+# TIKA_URL the application reads, and the parser's per-run container name.
 compose() {
   env ORBIT_IMAGE="$orbit_image" COMPOSE_PROJECT_NAME="$project_name" \
+    COMPOSE_PROFILES=processing \
     docker compose -p "$project_name" --env-file .env-orbit "${compose_files[@]}" "$@"
+}
+
+# #920: a local harness that claims to run the suite and silently leaves a
+# service out is the failure this check exists to stop -- the document
+# extraction spec used to be the only thing that noticed, 60 seconds into a
+# poll, reporting "the optional document processor" as if that were a
+# product answer rather than a harness fault. Assert both halves of what CI
+# gives the stack, the same way the APP_URL agreement check (#732) asserts
+# the port: the application must be pointed at the parser, and the parser
+# must actually be running under this project.
+assert_document_parser_ready() {
+  local configured_tika running_tika
+  configured_tika="$(compose config --format json | jq -r '.services["orbit-app"].environment.TIKA_URL // empty')"
+  [[ "$configured_tika" == "http://orbit-tika:9998" ]] ||
+    fail "the application is configured with TIKA_URL=${configured_tika:-<unset>}, not http://orbit-tika:9998; tests/e2e/v19-document-extraction.spec.ts would report the document processor as absent instead of testing it (#920)"
+  # First name only, by parameter expansion rather than `head` -- the
+  # SIGPIPE shape #809 rejects. Labels, not container names: the same
+  # identification cleanup() and --reuse trust.
+  running_tika=$(docker ps --filter "label=com.docker.compose.project=${project_name}" \
+    --filter "label=com.docker.compose.service=orbit-tika" --format '{{.Names}}')
+  running_tika="${running_tika%%$'\n'*}"
+  [[ -n "$running_tika" ]] ||
+    fail "no running orbit-tika container for project ${project_name}: the processing profile did not start the document parser, so the extraction journey would test nothing (#920)"
+  log "document parser is up (${running_tika}, TIKA_URL=${configured_tika})"
 }
 
 # Registered before anything is built or started, so any failure from here
@@ -420,6 +459,9 @@ if [[ -n "$reuse_project" ]]; then
   jq --exit-status '.status == "ready" and .service == "orbit"' <<< "$response" > /dev/null ||
     fail "--reuse ${project_name}: health endpoint did not report ready: ${response}"
   log "reusing project ${project_name} (profile ${profile}, app on ${base_url}); skipping image build, OIDC build and compose up"
+  # A stack kept by a run from before #920 has no parser, and reusing it
+  # would quietly reintroduce exactly the gap this check closes.
+  assert_document_parser_ready
 else
   # GreenMail's SMTP port and the disposable OIDC provider's port are fixed in
   # CI (3025 and 4443: tests/e2e/v19-mail-collection.spec.ts's SMTP_PORT,
@@ -478,7 +520,7 @@ else
   # The renamed containers (compose/docker-compose.local-e2e.yml) must not already
   # exist under a different project; a name collision there would mean this
   # script is about to touch something it did not create.
-  for fixed_name in "${project_name}-app" "${project_name}-db" "${project_name}-clamav"; do
+  for fixed_name in "${project_name}-app" "${project_name}-db" "${project_name}-clamav" "${project_name}-tika"; do
     if docker inspect "$fixed_name" >/dev/null 2>&1; then
       label="$(docker inspect "$fixed_name" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
       [[ "$label" == "$project_name" ]] || fail "container ${fixed_name} already exists and belongs to project '${label}', not '${project_name}'. Refusing to touch it."
@@ -616,6 +658,8 @@ else
   configured_app_url="$(compose config --format json | jq -r '.services["orbit-app"].environment.APP_URL // empty')"
   [[ "$configured_app_url" == "$base_url" ]] || fail "the application is configured with APP_URL=${configured_app_url:-<unset>} but this run publishes it on ${base_url}; browser sign-in would fail at the OIDC callback"
   log "APP_URL agrees with the published port"
+
+  assert_document_parser_ready
 fi
 
 # --- Run the Playwright suite -------------------------------------------------
