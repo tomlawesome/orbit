@@ -291,6 +291,8 @@
   .t{font:500 13.5px var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
   .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-quiet)}
   .t.over{color:var(--overdue-text)} .t.soon{color:var(--warm)}
+  /* #1005: an expiry past its date reads quietly, never as an alarm. */
+  .t.ended{color:var(--ink-mid)}
   .t.up{color:var(--upcoming)} .t.ok{color:var(--ok-text)}
   .suggest{border-style:dashed}
   .suggest .body span{color:var(--accent-text)}
@@ -695,6 +697,9 @@
                 box-shadow:0 0 0 2.5px var(--bg)}
 .manifest .corridor .planet.ter i{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)}
 .manifest .corridor .planet.con i{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)}
+/* #1005: a one-off is the dashed ring the sky draws it as -- an outline with
+   nothing inside, because nothing is coming round. */
+.manifest .corridor .planet.exp i{background:none;border:1.6px dashed currentColor}
 .manifest .corridor .planet.sug i{background:none;border:1.6px solid var(--accent)}
 .manifest .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-quiet);letter-spacing:.08em}
 

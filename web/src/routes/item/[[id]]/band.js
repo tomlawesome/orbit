@@ -50,7 +50,7 @@ import { seededRng } from "$lib/sky.js";
  * things and the two must never be confused for one another.
  * ==================================================================== */
 
-/** @typedef {"over" | "soon" | "up" | "ok"} Urgency the manifest's four words */
+/** @typedef {"over" | "soon" | "up" | "ok" | "ended"} Urgency the manifest's words; `ended` is the expiry past its date (#1005) */
 
 /**
  * The raw workspace item the manifest carries through untouched, so the
@@ -100,7 +100,7 @@ import { seededRng } from "$lib/sky.js";
  * @property {string}     id
  * @property {string}     title
  * @property {?string}    section
- * @property {string}     kind         inspection / renewal / service
+ * @property {string}     kind         inspection / renewal / service / expiry
  * @property {?string}    provider
  * @property {?string}    reference
  * @property {?string}    notes
@@ -111,7 +111,7 @@ import { seededRng } from "$lib/sky.js";
  * @property {number}     days         days until due; undated rows sort last
  * @property {Urgency}    urg
  * @property {string}     t            "T−16d"
- * @property {string}     when         "29 Aug"
+ * @property {string}     when         "29 Aug", or "ends 29 Aug" / "ended 29 Aug" for an expiry (#1005)
  * @property {string}     longWhen     "29 August 2026"
  * @property {?number}    cost         minor units
  * @property {boolean}    costIsEstimate
@@ -473,6 +473,8 @@ export function shortName(s) {
 const BAND_VAR = {
   over: "var(--overdue)", soon: "var(--warm)",
   up: "var(--upcoming)", ok: "var(--ok)",
+  /* #1005: an ended one-off wears the quiet ink tone, never the alarm. */
+  ended: "var(--ink-mid)",
 };
 
 /**
