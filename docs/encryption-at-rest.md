@@ -68,7 +68,11 @@ envelope bound to its own table, column and row.
 
 **Tier 1** is an item's notes and reference, and a mail-in receipt's extracted
 proposal and field evidence. **Tier 2** is an item's name, its provider's name
-and its cost, and the address on an open household invitation. Tier 2 costs
+and its cost, the address on an open household invitation, and — since #969 —
+every account address: `users.email` and the mail-forwarding addresses members
+send from. Those two sit under an instance-wide key rather than a household
+one, because a person belongs to several households and a forwarded message is
+matched to its sender before any household is known. Tier 2 costs
 queries the database used to be able to do: searching item names, matching a
 provider and adding up costs all happen in Orbit now, over one household's
 decrypted rows. Measured on a seeded database, that costs about 4.5 ms for a
@@ -78,14 +82,26 @@ list can reach.
 **Tier 3 is deliberately left in plaintext**: due dates, statuses, recurrence,
 and household and member relationships. Those are what the reminder workers and
 due-window queries run on in SQL, and disk encryption (layer 4) is the answer
-for them. The account address `users.email` is also deliberately in plaintext,
-so that a missing key never locks anybody out of signing in — #966 is where
-that call is being decided properly.
+for them.
 
-`items.reference` and the invitation address each carry a blind index, so an
-exact-match lookup still works without decrypting every row — for the
-invitation address, that index is what keeps "one open invitation per address"
-a rule the database enforces. Nothing else is indexed: an item's name, provider
+**What happens to signing in when the key is missing** was the open question
+here, and #966 settled it. Orbit finds an account by its address, so with no
+key it can match none: password sign-in is refused in those words — "this
+instance cannot sign anybody in until its encryption key is available" — and
+never as a wrong password, which would send an operator looking for a fault in
+themselves. People who sign in through an identity provider are unaffected,
+because that match is on the provider's own issuer and subject and never
+touches the address. If the key **and** the recovery bundle are both gone, the
+addresses cannot be recovered at all, and a host-shell command clears them so
+that people can be let back in and their addresses re-entered by hand — see
+[administrator-operations.md](administrator-operations.md#when-the-encryption-key-and-the-recovery-bundle-are-both-lost).
+
+`items.reference`, the invitation address and both account addresses carry a
+blind index, so an exact-match lookup still works without decrypting every row.
+For the invitation address that index is what keeps "one open invitation per
+address" a rule the database enforces; for the account addresses it is what
+keeps "one account per address", and it is how every sign-in finds its account.
+Nothing else is indexed: an item's name, provider
 and cost are only ever compared by readers that already read the whole
 household, so an index would serve no query. Within one household an index
 reveals which rows share a value and how many distinct values there are, and
@@ -168,7 +184,7 @@ exists so the operator picks it knowingly, rather than by accident.
 | Document bytes (inside an `orbit backup` tar) | Application envelope (same DOCUMENT_KEK) + disk encryption | — |
 | `DOCUMENT_KEK` secret file itself | Filesystem mode `0600`/`0400` + disk encryption | Application envelope (it *is* the key) |
 | Tier 1 metadata columns (item notes/reference, mail-in draft) | Application envelope (same DOCUMENT_KEK) + disk encryption | — (but see the two-release rollout in 2a) |
-| Tier 2 metadata columns (item name/provider/cost, invited address) | Application envelope (same DOCUMENT_KEK) + disk encryption | — (but see the two-release rollout in 2a) |
+| Tier 2 metadata columns (item name/provider/cost, invited address, account and mail-forwarding addresses) | Application envelope (same DOCUMENT_KEK) + disk encryption | — (but see the two-release rollout in 2a) |
 | PostgreSQL data directory, every other column | Disk encryption only | No database-level or Orbit-level encryption |
 | Database dump inside an `orbit backup` tar | Disk encryption only, plus the envelope for the Tier 1 and Tier 2 columns | No application-layer encryption for anything else |
 | Restore/repair checkpoints | Filesystem mode `0600`/`0700` + disk encryption | Application-layer encryption |
