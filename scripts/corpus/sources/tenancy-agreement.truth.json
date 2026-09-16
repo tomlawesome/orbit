@@ -1,0 +1,37 @@
+{
+  "name": "Assured Shorthold Tenancy Agreement",
+  "filename": "tenancy-agreement.pdf",
+  "expected": {
+    "dates": ["2026-06-15", "2027-06-14"],
+    "dateRoles": [
+      { "date": "2026-06-15", "role": "start" },
+      { "date": "2027-06-14", "role": "renewal" }
+    ],
+    "provider": "Thornfield Lettings & Management",
+    "reference": "THN-2026-0458",
+    "subtype": { "kinds": ["Tenancy", "Contract"], "qualifiers": ["Tenancy", "Home"] },
+    "costMinor": 1170000,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "Term is a fixed term of 12 months, printed in the particulars as 'A fixed term of 12 months, commencing 15/06/2026 and expiring 14/06/2027' — start date 2026-06-15, renewal/expiry date 2027-06-14.",
+    "Provider is the managing agent, Thornfield Lettings & Management, who receives rent and handles notices per clause 1 and 3 — not the private landlord Graham Pettifer.",
+    "Reference THN-2026-0458 is printed as the 'Tenancy Reference' in the particulars and repeated in every page footer.",
+    "costMinor 1170000 is 'Total rent payable over the term: £11,700.00' (12 x the £975.00 monthly rent in the particulars 'Rent' row, restated in clause 4) (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure).",
+    "Trap: the 'Date of this Agreement' (signing date) is printed as 02/06/2026, a rival date near but not equal to the tenancy start.",
+    "Trap: the Inventory / Check-in appointment is printed as '14/06/2026 at 10:00am', the day before the tenancy actually starts.",
+    "Trap: the Break Clause date '15/12/2026 (six months after commencement)' is a plausible but wrong renewal-like date.",
+    "Trap: the deposit amount '£1,125.00' and its '30 days of receipt' protection deadline are printed in the particulars and clause 4, a rival cost figure to the rent.",
+    "Trap: the holding deposit '£225.00, received 18/05/2026' is a third rival money figure and date.",
+    "Trap: 'First Payment Due 02/06/2026' is a rival date for the first rent payment, distinct from the recurring rent date of the 15th.",
+    "Trap: the landlord's own name and address, 'Mr Graham Pettifer, 22 Larch Avenue, Barchester, BR2 9LH', is printed prominently as a rival provider.",
+    "Trap: the deposit protection scheme, 'Home Deposits Custodial Scheme', is a rival organisation name.",
+    "Trap: the agent's redress scheme, 'National Letting Redress Service, membership no. NLRS-88213', is a rival organisation and reference.",
+    "Trap: the agent's client money protection scheme, 'Lettings Client Money Protect, certificate no. LCMP-4471', is a second rival organisation and reference.",
+    "Trap: the break clause notice period 'giving 2 months' written notice' is a rival number to the 12-month recurrence.",
+    "Trap: the late payment interest rate '3% above the Bank of England base rate' is a rival numeric figure.",
+    "Trap: the monthly rent '£975.00' is the instalment, not the commitment."
+  ]
+}

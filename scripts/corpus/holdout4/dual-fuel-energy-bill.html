@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Kestrel Vale Energy - dual fuel bill</title>
+<style>
+@font-face{font-family:"Corpus Kestrel";src:url("../fonts/HankenGrotesk.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Kestrel Mono";src:url("../fonts/JetBrainsMono.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@page { size: A4; margin: 0; }
+html, body { margin: 0; padding: 0; background: #fff; }
+.page { position: relative; width: 794px; min-height: 1123px; box-sizing: border-box; padding: 44px 52px; }
+
+body { font-family: "Corpus Kestrel", sans-serif; font-size: 9pt; color: #1b1b1b; }
+h1, h2, h3 { font-family: "Corpus Kestrel", sans-serif; margin: 0 0 6px 0; }
+table { font-family: "Corpus Kestrel Mono", monospace; border-collapse: collapse; width: 100%; font-size: 8.5pt; }
+.figures, .mono, .reading, .amount-due, .ref { font-family: "Corpus Kestrel Mono", monospace; }
+
+.masthead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #0b4d3a; padding-bottom: 10px; margin-bottom: 12px; }
+.brand { font-size: 20pt; font-weight: bold; color: #0b4d3a; letter-spacing: 0.5px; }
+.tagline { font-size: 7.5pt; color: #555; }
+.headbox { text-align: right; font-size: 8pt; line-height: 1.4; }
+h1.title { font-size: 15pt; color: #0b4d3a; margin-bottom: 10px; }
+h2.section { font-size: 11pt; color: #0b4d3a; border-bottom: 1px solid #ccc; padding-bottom: 3px; margin-top: 16px; }
+
+.amountpanel { background: #0b4d3a; color: #fff; padding: 12px 16px; border-radius: 4px; margin: 10px 0 14px 0; display: flex; justify-content: space-between; align-items: center; }
+.amountpanel .big { font-size: 20pt; font-weight: bold; font-family: "Corpus Kestrel Mono", monospace; }
+.amountpanel .small { font-size: 8pt; }
+
+.custblock { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.custblock div { font-size: 8.5pt; line-height: 1.4; }
+
+table.summary td, table.summary th { padding: 3px 6px; border-bottom: 1px solid #ddd; text-align: left; }
+table.summary th { font-family: "Corpus Kestrel", sans-serif; background: #eef3f1; text-align: left; }
+td.amt, th.amt { text-align: right; }
+
+.noise { font-size: 7.8pt; color: #444; line-height: 1.38; margin-top: 7px; }
+.footer { position: absolute; bottom: 30px; left: 52px; right: 52px; font-size: 7pt; color: #666; border-top: 1px solid #ccc; padding-top: 6px; line-height: 1.4; }
+.pageno { position: absolute; bottom: 8px; right: 52px; font-size: 7.5pt; color: #888; }
+
+.calcbox { border: 1px solid #ccc; border-radius: 3px; padding: 10px 12px; margin-bottom: 14px; }
+.calcbox h3 { font-size: 10pt; color: #0b4d3a; }
+table.calc td, table.calc th { padding: 2px 5px; border-bottom: 1px solid #e2e2e2; }
+table.calc th { font-family: "Corpus Kestrel", sans-serif; background: #f4f7f6; text-align: left; }
+tr.total td { font-weight: bold; border-top: 1px solid #999; }
+
+.til { background: #fbf7e9; border: 1px solid #d8c98a; padding: 10px 12px; margin: 12px 0; font-size: 8.2pt; line-height: 1.4; }
+.til h3 { font-size: 9.5pt; margin-bottom: 4px; }
+
+.smallgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; font-size: 8.2pt; }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+  <div class="masthead">
+    <div>
+      <div class="brand">KESTREL VALE ENERGY</div>
+      <div class="tagline">Fuelling homes and businesses since 2013</div>
+    </div>
+    <div class="headbox">
+      Account number <span class="ref">KVE-77420019</span><br>
+      Bill date 6 August 2026<br>
+      Bill number <span class="ref">INV-2026-0817734</span><br>
+      Customer number <span class="ref">8834021567</span>
+    </div>
+  </div>
+
+  <h1 class="title">Your dual fuel energy bill</h1>
+
+  <div class="custblock">
+    <div>
+      Mr J Harrow<br>
+      17 Foxglove Rise<br>
+      Marlbury<br>
+      PE9 4JT<br>
+      Supply address UPRN <span class="mono">100062345678</span>
+    </div>
+    <div style="text-align:right;">
+      Customer since 14 March 2021<br>
+      Previous bill dated 6 July 2026<br>
+      Page <span class="mono">1 of 4</span>
+    </div>
+  </div>
+
+  <div class="amountpanel">
+    <div>
+      <div class="small">AMOUNT DUE</div>
+      <div class="big">£248.63</div>
+    </div>
+    <div style="text-align:right;">
+      <div class="small">Payment due by</div>
+      <div class="mono" style="font-size:13pt;">20 August 2026</div>
+      <div class="small">Payment reference <span class="mono">66482190385</span></div>
+    </div>
+  </div>
+
+  <h2 class="section">Account summary</h2>
+  <table class="summary">
+    <tr><th>Description</th><th class="amt">Amount</th></tr>
+    <tr><td>Previous balance (bill dated 6 July 2026)</td><td class="amt">&pound;226.15</td></tr>
+    <tr><td>Payment received 14 July 2026, thank you</td><td class="amt">-&pound;226.15</td></tr>
+    <tr><td>Balance brought forward</td><td class="amt">&pound;0.00</td></tr>
+    <tr><td>Electricity charges, 1 July 2026 to 31 July 2026</td><td class="amt">&pound;158.43</td></tr>
+    <tr><td>Gas charges, 1 July 2026 to 31 July 2026</td><td class="amt">&pound;90.20</td></tr>
+    <tr class="total"><td>Amount now due</td><td class="amt">£248.63</td></tr>
+  </table>
+
+  <div class="noise">
+    This bill covers electricity and gas supplied to the address above between 1 July 2026 and
+    31 July 2026. A full breakdown of how we calculated your charges, including your meter
+    readings, unit rates and standing charges, is set out on pages 2 and 3, together with your
+    Tariff Information Label and a comparison against our other tariffs.
+  </div>
+
+  <div class="noise">
+    Your monthly Direct Debit is currently &pound;96.00, collected on or around the first of each
+    month under mandate reference <span class="mono">DDM-5521098X</span>. We review Direct Debit
+    amounts every six months against your actual usage; because summer usage is typically lower
+    than the Direct Debit assumes, your account can show an additional balance due like this one,
+    which will even out over the year.
+  </div>
+
+  <div class="noise">
+    Refer a friend to Kestrel Vale Energy through Vale Rewards and you could both receive a
+    &pound;50 account credit once their first Direct Debit collects successfully. Terms apply;
+    visit my.kestrelvale.co.uk/refer for full details, or manage your account and go paperless at
+    my.kestrelvale.co.uk. Our app is free to download; search "Kestrel Vale Energy" on the App
+    Store or Google Play. Follow @KestrelValeEnergy for tips, outage updates and competitions.
+  </div>
+
+  <div class="noise">
+    Kestrel Vale Energy is a trading name of KVE Retail Supply Limited, registered in England and
+    Wales, company number 09876543. Registered office: Alder House, 4 Greenwell Business Park,
+    Marlbury, PE1 2QA. VAT registration number GB 234 5678 90. We are licensed by Ofgem to supply
+    electricity and gas to domestic customers under licence numbers ES-2013-04471 and
+    GS-2013-04472.
+  </div>
+
+  <div class="noise">
+    Kestrel Vale Energy also offers HomeCare boiler cover from &pound;9.00 a month, and a
+    fixed-price broadband add-on for existing energy customers. None of these products are on
+    your account at present; call 0330 555 0198 if you would like a quote. If you contact us by
+    phone, calls may be recorded for training and monitoring purposes and to help resolve
+    disputes.
+  </div>
+
+  <div class="footer">
+    Kestrel Vale Energy, Alder House, 4 Greenwell Business Park, Marlbury, PE1 2QA. General
+    enquiries 0330 555 0198. This is not a VAT invoice unless marked as such. Keep this bill safe;
+    it may be needed for benefit or housing enquiries.
+  </div>
+  <div class="pageno">Page 1 of 4</div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+  <div class="masthead">
+    <div>
+      <div class="brand">KESTREL VALE ENERGY</div>
+      <div class="tagline">How we've worked out your bill</div>
+    </div>
+    <div class="headbox">
+      Account number <span class="ref">KVE-77420019</span><br>
+      Bill date 6 August 2026<br>
+      Page <span class="mono">2 of 4</span>
+    </div>
+  </div>
+
+  <h1 class="title">Your charges in detail</h1>
+
+  <div class="calcbox">
+    <h3>Electricity supply</h3>
+    <table class="calc">
+      <tr><th>MPAN (supply number)</th><td class="mono">1074562819304</td></tr>
+      <tr><th>Meter serial number</th><td class="mono">E77348291S</td></tr>
+      <tr><th>Reading type</th><td>Actual, submitted online</td></tr>
+      <tr><th>Previous reading, 1 July 2026</th><td class="mono">61122 kWh</td></tr>
+      <tr><th>Present reading, 31 July 2026</th><td class="mono">61608 kWh</td></tr>
+      <tr><th>Units used</th><td class="mono">486 kWh</td></tr>
+      <tr><th>Unit rate</th><td class="mono">27.13p per kWh &nbsp; &pound;131.85</td></tr>
+      <tr><th>Standing charge</th><td class="mono">61.42p per day &times; 31 days &nbsp; &pound;19.04</td></tr>
+      <tr><th>Subtotal, excluding VAT</th><td class="mono">&pound;150.89</td></tr>
+      <tr><th>VAT at 5%</th><td class="mono">&pound;7.54</td></tr>
+      <tr class="total"><th>Total electricity charges</th><td class="mono">&pound;158.43</td></tr>
+    </table>
+  </div>
+
+  <div class="noise">
+    Electricity is metered and billed directly in kilowatt hours, with no conversion needed. Your
+    meter is read and maintained on our behalf by Northmarch Metering Services Limited, our
+    appointed meter asset and data agent. Where we have not received a reading from you or our
+    meter agent, we estimate your usage from your historical consumption and correct it on your
+    next bill.
+  </div>
+
+  <div class="noise">
+    Your gas charges, Tariff Information Label and a comparison against our other tariffs are set
+    out on the next page. If you'd like a paper copy of a previous bill, call 0330 555 0198 or
+    download one from My Account, where up to two years of statements are stored free of charge.
+  </div>
+
+  <div class="footer">
+    Figures on this page are rounded to the nearest penny at each step, so totals may differ from
+    unit rate multiplied by units used by a penny or two.
+  </div>
+  <div class="pageno">Page 2 of 4</div>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page">
+  <div class="masthead">
+    <div>
+      <div class="brand">KESTREL VALE ENERGY</div>
+      <div class="tagline">Your gas charges and tariff information</div>
+    </div>
+    <div class="headbox">
+      Account number <span class="ref">KVE-77420019</span><br>
+      Bill date 6 August 2026<br>
+      Page <span class="mono">3 of 4</span>
+    </div>
+  </div>
+
+  <div class="calcbox">
+    <h3>Gas supply</h3>
+    <table class="calc">
+      <tr><th>MPRN (supply number)</th><td class="mono">3312456789</td></tr>
+      <tr><th>Meter serial number</th><td class="mono">G44710298K</td></tr>
+      <tr><th>Reading type</th><td>Actual, read by our meter agent</td></tr>
+      <tr><th>Previous reading, 2 July 2026</th><td class="mono">3312.1 m3</td></tr>
+      <tr><th>Present reading, 29 July 2026</th><td class="mono">3420.5 m3</td></tr>
+      <tr><th>Units used</th><td class="mono">108.4 m3 (1,216 kWh converted)</td></tr>
+      <tr><th>Unit rate</th><td class="mono">6.24p per kWh &nbsp; &pound;75.92</td></tr>
+      <tr><th>Standing charge</th><td class="mono">32.18p per day &times; 31 days &nbsp; &pound;9.98</td></tr>
+      <tr><th>Subtotal, excluding VAT</th><td class="mono">&pound;85.90</td></tr>
+      <tr><th>VAT at 5%</th><td class="mono">&pound;4.30</td></tr>
+      <tr class="total"><th>Total gas charges</th><td class="mono">&pound;90.20</td></tr>
+    </table>
+  </div>
+
+  <div class="noise">
+    Gas is measured in cubic metres at the meter and converted to kilowatt hours using a volume
+    correction factor of 1.02264 and a calorific value we receive from the National Grid, currently
+    39.5 megajoules per cubic metre. Meters of this kind are read and maintained on our behalf by
+    Northmarch Metering Services Limited, our appointed meter asset and data agent.
+  </div>
+
+  <div class="til">
+    <h3>Tariff Information Label</h3>
+    Prepared 4 August 2026 for account <span class="ref">KVE-77420019</span>
+    <div class="smallgrid">
+      <div>Tariff name: Vale Fixed Saver v3</div>
+      <div>Fuel: Dual fuel, electricity and gas</div>
+      <div>Payment method: Monthly Direct Debit</div>
+      <div>Meter type: Smart, SMETS2</div>
+      <div>Tariff type: Fixed until 31 March 2027</div>
+      <div>Exit fees: &pound;30.00 per fuel before that date</div>
+      <div>Exit fees no longer apply from: 10 February 2027</div>
+      <div>Unit rates last changed: 1 April 2026</div>
+    </div>
+    Estimated annual cost: &pound;1,412.00, based on Ofgem's typical domestic consumption values of
+    2,900 kWh of electricity and 12,000 kWh of gas a year for a medium-use household. Your own
+    annual cost will differ from this estimate depending on how much energy you actually use.
+    Before 1 April 2026 the electricity unit rate was 24.89p per kWh.
+  </div>
+
+  <h2 class="section">How your tariff compares</h2>
+  <table class="summary">
+    <tr><th>Tariff</th><th class="amt">Estimated annual cost</th></tr>
+    <tr><td>Vale Fixed Saver v3 (your current tariff)</td><td class="amt mono">&pound;1,412.00</td></tr>
+    <tr><td>Vale Online Saver (the cheapest tariff we currently offer)</td><td class="amt mono">&pound;1,289.00</td></tr>
+    <tr><td>Vale Standard (our standard variable tariff)</td><td class="amt mono">&pound;1,560.00</td></tr>
+  </table>
+
+  <div class="noise">
+    Your fixed tariff ends on 31 March 2027. On that date you move onto Vale Standard, our
+    standard variable tariff, automatically. Prices on Vale Standard can rise or fall in line with
+    Ofgem's energy price cap, which is reviewed every three months.
+  </div>
+
+  <div class="footer">
+    Tariff comparison figures assume the typical domestic consumption values shown above and the
+    payment method on your account.
+  </div>
+  <div class="pageno">Page 3 of 4</div>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page">
+  <div class="masthead">
+    <div>
+      <div class="brand">KESTREL VALE ENERGY</div>
+      <div class="tagline">Paying, help and getting in touch</div>
+    </div>
+    <div class="headbox">
+      Account number <span class="ref">KVE-77420019</span><br>
+      Bill date 6 August 2026<br>
+      Page <span class="mono">4 of 4</span>
+    </div>
+  </div>
+
+  <h2 class="section">Ways to pay</h2>
+  <div class="noise">
+    <strong>Direct Debit:</strong> &pound;96.00 collected monthly under mandate reference
+    <span class="mono">DDM-5521098X</span>, reviewed every six months. <strong>Online:</strong>
+    my.kestrelvale.co.uk, quoting payment reference <span class="mono">66482190385</span>.
+    <strong>By phone:</strong> 0330 555 0198; calls cost 4p a minute from a landline, more from
+    mobiles, and may be recorded. <strong>By cheque:</strong> payable to KVE Retail Supply
+    Limited, or paid direct to sort code 40-11-22, account 91234567. <strong>In person:</strong>
+    at any PayPoint or Post Office branch. A late payment charge of &pound;15.00 may apply if we
+    do not receive payment within 14 days of the due date. Credit balances over &pound;25.00 can
+    be refunded through My Account.
+  </div>
+
+  <h2 class="section">Reading your meter</h2>
+  <div class="noise">
+    Submit a reading in seconds at kve-read.uk, or through the Kestrel Vale Energy app on the App
+    Store or Google Play. If your smart meter stops sending readings automatically, send us a
+    manual one each month. Meter reading helpline 0330 555 0199; your meters are read and
+    maintained by Northmarch Metering Services Limited on our behalf.
+  </div>
+
+  <h2 class="section">Priority Services Register</h2>
+  <div class="noise">
+    The Priority Services Register is free for customers who are of pensionable age, disabled,
+    chronically ill, recovering from injury, deaf, blind, or otherwise vulnerable, including a
+    mental health crisis. Benefits include advance notice of power cuts, a password scheme for
+    doorstep callers, and nominating someone to receive your bills. Sign up on 0800 316 5029, or
+    by textphone on 0800 316 5030. Eligibility follows Ofgem's Consumer Vulnerability guidance,
+    updated 1 April 2025.
+  </div>
+
+  <h2 class="section">Using less energy</h2>
+  <div class="noise">
+    Small changes add up: wash at 30 degrees, turn appliances off standby, and draught-proof
+    windows and doors. For free, independent advice visit the Energy Saving Trust at
+    www.energysavingtrust.org.uk, or Citizens Advice at www.citizensadvice.org.uk, or compare
+    tariffs at www.switchmyenergy.co.uk. Struggling to pay? The Vale Warmth Fund, our hardship
+    trust, has helped clear over &pound;2 million of energy debt since 2016.
+  </div>
+
+  <h2 class="section">Smart meters and heat pumps</h2>
+  <div class="noise">
+    Haven't gone smart yet? Book a free upgrade through KVE Smart at my.kestrelvale.co.uk/smart.
+    Considering a heat pump? We work with installer partners under the government's Boiler
+    Upgrade Scheme, offering grants of up to &pound;7,500 towards an air source heat pump; see
+    my.kestrelvale.co.uk/heatpumps.
+  </div>
+
+  <h2 class="section">Complaints and the Energy Ombudsman</h2>
+  <div class="noise">
+    Contact our customer team first on 0330 555 0198 or My Account; we aim to resolve complaints
+    within 5 working days and always within 8 weeks. After that, or on a deadlock letter, refer
+    your complaint free to the Energy Ombudsman at www.ombudsman-services.org/energy or on
+    0330 440 1624.
+  </div>
+
+  <h2 class="section">Your data</h2>
+  <div class="noise">
+    KVE Retail Supply Limited, trading as Kestrel Vale Energy, is the data controller for your
+    personal information, used to bill you, manage your account, and, where agreed, tell you
+    about other products. You can access, correct or erase your data at any time. Read our
+    privacy notice at my.kestrelvale.co.uk/privacy, or write to our Data Protection Officer at
+    Alder House, 4 Greenwell Business Park, Marlbury, PE1 2QA.
+  </div>
+
+  <div class="footer">
+    Kestrel Vale Energy is a trading name of KVE Retail Supply Limited, company number 09876543,
+    VAT registration number GB 234 5678 90. Licensed by Ofgem, licence numbers ES-2013-04471 and
+    GS-2013-04472. Follow @KestrelValeEnergy for updates.
+  </div>
+  <div class="pageno">Page 4 of 4</div>
+</div>
+
+</body>
+</html>

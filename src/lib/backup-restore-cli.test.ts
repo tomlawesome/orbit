@@ -114,6 +114,12 @@ class FakeAdapter implements RestoreDockerAdapter {
   collectDocumentsArchive(outputPath: string): void {
     createTar(this.liveDocumentsRoot, outputPath, ["."]);
   }
+  recordExportedCalls = 0;
+  recordExportedOk = true;
+  recordRecoveryBundleExported(): void {
+    this.recordExportedCalls += 1;
+    if (!this.recordExportedOk) throw new RecoveryBundleRefusal("record failed", "recovery-bundle-record-failed");
+  }
   createStageDatabase(): void {
     // no-op
   }
@@ -415,6 +421,49 @@ describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", 
     expect(isValidDocumentKekHex(recoveredHex)).toBe(true);
     // The inner bundle is a byte-identical copy of the source.
     expect(readFileSync(join(extractedDir, "orbit-backup.tar"))).toEqual(readFileSync(sourceBundlePath));
+  });
+
+  it("records the export with the adapter once the bundle is published (#968: what clears the administration card)", () => {
+    const documentsRoot = join(sandbox, "docs-record");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "source-backups-record"));
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const passphrase = "correct horse battery staple";
+
+    runExportRecoveryBundle({
+      sourceBundlePath,
+      documentKekHex: LIVE_KEK,
+      passphrase,
+      passphraseConfirmation: passphrase,
+      backupDirectory: join(sandbox, "recovery-backups-record"),
+      adapter,
+      now: new Date("2026-02-02T00:00:00Z"),
+    });
+
+    expect(adapter.recordExportedCalls).toBe(1);
+  });
+
+  it("still throws when the export cannot be recorded, even though the bundle is already on disk (a false-positive administration card is worse than a resumable error)", () => {
+    const documentsRoot = join(sandbox, "docs-record-fail");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "source-backups-record-fail"));
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    adapter.recordExportedOk = false;
+    const passphrase = "correct horse battery staple";
+    const recoveryDirectory = join(sandbox, "recovery-backups-record-fail");
+
+    expect(() =>
+      runExportRecoveryBundle({
+        sourceBundlePath,
+        documentKekHex: LIVE_KEK,
+        passphrase,
+        passphraseConfirmation: passphrase,
+        backupDirectory: recoveryDirectory,
+        adapter,
+        now: new Date("2026-02-02T00:00:00Z"),
+      }),
+    ).toThrow(RecoveryBundleRefusal);
+    expect(adapter.recordExportedCalls).toBe(1);
+    // The bundle itself is not rolled back: it was already safely published.
+    expect(existsSync(join(recoveryDirectory, "orbit-recovery-20260202-000000.tar"))).toBe(true);
   });
 
   it("publishes the recovery bundle at mode 0600 regardless of the ambient umask (issue #383 finding 5: export-recovery-bundle.sh's `umask 077` was never ported)", () => {

@@ -1,0 +1,27 @@
+{
+  "name": "satellite TV invoice, a plain letterhead among a page of billing-history dates",
+  "filename": "fullpage-satellite-tv-subscription-invoice.pdf",
+  "expected": {
+    "dates": ["2026-03-12", "2027-03-12"],
+    "provider": "Starview Satellite TV",
+    "reference": "STV-AC-774213",
+    "dateRoles": [
+      { "date": "2026-03-12", "role": "start" },
+      { "date": "2027-03-12", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Subscription"], "qualifiers": ["TV"] },
+    "costMinor": 4299,
+    "currency": "GBP",
+    "scheduleKind": "renewal",
+    "recurrenceMonths": 1
+  },
+  "notes": [
+    "dates: contract started 12 March 2026 and its minimum term, and the printed renewal, both fall on 12 March 2027. Seven other printed dates are deliberately not declared: the invoice date (5 Sep 2026), the direct debit collection date (15 Sep 2026), the previous month's bill date (5 Aug 2026), the four billing-history dates (05/08/2026, 05/07/2026, 05/06/2026, 05/05/2026), the last price review (1 Jun 2026) and next price review (1 Jun 2027), and the terms edition stamp (3 Feb 2025).",
+    "provider is 'Starview Satellite TV', printed large in the letterhead and confirmed by name in the small print ('Starview Satellite TV is a registered trademark of Starview Broadcasting Ltd'); the registered company name is a rival correct-ish answer but the brand is what the customer deals with and what the invoice is issued under.",
+    "reference is the account number STV-AC-774213.",
+    "costMinor is the £42.99 total due, not any of the four individual charge or discount lines that sum to it, and not any of the four historic billing amounts.",
+    "subtype: 'Subscription' qualified by 'TV'.",
+    "scheduleKind is 'renewal': the later dateRole is 'renewal', and the page confirms the contract renews automatically.",
+    "recurrenceMonths is 1: the package is billed '1 month in advance', printed in digits."
+  ]
+}

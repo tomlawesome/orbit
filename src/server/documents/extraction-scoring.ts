@@ -62,6 +62,14 @@
 //    documents shout their headings ("HOME INSURANCE") and the measurement
 //    is whether the extractor found the right thing, not whether it copied
 //    the typography. Every other text field keeps its exact comparison.
+//    Ground truth may also declare a SET of acceptable phrases rather than
+//    one, because a page can genuinely support more than one right answer
+//    (owner decision 2026-09-11, #989/#992); a match against any member of
+//    the set is correct. The current form of that ruling (#989) names
+//    taxonomy KIND and QUALIFIER groups from `subtype-taxonomy.json` rather
+//    than literal phrases; `subtypeAnswers` expands a document's declared
+//    groups into every phrase the taxonomy's combination rules accept, and
+//    that expansion is what gets matched against.
 //
 // The heuristics attempt none of the five new categories, by the owner's
 // decision on #319, so they score a blank on every one of those points.
@@ -70,20 +78,45 @@
 // floor in `extraction-accuracy.test.ts` is re-recorded against the larger
 // point total rather than the extractor being let off the new fields.
 
-import type { CorpusDocument } from "./extraction-corpus";
+import type { CorpusDocument, SubtypeSpec } from "./extraction-corpus";
+import { DESCRIBER_WORDS } from "./extraction-provider-runs";
+import { selectedExtractionModel } from "./model-extraction";
+import subtypeTaxonomyJson from "./subtype-taxonomy.json";
+import type { DocumentProposal } from "./suggestions";
+
+interface TaxonomyGroup {
+  name: string;
+  synonyms: string[];
+}
+
+interface SubtypeTaxonomy {
+  description: string;
+  kinds: TaxonomyGroup[];
+  qualifiers: TaxonomyGroup[];
+  combinations: {
+    patterns: string[];
+    standalone: string[];
+    notes: string[];
+  };
+}
+
+const SUBTYPE_TAXONOMY = subtypeTaxonomyJson as SubtypeTaxonomy;
 
 /** ADR-0025 section 6: five runs, and the minimum is the score. */
 export const SCORING_RUNS = 5;
 
 /**
- * How much more a wrong value costs than a blank (issue #939). A blank
- * field earns 0 out of its 1 possible point. A wrong value earns
- * `-WRONG_VALUE_PENALTY`: it forfeits the same point a blank forfeits, and
- * then loses that much again, because a plausible wrong value is the one
- * that gets approved without a second look while a blank is the one that
- * gets noticed and checked.
+ * How much more a wrong value costs than a blank. Zero since the owner's
+ * ruling of 2026-09-12: a wrong answer and a blank both simply earn no
+ * point, so a score reads as "how many did it get right" and nothing else.
+ *
+ * The earlier value of 1 (issue #939) was there because a plausible wrong
+ * value is the one that gets approved without a second look. That is still
+ * true and still worth handling -- but as its own piece of work, not by
+ * bending every measurement around it. Every score recorded before this
+ * date was computed with the penalty and is not comparable with one after.
  */
-export const WRONG_VALUE_PENALTY = 1;
+export const WRONG_VALUE_PENALTY = 0;
 
 /** The fields a scored extractor returns. `DocumentProposal` satisfies it. */
 export interface ExtractedFields {
@@ -172,10 +205,10 @@ function buildFieldScores(totals: Record<FieldName, FieldTotal>): Record<FieldNa
   return scores;
 }
 
-type Classification = "correct" | "blank" | "wrong";
+export type Classification = "correct" | "blank" | "wrong";
 
-/** A correct value earns its point; a blank earns nothing; a wrong value
- * earns `-WRONG_VALUE_PENALTY` (issue #939, see the file header). */
+/** A correct value earns its point; a blank and a wrong value both earn
+ * nothing while `WRONG_VALUE_PENALTY` is 0 (see the file header). */
 function pointsFor(classification: Classification): number {
   if (classification === "correct") return 1;
   if (classification === "blank") return 0;
@@ -217,21 +250,71 @@ function withoutLegalSuffix(name: string): string {
   return words.slice(0, -1).join(" ").replace(/\s*&$/u, "").trim();
 }
 
+/** A provider name as words, for comparison only: lower case, `&` read as
+ * "and", punctuation dropped, a leading "the" and every trailing
+ * company-form word removed. */
+function providerWords(name: string): string[] {
+  const words = name
+    .toLowerCase()
+    .replaceAll("&", " and ")
+    .split(/[^a-z0-9]+/u)
+    .filter((word) => word.length > 0);
+  if (words[0] === "the") words.shift();
+  while (words.length > 1 && LEGAL_SUFFIXES.includes(words[words.length - 1] as string)) words.pop();
+  while (words.length > 1 && words[words.length - 1] === "and") words.pop();
+  return words;
+}
+
+/** Whether `part` is a contiguous run of whole words inside `whole`. */
+function isWordRunOf(part: string[], whole: string[]): boolean {
+  if (part.length === 0 || part.length > whole.length) return false;
+  for (let from = 0; from + part.length <= whole.length; from += 1) {
+    if (part.every((word, at) => whole[from + at] === word)) return true;
+  }
+  return false;
+}
+
+/** Whether a name carries at least one word that says WHICH organisation,
+ * not just what kind: "Cresswell" does, "Insurance Services" does not. */
+function namesSomething(words: string[]): boolean {
+  return words.some((word) => word.length >= 4 && !DESCRIBER_WORDS.has(word));
+}
+
 /** Provider is compared with its legal suffix optional on BOTH sides, per
  * the owner's ruling above. "Northfield Gas & Energy Ltd" and "Northfield
  * Gas & Energy" are the same answer, so scoring one of them wrong — and,
  * since #939, charging it the wrong-value penalty on top — would be
  * measuring a naming convention rather than extraction.
  *
- * Deliberately narrow: only ONE trailing company-form word is optional, and
- * only at the end. Everything else still has to match exactly, so a genuinely
- * different name ("Direct Debit" for a water company) is still wrong. */
-function classifyProvider(expected: string, actual: string | undefined): Classification {
-  if (actual === expected) return "correct";
-  if (actual !== undefined && withoutLegalSuffix(actual) === withoutLegalSuffix(expected)) {
+ * Loosened 2026-09-12 (#994, owner: "the classifyProvider is far too
+ * strict"): a short form of the name is the same answer too. "Cresswell" for
+ * "Cresswell Fitness Club", or "Colworth & Drake" for "Colworth & Drake
+ * Insurance Services Ltd", is what a reader marking by eye accepts, and what
+ * the page itself calls the organisation most of the time. The short form
+ * has to be a run of whole words of the long one, and has to carry a word
+ * that names the organisation rather than describes it: "Insurance Services"
+ * is not a short form of anything, and a genuinely different name ("Direct
+ * Debit" for a water company) is still wrong. */
+export function classifyProvider(expected: string, actual: string | undefined): Classification {
+  if (actual === undefined) return "blank";
+  // Case and whitespace runs ignored, as `comparableSubtype` already does.
+  // Owner ruling 2026-09-11: "All caps is an acceptable answer... the valuable
+  // part is the extraction of the correct information." A letterhead printed
+  // WEXLEY WATER is read correctly by any extractor copying verbatim, and
+  // scoring it wrong -- and since #939 charging it the wrong-value penalty --
+  // measures typography rather than extraction. Presentation is a
+  // post-processing concern, not an accuracy one.
+  const comparable = (value: string) => value.replace(/\s+/gu, " ").trim().toLowerCase();
+  if (comparable(actual) === comparable(expected)) return "correct";
+  if (comparable(withoutLegalSuffix(actual)) === comparable(withoutLegalSuffix(expected))) {
     return "correct";
   }
-  return actual === undefined ? "blank" : "wrong";
+  const wanted = providerWords(expected);
+  const got = providerWords(actual);
+  if (wanted.join(" ") === got.join(" ")) return "correct";
+  const [shorter, longer] = got.length <= wanted.length ? [got, wanted] : [wanted, got];
+  if (namesSomething(shorter) && isWordRunOf(shorter, longer)) return "correct";
+  return "wrong";
 }
 
 /** An expected date missing from an extractor that returned nothing at all
@@ -254,9 +337,88 @@ function comparableSubtype(value: string): string {
   return value.replace(/\s+/gu, " ").trim().toLowerCase();
 }
 
-function classifySubtype(expected: string, actual: string | undefined): Classification {
-  if (actual !== undefined && comparableSubtype(actual) === comparableSubtype(expected)) return "correct";
-  return actual === undefined ? "blank" : "wrong";
+/** True when `expected` names taxonomy groups (`{ kinds, qualifiers }`)
+ * rather than giving literal phrases directly. */
+export function isSubtypeSpec(expected: string | string[] | SubtypeSpec): expected is SubtypeSpec {
+  return typeof expected === "object" && !Array.isArray(expected);
+}
+
+function taxonomyGroup(groups: TaxonomyGroup[], name: string): TaxonomyGroup {
+  const group = groups.find((candidate) => candidate.name === name);
+  if (!group) throw new Error(`"${name}" is not a group in subtype-taxonomy.json`);
+  return group;
+}
+
+/**
+ * Expands a `{ kinds, qualifiers }` ground-truth spec of taxonomy group
+ * NAMES (owner decision 2026-09-11, #989: the accepted answers come from a
+ * generic taxonomy, not a per-page list) into every phrase
+ * `subtype-taxonomy.json`'s combination rules accept for it:
+ *  - every synonym of every listed kind ("{kind}"),
+ *  - every listed qualifier synonym followed by every listed kind synonym
+ *    ("{qualifier} {kind}"),
+ *  - every synonym of any listed qualifier the taxonomy allows to stand
+ *    alone, with no kind word.
+ */
+export function subtypeAnswers(spec: SubtypeSpec): string[] {
+  const kindGroups = spec.kinds.map((name) => taxonomyGroup(SUBTYPE_TAXONOMY.kinds, name));
+  const qualifierNames = spec.qualifiers ?? [];
+  const qualifierGroups = qualifierNames.map((name) => taxonomyGroup(SUBTYPE_TAXONOMY.qualifiers, name));
+  const answers: string[] = [];
+
+  for (const kind of kindGroups) answers.push(...kind.synonyms);
+
+  for (const qualifier of qualifierGroups) {
+    for (const kind of kindGroups) {
+      for (const qualifierSynonym of qualifier.synonyms) {
+        for (const kindSynonym of kind.synonyms) answers.push(`${qualifierSynonym} ${kindSynonym}`);
+      }
+    }
+  }
+
+  for (const name of qualifierNames) {
+    if (!SUBTYPE_TAXONOMY.combinations.standalone.includes(name)) continue;
+    answers.push(...taxonomyGroup(SUBTYPE_TAXONOMY.qualifiers, name).synonyms);
+  }
+
+  return answers;
+}
+
+/** Every literal phrase `expected` accepts, regardless of its form: one
+ * phrase, a set of them, or a taxonomy spec expanded via `subtypeAnswers`.
+ * For callers that need to search text for "any acceptable phrase" rather
+ * than classify one candidate at a time. */
+export function subtypeCandidatePhrases(expected: string | string[] | SubtypeSpec): string[] {
+  if (isSubtypeSpec(expected)) return subtypeAnswers(expected);
+  return Array.isArray(expected) ? expected : [expected];
+}
+
+/** `expected` may be one phrase, a set of acceptable phrases, or a
+ * `{ kinds, qualifiers }` taxonomy spec (owner decision 2026-09-11, #989/
+ * #992): a page can genuinely support more than one right answer, and an
+ * extracted subtype is correct if it matches any of them. */
+export function classifySubtype(
+  expected: string | string[] | SubtypeSpec,
+  actual: string | undefined,
+): Classification {
+  if (actual === undefined) return "blank";
+  const comparableActual = comparableSubtype(actual);
+  return subtypeCandidatePhrases(expected).some((candidate) => comparableSubtype(candidate) === comparableActual)
+    ? "correct"
+    : "wrong";
+}
+
+/** Prints the expected subtype for humans: the one phrase, every acceptable
+ * phrase joined with " | ", or the taxonomy group names for the object
+ * form (`kinds: A, B / qualifiers: C`) -- printing the names, not their
+ * expansion, because the expansion can run into the hundreds of phrases. */
+export function formatSubtypeExpected(expected: string | string[] | SubtypeSpec): string {
+  if (isSubtypeSpec(expected)) {
+    const kinds = `kinds: ${expected.kinds.join(", ")}`;
+    const qualifiers = expected.qualifiers?.length ? ` / qualifiers: ${expected.qualifiers.join(", ")}` : "";
+    return `${kinds}${qualifiers}`;
+  }
+  return Array.isArray(expected) ? expected.join(" | ") : expected;
 }
 
 /** A cost is its amount and its currency together (ADR-0025 section 3). */
@@ -365,7 +527,7 @@ function scoreDocument(document: CorpusDocument, extracted: ExtractedFields): Do
     earned += addPoint(fieldTotals, "subtype", classification);
     if (classification !== "correct") {
       misses.push(
-        `${name}: subtype expected "${expected.subtype}", got "${extracted.subtype ?? "none"}" (${classification})`,
+        `${name}: subtype expected "${formatSubtypeExpected(expected.subtype)}", got "${extracted.subtype ?? "none"}" (${classification})`,
       );
     }
   }
@@ -439,6 +601,23 @@ export async function scoreCorpus(
   };
 }
 
+/** Shared by `scoreCorpusRepeated` and the three-way scorer below: minimum,
+ * mean and maximum over a set of runs already scored (ADR-0025 section 6).
+ * The minimum is the number every gate uses, so run-to-run variance counts
+ * against the extractor, never for it. */
+function summariseRuns(scored: RunScore[]): RepeatedScore {
+  const accuracies = scored.map((score) => score.accuracy);
+  const minimum = Math.min(...accuracies);
+  const worst = scored.find((score) => score.accuracy === minimum) ?? scored[0];
+  return {
+    runs: scored,
+    minimum,
+    mean: accuracies.reduce((total, value) => total + value, 0) / accuracies.length,
+    maximum: Math.max(...accuracies),
+    worst,
+  };
+}
+
 /**
  * Score a corpus `runs` times and report minimum, mean and maximum. The
  * minimum is the number ADR-0025's gate uses.
@@ -452,16 +631,7 @@ export async function scoreCorpusRepeated(
   for (let run = 0; run < runs; run += 1) {
     scored.push(await scoreCorpus(corpus, extractor));
   }
-  const accuracies = scored.map((score) => score.accuracy);
-  const minimum = Math.min(...accuracies);
-  const worst = scored.find((score) => score.accuracy === minimum) ?? scored[0];
-  return {
-    runs: scored,
-    minimum,
-    mean: accuracies.reduce((total, value) => total + value, 0) / accuracies.length,
-    maximum: Math.max(...accuracies),
-    worst,
-  };
+  return summariseRuns(scored);
 }
 
 const percent = (value: number): string => `${(value * 100).toFixed(1)}%`;
@@ -484,4 +654,250 @@ export function formatRepeatedScore(label: string, repeated: RepeatedScore): str
     `(${worst.earned}/${worst.possible}); mean ${percent(mean)}, maximum ${percent(maximum)}` +
     ` [${formatFieldScores(worst.fields)}]` +
     (worst.misses.length ? `\n  misses in the worst run:\n  - ${worst.misses.join("\n  - ")}` : "");
+}
+
+// ADR-0025 section 6 / issue #959: the three-way measurement. "Three numbers
+// are kept, never two" (section 4): the heuristics alone (above, unchanged),
+// the model's blind pass, and the model's adjudicated answer -- reported
+// separately, never averaged into one score. Beside them, a diagnostic:
+// among the fields where the blind pass and the heuristic disagreed AND the
+// blind reading was the one ground truth supports, how often adjudication
+// sided with the heuristic (the wrong reading) anyway. That diagnostic is
+// reporting only -- it is never a threshold, and it never fails a test.
+//
+// A blind score at or below the heuristic baseline is NOT a failure here or
+// anywhere downstream: nothing in this file compares the blind number to the
+// heuristic number or fails on the relationship between them. The model's
+// value is as a judge over both readings, not as a solo extractor.
+//
+// The model path is a genuinely separate path, run only where the `ai`
+// profile exists (`selectedExtractionModel`): CI runners do not carry it, so
+// `scoreCorpusThreeWay` returns `model: null` -- a clean skip, not a failure
+// -- rather than attempting a live model when none is configured. The
+// heuristics-only score is computed unconditionally either way, so a caller
+// that only wants today's fast-lane number is unaffected.
+
+/** The only two adjudicated fields (`./adjudication.ts`'s `AdjudicatedField`)
+ * the corpus carries ground truth for -- `title` has none, so it cannot
+ * feature in the resolution-accuracy diagnostic. */
+type ResolvableField = "provider" | "reference";
+const RESOLVABLE_FIELDS: readonly ResolvableField[] = ["provider", "reference"];
+
+function classifyResolvable(field: ResolvableField, expected: string, actual: string | undefined): Classification {
+  return field === "provider" ? classifyProvider(expected, actual) : classifyScalar(expected, actual);
+}
+
+/** The shape of one field comparison this harness reads. Deliberately
+ * narrower than `./adjudication.ts`'s `FieldComparison` -- structurally
+ * compatible with it, so the real `adjudicateProposal` result can be passed
+ * straight through -- so a test can hand-build one without importing the
+ * model plumbing. */
+export interface ThreeWayComparison {
+  field: string;
+  comparison: "agreed" | "disagreed" | "neither";
+  outcome?: string;
+}
+
+/** The per-document result of the model's blind-then-adjudicate flow.
+ * Structurally compatible with `./adjudication.ts`'s `AdjudicationResult`
+ * (`blind`, `proposal` and `comparisons` line up), so `adjudicateProposal`
+ * can be adapted with a one-line wrapper rather than a bespoke shape. */
+export interface ThreeWayResult {
+  /** `null` when the blind pass was skipped or failed for this document --
+   * scored as a blank on every field, exactly as "the extractor offered
+   * nothing" already is. */
+  blind: ExtractedFields | null;
+  /** What the reviewer would actually see. */
+  adjudicated: ExtractedFields;
+  comparisons: ThreeWayComparison[];
+}
+
+/** Runs the model's blind-then-adjudicate flow for one document. In
+ * production this wraps `adjudicateProposal` from `./adjudication`; tests may
+ * supply a hand-built fake instead. */
+export type ThreeWayExtractor = (
+  text: string,
+  filename: string,
+  heuristic: DocumentProposal,
+) => Promise<ThreeWayResult>;
+
+const EMPTY_FIELDS: ExtractedFields = { dates: [] };
+
+/**
+ * Per-disagreement resolution accuracy (ADR-0025 section 6): the sharper
+ * diagnostic that detects adjudication laundering the heuristic's answer
+ * instead of judging it. Reporting only -- never a threshold.
+ */
+export interface ResolutionAccuracy {
+  /** Disagreements where the blind reading was the one ground truth supports. */
+  blindCorrectDisagreements: number;
+  /** Of those, how many adjudication resolved toward the heuristic anyway. */
+  resolvedTowardHeuristic: number;
+  /** `undefined` when there were no such disagreements to measure. */
+  rate: number | undefined;
+}
+
+function resolutionAccuracyOf(blindCorrectDisagreements: number, resolvedTowardHeuristic: number): ResolutionAccuracy {
+  return {
+    blindCorrectDisagreements,
+    resolvedTowardHeuristic,
+    rate: blindCorrectDisagreements === 0 ? undefined : resolvedTowardHeuristic / blindCorrectDisagreements,
+  };
+}
+
+interface ThreeWayRun {
+  blind: RunScore;
+  adjudicated: RunScore;
+  blindCorrectDisagreements: number;
+  resolvedTowardHeuristic: number;
+}
+
+async function scoreCorpusThreeWayOnce(
+  corpus: readonly CorpusDocument[],
+  heuristic: (text: string, filename: string) => DocumentProposal,
+  threeWay: ThreeWayExtractor,
+): Promise<ThreeWayRun> {
+  let blindEarned = 0;
+  let blindPossible = 0;
+  let adjudicatedEarned = 0;
+  let adjudicatedPossible = 0;
+  const blindMisses: string[] = [];
+  const adjudicatedMisses: string[] = [];
+  const blindFieldTotals = emptyFieldTotals();
+  const adjudicatedFieldTotals = emptyFieldTotals();
+  let blindCorrectDisagreements = 0;
+  let resolvedTowardHeuristic = 0;
+
+  for (const document of corpus) {
+    const heuristicProposal = heuristic(document.text, document.filename);
+    const result = await threeWay(document.text, document.filename, heuristicProposal);
+
+    const blindScore = scoreDocument(document, result.blind ?? EMPTY_FIELDS);
+    blindEarned += blindScore.earned;
+    blindPossible += blindScore.possible;
+    blindMisses.push(...blindScore.misses);
+    for (const field of FIELD_NAMES) {
+      blindFieldTotals[field].earned += blindScore.fieldTotals[field].earned;
+      blindFieldTotals[field].possible += blindScore.fieldTotals[field].possible;
+    }
+
+    const adjudicatedScore = scoreDocument(document, result.adjudicated);
+    adjudicatedEarned += adjudicatedScore.earned;
+    adjudicatedPossible += adjudicatedScore.possible;
+    adjudicatedMisses.push(...adjudicatedScore.misses);
+    for (const field of FIELD_NAMES) {
+      adjudicatedFieldTotals[field].earned += adjudicatedScore.fieldTotals[field].earned;
+      adjudicatedFieldTotals[field].possible += adjudicatedScore.fieldTotals[field].possible;
+    }
+
+    for (const field of RESOLVABLE_FIELDS) {
+      const expected = document.expected[field];
+      if (expected === undefined) continue;
+      const comparison = result.comparisons.find((entry) => entry.field === field);
+      if (!comparison || comparison.comparison !== "disagreed") continue;
+      const blindValue = result.blind ? result.blind[field] : undefined;
+      if (classifyResolvable(field, expected, blindValue) !== "correct") continue;
+      blindCorrectDisagreements += 1;
+      if (comparison.outcome === "endorsed_heuristic") resolvedTowardHeuristic += 1;
+    }
+  }
+
+  return {
+    blind: {
+      earned: blindEarned,
+      possible: blindPossible,
+      accuracy: blindPossible === 0 ? 1 : blindEarned / blindPossible,
+      misses: blindMisses,
+      fields: buildFieldScores(blindFieldTotals),
+    },
+    adjudicated: {
+      earned: adjudicatedEarned,
+      possible: adjudicatedPossible,
+      accuracy: adjudicatedPossible === 0 ? 1 : adjudicatedEarned / adjudicatedPossible,
+      misses: adjudicatedMisses,
+      fields: buildFieldScores(adjudicatedFieldTotals),
+    },
+    blindCorrectDisagreements,
+    resolvedTowardHeuristic,
+  };
+}
+
+export interface ThreeWayScore {
+  /** Unconditional: the heuristics run on every upload regardless (ADR-0025
+   * section 4), and this is exactly `scoreCorpusRepeated`'s result. */
+  heuristic: RepeatedScore;
+  /** `null` exactly when the model is not configured for this environment --
+   * a clean skip, never a failure (ADR-0025 section 6). */
+  model: {
+    blind: RepeatedScore;
+    adjudicated: RepeatedScore;
+    resolution: ResolutionAccuracy;
+  } | null;
+}
+
+/**
+ * ADR-0025 section 6's three-way measurement. Scores the corpus
+ * `SCORING_RUNS` times exactly as `scoreCorpusRepeated` always has, reporting
+ * minimum, mean and maximum for the heuristics alone; where (and only where)
+ * `selectedExtractionModel` reports the model as configured, it does the same
+ * for the model's blind pass and its adjudicated answer, plus the
+ * resolution-accuracy diagnostic summed across every run. Model evaluation
+ * must never become a required pipeline gate: `model` is `null`, not a
+ * failure, when the `ai` profile is absent, and the heuristic number is
+ * unaffected either way.
+ */
+export async function scoreCorpusThreeWay(
+  corpus: readonly CorpusDocument[],
+  args: {
+    heuristic: (text: string, filename: string) => DocumentProposal;
+    threeWay: ThreeWayExtractor;
+    environment?: NodeJS.ProcessEnv;
+    runs?: number;
+  },
+): Promise<ThreeWayScore> {
+  const runs = args.runs ?? SCORING_RUNS;
+  const heuristicExtractor: CorpusExtractor = (text, filename) => args.heuristic(text, filename);
+  const heuristicScore = await scoreCorpusRepeated(corpus, heuristicExtractor, runs);
+
+  if (!selectedExtractionModel(args.environment ?? process.env)) {
+    return { heuristic: heuristicScore, model: null };
+  }
+
+  const blindRuns: RunScore[] = [];
+  const adjudicatedRuns: RunScore[] = [];
+  let blindCorrectDisagreements = 0;
+  let resolvedTowardHeuristic = 0;
+  for (let run = 0; run < runs; run += 1) {
+    const result = await scoreCorpusThreeWayOnce(corpus, args.heuristic, args.threeWay);
+    blindRuns.push(result.blind);
+    adjudicatedRuns.push(result.adjudicated);
+    blindCorrectDisagreements += result.blindCorrectDisagreements;
+    resolvedTowardHeuristic += result.resolvedTowardHeuristic;
+  }
+
+  return {
+    heuristic: heuristicScore,
+    model: {
+      blind: summariseRuns(blindRuns),
+      adjudicated: summariseRuns(adjudicatedRuns),
+      resolution: resolutionAccuracyOf(blindCorrectDisagreements, resolvedTowardHeuristic),
+    },
+  };
+}
+
+export function formatThreeWayScore(label: string, score: ThreeWayScore): string {
+  const lines = [formatRepeatedScore(`${label} (heuristic alone)`, score.heuristic)];
+  if (!score.model) {
+    lines.push(`${label} (model): skipped -- no model configured`);
+    return lines.join("\n");
+  }
+  lines.push(formatRepeatedScore(`${label} (model blind)`, score.model.blind));
+  lines.push(formatRepeatedScore(`${label} (model adjudicated)`, score.model.adjudicated));
+  const { blindCorrectDisagreements, resolvedTowardHeuristic, rate } = score.model.resolution;
+  lines.push(
+    `${label} (resolution accuracy): ${resolvedTowardHeuristic}/${blindCorrectDisagreements} blind-correct ` +
+    "disagreements resolved toward the heuristic anyway" +
+    (rate === undefined ? " (no such disagreements)" : ` (${percent(rate)})`),
+  );
+  return lines.join("\n");
 }

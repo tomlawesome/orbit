@@ -468,7 +468,7 @@ deferred as a design: its boundary is recorded below.
 
 ## Local model extraction boundary
 
-[ADR-0025](adr/0025-local-model-extraction.md) sections 1-3 decide this
+[ADR-0025](adr/0025-local-model-extraction.md) sections 1-4 decide this
 boundary; the client that implements it is
 `src/server/documents/model-extraction.ts`.
 
@@ -488,16 +488,26 @@ result, so a separate one-shot puller reaches the model registry on the
 default network, writes into the shared model volume, and exits; it never
 receives document text and never runs as a side effect of starting the stack.
 
-Each document produces exactly one request, for exactly one JSON object, and
-every axis of it is bounded by a constant in code: a fixed input character
-budget over the same normalised text any other untrusted evidence gets,
-schema-constrained decoding so the reply cannot be prose, temperature 0, a
-fixed seed, a generation-token cap, a response-size cap checked before parsing,
-and a wall-clock deadline. A reply that is late, oversized, refused, malformed
-or absent is discarded whole - no partial salvage, no repair prompt, no retry -
-and the upload keeps the heuristic proposal alone. The failure is a log record
-in the existing fixed vocabulary; no model output, and no caught error text,
-ever reaches a log.
+At most two requests are made per document: a blind pass, for exactly one
+JSON object, and an adjudicating pass that runs only where the blind reading
+and the heuristic reading disagree on a field. Every axis of both passes is
+bounded by the same constant in code: a fixed input character budget over the
+same normalised text any other untrusted evidence gets, schema-constrained
+decoding so the reply cannot be prose, temperature 0, a fixed seed, a
+generation-token cap, a response-size cap checked before parsing, and a
+wall-clock deadline - no pass relaxes any of them, and that deadline bounds
+the whole flow rather than each pass, so two sequential passes cannot double
+what the interactive path already waits for. A reply that is late, oversized,
+refused, malformed or absent is discarded whole - no partial salvage, no
+repair prompt, no retry. Where it is the blind pass that fails, the upload
+keeps the heuristic proposal alone, exactly as before. Where it is the
+adjudicating pass that fails, the heuristic value stands for the disputed
+field, not the blind model value, because a failed adjudication is evidence
+for neither reading. The adjudicating pass may instead return a field empty -
+both readings rejected - and that is a result, not a failed pass, distinct
+from the late, oversized, refused, malformed or absent reply above. Every
+failure is a log record in the existing fixed vocabulary; no model output,
+and no caught error text, ever reaches a log.
 
 The system prompt tells the model that the document is untrusted data to be
 read rather than obeyed, but the prompt is not the control. Two things are.
@@ -505,7 +515,11 @@ First, grounding: every value must arrive with a verbatim evidence span, and a
 value is dropped unless that span occurs in the normalised document text and
 itself carries the value. Numeric values must additionally show their digits in
 the span, and a cost is proposed only when its span carries an explicit
-currency symbol or code. Second, the surviving values pass
+currency symbol or code. The adjudicating prompt carries the heuristic and
+blind readings inside it, but grounding stays against the document data block
+and nothing else: a value present only in those supplied readings does not
+ground on them, so the adjudicated answer is grounded against the document
+exactly as the blind answer is. Second, the surviving values pass
 `safeStoredDocumentProposal` exactly as a heuristic or stored proposal does, so
 normalisation, length caps, markup rejection and the fresh-object rebuild that
 discards unknown keys all apply unchanged.
@@ -517,11 +531,23 @@ dropped with it.
 
 The blast radius is therefore the same one a hostile document already has over
 the heuristics: it can influence which candidate suggestions a reviewer is
-shown, and it can waste one bounded inference. It cannot cause a write, reach
+shown, and it can waste at most two bounded inferences. A hostile document can
+always manufacture a disagreement between the two readings and so force the
+second pass, which is why the two-pass count is capped by a constant in code
+rather than left to the agreement test between the readings - that test is a
+cost optimisation, not a security control. It cannot cause a write, reach
 another household, address a tool, or send anything outward. Review-first
 ingestion ([ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md)) is
 unchanged - a model suggestion is still only a suggestion a person accepts.
 
 Still to come, and out of this boundary until they land: wiring the model path
-in as the default where the profile is present, showing extractor disagreement
-to the reviewer, and reporting model availability to the administrator.
+in as the default where the profile is present, and reporting model
+availability to the administrator.
+
+The reviewer surface is being built now. Where the blind and heuristic
+readings disagreed, the reviewer sees the adjudicated value as the
+suggestion, with the reading it rejected available behind a secondary
+affordance beside the field; where the two readings agreed, nothing extra is
+shown at all. The losing validated value is kept only for the life of the
+pending review that offers it, and is discarded with everything else the
+review held once the item is saved or the review is abandoned.

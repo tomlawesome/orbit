@@ -1,0 +1,50 @@
+{
+  "name": "Little Acorns Day Nursery - September 2026 fees invoice",
+  "filename": "nursery-fees-invoice.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-02",
+      "2026-09-15"
+    ],
+    "dateRoles": [
+      {
+        "date": "2026-09-02",
+        "role": "issued"
+      },
+      {
+        "date": "2026-09-15",
+        "role": "due"
+      }
+    ],
+    "provider": "Little Acorns Day Nursery",
+    "reference": "1044829",
+    "subtype": {
+      "kinds": [
+        "Fees",
+        "Bill"
+      ],
+      "qualifiers": [
+        "Childcare"
+      ]
+    },
+    "costMinor": 108760,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: invoice date printed as 'Invoice date: 02/09/2026' (role issued) and due date printed as 'Due date: 15/09/2026' (role due).",
+    "provider is the nursery itself, 'Little Acorns Day Nursery', not the 'Bramblewood Childcare Group' it belongs to.",
+    "reference is the account number '1044829', printed in the invoice grid and repeated in the remittance panel, not the invoice number.",
+    "costMinor is the total payable '£1,087.60' i.e. 108760 pence.",
+    "trap: invoice number 'INV-045821'.",
+    "trap: session rate '£68.50 / day'.",
+    "trap: funded-hours credit shown as a negative amount '−£190.40'.",
+    "trap: balance brought forward from August 2026 '£45.00'.",
+    "trap: late payment charge 'A late payment charge of £25.00 applies to any balance left unpaid 7 days after the due date'.",
+    "trap: autumn term dates '2 September 2026 to 18 December 2026'.",
+    "trap: fee increase notice 'fees will increase from 1 January 2027'.",
+    "trap: registration fee mention 'Registration fees (one-off, charged on enrolment) are non-refundable'.",
+    "trap: the group's name 'Bramblewood Childcare Group'.",
+    "trap: early years registration number 'EY-558214'.",
+    "trap: bank details 'Sort code: 40-51-62, Account number: 20194837'."
+  ]
+}

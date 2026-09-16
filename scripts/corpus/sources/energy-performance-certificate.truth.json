@@ -1,0 +1,29 @@
+{
+  "name": "Energy Performance Certificate",
+  "filename": "energy-performance-certificate.pdf",
+  "expected": {
+    "dates": ["2026-05-12", "2036-05-11"],
+    "dateRoles": [
+      { "date": "2026-05-12", "role": "issued" },
+      { "date": "2036-05-11", "role": "expiry" }
+    ],
+    "provider": "Greenline Energy Assessments Ltd",
+    "reference": "8823-4471-9902-1156-3390",
+    "subtype": { "kinds": ["Certificate", "Inspection"], "qualifiers": ["Energy performance", "Home"] }
+  },
+  "notes": [
+    "Declared issued date: 'Assessment date / certificate issued: 12 May 2026'.",
+    "Declared expiry date: 'Valid until: 11 May 2036' and 'This certificate is valid for 10 years.'",
+    "Declared provider: 'This certificate was produced by Greenline Energy Assessments Ltd', printed with its address and phone number as the firm to contact — not the accreditation scheme or the register.",
+    "Declared reference: the RRN '8823-4471-9902-1156-3390', printed identically on both pages.",
+    "No cost is declared: this document has no price, only cost estimates about the property.",
+    "Trap: the cost panel's 'Per year £871', 'Over 3 years £2,614' and 'Potential saving £456 / year' are energy-cost estimates, not a price for the certificate.",
+    "Trap: indicative improvement costs such as 'Solar water heating... £4,000–£6,000' price recommended work, not the certificate.",
+    "Trap: 'Accredited by the Home Energy Assessors Scheme (HEAS)... lodged on the National Energy Performance Register (NEPR)' names the scheme and the register, both rival provider candidates.",
+    "Trap: 'Assessor: Priya Nandakumar, membership number HEAS/2018/004471' is the individual assessor's own membership number, not the certificate reference.",
+    "Trap: 'This property's previous certificate was issued on 4 April 2016' is an earlier, superseded certificate's date.",
+    "Trap: 'Total floor area 94 m²' is a property detail, not a date or reference.",
+    "Trap: 'Year built 1938' is the property's age, not the certificate's issue date.",
+    "Trap: 'call the national helpline on 01632 960900' is a different phone number from the assessment firm's own 01632 960777."
+  ]
+}

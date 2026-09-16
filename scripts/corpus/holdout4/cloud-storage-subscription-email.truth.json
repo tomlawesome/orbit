@@ -1,0 +1,19 @@
+{
+  "name": "Cloud storage subscription e-mail",
+  "filename": "cloud-storage-subscription-email.pdf",
+  "notes": ["Printed e-mail receipt for a yearly cloud storage subscription renewal"],
+  "expected": {
+    "dates": ["2026-06-12", "2027-06-12"],
+    "provider": "Fenwold Vault",
+    "reference": "SUB-FNW-30219",
+    "dateRoles": [
+      { "date": "2026-06-12", "role": "issued" },
+      { "date": "2027-06-12", "role": "renewal" }
+    ],
+    "subtype": { "kinds": ["Subscription"], "qualifiers": ["Software"] },
+    "costMinor": 11988,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  }
+}

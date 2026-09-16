@@ -44,7 +44,15 @@ export type AuthErrorCode =
      themselves out — at least one USABLE method has to survive, and an
      identity is not usable while `ORBIT_AUTH_OIDC` is false. */
   | "link_exists"
-  | "link_last_method";
+  | "link_last_method"
+  /* The instance holds no usable encryption key, so the account addresses
+     sign-in matches on cannot be read or written (#969, ADR-0024). Deliberately
+     NOT `credentials_invalid`: that code is the one answer for an unknown
+     address and a wrong password alike, and an operator who has lost the key
+     must be able to tell "Orbit cannot see any address" from "your password is
+     wrong". It says nothing about any particular account — the fault is
+     instance-wide — so it leaks nothing the generic answer protects. */
+  | "instance_locked";
 
 /**
  * Closed internal diagnostic reasons for a token-exchange failure.

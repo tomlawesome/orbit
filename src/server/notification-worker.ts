@@ -26,7 +26,7 @@ import {
   type RecipientWarningDays,
 } from "@/lib/preferences";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
-import { openMetadataReaders } from "@/server/metadata/fields";
+import { openInstanceMetadataReader, openMetadataReaders } from "@/server/metadata/fields";
 
 // Re-exported so every existing import of these from this module (the
 // dispatch worker) keeps working: the pure logic itself now lives in
@@ -81,6 +81,11 @@ export const notificationFailureCategories = [
      because both causes are repairable and neither justifies a nameless
      reminder. */
   "item_title_unreadable",
+  /* #969: the recipient's own address is Tier 2 ciphertext under the instance
+     key, and would not decrypt — the same two causes, and the same answer.
+     The reminder is left for a later run rather than sent to nowhere or
+     cancelled: neither cause is the recipient's doing. */
+  "recipient_address_unreadable",
   "unknown",
 ] as const;
 
@@ -703,6 +708,7 @@ async function deliverClaimed(
       userId: notificationDeliveries.userId,
       householdId: notificationDeliveries.householdId,
       email: users.email,
+      emailEnc: users.emailEnc,
       title: items.title,
       titleEnc: items.titleEnc,
       dueDate: dueEvents.dueDate,
@@ -756,6 +762,11 @@ async function deliverClaimed(
   // delivery. The worker already runs with key access, which is what the
   // tiering decision relied on.
   const titleReaders = await openMetadataReaders(deliveries.map((delivery) => delivery.householdId));
+  // #969: addresses are instance-scope, not a household's — one unwrap for the
+  // batch, and only when something in it actually goes by mail.
+  const addressReader = deliveries.some((delivery) => delivery.channel === "email")
+    ? await openInstanceMetadataReader()
+    : null;
   for (const delivery of deliveries) {
     const leaseToken = leaseTokens.get(delivery.id);
     if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
@@ -802,6 +813,18 @@ async function deliverClaimed(
           await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "smtp_unconfigured", now, retryDelay);
           continue;
         }
+        /* Tier 2 (#969): the address decrypts here, exactly as the item's name
+           does above. An address this run cannot read leaves the reminder for
+           a later one — the row goes back to `retry` and is neither consumed
+           nor cancelled, because a locked key and a damaged value are both
+           repairable and neither is a reason to drop somebody's reminder. */
+        const address = addressReader!
+          .text("users.email", delivery.userId, { encrypted: delivery.emailEnc, plaintext: delivery.email });
+        if (!address.value) {
+          await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "recipient_address_unreadable", now, retryDelay);
+          continue;
+        }
+        const recipientAddress = address.value;
         if (!await dispatchUnderHouseholdLifecycleLock(
           db,
           {
@@ -814,7 +837,7 @@ async function deliverClaimed(
           leaseDurationMs,
           async () => providers.sendEmail({
             from: config.smtpFrom,
-            to: delivery.email,
+            to: recipientAddress,
             subject,
             text,
             tlsMode: config.smtpSecurity,

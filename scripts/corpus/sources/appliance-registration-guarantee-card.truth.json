@@ -1,0 +1,23 @@
+{
+  "name": "appliance registration card confirming an extended guarantee, terms printed on the reverse",
+  "filename": "appliance-registration-guarantee-card.pdf",
+  "expected": {
+    "dates": ["2028-05-09", "2031-05-08"],
+    "provider": "Fernhill Appliance Care",
+    "reference": "FAC-EG-2291083",
+    "dateRoles": [
+      { "date": "2028-05-09", "role": "start" },
+      { "date": "2031-05-08", "role": "expiry" }
+    ],
+    "subtype": { "kinds": ["Guarantee", "Warranty"], "qualifiers": ["Extended", "Appliance"] },
+    "costMinor": 14900,
+    "currency": "GBP"
+  },
+  "notes": [
+    "provider is Fernhill Appliance Care, the firm that sold and administers the extended guarantee and that the household books repairs with. It is not the manufacturer Vantage Kitchens, not the retailer Halloway Electricals where the machine was bought, not the insurer behind the guarantee, Redhurst Insurance plc, not the repair network Swift Domestic Repairs, not the parts supplier Kelso Spares and not the Financial Ombudsman Service.",
+    "reference is the guarantee number FAC-EG-2291083, printed on the card and on the reverse. Rivals: the appliance serial number 22K9910834, the model number VK-DW60-914, the retailer's order number HE-7712094, the registration identifier 5510983, the product code 8820119, the repair booking reference BK-44710, the VAT number GB 771 2094 33, the company registration number 07719042 and the Gas Safe and electrical scheme numbers quoted for the engineer network.",
+    "dates and dateRoles carry the date the extended guarantee starts, 9 May 2028, and the date it runs out, 8 May 2031, after which the cover is simply over and the household is not asked to do anything. Rivals: the purchase date (9 May 2026), the registration date (23 May 2026), the date the manufacturer's two year guarantee ends (8 May 2028, the day before cover starts), the card print date (26 May 2026), the last day of the cooling-off period (6 June 2026), the thirty day registration deadline and the date the terms were last revised (1 March 2026).",
+    "costMinor is the £149.00 paid once for the three years of extended cover. It is not the £629.00 the appliance cost, not the £4.99 a month option or its printed £179.64 total if paying monthly (an offered option is not the commitment, owner 2026-09-13), not the £35.00 excess for each repair, not the £75.00 charge for a visit outside cover and not the £700.00 replacement limit, which is a cover limit.",
+    "scheduleKind and recurrenceMonths are omitted: the cover expires rather than renews, and nothing on the card states a repeating cycle."
+  ]
+}
