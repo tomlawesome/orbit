@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 import nodemailer from "nodemailer";
 import webPush from "web-push";
-import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
+  auditLog,
   dueEvents,
   households,
   items,
@@ -685,6 +686,25 @@ async function cancelDelivery(
   ));
 }
 
+/**
+ * What one reminder says. A renewal and a service are things that fall due; an
+ * expiry (#1005) is a thing running out, so it is worded as an ending and
+ * never as something owed. Lead times and rules are the same for all three.
+ */
+export function reminderWords(
+  title: string,
+  dueDate: string,
+  kind: "renewal" | "service" | "expiry",
+): { subject: string; body: string; text: string } {
+  const body = (kind === "expiry"
+    ? `${title} ends on ${dueDate}.`
+    : `${title} is due on ${dueDate}.`).slice(0, 320);
+  const subject = (kind === "expiry"
+    ? `${title} is running out`
+    : `${title} is coming up`).slice(0, 180);
+  return { subject, body, text: `Reminder: ${body}\nOpen Orbit to review it.`.slice(0, 500) };
+}
+
 async function deliverClaimed(
   db: NotificationDatabase,
   claimed: ClaimedDelivery[],
@@ -712,6 +732,7 @@ async function deliverClaimed(
       title: items.title,
       titleEnc: items.titleEnc,
       dueDate: dueEvents.dueDate,
+      kind: dueEvents.kind,
       itemId: items.id,
       itemStatus: items.status,
       snoozedUntil: items.snoozedUntil,
@@ -805,9 +826,7 @@ async function deliverClaimed(
         continue;
       }
       const title = decryptedTitle.value.trim().slice(0, 160);
-      const body = `${title} is due on ${delivery.dueDate}.`.slice(0, 320);
-      const subject = `${title} is coming up`.slice(0, 180);
-      const text = `Reminder: ${body}\nOpen Orbit to review it.`.slice(0, 500);
+      const { subject, body, text } = reminderWords(title, delivery.dueDate, delivery.kind);
       if (delivery.channel === "email") {
         if (!config.smtpUrl) {
           await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "smtp_unconfigured", now, retryDelay);
@@ -978,6 +997,101 @@ async function failDelivery(
   ));
 }
 
+/**
+ * How long an ended one-off lingers before it leaves the sky (#1005). Nothing
+ * is owed once a warranty runs out, so it is never chased -- it simply stays
+ * visible for a fortnight and then becomes an ended thing.
+ */
+export const EXPIRY_LINGER_DAYS = 14;
+
+/**
+ * The first date still inside the linger. Anything that ended before this has
+ * had its fortnight and is swept.
+ *
+ * Calendar days in UTC rather than each household's own zone: the boundary is
+ * already a fortnight old by the time it bites, so an hours-wide difference
+ * cannot change which side of it a date falls on, and one boundary for the
+ * instance keeps the sweep a single statement.
+ */
+export function expirySweepBoundary(now: Date): string {
+  return new Date(now.getTime() - EXPIRY_LINGER_DAYS * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Whether today's sweep has already run. The flip is a stored status, not a
+ * read-time derivation, so it has to happen once a day whatever the poll
+ * interval is -- otherwise every tick would rewrite the same rows.
+ */
+export function expirySweepIsDue(today: string, lastSweptOn: string | undefined): boolean {
+  return today !== lastSweptOn;
+}
+
+/**
+ * The daily sweep (#1005): every active item whose open due event is an expiry
+ * that ended more than `EXPIRY_LINGER_DAYS` ago becomes `expired`. The event is
+ * completed with no successor, the item's reminder rules go with it, and an
+ * activity row records the flip the way a retire does.
+ *
+ * Returns how many items it ended.
+ */
+export async function sweepEndedExpiries(db: NotificationDatabase, now: Date): Promise<number> {
+  const boundary = expirySweepBoundary(now);
+  const ended = await db.select({
+    eventId: dueEvents.id,
+    itemId: items.id,
+    householdId: items.householdId,
+    dueDate: dueEvents.dueDate,
+  })
+    .from(dueEvents)
+    .innerJoin(items, eq(items.id, dueEvents.itemId))
+    .where(and(
+      eq(dueEvents.kind, "expiry"),
+      isNull(dueEvents.completedAt),
+      eq(items.status, "active"),
+      lt(dueEvents.dueDate, boundary),
+    ));
+  let swept = 0;
+  for (const row of ended) {
+    const activityId = randomUUID();
+    await db.transaction(async (transaction) => {
+      const [updated] = await transaction.update(items).set({
+        status: "expired",
+        version: sql`${items.version} + 1`,
+        updatedAt: now,
+      })
+        /* Still active when the write lands, or somebody changed it between the
+           read above and here and their change is the current one. */
+        .where(and(eq(items.id, row.itemId), eq(items.status, "active")))
+        .returning({ id: items.id });
+      if (!updated) return;
+      await transaction.update(dueEvents).set({ completedAt: now })
+        .where(and(eq(dueEvents.id, row.eventId), isNull(dueEvents.completedAt)));
+      await transaction.delete(reminderRules).where(eq(reminderRules.itemId, row.itemId));
+      await transaction.insert(auditLog).values({
+        id: activityId,
+        householdId: row.householdId,
+        /* Nobody did this: the instance did, once the date was a fortnight old. */
+        actorUserId: null,
+        entityType: "item",
+        entityId: row.itemId,
+        action: "expired",
+        changes: {
+          activity: {
+            id: activityId,
+            itemId: row.itemId,
+            kind: "expired",
+            occurredAt: now.toISOString(),
+            effectiveDate: row.dueDate,
+          },
+        },
+        createdAt: now,
+      }).onConflictDoNothing();
+      swept += 1;
+    });
+  }
+  return swept;
+}
+
 export async function runNotificationCycle(
   config = getNotificationWorkerConfig(),
   dependencies: NotificationWorkerDependencies = {},
@@ -989,6 +1103,13 @@ export async function runNotificationCycle(
   const retryDelay = dependencies.retryDelayMs ?? notificationRetryDelayMs;
   const nextLeaseToken = dependencies.nextLeaseToken ?? randomUUID;
   const providers = dependencies.providers ?? createDefaultNotificationProviders(config);
+  /* Once a day, not every tick (#1005): the worker has no other daily job, so
+     the last swept date sits beside its other process-local state. */
+  const today = now.toISOString().slice(0, 10);
+  if (expirySweepIsDue(today, workerState.__orbitExpirySweptOn)) {
+    workerState.__orbitExpirySweptOn = today;
+    await sweepEndedExpiries(db, now);
+  }
   await materializeDueDeliveries(db, now);
   const claimed = await claimDeliveries(db, now, nextLeaseToken, leaseDurationMs, dependencies.claimLimit ?? 25);
   await deliverClaimed(
@@ -1005,6 +1126,8 @@ export async function runNotificationCycle(
 }
 
 const workerState = globalThis as typeof globalThis & {
+  /** The UTC day the expiry sweep last ran (#1005). */
+  __orbitExpirySweptOn?: string;
   __orbitWorkerStarted?: boolean;
   __orbitWorkerRunning?: boolean;
   __orbitWorkerLastSuccessAt?: string;
