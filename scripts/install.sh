@@ -1396,16 +1396,14 @@ if [[ "$channel" =~ $semver_pattern && "$image_version" != "$channel" ]]; then
 fi
 readonly applied_digest="${resolved_reference##*@}"
 
-installer_ui_event identity image running image-identity inspect
-if ! docker run --rm --entrypoint /opt/orbit/scripts/container-entrypoint.sh \
-  "$resolved_reference" --banner; then
-  fail "The resolved Orbit image could not render its canonical banner."
-fi
-installer_ui_event identity image completed image-identity verify
-
 # The image says where it keeps the assets it was built from. An image
 # without that label predates ADR-0019 and cannot be installed from: there is
-# nothing to extract, and the revision it names may no longer resolve.
+# nothing to extract, and the revision it names may no longer resolve. The
+# label is read before the image is asked for its banner (#1016): an image
+# built before ADR-0019 cannot render the banner either, and that failure
+# reports a retryable registry fault, which sends an operator round a loop
+# no retry can end. The supportability question is cheap, needs no
+# container, and has the accurate answer.
 readonly deployment_assets_root="/opt/orbit/deploy"
 if ! bundled_assets_root="$(docker image inspect --format '{{index .Config.Labels "io.orbit.deployment-assets"}}' "$resolved_reference" 2>/dev/null)"; then
   fail "Could not inspect ${resolved_reference} for its bundled deployment assets."
@@ -1415,6 +1413,14 @@ fi
 [[ "$bundled_assets_root" == "$deployment_assets_root" ]] ||
   fail "The published image records deployment assets somewhere other than ${deployment_assets_root}."
 readonly bundled_assets_root
+
+installer_ui_event identity image running image-identity inspect
+if ! docker run --rm --entrypoint /opt/orbit/scripts/container-entrypoint.sh \
+  "$resolved_reference" --banner; then
+  fail "The resolved Orbit image could not render its canonical banner."
+fi
+installer_ui_event identity image completed image-identity verify
+
 readonly deployment_assets=(
   "docker-compose.yml"
   "docker-compose.mail.yml"
