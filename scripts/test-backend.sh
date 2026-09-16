@@ -8,19 +8,31 @@ cd "$repo_dir"
 # @pnpm/exe block back into the lockfile. Runs via `node --test`, not Vitest --
 # see vitest.config.ts's exclude entry for why.
 #
-# Fatal in CI, advisory locally (#1024). The block is written by any local
-# `pnpm` command, including the ones further down this very script, so as the
-# first fatal step it mostly caught pollution the previous local run had
-# caused: `set -Eeuo pipefail` then aborted before a single test ran, and the
-# developer read a failure about a file they had never edited. Every agent and
-# developer hit it, restored the lockfile and ran again, losing a run each
-# time.
+# Fatal against the COMMITTED lockfile; advisory against the working tree
+# (#1024). The block is written by any local `pnpm` command, including the ones
+# further down this very script, so while this ran fatally against the working
+# copy it mostly caught pollution the previous local run had caused:
+# `set -Eeuo pipefail` then aborted before a single test ran, and the developer
+# read a failure about a file they had never edited. Every agent and developer
+# hit it, restored the lockfile and ran again, losing a run each time.
 #
-# So locally the check moves to the end, where it reports the state this run
-# leaves behind and says what to do about it, without eating the run. In CI it
-# stays exactly as it was: first, and fatal. That is the path that matters,
-# because it is the one that can put the block into the repository.
-if [[ -n "${CI:-}" ]]; then
+# What must never happen is the block being IN the repository, and that is a
+# property of the commit, not of the working copy. So the fatal reading is of
+# `HEAD:pnpm-lock.yaml`. In CI the checkout is the commit, so this is exactly
+# the check that ran before, with the same outcome; locally it stays quiet
+# about pollution the run itself is about to cause, and the advisory reading at
+# the end of this script reports that instead.
+#
+# Deliberately not a test of an environment variable: `su node -c` decides
+# whether CI= survives into the job's unprivileged half, and a guard that
+# quietly stops being fatal because a variable was dropped is worse than no
+# guard.
+committed_lockfile="$(mktemp)"
+trap 'rm -f "$committed_lockfile"' EXIT
+if git show HEAD:pnpm-lock.yaml > "$committed_lockfile" 2>/dev/null; then
+  ORBIT_LOCKFILE_PATH="$committed_lockfile" node --test scripts/lockfile-no-pnpm-exe.test.mjs
+else
+  # No git, or no lockfile in HEAD: fail closed by judging what is on disk.
   node --test scripts/lockfile-no-pnpm-exe.test.mjs
 fi
 
@@ -102,7 +114,7 @@ fi
 # real work, and discarding one to save a message would be the worse fault --
 # and it never changes this script's exit code, because the tests above are
 # what the run was for.
-if [[ -z "${CI:-}" ]] && ! node --test scripts/lockfile-no-pnpm-exe.test.mjs >/dev/null 2>&1; then
+if ! node --test scripts/lockfile-no-pnpm-exe.test.mjs >/dev/null 2>&1; then
   printf '\n' >&2
   printf 'NOTE: pnpm-lock.yaml now carries a bare @pnpm/exe block.\n' >&2
   printf '      A local pnpm command writes it while handing over to the pinned 12.3.4;\n' >&2
