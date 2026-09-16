@@ -41,6 +41,8 @@ follow `tour.css` `FORWARD_PACKS`, deferred with that work.
 - #1035 — belt chrome collides with the search field and belt arrows on a phone.
 - #1036 — pocket home has no way to add an item.
 
-## Verdicts
+## Verdicts (owner, 2026-09-16)
 
-(pending)
+- Adrift gets the tour: "They get one. Maybe they'll join and create their own."
+- Pocket bottom-sheet card: "Bottom is fine."
+- Build brief: "Go."
