@@ -25,9 +25,8 @@
   /* §14: due-next and documents retired — the manifest is the corridor and
      the belt is the document surface.
      #1014: the belt (/item/[[id]]) has no front door of its own elsewhere in
-     the chrome, so it gets one here, above Inbox. This only wires the menu
-     entry -- the belt itself does not render Chrome (that is #1010's job),
-     so "item" never actually reaches `current` from that screen yet. */
+     the chrome, so it gets one here, above Inbox; since #1010 the belt renders
+     Chrome too, so "item" is a `current` that lights up. */
   const NAV = [
     ["item", "Items", "/item"],
     ["inbox", "Inbox", "/inbox"],
