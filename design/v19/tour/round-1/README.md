@@ -67,4 +67,12 @@ motion is respected in both files (end states, no walks).
 
 ## Verdicts
 
-_(recorded here verbatim when the owner rules)_
+Owner, 2026-09-16, in chat, numbered against the round's questions:
+
+- 13 (direction): "B"
+- 14 (watch-only vs reader performs): "Let's try watch only first" / "Watch only."
+- 15 (beats to cut or add): "Good for now."
+
+So: direction B, watch-only, the ten beats as listed. Round 2 carries B onto
+pocket, adrift and the empty sky. Direction A is closed (superseded by B;
+its inserts fell below the legibility floor).
