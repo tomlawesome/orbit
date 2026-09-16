@@ -150,7 +150,8 @@
     <div class="panel">
       <div class="row2">
         <div class="field" class:sugg={marked("dueDate")}>
-          <label for="s-due">renews / due</label>
+          <!-- #1005: a one-off ends; it does not renew and it is not owed. -->
+          <label for="s-due">{proposal.scheduleKind === "expiry" ? "ends" : "renews / due"}</label>
           <input id="s-due" type="date" bind:value={sform.dueDate}></div>
         <div class="field" class:sugg={marked("recurrenceMonths")}>
           <label for="s-recur">orbital period (months)</label>

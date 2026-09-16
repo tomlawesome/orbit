@@ -194,7 +194,7 @@
                 <div class="kv"><span>provider</span><b>{receipt.proposal.provider}{#if mark(receipt, "provider")}<span class="conf">{mark(receipt, "provider")}</span>{/if}</b></div>
               {/if}
               {#if receipt.proposal?.dueDate}
-                <div class="kv"><span>renews</span><b>{fullDate(receipt.proposal.dueDate)}{#if mark(receipt, "dueDate")}<span class="conf">{mark(receipt, "dueDate")}</span>{/if}</b></div>
+                <div class="kv"><span>{receipt.proposal.scheduleKind === "expiry" ? "ends" : "renews"}</span><b>{fullDate(receipt.proposal.dueDate)}{#if mark(receipt, "dueDate")}<span class="conf">{mark(receipt, "dueDate")}</span>{/if}</b></div>
               {/if}
               {#if receipt.proposal?.costMinor}
                 <div class="kv"><span>cost</span><b>{money(receipt.proposal.costMinor, receipt.proposal.currency ?? "GBP", true)}{#if mark(receipt, "costMinor")}<span class="conf">{mark(receipt, "costMinor")}</span>{/if}</b></div>
