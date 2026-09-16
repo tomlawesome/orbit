@@ -35,6 +35,7 @@ that?" for the reading in force, which is the only one the reader must
 trust before pressing Add; the other two are one tap away and then show
 theirs.
 
-## Verdicts
+## Verdicts (owner, 2026-09-16)
 
-(pending)
+- "29. Lines is better. Neither is very elegant." — B carries forward; round 2
+  keeps every reading visible and takes the boxes away.
