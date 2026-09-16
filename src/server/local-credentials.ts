@@ -27,8 +27,8 @@
  * route actually calls.
  */
 
-import { createHash, randomBytes } from "node:crypto";
-import { and, asc, eq, gt, isNull, ne, sql } from "drizzle-orm";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { and, asc, eq, gt, isNull, ne, or, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -51,6 +51,12 @@ import { VerificationGateRefusedError } from "@/lib/auth/verification-gate";
 import { getAuthConfig } from "@/lib/env";
 import { AppError } from "@/lib/errors";
 import { log } from "@/lib/logger";
+import {
+  MetadataCipher,
+  openInstanceMetadataReader,
+  requireInstanceMetadataWriter,
+} from "@/server/metadata/fields";
+import { metadataCryptoAvailable } from "@/server/metadata/keys";
 
 /** The executor a caller already holds a transaction on, or `getDb()` itself. */
 type Executor = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
@@ -152,14 +158,35 @@ export async function createLocalUser(
       }
     }
 
+    /* Creating an account WRITES an address, so unlike signing in it genuinely
+       needs the key, and the claim — the very first thing a new instance does
+       — needs it most (#969). Refused in its own words: an operator whose key
+       is missing must not read this as their address being rejected. */
+    let cipher: MetadataCipher;
+    try {
+      cipher = await requireInstanceMetadataWriter(transaction);
+    } catch {
+      throw new AuthError(
+        "instance_locked",
+        "This Orbit instance cannot create accounts until its encryption key is available",
+        503,
+      );
+    }
+
     /* Checked rather than left to the case-insensitive unique index, so the
        answer is Orbit's own bounded refusal instead of a driver error. The
        wording is ADR-0023 §3's collision refusal: an address belongs to one
-       account, and the way to add a second sign-in method is to link it. */
+       account, and the way to add a second sign-in method is to link it.
+
+       Both indexes are consulted (#969): the blind one for an encrypted row,
+       the case-insensitive one for a row the backfill has not reached. */
+    const emailIndex = cipher.emailIndex(email);
     const [taken] = await transaction
       .select({ id: users.id })
       .from(users)
-      .where(sql`lower(${users.email}) = lower(${email})`)
+      .where(emailIndex === null
+        ? sql`lower(${users.email}) = lower(${email})`
+        : or(eq(users.emailIndex, emailIndex), sql`lower(${users.email}) = lower(${email})`))
       .limit(1);
     if (taken) {
       throw new AuthError(
@@ -169,17 +196,24 @@ export async function createLocalUser(
       );
     }
 
+    /* Minted here rather than by the database, because the envelope binds the
+       address to its own row id: the ciphertext cannot be written before the
+       id it belongs to is known. */
+    const userId = randomUUID();
     const [created] = await transaction
       .insert(users)
       .values({
-        email,
+        id: userId,
+        email: null,
+        emailEnc: cipher.encryptText("users.email", userId, email),
+        emailIndex,
         /* Nothing has verified this address: no provider asserted it and Orbit
            sends no confirmation mail (ADR-0023 rejects email-based flows). */
         emailVerified: false,
         displayName,
         isInstanceAdmin: options.bootstrap === true,
       })
-      .returning({ id: users.id, email: users.email, displayName: users.displayName });
+      .returning({ id: users.id, displayName: users.displayName });
 
     await transaction.insert(userPreferences).values({ userId: created.id }).onConflictDoNothing();
     if (draft.passwordHash) {
@@ -210,7 +244,10 @@ export async function createLocalUser(
       });
     }
 
-    return created;
+    /* The caller is handed the address it just supplied, not a re-read of the
+       column: the row now holds ciphertext, and decrypting it again to answer
+       with the same string would be work for nothing. */
+    return { ...created, email };
   });
 }
 
@@ -223,7 +260,19 @@ export async function createLocalUser(
 export type CredentialVerdict =
   | { outcome: "verified"; userId: string }
   | { outcome: "rejected" }
-  | { outcome: "throttled" };
+  | { outcome: "throttled" }
+  /**
+   * The instance holds no usable encryption key, so no address can be matched
+   * at all (#969). A FIFTH answer, deliberately, and the one exception to the
+   * "every failure looks the same" rule at the top of this file: that rule
+   * exists so a verdict cannot be turned into "that address exists", and this
+   * one says nothing about any address. It is true of the whole instance
+   * before a single character of the address is compared, so an attacker
+   * learns only what the sign-in screen is about to tell everybody anyway —
+   * while the operator learns the thing they actually need to know, instead of
+   * being told their own password is wrong.
+   */
+  | { outcome: "locked" };
 
 /**
  * Verifies an email and password against `local_credentials` (ADR-0023 §4).
@@ -255,6 +304,31 @@ export async function verifyCredential(email: string, password: string): Promise
 
 async function attemptVerification(email: string, password: string): Promise<CredentialVerdict> {
   const db = getDb();
+
+  /* The address is behind the key now (#969), so the lookup is the blind index
+     — and an instance with no KEK can compute no index. Reported before any
+     derivation runs: there is nothing to guess against, so spending the decoy
+     would only make a locked instance slow as well as locked.
+
+     The test is "is there a KEK", not "is this cipher locked". They differ on
+     an instance that has simply never written an address — a fresh, unclaimed
+     one — whose key row does not exist yet. That instance is not locked and
+     has no accounts either, so it must keep giving the ordinary answer rather
+     than announcing which of the two states it is in. */
+  if (!metadataCryptoAvailable()) return { outcome: "locked" };
+  const cipher = await openInstanceMetadataReader();
+
+  const trimmed = email.trim();
+  /* Null on an instance whose key row does not exist yet — it has never
+     written an address, so there is nothing for an index to find, and asking
+     the cipher for one would throw. The plaintext arm below still answers. */
+  const emailIndex = cipher.locked ? null : cipher.emailIndex(trimmed);
+  /* Two matches: the index finds an encrypted row, the case-insensitive
+     comparison finds one the backfill has not reached. A row is in exactly one
+     of those states, so this cannot match twice. */
+  const matchesAddress = emailIndex === null
+    ? sql`lower(${users.email}) = lower(${trimmed})`
+    : or(eq(users.emailIndex, emailIndex), sql`lower(${users.email}) = lower(${trimmed})`);
   const [account] = await db
     .select({
       userId: users.id,
@@ -264,7 +338,7 @@ async function attemptVerification(email: string, password: string): Promise<Cre
     })
     .from(users)
     .leftJoin(localCredentials, eq(localCredentials.userId, users.id))
-    .where(sql`lower(${users.email}) = lower(${email.trim()})`)
+    .where(matchesAddress)
     .limit(1);
 
   /* No such address, a disabled account, or an account that has no password
