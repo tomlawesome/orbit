@@ -42,3 +42,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0025: Model extraction is a schema-bound, evidence-grounded proposer on a fixed internal endpoint, gated by a hold-out corpus](0025-local-model-extraction.md) (Accepted; §4 amended 2026-09-10)
 - [ADR-0026: Extraction finds every candidate, tags each with the label beside it, then chooses per field](0026-extraction-sieves-tags-then-chooses.md) (Accepted)
 - [ADR-0028: CI job reuse is keyed on the artefact under test, not on a guess at its inputs](0028-ci-reuse-keyed-on-tested-artefact.md) (Accepted)
+- [ADR-0029: One extraction queue, one job at a time, turns by who is waiting; the GPU is observed, never declared](0029-model-allocation.md) (Accepted)
