@@ -163,11 +163,17 @@ describe("the four model-owned fields at the storage boundary", () => {
       scheduleKind: "renewal",
       scheduleDate: "2030-12-20",
     });
-    // Only a renewal or a service date is a scheduled event.
-    for (const role of ["expiry", "due", "issued", "start", "other"]) {
+    // Only a renewal, a service or an expiry date is a scheduled event (#1005).
+    for (const role of ["due", "issued", "start", "other"]) {
       expect(stored({ dateRoles: [{ date: "2030-12-20", role }] }).scheduleKind).toBeUndefined();
     }
     expect(stored({ dateRoles: [{ date: "2030-12-20", role: "service" }] }).scheduleKind).toBe("service");
+    expect(stored({ dateRoles: [{ date: "2030-12-20", role: "expiry" }] }).scheduleKind).toBe("expiry");
+    // An expiry happens once, so a recurrence never rides one.
+    expect(stored({
+      recurrenceMonths: 12,
+      dateRoles: [{ date: "2030-12-20", role: "expiry" }],
+    }).recurrenceMonths).toBeUndefined();
   });
 
   it("keeps one role per date, the first winning, and rebuilds from an allowlist", () => {
