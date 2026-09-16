@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   canonicalReviewedIntakeHash,
+  clearedReviewDraftMetadata,
+  reviewDraftMetadataFromProposal,
   reviewedIntakeApprovalSchema,
   sanitizeReviewDraftMetadata,
 } from "./reviewed-intake";
@@ -73,6 +75,48 @@ describe("reviewed intake contract", () => {
     expect(canonicalReviewedIntakeHash(reviewedIntakeApprovalSchema.parse(base))).toBe(
       canonicalReviewedIntakeHash(reviewedIntakeApprovalSchema.parse(reordered)),
     );
+  });
+
+  it("keeps a bounded rejected-reading alternative and drops an oversized or markup-bearing one (#959, ADR-0025 section 4)", () => {
+    expect(sanitizeReviewDraftMetadata({
+      proposal: { provider: "Larkfield Mutual" },
+      fieldEvidence: {
+        provider: { source: "document_text", confidence: "medium", alternative: "  Acme Cover  " },
+        reference: { source: "document_text", confidence: "medium", alternative: "x".repeat(81) },
+        title: { source: "filename", confidence: "high", alternative: "<script>alert(1)</script>" },
+      },
+    })).toEqual({
+      proposal: { provider: "Larkfield Mutual" },
+      fieldEvidence: {
+        provider: { source: "document_text", confidence: "medium", alternative: "Acme Cover" },
+        reference: { source: "document_text", confidence: "medium" },
+        title: { source: "filename", confidence: "high" },
+      },
+    });
+  });
+
+  it("carries the rejected reading into a mail-in draft's field evidence only for the fields adjudication disputed", () => {
+    const proposal = { title: "receipt", provider: "Larkfield Mutual", reference: "LKM-1", dates: ["2027-02-01"] };
+    const { fieldEvidence } = reviewDraftMetadataFromProposal(proposal, { provider: "Acme Cover" });
+
+    expect(fieldEvidence.provider).toEqual({ source: "document_text", confidence: "medium", alternative: "Acme Cover" });
+    expect(fieldEvidence.reference).toEqual({ source: "document_text", confidence: "medium" });
+    expect(fieldEvidence.title).toEqual({ source: "filename", confidence: "high" });
+  });
+
+  it("offers no alternative for a mail-in draft when adjudication is absent or agreed on everything", () => {
+    const proposal = { title: "receipt", provider: "Larkfield Mutual", reference: "LKM-1", dates: ["2027-02-01"] };
+
+    expect(reviewDraftMetadataFromProposal(proposal).fieldEvidence.provider).toEqual({ source: "document_text", confidence: "medium" });
+  });
+
+  it("clears every column a mail-in draft's rejected reading could ride in, and nothing else", () => {
+    expect(clearedReviewDraftMetadata).toEqual({
+      proposal: {},
+      proposalEnc: null,
+      fieldEvidence: {},
+      fieldEvidenceEnc: null,
+    });
   });
 
   it("requires an explicit, validated operation identity to complete a direct document upload", () => {

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { AppError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
+import { adjudicateProposal, type AdjudicatedField } from "@/server/documents/adjudication";
 import { getDocumentConfig } from "@/server/documents/config";
+import { MODEL_INTERACTIVE_DEADLINE_MS } from "@/server/documents/model-extraction";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
@@ -40,6 +42,15 @@ export interface ItemDocumentSuggestion {
   value: string;
   source: ItemDocumentSuggestionSource;
   confidence: ItemDocumentSuggestionConfidence;
+  /**
+   * The validated value adjudication rejected in favour of `value` (ADR-0025
+   * section 4, owner ruling 2026-09-10). Present only for the three
+   * adjudicated fields, and only where the two readings actually disagreed;
+   * absent everywhere else, including whenever no model is configured. The
+   * web layer's presentation of it is a separate, not-yet-ratified decision
+   * — this only makes the value reachable.
+   */
+  alternative?: string;
 }
 
 export interface ItemDocumentInspectionResult {
@@ -77,23 +88,30 @@ function costSuggestion(proposal: DocumentProposal): string | undefined {
  * than field by field here, so this surface can never show a reviewer a
  * value the storage boundary would have refused.
  */
-export function buildDocumentSuggestions(filename: string, proposal: unknown): ItemDocumentSuggestion[] {
+export function buildDocumentSuggestions(
+  filename: string,
+  proposal: unknown,
+  alternatives: Partial<Record<AdjudicatedField, string>> = {},
+): ItemDocumentSuggestion[] {
   const suggestions: ItemDocumentSuggestion[] = [];
   const add = (
     field: ItemDocumentSuggestionField,
     value: string | undefined,
     source: ItemDocumentSuggestionSource,
     confidence: ItemDocumentSuggestionConfidence,
+    alternative?: string,
   ) => {
     if (!allowedSuggestionFields.has(field) || !value || suggestions.some((suggestion) => suggestion.field === field)) return;
-    suggestions.push({ field, value, source, confidence });
+    suggestions.push({ field, value, source, confidence, ...(alternative ? { alternative } : {}) });
   };
 
   const safe = safeStoredDocumentProposal(proposal, filename);
+  // Title is always the filename reading here, never the document text's —
+  // unchanged by adjudication, so it carries no alternative from it either.
   add("title", safeDocumentFilenameTitle(filename), "filename", "high");
   add("subtype", safe.subtype, "document_text", "medium");
-  add("provider", safe.provider, "document_text", "medium");
-  add("reference", safe.reference, "document_text", "medium");
+  add("provider", safe.provider, "document_text", "medium", alternatives.provider);
+  add("reference", safe.reference, "document_text", "medium", alternatives.reference);
   add("cost", costSuggestion(safe), "document_text", "medium");
   // The scheduled date when the roles named one, and otherwise the first
   // date the document offered, exactly as this surface has always behaved.
@@ -205,6 +223,7 @@ export async function inspectItemDocument(input: {
       let extracted = false;
       let message: string | undefined;
       let proposal: unknown;
+      let alternatives: Partial<Record<AdjudicatedField, string>> = {};
       try {
         const parsedText = await extractTextWithTika(bytes, mediaType, operationId);
         if (typeof parsedText !== "string" || parsedText.length > MAX_EXTRACTED_CHARACTERS) throw new Error("parser_output_invalid");
@@ -217,10 +236,33 @@ export async function inspectItemDocument(input: {
           ? processorDisabledMessage
           : parserRecoveryMessage;
       }
+      if (extracted && proposal) {
+        // ADR-0025 section 4: adjudicate the heuristic reading against the
+        // model's independent one, bounded by the document's own deadline —
+        // `adjudicateProposal` already enforces that budget for both of its
+        // passes together, so nothing further is awaited here. With no model
+        // configured this returns the heuristic proposal unchanged and
+        // issues no request (section 5), so suggestions stay exactly what
+        // they are today. A thrown error is not part of its contract, but is
+        // treated the same as any other model failure regardless: invisible
+        // to the caller (section 5).
+        try {
+          const adjudication = await adjudicateProposal({
+            text,
+            filename: input.filename,
+            heuristic: proposal as DocumentProposal,
+            deadlineMs: MODEL_INTERACTIVE_DEADLINE_MS,
+          });
+          proposal = adjudication.proposal;
+          alternatives = adjudication.alternatives;
+        } catch {
+          // Keep the heuristic proposal already in `proposal`.
+        }
+      }
       text = "";
       return {
         extracted,
-        suggestions: buildDocumentSuggestions(input.filename, proposal),
+        suggestions: buildDocumentSuggestions(input.filename, proposal, alternatives),
         attachmentDisposition: "attachable",
         reason: structureReason,
         ...(message ? { message } : {}),

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
+import { MODEL_INTERACTIVE_DEADLINE_MS } from "@/server/documents/model-extraction";
 import { syntheticJpeg, syntheticPdf, syntheticPng } from "../../tests/support/synthetic-documents";
 
 const mocks = vi.hoisted(() => ({
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   proposal: vi.fn(),
   config: vi.fn(),
   classifyStructure: vi.fn(),
+  adjudicate: vi.fn(),
 }));
 
 const OPERATION_ID = "22222222-2222-4222-8222-222222222222";
@@ -33,6 +35,10 @@ vi.mock("@/server/documents/suggestions", async () => ({
 vi.mock("@/server/documents/validation", async () => ({
   ...await vi.importActual<typeof import("@/server/documents/validation")>("@/server/documents/validation"),
   classifyDocumentStructure: mocks.classifyStructure,
+}));
+vi.mock("@/server/documents/adjudication", async () => ({
+  ...await vi.importActual<typeof import("@/server/documents/adjudication")>("@/server/documents/adjudication"),
+  adjudicateProposal: mocks.adjudicate,
 }));
 vi.mock("@/server/documents/storage", () => ({
   LocalDocumentStorage: class {
@@ -81,6 +87,18 @@ describe("item document inspection", () => {
       reference: "AB-12345",
       dates: ["2027-08-01"],
     });
+    // No `ai` profile is the default across this file: adjudication hands
+    // the heuristic proposal straight back, unchanged, with nothing
+    // disputed -- exactly what `adjudicateProposal` itself returns when
+    // `selectedExtractionModel` finds nothing configured.
+    mocks.adjudicate.mockImplementation(async ({ heuristic }) => ({
+      proposal: heuristic,
+      heuristic,
+      blind: null,
+      alternatives: {},
+      comparisons: [],
+      passes: 0,
+    }));
   });
 
   it("returns only bounded allow-listed suggestions with source and confidence metadata", async () => {
@@ -519,5 +537,135 @@ describe("item document inspection", () => {
 
     vi.doMock("@/server/documents/tika", () => ({ extractTextWithTika: mocks.extract }));
     vi.unstubAllGlobals();
+  });
+
+  describe("adjudication (#959, ADR-0025 section 4)", () => {
+    it("adjudicates the heuristic proposal within the document's own deadline, and matches today's suggestions with no model configured", async () => {
+      const result = await inspectItemDocument({
+        userId: "member-user",
+        householdId: "household-id",
+        filename: "home-insurance.pdf",
+        body: new ReadableStream<Uint8Array>(),
+      });
+
+      expect(mocks.adjudicate).toHaveBeenCalledTimes(1);
+      expect(mocks.adjudicate).toHaveBeenCalledWith({
+        text: "Provider: Safe Cover\nPolicy number: AB-12345\n2027-08-01",
+        filename: "home-insurance.pdf",
+        heuristic: { title: "home-insurance", provider: "Safe Cover", reference: "AB-12345", dates: ["2027-08-01"] },
+        deadlineMs: MODEL_INTERACTIVE_DEADLINE_MS,
+      });
+      expect(result.suggestions).toEqual([
+        { field: "title", value: "home-insurance", source: "filename", confidence: "high" },
+        { field: "provider", value: "Safe Cover", source: "document_text", confidence: "medium" },
+        { field: "reference", value: "AB-12345", source: "document_text", confidence: "medium" },
+        { field: "dueDate", value: "2027-08-01", source: "document_text", confidence: "medium" },
+      ]);
+    });
+
+    it("does not adjudicate when extraction failed", async () => {
+      mocks.extract.mockRejectedValue(new AppError("parser_unavailable", "private parser detail", 503));
+
+      await inspectItemDocument({
+        userId: "member-user",
+        householdId: "household-id",
+        filename: "policy.pdf",
+        body: new ReadableStream<Uint8Array>(),
+      });
+
+      expect(mocks.adjudicate).not.toHaveBeenCalled();
+    });
+
+    it("offers no alternative when the model's blind reading agrees with the heuristic", async () => {
+      const heuristic = { title: "home-insurance", provider: "Safe Cover", reference: "AB-12345", dates: ["2027-08-01"] };
+      mocks.adjudicate.mockResolvedValue({
+        proposal: heuristic,
+        heuristic,
+        blind: heuristic,
+        alternatives: {},
+        comparisons: [
+          { field: "title", comparison: "agreed" },
+          { field: "provider", comparison: "agreed" },
+          { field: "reference", comparison: "agreed" },
+        ],
+        passes: 1,
+      });
+
+      const result = await inspectItemDocument({
+        userId: "member-user",
+        householdId: "household-id",
+        filename: "home-insurance.pdf",
+        body: new ReadableStream<Uint8Array>(),
+      });
+
+      expect(result.suggestions.every((suggestion) => !("alternative" in suggestion))).toBe(true);
+    });
+
+    it("suggests the adjudicated value and carries the rejected reading when the readings disagree", async () => {
+      mocks.adjudicate.mockResolvedValue({
+        proposal: { title: "home-insurance", provider: "Larkfield Mutual", reference: "AB-12345", dates: ["2027-08-01"] },
+        heuristic: { title: "home-insurance", provider: "Safe Cover", reference: "AB-12345", dates: ["2027-08-01"] },
+        blind: { title: "home-insurance", provider: "Larkfield Mutual", reference: "AB-12345", dates: ["2027-08-01"] },
+        alternatives: { provider: "Safe Cover" },
+        comparisons: [{ field: "provider", comparison: "disagreed", outcome: "endorsed_blind" }],
+        passes: 2,
+      });
+
+      const result = await inspectItemDocument({
+        userId: "member-user",
+        householdId: "household-id",
+        filename: "home-insurance.pdf",
+        body: new ReadableStream<Uint8Array>(),
+      });
+
+      expect(result.suggestions).toContainEqual({
+        field: "provider",
+        value: "Larkfield Mutual",
+        source: "document_text",
+        confidence: "medium",
+        alternative: "Safe Cover",
+      });
+    });
+
+    it("keeps the heuristic suggestions and surfaces no error when adjudication itself fails", async () => {
+      mocks.adjudicate.mockRejectedValue(new Error("unexpected adjudication failure"));
+
+      const result = await inspectItemDocument({
+        userId: "member-user",
+        householdId: "household-id",
+        filename: "home-insurance.pdf",
+        body: new ReadableStream<Uint8Array>(),
+      });
+
+      expect(result.suggestions).toEqual([
+        { field: "title", value: "home-insurance", source: "filename", confidence: "high" },
+        { field: "provider", value: "Safe Cover", source: "document_text", confidence: "medium" },
+        { field: "reference", value: "AB-12345", source: "document_text", confidence: "medium" },
+        { field: "dueDate", value: "2027-08-01", source: "document_text", confidence: "medium" },
+      ]);
+    });
+
+    it("never lets a rejected reading reach a log line", async () => {
+      const infoSpy = vi.spyOn(log, "info");
+      const warnSpy = vi.spyOn(log, "warn");
+      mocks.adjudicate.mockResolvedValue({
+        proposal: { title: "home-insurance", provider: "Larkfield Mutual", reference: "AB-12345", dates: ["2027-08-01"] },
+        heuristic: { title: "home-insurance", provider: "Safe Cover", reference: "AB-12345", dates: ["2027-08-01"] },
+        blind: { title: "home-insurance", provider: "Larkfield Mutual", reference: "AB-12345", dates: ["2027-08-01"] },
+        alternatives: { provider: "unlogged-rejected-provider" },
+        comparisons: [],
+        passes: 2,
+      });
+
+      await inspectItemDocument({
+        userId: "member-user",
+        householdId: "household-id",
+        filename: "home-insurance.pdf",
+        body: new ReadableStream<Uint8Array>(),
+      });
+
+      const logged = JSON.stringify([...infoSpy.mock.calls, ...warnSpy.mock.calls]);
+      expect(logged).not.toContain("unlogged-rejected-provider");
+    });
   });
 });

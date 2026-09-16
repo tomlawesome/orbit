@@ -134,6 +134,13 @@ every device they were previously signed into, and records a
 `recovery_link_issued` audit entry. It never changes who the primary
 administrator is.
 
+That command assumes Orbit can still read its own data. If the encryption key
+*and* the recovery bundle are both lost, nobody can sign in at all, because
+Orbit finds an account by an address it can no longer read — see
+[administrator-operations.md](administrator-operations.md#when-the-encryption-key-and-the-recovery-bundle-are-both-lost)
+for the last resort that clears those addresses so people can be let back in.
+It recovers nothing, and it refuses to run while the key still works.
+
 ## Recent authentication (step-up)
 
 Every sensitive action — setting or changing a password, linking or

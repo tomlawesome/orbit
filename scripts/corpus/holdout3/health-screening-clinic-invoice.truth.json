@@ -1,0 +1,47 @@
+{
+  "name": "private health screening clinic invoice, a spouse's separate invoice as a decoy",
+  "filename": "fullpage-health-screening-clinic-invoice.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-03",
+      "2026-09-17",
+      "2027-09-03"
+    ],
+    "provider": "Kestrel Health Screening Clinic",
+    "reference": "KHSC-INV-771049",
+    "dateRoles": [
+      {
+        "date": "2026-09-03",
+        "role": "issued"
+      },
+      {
+        "date": "2026-09-17",
+        "role": "due"
+      },
+      {
+        "date": "2027-09-03",
+        "role": "service"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Appointment"
+      ],
+      "qualifiers": [
+        "Health"
+      ]
+    },
+    "costMinor": 24900,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "service"
+  },
+  "notes": [
+    "dates: appointment and invoice date 3 September 2026 (one date, two labels), payment due 17 September 2026, recommended next screening 3 September 2027. The spouse's separately invoiced screening, paid 28 August 2026, is undeclared.",
+    "provider is Kestrel Health Screening Clinic; Kestrel Health Ltd is the operating company, named only in the small print.",
+    "reference is invoice KHSC-INV-771049.",
+    "costMinor is the package price, 249.00; the optional bone density scan (0.00, not taken) is a trap.",
+    "recurrenceMonths is 12, printed in digits as 'every 12 months'; scheduleKind is 'service', from the recommended-next-screening dateRole, which is a recommendation only and not yet a booked appointment.",
+    "subtype: Appointment/Health."
+  ]
+}

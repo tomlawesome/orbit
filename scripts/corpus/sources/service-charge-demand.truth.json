@@ -1,0 +1,41 @@
+{
+  "name": "leasehold service charge, period-framed with no renewal word",
+  "filename": "fullpage-service-charge-demand.pdf",
+  "expected": {
+    "dates": [
+      "2027-03-31"
+    ],
+    "provider": "Purbeck & Vane Property Management Ltd",
+    "reference": "TFC-014-2627",
+    "dateRoles": [
+      {
+        "date": "2027-03-31",
+        "role": "renewal"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Service charge",
+        "Bill",
+        "Fees"
+      ],
+      "qualifiers": [
+        "Leasehold",
+        "Home"
+      ]
+    },
+    "costMinor": 393000,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "The word 'renewal'/'renews' is never used. The service charge year is framed only as running 1 April 2026 to 31 March 2027 (a 12-month period), and the document itself says that at the end of that year a further demand follows for the next instalment — that is the signal a correct extraction has to pick up on to assign role 'renewal' to 2027-03-31.",
+    "dates deliberately omits the instalment due dates (1 April 2026, 1 October 2026), the demand issue date (10 March 2026), the prior year end (2026-03-31) and the board approval date (24 February 2026): all texture a careful human would not report as the document's governing date.",
+    "costMinor is the leaseholder's apportioned annual service charge for the year ending 31 March 2027 (£3,930.00), not the development-wide budget total (£94,320.00, explicitly excluded), not the first instalment alone (£1,965.00), and not the 'total now due' on this demand (£1,990.83, which blends the regular charge with a one-off prior-year balancing figure). This mirrors the corpus convention (see the buildings/contents schedule fixture) of choosing the annual figure over a periodic instalment when both are printed on the page.",
+    "recurrenceMonths: 12 is declared because the document prints the service charge year as running 'for a 12-month period' in digits, alongside the scheduled next-demand event implied by the year-end date.",
+    "provider is the managing agent (who issues and administers the demand), not the freeholder/landlord (Thornfield Court (Freehold) Ltd) or the individual property manager named in the queries section — matching the convention of naming the entity that issued the document.",
+    "reference is the account reference TFC-014-2627 rather than the lease reference TFC/14/LR-1998, since the account reference is what the demand itself is filed and paid against.",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Service charge demand')."
+  ]
+}

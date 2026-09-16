@@ -4,6 +4,7 @@ import {
   MODEL_FAILURE_RATE_THRESHOLD,
   MODEL_INTERACTIVE_DEADLINE_MS,
   MODEL_SAMPLE_WINDOW,
+  modelAdjudicateFields,
   modelExtractionWindow,
   modelFailureRateExceeded,
   modelProposalFromText,
@@ -125,6 +126,23 @@ describe("model extraction request bounds (ADR-0025 sections 1-2)", () => {
     const transport = transportReturning(replyOf(envelopeOf({})));
     await modelProposalFromText(POLICY_DOCUMENT, "x.pdf", { environment: MODEL_ENVIRONMENT, transport });
     expect(JSON.stringify(transport.requests[0].format)).not.toContain("scheduleKind");
+  });
+
+  // #973: a model whose thinking mode defaults to on spends the generation cap
+  // reasoning and returns nothing. Measured on qwen3.5:0.8b: 192 characters of
+  // reasoning, an empty reply, 144 seconds. Both passes must turn it off.
+  it("turns thinking off on the blind pass, so reasoning cannot eat the generation cap", async () => {
+    const transport = transportReturning(replyOf(envelopeOf({})));
+    await modelProposalFromText(POLICY_DOCUMENT, "x.pdf", { environment: MODEL_ENVIRONMENT, transport });
+    expect(transport.requests[0].think).toBe(false);
+  });
+
+  it("turns thinking off on the adjudicating pass too", async () => {
+    const transport = transportReturning(replyOf(envelopeOf({})));
+    await modelAdjudicateFields(POLICY_DOCUMENT, "x.pdf", [
+      { field: "provider", maxLength: 100, heuristicValue: "Kingsmoor Mutual", blindValue: "Kingsmoor" },
+    ], { environment: MODEL_ENVIRONMENT, transport });
+    expect(transport.requests[0].think).toBe(false);
   });
 });
 

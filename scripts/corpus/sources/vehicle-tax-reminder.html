@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Vehicle Tax Reminder</title>
+<style>
+@font-face{font-family:"Corpus Official";src:url("../fonts/Karla.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Official Mono";src:url("../fonts/JetBrainsMono.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Official", sans-serif; font-size: 8pt; color: #101010;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always;
+    background: #fdfdf5;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  .header {
+    background: #0b5c2e; color: #fdfdf5; padding: 4.5mm 10mm 4mm 10mm;
+    display: flex; justify-content: space-between; align-items: flex-start;
+  }
+  .header .agency { font-size: 11pt; font-weight: 700; letter-spacing: 0.3px; max-width: 108mm; line-height: 1.3; }
+  .header .tagline { font-size: 6.2pt; margin-top: 1.4mm; line-height: 1.45; max-width: 108mm; }
+  .header .doc { text-align: right; }
+  .header .formno { font-size: 6.4pt; letter-spacing: 1.2px; text-transform: uppercase; }
+  .header .title { font-size: 15pt; font-weight: 700; letter-spacing: 0.5px; margin-top: 1.2mm; text-transform: uppercase; }
+  .header .subtitle { font-size: 6.8pt; margin-top: 1mm; max-width: 66mm; line-height: 1.4; }
+
+  .runhead {
+    display: flex; justify-content: space-between; font-size: 6px; color: #45624c;
+    letter-spacing: 0.3px; padding: 1.4mm 10mm; border-bottom: 0.6px solid #c3d3c6;
+  }
+
+  .content { padding: 3mm 10mm 1.5mm 10mm; }
+
+  .lbl {
+    font-family: "Corpus Official", sans-serif; font-size: 5.4pt; text-transform: uppercase;
+    letter-spacing: 1.1px; color: #0b5c2e; font-weight: 700;
+  }
+  .val { font-family: "Corpus Official Mono", monospace; color: #101010; }
+
+  .refstrip { border: 2px solid #0b5c2e; display: flex; margin-bottom: 2.6mm; background: #fff; }
+  .refstrip .refmain { flex: 2; padding: 1.8mm 3.5mm; border-right: 1px solid #0b5c2e; }
+  .refstrip .refside { flex: 1; padding: 1.8mm 3.5mm; }
+  .groupref { margin-top: 1mm; }
+  .groupref span {
+    display: inline-block; border: 1px solid #0b5c2e; padding: 1mm 2.4mm; margin-right: 1.6mm;
+    font-family: "Corpus Official Mono", monospace;
+    font-size: 13pt; font-weight: 700; letter-spacing: 2px; background: #fdfdf5;
+  }
+  .refside .val { font-size: 8.6pt; margin-top: 1mm; display: block; }
+
+  .platerow { display: flex; gap: 3.5mm; margin-bottom: 2.6mm; align-items: stretch; }
+  .platebox {
+    border: 3px solid #101010; border-radius: 1.6mm; padding: 1.5mm 7mm; background: #fff;
+    flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .platebox .lbl { color: #45624c; }
+  .platebox .plateval {
+    font-family: "Corpus Official Mono", monospace; font-weight: 700; font-size: 27pt;
+    letter-spacing: 5px; margin-top: 1mm; color: #101010;
+  }
+  .sidebox { flex: 1; border: 1px solid #0b5c2e; padding: 1.6mm 3.5mm; background: #fff; }
+  .sidebox .val { font-size: 8.4pt; margin-top: 0.8mm; display: block; letter-spacing: 0.6px; }
+
+  .grid { display: flex; flex-wrap: wrap; border-top: 1px solid #0b5c2e; border-left: 1px solid #0b5c2e; margin-bottom: 2mm; }
+  .cell { width: 33.333%; border-right: 1px solid #0b5c2e; border-bottom: 1px solid #0b5c2e; padding: 0.9mm 3mm; box-sizing: border-box; background: #fff; }
+  .cell .val { font-size: 8.2pt; margin-top: 0.5mm; display: block; }
+
+  .statusband { border: 2px solid #0b5c2e; display: flex; margin-bottom: 2mm; background: #fff; }
+  .statusband .big { flex: 1.9; padding: 1.5mm 4mm; border-right: 1px solid #0b5c2e; }
+  .statusband .big .val { font-size: 15pt; font-weight: 700; display: block; margin-top: 0.5mm; white-space: nowrap; }
+  .statusband .small { flex: 1; padding: 1.5mm 3mm; border-right: 1px solid #0b5c2e; }
+  .statusband .small:last-child { border-right: none; }
+  .statusband .small .val { font-size: 9pt; display: block; margin-top: 0.6mm; }
+
+  h2.section {
+    font-size: 7.4pt; font-weight: 700; margin: 0 0 1mm 0; color: #0b5c2e;
+    text-transform: uppercase; letter-spacing: 0.8px;
+  }
+
+  table.rates { width: 100%; border-collapse: collapse; border: 1px solid #0b5c2e; margin-bottom: 1.8mm; background: #fff; }
+  table.rates th {
+    background: #0b5c2e; color: #fdfdf5; font-size: 6pt; text-transform: uppercase;
+    letter-spacing: 0.5px; font-weight: 700; padding: 1.2mm 2.4mm; text-align: left;
+  }
+  table.rates td { border-top: 1px solid #0b5c2e; padding: 1.4mm 2.4mm; font-size: 8pt; }
+  table.rates td.amt { font-family: "Corpus Official Mono", monospace; font-weight: 700; font-size: 10pt; white-space: nowrap; }
+  table.rates td.tick { text-align: center; font-size: 11pt; width: 8mm; }
+
+  .penaltyline { font-size: 6.8pt; line-height: 1.4; margin-bottom: 1.6mm; color: #33452f; }
+  .alreadytaxed { font-size: 6.8pt; line-height: 1.4; margin-bottom: 2.6mm; padding: 1.4mm 2.6mm; border: 1px dashed #0b5c2e; background: #fff; }
+
+  .officialband { background: #dfe8df; border: 1px solid #0b5c2e; padding: 1.5mm 4mm; margin-bottom: 2mm; }
+  .officialband .ofrow { display: flex; flex-wrap: wrap; gap: 0 6mm; font-size: 6.9pt; line-height: 1.55; }
+  .officialband .val { font-size: 6.9pt; }
+  .officialband .tickbox { display: inline-block; border: 1px solid #0b5c2e; width: 3mm; height: 3mm; text-align: center; line-height: 3mm; font-size: 6pt; margin-right: 1mm; background: #fff; }
+
+  .smallprint { column-count: 2; column-gap: 6mm; font-size: 6.1pt; line-height: 1.28; text-align: justify; margin-bottom: 1.4mm; color: #262626; }
+  .smallprint p { margin: 0 0 1.1mm 0; }
+  .smallprint b { color: #0b5c2e; }
+
+  .counterfoil { border-top: 2px dashed #0b5c2e; padding-top: 2mm; margin-top: 1mm; }
+  .counterfoil .cftitle { font-size: 6.2pt; letter-spacing: 1px; text-transform: uppercase; color: #45624c; margin-bottom: 1.2mm; }
+  .cfgrid { display: flex; border: 1px solid #0b5c2e; background: #fff; }
+  .cfcell { flex: 1; padding: 1.4mm 2.8mm; border-right: 1px solid #0b5c2e; }
+  .cfcell:last-child { border-right: none; }
+  .cfcell .lbl { font-size: 5pt; }
+  .cfcell .val { font-size: 8.4pt; display: block; margin-top: 0.5mm; }
+  .cfinitial { font-size: 15pt; font-weight: 700; color: #0b5c2e; letter-spacing: 1px; }
+
+  .footfine { font-size: 5.6pt; color: #6b7f6b; text-align: right; padding: 0.6mm 10mm 1mm 10mm; }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="header">
+    <div>
+      <div class="agency">Highways and Vehicle Licensing Authority</div>
+      <div class="tagline">
+        Executive agency for vehicle registration and taxation &middot; Northgate House,
+        4 Averill Close, Bournley, Midshire BN7 2QF<br>
+        Enquiries 0300 555 0142 &middot; hvla.example/tax &middot; Authority ref HVLA/RF9/2026
+      </div>
+    </div>
+    <div class="doc">
+      <div class="formno">Form RF9</div>
+      <div class="title">Vehicle Tax Reminder</div>
+      <div class="subtitle">Renew your vehicle tax before it expires, or tell us the vehicle is off the road.</div>
+    </div>
+  </div>
+
+  <div class="runhead">
+    <span>HVLA &mdash; Vehicle tax reminder</span>
+    <span>Reminder issued 04 September 2026 &middot; Reg. mark LR69 KHM</span>
+  </div>
+
+  <div class="content">
+
+    <div class="refstrip">
+      <div class="refmain">
+        <span class="lbl">Registration document reference</span>
+        <div class="groupref"><span>4471</span> <span>8823</span> <span>0519</span></div>
+      </div>
+      <div class="refside">
+        <span class="lbl">Case reference</span><span class="val">HVLA-2026-661452</span>
+      </div>
+    </div>
+
+    <div class="platerow">
+      <div class="platebox">
+        <span class="lbl">Registration mark</span>
+        <div class="plateval">LR69&nbsp;KHM</div>
+      </div>
+      <div class="sidebox">
+        <span class="lbl">Vehicle identification number (VIN)</span>
+        <span class="val">WVWZZZ1KZLW238841</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="cell"><span class="lbl">Make</span><span class="val">Voxholt</span></div>
+      <div class="cell"><span class="lbl">Model</span><span class="val">Callisto 1.5 TSI Hatchback</span></div>
+      <div class="cell"><span class="lbl">Colour</span><span class="val">Storm Blue</span></div>
+      <div class="cell"><span class="lbl">Fuel type</span><span class="val">Petrol</span></div>
+      <div class="cell"><span class="lbl">Engine capacity</span><span class="val">1498 cc</span></div>
+      <div class="cell"><span class="lbl">CO2 emissions</span><span class="val">128 g/km</span></div>
+      <div class="cell"><span class="lbl">Taxation class</span><span class="val">Private/Light Goods (PLG)</span></div>
+      <div class="cell"><span class="lbl">Date of first registration</span><span class="val">14 March 2019</span></div>
+      <div class="cell"><span class="lbl">Registered keeper since</span><span class="val">22 June 2021</span></div>
+    </div>
+
+    <div class="statusband">
+      <div class="big">
+        <span class="lbl">Current tax expires</span>
+        <span class="val">31 October 2026</span>
+      </div>
+      <div class="small">
+        <span class="lbl">MOT expires</span>
+        <span class="val">19 November 2026</span>
+      </div>
+      <div class="small">
+        <span class="lbl">Reminder issued</span>
+        <span class="val">04 September 2026</span>
+      </div>
+      <div class="small">
+        <span class="lbl">Renewal window opens</span>
+        <span class="val">01 October 2026</span>
+      </div>
+    </div>
+
+    <h2 class="section">Rate for this vehicle &mdash; tick one and pay by the methods overleaf</h2>
+    <table class="rates">
+      <thead>
+        <tr><th style="width:8mm;"></th><th>Payment option</th><th style="text-align:right;">Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="tick">&#9744;</td><td>Single 12 month payment</td><td class="amt" style="text-align:right;">£180.00</td></tr>
+        <tr><td class="tick">&#9744;</td><td>Single 6 month payment</td><td class="amt" style="text-align:right;">£99.00</td></tr>
+        <tr><td class="tick">&#9744;</td><td>Monthly by Direct Debit (£15.75 &times; 12, total £189.00)</td><td class="amt" style="text-align:right;">£15.75</td></tr>
+      </tbody>
+    </table>
+    <div class="penaltyline">
+      If this vehicle is not taxed, or declared off the road (SORN), by the expiry date shown above, a
+      fixed penalty of £80 may be issued, rising to prosecution and a fine of up to £1,000 on conviction.
+      A first reminder for the previous licence period was issued on 04 August 2025.
+    </div>
+    <div class="alreadytaxed">
+      If you have already taxed this vehicle, by any method, since 28 August 2026, please disregard this
+      reminder &mdash; no further action is needed. If you begin a Direct Debit today, the first collection
+      will be taken on or after 01 November 2026.
+    </div>
+
+    <div class="officialband">
+      <h2 class="section" style="margin-bottom:1mm;">For official use only</h2>
+      <div class="ofrow">
+        <span><span class="tickbox">&#10003;</span>MOT status checked &mdash; valid, expiry on record <span class="val">19 November 2026</span></span>
+        <span><span class="tickbox">&#10003;</span>Continuous insurance (database) checked <span class="val">02 September 2026</span> &mdash; record shown valid to <span class="val">14 January 2027</span></span>
+      </div>
+      <div class="ofrow" style="margin-top:1mm;">
+        <span>Database last updated <span class="val">02 September 2026, 08:41</span></span>
+        <span>Checked by (initials) <span class="val">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></span>
+        <span>Case reference <span class="val">HVLA-2026-661452</span></span>
+      </div>
+    </div>
+
+    <div class="smallprint">
+      <p><b>Why you have been sent this reminder.</b> Our records show the vehicle described above is
+      due to run out of tax. This reminder is sent as a courtesy roughly five weeks before the expiry
+      date; failure to receive it does not remove the legal duty to keep the vehicle taxed or declared
+      SORN, and no further reminder is sent for this licence period if this one is not acted on.</p>
+
+      <p><b>How to pay.</b> Renew online at hvla.example/tax using the registration document reference
+      shown in the boxed strip above, by telephone on 0300 555 0142, or in person at a participating Post
+      Office branch, quoting the registration mark and the registration document reference. You will need
+      a valid MOT test certificate covering the start of the new tax period and evidence of insurance;
+      these are checked automatically against the database where a record exists.</p>
+
+      <p><b>Statutory Off Road Notification (SORN).</b> If the vehicle is not being kept or used on a
+      public road, you must declare SORN instead of renewing. A SORN declared before the expiry date
+      shown above takes effect from that date; one declared after expiry takes effect immediately and
+      does not refund any unused full months already paid on the previous licence.</p>
+
+      <p><b>Change of keeper or address.</b> If you have sold, transferred or scrapped this vehicle, or
+      your name or address has changed, tell us straight away using the registration certificate, since
+      this reminder and any refund are otherwise sent to the last keeper we hold on record.</p>
+
+      <p><b>Refunds.</b> If the vehicle is taxed and is then declared SORN, sold, scrapped, exported, or
+      the taxation class changes, any full remaining months of the 12 month rate are refunded
+      automatically to the registered keeper; the 6 month rate and the Direct Debit surcharge are not
+      refunded in full for part-used months.</p>
+
+      <p><b>Direct Debit.</b> Choosing monthly, 6 monthly or annual Direct Debit continues automatically
+      at renewal using the rate then in force, unless you cancel it or declare SORN. The first monthly
+      collection date shown above is indicative and may fall up to five working days later.</p>
+
+      <p><b>Checking this reminder.</b> To check the record behind this reminder, contact us using the
+      registration mark and the registration document reference. Do not rely on the registration mark
+      alone: it appears on other correspondence, including the previous reminder dated 04 August 2025 and
+      the registration certificate issued 20 March 2019, which are not renewal documents.</p>
+
+      <p><b>Complaints and appeals.</b> If you believe this reminder was sent in error, write to the
+      Authority's tax correspondence unit at the address above within 21 days, quoting the case reference.
+      An MOT or insurance record shown as not found above can be corrected by contacting the relevant
+      database operator directly; the Authority does not hold those records itself.</p>
+
+      <p><b>Data protection.</b> Vehicle and keeper details are processed under the Authority's statutory
+      function of maintaining the vehicle register. Data protection registration ZC7729114. Records
+      relating to this licence period are retained for six years after expiry.</p>
+    </div>
+
+    <div class="counterfoil">
+      <div class="cftitle">Counterfoil &mdash; detach and keep for your records</div>
+      <div class="cfgrid">
+        <div class="cfcell" style="flex:0 0 20mm; display:flex; align-items:center; justify-content:center;">
+          <span class="cfinitial">HVLA</span>
+        </div>
+        <div class="cfcell">
+          <span class="lbl">Registration mark</span><span class="val">LR69 KHM</span>
+        </div>
+        <div class="cfcell">
+          <span class="lbl">Registration document reference</span><span class="val">4471 8823 0519</span>
+        </div>
+        <div class="cfcell">
+          <span class="lbl">Current tax expires</span><span class="val">31 October 2026</span>
+        </div>
+        <div class="cfcell">
+          <span class="lbl">Amount due (12 months)</span><span class="val">£180.00</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footfine">Form RF9 &middot; printed 04/09/2026 &middot; HVLA</div>
+</div>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <div class="agency">HVLA</div>
+      <div class="tagline">
+        Rates and services leaflet, enclosed with your reminder &middot; Northgate House,
+        4 Averill Close, Bournley, Midshire BN7 2QF<br>
+        Enquiries 0300 555 0142 &middot; hvla.example/tax
+      </div>
+    </div>
+    <div class="doc">
+      <div class="formno">Leaflet V149/1</div>
+      <div class="title">Rates of Vehicle Tax</div>
+      <div class="subtitle">How your rate is worked out, and how to pay it.</div>
+    </div>
+  </div>
+
+  <div class="runhead">
+    <span>HVLA &mdash; Rates of vehicle tax 2026-27</span>
+    <span>Reg. mark LR69 KHM &middot; Page 2 of 3</span>
+  </div>
+
+  <div class="content">
+
+    <h2 class="section">First-year rate, by CO2 emissions (new registrations only)</h2>
+    <table class="rates">
+      <thead><tr><th>CO2 emissions</th><th style="text-align:right;">Petrol / diesel</th><th style="text-align:right;">Alternative fuel</th></tr></thead>
+      <tbody>
+        <tr><td>0 g/km</td><td class="amt" style="text-align:right;">£0</td><td class="amt" style="text-align:right;">£0</td></tr>
+        <tr><td>1&ndash;50 g/km</td><td class="amt" style="text-align:right;">£10</td><td class="amt" style="text-align:right;">£0</td></tr>
+        <tr><td>51&ndash;75 g/km</td><td class="amt" style="text-align:right;">£30</td><td class="amt" style="text-align:right;">£20</td></tr>
+        <tr><td>76&ndash;90 g/km</td><td class="amt" style="text-align:right;">£135</td><td class="amt" style="text-align:right;">£125</td></tr>
+        <tr><td>91&ndash;100 g/km</td><td class="amt" style="text-align:right;">£175</td><td class="amt" style="text-align:right;">£165</td></tr>
+        <tr><td>101&ndash;130 g/km</td><td class="amt" style="text-align:right;">£220</td><td class="amt" style="text-align:right;">£210</td></tr>
+        <tr><td>131&ndash;150 g/km</td><td class="amt" style="text-align:right;">£270</td><td class="amt" style="text-align:right;">£260</td></tr>
+        <tr><td>151&ndash;170 g/km</td><td class="amt" style="text-align:right;">£680</td><td class="amt" style="text-align:right;">£670</td></tr>
+        <tr><td>171&ndash;190 g/km</td><td class="amt" style="text-align:right;">£1,095</td><td class="amt" style="text-align:right;">£1,085</td></tr>
+        <tr><td>191&ndash;225 g/km</td><td class="amt" style="text-align:right;">£1,650</td><td class="amt" style="text-align:right;">£1,640</td></tr>
+        <tr><td>226&ndash;255 g/km</td><td class="amt" style="text-align:right;">£2,340</td><td class="amt" style="text-align:right;">£2,330</td></tr>
+        <tr><td>Over 255 g/km</td><td class="amt" style="text-align:right;">£2,745</td><td class="amt" style="text-align:right;">£2,735</td></tr>
+      </tbody>
+    </table>
+    <div class="penaltyline">The first-year rate applies only when a vehicle is first registered and taxed; it does not apply to this reminder, which is a renewal for a vehicle already on the road.</div>
+
+    <h2 class="section">Standard rate, second year of registration onwards</h2>
+    <table class="rates">
+      <thead><tr><th>Fuel type</th><th style="text-align:right;">12 month rate</th><th style="text-align:right;">6 month rate</th></tr></thead>
+      <tbody>
+        <tr><td>Petrol or diesel</td><td class="amt" style="text-align:right;">£180.00</td><td class="amt" style="text-align:right;">£99.00</td></tr>
+        <tr><td>Alternative fuel (hybrid, LPG, bioethanol)</td><td class="amt" style="text-align:right;">£170.00</td><td class="amt" style="text-align:right;">£93.50</td></tr>
+        <tr><td>Zero-emission, registered before 1 April 2025</td><td class="amt" style="text-align:right;">£0</td><td class="amt" style="text-align:right;">£0</td></tr>
+        <tr><td>Zero-emission, registered on or after 1 April 2025</td><td class="amt" style="text-align:right;">£180.00</td><td class="amt" style="text-align:right;">£99.00</td></tr>
+      </tbody>
+    </table>
+    <div class="penaltyline">This vehicle is taxed at the petrol/diesel standard rate shown on the front of this reminder. Rates in this leaflet apply from 1 April 2026, when the standard rate last increased in line with RPI; rates are reviewed at each Budget and normally next change on 1 April 2027.</div>
+
+    <h2 class="section">Expensive car supplement</h2>
+    <div class="penaltyline">Cars with a list price above £40,000 when new pay an additional supplement of £410 a year, on top of the standard rate for their fuel type, for 5 years starting from the second time the vehicle is taxed. This reminder does not show whether the supplement applies to this vehicle; check the original registration certificate if you are unsure.</div>
+
+    <h2 class="section">Paying by Direct Debit</h2>
+    <table class="rates">
+      <thead><tr><th>Direct Debit plan</th><th style="text-align:right;">Instalments</th><th style="text-align:right;">Total</th></tr></thead>
+      <tbody>
+        <tr><td>Annual</td><td class="amt" style="text-align:right;">£180.00 &times; 1</td><td class="amt" style="text-align:right;">£180.00</td></tr>
+        <tr><td>Six monthly</td><td class="amt" style="text-align:right;">£51.98 &times; 2</td><td class="amt" style="text-align:right;">£103.96</td></tr>
+        <tr><td>Monthly</td><td class="amt" style="text-align:right;">£15.75 &times; 12</td><td class="amt" style="text-align:right;">£189.00</td></tr>
+      </tbody>
+    </table>
+    <div class="penaltyline">Six monthly and monthly Direct Debit plans include a surcharge over the 12 month rate shown on the front of this reminder; the annual plan does not.</div>
+
+    <h2 class="section">Clamping and impounding</h2>
+    <div class="penaltyline">A vehicle found untaxed on a public road may be wheel-clamped without further warning. The release fee is £100, rising to £160 plus removal and storage charges if the vehicle is impounded before the fee is paid. Clamping and impounding are separate from, and in addition to, any fixed penalty or court fine for keeping an untaxed vehicle.</div>
+
+  </div>
+
+  <div class="footfine">Leaflet V149/1 &middot; issued with Form RF9 &middot; HVLA</div>
+</div>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <div class="agency">HVLA</div>
+      <div class="tagline">
+        Other services and how to contact us &middot; Northgate House,
+        4 Averill Close, Bournley, Midshire BN7 2QF<br>
+        Enquiries 0300 555 0142 &middot; hvla.example/tax
+      </div>
+    </div>
+    <div class="doc">
+      <div class="formno">Leaflet V149/1</div>
+      <div class="title">Other Services</div>
+      <div class="subtitle">Manage your vehicle online, or get in touch.</div>
+    </div>
+  </div>
+
+  <div class="runhead">
+    <span>HVLA &mdash; Other services</span>
+    <span>Reg. mark LR69 KHM &middot; Page 3 of 3</span>
+  </div>
+
+  <div class="content">
+
+    <h2 class="section">Manage your vehicle online</h2>
+    <div class="penaltyline">Check this vehicle's MOT status at check-mot.hvla.example, and its current tax status at check-tax-status.hvla.example, using the registration mark only &mdash; no login is needed for either service. Follow @HVLAgov for notice of planned maintenance to these services.</div>
+
+    <h2 class="section">Taxing a fleet of vehicles</h2>
+    <div class="penaltyline">Businesses that keep five or more vehicles can open a free HVLA Fleet Account (reference format HVLA-FLT-000000) to renew tax for every vehicle from one login and one Direct Debit collection date. Call our fleet team on 0300 555 0198.</div>
+
+    <h2 class="section">Contacting us</h2>
+    <table class="rates">
+      <thead><tr><th>Line</th><th style="text-align:right;">Number</th><th>Hours</th></tr></thead>
+      <tbody>
+        <tr><td>General enquiries (automated options)</td><td class="amt" style="text-align:right;">0300 555 0142</td><td>24 hours</td></tr>
+        <tr><td>Speak to an adviser (press 0)</td><td class="amt" style="text-align:right;">0300 555 0142</td><td>Mon&ndash;Fri 8am&ndash;6pm, Sat 8am&ndash;2pm</td></tr>
+        <tr><td>Fleet accounts</td><td class="amt" style="text-align:right;">0300 555 0198</td><td>Mon&ndash;Fri 9am&ndash;5pm</td></tr>
+        <tr><td>Textphone</td><td class="amt" style="text-align:right;">18001 0300 555 0142</td><td>Mon&ndash;Fri 8am&ndash;6pm</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">Refunds paid by bank transfer</h2>
+    <div class="penaltyline">Where a refund cannot be paid automatically to the account or card originally used to buy tax, we pay it by bank transfer once you supply your sort code and account number, or by cheque to the registered keeper if no account details are given. Refunds are issued under reference format HVLA-RFD-000000.</div>
+
+    <h2 class="section">Complaints</h2>
+    <div class="penaltyline">If you are unhappy with how we have handled this reminder or a related enquiry, ask for your call or letter to be treated as a complaint; a case reference will be issued in the form HVLA-2026-000000. Unresolved complaints can be referred to the Independent Complaints Adjudicator after eight weeks.</div>
+
+    <h2 class="section">Freedom of Information and environmental information</h2>
+    <div class="penaltyline">Requests for information the Authority holds, other than about a specific vehicle or keeper, can be made under the Freedom of Information Act 2000 or the Environmental Information Regulations 2004 to foi@hvla.example.</div>
+
+    <h2 class="section">Accessibility</h2>
+    <div class="penaltyline">This leaflet is available in large print, audio or Braille on request by calling the general enquiries line above. Guidance on renewing tax is also available in Welsh at hvla.example/cy.</div>
+
+  </div>
+
+  <div class="footfine">Leaflet V149/1 &middot; issued with Form RF9 &middot; HVLA</div>
+</div>
+
+</body>
+</html>

@@ -85,10 +85,32 @@ async function readBoundedText(body: ReadableStream<Uint8Array>, document: strin
 
   try {
     const bytes = Buffer.concat(chunks, totalBytes);
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes).slice(0, MAX_EXTRACTED_CHARACTERS);
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return undoTikaMarkdownEscapes(decoded).slice(0, MAX_EXTRACTED_CHARACTERS);
   } catch {
     throw parserUnavailable(document, startedAt, "undecodable_response");
   }
+}
+
+/**
+ * Tika 4's plain-text writer escapes Markdown metacharacters that are not in
+ * the document (#982). A bill printing `Wellmarsh Water & Drainage plc`
+ * arrives as `Wellmarsh Water \\& Drainage plc`, and `1.` in a numbered
+ * field arrives as `1\\.`. The backslashes are the writer's, not the
+ * document's.
+ *
+ * Left in, they break every comparison downstream: `classifyProvider` never
+ * matches a company name containing an ampersand, and model grounding rejects
+ * a correct value because it cannot be found in its own evidence span. Two of
+ * the six full-page corpus documents have such a provider, and neither could
+ * be extracted at all before this.
+ *
+ * Only a backslash immediately before a character Markdown actually escapes is
+ * removed, so a genuine backslash in the document (`C:\\Users`, a maths
+ * expression) is left alone.
+ */
+export function undoTikaMarkdownEscapes(text: string): string {
+  return text.replace(/\\([\\`*_{}\[\]()#+\-.!|&<>~])/gu, "$1");
 }
 
 export interface TikaHealth {

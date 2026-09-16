@@ -1,0 +1,19 @@
+{
+  "name": "Vehicle service record",
+  "filename": "vehicle-service-record.pdf",
+  "notes": ["Garage job card and service report handed over after a full service"],
+  "expected": {
+    "dates": ["2026-04-17", "2027-04-17"],
+    "provider": "Pikeholt",
+    "reference": "PM-J-09412",
+    "dateRoles": [
+      { "date": "2026-04-17", "role": "service" },
+      { "date": "2027-04-17", "role": "service" }
+    ],
+    "subtype": { "kinds": ["Service"], "qualifiers": ["Motor"] },
+    "costMinor": 42894,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "service"
+  }
+}

@@ -1,5 +1,5 @@
 > [!IMPORTANT]
-> **Development disclosure:** Orbit was coded by OpenAI Codex under human
+> **Development disclosure:** Orbit was coded by Claude under human
 > direction.
 
 <p align="center">

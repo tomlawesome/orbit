@@ -1,0 +1,22 @@
+{
+  "name": "water account portal page printed from a browser, provider named only in addresses",
+  "filename": "water-account-portal-page.pdf",
+  "expected": {
+    "dates": ["2026-11-12"],
+    "provider": "Bellrush",
+    "reference": "7719 0042 18",
+    "dateRoles": [
+      { "date": "2026-11-12", "role": "due" }
+    ],
+    "subtype": { "kinds": ["Bill", "Utility"], "qualifiers": ["Water"] },
+    "costMinor": 14255,
+    "currency": "GBP"
+  },
+  "notes": [
+    "provider is Bellrush. The trading name is never printed as a plain name: it is only ever inside bellrush.co.uk, my.bellrush.co.uk/account, account@bellrush.co.uk, the app link bellrush.co.uk/app and the handle @bellrushwater. The registered company in the footer is Sarn Vale Water Services Limited, a different form of words. Other organisations on the page: the sewerage partner Marchway Wastewater, the metering contractor Tellick Field Metering, the Consumer Council for Water, Ofwat and the payment scheme Payzone-style Paypoint Retail Network.",
+    "reference is the account number 7719 0042 18, shown at the top of the account panel and on the payment card details. Rivals genuinely printed: the meter serial 22K1190843, the property reference 100091223345, the payment card long number 6330 4411 8820 1194, the bill number WB-0099142, the direct debit reference 77190042, the company registration number 03301988, the sort code 60-11-08, the account number 41190227 for bank transfers and the WaterSure application reference WS-2291.",
+    "dates and dateRoles carry only the payment due date, 12 November 2026. The page prints a printed-on timestamp (28/10/2026), the charge period (1 October 2026 to 31 March 2027), the last bill date (26/10/2026), the last payment received (14/10/2026), three meter reading dates (18/04/2026, 22/07/2026, 21/10/2026), the next planned read (20/01/2027), the date charges change (1 April 2027) and the year the network was laid.",
+    "costMinor is the amount due on this bill, £142.55. It is not the £571.00 estimated charge for the year, not the £140.00 payment received, not the £38.20 surface water drainage charge, not the £86.35 water supply charge or the £56.20 wastewater charge that make up the bill, not the £429.00 WaterSure annual cap, not the £1.9432 per cubic metre volumetric rate and not the £5.00 late payment charge.",
+    "scheduleKind and recurrenceMonths are omitted: this is a bill with a payment due date, not a renewal or a service, and the six monthly billing cycle is a billing frequency rather than the cycle of the thing."
+  ]
+}

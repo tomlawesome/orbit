@@ -1,0 +1,47 @@
+{
+  "name": "cycle insurance certificate, the true renewal date sits one day after the printed period end",
+  "filename": "fullpage-cycle-insurance-certificate.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-04",
+      "2026-09-14",
+      "2027-09-14"
+    ],
+    "provider": "Spoke & Wheel Cycle Cover",
+    "reference": "SWC-2026-88213",
+    "dateRoles": [
+      {
+        "date": "2026-09-04",
+        "role": "issued"
+      },
+      {
+        "date": "2026-09-14",
+        "role": "start"
+      },
+      {
+        "date": "2027-09-14",
+        "role": "renewal"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Insurance"
+      ],
+      "qualifiers": [
+        "Bike"
+      ]
+    },
+    "costMinor": 6420,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "dates: certificate issued 4 September 2026, period start 14 September 2026, renewal date 14 September 2027. The period-of-insurance END date, 13 September 2027, is printed one day before the renewal date and is a deliberate trap, not declared. The bicycle's purchase date (2 June 2025) and its unrelated manufacturer's warranty expiry (2 June 2027) are also undeclared.",
+    "provider is Spoke & Wheel Cycle Cover, the trading name under which the certificate is issued, not Ridgeway Insurance Brokers Ltd (the legal entity, named only once) or Palisade Insurance Company plc (the underwriter).",
+    "reference is the certificate number SWC-2026-88213.",
+    "costMinor is the annual premium, 64.20; the insured purchase price (2,150.00), the optional roadside-assistance add-on price (18.50) and the cover limits/excesses in the table are traps.",
+    "recurrenceMonths is 12, printed in digits as 'a 12-month policy'.",
+    "subtype: Insurance/Bike. scheduleKind is 'renewal', derived from the renewal dateRole."
+  ]
+}

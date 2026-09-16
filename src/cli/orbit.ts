@@ -923,6 +923,9 @@ function buildRehearsalUpdateBundle(spec: RestoreRehearsalDocumentSpec, document
     collectDocumentsArchive(outputPath: string): void {
       createTar(documentsRoot, outputPath, ["."]);
     },
+    // This rehearsal only exercises runBackup, never runExportRecoveryBundle,
+    // so there is nothing for this throwaway adapter to record.
+    recordRecoveryBundleExported(): void {},
   };
 
   const bundleDirectory = join(scratchRoot, "bundle-source");
@@ -1301,9 +1304,94 @@ function commandAuthRecoveryLink(): void {
   })();
 }
 
+/** The phrase typed to confirm `orbit auth clear-addresses` (#970). */
+const CLEAR_ADDRESSES_CONFIRMATION_PHRASE = "CLEAR ADDRESSES";
+
+/**
+ * `orbit auth clear-addresses` (#970, ADR-0022 §5's host-CLI pattern): the
+ * last resort when the encryption key and the recovery bundle are both gone —
+ *
+ * `docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth clear-addresses`
+ *
+ * It recovers nothing, and says so before it does anything. Documents and
+ * encrypted metadata are gone with the key. What it prevents is the second
+ * loss: Orbit finds an account by its address, the address is encrypted
+ * (#969), so with the key gone nobody can sign in at all and the instance
+ * becomes a brick with intact accounts inside it. Clearing the addresses it
+ * cannot read lets the primary administrator back in through
+ * `auth recovery-link` — which never touches an address — to re-enter members'
+ * addresses by hand.
+ *
+ * Two refusals stand in front of it, both in `account-addresses-reset.ts` so a
+ * second caller could not skip them: it will not run while the key still
+ * works, and nothing network-reachable may call it. The typed phrase is the
+ * third, and the only one a human is asked for.
+ */
+function commandAuthClearAddresses(): void {
+  process.env.ORBIT_LOG_LEVEL = "error";
+  void (async () => {
+    const [{ closeDatabase }, { clearUnreadableAddresses, encryptionKeyIsUsable }] = await Promise.all([
+      import("../db"),
+      import("../server/account-addresses-reset"),
+    ]);
+    try {
+      /* The refusal that matters most. An operator who sees "instance locked"
+         and assumes the worst would otherwise destroy addresses that were
+         perfectly recoverable — the key was fine, and only the bundle needed
+         restoring. Checked before a single word about clearing anything. */
+      if (await encryptionKeyIsUsable()) {
+        process.stderr.write(
+          "orbit: refused — this instance can still read its encrypted data, so its addresses are not lost.\n"
+          + "orbit: if members cannot sign in, the fault is elsewhere; this command would destroy addresses for nothing.\n",
+        );
+        await closeDatabase().catch(() => {});
+        process.exit(1);
+        return;
+      }
+
+      process.stdout.write(
+        "This does NOT recover anything. Documents and encrypted details stay unreadable.\n"
+        + "It clears the account addresses this instance can no longer read, so that people can be let back in:\n"
+        + "  - every unreadable account address is removed; the accounts themselves survive\n"
+        + "  - every unreadable mail-forwarding address is removed, and must be added and proved again\n"
+        + "  - addresses this instance CAN still read are left alone\n"
+        + "Afterwards, run `orbit auth recovery-link` to get back in as the primary administrator,\n"
+        + "then re-enter members' addresses by hand.\n",
+      );
+      const answer = readTtyLine(`Type ${CLEAR_ADDRESSES_CONFIRMATION_PHRASE} to continue: `);
+      if (answer !== CLEAR_ADDRESSES_CONFIRMATION_PHRASE) {
+        process.stderr.write("orbit: not confirmed; nothing was changed\n");
+        await closeDatabase().catch(() => {});
+        process.exit(1);
+        return;
+      }
+
+      const outcome = await clearUnreadableAddresses();
+      process.stdout.write(
+        `orbit: cleared ${outcome.users} account address(es) and removed ${outcome.senderAddresses} `
+        + "mail-forwarding address(es).\n"
+        + "orbit: next, run `orbit auth recovery-link`.\n",
+      );
+    } catch {
+      // Category only, for the same reason recovery-link gives above: a driver
+      // failure can carry the connection string, and an operator in the middle
+      // of this is the likeliest person to paste their terminal somewhere.
+      process.stderr.write("orbit: clear-addresses failed; the database could not be updated\n");
+      await closeDatabase().catch(() => {});
+      process.exit(1);
+      return;
+    }
+    await closeDatabase();
+  })();
+}
+
 function commandAuth(args: string[]): void {
-  if (args.length !== 1 || args[0] !== "recovery-link") {
-    usageExit("orbit: unknown auth subcommand (usage: orbit auth recovery-link)");
+  if (args.length !== 1 || (args[0] !== "recovery-link" && args[0] !== "clear-addresses")) {
+    usageExit("orbit: unknown auth subcommand (usage: orbit auth recovery-link | orbit auth clear-addresses)");
+  }
+  if (args[0] === "clear-addresses") {
+    commandAuthClearAddresses();
+    return;
   }
   commandAuthRecoveryLink();
 }
@@ -1391,7 +1479,7 @@ function main(): void {
 
 function failUsage(): never {
   fail(
-    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
+    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, auth recovery-link, auth clear-addresses [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
   );
 }
 

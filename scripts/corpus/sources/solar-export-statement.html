@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Millbrook Energy — Solar Export Statement</title>
+<style>
+@font-face{font-family:"Corpus Export";src:url("../fonts/Alegreya.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Export Mono";src:url("../fonts/CutiveMono-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Export", serif;
+    font-size: 9.4pt; line-height: 1.4; color: #000; background: #fff;
+  }
+  .mono { font-family: "Corpus Export Mono", monospace; }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always; background: #fff;
+    padding: 0 0 14mm 0;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  .band {
+    background: #2d6a4f; color: #fff; padding: 6mm 12mm 5mm 12mm;
+    display: flex; justify-content: space-between; align-items: flex-start;
+  }
+  .band .wordmark { font-size: 16.5pt; font-weight: 700; letter-spacing: 0.5px; }
+  .band .team { font-size: 8pt; margin-top: 0.8mm; }
+  .band .facts { font-family: "Corpus Export Mono", monospace; font-size: 8pt; text-align: right; line-height: 1.75; }
+  .band .facts .k { color: #d8f3dc; margin-right: 2mm; }
+
+  .content { padding: 5mm 12mm 0 12mm; }
+
+  h2 {
+    font-size: 10.5pt; font-weight: 700; color: #2d6a4f; margin: 5mm 0 2mm 0;
+    border-bottom: 1pt solid #2d6a4f; padding-bottom: 1mm;
+  }
+
+  .twocol { display: flex; gap: 8mm; margin-bottom: 1mm; }
+  .twocol > div { flex: 1; }
+  .box {
+    border: 0.8pt solid #2d6a4f; padding: 2.6mm 3.6mm; font-size: 8.6pt; line-height: 1.6;
+  }
+  .box .row { display: flex; justify-content: space-between; gap: 3mm; }
+  .box .lab { color: #1d4a37; }
+  .box b { font-weight: 700; }
+
+  /* ---- quarterly blocks ---- */
+  .qgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 3.5mm; margin-top: 2mm; }
+  .qblock { border: 0.8pt solid #2d6a4f; }
+  .qhead {
+    background: #d8f3dc; color: #1d4a37; font-weight: 700; font-size: 8.6pt;
+    padding: 1.6mm 3mm; display: flex; justify-content: space-between;
+  }
+  .qbody { padding: 2mm 3mm 2.4mm 3mm; font-size: 7.9pt; }
+  table.qtab { width: 100%; border-collapse: collapse; font-size: 7.7pt; }
+  table.qtab td { padding: 0.6mm 0; }
+  table.qtab td.lab { color: #333; }
+  table.qtab td.val { text-align: right; font-family: "Corpus Export Mono", monospace; white-space: nowrap; }
+  .qpay {
+    margin-top: 1.6mm; padding-top: 1.4mm; border-top: 0.7pt solid #2d6a4f;
+    display: flex; justify-content: space-between; align-items: baseline; font-size: 8.4pt;
+  }
+  .qpay .amt { font-family: "Corpus Export Mono", monospace; font-weight: 700; font-size: 10.5pt; color: #1d4a37; }
+  .qpay .when { font-family: "Corpus Export Mono", monospace; font-size: 7.6pt; color: #333; }
+
+  .pagefoot {
+    position: absolute; left: 12mm; right: 12mm; bottom: 6mm; font-size: 6.8pt; color: #444;
+    border-top: 0.6pt solid #999; padding-top: 1.6mm; display: flex; justify-content: space-between;
+  }
+
+  /* ---- page 2 ---- */
+  .band2 {
+    background: #2d6a4f; color: #fff; padding: 3.5mm 12mm; font-size: 9.2pt;
+    display: flex; justify-content: space-between;
+  }
+
+  table.summary { width: 100%; border-collapse: collapse; font-size: 8.8pt; margin-bottom: 2mm; }
+  table.summary td { padding: 1.2mm 0; border-bottom: 0.4pt dotted #999; }
+  table.summary td.v { text-align: right; font-family: "Corpus Export Mono", monospace; white-space: nowrap; }
+  table.summary tr.tot td { border-top: 1pt solid #2d6a4f; border-bottom: none; font-weight: 700; padding-top: 2mm; }
+  table.summary tr.tot td.v { font-size: 12pt; color: #1d4a37; }
+  table.summary tr.est td { color: #555; font-style: italic; }
+
+  .chartwrap { border: 0.8pt solid #2d6a4f; padding: 3mm 5mm 2mm 5mm; margin-bottom: 3mm; }
+  .chart { display: flex; align-items: flex-end; height: 34mm; gap: 8mm; padding: 0 6mm; border-bottom: 1pt solid #2d6a4f; }
+  .bar-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; width: 16mm; }
+  .bar { width: 9mm; background: #2d6a4f; }
+  .bar-val { font-family: "Corpus Export Mono", monospace; font-size: 6.6pt; margin-bottom: 0.6mm; }
+  .chart-axis { display: flex; gap: 8mm; padding: 0 6mm; margin-top: 1mm; }
+  .axis-lab { width: 16mm; text-align: center; font-size: 6.8pt; color: #333; }
+
+  table.tariff { width: 100%; border-collapse: collapse; font-size: 8pt; margin: 2mm 0 3mm 0; }
+  table.tariff th { text-align: left; font-size: 7.6pt; text-transform: uppercase; letter-spacing: 0.4px; color: #1d4a37; border-bottom: 1pt solid #2d6a4f; padding: 1mm 2mm; }
+  table.tariff th.r, table.tariff td.r { text-align: right; }
+  table.tariff td { padding: 1mm 2mm; border-bottom: 0.4pt dotted #999; font-family: "Corpus Export Mono", monospace; }
+  table.tariff td.desc { font-family: "Corpus Export", serif; }
+
+  .smallprint { font-size: 6.9pt; line-height: 1.5; color: #222; column-count: 2; column-gap: 6mm; margin-top: 2mm; }
+  .smallprint p { margin: 0 0 2mm 0; }
+  .smallprint b { color: #1d4a37; }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+  <div class="band">
+    <div>
+      <div class="wordmark">Millbrook Energy</div>
+      <div class="team">Solar Generation Team &middot; Annual Solar Export Statement</div>
+    </div>
+    <div class="facts">
+      <div><span class="k">GENERATION ACCOUNT</span>SEG-4471-0932</div>
+      <div><span class="k">STATEMENT PERIOD</span>01/04/2025 &ndash; 31/03/2026</div>
+      <div><span class="k">STATEMENT DATE</span>24/04/2026</div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="twocol">
+      <div class="box">
+        <b>Mrs Priya Nandra</b><br>
+        7 Larkspur Close<br>
+        Bramfield<br>
+        Suffolk<br>
+        IP14 6QS
+        <div style="margin-top:2mm;">Installation address: as above</div>
+      </div>
+      <div class="box">
+        <div class="row"><span class="lab">Array size</span><b class="mono">4.2 kWp</b></div>
+        <div class="row"><span class="lab">Panels / inverter</span><span>14 &times; 300W, single inverter</span></div>
+        <div class="row"><span class="lab">Commissioned</span><span>18 June 2019</span></div>
+        <div class="row"><span class="lab">MCS installation ref.</span><span class="mono">2019/A/48871</span></div>
+        <div class="row"><span class="lab">Installer</span><span>SunHarvest Installations Ltd</span></div>
+        <div class="row"><span class="lab">Generation meter</span><span class="mono">GM7734215</span></div>
+        <div class="row"><span class="lab">Export meter</span><span class="mono">EM2205968</span></div>
+        <div class="row"><span class="lab">Export meter last verified</span><span>12 May 2022</span></div>
+      </div>
+    </div>
+
+    <h2>Your quarterly export and payments this year</h2>
+    <div class="qgrid">
+
+      <div class="qblock">
+        <div class="qhead"><span>Quarter 1</span><span>1 Apr 2025 &ndash; 30 Jun 2025</span></div>
+        <div class="qbody">
+          <table class="qtab">
+            <tr><td class="lab">Generation meter, opening &rarr; closing</td><td class="val">018942.6 &rarr; 020184.9 kWh</td></tr>
+            <tr><td class="lab">Export meter, opening &rarr; closing</td><td class="val">009821.4 &rarr; 010511.2 kWh</td></tr>
+            <tr><td class="lab">Generation this quarter</td><td class="val">1242.3 kWh</td></tr>
+            <tr><td class="lab">Exported to grid this quarter</td><td class="val">689.8 kWh</td></tr>
+            <tr><td class="lab">Export rate applied</td><td class="val">15.72p/kWh</td></tr>
+            <tr><td class="lab">Reading date</td><td class="val">03/07/2025</td></tr>
+          </table>
+          <div class="qpay"><span class="amt">&pound;108.45</span><span class="when">paid 18/07/2025</span></div>
+        </div>
+      </div>
+
+      <div class="qblock">
+        <div class="qhead"><span>Quarter 2</span><span>1 Jul 2025 &ndash; 30 Sep 2025</span></div>
+        <div class="qbody">
+          <table class="qtab">
+            <tr><td class="lab">Generation meter, opening &rarr; closing</td><td class="val">020184.9 &rarr; 021871.4 kWh</td></tr>
+            <tr><td class="lab">Export meter, opening &rarr; closing</td><td class="val">010511.2 &rarr; 011443.6 kWh</td></tr>
+            <tr><td class="lab">Generation this quarter</td><td class="val">1686.5 kWh</td></tr>
+            <tr><td class="lab">Exported to grid this quarter</td><td class="val">932.4 kWh</td></tr>
+            <tr><td class="lab">Export rate applied</td><td class="val">15.72p/kWh</td></tr>
+            <tr><td class="lab">Reading date</td><td class="val">04/10/2025</td></tr>
+          </table>
+          <div class="qpay"><span class="amt">&pound;146.57</span><span class="when">paid 17/10/2025</span></div>
+        </div>
+      </div>
+
+      <div class="qblock">
+        <div class="qhead"><span>Quarter 3</span><span>1 Oct 2025 &ndash; 31 Dec 2025</span></div>
+        <div class="qbody">
+          <table class="qtab">
+            <tr><td class="lab">Generation meter, opening &rarr; closing</td><td class="val">021871.4 &rarr; 022518.7 kWh</td></tr>
+            <tr><td class="lab">Export meter, opening &rarr; closing</td><td class="val">011443.6 &rarr; 011799.5 kWh</td></tr>
+            <tr><td class="lab">Generation this quarter</td><td class="val">647.3 kWh</td></tr>
+            <tr><td class="lab">Exported to grid this quarter</td><td class="val">355.9 kWh</td></tr>
+            <tr><td class="lab">Export rate applied</td><td class="val">15.72p/kWh</td></tr>
+            <tr><td class="lab">Reading date</td><td class="val">05/01/2026</td></tr>
+          </table>
+          <div class="qpay"><span class="amt">&pound;55.95</span><span class="when">paid 19/01/2026</span></div>
+        </div>
+      </div>
+
+      <div class="qblock">
+        <div class="qhead"><span>Quarter 4</span><span>1 Jan 2026 &ndash; 31 Mar 2026</span></div>
+        <div class="qbody">
+          <table class="qtab">
+            <tr><td class="lab">Generation meter, opening &rarr; closing</td><td class="val">022518.7 &rarr; 023102.9 kWh</td></tr>
+            <tr><td class="lab">Export meter, opening &rarr; closing</td><td class="val">011799.5 &rarr; 012121.8 kWh</td></tr>
+            <tr><td class="lab">Generation this quarter</td><td class="val">584.2 kWh</td></tr>
+            <tr><td class="lab">Exported to grid this quarter</td><td class="val">322.3 kWh</td></tr>
+            <tr><td class="lab">Export rate applied</td><td class="val">15.72p/kWh</td></tr>
+            <tr><td class="lab">Reading date</td><td class="val">06/04/2026</td></tr>
+          </table>
+          <div class="qpay"><span class="amt">&pound;50.67</span><span class="when">paid 20/04/2026</span></div>
+        </div>
+      </div>
+
+    </div>
+    <p style="font-size:7.2pt;color:#444;margin:2mm 0 0 0;">Meter readings are taken remotely from your smart export meter where possible; a reading marked with an asterisk elsewhere in your account history would indicate an estimate carried forward pending a site visit. No readings on this statement are estimated.</p>
+  </div>
+
+  <div class="pagefoot">
+    <span>Millbrook Energy &middot; Generation account SEG-4471-0932</span>
+    <span>Page 1 of 4</span>
+  </div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+  <div class="band2">
+    <span>Millbrook Energy &mdash; Solar Generation Team</span>
+    <span class="mono">SEG-4471-0932 &middot; Page 2 of 4</span>
+  </div>
+
+  <div class="content">
+    <h2>Annual summary, 1 April 2025 to 31 March 2026</h2>
+    <p style="font-size:8.6pt;line-height:1.5;margin:0 0 2mm 0;">This statement summarises the 12-month period from 1 April 2025 to 31 March 2026, drawn from the quarterly meter readings and payments on the previous page.</p>
+    <table class="summary">
+      <tr><td>Total generation recorded this year</td><td class="v">4160.3 kWh</td></tr>
+      <tr><td>Total exported to the grid this year</td><td class="v">2300.4 kWh</td></tr>
+      <tr><td>Gross export payment, four quarters</td><td class="v">&pound;361.64</td></tr>
+      <tr><td>Less: annual metering &amp; data administration charge</td><td class="v">&minus;&pound;18.00</td></tr>
+      <tr class="tot"><td>Total paid to you this year</td><td class="v">&pound;343.64</td></tr>
+      <tr class="est"><td>Estimated total for 2026/27 if generation is unchanged</td><td class="v">&pound;355.00</td></tr>
+    </table>
+
+    <h2>Your export payments by quarter</h2>
+    <div class="chartwrap">
+      <div class="chart">
+        <div class="bar-col"><div class="bar-val">&pound;108.45</div><div class="bar" style="height:74%"></div></div>
+        <div class="bar-col"><div class="bar-val">&pound;146.57</div><div class="bar" style="height:100%"></div></div>
+        <div class="bar-col"><div class="bar-val">&pound;55.95</div><div class="bar" style="height:38%"></div></div>
+        <div class="bar-col"><div class="bar-val">&pound;50.67</div><div class="bar" style="height:35%"></div></div>
+      </div>
+      <div class="chart-axis">
+        <div class="axis-lab">Q1 25/26</div>
+        <div class="axis-lab">Q2 25/26</div>
+        <div class="axis-lab">Q3 25/26</div>
+        <div class="axis-lab">Q4 25/26</div>
+      </div>
+    </div>
+
+    <h2>Your export tariff explained</h2>
+    <p style="font-size:8.6pt;line-height:1.5;margin:0 0 2mm 0;">Payments in this statement are calculated by multiplying the export figure recorded at your export meter each quarter by the export rate applying to your generation account. Your generation account is held on our Standard Export Tariff.</p>
+    <table class="tariff">
+      <thead><tr><th class="desc">Rate</th><th class="r">p/kWh</th><th class="desc">Applies</th></tr></thead>
+      <tbody>
+        <tr><td class="desc">Standard Export Tariff (this statement)</td><td class="r">15.72</td><td class="desc">until reviewed</td></tr>
+        <tr><td class="desc">Standard Export Tariff, after RPI review</td><td class="r">16.05</td><td class="desc">from 1 October 2026</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:8.6pt;line-height:1.5;margin:0 0 2mm 0;">The export rate shown above is reviewed each year in line with RPI on 1 October; based on this year's review it will next change on 1 October 2026. This is separate from your export tariff agreement, which began on 1 April 2023 for a fixed term of 4 years and ends on 31 March 2027. Shortly before your agreement ends we will write to you with the export tariffs then available, and if you take no action your generation account will move onto our then-current default export tariff.</p>
+
+    <div class="smallprint">
+      <p><b>Millbrook Energy Ltd</b> is a licensed electricity supplier, registered in England &amp; Wales No. 06821345, registered office 14 Foundry Court, Leeds, LS2 7QW. Millbrook Energy Ltd is licensed to supply electricity by Ofgem, the Office of Gas and Electricity Markets.</p>
+      <p>Generation payments under the Smart Export Guarantee are calculated and administered on behalf of Millbrook Energy Ltd by <b>Cheswick Metering Services Ltd</b>, a wholly owned subsidiary of Millbrook Energy Ltd and its appointed generation payment administrator, registered in England &amp; Wales No. 05512987, registered office 3 Riverside Business Park, Leeds, LS9 8AH. Correspondence about a specific quarterly payment should quote your generation account number and be sent to Cheswick Metering Services Ltd at the address above.</p>
+      <p>Export figures are taken from your export meter, serial EM2205968, which was last verified for accuracy on 12 May 2022 in line with the Measuring Instruments Regulations 2016 and is valid for use until 12 May 2032. Generation figures are taken from your generation meter, serial GM7734215, and are provided for information; they do not affect the payment calculated for this statement.</p>
+      <p>If you are unhappy with how a payment on this statement has been calculated, contact our Solar Generation Team in the first instance. If we cannot resolve your complaint within eight weeks, you may refer it free of charge to the Energy Ombudsman. Your export meter installation was carried out by SunHarvest Installations Ltd under MCS certification; MCS certification is unrelated to your export tariff agreement with Millbrook Energy Ltd.</p>
+      <p>Statement layout SES-4/2026, generated from meter records held on your generation account. This statement supersedes any estimated figures previously issued for the quarters shown above.</p>
+    </div>
+  </div>
+
+  <div class="pagefoot">
+    <span>Millbrook Energy &middot; Generation account SEG-4471-0932</span>
+    <span>Page 2 of 4</span>
+  </div>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page">
+  <div class="band2">
+    <span>Millbrook Energy &mdash; Solar Generation Team</span>
+    <span class="mono">SEG-4471-0932 &middot; Page 3 of 4</span>
+  </div>
+
+  <div class="content">
+    <h2>Comparing your import and export</h2>
+    <p style="font-size:8.6pt;line-height:1.5;margin:0 0 2mm 0;">Your generation account only covers what you are paid for exporting. Your household also buys electricity from us on a separate import account; the rates below are shown for comparison and are not part of this statement's payment.</p>
+    <table class="tariff">
+      <thead><tr><th class="desc">Import tariff (Standard Variable)</th><th class="r">Rate</th><th class="desc">Applies</th></tr></thead>
+      <tbody>
+        <tr><td class="desc">Day unit rate</td><td class="r">24.50p/kWh</td><td class="desc">07:00&ndash;23:00</td></tr>
+        <tr><td class="desc">Night unit rate (Economy 7)</td><td class="r">7.50p/kWh</td><td class="desc">23:00&ndash;07:00</td></tr>
+        <tr><td class="desc">Daily standing charge</td><td class="r">53.35p/day</td><td class="desc">every day</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Your electricity supply meter</h2>
+    <p style="font-size:8.6pt;line-height:1.5;margin:0 0 2mm 0;">Your import supply is settled half-hourly against Meter Point Administration Number (MPAN) 1900 0123 4567 8, which is separate from the generation and export meters listed on page 1. Half-hourly settlement means your import use is recorded in 48 half-hour periods a day rather than on a single meter reading; your export payments are unaffected by this and continue to be calculated from the quarterly readings shown on page 1.</p>
+
+    <h2>Generation meter reading history</h2>
+    <table class="summary">
+      <tr><td>2022/23 generation year &mdash; total exported</td><td class="v">2115.6 kWh</td></tr>
+      <tr><td>2022/23 generation year &mdash; export rate applied</td><td class="v">14.85p/kWh</td></tr>
+      <tr><td>2023/24 generation year &mdash; total exported</td><td class="v">2260.9 kWh</td></tr>
+      <tr><td>2023/24 generation year &mdash; export rate applied</td><td class="v">15.20p/kWh</td></tr>
+      <tr><td>2024/25 generation year &mdash; total exported</td><td class="v">2298.1 kWh</td></tr>
+      <tr><td>2024/25 generation year &mdash; export rate applied</td><td class="v">15.72p/kWh</td></tr>
+    </table>
+    <p style="font-size:7.2pt;color:#444;margin:2mm 0 0 0;">Figures for earlier generation years are shown for reference only and are not affected by, and do not affect, the payment total on page 2 of this statement.</p>
+
+    <h2>Your other products with Millbrook Energy</h2>
+    <table class="tariff">
+      <thead><tr><th class="desc">Product</th><th class="r">From</th><th class="desc">Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="desc">Heat Pump Tariff</td><td class="r">18.90p/kWh</td><td class="desc">Cheaper unit rate for heat pump households</td></tr>
+        <tr><td class="desc">Home Battery Tariff</td><td class="r">from &pound;2,400</td><td class="desc">Supply and install, 5kWh battery</td></tr>
+        <tr><td class="desc">EV Driver Tariff</td><td class="r">7.00p/kWh</td><td class="desc">Overnight rate, 00:00&ndash;05:00</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:7.2pt;color:#444;margin:2mm 0 0 0;">Ask our Solar Generation Team whether adding a battery would change the export figures on this statement; battery installations are arranged through our New Products team, not through Cheswick Metering Services Ltd.</p>
+  </div>
+
+  <div class="pagefoot">
+    <span>Millbrook Energy &middot; Generation account SEG-4471-0932</span>
+    <span>Page 3 of 4</span>
+  </div>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page">
+  <div class="band2">
+    <span>Millbrook Energy &mdash; Solar Generation Team</span>
+    <span class="mono">SEG-4471-0932 &middot; Page 4 of 4</span>
+  </div>
+
+  <div class="content">
+    <h2>About the Smart Export Guarantee</h2>
+    <p style="font-size:8.6pt;line-height:1.5;margin:0 0 2mm 0;">The Smart Export Guarantee (SEG) is the government scheme, introduced on 1 January 2020 under the Electricity Capacity Regulations, that requires larger electricity suppliers to offer a payment for electricity exported to the grid by small-scale generators such as your solar array. Millbrook Energy Ltd's SEG licence obligation has applied since the scheme began; the rate and terms offered under SEG are set by each supplier, not by government, and are reviewed by Millbrook Energy Ltd from time to time as described on page 2.</p>
+
+    <h2>Priority Services Register</h2>
+    <p style="font-size:8.6pt;line-height:1.5;margin:0 0 2mm 0;">If you or someone in your household would benefit from extra help &mdash; for example due to age, disability, illness, or being off-grid during a power cut &mdash; you can join our free Priority Services Register. This can include advance notice of planned interruptions to your import supply and a password scheme for callers to your home. Registering does not change anything about this export statement.</p>
+
+    <h2>If something goes wrong</h2>
+    <p style="font-size:8.6pt;line-height:1.5;margin:0 0 2mm 0;">Contact our Solar Generation Team first if you disagree with a figure on this statement. If we cannot resolve your complaint within eight weeks, or you are unhappy with our final response, you may refer it free of charge to the Energy Ombudsman, who is independent of Millbrook Energy Ltd. Millbrook Energy Ltd is VAT registered, VAT registration number 356 2208 71.</p>
+
+    <h2>Get in touch</h2>
+    <p style="font-size:8.6pt;line-height:1.5;margin:0 0 2mm 0;">Manage your generation account online at my-account.millbrookenergy.example, or download the Millbrook Energy app to submit meter readings. Solar Generation Team: 0345 601 4477 (Mon&ndash;Fri, 8am&ndash;6pm). Follow @MillbrookEnergy for updates on tariff changes and planned maintenance to our online services.</p>
+
+    <div class="smallprint">
+      <p><b>Millbrook Energy Ltd</b> is a licensed electricity supplier, registered in England &amp; Wales No. 06821345, registered office 14 Foundry Court, Leeds, LS2 7QW.</p>
+      <p>This statement, and the leaflet pages enclosed with it, are sent once a year with your annual export statement. Keep it with your other generation account paperwork; it does not need to be returned.</p>
+    </div>
+  </div>
+
+  <div class="pagefoot">
+    <span>Millbrook Energy &middot; Generation account SEG-4471-0932</span>
+    <span>Page 4 of 4</span>
+  </div>
+</div>
+
+</body>
+</html>

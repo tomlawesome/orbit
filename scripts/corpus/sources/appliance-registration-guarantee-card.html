@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Registration Card — Fernhill Appliance Care</title>
+<style>
+@font-face{font-family:"Corpus Reg";src:url("../fonts/DMSerifText-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Reg Sans";src:url("../fonts/Oswald.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; }
+  .page { width: 794px; height: 1123px; box-sizing: border-box; position: relative; overflow: hidden; padding: 40px 48px; font-family: "Corpus Reg", serif; color: #1a1a1a; font-size: 10.4px; line-height: 1.42; }
+
+  .brandstrip { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #7a1f2b; padding-bottom: 8px; margin-bottom: 12px; }
+  .brand { font-family: "Corpus Reg Sans", sans-serif; font-weight: 700; font-size: 20px; color: #7a1f2b; letter-spacing: 0.4px; }
+  .brand .sub { display: block; font-size: 8.6px; font-weight: 400; letter-spacing: 1px; color: #555; text-transform: uppercase; margin-top: 2px; }
+  .brandstrip .addr { font-family: "Corpus Reg Sans", sans-serif; font-size: 8.4px; text-align: right; color: #444; line-height: 1.5; }
+
+  .cardtitle { text-align: center; margin: 6px 0 14px 0; }
+  .cardtitle h1 { font-size: 17px; margin: 0; color: #7a1f2b; }
+  .cardtitle .lede { font-size: 9.8px; color: #333; margin-top: 4px; }
+
+  .cardbox { border: 2px solid #1a1a1a; border-radius: 4px; padding: 12px 16px; margin-bottom: 12px; background: #fbf8f2; }
+  .cardbox .head { font-family: "Corpus Reg Sans", sans-serif; font-weight: 700; font-size: 9px; text-transform: uppercase; letter-spacing: 0.6px; color: #7a1f2b; margin-bottom: 8px; }
+  .cbgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; font-family: "Corpus Reg Sans", sans-serif; }
+  .cbfield { border-top: 0.6px solid #ccc; padding: 4px 0; }
+  .cbfield .l { font-size: 7.6px; text-transform: uppercase; letter-spacing: 0.4px; color: #666; }
+  .cbfield .v { font-size: 10.2px; margin-top: 1px; }
+  .cbfield .v.big { font-size: 13px; font-weight: 700; color: #1a1a1a; }
+  .cbfield .v.ref { white-space: nowrap; font-weight: 700; }
+  .coverdates { display: flex; justify-content: space-between; margin-top: 10px; padding-top: 8px; border-top: 1.4px solid #7a1f2b; font-family: "Corpus Reg Sans", sans-serif; }
+  .coverdates .cd { text-align: center; }
+  .coverdates .cd .l { font-size: 7.6px; text-transform: uppercase; color: #666; }
+  .coverdates .cd .v { font-size: 12.5px; font-weight: 700; margin-top: 2px; }
+  .coverdates .arrow { font-size: 16px; color: #7a1f2b; align-self: center; }
+
+  .marketstrip { display: flex; gap: 10px; margin-bottom: 12px; }
+  .mcard { flex: 1; border: 1px solid #ddd; padding: 8px 10px; background: #fff; }
+  .mcard h3 { font-family: "Corpus Reg Sans", sans-serif; font-size: 8.6px; margin: 0 0 4px 0; color: #7a1f2b; text-transform: uppercase; }
+  .mcard p { font-size: 9px; margin: 0; color: #333; }
+
+  .thanks { font-size: 9.6px; color: #333; margin-bottom: 10px; }
+  .thanks strong { color: #7a1f2b; }
+
+  .contactrow { font-family: "Corpus Reg Sans", sans-serif; font-size: 8.4px; text-align: center; color: #555; border-top: 1px solid #ccc; padding-top: 6px; margin-top: 10px; }
+
+  h2.termshead { font-family: "Corpus Reg Sans", sans-serif; font-size: 13px; color: #7a1f2b; border-bottom: 1.4px solid #7a1f2b; padding-bottom: 4px; margin: 0 0 8px 0; }
+  .twocol { column-count: 2; column-gap: 20px; font-size: 9.2px; }
+  .twocol h4 { font-family: "Corpus Reg Sans", sans-serif; font-size: 9.4px; color: #7a1f2b; margin: 6px 0 2px 0; break-after: avoid; }
+  .twocol p, .twocol ol { margin: 0 0 5px 0; }
+  .twocol ol { padding-left: 14px; }
+  .twocol li { margin-bottom: 3px; }
+  .pagefoot { position: absolute; bottom: 14px; left: 48px; right: 48px; font-family: "Corpus Reg Sans", sans-serif; font-size: 7.6px; color: #888; text-align: center; border-top: 0.6px solid #ddd; padding-top: 4px; }
+  .pagenum { position: absolute; bottom: 14px; right: 48px; font-family: "Corpus Reg Sans", sans-serif; font-size: 7.6px; color: #888; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="brandstrip">
+    <div class="brand">Fernhill Appliance Care<span class="sub">Extended cover for your kitchen appliances</span></div>
+    <div class="addr">Fernhill House, Dunmow Way<br>Ipswich, IP2 9RR<br>fernhillcare.co.uk/register</div>
+  </div>
+
+  <div class="cardtitle">
+    <h1>Thank you for registering your appliance</h1>
+    <div class="lede">Please keep this card safe. You may be asked to show it if you ever need to arrange a repair.</div>
+  </div>
+
+  <div class="thanks">Your appliance is now registered with <strong>Fernhill Appliance Care</strong> and your extended guarantee is confirmed. Registration identifier <strong>5510983</strong> was created when you registered online at fernhillcare.co.uk/register on 23 May 2026.</div>
+
+  <div class="cardbox">
+    <div class="head">Appliance and cover details</div>
+    <div class="cbgrid">
+      <div class="cbfield"><div class="l">Appliance</div><div class="v">Vantage Kitchens 60cm Integrated Dishwasher</div></div>
+      <div class="cbfield"><div class="l">Model number</div><div class="v">VK-DW60-914</div></div>
+      <div class="cbfield"><div class="l">Appliance serial number</div><div class="v">22K9910834</div></div>
+      <div class="cbfield"><div class="l">Product code</div><div class="v">8820119</div></div>
+      <div class="cbfield"><div class="l">Bought from</div><div class="v">Halloway Electricals, order no. HE-7712094</div></div>
+      <div class="cbfield"><div class="l">Date purchased</div><div class="v">9 May 2026</div></div>
+      <div class="cbfield"><div class="l">Appliance price paid</div><div class="v big">£629.00</div></div>
+      <div class="cbfield"><div class="l">Extended cover price paid</div><div class="v big">£149.00</div></div>
+      <div class="cbfield"><div class="l">Guarantee number</div><div class="v ref">FAC-EG-2291083</div></div>
+      <div class="cbfield"><div class="l">Card printed</div><div class="v">26 May 2026</div></div>
+      <div class="cbfield"><div class="l">Manufacturer's guarantee ends</div><div class="v">8 May 2028</div></div>
+      <div class="cbfield"><div class="l">Replacement limit</div><div class="v">£700.00</div></div>
+    </div>
+    <div class="coverdates">
+      <div class="cd"><div class="l">Extended cover starts</div><div class="v">9 May 2028</div></div>
+      <div class="arrow">&rarr;</div>
+      <div class="cd"><div class="l">Extended cover ends</div><div class="v">8 May 2031</div></div>
+    </div>
+  </div>
+
+  <div class="marketstrip">
+    <div class="mcard"><h3>Also from Fernhill</h3><p>Ask about our Laundry Care plan, Cooking Appliance plan and Multi-Appliance bundle, each sold in the same way as the cover on this card, at fernhillcare.co.uk.</p></div>
+    <div class="mcard"><h3>Recycle your old machine</h3><p>Halloway Electricals can collect and recycle your old appliance free of charge when a new one is delivered — ask in branch or visit hallowayelectricals.co.uk/orders.</p></div>
+    <div class="mcard"><h3>Manage your cover</h3><p>View your cover, update your address or download a copy of this card any time at my.fernhillcare.co.uk, or follow @fernhillcare for reminders.</p></div>
+  </div>
+
+  <div class="contactrow">Questions about this card? Call our booking line on <strong>0330 100 2291</strong> or email <strong>care@fernhillcare.co.uk</strong>. Terms and conditions are printed overleaf.</div>
+
+  <div class="pagefoot">Fernhill Appliance Care is a trading name used under licence. Registration deadline: appliances must be registered within thirty days of purchase.</div>
+  <div class="pagenum">Page 1 of 3</div>
+</div>
+
+<div class="page">
+  <h2 class="termshead">Terms and conditions — extended appliance guarantee</h2>
+  <div class="twocol">
+    <h4>1. Who provides this cover</h4>
+    <p>1.1 This extended guarantee is sold and administered by Fernhill Appliance Care, Fernhill House, Dunmow Way, Ipswich, IP2 9RR (company registration number 07719042, VAT number GB 771 2094 33). Fernhill Appliance Care is not the manufacturer of your appliance, Vantage Kitchens, and is not the retailer, Halloway Electricals, from whom the appliance was bought.</p>
+    <p>1.2 The financial risk under this guarantee is carried by Redhurst Insurance plc, which is authorised to write this class of business. Fernhill Appliance Care administers claims and bookings on Redhurst Insurance plc's behalf and is the firm you should contact about your cover.</p>
+    <p>1.3 Repairs are carried out through our approved network, Swift Domestic Repairs, whose engineers hold the following scheme registrations: Gas Safe 447102 and NICEIC 22908. Genuine and compatible parts are supplied by Kelso Spares where the manufacturer's own part is unavailable.</p>
+
+    <h4>2. When cover starts and ends</h4>
+    <p>2.1 This extended guarantee runs from 9 May 2028, the day the appliance's manufacturer's guarantee ends (8 May 2028), until 8 May 2031. It does not run alongside the manufacturer's guarantee and no claim can be made under this card before 9 May 2028.</p>
+    <p>2.2 Cover simply ends on 8 May 2031. Nothing further is due from you and there is no automatic renewal; if you want continuing cover after that date you would need to buy a new plan.</p>
+    <p>2.3 The appliance was purchased on 9 May 2026 and registered on 23 May 2026, within the thirty day registration deadline. A registration made after thirty days from purchase may be refused or may attract a processing fee.</p>
+    <p>2.4 You have a cooling-off period of fourteen days from the card print date of 26 May 2026, ending 6 June 2026, during which you may cancel this guarantee for a full refund of the £149.00 paid, provided no claim has been made or booked.</p>
+
+    <h4>3. What is covered</h4>
+    <p>3.1 Cover applies to mechanical or electrical breakdown of the appliance described on the front of this card, arising from normal domestic use, during the period stated at clause 2.1.</p>
+    <p>3.2 An excess of £35.00 is payable by you towards the cost of each repair visit made under this guarantee. A visit found not to be covered, for example where no fault is found or the fault is excluded under clause 4, will be charged at £75.00.</p>
+    <p>3.3 Where the appliance cannot be economically repaired, "beyond economical repair" meaning the cost of repair would exceed the appliance's value, we will arrange a replacement of similar specification or a cash settlement. In either case the amount will not exceed the replacement limit of £700.00 shown on the front of this card.</p>
+    <p>3.4 Settlement offers take into account the age and condition of the appliance and are not required to match the original £629.00 purchase price.</p>
+
+    <h4>4. What is not covered</h4>
+    <p>4.1 This guarantee does not cover cosmetic damage, accidental damage, consumable parts such as filters and seals, commercial or non-domestic use, or faults caused by incorrect installation, misuse or failure to descale or clean the appliance as instructed.</p>
+    <p>4.2 Cover does not extend to a second or replacement appliance obtained other than through a settlement under clause 3.3, and does not cover any appliance other than the one described on the front of this card by its serial number, 22K9910834.</p>
+    <p>4.3 Call-out visits requested outside the terms of this guarantee, including where the appliance is found to be working correctly, will be charged at the rate shown at clause 3.2.</p>
+
+    <h4>5. How to book a repair</h4>
+    <p>5.1 To arrange a repair, contact Fernhill Appliance Care on 0330 100 2291 or through my.fernhillcare.co.uk, quoting your guarantee number FAC-EG-2291083. Swift Domestic Repairs will contact you to arrange an appointment.</p>
+    <p>5.2 A repair booking is given its own reference, for example BK-44710, which you should quote in any further correspondence about that particular visit. A cancelled appointment without at least 24 hours' notice may be charged at £45.00.</p>
+    <p>5.3 Please have your registration identifier, 5510983, and your guarantee number to hand when you call, so that we can find your record quickly.</p>
+  </div>
+  <div class="pagenum">Page 2 of 3</div>
+</div>
+
+<div class="page">
+  <h2 class="termshead">Terms and conditions (continued) — other plans, complaints and your data</h2>
+  <div class="twocol">
+    <h4>6. Other cover from Fernhill Appliance Care</h4>
+    <p>6.1 We also offer a Laundry Care plan covering washing machines, washer-dryers and tumble dryers, and a Cooking Appliance plan covering ovens, hobs and cooker hoods, each priced separately from the cover on this card.</p>
+    <p>6.2 A Multi-Appliance bundle, covering up to five appliances in one household under a single monthly payment, is available from £4.99 a month, with a printed total if paying monthly of £179.64 over the term quoted at the time. This is a separate product from the cover confirmed on this card and is not automatically added.</p>
+    <p>6.3 A five-year single-appliance plan, similar to this one but for a longer term, is available at £229.00, and may suit an appliance bought new without an existing manufacturer's guarantee.</p>
+    <p>6.4 Fernhill Appliance Care may offer a recycling contribution when an old appliance is collected in connection with a new purchase from Halloway Electricals; ask at hallowayelectricals.co.uk/orders for current terms.</p>
+
+    <h4>7. Making a complaint</h4>
+    <p>7.1 If you are unhappy with any aspect of this guarantee, please write to the Complaints Manager, Fernhill Appliance Care, Fernhill House, Dunmow Way, Ipswich, IP2 9RR, or email care@fernhillcare.co.uk, quoting your guarantee number.</p>
+    <p>7.2 We aim to resolve complaints within eight weeks. If you remain dissatisfied, or if eight weeks pass without a resolution, you may refer your complaint to the Financial Ombudsman Service, since this guarantee is a contract of insurance underwritten by Redhurst Insurance plc.</p>
+    <p>7.3 Nothing in this clause affects your other legal rights, including any rights you have against Halloway Electricals or Vantage Kitchens under consumer protection law.</p>
+
+    <h4>8. Accessibility</h4>
+    <p>8.1 This card and its terms are available in large print, audio or braille on request, free of charge, by calling 0330 100 2291 or emailing care@fernhillcare.co.uk.</p>
+    <p>8.2 Our online account service at my.fernhillcare.co.uk is designed to meet current accessibility guidelines; if you experience difficulty using it please let us know so that we can help another way.</p>
+
+    <h4>9. Your data</h4>
+    <p>9.1 Fernhill Appliance Care processes your personal data, including the appliance and purchase details on the front of this card, to administer your guarantee, arrange repairs through Swift Domestic Repairs, and meet our obligations to Redhurst Insurance plc.</p>
+    <p>9.2 We may share limited details with Halloway Electricals to confirm your original purchase, and with Kelso Spares where a part needs to be ordered in your name. We do not sell your data to third parties for marketing.</p>
+    <p>9.3 You can ask for a copy of the data we hold about you, or ask us to correct it, by writing to the address above. Full details of how we use your data are available at fernhillcare.co.uk/register.</p>
+    <p>9.4 These terms were last revised on 1 March 2026 and supersede any earlier version issued with a card of this type. Fernhill Appliance Care Fernhill House, Dunmow Way, Ipswich, IP2 9RR. Company no. 07719042. VAT no. GB 771 2094 33.</p>
+
+    <h4>10. General</h4>
+    <p>10.1 This card and its terms are governed by the law of England and Wales. Nothing in these terms limits your statutory rights.</p>
+    <p>10.2 fhcare.co/claim provides a short form for starting a claim online, and vantagekitchens.co.uk/support carries manufacturer guidance for this model that may resolve some faults without a visit.</p>
+    <p>10.3 If you move house during the period of cover, please update your address at my.fernhillcare.co.uk so that any correspondence, including a reminder before the cover on this card ends on 8 May 2031, reaches you. Cover follows the appliance, not the address, so a fitted appliance left behind at a former address remains covered provided it is not removed from that property by you.</p>
+    <p>10.4 Where you have bought more than one appliance from Halloway Electricals and registered each with Fernhill Appliance Care, each appliance has its own guarantee number and its own card; this card and its terms apply only to the appliance identified by serial number 22K9910834 above.</p>
+
+    <h4>11. Frequently asked questions</h4>
+    <p>11.1 <em>Can I transfer this guarantee if I sell the appliance?</em> Yes, provided you notify us in writing within thirty days of the sale and the new owner takes over the registration. Contact care@fernhillcare.co.uk to arrange this.</p>
+    <p>11.2 <em>What if I lose this card?</em> A replacement can be printed from my.fernhillcare.co.uk at any time using your guarantee number FAC-EG-2291083 or your registration identifier 5510983; it does not affect your cover.</p>
+    <p>11.3 <em>Does the excess apply to every visit, even a second visit for the same fault?</em> No, if an engineer from Swift Domestic Repairs needs to return to complete a repair already booked, no further excess is charged for that same job.</p>
+    <p>11.4 <em>What happens if Fernhill Appliance Care stops trading?</em> Your guarantee is underwritten by Redhurst Insurance plc, so a claim can still be made directly to the insurer using the details on this card.</p>
+
+    <h4>12. Keeping in touch</h4>
+    <p>12.1 We may write to you with reminders about your cover, including approaching the start date of 9 May 2028. You can opt out of marketing communications at any time while remaining covered.</p>
+    <p>12.2 Fernhill Appliance Care may occasionally write on behalf of Vantage Kitchens about a safety notice affecting your model, VK-DW60-914; this is sent regardless of your marketing preferences.</p>
+  </div>
+  <div class="pagenum">Page 3 of 3</div>
+</div>
+
+</body>
+</html>

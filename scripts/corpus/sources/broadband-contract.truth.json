@@ -1,0 +1,50 @@
+{
+  "name": "24-month broadband contract, exit fees as rival amounts",
+  "filename": "fullpage-broadband-contract.pdf",
+  "expected": {
+    "dates": [
+      "2026-04-22",
+      "2028-04-21"
+    ],
+    "provider": "Kestrel Broadband",
+    "reference": "ORD-2026-0417726",
+    "dateRoles": [
+      {
+        "date": "2026-04-22",
+        "role": "start"
+      },
+      {
+        "date": "2028-04-21",
+        "role": "renewal"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Contract",
+        "Subscription",
+        "Plan",
+        "Tariff",
+        "Utility",
+        "Service"
+      ],
+      "qualifiers": [
+        "Broadband"
+      ]
+    },
+    "costMinor": 83976,
+    "currency": "GBP",
+    "costArithmetic": [[3499, 24]],
+    "recurrenceMonths": 24,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "costMinor is 83976, 24 months x the £34.99 monthly price during the minimum term ('Monthly price during minimum term' price box and the 'Total during minimum term' table row) -- the total is never printed (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure). Not the £46.99 after-term price, not the £4.99 activation charge, and not any of the 24 early-termination amounts — those sit right next to the real price precisely to test whether an extractor grabs the wrong one.",
+    "recurrenceMonths is declared as 24 because the document prints 'Minimum term 24 months' in digits, but this is the length of the fixed commitment, not a repeating interval — after it, billing continues monthly on a rolling basis at a different price. A parser that reads 24 as 'this item recurs every 24 months' would be wrong; flagging this as the real judgement call.",
+    "2028-04-21 is labelled 'renewal' rather than 'expiry' because the document explicitly says the contract 'continues and renews automatically on a rolling 30-day basis' at that point (page 1 callout and page 3 'Contract renewal' paragraph) — an actual renewal event, not just a term ending.",
+    "Distractors left in deliberately and excluded from dates[]: order date 14 April 2026, document-issued date 15 April 2026, cooling-off deadline 28 April 2026, the 1 April annual price-rise date, the Direct Debit collection day, and the 24 contract-month numbers (1-24) in the exit-fee table, which are month indices, not dates.",
+    "Provider is given as the trading name 'Kestrel Broadband' (the letterhead brand and what the customer would call it), not the legal entity 'Alderway Communications Ltd', though both appear verbatim in the document.",
+    "Reference is the order reference ORD-2026-0417726 rather than the account number KB-771049-3; both are printed and either would be a defensible choice, but the order reference is what the document itself repeats in every running header.",
+    "2028-04-21 is role 'renewal', not 'expiry', because this document says the contract renews automatically on a rolling basis at that point. The existing broadband-agreement entry uses 'expiry' because its document only says 'Minimum term ends'. The rule: label what the page says happens, not what kind of document it is.",
+    "subtype is a set of kinds/qualifiers expanded from src/server/documents/subtype-taxonomy.json: what type of thing this is (owner ruling 2026-09-11, #989), not the printed title (previously 'Contract summary and terms')."
+  ]
+}

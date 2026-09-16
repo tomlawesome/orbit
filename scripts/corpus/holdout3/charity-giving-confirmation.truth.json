@@ -1,0 +1,37 @@
+{
+  "name": "charity regular-giving confirmation, a prior one-off gift sits beside the new Direct Debit",
+  "filename": "fullpage-charity-giving-confirmation.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-09",
+      "2026-10-01"
+    ],
+    "provider": "Fernbridge Wildlife Trust",
+    "reference": "FWT-227410",
+    "dateRoles": [
+      {
+        "date": "2026-09-09",
+        "role": "issued"
+      },
+      {
+        "date": "2026-10-01",
+        "role": "due"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Subscription"
+      ]
+    },
+    "costMinor": 1200,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: letter dated 9 September 2026, first Direct Debit collection 1 October 2026. The earlier one-off online gift (18 August 2026) and the patron's annual address date (14 March 2026) are printed but not declared.",
+    "provider is Fernbridge Wildlife Trust, the charity itself.",
+    "reference is the supporter number FWT-227410.",
+    "costMinor is the new regular gift, 12.00 a month; the earlier one-off gift (25.00) is a trap, printed as a rival amount already receipted separately.",
+    "subtype: Subscription. No qualifier in the taxonomy names charitable giving closely enough to declare one.",
+    "No recurrence or scheduleKind is declared: neither dateRole is 'renewal' or 'service', even though the gift itself recurs monthly."
+  ]
+}
