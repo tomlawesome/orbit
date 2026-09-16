@@ -4,14 +4,35 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
-# Cheapest check first, and node_modules-free: catches the pnpm 11 -> 12.3.4
-# handoff writing an @pnpm/exe block back into the lockfile (#901). Runs via
-# `node --test`, not Vitest -- see vitest.config.ts's exclude entry for why.
-node --test scripts/lockfile-no-pnpm-exe.test.mjs
+# The lockfile guard (#901): catches the pnpm 11 -> 12.3.4 handoff writing an
+# @pnpm/exe block back into the lockfile. Runs via `node --test`, not Vitest --
+# see vitest.config.ts's exclude entry for why.
+#
+# Fatal in CI, advisory locally (#1024). The block is written by any local
+# `pnpm` command, including the ones further down this very script, so as the
+# first fatal step it mostly caught pollution the previous local run had
+# caused: `set -Eeuo pipefail` then aborted before a single test ran, and the
+# developer read a failure about a file they had never edited. Every agent and
+# developer hit it, restored the lockfile and ran again, losing a run each
+# time.
+#
+# So locally the check moves to the end, where it reports the state this run
+# leaves behind and says what to do about it, without eating the run. In CI it
+# stays exactly as it was: first, and fatal. That is the path that matters,
+# because it is the one that can put the block into the repository.
+if [[ -n "${CI:-}" ]]; then
+  node --test scripts/lockfile-no-pnpm-exe.test.mjs
+fi
 
 # Same reason: uses node:test, not vitest globals (#921) -- see
 # vitest.config.ts's exclude entry for this file too.
 node --test scripts/compose-project-name-resolution.test.mjs
+
+# Also node_modules-free, and it belongs before `pnpm typecheck` below: it
+# guards the configuration that decides whether typecheck reads tmp/ at all
+# (#995). If that guard has been lost, the next step is what fails, naming a
+# scratch prototype instead of the real cause.
+node --test scripts/scratch-dir-ignored.test.mjs
 
 # Static analysis covers the full-stack boundary; Vitest exercises all fast
 # server, authentication, database, domain, and reducer tests without Docker.
@@ -73,4 +94,21 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
 else
   printf 'Orbit tests: pnpm, or Node.js with installed dependencies, is required.\n' >&2
   exit 1
+fi
+
+# The local half of the lockfile guard above (#1024). Advisory by design: this
+# names a self-inflicted, already-understood pollution and tells the developer
+# how to undo it. It never restores the file itself -- a lockfile edit can be
+# real work, and discarding one to save a message would be the worse fault --
+# and it never changes this script's exit code, because the tests above are
+# what the run was for.
+if [[ -z "${CI:-}" ]] && ! node --test scripts/lockfile-no-pnpm-exe.test.mjs >/dev/null 2>&1; then
+  printf '\n' >&2
+  printf 'NOTE: pnpm-lock.yaml now carries a bare @pnpm/exe block.\n' >&2
+  printf '      A local pnpm command writes it while handing over to the pinned 12.3.4;\n' >&2
+  printf '      it is not your change, and CI rejects it. Restore before committing:\n' >&2
+  printf '\n' >&2
+  printf '        git checkout -- pnpm-lock.yaml\n' >&2
+  printf '\n' >&2
+  printf '      If you did mean to change the lockfile, remove just that block instead.\n' >&2
 fi
