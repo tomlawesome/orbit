@@ -41,3 +41,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0024: Tier 1 metadata encrypts under one per-household DEK beneath the existing KEK, with a derived per-household blind index](0024-tiered-metadata-encryption.md) (Accepted)
 - [ADR-0025: Model extraction is a schema-bound, evidence-grounded proposer on a fixed internal endpoint, gated by a hold-out corpus](0025-local-model-extraction.md) (Accepted; §4 amended 2026-09-10)
 - [ADR-0026: Extraction finds every candidate, tags each with the label beside it, then chooses per field](0026-extraction-sieves-tags-then-chooses.md) (Accepted)
+- [ADR-0030: Every document takes the queue; the upload form keeps a quick rules-only read as the lesser choice](0030-one-route-in-with-a-quick-rules-read.md) (Accepted)
