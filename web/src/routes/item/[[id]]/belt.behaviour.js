@@ -27,7 +27,7 @@
 import {
   AMBIENT_SEED, BAND_MARGIN, BERTH_NARROW, COS_I, DRIFT, GLIDE, HFRAC, RAD, RADIAL,
   SIN_I, SWEEP, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, clamp01, ease,
-  geometryOf, lehmer, rollRangeOf, seatOf, spawnInto,
+  geometryOf, lehmer, phiAtX, rollRangeOf, seatOf, spawnInto,
 } from "./band.js";
 
 /**
@@ -346,14 +346,23 @@ export function mountBelt(root, options) {
     });
   }
 
-  /* The two end-caps: which way time runs. Quiet, at the two far corners. */
+  /* The two end-caps: which way time runs. Quiet, riding the band where it
+     leaves the frame, so the words label the line they describe (#1010, owner
+     2026-09-16 — the far corners they used to sit in belong to the shared
+     chrome now). Above the band's upper edge, clear of the tallest rock and
+     its ring, because a body can sit anywhere along the band, including at
+     the frame's edge: below or on the band, one would eventually cover them.
+     Labels hang beneath their rocks, so above is the one safe side. */
   function buildEnds() {
     endsG.textContent = "";
     if (!bodies.length) return;
-    for (const [x, anchor, text] of
-         /** @type {[number, string, string][]} */
-         ([[28, "start", "← sooner"], [geom.W - 28, "end", "later →"]])) {
-      const t = el("text", { class: "endcap", x, y: 38, "text-anchor": anchor });
+    const half = (geom.A * RADIAL * COS_I * 2 + geom.A * HFRAC * SIN_I * 2) / 2;
+    const clear = half + 25 + 6 + 14;   /* rock r ≤ 25, its ring, breathing room */
+    for (const [x, dir, anchor, text] of
+         /** @type {[number, number, string, string][]} */
+         ([[28, +1, "start", "← sooner"], [geom.W - 28, -1, "end", "later →"]])) {
+      const y = geom.project(phiAtX(geom, x, dir), geom.A, 0).y - clear;
+      const t = el("text", { class: "endcap", x, y: y.toFixed(0), "text-anchor": anchor });
       t.textContent = text;
       endsG.appendChild(t);
     }
