@@ -28,6 +28,7 @@ only makes the five shipped sections a privileged class; a picker of
 pictograms needs a big set to feel like a choice and breaks one pen's hand.
 An asterism is honest for any name because it depicts nothing.
 
-## Verdicts
+## Verdicts (owner, 2026-09-16)
 
-(pending)
+- Asterisms: "Yes."
+- Choosing: "Tap to swap." — assigned on arrival, swappable from the row.
