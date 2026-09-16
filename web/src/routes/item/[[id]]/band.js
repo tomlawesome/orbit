@@ -321,7 +321,7 @@ function projectAt(cx, cy, phi, rho, hh) {
  * @param   {number}   dir      which way round the ring to walk
  * @returns {number}            the ring angle that lands on it
  */
-function phiAtX(geom, targetX, dir) {
+export function phiAtX(geom, targetX, dir) {
   let phi = geom.PHI_APEX, step = 0.02 * dir, last = geom.project(phi, geom.A, 0).x;
   for (let i = 0; i < 400; i++) {
     const next = phi + step, x = geom.project(next, geom.A, 0).x;
