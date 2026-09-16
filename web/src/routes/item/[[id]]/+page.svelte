@@ -4,6 +4,7 @@
   import { resolve } from "$app/paths";
   import { mountTiledSky } from "$lib/sky.js";
   import { every, longDate, money } from "$lib/format.js";
+  import Chrome from "$lib/Chrome.svelte";
   import { WorkspaceError, applyCommand } from "$lib/data/workspace.js";
   import { beltManifestOf } from "$lib/data/belt.js";
   import {
@@ -75,8 +76,9 @@
   let { data } = $props();
 
   /* #434: an id that is a mail-in receipt is not an item and has no seat in
-     the band. It forks to its own component, imported lazily so the belt's
-     page never loads item.css — see Suggestion.svelte. */
+     the band. It forks to its own component, imported lazily so the belt
+     does not run its code — see Suggestion.svelte. Its item.css still lands
+     in this route's CSS bundle, so every rule in it is scoped to the card. */
   const suggestionView =
     data.kind === "suggestion" ? import("./Suggestion.svelte").then((m) => m.default) : null;
   /* readBelt only ever sets `item` alongside kind: "suggestion" (workspace.js);
@@ -410,6 +412,13 @@
     <Suggestion item={suggestionItem} />
   {/await}
 {:else}
+<!-- The shared chrome (#1010): the way back to the sky and the account menu.
+     A sibling of the belt, not a child, so belt.css's own `.belt-page .back`
+     (the in-card links) never reaches the chrome's link of the same name. -->
+<Chrome user={data.kind === "belt" ? data.user : null} current="item"
+        role={data.kind === "belt" && data.household
+          ? `${data.household.name ?? ""} · ${data.household.canManage ? "owner" : "member"}` : ""} />
+
 <div class="belt-page" bind:this={root} role="main">
   <!-- #843: sr-only -- the visible title is the centred card's own h2. -->
   <h1 class="sr-only">Item</h1>
@@ -459,7 +468,6 @@
           <button style="--act:var(--accent);--act-text:var(--accent-text)" onclick={() => goto(resolve("/create"))}>add an item</button>
           <button style="--act:var(--upcoming);--act-text:var(--upcoming-text)" onclick={() => goto(resolve("/inbox"))}>mail something in</button>
         </div>
-        <a class="back" href={resolve("/home")}>← back to your orbit</a>
       </article>
     {:else if cardBody?.kind === "doc" && row}
       <!-- A document shows what Orbit honestly holds: what the file is, when
@@ -698,7 +706,6 @@
           <div class="note">no documents yet — anything you attach, or mail in to your
             relay, takes a seat in the belt beside this item.</div>
         {/if}
-        <a class="back" href={resolve(`/home#${row.id}`)}>← back to your orbit</a>
       </article>
     {/if}
   </div>

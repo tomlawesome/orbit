@@ -216,9 +216,25 @@
   /* the law, everywhere: if you have asked for stillness, the sky is still */
   @media (prefers-reduced-motion: reduce){*{animation:none!important}}
   body.frozen *{animation:none!important}
+
+  /* THE SHARED CHROME (#1010): the way back and the account orb, verbatim
+     from the #452 family. The way back is knocked out against the starfield
+     with a --bg halo, as on every other sheet. */
+  .chrome-back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
+        text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .chrome-back:hover{color:var(--accent-text)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
 </style>
 </head>
 <body>
+
+<a class="chrome-back" href="home.html">← YOUR SKY</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu">TL</button>
 
 <div class="sky" aria-hidden="true">
   <svg id="skysvg" preserveAspectRatio="none">

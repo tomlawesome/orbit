@@ -344,6 +344,19 @@
         cursor:pointer;padding:0}
   .back:hover{color:var(--accent-text)}
 
+  /* THE SHARED CHROME (#1010): the way back and the account orb, verbatim
+     from the #452 family. The way back is knocked out against the starfield
+     with a --bg halo, as on every other sheet. */
+  .chrome-back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
+        text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .chrome-back:hover{color:var(--accent-text)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+
   /* The document's honest display, v2's, unchanged. No fabricated page image:
      the plate says what the file is, the rows say what Orbit knows, the
      button hands over the original. #476's page-one render turns this half
@@ -426,6 +439,9 @@
 </style>
 </head>
 <body>
+
+<a class="chrome-back" href="home.html">← YOUR SKY</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu">TL</button>
 
 <div class="sky" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
@@ -1501,7 +1517,6 @@ function renderCard() {
           <button style="--act:var(--accent)">add an item</button>
           <button style="--act:var(--upcoming)">mail something in</button>
         </div>
-        <a class="back" href="home.html">← back to your orbit</a>
       </article>`;
     return;
   }
@@ -1557,7 +1572,6 @@ function renderCard() {
           it in.</div>`
           : `<div class="note">no documents yet — anything you attach, or mail in to your
           relay, takes a seat in the belt beside this item.</div>`}
-      <a class="back" href="home.html">← back to your orbit</a>
     </article>`;
 }
 
