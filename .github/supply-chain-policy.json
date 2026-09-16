@@ -1018,8 +1018,8 @@
     {
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
-      "reference": "node:24-alpine@sha256:4caaaf42195bcd6f6f3559a413b20cb8f8ad089e231ee874cf7701643966689f",
-      "indexDigest": "sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf",
+      "reference": "node:24-alpine@sha256:333f6b3eca25980d5682c26207665b93c9417786b21760b2764d5821d9704c8a",
+      "indexDigest": "sha256:50c8e8ca1d27439048670df5883f32d57cf81cff6233222c893fd0d9884cbd81",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile"
@@ -1029,7 +1029,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-08-30",
+      "resolvedOn": "2026-09-16",
       "reviewBy": "2026-10-30"
     },
     {
@@ -1054,8 +1054,8 @@
     {
       "name": "ClamAV malware scanner",
       "tag": "clamav/clamav:1.5.4-debian",
-      "reference": "clamav/clamav:1.5.4-debian@sha256:5037bae34bf7566052d18f30be1e351155bfce845a583f0c08027f9fcaa44b5d",
-      "indexDigest": "sha256:4c975c439fcb7ab9cbdd72162c2802f5efcb4a11dcf5b0b37da1d746474ef20e",
+      "reference": "clamav/clamav:1.5.4-debian@sha256:51e8a6c78895b68bfbbadf8030cc10b4a992d85738f0af9c8f1050b2a176f786",
+      "indexDigest": "sha256:cc16781fe005e49de6a8fc1231b63b265f74b18fc2a6347c670c35716914c3b6",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -1065,7 +1065,7 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-09-07",
+      "resolvedOn": "2026-09-16",
       "reviewBy": "2026-10-30"
     },
     {
