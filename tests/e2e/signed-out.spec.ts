@@ -53,9 +53,13 @@ test("the arrival shows the ratified door and nothing of the workspace", async (
   // The mark the cut dropped, #780 restored and #1009 redrew: the SVG for
   // browsers that take one, a PNG for the rest, and the manifest naming the
   // same file — a tab and an installed app must never show two marks again.
-  await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute("href", "/icon.svg");
-  await expect(page.locator('link[rel="icon"][type="image/png"]')).toHaveAttribute("href", "/icon-32.png");
-  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("href", "/apple-touch-icon.png");
+  // Anchored on the file, not on the whole value: app.html writes a
+  // root-relative href and the DOM hands back the absolute URL it resolves to,
+  // so an exact "/icon.svg" can never match. Each `type` selector is what
+  // pins the right link to the right file.
+  await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute("href", /\/icon\.svg$/);
+  await expect(page.locator('link[rel="icon"][type="image/png"]')).toHaveAttribute("href", /\/icon-32\.png$/);
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("href", /\/apple-touch-icon\.png$/);
   const manifest = await (await request.get("/manifest.webmanifest")).json();
   expect(manifest.icons.map((icon: { src: string }) => icon.src)).toEqual(["/icon.svg", "/icon-192.png", "/icon-512.png"]);
 });
