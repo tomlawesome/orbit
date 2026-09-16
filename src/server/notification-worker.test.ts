@@ -191,6 +191,12 @@ describe("notification worker scheduling", () => {
     expect(deliveryFailureState("smtp_rejected", 1, 5)).toBe("cancelled");
     expect(deliveryFailureState("recipient_preferences_disabled", 1, 5)).toBe("cancelled");
     expect(deliveryFailureState("smtp_unavailable", 1, 5)).toBe("retry");
+    /* #963/#969: a name or an address this run could not decrypt is deferred,
+       not cancelled — a locked key and a damaged value are both repairable,
+       and neither is a reason to throw somebody's reminder away. */
+    expect(deliveryFailureState("item_title_unreadable", 1, 5)).toBe("retry");
+    expect(deliveryFailureState("recipient_address_unreadable", 1, 5)).toBe("retry");
+    expect(deliveryFailureState("recipient_address_unreadable", 5, 5)).toBe("failed");
     expect(deliveryFailureState("push_unavailable", 5, 5)).toBe("failed");
     expect(deliveryFailureState("unknown", 5, 5)).toBe("failed");
   });

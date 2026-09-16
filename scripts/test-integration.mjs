@@ -116,7 +116,14 @@ try {
   delete integrationEnvironment.OIDC_CLIENT_SECRET_FILE;
 
   run(packageManager, ["exec", "tsx", "src/db/migrate.ts"], integrationEnvironment, "Database migrations");
-  run(packageManager, ["exec", "vitest", "run", "--project", "integration"], integrationEnvironment, "Integration tests");
+  /* Extra arguments are handed to vitest, so one file can be run on its own
+     against the same disposable database the whole suite uses. `--project
+     <name>` may be given first, which is how the database-backed tests that
+     live outside tests/integration — the CLI's own, guarded on DATABASE_URL —
+     get a real database to run against. */
+  const selected = process.argv.slice(2);
+  const project = selected[0] === "--project" ? selected.splice(0, 2)[1] : "integration";
+  run(packageManager, ["exec", "vitest", "run", "--project", project, ...selected], integrationEnvironment, "Integration tests");
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Integration tests failed");
   process.exitCode = 1;

@@ -57,3 +57,15 @@ sighting proves nothing either way.
 ## migrations.test.ts "migrates every current migration into a fresh PostgreSQL 18 database"
 
 - 2026-09-10 · `feature/m8-tier2` · local `vitest run --project integration tests/integration/migrations.test.ts` against a disposable PostgreSQL 18 container · failed once, then passed on three consecutive re-runs of the same file on unchanged code. The failing run took 18.8 s against 1.4–1.8 s on each passing run, so it looks like contention with the containers the other migration scenarios in the same file create and drop, rather than a schema-contract mismatch. First sighting; no issue yet (an issue on the third, per the testing-and-ci skill). The next sighting should capture the assertion itself, which this one did not.
+
+## document-lifecycle.test.ts "emits a bounded rejected lifecycle record when reconciliation finds an available document's ciphertext missing"
+
+- 2026-09-15 · `feature/m8-addresses` · local `node scripts/test-integration.mjs` (full suite, disposable PostgreSQL 18 container) · failed once in a whole-suite run, then passed both on its own file (34/34) and on an immediate re-run of the whole suite (404 passed), on unchanged code. The failing run reported 600 ms against the file's ordinary pace.
+
+The assertion itself was not captured, so the next sighting should record it.
+Reconciliation reads the document store, and this suite shares one database
+with `fileParallelism: false` — so the first thing to check is whether the
+run that failed had a neighbouring file still holding or removing files under
+the shared `DOCUMENTS_ROOT`, rather than anything about the record's bounds.
+First sighting; no issue yet (an issue on the third, per the testing-and-ci
+skill).

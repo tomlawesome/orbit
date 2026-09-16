@@ -8,6 +8,7 @@ import { clearSessionCookie, sessionCookieName, setSessionCookie } from "@/lib/a
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
 import type { TextSize, UrgencyPalette } from "@/lib/preferences";
+import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { themePackOrDefault } from "@/lib/preferences";
 
 export interface AuthenticatedSession {
@@ -15,7 +16,13 @@ export interface AuthenticatedSession {
   token: string;
   user: {
     id: string;
-    email: string;
+    /**
+     * Null when the instance has no usable encryption key, or when the stored
+     * value will not authenticate (#969). Never an empty string: a surface
+     * that shows an address must be able to tell "cannot be read" from
+     * "blank".
+     */
+    email: string | null;
     emailVerified: boolean;
     displayName: string;
     avatarUrl: string | null;
@@ -185,6 +192,7 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       lastSeenAt: sessions.lastSeenAt,
       userId: users.id,
       email: users.email,
+      emailEnc: users.emailEnc,
       emailVerified: users.emailVerified,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
@@ -208,6 +216,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
     return null;
   }
   await touchLastSeen(record.id, record.lastSeenAt);
+  /* The address is Tier 2 metadata now (#969). A locked instance still yields
+     a session — sign-in itself never depended on reading the address, and
+     everything else about the session is plaintext — so this reads null rather
+     than refusing, and the surfaces that need an address say so themselves. */
+  const cipher = await openInstanceMetadataReader();
   return {
     id: record.id,
     token,
@@ -215,7 +228,10 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
     expiresAt: record.expiresAt,
     user: {
       id: record.userId,
-      email: record.email,
+      email: cipher.text("users.email", record.userId, {
+        encrypted: record.emailEnc,
+        plaintext: record.email,
+      }).value,
       emailVerified: record.emailVerified,
       displayName: record.displayName,
       avatarUrl: record.avatarUrl,
