@@ -132,3 +132,86 @@ describe("every artifacts block has an expire_in (#834)", () => {
     },
   );
 });
+
+// #1041: `build_image` may stand on an earlier pipeline's run, and when it does
+// it hands on that run's image.tar and build.env wholesale. The tarball then
+// carries the *earlier* commit's tag. A job that names the image by this
+// commit -- ORBIT_CI_IMAGE, `orbit-ci:$CI_COMMIT_SHA` -- asks the daemon for a
+// tag it never loaded; `orbit-ci` has no registry prefix, so Docker resolves it
+// to Docker Hub and reports "pull access denied", which names the wrong fault
+// entirely. The tag must come from build.env, which travels with the tarball.
+const REUSED_SHA = "4516511".padEnd(40, "0");
+const CURRENT_SHA = "56c7884".padEnd(40, "0");
+
+// The pipeline-wide `variables:` block, as name/value pairs.
+function globalVariables() {
+  const block = jobBlocks().get("variables");
+  const pairs = [...block.matchAll(/^ {2}([A-Z][A-Z0-9_]*): (.+)$/gmu)];
+  return Object.fromEntries(pairs.map((match) => [match[1], match[2].trim()]));
+}
+
+// GitLab's own precedence: a dotenv variable from a `needs:` job beats the
+// job's and the pipeline's YAML definitions, and every value is expanded
+// against the whole set.
+function expand(expression, variables) {
+  let value = expression;
+  for (let pass = 0; pass < 10 && /\$/u.test(value); pass += 1) {
+    value = value.replace(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/gu, (whole, name) =>
+      name in variables ? variables[name] : whole,
+    );
+  }
+  return value;
+}
+
+// Every way a job names the image it has just loaded: the ORBIT_IMAGE job
+// variable the acceptance stack reads, the TESTED_IMAGE_TAG the ci scripts
+// take, and the source side of a `docker tag`.
+function imageReferences(block) {
+  return [
+    ...[...block.matchAll(/^ {4}ORBIT_IMAGE: (\S+)$/gmu)].map((match) => match[1]),
+    ...[...block.matchAll(/TESTED_IMAGE_TAG="([^"]+)"/gu)].map((match) => match[1]),
+    ...[...block.matchAll(/docker tag "([^"]+)"/gu)].map((match) => match[1]),
+  ];
+}
+
+describe("a job names the image it loaded, not the commit it is running on (#1041)", () => {
+  const loaders = [...jobBlocks()].filter(
+    ([name, block]) => !name.startsWith(".") && block.includes("docker load --input image.tar"),
+  );
+
+  it("covers every job that loads the build_image tarball", () => {
+    expect(loaders.map(([name]) => name).sort()).toEqual(
+      [
+        "acceptance", "launcher_install_compat", "record_image", "repair_journeys",
+        "smoke", "smoke_local_only", "supply_chain_image",
+      ].sort(),
+    );
+  });
+
+  // The identity build_image publishes is what makes this possible: without
+  // ORBIT_IMAGE_TAG in build.env there is nothing for a reused job to read.
+  it("build_image publishes the loaded tag in its dotenv artefact", () => {
+    const block = jobBlocks().get("build_image");
+    expect(block).toMatch(/ORBIT_IMAGE_TAG:tag/u);
+    expect(block).toMatch(/dotenv: build\.env/u);
+  });
+
+  it.each(loaders.map(([name, block]) => [name, block]))(
+    "%s asks for the tag the reused tarball carries",
+    (_name, block) => {
+      const references = imageReferences(block);
+      expect(references.length, "names the loaded image nowhere").toBeGreaterThan(0);
+      // build_image stood on a run at REUSED_SHA; this pipeline is at
+      // CURRENT_SHA. build.env came with the tarball, so its tag is the
+      // earlier one, and dotenv outranks the pipeline's ORBIT_CI_IMAGE.
+      const variables = {
+        ...globalVariables(),
+        CI_COMMIT_SHA: CURRENT_SHA,
+        ORBIT_IMAGE_TAG: `orbit-ci:${REUSED_SHA}`,
+      };
+      for (const reference of references) {
+        expect(expand(reference, variables)).toBe(`orbit-ci:${REUSED_SHA}`);
+      }
+    },
+  );
+});
