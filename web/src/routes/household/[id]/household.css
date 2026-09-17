@@ -6,11 +6,12 @@
  * the family's standard drifting star tiles until §15 picks its successor, at
  * which point this screen adopts it unchanged in every other respect.
  *
- * Palette tokens come from packs.css. Two families of token the mockup
- * declared for itself are NOT in packs.css because nothing else uses them —
- * the section accents and the ink that reads on a solid danger button — so
- * they are declared here, per pack, scoped to this screen rather than pushed
- * into a shared file no other screen would read.
+ * Palette tokens come from packs.css, including the section accents (#867:
+ * moved there from here, since the manifest on /home now draws marks too --
+ * a value scoped to this screen alone was not shareable with a second).
+ * One family of token the mockup declared for itself is still NOT in
+ * packs.css because nothing else uses it -- the ink that reads on a solid
+ * danger button -- so it stays here, per pack, scoped to this screen.
  *
  * Everything is scoped under .household-page: this route is a sibling of no
  * one, but the family's law is that a screen's stylesheet cannot reach past
@@ -22,31 +23,11 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page *{box-sizing:border-box;margin:0}
 .household-page{min-height:100vh}
 
-[data-theme=starchart] .household-page{
-  --on-danger:#060b1c;
-  --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
-  --sec-plum:#b79ae0; --sec-coral:#f0907a;
-}
-[data-theme=afterdark] .household-page{
-  --on-danger:#05070d;
-  --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
-  --sec-plum:#a99ae0; --sec-coral:#ef9b86;
-}
-[data-theme=atlas] .household-page{
-  --on-danger:#f6f1e4;
-  --sec-sage:#3f6f4d; --sec-blue:#2b6cb0; --sec-sand:#a9761f;
-  --sec-plum:#6f4788; --sec-coral:#ab4a34;
-}
-[data-theme=dawn] .household-page{
-  --on-danger:#ffffff;
-  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
-  --sec-plum:#71499a; --sec-coral:#bd4f36;
-}
-[data-theme=retrograde] .household-page{
-  --on-danger:#0a0410;
-  --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
-  --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
-}
+[data-theme=starchart] .household-page{ --on-danger:#060b1c; }
+[data-theme=afterdark] .household-page{ --on-danger:#05070d; }
+[data-theme=clouds] .household-page{ --on-danger:#f6f1e4; }
+[data-theme=dawn] .household-page{ --on-danger:#ffffff; }
+[data-theme=retrograde] .household-page{ --on-danger:#0a0410; }
 
 /* ══ H2 — THE HOUSEHOLD'S OWN CHART, AT ROOM SCALE (§15) ═══════════════════
    From design/v19/household-inside.html, whose cards are this screen's cards
@@ -129,6 +110,19 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
 .household-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:5px;letter-spacing:.04em}
 .household-page header.screen .glyph{flex:none}
+
+/* #867 — the dial's own legend: a mark and a name for every figure the
+   mini system dial above actually draws (a section with 2+ dated entries,
+   joined into a line — constellationOf skips a lone star and an empty
+   section the same way the dial does). Visible to every viewer, not
+   owner-only: the figures are drawn for both, and a member never sees the
+   Sections card that would otherwise say what a line means. */
+.household-page .dial-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:16px;list-style:none}
+.household-page .dial-legend li{display:flex;align-items:center;gap:6px;
+      font:11px var(--mono);color:var(--ink-mid);letter-spacing:.02em}
+.household-page .dial-legend .mark{width:14px;height:14px}
+.household-page .dial-legend .mark svg{width:12px;height:12px}
+.household-page .dial-legend .mark i{width:4px;height:4px;right:-2px}
 
 .household-page .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:24px;align-items:start}
 .household-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
@@ -243,6 +237,22 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .mark i{position:absolute;right:-1px;bottom:0;width:5px;height:5px;border-radius:50%;
         background:var(--sec);opacity:.92}
 .household-page .sec.off .mark{opacity:.6}
+
+/* #867 tap to swap. A user-named row's mark is a real button; a shipped
+   row's is the plain span above and never wears these rules. */
+.household-page .mark.swap{cursor:pointer;background:none;border:0;padding:0;border-radius:6px}
+.household-page .mark.swap:hover,.household-page .mark.swap[aria-expanded=true]{box-shadow:0 0 0 1px var(--line)}
+.household-page .mark.swap:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* the tray: the worn figure plus every asterism this household has not
+   worn, role=radiogroup, the worn one ringed in --accent. Picking one
+   updates the row in place — it saves with the rest of the list. */
+.household-page .tray{display:flex;gap:6px;padding:6px 0 8px 32px;border-bottom:1px solid var(--line-soft)}
+.household-page .sec:last-of-type + .tray{border-bottom:0}
+.household-page .tray button.mark{width:24px;height:24px;border-radius:6px;cursor:pointer;
+      background:none;border:0;padding:0}
+.household-page .tray button.mark:hover{box-shadow:0 0 0 1px var(--line)}
+.household-page .tray button.mark[aria-checked=true]{box-shadow:0 0 0 1px var(--accent)}
+.household-page .tray button.mark:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .household-page .sec:last-of-type{border-bottom:0}
 .household-page .sec input{flex:1;min-width:0;background:none;border:0;border-bottom:1px solid transparent;
            color:var(--ink);font-size:13.5px;font-family:var(--ui);padding:4px 0}
