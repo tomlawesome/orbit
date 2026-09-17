@@ -105,10 +105,13 @@ html body{overflow-y:auto;overflow-x:hidden}
    save-note treatment, toned with the urgency ink the design already uses. */
 .problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:14px;line-height:1.6}
 
-/* create.html's cancel link, which is its established way back. */
-.back{display:inline-block;margin-top:20px;font:11.5px var(--mono);
+/* create.html's cancel link, which is its established way back. Scoped to
+   the card: this sheet is bundled into the belt route's CSS whatever the
+   comment in +page.svelte hopes, and a bare .back reached the shared
+   chrome's link of the same name and pushed it 20px down the sky (#1010). */
+.item-card .back{display:inline-block;margin-top:20px;font:11.5px var(--mono);
       color:var(--ink-mid);text-decoration:none}
-.back:hover{color:var(--accent-text)}
+.item-card .back:hover{color:var(--accent-text)}
 
 /* POL-11, the owner rule that every page's starfield drifts: perceptible
    within a few seconds, one direction, seamless over a tiled field. The same
@@ -129,4 +132,4 @@ html body{overflow-y:auto;overflow-x:hidden}
 .name-title:focus{border-bottom:1px solid var(--accent)}
 .name-title.sugg{border-left:3px solid var(--accent);padding-left:10px}
 .panel .field.sugg input{border-left:3px solid var(--accent)}
-.save-row .back{margin-top:0}
+.item-card .save-row .back{margin-top:0}

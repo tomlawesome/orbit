@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en" data-direction="B" data-dialect="pocket">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tour round 2 — B · pocket</title>
+<style>
+  /* Pack tokens, verbatim from web/src/lib/packs.css (default pack). Nothing
+     below invents a colour. */
+  :root {
+    --bg:#060b1c; --panel-raised:rgba(19,28,58,.75); --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-quiet:#8b95b6; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --mono:'JetBrains Mono Variable','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--ui);overflow:hidden}
+  /* The stage is the product at 1280×800, scaled to whatever window the
+     reviewer has. Every coordinate in this file is in stage pixels. */
+  .stage{position:absolute;left:50%;top:50%;width:390px;height:844px;border-radius:28px;box-shadow:0 0 0 1px var(--line);transform-origin:0 0;overflow:hidden;background:var(--bg)}
+  .stage img.bg{position:absolute;inset:0;width:390px;height:844px;opacity:0;transition:opacity .6s ease}
+  .stage img.bg.on{opacity:1}
+  /* the dimming mechanic, as tour.css: everything else drops to the faint
+     tier, the lit thing stays at full strength */
+  .veil{position:absolute;inset:0;background:var(--bg);opacity:0;transition:opacity .45s ease;pointer-events:none}
+  .veil.on{opacity:.62}
+  svg.fx{position:absolute;inset:0;width:390px;height:844px;overflow:visible;pointer-events:none}
+  .hl{position:absolute;border-radius:14px;box-shadow:0 0 0 1.5px var(--accent),0 0 0 8px color-mix(in srgb,var(--accent) 18%,transparent),0 0 34px color-mix(in srgb,var(--accent) 35%,transparent);opacity:0;transition:opacity .45s ease}
+  .hl.on{opacity:1}
+  .hl.round{border-radius:50%}
+  /* a windowed cut-out: the lit thing shows through the veil at full strength */
+  .cut{position:absolute;background-image:var(--src);background-size:390px 844px;border-radius:14px;opacity:0;transition:opacity .45s ease}
+  .cut.on{opacity:1}
+  .cut.round{border-radius:50%}
+  /* the typed title in the create drawer */
+  .typed{position:absolute;font:700 26px var(--ui);letter-spacing:-.02em;color:var(--ink);white-space:nowrap;overflow:hidden;width:0;border-right:2px solid var(--accent);background:#0d121f;height:30px;line-height:30px}
+  .field-blank{position:absolute;background:#0d121f}
+  .typed.go{animation:type 1.6s steps(22,end) .4s forwards}
+  @keyframes type{to{width:262px}}
+  /* the reminder, as Orbit's own notification would arrive */
+  .toast{position:absolute;left:50%;top:-80px;transform:translateX(-50%);width:330px;box-sizing:border-box;background:var(--panel-raised);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:14px;padding:12px 16px;transition:top .5s cubic-bezier(.2,.8,.2,1)}
+  .toast.on{top:100px}
+  .toast b{display:block;font:500 13.5px var(--ui);color:var(--ink)}
+  .toast small{font:11px var(--mono);color:var(--warm);letter-spacing:.06em}
+  /* the envelope */
+  .paper{position:absolute;width:26px;height:18px;border:1.5px solid var(--accent);border-radius:3px;background:var(--bg);opacity:0}
+  .paper::after{content:"";position:absolute;left:3px;right:3px;top:2px;height:7px;border:1.5px solid var(--accent);border-top:none;border-radius:0 0 3px 3px;transform:scaleY(.8)}
+  .paper.fly{animation:fly 1.5s cubic-bezier(.4,0,.6,1) .5s forwards}
+  @keyframes fly{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(120px,-200px) scale(.4)}}
+  /* the card, carried from tour.css verbatim */
+  .tourcard{position:absolute;left:0;right:0;bottom:0;z-index:20;background:var(--panel-raised);backdrop-filter:blur(14px);border:1px solid var(--line);border-bottom:none;border-radius:16px 16px 0 0;padding:10px 18px 22px;outline:none;color:var(--ink)}
+  .tourcard .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
+  .tourcard .progress{font:10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-quiet);margin:0 0 10px}
+  .tourcard .copy{font-size:14px;color:var(--ink);line-height:1.5;margin:0 0 6px}
+  .tourcard .copy.second{color:var(--ink-quiet);font-size:13px}
+  .tourcard .dots{display:flex;gap:5px;margin:14px 0}
+  .tourcard .dots i{width:6px;height:6px;border-radius:50%;background:var(--line)}
+  .tourcard .dots i.on{background:var(--accent)}
+  .tourbtns{display:flex;gap:8px;align-items:center;justify-content:space-between}
+  .tourbtns .side{display:flex;gap:8px}
+  .tourbtns button{font:12px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);border-radius:10px;padding:11px 14px;cursor:pointer;min-height:44px}
+  .tourbtns button:hover{border-color:var(--accent);color:var(--accent)}
+  .tourbtns button:disabled{opacity:.35;cursor:default}
+  .tourbtns .skip{color:var(--ink-quiet);border-color:var(--line-soft)}
+  .tourbtns .skip:hover{color:var(--overdue);border-color:var(--overdue)}
+  /* the north star's one pulse, and the "add to orbit" tap */
+  .pulse{position:absolute;border-radius:50%;border:1.5px solid var(--accent);opacity:0}
+  .pulse.go{animation:pulse 1.4s ease-out .3s 2}
+  @keyframes pulse{0%{opacity:.9;transform:scale(.4)}100%{opacity:0;transform:scale(1.6)}}
+  .tap{position:absolute;width:0;height:0;border-radius:50%;background:var(--upcoming);opacity:0}
+  .tap.go{animation:tap .9s ease-out .9s forwards}
+  @keyframes tap{0%{opacity:.7;width:0;height:0;margin:0}100%{opacity:0;width:90px;height:90px;margin:-45px}}
+  .done{position:absolute;font:11px var(--mono);letter-spacing:.1em;color:var(--ok);opacity:0;transition:opacity .4s ease 1.6s}
+  .done.on{opacity:1}
+  /* round-1 chrome: which direction this is, for the reviewer only */
+  .tag{position:fixed;left:14px;bottom:12px;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);z-index:30}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;transition-duration:0s!important}
+    .typed.go{width:262px;border-right-color:transparent}
+    .paper.fly{opacity:0}
+    .tap.go,.pulse.go{opacity:0}
+  }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <img class="bg" id="bgA" alt="">
+  <img class="bg" id="bgB" alt="">
+  <div class="veil" id="veil"></div>
+  <div id="cuts"></div>
+  <svg class="fx" id="fx" viewBox="0 0 390 844" aria-hidden="true">
+    <defs>
+      <radialGradient id="p-jade" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#b8f5cf"/><stop offset="45%" stop-color="#2fae6a"/><stop offset="100%" stop-color="#12603a"/></radialGradient>
+      <radialGradient id="p-sky" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#dbe9ff"/><stop offset="45%" stop-color="#6f9fe6"/><stop offset="100%" stop-color="#2b4f8f"/></radialGradient>
+      <radialGradient id="p-amber" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#ffe7a8"/><stop offset="45%" stop-color="#e0a020"/><stop offset="100%" stop-color="#7a4f08"/></radialGradient>
+    </defs>
+    <g id="orbit"></g>
+    <g id="body"></g>
+    <g id="extra"></g>
+  </svg>
+  <div id="layer"></div>
+  <div class="toast" id="toast" role="status"><b>Car MOT — Volvo V60 is coming up</b><small>T−16D · 29 AUG · REMINDER SENT 21 DAYS BEFORE</small></div>
+  <div class="tourcard" id="card" role="dialog" aria-labelledby="copy1" tabindex="0">
+    <div class="grab"></div>
+    <p class="progress" id="progress"></p>
+    <p class="copy" id="copy1"></p>
+    <p class="copy second" id="copy2"></p>
+    <div class="dots" id="dots"></div>
+    <div class="tourbtns">
+      <button class="skip" id="skip">skip the walk</button>
+      <span class="side"><button id="back">back</button><button id="next">next</button></span>
+    </div>
+  </div>
+</div>
+<div class="tag">ROUND 2 · B · POCKET · 390×844</div>
+<script>
+/* ---- the sky's law, in stage pixels (chart.js, ×640/380 about (640,400)) --- */
+const K = 366 / 380, CX = 12 + 183, CY = 64 + 183;
+const pos = (days) => {
+  const a = (Math.max(-90, Math.min(days, 430)) - 90) * Math.PI / 180;
+  const r = days >= 0 ? Math.min(62 + 0.242 * days, 166) : Math.max(24, 62 - 0.625 * -days);
+  return [CX + Math.cos(a) * r * K, CY + Math.sin(a) * r * K];
+};
+const paint = (days) => days <= 30 ? "amber" : days <= 90 ? "sky" : "jade";
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const S = 5.5; /* pocket bodies are plain discs; a cheap item stays small */
+
+/* ---- one body, drawn as home draws an inspection -------------------------- */
+const ns = "http://www.w3.org/2000/svg";
+const el = (n, at) => { const e = document.createElementNS(ns, n); for (const k in at) e.setAttribute(k, at[k]); return e; };
+function drawBody(days, opacity = 1) {
+  const g = document.getElementById("body"); g.innerHTML = "";
+  const [x, y] = pos(days), p = paint(days);
+  const wrap = el("g", { opacity });
+  wrap.appendChild(el("circle", { cx: x, cy: y, r: S, fill: p === "amber" ? "var(--warm)" : p === "sky" ? "var(--upcoming)" : "var(--ok)", style: p === "amber" ? "stroke:var(--bg);stroke-width:2" : "" }));
+  /* the pocket draws a plain disc, no face (pocket.svelte) */
+  // label sits on the sunward side of the body, so it never runs into the month ring
+  const dx = CX - x, dy = CY - y, len = Math.hypot(dx, dy) || 1, off = S + 18;
+  const label = el("text", { x: x + dx / len * off, y: y + dy / len * off + 4, "text-anchor": "middle", style: "font:10px var(--mono);fill:var(--ink-mid);letter-spacing:.06em" });
+  label.textContent = `MOT · T−${days}D`;
+  wrap.appendChild(label);
+  g.appendChild(wrap);
+  return wrap;
+}
+function landing(days) {
+  const [x, y] = pos(days); const g = document.getElementById("extra");
+  const ring = el("circle", { cx: x, cy: y, r: S + 2, fill: "none", stroke: "var(--accent)", "stroke-width": 1.5 });
+  g.appendChild(ring);
+  if (reduced) { ring.remove(); return; }
+  ring.animate([{ r: S + 2, opacity: .9 }, { r: S + 40, opacity: 0 }], { duration: 1200, easing: "ease-out" }).onfinish = () => ring.remove();
+}
+let raf = 0;
+function walk(from, to, ms, done) {
+  cancelAnimationFrame(raf);
+  if (reduced) { drawBody(to); done && done(); return; }
+  const t0 = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  const step = (now) => {
+    const t = Math.min(1, (now - t0) / ms);
+    drawBody(Math.round(from + (to - from) * ease(t)));
+    if (t < 1) raf = requestAnimationFrame(step); else done && done();
+  };
+  raf = requestAnimationFrame(step);
+}
+
+/* ---- the beats ------------------------------------------------------------ */
+const shots = (f) => `shots/${f}`;
+const layer = document.getElementById("layer"), cuts = document.getElementById("cuts");
+const put = (html) => { layer.insertAdjacentHTML("beforeend", html); return layer.lastElementChild; };
+const cut = (bg, x, y, w, h, round) => {
+  const c = document.createElement("div"); c.className = "cut" + (round ? " round" : "");
+  c.style.cssText = `--src:url(${shots(bg)});left:${x}px;top:${y}px;width:${w}px;height:${h}px;background-position:-${x}px -${y + (BEATS[i].scroll || 0)}px`;
+  cuts.appendChild(c); requestAnimationFrame(() => c.classList.add("on"));
+  const h2 = document.createElement("div"); h2.className = "hl" + (round ? " round" : "");
+  h2.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px`; cuts.appendChild(h2);
+  requestAnimationFrame(() => h2.classList.add("on"));
+};
+
+const BEATS = [
+  { bg: "p-home-empty.png", veil: false,
+    copy: ["This is your sky. The sun at the centre is your household.", "Everything you own that comes round again will orbit it."],
+    act() { drawBody(0, 0); } },
+  { bg: "p-create.png", veil: true,
+    copy: ["Add anything — the MOT, say.", "A name and a date is all a body needs."],
+    act() { cut("p-create.png", 25, 218, 340, 410); put(`<div class="field-blank" style="left:60px;top:248px;width:112px;height:32px"></div><div class="typed${reduced ? " go" : ""}" style="left:61px;top:247px">Car MOT — Volvo V60</div>`); if (!reduced) requestAnimationFrame(() => layer.lastElementChild.classList.add("go")); } },
+  { bg: "p-home-empty.png", veil: false,
+    copy: ["It lands where its date falls — a year out, on the rim.", "Today is at the top; each day is one degree round."],
+    act() { drawBody(365); landing(365); } },
+  { bg: "p-home-empty.png", veil: false,
+    copy: ["Time runs. The nearer the sun, the sooner.", "At a month out it warms, and Orbit reminds you — 21 and 7 days before."],
+    act() { drawBody(365); walk(365, 16, 2600, () => document.getElementById("toast").classList.add("on")); } },
+  { bg: "p-relay.png", veil: true,
+    copy: ["Paper can come by post too. Forward a bill to your relay address.", "Orbit reads a copy. Your mail keeps arriving exactly where it always has."],
+    act() { cut("p-relay.png", 50, 268, 290, 40); put(`<div class="paper fly" style="left:182px;top:279px"></div>`); } },
+  { bg: "p-inbox.png", veil: true, scroll: 330,
+    copy: ["It lands in your inbox, read and waiting for you.", "Nothing joins your orbit without your say-so — one tap adds it."],
+    act() { cut("p-inbox.png", 24, 158, 342, 330); put(`<div class="tap go" style="left:81px;top:454px"></div>`); put(`<div class="done on" style="left:24px;top:500px">ADDED · HOME INSURANCE RENEWAL NOW ORBITS</div>`); } },
+  { bg: "p-belt.png", veil: true,
+    copy: ["Open a body and its paper rides beside it, in a belt.", "The MOT certificate and the service history, one step either side."],
+    act() { cut("p-belt.png", 25, 162, 340, 390); } },
+  { bg: "p-home-empty.png", veil: false,
+    copy: ["MOT passed — mark it done and it swings back out to next year.", "Nothing is ever finished on a sky; it comes round."],
+    act() { drawBody(16); walk(16, 381, 2200); } },
+  { bg: "p-home-empty.png", veil: false,
+    copy: ["The strip below the dial holds households you don't belong to.", "Tap one to ask to join — Seaside Cottage, Mum & Dad's."],
+    act() { drawBody(381); cut("p-home-empty.png", 12, 440, 366, 34); } },
+  { bg: "p-home-empty.png", veil: false,
+    copy: ["That was a year in a minute. Now it's yours.", "Settings holds your sky, your relay and this walk — take it again anytime."],
+    act() { drawBody(381, .35); const h = document.createElement("div"); h.className = "hl round"; h.style.cssText = "left:322px;top:20px;width:44px;height:44px"; cuts.appendChild(h); requestAnimationFrame(() => h.classList.add("on")); } },
+];
+
+/* ---- the player ----------------------------------------------------------- */
+let i = 0, flip = false;
+const bgs = [document.getElementById("bgA"), document.getElementById("bgB")];
+function show(n) {
+  i = Math.max(0, Math.min(n, BEATS.length - 1));
+  const b = BEATS[i];
+  cancelAnimationFrame(raf);
+  layer.innerHTML = ""; cuts.innerHTML = ""; document.getElementById("extra").innerHTML = ""; document.getElementById("body").innerHTML = "";
+  document.getElementById("toast").classList.remove("on");
+  const next = bgs[flip ? 0 : 1], prev = bgs[flip ? 1 : 0];
+  next.style.top = `${-(b.scroll || 0)}px`;
+  if (next.getAttribute("src") !== shots(b.bg)) next.src = shots(b.bg);
+  next.classList.add("on"); prev.classList.remove("on"); flip = !flip;
+  document.getElementById("veil").classList.toggle("on", b.veil);
+  document.getElementById("progress").textContent = `First light · ${i + 1} of ${BEATS.length}`;
+  document.getElementById("copy1").textContent = b.copy[0];
+  document.getElementById("copy2").textContent = b.copy[1];
+  document.getElementById("dots").innerHTML = BEATS.map((_, k) => `<i class="${k === i ? "on" : ""}"></i>`).join("");
+  document.getElementById("back").disabled = i === 0;
+  document.getElementById("next").textContent = i === BEATS.length - 1 ? "start using Orbit" : "next";
+  b.act();
+  location.hash = `beat-${i + 1}`;
+}
+document.getElementById("next").onclick = () => (i < BEATS.length - 1 ? show(i + 1) : end());
+document.getElementById("back").onclick = () => show(i - 1);
+document.getElementById("skip").onclick = end;
+function end() { document.getElementById("card").style.display = "none"; document.getElementById("veil").classList.remove("on"); cuts.innerHTML = ""; layer.innerHTML = ""; }
+addEventListener("keydown", (e) => { if (e.key === "ArrowRight") document.getElementById("next").click(); if (e.key === "ArrowLeft") show(i - 1); if (e.key === "Escape") end(); });
+function fit() { const s = Math.min(1, (innerWidth - 40) / 390, (innerHeight - 40) / 844); const st = document.getElementById("stage"); st.style.transform = `translate(${-195 * s}px,${-422 * s}px) scale(${s})`; }
+addEventListener("resize", fit); fit();
+for (const b of BEATS) { const im = new Image(); im.src = shots(b.bg); }
+show(Math.max(0, (parseInt((location.hash.match(/beat-(\d+)/) || [])[1]) || 1) - 1));
+document.getElementById("card").focus();
+</script>
+</body>
+</html>

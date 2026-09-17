@@ -496,12 +496,11 @@ const SCREENS = [
     settle: () =>
       Boolean(document.getElementById("card"))
       && document.querySelectorAll(".chartback .csys").length > 0,
-    /* The sheet's own scaffolding: the demos rail (re-roll, state switcher),
-       the footer naming the proposal, and the account chrome (back link,
-       menu orb) that every standalone mockup carries to stand on its own but
-       that this route does not render — leaving the form is cancel or
-       submit, not a back link, and the account menu lives elsewhere. */
-    mockupOnly: [".demos", "footer", ".back", ".orb"],
+    /* The sheet's own scaffolding: the demos rail (re-roll, state switcher)
+       and the footer naming the proposal. The account chrome the sheet
+       draws was scaffolding too until #1010 -- the route renders it now, so
+       it is compared like everything else. */
+    mockupOnly: [".demos", "footer"],
   },
   {
     /*

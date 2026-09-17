@@ -542,6 +542,15 @@
   /** @type {(b: any) => string} */
   const crescent = (b) =>
     `M ${b.placement.x} ${b.placement.y - b.size} A ${b.size} ${b.size} 0 0 1 ${b.placement.x} ${b.placement.y + b.size} Z`;
+  /* #1005: a one-off is a dashed ring in its own band's colour -- an outline
+     with nothing inside it, because there is nothing coming round. Past its
+     date it wears the quiet ink tone: ended, not owed. */
+  /** @type {(b: any) => string} */
+  const expiryStroke = (b) =>
+    b.paint === "ended" ? "var(--ink-mid)"
+      : b.paint === "amber" ? "var(--warm)"
+        : b.paint === "sky" ? "var(--upcoming)"
+          : "var(--ok)";
 
 
   onMount(() => {
@@ -1118,7 +1127,11 @@
              aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${b.documentCount} document${b.documentCount === 1 ? "" : "s"}` : ""}`}><g
              id={b.closest ? "b-closest" : undefined}
              class={b.overdue || b.paint === "amber" ? "breathe" : undefined}>
-            {#if b.paint === "ruby" || b.paint === "amber"}
+            {#if b.kind === "expiry"}
+              <!-- #1005: no fill, no core, no highlight -- the ring IS the body. -->
+              <circle cx={b.placement.x} cy={b.placement.y} r={b.size} fill="none"
+                      stroke={expiryStroke(b)} stroke-width="2" stroke-dasharray="2.6 2.2"/>
+            {:else if b.paint === "ruby" || b.paint === "amber"}
               <circle cx={b.placement.x} cy={b.placement.y} r={b.size}
                       style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
             {:else if b.paint === "sky"}
@@ -1135,7 +1148,7 @@
               <circle cx={b.placement.x} cy={b.placement.y} r={b.size * 0.57} style="fill:var(--bg)"/>
               <circle cx={b.placement.x} cy={b.placement.y} r={b.size * 0.28} fill="url(#p-{b.paint})"/>
             {/if}
-            {#if b.size >= 4}
+            {#if b.kind !== "expiry" && b.size >= 4}
               <circle cx={b.placement.x - 0.2 * b.size} cy={b.placement.y + 0.25 * b.size}
                       r={0.33 * b.size} fill="rgba(255,255,255,.38)"/>
             {/if}
@@ -1237,6 +1250,7 @@
   <h2>Types</h2>
   <div class="keyrow"><span class="sw" style="background:var(--ink-mid)"></span>routine service</div>
   <div class="keyrow"><span class="sw" style="background:radial-gradient(circle,var(--ink-mid) 24%,var(--panel-raised) 34%,var(--ink-mid) 52%)"></span>renewal / contract</div>
+  <div class="keyrow"><span class="sw" style="background:none;border:2px dashed var(--ink-mid)"></span>expiry &mdash; ends, does not come round</div>
   <div class="keyrow"><span class="sw" style="background:linear-gradient(90deg,var(--ink-mid) 50%,rgba(0,0,0,.55) 50%)"></span>inspection / certification</div>
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
   <h2>Physics</h2>
