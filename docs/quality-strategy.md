@@ -266,6 +266,21 @@ under way when that happens. `fidelity` and `integration` still wait for all
 five: `fast`, `fast_docker`, `gitleaks`, `licence_policy` and
 `supply_chain_source`.
 
+`sidecar_images` and `launcher_install_compat` (#944, owner ruling on #923
+rec 16a, 2026-09-09) used to queue for a slot and only then, inside
+`script:`, read a classifier dotenv variable and decide there was nothing to
+do — 143–300 s of `big` plus a 443–589 s queued tail on nearly every merge
+request, for a job that never ran. `rules:` is evaluated before any job runs
+and cannot read that dotenv artifact, so both jobs now decide with
+`rules: changes:` instead, which reads the merge diff directly. Delivery
+branches and the merge request into `main` still run both unconditionally.
+`launcher_install_compat`'s list is an exact copy of the classifier's own
+`launcherCompatPatterns`. `sidecar_images`' list is deliberately wider than
+the classifier's `ORBIT_SYSTEM` axis: that axis defaults an unmatched path to
+system risk, which `changes:` cannot express as a negation, so the list
+covers everything except what the classifier calls definitely fast (`docs/`,
+root-level markdown, `LICENSE`, `.gitignore`).
+
 ### The second browser lane: an Orbit with no identity provider (#916)
 
 Since [ADR-0023](adr/0023-registration-linking-and-recent-authentication.md) §1

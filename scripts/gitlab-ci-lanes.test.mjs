@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { CI_LANE } from "./classify-changed-paths.mjs";
+import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
 
 // #889: `classify` hands the pipeline a lane, and each job decides for itself
 // whether that lane runs it. Nothing else checks the two halves agree -- a
@@ -143,6 +143,10 @@ const everythingOn = {
 
 describe("pipeline lanes", () => {
   it("guards every job a narrow lane can skip", () => {
+    // sidecar_images left this list in #944 (owner ruling on #923 rec 16a,
+    // 2026-09-09): it no longer waits for ORBIT_LANE/ORBIT_SYSTEM inside
+    // `script:`, and decides entirely from `rules: changes:` instead, which
+    // needs no dotenv artifact and so needs no wait for one.
     expect(guardedJobs().map(({ name }) => name).sort()).toEqual([
       "acceptance",
       "base_image",
@@ -153,7 +157,6 @@ describe("pipeline lanes", () => {
       "integration",
       "licence_policy",
       "repair_journeys",
-      "sidecar_images",
       "smoke",
       "smoke_local_only",
       "supply_chain_image",
@@ -253,5 +256,103 @@ describe("pipeline lanes", () => {
     // request into `main` collapse it to `full` and run everything.
     expect(classify).toMatch(/dev \| preview \| main \| hotfix\/\*\) lane=full ;;/u);
     expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" = "main" \]/u);
+  });
+});
+
+// A `dir/**/*` pattern or an exact path, which is all sidecar_images' list
+// (below) uses -- enough to check the list against the classifier's own
+// verdict without a real glob library.
+function matchesChangesPattern(pattern, path) {
+  if (!pattern.includes("*")) return pattern === path;
+  if (pattern.endsWith("/**/*")) {
+    const dir = pattern.slice(0, -"/**/*".length);
+    return path === dir || path.startsWith(`${dir}/`);
+  }
+  throw new Error(`unhandled changes: pattern shape: ${pattern}`);
+}
+
+// #944 (owner ruling on #923 rec 16a, 2026-09-09): sidecar_images used to
+// queue for a `big` slot and only then, inside `script:`, read ORBIT_SYSTEM
+// from classify's dotenv artifact and decide there was nothing to do.
+// `rules:` cannot read that artifact -- it is evaluated before any job runs
+// -- so the decision moved to `rules: changes:`, which reads the merge diff
+// directly.
+describe("sidecar_images: the system-lane gate moved into rules: changes: (#944)", () => {
+  const sidecarImages = () => allBlocks.get("sidecar_images");
+
+  function changesList(job) {
+    const start = job.indexOf("      changes:\n");
+    const end = job.indexOf("\n    - when: manual", start);
+    expect(start, "no changes: block on sidecar_images' merge-request rule").toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    return [...job.slice(start, end).matchAll(/^ {10}- (\S+)$/gmu)].map((match) => match[1]);
+  }
+
+  it("no longer waits on ORBIT_LANE or ORBIT_SYSTEM inside script:", () => {
+    const job = sidecarImages();
+    const script = job.slice(job.indexOf("\n  script:\n"));
+    // Comments above the job still explain the move away from these in
+    // prose; only the script's own use of them (now removed) matters here.
+    expect(script).not.toContain("orbit_lane_admits sidecar_images");
+    expect(script).not.toContain("*system_lane_gate");
+    expect(script).not.toContain("*reach_helpers");
+  });
+
+  it("always runs on every delivery branch and on a merge request into main, unconditionally", () => {
+    const job = sidecarImages();
+    // Neither rule carries a `changes:` clause, matching what
+    // `orbit_full_gate` gave every job that still calls `.system_lane_gate`.
+    expect(job).toMatch(
+      /- if: \$CI_COMMIT_BRANCH == "dev" \|\| \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH == "main" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n {4}- if: \$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"\n {4}- if: \$CI_PIPELINE_SOURCE == "merge_request_event"\n/u,
+    );
+  });
+
+  it("covers every path the classifier calls explicit system risk", () => {
+    const listed = changesList(sidecarImages());
+    const explicitSystemPaths = [
+      ".github/workflows/deploy.yml",
+      "Dockerfile",
+      "docker-compose.yml",
+      "compose/docker-compose.test.yml",
+      "config/some-setting.json",
+      "package.json",
+      "drizzle/0001_init.sql",
+      "tests/e2e/some.spec.ts",
+      "web/src/App.svelte",
+      "src/lib/auth/session.ts",
+      "src/server/boot/index.ts",
+      "scripts/backup.sh",
+    ];
+    for (const path of explicitSystemPaths) {
+      expect(pathRisk(path), path).toBe(CI_RISK.SYSTEM);
+      expect(
+        listed.some((pattern) => matchesChangesPattern(pattern, path)),
+        `${path} not covered by sidecar_images' changes: list`,
+      ).toBe(true);
+    }
+  });
+
+  it("also covers the classifier's catch-all default, including .gitleaksignore", () => {
+    const listed = changesList(sidecarImages());
+    // classifyCiRisk defaults an unmatched path to system risk -- the
+    // fail-safe `rules:` cannot read (there is no dotenv to fall back to),
+    // so the list has to be wide enough to catch it too. .gitleaksignore is
+    // the sharpest example: nothing in fastPatterns or systemPatterns names
+    // it, so it is system risk by that same default, even though the now-
+    // removed `ignore_policy` lane used to keep it away from this job by a
+    // different route entirely.
+    const catchAllPaths = ["cosign.pub", "tsconfig.json", "demo-tls/ca.pem", "design/notes.fig", ".gitleaksignore"];
+    for (const path of catchAllPaths) {
+      expect(pathRisk(path), path).toBe(CI_RISK.SYSTEM);
+      expect(listed.some((pattern) => matchesChangesPattern(pattern, path)), path).toBe(true);
+    }
+  });
+
+  it("leaves out only what the classifier calls fast: docs, root markdown, LICENSE, .gitignore", () => {
+    const listed = changesList(sidecarImages());
+    for (const path of ["docs/setup.md", "README.md", "AGENTS.md", "LICENSE", ".gitignore"]) {
+      expect(pathRisk(path), path).not.toBe(CI_RISK.SYSTEM);
+      expect(listed.some((pattern) => matchesChangesPattern(pattern, path)), path).toBe(false);
+    }
   });
 });
