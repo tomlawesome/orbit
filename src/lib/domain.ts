@@ -1,4 +1,15 @@
-export const sectionIcons = ["home", "vehicle", "device", "service", "calendar"] as const;
+/*
+ * The five shipped glyphs (home..calendar) plus the seven asterisms #867
+ * ratified — hook, kite, ladle, cross, bow, wedge, belt — twelve marks, the
+ * cap. The shipped five never change meaning; the seven are assigned to a
+ * user-named section on arrival and may be swapped from the Sections card.
+ * The frontend's own figure table (web/src/lib/marks.js) draws these by the
+ * same ids — keep the two lists in the same order if either ever changes.
+ */
+export const sectionIcons = [
+  "home", "vehicle", "device", "service", "calendar",
+  "hook", "kite", "ladle", "cross", "bow", "wedge", "belt",
+] as const;
 export type SectionIcon = (typeof sectionIcons)[number];
 export const sectionAccents = ["sage", "blue", "sand", "plum", "coral"] as const;
 export type SectionAccent = (typeof sectionAccents)[number];

@@ -13,6 +13,7 @@
 
 import { bandOf, bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
 import { ago, shortDate, tminus } from "$lib/format.js";
+import { SHIPPED_SECTION_IDS } from "$lib/marks.js";
 
 /**
  * Two letters from a chosen display name — never from an email address, which
@@ -51,6 +52,13 @@ export function entriesLabel(count) {
  * enforceable in the interface — a section holding entries has no × at all,
  * because sections.replace would re-file its items under the first surviving
  * section and the reader never asked for that.
+ *
+ * `shipped` (#867) says whether the row's mark is a button: it is decided
+ * by the section's id (marks.js's `SHIPPED_SECTION_IDS`), never by what the
+ * row happens to be wearing, so a user section saved before this issue —
+ * still wearing the never-actually-chosen fallback, "home"/"sage" — gets
+ * its swap button immediately rather than staying fixed until some other
+ * migration runs. Nothing about a stored icon or accent is rewritten here.
  * @param {import('./workspace.js').Household | null} [household]
  * @returns {import('./workspace.js').SectionRow[]}
  */
@@ -63,6 +71,7 @@ export function sectionRowsOf(household) {
       name: section.name,
       icon: section.icon ?? "home",
       accent: section.accent ?? "sage",
+      shipped: SHIPPED_SECTION_IDS.has(section.id),
       /* The server's field is `visible`; the interface's word is "shown". A
          section with no `visible` at all is shown — the engine's schema
          requires the flag, so only a degraded payload can reach this. */
@@ -191,6 +200,7 @@ export function invitationRowsOf(invitations, now) {
  * @property {string} id
  * @property {string} name
  * @property {?string} accent
+ * @property {string} icon    the dial's own legend draws this (#867)
  * @property {string[]} members
  */
 
@@ -259,7 +269,8 @@ export function constellationOf(household, today) {
       id: section.id,
       name: section.name,
       accent: section.accent ?? null,
-      members: members.map((mark) => mark.id),
+      icon: section.icon ?? "home",
+      members: members.map((star) => star.id),
     });
   }
   return { marks, figures };
