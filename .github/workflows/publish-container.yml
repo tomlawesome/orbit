@@ -40,7 +40,19 @@ name: Validate Orbit and publish previews
 # stays false, so they no longer run even when this workflow is dispatched by
 # hand. That is not a coverage loss -- see the mapping above -- but it means
 # dispatching this workflow now only ever exercises `changes` through
-# `repair_journeys`.
+# `repair_journeys`. They are kept rather than deleted because
+# scripts/exact-image-workflow.test.mjs asserts their step sequences, and
+# because a future event trigger would want them back unchanged.
+#
+# Everything between `changes` and `repair_journeys` must actually be
+# reachable on a dispatch, or the second opinion quietly covers less than the
+# mapping above claims. Two places did not: `fast`'s production build and
+# document-render steps were gated on `github.event_name == 'push'` alone, and
+# `fidelity` was gated on the classifier's `web` output. A dispatch has no base
+# and head SHA to compare, so `scripts/classify-changed-paths.mjs` falls back
+# to system risk -- build/integration/system all true, but `web` false, because
+# that one is computed from the changed paths rather than from the risk level.
+# Both now name workflow_dispatch explicitly.
 on:
   workflow_dispatch: {}
 
@@ -179,7 +191,10 @@ jobs:
       - name: Build production application
         if: >-
           ${{
-            github.event_name == 'push' &&
+            (
+              github.event_name == 'push' ||
+              github.event_name == 'workflow_dispatch'
+            ) &&
             needs.changes.outputs.build == 'true'
           }}
         run: pnpm --filter orbit-web build
@@ -190,7 +205,10 @@ jobs:
       - name: Prove document previews can still be rendered
         if: >-
           ${{
-            github.event_name == 'push' &&
+            (
+              github.event_name == 'push' ||
+              github.event_name == 'workflow_dispatch'
+            ) &&
             needs.changes.outputs.build == 'true'
           }}
         run: pnpm test:web-pdfjs
@@ -384,7 +402,16 @@ jobs:
     # regression that is only caught on the preview push is caught too late.
     # A pull request that moves web/ pays for this; one that does not never
     # sees it.
-    if: ${{ needs.changes.outputs.web == 'true' }}
+    #
+    # A dispatch has no diff to classify, so `web` comes back false and this
+    # job would be skipped on the one event that can still start this workflow
+    # (#948). Someone asking for the second opinion by hand wants the visual
+    # gate in it, so the dispatch reaches this job unconditionally.
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.web == 'true'
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
