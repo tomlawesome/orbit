@@ -54,8 +54,14 @@ export default defineConfig({
       : undefined,
   },
   projects: [
-    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "mobile-chromium", use: { ...devices["Pixel 7"] } },
+    // #1039: claims the stack once, before either project's specs run, so
+    // any spec means what it says run alone with --spec against a fresh
+    // stack instead of relying on an earlier spec in the same run having
+    // claimed it first. See tests/e2e/claim.setup.ts for what it does and
+    // does not cover (OIDC only) and why.
+    { name: "setup", testMatch: /.*\.setup\.ts/ },
+    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] }, dependencies: ["setup"] },
+    { name: "mobile-chromium", use: { ...devices["Pixel 7"] }, dependencies: ["setup"] },
   ],
   outputDir: "../../test-results",
 });
