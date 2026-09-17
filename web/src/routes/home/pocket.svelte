@@ -301,17 +301,17 @@
       {/each}
     </svg>
   </div>
-  <!-- #845 wanted this strip keyboard-scrollable via tabindex on the div
-       itself, but that is a noninteractive-element-tabindex violation
-       (a11y_no_noninteractive_tabindex) with no honest fix that does not
-       either lie about the role or add real controls — and every `.msys`
-       here is a glance, not a click target, so there is nothing to make a
-       button or link out of. Left as a landmark instead: screen readers
-       still get the "Other skies" region and its contents in document
-       order; a keyboard-only sighted user loses the ability to scroll this
-       one strip without a mouse or touch, which is a real, narrow
-       regression from #845 worth a follow-up if it matters in practice. -->
-  <div class="skies" role="region" aria-label="Other skies">
+  <!-- #845: the strip scrolls sideways, so it must be reachable to scroll by
+       keyboard. A region that scrolls has to be focusable to be operable
+       without a mouse or touch (WCAG 2.1.1), and a focusable `role="region"`
+       with an accessible name is the technique for it. The rule below is
+       aimed at tabindex on elements that do nothing; it cannot see that this
+       one scrolls, so it is wrong here and is silenced deliberately rather
+       than obeyed. Do not drop the tabindex to quieten it: that takes the
+       strip away from keyboard-only readers and leaves the warning's real
+       target untouched. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div class="skies" tabindex="0" role="region" aria-label="Other skies">
     {#each others as hh (hh.id)}
       <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx={hh.dx} cy={hh.dy} r="2" style="fill:var({hh.tone === "--warm" ? "--warm" : hh.tone === "--upcoming" ? "--upcoming" : "--ok"})" opacity=".6"/></svg>{hh.name}</div>
     {/each}
