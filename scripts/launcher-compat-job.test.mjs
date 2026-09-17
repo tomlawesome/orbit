@@ -94,21 +94,68 @@ describe("launcher install compatibility gate", () => {
     expect(job).toContain("did not serve $served_file byte for byte");
   });
 
-  it("always runs on a merge request into main, the promotion gate", () => {
+  it("always runs on a merge request into main and on every delivery branch, unconditionally (#944)", () => {
     const job = launcherCompatJob();
 
-    expect(job).toContain('CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main"');
-    // Every other merge-request or delivery-branch pipeline reaches the job,
-    // but the job itself narrows further by classified scope, not by rules:.
-    expect(job).toContain('CI_PIPELINE_SOURCE == "merge_request_event"');
-    expect(job).toContain('CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\\//');
+    // #944: ORBIT_LAUNCHER_COMPAT was a dotenv variable from `classify`, and
+    // `rules:` runs before any job -- including `classify` -- so it could
+    // never read it. The promotion gate and the delivery branches are now
+    // unconditional `rules:` entries, neither carrying a `changes:` clause,
+    // rather than a branch the job's own script took at runtime.
+    expect(job).toMatch(
+      /- if: \$CI_COMMIT_BRANCH == "dev" \|\| \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH == "main" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n {4}- if: \$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"\n {4}- if: \$CI_PIPELINE_SOURCE == "merge_request_event"\n/u,
+    );
   });
 
-  it("narrows to installer or job-definition changes off the classifier, not general system risk", () => {
+  it("gates an ordinary merge request on rules: changes:, off the classifier's own launcher-compat patterns (#944)", async () => {
+    const { touchesLauncherInstallCompat } = await import("./classify-changed-paths.mjs");
     const job = launcherCompatJob();
 
-    expect(job).toContain("ORBIT_LAUNCHER_COMPAT");
-    expect(job).not.toContain("ORBIT_SYSTEM");
+    // The decision used to live in a script-level dotenv read; `rules:`
+    // cannot make that read, so the script should no longer reach for either
+    // classifier output as a shell variable (comments above the job still
+    // name them, to explain why this axis exists separately from
+    // ORBIT_SYSTEM).
+    expect(job).not.toContain("${ORBIT_LAUNCHER_COMPAT");
+    expect(job).not.toContain("${ORBIT_SYSTEM");
+
+    const changesStart = job.indexOf("      changes:\n");
+    const changesEnd = job.indexOf("\n    - when: manual", changesStart);
+    expect(changesStart, "no changes: block on the merge-request rule").toBeGreaterThan(-1);
+    expect(changesEnd).toBeGreaterThan(changesStart);
+    const listed = [...job.slice(changesStart, changesEnd).matchAll(/^ {10}- (\S+)$/gmu)].map((match) => match[1]);
+
+    // touchesLauncherInstallCompat has no catch-all default (unlike
+    // ORBIT_SYSTEM's classifyCiRisk), so this list can and should be an
+    // exact translation of launcherCompatPatterns rather than a widened one.
+    const concretePaths = [
+      "scripts/install.sh",
+      ".gitlab-ci.yml",
+      "Dockerfile",
+      ".dockerignore",
+      "docker-compose.yml",
+      "docker-compose.mail.yml",
+      ".env-orbit.example",
+      "config/tika-config.json",
+      "scripts/configure.sh",
+      "scripts/installer-ui.sh",
+      "scripts/configuration.sh",
+      "scripts/backup.sh",
+      "scripts/restore.sh",
+      "scripts/repair.sh",
+      "scripts/engine-check.sh",
+    ];
+    for (const path of concretePaths) {
+      expect(touchesLauncherInstallCompat([path]), path).toBe(true);
+    }
+    expect(listed.sort()).toEqual(concretePaths.sort());
+
+    // A change outside that scope leaves both agreeing there is nothing to
+    // prove: the classifier's verdict and the rules: list have to match, or
+    // the job could run when the classifier says it need not, or -- worse --
+    // stay unrun when the classifier says it should.
+    expect(touchesLauncherInstallCompat(["README.md"])).toBe(false);
+    expect(listed).not.toContain("README.md");
   });
 
   it("never runs in a scheduled pipeline and is a required check", () => {
