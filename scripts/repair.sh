@@ -218,6 +218,20 @@ set -Eeuo pipefail
 #                                   secret failed with a password/SQLSTATE
 #                                   28P01-style error — the motivating
 #                                   failure of issue #261.
+#   database-credential-unverifiable — a distinct outcome from either of the
+#                                   two above (issue #1026): the application
+#                                   container exists but never held still
+#                                   long enough, within a generous bounded
+#                                   wait, to read its own copy of the
+#                                   credential and prove it either way. Never
+#                                   guessed as a match or a mismatch — this
+#                                   check cannot tell a wrong credential
+#                                   apart from an application crash-looping
+#                                   for an unrelated reason — and never
+#                                   planned as an automatic action (falls to
+#                                   `action_for_class`'s `manual` default),
+#                                   so it can never reach the dangerous
+#                                   batch's rotate path on a guess.
 #   stale-container                 — this deployment's orbit-app container
 #                                   is running an image identity that does
 #                                   not match `ORBIT_IMAGE` in `.env-orbit`
@@ -257,7 +271,7 @@ set -Eeuo pipefail
 # PLAN MODE (--plan) — issue #261 third slice, STILL ZERO MUTATION
 # --------------------------------------------------------------------------
 # `--plan` runs exactly the same read-only diagnosis as `--check` above (the
-# same 25 reason classes, the same optional docker probes, the same
+# same 26 reason classes, the same optional docker probes, the same
 # read-only-by-construction guarantees) and then, instead of printing
 # `finding`/`diagnosis` lines, prints a PROPOSED, CLASSIFIED plan derived
 # from the findings and exits. It performs no filesystem write, no chmod, no
@@ -1446,6 +1460,7 @@ readonly -a class_order=(
   unrelated-resource-present
   database-unreachable
   database-credential-mismatch
+  database-credential-unverifiable
   stale-container
   image-identity-mismatch
   application-unhealthy
@@ -2526,11 +2541,30 @@ check_database_reachability() {
   # final one here, so treating it the same as `created` or `dead` — which
   # really do mean "nothing is bringing this back" — was itself the bug
   # (#822): a probe that happened to land in that instant gave up with the
-  # rest of its 20s budget unused, and silently fell back to the database's
-  # own copy of the credential, which always "authenticates" against itself
-  # and so raised no finding at all. A healthy container passes first time
-  # and pays nothing.
-  local app_secret_deadline=$((SECONDS + 20)) app_secret_readable=0 app_state
+  # rest of its budget unused, and silently fell back to the database's own
+  # copy of the credential, which always "authenticates" against itself and
+  # so raised no finding at all. A healthy container passes first time and
+  # pays nothing.
+  #
+  # The budget itself was the next instance of the same bug (#1026): Docker's
+  # restart-policy backoff for a container that keeps crashing grows on every
+  # attempt, and was observed on this engine (docker-ce 29.7.2) to exceed 20s
+  # within under a minute of crash-looping and to plateau under 65s. A 20s
+  # budget can land entirely inside one backoff wait once the loop has been
+  # crash-looping for a while — which this fault's own container always is,
+  # by definition, so the miss was not timing luck but a budget shorter than
+  # the wait it was meant to ride out. 75s clears the observed plateau with
+  # margin. Even so, the plateau is a property of this engine and this
+  # fault's crash rate, not a constant the code can rely on — see the
+  # app_secret_readable==0-with-a-container branch below, which reports the
+  # budget running out as its own distinct, visible finding rather than
+  # trusting 75s to always be enough.
+  #
+  # ORBIT_REPAIR_APP_SECRET_BUDGET is a test-only override (mirroring
+  # ORBIT_REPAIR_TTY_INPUT's precedent elsewhere in this file) so a unit test
+  # can drive this loop to exhaustion in well under a second instead of
+  # waiting out a real 75s budget.
+  local app_secret_deadline=$((SECONDS + ${ORBIT_REPAIR_APP_SECRET_BUDGET:-75})) app_secret_readable=0 app_state
   while [[ -n "$app_probe_id" ]]; do
     # shellcheck disable=SC2016  # expanded by the container's shell, not this one
     if timeout "$docker_probe_timeout" docker exec "$app_probe_id" \
@@ -2545,6 +2579,26 @@ check_database_reachability() {
     sleep 0.25
   done
   if [[ "$app_secret_readable" == 0 ]]; then
+    if [[ -n "$app_probe_id" ]]; then
+      # There WAS an application container to test -- the loop above ran
+      # against a real target and simply never caught it holding still long
+      # enough to read its secret file before the budget ran out (#1026).
+      # That is different from the case below (no app container at all,
+      # where the database's own copy is read purely to reach the database
+      # for the migration backstop and is explicitly never classified):
+      # here, falling silently back to the database's self-authenticating
+      # copy would report "no finding" for a container that has spent its
+      # whole probe window unable to prove its credential works -- which is
+      # exactly what let this read as three flaky CI sightings instead of
+      # the real defect it was. Report the uncertainty itself: "no fault
+      # found" and "could not determine" must never look the same on the
+      # wire, and this check cannot tell a wrong credential apart from an
+      # application crashing for an unrelated reason, so it must not guess
+      # either way -- see `action_for_class`'s default of `manual` below,
+      # which keeps this off the dangerous batch's rotate path entirely.
+      add_finding database-credential-unverifiable database fail
+      return 0
+    fi
     reader_id="$db_id"
     reader_script="$db_credential_reader"
     classify_credentials=0
