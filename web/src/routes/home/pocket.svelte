@@ -203,8 +203,9 @@
          (+page.svelte's `.account`/`#account`), laid out as a bottom sheet
          here — see `.msheet` below and pocket.behaviour.js for the wiring. -->
     <button class="morb" id="morb" aria-expanded="false" aria-controls="maccount" title="Menu">{initials}</button>
-    <!-- #852: the account menu as a bottom sheet — same contents as the desk
-         `.account` (+page.svelte lines ~779-810), same wiring (pocket.behaviour.js
+    <!-- #852: the account menu as a bottom sheet — the desk `.account`'s
+         contents (+page.svelte lines ~779-810) plus the one thing the pocket
+         has nowhere else to put (#1036, the create link below), same wiring (pocket.behaviour.js
          imports setSwatch/packOf from ./swatches.js, the same functions
          home.behaviour.js's swatches use, and drives sign-out the way
          Chrome.svelte's sub-screen orb does: two taps, the second one revoking
@@ -218,6 +219,23 @@
       <div class="grab"></div>
       <div class="mwho"><b>{view?.user?.displayName ?? ""}</b><span>{roleLine}</span></div>
       <nav>
+        <!-- #1036: THE POCKET'S WAY TO ADD SOMETHING. The desk's create
+             handle is the north star above the dial, and the north star is
+             `.desk` chrome — pocket.css hides the whole subtree below
+             901px/600px, so on a phone the create drawer and its "open the
+             full form →" link were in the page but unreachable, and the only
+             way to add an item was to type /create into the address bar.
+
+             It goes in this nav, not on the dial, for #1014's reason: a
+             surface with no front door of its own in the chrome gets one
+             here. First in the list because adding is what a reader comes to
+             the sky to do; the desk's own drawer is still the desk's.
+
+             What the pocket's create handle should EVENTUALLY be — whether
+             the dial earns a north star of its own in this dialect — is a
+             design question and stays open (#1036 says so). This is the
+             door, not the drawing. -->
+        <a href={resolve("/create")}>Add an item</a>
         <a href={resolve("/inbox")}>Inbox</a>
         <a href={resolve("/settings")}>Settings</a>
         <a href={resolve("/administration")}>Administration</a>
@@ -283,8 +301,17 @@
       {/each}
     </svg>
   </div>
-  <!-- #845: the strip scrolls sideways, so it must be reachable to scroll by keyboard. -->
-  <div class="skies" tabindex="0" role="region" aria-label="Other skies">
+  <!-- #845 wanted this strip keyboard-scrollable via tabindex on the div
+       itself, but that is a noninteractive-element-tabindex violation
+       (a11y_no_noninteractive_tabindex) with no honest fix that does not
+       either lie about the role or add real controls — and every `.msys`
+       here is a glance, not a click target, so there is nothing to make a
+       button or link out of. Left as a landmark instead: screen readers
+       still get the "Other skies" region and its contents in document
+       order; a keyboard-only sighted user loses the ability to scroll this
+       one strip without a mouse or touch, which is a real, narrow
+       regression from #845 worth a follow-up if it matters in practice. -->
+  <div class="skies" role="region" aria-label="Other skies">
     {#each others as hh (hh.id)}
       <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx={hh.dx} cy={hh.dy} r="2" style="fill:var({hh.tone === "--warm" ? "--warm" : hh.tone === "--upcoming" ? "--upcoming" : "--ok"})" opacity=".6"/></svg>{hh.name}</div>
     {/each}
