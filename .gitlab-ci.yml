@@ -136,6 +136,11 @@ variables:
   TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
   # The digest scripts/test-integration.mjs pins for its disposable database.
   POSTGRES_IMAGE: postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+  # The tag `build_image` builds under, and nothing else: it names this commit,
+  # so it is only ever the tag inside image.tar when this pipeline really built
+  # it. The jobs that load that tarball take ORBIT_IMAGE_TAG from build.env
+  # instead -- the tag the image actually carries, which is an earlier commit's
+  # whenever build_image stood on an earlier run (#1041).
   ORBIT_CI_IMAGE: orbit-ci:$CI_COMMIT_SHA
   # `.drop_to_node` gives the checkout to uid 1000 so pnpm can write in it, and
   # /builds survives from one job to the next on these runners. The next job to
@@ -1344,6 +1349,8 @@ build_image:
       set -eu
       # The script's step outputs, converted into the dotenv artifact the later
       # jobs read, exactly as classify converts the classifier's.
+      # ORBIT_IMAGE_TAG travels with image.tar, so a job standing on an earlier
+      # build gets that build's tag and asks the daemon for what it loaded.
       : > build.env
       for pair in ORBIT_IMAGE_ID:id ORBIT_IMAGE_TAG:tag ORBIT_IMAGE_VERSION:version; do
         name="${pair%%:*}"
@@ -1441,7 +1448,7 @@ supply_chain_image:
     - |
       set -eu
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
-      TESTED_IMAGE_TAG="$ORBIT_CI_IMAGE" \
+      TESTED_IMAGE_TAG="$ORBIT_IMAGE_TAG" \
       ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
         bash scripts/ci/scan-image.sh
     - *reuse_evidence
@@ -1482,7 +1489,7 @@ smoke:
   timeout: 30m
   needs: *needs_gated_image
   variables:
-    ORBIT_IMAGE: $ORBIT_CI_IMAGE
+    ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
@@ -1574,7 +1581,7 @@ smoke_local_only:
   timeout: 30m
   needs: *needs_gated_image
   variables:
-    ORBIT_IMAGE: $ORBIT_CI_IMAGE
+    ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     COMPOSE_FILES: -f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.ci-cap.yml
   rules:
@@ -1651,7 +1658,7 @@ acceptance:
   timeout: 45m
   needs: *needs_gated_image
   variables:
-    ORBIT_IMAGE: $ORBIT_CI_IMAGE
+    ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     # The scripts default $GITHUB_WORKSPACE to their own repository root, which
     # is the checkout either way; set explicitly because two of them run from
     # the installer target and read it to find the checkout again.
@@ -1708,7 +1715,7 @@ acceptance:
     - |
       set -eu
       if [ "$(orbit_output required)" = "true" ]; then
-        TESTED_IMAGE_TAG="$ORBIT_CI_IMAGE" bash scripts/ci/verify-tika-processor.sh
+        TESTED_IMAGE_TAG="$ORBIT_IMAGE_TAG" bash scripts/ci/verify-tika-processor.sh
       else
         echo "skipped: nothing the hostile-document processor check covers changed"
       fi
@@ -1718,7 +1725,7 @@ acceptance:
     - bash scripts/ci/stop-acceptance-stack.sh
     - |
       set -eu
-      TESTED_IMAGE_TAG="$ORBIT_CI_IMAGE" \
+      TESTED_IMAGE_TAG="$ORBIT_IMAGE_TAG" \
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
         bash scripts/ci/start-installer-registry.sh
     - bash scripts/ci/prepare-installer-target.sh
@@ -1819,7 +1826,7 @@ repair_journeys:
     - *reuse_gate
     - *docker_in_job
     - docker load --input image.tar
-    - docker tag "$ORBIT_CI_IMAGE" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
+    - docker tag "$ORBIT_IMAGE_TAG" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
     - bash scripts/test-repair-journeys.sh
     - *reuse_evidence
   after_script:
@@ -1906,7 +1913,7 @@ launcher_install_compat:
     - |
       set -eu
       : > "$GITHUB_OUTPUT"
-      TESTED_IMAGE_TAG="$ORBIT_CI_IMAGE" \
+      TESTED_IMAGE_TAG="$ORBIT_IMAGE_TAG" \
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
         bash scripts/ci/start-installer-registry.sh
     # git and curl for the launcher checkout and the Go download below; not
@@ -2168,7 +2175,7 @@ record_image:
       set -eu
       : > "$GITHUB_OUTPUT"
       sha_reference="${CI_REGISTRY_IMAGE}:sha-${CI_COMMIT_SHA}"
-      docker tag "$ORBIT_CI_IMAGE" "$sha_reference"
+      docker tag "$ORBIT_IMAGE_TAG" "$sha_reference"
       echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
     # The workflow's push-and-verify: the tag is pushed, the digest the
     # registry returns is pulled back, and its configuration identity compared

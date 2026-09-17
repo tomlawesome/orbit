@@ -67,19 +67,24 @@ resolve_compose_project() {
 # callers should build it with a unique `-p` (e.g. a worktree hash and PID,
 # in the style of scripts/test-e2e-local.sh since #875).
 compose_isolation_preflight() {
-  local project="$1" safe_alternative="$2" running
+  # Prefixed names, because this file is *sourced*: the function shares its
+  # caller's scope, so a plain `local project` collides with a caller that has
+  # already made `project` readonly -- `local` then fails, and the function
+  # returns 1 from its first line without ever checking anything. That is how
+  # the guard sat dead in scripts/ci/start-acceptance-stack.sh (#1040).
+  local _cip_project="$1" _cip_safe_alternative="$2" _cip_running
 
-  if [[ -z "$project" ]]; then
+  if [[ -z "$_cip_project" ]]; then
     printf 'compose-isolation-preflight: could not resolve a Compose project name; refusing rather than guessing.\n' >&2
     return 1
   fi
 
-  running="$(docker ps --filter "label=com.docker.compose.project=${project}" --format '{{.Names}}' 2>/dev/null || true)"
-  if [[ -n "$running" ]]; then
+  _cip_running="$(docker ps --filter "label=com.docker.compose.project=${_cip_project}" --format '{{.Names}}' 2>/dev/null || true)"
+  if [[ -n "$_cip_running" ]]; then
     printf 'compose-isolation-preflight: refusing to run against project '\''%s'\'' -- containers are already running under it (%s), and this run did not choose an isolating project name of its own.\n' \
-      "$project" "$(printf '%s' "$running" | tr '\n' ' ' | sed 's/ *$//')" >&2
+      "$_cip_project" "$(printf '%s' "$_cip_running" | tr '\n' ' ' | sed 's/ *$//')" >&2
     printf 'compose-isolation-preflight: if that project is a real deployment, leave it alone. To run an isolated stack instead:\n  %s\n' \
-      "$safe_alternative" >&2
+      "$_cip_safe_alternative" >&2
     return 1
   fi
 
