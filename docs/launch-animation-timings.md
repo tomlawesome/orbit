@@ -1,0 +1,127 @@
+# The launch animation's frame timings (#873, step 1)
+
+This is a measurement, not a fix. It records how the launch actually moves,
+so the next step can name what to change instead of guessing. Nothing about
+the animation — its timing, easing, transforms or geometry — was touched to
+get these numbers.
+
+## What "the launch" is
+
+The create card's hand-off into the flight (`Arrival.svelte`'s `submit()`):
+on success, the login ring shrinks from the card's 500px to the login ring's
+own 302.4px in place (`ringcard.css`) while the login chrome — hidden while
+the card showed — fades back in. Both ride CSS transitions that start
+together when `body.reclaimed` is added. 620ms later (`setTimeout` in
+`Arrival.svelte`), the page navigates to `/home`, and `/home` reads a one-shot
+marker (`arrival.js`'s `markLaunch`/`consumeLaunch`) and plays the live,
+un-pinned ascent — `Flight.ascend()`, the beats in `timeline.js`'s
+`ASCENT_BASE` (warp at 200ms, the mark's ride to centre 260-1340ms, and so
+on), driven by `engine.js`'s canvas renderer.
+
+So the launch is two back-to-back phases with two different rendering paths:
+a CSS-transition hand-off (0-620ms, on the create page), then a canvas
+rAF-driven ascent (from navigation, on `/home`).
+
+## How it was measured
+
+`web/tests/fidelity/launch-timing.spec.js`, new in this change. It drives the
+real thing rather than a synthetic stand-in: loads `/?arrival=create`, fills
+and submits the create card exactly as a reader would, and records every
+`requestAnimationFrame` callback's timestamp from the moment of the click
+through the 620ms hand-off, the navigation, and 1.8s into the ascent on
+`/home`. It reports the interval between consecutive frames — the thing a
+reader actually perceives as stutter — not a synthetic score. Run it with:
+
+```
+cd web && CI=1 pnpm exec playwright test tests/fidelity/launch-timing.spec.js
+```
+
+It repeats the same drive for all five packs (`starchart`, `afterdark`,
+`clouds`, `dawn`, `retrograde`), switched the same way the fidelity gate
+switches them: `orbit-theme` in `localStorage`, set before the app's first
+paint.
+
+**"Both dial dialects" does not apply here.** The desk/pocket split (CON-10)
+is a viewport media query scoped to `/home`'s own dial. Grepping `flight.css`,
+`ringcard.css` and `arrival.css` for `@media` turns up only
+`prefers-reduced-motion` — nothing viewport-conditional. The create card and
+the ring it hands off into render one way regardless of viewport, so there is
+no second dialect of this hand-off to measure.
+
+## The numbers
+
+All five packs, one run each, on this session's container (see caveat below):
+
+| pack | create-phase frames | create max interval | create mean interval | home-phase frames | home max interval | home mean interval |
+|---|---|---|---|---|---|---|
+| starchart | 11 | 166.6ms | 94.7ms | 10 | 250.0ms | 180.0ms |
+| afterdark | 8 | 150.0ms | 99.5ms | 9 | 349.9ms | 196.3ms |
+| clouds | 9 | 133.4ms | 85.7ms | 10 | 283.3ms | 190.0ms |
+| dawn | 10 | 116.6ms | 81.7ms | 14 | 283.2ms | 158.3ms |
+| retrograde | 11 | 116.6ms | 73.6ms | 10 | 316.6ms | 185.0ms |
+
+("create-phase frames" counts frames from the click to the navigation, over
+the 620ms budget; "home-phase frames" counts frames from `/home`'s load over
+the 1.8s the harness waits, which covers the ascent's opening beats.) At a
+steady 60fps those windows would hold about 37 and 108 frames respectively —
+every pack landed far short of both.
+
+Every single frame interval measured, in every pack, exceeded 32ms (more than
+one missed 60fps vsync) — not an occasional drop, the whole hand-off and the
+opening of the ascent run well under 60fps throughout. A control run on a
+blank page in the same container, same moment, held a clean 16.6-16.8ms
+cadence for 61 straight frames, so the drops are specific to what the launch
+page is doing, not a browser that cannot hit 60fps here at all.
+
+The ascent (`home` column) is consistently worse than the reclaim (`create`
+column) — roughly double the mean interval in every pack — and within each
+pack's `home` run the intervals climb rather than stay flat (starchart's raw
+sequence: 16.7, 83.3, 183.3, 183.3, 133.3, 233.4, 250, 233.3, 250, 233.4ms).
+That climbing shape points at the ascent's per-frame cost growing as more of
+the canvas scene joins in, over the CSS-only reclaim's comparatively flatter
+cost.
+
+## What this implicates
+
+Two different things, because the two phases use different rendering paths:
+
+- **The reclaim (0-620ms):** `ringcard.css`'s `.ringglass` and `.ringorbit`
+  transition `width` and `height` directly (500px to 302.4px) rather than a
+  `transform: scale()`. Animating `width`/`height` forces layout and paint on
+  every frame; a `transform` would let the compositor do the work instead.
+  This is exactly the first "likely candidate" the issue named.
+- **The ascent's opening (from navigation):** `engine.js`'s canvas renderer
+  draws the scene (gradients, arcs — see its `t0`/`dur`/`z`/`spin`-keyed body
+  list) on every `requestAnimationFrame`, and the per-frame cost visibly grows
+  as more bodies join the timeline. This matches the issue's second candidate
+  — the number of elements in flight at once — more than the first, since
+  canvas drawing has no layout step to force.
+
+Both are consistent with what was measured; neither is proven the sole cause,
+and nothing here decides between them or says what to change — that is
+step 2's call, informed by these numbers, not this step's.
+
+## What is still unmeasured
+
+- **Real hardware.** This ran in a shared container (12 cores, load average
+  5.9 at the time, other agents building and testing concurrently in sibling
+  worktrees of this repository) with no GPU and headless Chromium's software
+  compositor. The blank-page control shows the container itself can still
+  deliver a clean 60fps, so the drops are real and page-specific — but the
+  absolute millisecond figures above should not be read as what a reader's
+  own mid-range machine would see. The issue's acceptance criteria call for a
+  measurement "on the same hardware" before and after a fix; this is a
+  repeatable baseline from this environment, not that hardware-controlled
+  measurement.
+- **`prefers-reduced-motion`.** The harness runs with `reducedMotion:
+  "no-preference"` (the fidelity project's own default, deliberately — motion
+  is the design's to show, not the machine's to skip). The reduced-motion
+  path collapses the same sequence to 200ms and was not separately measured.
+- **The descent** (`/logout`'s reversed flight) and the newcomer's climb
+  (`/?arrival=newcomer`) were not driven — only the create path's launch, which
+  is what the issue and #862 round 3 are about.
+- **CPU/GPU profiling of which specific canvas draw calls or layout
+  recalculations cost the most** — this harness measures frame intervals,
+  the outcome a reader perceives, not a trace of what produced each one. A
+  DevTools Protocol trace would be the next tool to reach for if the frame
+  numbers alone are not enough to choose a fix.
