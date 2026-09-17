@@ -1001,7 +1001,7 @@
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7c28800b7c86d593241be2bdc798c231a0b51f48eb8ac5058ab31f1b957abfb7",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:22a8ef6b53d64fb11fc30e0cfb2a05a56f91c85ba1a92cc0a07c838a6a10f9aa",
       "indexDigest": "sha256:b2c4a352d7aee8e1010887b63bdefa00a1682a58916fd42eb43b6c93cb616d6c",
       "platform": "linux/amd64",
       "locations": [
