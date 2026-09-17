@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
@@ -229,8 +229,16 @@ const bundledAssetMode = 0o444;
 const stagedAssetMode =
   0o666 & ~Number.parseInt(spawnSync("bash", ["-c", "umask"], { encoding: "utf8" }).stdout.trim(), 8);
 
+// The real bundled compose file opens with its own project declaration
+// (docker-compose.yml:1, `name: orbit`), and since #999 the installer reads
+// exactly that line to name the Compose project, so the fixture carries it
+// rather than a content placeholder. Everything below the first line is
+// still placeholder text: nothing here ever reaches a real Compose.
+const bundledComposeFile = ["name: orbit", "", "fake content for docker-compose.yml", ""].join("\n");
+
 function makeImageDeployFixture(environment) {
   const contents = new Map(deploymentAssets.map((asset) => [asset, `fake content for ${asset}\n`]));
+  contents.set("docker-compose.yml", bundledComposeFile);
   contents.set("scripts/configure.sh", fakeConfigureScript);
   contents.set("scripts/backup.sh", fakeAnnouncingScript("BACKUP_INVOKED"));
   contents.set("scripts/restore.sh", fakeAnnouncingScript("RESTORE_INVOKED"));
@@ -1522,6 +1530,34 @@ describe("install.sh", () => {
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
+  // #999: docker-compose.yml:1 declares `name: orbit`, and until this fix a
+  // fresh install never reached it. With no .env-orbit and no
+  // COMPOSE_PROJECT_NAME, derive_compose_project_name went straight to
+  // `basename $(pwd)`, so installing into ~/apps/household created and
+  // persisted the Compose project "household" and the repository's own
+  // declaration was unreachable for any directory not literally called
+  // "orbit". The bundled compose file only lands in the target part-way
+  // through the run, which is why the installer re-derives once it is there
+  // rather than guessing earlier. Run against the old behaviour, every
+  // assertion below reads this mkdtemp directory's name instead of "orbit".
+  it("names a fresh install's Compose project from docker-compose.yml, not the target directory", () => {
+    const targetDir = makeTarget();
+    expect(basename(targetDir)).not.toBe("orbit");
+
+    const result = runInstall(targetDir, { FAKE_USE_REAL_CONFIGURATION: "1" });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain("COMPOSE_PROJECT_NAME=orbit\n");
+    const projectCalls = result.calls.split("\n").filter((line) => line.includes("--project-name"));
+    expect(projectCalls.length).toBeGreaterThan(0);
+    for (const call of projectCalls) {
+      expect(call).toContain("--project-name orbit --env-file");
+    }
+    expect(projectCalls.join("\n")).not.toContain(basename(targetDir));
+    expect(result.calls).toContain("up -d");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
   it("keeps backup and restore commands on the persisted env-file project", () => {
     for (const path of [backupScriptPath, restoreScriptPath]) {
       const source = readFileSync(path, "utf8");
@@ -2515,9 +2551,7 @@ describe("install.sh", () => {
     expect(readFileSync(join(targetDir, ".orbit-secrets", "sentinel"), "utf8")).toBe(
       "KEEP-SECRET\n",
     );
-    expect(readFileSync(join(targetDir, "docker-compose.yml"), "utf8")).toBe(
-      "fake content for docker-compose.yml\n",
-    );
+    expect(readFileSync(join(targetDir, "docker-compose.yml"), "utf8")).toBe(bundledComposeFile);
     expect(existsSync(join(targetDir, "scripts", "backup.sh"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "restore.sh"))).toBe(true);
     expect(stagingLeftovers(targetDir)).toEqual([]);
