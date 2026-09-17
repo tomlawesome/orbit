@@ -224,6 +224,7 @@
  * @property {string} sourceDocument
  * @property {number} [draftVersion]
  * @property {?string} [renewsOn]
+ * @property {?string} [scheduleKind]   renewal / service / expiry (#1005)
  * @property {?string} [provider]
  * @property {?string} [expiresAt]
  * @property {?string} [receivedAt]

@@ -92,14 +92,19 @@
     })),
   );
   /** @type {Record<string, string>} */
-  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok" };
+  /* `ended` is the expiry past its date (#1005): quiet ink, never the alarm. */
+  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", ended: "--ink-mid" };
   /** @type {(b: { days: number | null }) => string} */
   const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
   /** @type {(iso: string) => string} */
   const short = (iso) =>
     new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  /* #1005: a renewal comes round, a one-off ends. The proposal's own schedule
+     kind is what says which word the date takes. */
+  /** @type {(s: { scheduleKind?: ?string }) => string} */
+  const dateWord = (s) => (s.scheduleKind === "expiry" ? "ends" : "renews");
   /** @type {(b: DialBody) => string} */
-  const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
+  const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {(b: DialBody) => number} */
   const bodyR = (b) => (b.overdue ? 8 : b.closest ? 7 : 7.5);
   /** @type {(b: DialBody) => string} */
@@ -306,7 +311,7 @@
           `from ${s.sourceDocument}`,
           burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : null,
         ].filter(Boolean).join(" · ")}</span></div>
-        <div class="mt" style="color:var(--accent-text)">{s.costMinor ? money(s.costMinor, s.currency, true) : ""}<small>{s.renewsOn ? `renews ${short(s.renewsOn)}` : ""}</small></div>
+        <div class="mt" style="color:var(--accent-text)">{s.costMinor ? money(s.costMinor, s.currency, true) : ""}<small>{s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""}</small></div>
       </div>
     {/each}
     {#each view.mailReading as r (r.id)}
@@ -344,7 +349,7 @@
   <template data-sugg-template={s.id} data-title={s.title}
             data-meta={suggMeta(s)}>
     {#if s.provider}<div class="kv"><span>provider</span><b>{s.provider}</b></div>{/if}
-    {#if s.renewsOn}<div class="kv"><span>renews</span><b>{short(s.renewsOn)} {s.renewsOn.slice(0, 4)}</b></div>{/if}
+    {#if s.renewsOn}<div class="kv"><span>{dateWord(s)}</span><b>{short(s.renewsOn)} {s.renewsOn.slice(0, 4)}</b></div>{/if}
     {#if s.costMinor}<div class="kv"><span>cost</span><b>{money(s.costMinor, s.currency, true)}</b></div>{/if}
     <div class="kv"><span>document</span><b>◆ {s.sourceDocument} · scanned clean</b></div>
   </template>

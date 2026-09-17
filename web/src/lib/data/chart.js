@@ -48,6 +48,7 @@
  * @property {string} id
  * @property {string} title
  * @property {string} [renewsOn]
+ * @property {?string} [scheduleKind]
  * @property {number} [costMinor]
  * @property {string} [currency]
  * @property {string} [receiptId]
@@ -200,13 +201,42 @@ export function constellationPlanetsOf(items, today) {
   });
 }
 
-const PAINTS = { overdue: "ruby", "due-soon": "amber", upcoming: "sky", ok: "jade", unscheduled: "jade" };
+/** @type {Record<string, string>} */
+const PAINTS = { overdue: "ruby", "due-soon": "amber", upcoming: "sky", ok: "jade", unscheduled: "jade", ended: "ended" };
+
+/**
+ * The body's kind in the chart key's vocabulary. An expiry (#1005) is read off
+ * the schedule kind before the subtype, because a one-off ending is what the
+ * body IS -- the crescent marks an inspection that comes round again.
+ *
+ * @param {ChartItem} item
+ * @returns {string}
+ */
+export function kindOfItem(item) {
+  if (item.scheduleKind === "expiry") return "expiry";
+  return item.subtype === "inspection" ? "inspection" : item.scheduleKind === "renewal" ? "renewal" : "service";
+}
+
+/**
+ * The urgency band, with the one exception the design rules (#1005): nothing is
+ * owed once a one-off thing has ended, so an expiry past its date is never
+ * overdue. It gets its own quiet band instead, and lingers there.
+ *
+ * @param {string} kind
+ * @param {?number} [days]
+ * @returns {string}
+ */
+export function bandOfKind(kind, days) {
+  const band = bandOf(days);
+  return kind === "expiry" && band === "overdue" ? "ended" : band;
+}
 
 /**
  * The dial's bodies (#414/#451): the household's active items placed by the
  * law, plus any document suggestions as un-accepted accent bodies. Sorted by
  * lead time. Decorations follow the chart key: kind marks the body's face
- * (crescent = inspection, cored = renewal, plain = service), a belt means
+ * (crescent = inspection, cored = renewal, dashed ring = expiry, plain =
+ * service), a belt means
  * documents, a trail rides with anything within 60 days of the sun, the ping
  * sits on overdue, and the comet flies from the closest approach.
  *
@@ -221,22 +251,27 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
     if (item.status !== "active") continue;
     const days = daysUntil(item.dueDate, today);
     if (days === null) continue;
+    const kind = kindOfItem(item);
     bodies.push({
       id: item.id,
       title: item.title,
       days,
       dueDate: item.dueDate,
+      /* The dial law holds for an expiry too: it sits where its date falls,
+         which after the date is inward, for as long as it lingers (#1005). */
       placement: dialPlacement(days),
       size: bodySize(item.costMinor),
-      paint: PAINTS[bandOf(days)],
-      kind: item.subtype === "inspection" ? "inspection" : item.scheduleKind === "renewal" ? "renewal" : "service",
+      paint: PAINTS[bandOfKind(kind, days)],
+      kind,
       suggestion: false,
       costMinor: item.costMinor ?? null,
       costIsEstimate: Boolean(item.costIsEstimate),
       currency: item.currency ?? "GBP",
       documentCount: item.documentCount ?? 0,
       trail: Math.abs(days) <= 60,
-      overdue: days < 0,
+      /* An expiry never turns ruby, never pings and is never counted as
+         overdue -- there is nothing left to owe on it (#1005). */
+      overdue: kind !== "expiry" && days < 0,
     });
   }
   for (const suggestion of suggestions) {
@@ -283,13 +318,13 @@ export function manifestGroupsOf(household, { suggestions = [], today }) {
       section: sections.get(/** @type {string} */ (item.sectionId)) ?? null,
       days: daysUntil(item.dueDate, today),
       dueDate: item.dueDate ?? null,
-      band: bandOf(daysUntil(item.dueDate, today)),
+      band: bandOfKind(kindOfItem(item), daysUntil(item.dueDate, today)),
       provider: item.provider ?? null,
       recurrenceMonths: item.recurrenceMonths ?? null,
       costMinor: item.costMinor ?? null,
       costIsEstimate: Boolean(item.costIsEstimate),
       currency: item.currency ?? "GBP",
-      kind: item.subtype === "inspection" ? "inspection" : item.scheduleKind === "renewal" ? "renewal" : "service",
+      kind: kindOfItem(item),
     }))
     .sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity));
   const attention = rows.filter((row) => row.days !== null && row.days <= 30);
@@ -438,12 +473,12 @@ export function corridorOf(workspace, today, options = {}) {
         section: sections.get(/** @type {string} */ (item.sectionId)) ?? null,
         days: /** @type {number} */ (days),
         dueDate: item.dueDate,
-        band: bandOf(days),
+        band: bandOfKind(kindOfItem(item), days),
         provider: item.provider ?? null,
         costMinor: item.costMinor ?? null,
         costIsEstimate: Boolean(item.costIsEstimate),
         currency: item.currency ?? "GBP",
-        kind: item.subtype === "inspection" ? "inspection" : item.scheduleKind === "renewal" ? "renewal" : "service",
+        kind: kindOfItem(item),
       });
     }
   }
@@ -472,8 +507,12 @@ export function corridorOf(workspace, today, options = {}) {
     });
   }
   rows.sort((a, b) => a.days - b.days || a.id.localeCompare(b.id));
-  const overdue = rows.filter((row) => row.days < 0);
-  const ahead = rows.filter((row) => row.days >= 0);
+  /* An expiry that has passed is not in the red zone and is not counted with
+     it (#1005) -- nothing is owed on a thing that has ended. It keeps its seat
+     on the line at the date it fell, which is where the reader looks for it. */
+  const isOverdue = (/** @type {CorridorRow} */ row) => row.days < 0 && row.kind !== "expiry";
+  const overdue = rows.filter(isOverdue);
+  const ahead = rows.filter((row) => !isOverdue(row));
   const currentKey = today.slice(0, 7);
   const current = ahead.filter((row) => row.dueDate?.slice(0, 7) === currentKey);
   /** @type {{ key: string, label: string, rows: CorridorRow[] }[]} */

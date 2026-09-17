@@ -36,7 +36,7 @@ test("signed-out visitors get 401 from every workspace API route", async ({ requ
   }
 });
 
-test("the arrival shows the ratified door and nothing of the workspace", async ({ page }) => {
+test("the arrival shows the ratified door and nothing of the workspace", async ({ page, request }) => {
   // #410/§15: "/" is the ratified v19 sign-in now — the door every reader
   // meets.
   await page.goto("/");
@@ -50,8 +50,18 @@ test("the arrival shows the ratified door and nothing of the workspace", async (
   await expect(page.locator("#dawn .below")).toHaveCount(0);
   await expect(page.locator("button.topbar-profile")).toHaveCount(0);
   await expect(page.locator(".sidebar, .item-list, .household-control")).toHaveCount(0);
-  // The mark the cut dropped and #780 restored.
-  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /icon\.svg/);
+  // The mark the cut dropped, #780 restored and #1009 redrew: the SVG for
+  // browsers that take one, a PNG for the rest, and the manifest naming the
+  // same file — a tab and an installed app must never show two marks again.
+  // Anchored on the file, not on the whole value: app.html writes a
+  // root-relative href and the DOM hands back the absolute URL it resolves to,
+  // so an exact "/icon.svg" can never match. Each `type` selector is what
+  // pins the right link to the right file.
+  await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute("href", /\/icon\.svg$/);
+  await expect(page.locator('link[rel="icon"][type="image/png"]')).toHaveAttribute("href", /\/icon-32\.png$/);
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("href", /\/apple-touch-icon\.png$/);
+  const manifest = await (await request.get("/manifest.webmanifest")).json();
+  expect(manifest.icons.map((icon: { src: string }) => icon.src)).toEqual(["/icon.svg", "/icon-192.png", "/icon-512.png"]);
 });
 
 test("a gated screen redirects on the server, before any of it is sent", async ({ request }) => {

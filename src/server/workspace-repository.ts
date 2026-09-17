@@ -14,6 +14,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import type { ScheduleKind } from "@/lib/domain";
 import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
@@ -186,8 +187,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
         };
         const damaged = Object.values(metadataStatus).some(Boolean);
         const scheduleKind = event?.kind
-          ?? (item.serviceDate ? "service" : item.renewalDate ? "renewal" : undefined);
-        const dueDate = event?.dueDate ?? item.serviceDate ?? item.renewalDate ?? undefined;
+          ?? (item.serviceDate ? "service" : item.renewalDate ? "renewal" : item.expiryDate ? "expiry" : undefined);
+        const dueDate = event?.dueDate ?? item.serviceDate ?? item.renewalDate ?? item.expiryDate ?? undefined;
         return {
           id: item.id,
           sectionId: item.sectionId,
@@ -280,10 +281,12 @@ export async function hasOnwardHousehold(userId: string, isInstanceAdmin: boolea
   return Boolean(row);
 }
 
-function itemDates(scheduleKind: "renewal" | "service" | undefined, dueDate: string | undefined) {
+function itemDates(scheduleKind: ScheduleKind | undefined, dueDate: string | undefined) {
   return {
     renewalDate: scheduleKind === "renewal" ? dueDate ?? null : null,
     serviceDate: scheduleKind === "service" ? dueDate ?? null : null,
+    /* #1005: the one-off's date lives in the column the schema already had. */
+    expiryDate: scheduleKind === "expiry" ? dueDate ?? null : null,
   };
 }
 
@@ -513,7 +516,10 @@ export async function applyWorkspaceCommand(
         costMinor: null,
         costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, command.item.costMinor),
         currency: command.item.currency,
-        recurrenceMonths: command.item.recurrenceMonths ?? null,
+        /* #1005: belt and braces with `workspaceItemSchema`, which refuses the
+           pair outright -- nothing that reaches the row can claim a one-off
+           comes round again. */
+        recurrenceMonths: command.item.scheduleKind === "expiry" ? null : command.item.recurrenceMonths ?? null,
         snoozedUntil: command.item.snoozedUntil ?? null,
         notes: null,
         notesEnc: metadata.encryptText("items.notes", itemId, command.item.notes),
@@ -648,6 +654,11 @@ export async function applyWorkspaceCommand(
       if (!currentEvent) {
         throw new AppError("version_conflict", "This item has no active scheduled event", 409);
       }
+      /* #1005: an expiry is the one-off kind -- completing one records that it
+         ended, and there is no next date to take. */
+      if (currentEvent.kind === "expiry" && command.nextDate) {
+        throw new AppError("invalid_command", "An expiry happens once; it has no next date", 400);
+      }
       let nextEventId: string | undefined;
       if (command.nextDate) {
         nextEventId = randomUUID();
@@ -693,7 +704,7 @@ export async function applyWorkspaceCommand(
     }
 
     if (command.type === "item.reschedule") {
-      const kind = current.serviceDate ? "service" : "renewal";
+      const kind = current.serviceDate ? "service" : current.expiryDate ? "expiry" : "renewal";
       await transaction.update(items).set({
         status: "active",
         snoozedUntil: null,

@@ -1,4 +1,4 @@
-import { readInbox, readRelay } from "$lib/data/workspace.js";
+import { readInbox, readRelay, readSession, readWorkspace } from "$lib/data/workspace.js";
 import { receiptFailuresOf } from "$lib/data/inbox.js";
 
 /** Your relay reads through the seam (#446). The address, listening state,
@@ -14,9 +14,20 @@ import { receiptFailuresOf } from "$lib/data/inbox.js";
 export const ssr = false;
 
 export async function load() {
-  const [relay, inbox] = await Promise.all([
+  const [relay, inbox, session, workspace] = await Promise.all([
     readRelay(),
     readInbox().catch(() => ({ receipts: [] })),
+    /* For the shared chrome (#1010): who is here, and which household. Both
+       readers are cached client-side, so this costs nothing the sky did not
+       already pay. */
+    readSession(),
+    readWorkspace(),
   ]);
-  return { relay, failures: receiptFailuresOf(inbox.receipts) };
+  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  return {
+    relay,
+    failures: receiptFailuresOf(inbox.receipts),
+    user: session?.user ?? null,
+    household: workspace.households.find((one) => one.id === primary) ?? null,
+  };
 }
