@@ -1606,6 +1606,15 @@ readonly -A manual_guidance=(
   [docker-unavailable]="ensure the docker CLI is installed and the daemon is reachable, then re-run diagnosis"
   [unrelated-resource-present]="confirm whether the reported resource under a different Compose project is still needed; it is out of scope for this deployment's repair"
   [database-unreachable]="verify the database container/service is running and reachable, then re-run diagnosis; repair never starts a service to investigate"
+  # #1026: the application container exists but never held still long enough
+  # to read its own copy of the credential, so repair cannot tell a wrong
+  # password apart from a crash loop with an unrelated cause, and it never
+  # guesses either way. Stopping the container does not help -- the probe
+  # needs `docker exec`, which a stopped container refuses just as a
+  # restarting one does -- so the operator settles it off the mounts. The
+  # two sides mount the same secret at different paths (docker-compose.yml),
+  # which is the divergence #629/#632 exist for.
+  [database-credential-unverifiable]="the application restarts too fast for repair to read the credential it presents, and repair never rotates on a guess; compare the application container's \$POSTGRES_PASSWORD_FILE (/run/orbit-secrets/orbit-postgres-password) against the database container's (/run/secrets/orbit-postgres-password) yourself, and rotate by hand if they differ"
   # Neither side of a schema disagreement moves on its own (#437): point this
   # build at the database it expects, or point this database at a build that
   # still recognises its migration history. repair never merges or migrates
