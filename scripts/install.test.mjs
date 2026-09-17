@@ -481,6 +481,13 @@ const fakeDockerScript = [
   "    args=(\"$@\")",
   '    parse_flags "--entrypoint --network --cap-drop --security-opt -u --user --pids-limit -m --memory --cpus --name -e --env --env-file -v --volume --mount -w --workdir --platform -l --label --add-host --tmpfs --ulimit --pull --health-cmd" "--rm -i --interactive -t --tty --read-only --init --privileged -d --detach --no-healthcheck --sig-proxy" 1 125 "${@:2}"',
   '    if [[ "$*" == *"--entrypoint /opt/orbit/scripts/container-entrypoint.sh"* ]]; then',
+  "      # What the published v1.2.0 image really does when it is asked for a",
+  "      # banner its entrypoint does not implement: it takes the startup path",
+  "      # and dies on the secrets directory a one-off run does not have.",
+  '      if [[ "${FAKE_DOCKER_BANNER_FAIL:-0}" == "1" ]]; then',
+  "        printf 'Orbit container startup: the Docker secrets directory is unavailable\\n' >&2",
+  "        exit 1",
+  "      fi",
   "      printf 'FAKE_CANONICAL_BANNER\\n'",
   "      exit 0",
   "    fi",
@@ -1855,6 +1862,45 @@ describe("install.sh", () => {
     // Refused on the label alone: no container is ever made from an image
     // that has nothing to extract.
     expect(result.calls).not.toContain("docker create");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses a pre-bundle image on its label without asking it for a banner", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    // The published `latest` image (v1.2.0) is both of these at once: no
+    // io.orbit.deployment-assets label, and an entrypoint that cannot render
+    // the canonical banner. Ask it for the banner first and the install dies
+    // reporting a retryable registry fault, so an operator — or the
+    // launcher's live gate — retries an image that can never install (#1016).
+    const result = runInstall(targetDir, {
+      FAKE_DOCKER_NO_DEPLOY_LABEL: "1",
+      FAKE_DOCKER_BANNER_FAIL: "1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "The published image was built before Orbit bundled its deployment assets and is not a supported install target (ADR-0016, ADR-0019).",
+    );
+    expect(result.stderr).not.toContain("could not render its canonical banner");
+    expect(result.calls).not.toContain("--banner");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("still reports a banner failure on an image that does carry the bundle", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_DOCKER_BANNER_FAIL: "1" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("The resolved Orbit image could not render its canonical banner.");
+    expect(result.calls).toContain("--banner");
+    expect(managedSnapshot(targetDir)).toEqual(before);
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
