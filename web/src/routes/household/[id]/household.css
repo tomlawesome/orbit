@@ -71,7 +71,6 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    lines on dark, at the same alpha */
 [data-theme=afterdark]  .household-page .consty{--con-op:.92}
 [data-theme=retrograde] .household-page .consty{--con-op:.82}
-[data-theme=atlas]      .household-page .consty{--con-op:.46}
 [data-theme=dawn]       .household-page .consty{--con-op:.46}
 /* clouds arrived after the mockup was drawn (#486/§15) and carries the lighter
    end of the roster with dawn, so it takes dawn's restraint. */
@@ -101,7 +100,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .sky .near{animation:driftn 195s linear infinite}
 .household-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=atlas] .household-page .vignette,
+[data-theme=clouds] .household-page .vignette,
 [data-theme=dawn] .household-page .vignette{background:none}
 
 /* §14: the desk. Same scale as the helm and administration. */
@@ -360,7 +359,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .dangercard::after{content:"";position:absolute;inset:0;border-radius:inherit;
                    background:var(--overdue);opacity:.085;pointer-events:none}
 /* the light packs need more of it before the red is felt rather than seen */
-[data-theme=atlas] .household-page .dangercard::after,
+[data-theme=clouds] .household-page .dangercard::after,
 [data-theme=dawn] .household-page .dangercard::after{opacity:.12}
 /* the hazard rule — chart-pen ticks, hard edges only, along the top */
 .household-page .dangercard::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;
