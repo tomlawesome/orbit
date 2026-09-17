@@ -784,19 +784,6 @@
     </div>
   </header>
 
-  <!-- #867 — the dial's own legend: a mark and a name for every line the
-       system dial above actually draws (constellationOf skips a lone star
-       and an empty section the same way the dial does). Visible to every
-       viewer, owner or member: the lines are drawn for both, and a member
-       never sees the Sections card that would otherwise say what one means. -->
-  {#if v.constellation.figures.length}
-    <ul class="dial-legend" aria-label="Sections on your system's chart">
-      {#each v.constellation.figures as figure (figure.id)}
-        <li><Mark icon={figure.icon} accent={figure.accent} size={12} aria-hidden="true" />{figure.name}</li>
-      {/each}
-    </ul>
-  {/if}
-
   <div class="cards">
 
     <!-- ── the system ────────────────────────────────────────────────────
