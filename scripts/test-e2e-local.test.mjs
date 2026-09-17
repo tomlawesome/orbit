@@ -134,3 +134,42 @@ describe("the local-only profile", () => {
     expect(result.stderr).toContain("unknown profile");
   });
 });
+
+/*
+ * #920: this harness's claim is that a local run judges the journeys CI
+ * judges, and it silently did not -- the document parser was never turned
+ * on, so tests/e2e/v19-document-extraction.spec.ts failed locally with the
+ * product's "the optional document processor" message while passing in CI.
+ * CI turns it on in scripts/ci/create-test-configuration.sh, which appends
+ * the profile and the parser's address to .env-orbit. This script must never
+ * write to .env-orbit, so it carries the same two values by its own route:
+ * the profile through COMPOSE_PROFILES on its compose() wrapper, the address
+ * through compose/docker-compose.local-e2e.yml. Read CI's values rather than
+ * repeating them, so moving CI's pair cannot leave the local pair behind --
+ * the same "one source both lanes read" shape as local-only-specs.txt above.
+ */
+const ciTestConfiguration = readFileSync(
+  fileURLToPath(new URL("./ci/create-test-configuration.sh", import.meta.url)),
+  "utf8",
+);
+const scriptSource = readFileSync(script, "utf8");
+const localE2eOverlay = readFileSync(
+  fileURLToPath(new URL("../compose/docker-compose.local-e2e.yml", import.meta.url)),
+  "utf8",
+);
+
+function ciAppendedValue(key) {
+  const match = ciTestConfiguration.match(new RegExp(`'${key}=([^']*)'`));
+  expect(match, `scripts/ci/create-test-configuration.sh no longer appends ${key}`).not.toBeNull();
+  return match[1];
+}
+
+describe("the document parser the local stack runs", () => {
+  it("selects the same Compose profile CI does", () => {
+    expect(scriptSource).toContain(`COMPOSE_PROFILES=${ciAppendedValue("COMPOSE_PROFILES")}`);
+  });
+
+  it("points the application at the same parser address CI does", () => {
+    expect(localE2eOverlay).toContain(`TIKA_URL: ${ciAppendedValue("TIKA_URL")}`);
+  });
+});
