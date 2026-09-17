@@ -111,19 +111,6 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:5px;letter-spacing:.04em}
 .household-page header.screen .glyph{flex:none}
 
-/* #867 — the dial's own legend: a mark and a name for every figure the
-   mini system dial above actually draws (a section with 2+ dated entries,
-   joined into a line — constellationOf skips a lone star and an empty
-   section the same way the dial does). Visible to every viewer, not
-   owner-only: the figures are drawn for both, and a member never sees the
-   Sections card that would otherwise say what a line means. */
-.household-page .dial-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:16px;list-style:none}
-.household-page .dial-legend li{display:flex;align-items:center;gap:6px;
-      font:11px var(--mono);color:var(--ink-mid);letter-spacing:.02em}
-.household-page .dial-legend .mark{width:14px;height:14px}
-.household-page .dial-legend .mark svg{width:12px;height:12px}
-.household-page .dial-legend .mark i{width:4px;height:4px;right:-2px}
-
 .household-page .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:24px;align-items:start}
 .household-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
       border-radius:16px;padding:20px 22px}
