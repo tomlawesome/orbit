@@ -2,6 +2,7 @@
   import "./relay.css";
   import { onMount } from "svelte";
   import { mountSatellites } from "$lib/backdrops/satellites.js";
+  import Chrome from "$lib/Chrome.svelte";
   import { rotateRelay } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
 
@@ -76,6 +77,12 @@
 </svelte:head>
 
 <div class="satellites" bind:this={backdropRoot} aria-hidden="true"></div>
+
+<!-- The shared chrome (#1010, owner 2026-09-16): the way back goes to the
+     sky here too, not to /settings -- the owner chose one door for every
+     sub-screen. The stage's light-dismiss stays as the other way out. -->
+<Chrome user={data.user} current="settings"
+        role={data.household ? `${data.household.name ?? ""} · ${data.household.canManage ? "owner" : "member"}` : ""} />
 <!-- §14 (#471): clicking off the card returns to wherever the reader came
      from — the inbox, settings, or home as the deep-link fallback. -->
 <div class="stage" role="main" onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">

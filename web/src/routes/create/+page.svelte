@@ -5,6 +5,7 @@
   import "./create.css";
   import { mountCreate } from "./create.behaviour.js";
   import { mountConstellations } from "$lib/backdrops/constellations.js";
+  import Chrome from "$lib/Chrome.svelte";
   import { readHome } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
 
@@ -31,6 +32,11 @@
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
 
+  /* The shared chrome's who-and-where (#1010), off the same readHome the
+     backdrop already makes: null until it lands, and Chrome draws without. */
+  /** @type {Awaited<ReturnType<typeof readHome>> | null} */
+  let chrome = $state(null);
+
   onMount(() => {
     const formTeardown = mountCreate();
     let disposed = false;
@@ -41,6 +47,7 @@
        deterministic sky against the mockup's; rolled fresh otherwise. */
     readHome().then((view) => {
       if (disposed) return;
+      chrome = view;
       const seed = data?.fixtures ? seedFromWorkspace(view.primary ?? "") : rollSeed();
       backdropTeardown = mountConstellations(
         /** @type {HTMLDivElement} */ (backdropRoot),
@@ -61,6 +68,12 @@
 </svelte:head>
 
 <div class="backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
+
+<!-- The shared chrome (#1010, owner 2026-09-16): the way back to the sky and
+     the account menu, as on every sub-screen. The stage's own light-dismiss
+     below is the other way out and stays. -->
+<Chrome user={chrome?.user} current=""
+        role={chrome?.household ? `${chrome.household.name ?? ""} · ${chrome.household.canManage ? "owner" : "member"}` : ""} />
 
 <!-- §14 (#471): clicking off the form returns to the landing page — the same
      light-dismiss the item view has. -->

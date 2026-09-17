@@ -30,13 +30,18 @@ export interface DocumentDateRoleLabel {
 }
 
 /**
- * Only a renewal or a service date is a scheduled event in Orbit's model
+ * A renewal, a service or an expiry date is a scheduled event in Orbit's model
  * (`scheduleKinds`, src/lib/domain.ts). Every other role labels a date the
  * reviewer may still want, but produces no schedule kind.
+ *
+ * #1005: an expiry is the one-off of the three. It reaches the schedule like
+ * the other two so the sky, the belt and the reminders all see it, but it
+ * never comes round again.
  */
 const SCHEDULE_KIND_BY_ROLE: Partial<Record<DocumentDateRole, ScheduleKind>> = {
   renewal: "renewal",
   service: "service",
+  expiry: "expiry",
 };
 
 /**
@@ -477,8 +482,9 @@ export function safeStoredDocumentProposal(value: unknown, filename: string): Do
     costMinor: cost?.costMinor,
     currency: cost?.currency,
     // `workspaceItemSchema` refuses a recurrence without a schedule kind, so
-    // a recurrence with no scheduled date to repeat is dropped here too.
-    recurrenceMonths: scheduleKind
+    // a recurrence with no scheduled date to repeat is dropped here too -- and
+    // refuses one ON an expiry (#1005), which happens once and never repeats.
+    recurrenceMonths: scheduleKind && scheduleKind !== "expiry"
       ? boundedInteger(candidate.recurrenceMonths, MIN_RECURRENCE_MONTHS, MAX_RECURRENCE_MONTHS)
       : undefined,
     scheduleKind,

@@ -16,12 +16,17 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#060b1c" />
     <!--
-      The mark Next used to serve from src/app/icon.svg, restored here as a
-      static file because adapter-node has no filesystem-convention icon.
-      Carried over unchanged on purpose: choosing a v19 mark is a brand
-      decision that belongs to whichever issue ratifies it, not to the cut.
+      The mark: the ring and planet the login and logout screens draw, on the
+      star-chart ground (#1009, owner-ratified 2026-09-16; the old tri-colour
+      house #780 carried over was the pre-v19 brand). Static because
+      adapter-node has no filesystem-convention icon. The SVG serves any
+      browser that takes one; the PNGs are for the rest -- rendered from the
+      SVG by web/scripts/render-icons.mjs, never drawn separately, so the tab,
+      the iOS home screen and the install prompt cannot drift apart again.
     -->
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <!--
       Reapply the reader's chosen pack before the first paint, so a refresh
       does not flash after dark at someone who chose dawn. Inline and

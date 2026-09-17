@@ -20,7 +20,12 @@ export const defaultSections: HouseholdSection[] = [
 
 export const itemStatuses = ["active", "expired", "cancelled", "archived"] as const;
 export type ItemStatus = (typeof itemStatuses)[number];
-export const scheduleKinds = ["renewal", "service"] as const;
+/**
+ * The three kinds of dated event an item can carry (#1005). `expiry` is the
+ * one-off: it never recurs, a completion never takes a next date, and once its
+ * day is past nothing is owed, so it is never counted as overdue.
+ */
+export const scheduleKinds = ["renewal", "service", "expiry"] as const;
 export type ScheduleKind = (typeof scheduleKinds)[number];
 
 export type DueState = "overdue" | "due-soon" | "upcoming" | "unscheduled";
