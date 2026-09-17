@@ -23,7 +23,28 @@ services:
       # the page ends at chrome-error://chromewebdata/ before any test runs.
       APP_URL: http://127.0.0.1:${ORBIT_PORT:-3000}
       OIDC_CALLBACK_URL: http://127.0.0.1:${ORBIT_PORT:-3000}/api/auth/callback
+      # #920, and the orbit-tika block at the bottom of this file.
+      COMPOSE_PROFILES: processing
+      TIKA_URL: http://orbit-tika:9998
   orbit-db:
     container_name: ${COMPOSE_PROJECT_NAME}-db
   orbit-clamav:
     container_name: ${COMPOSE_PROJECT_NAME}-clamav
+  # #920: the document parser, on the same terms CI gives it. Both CI stacks
+  # run scripts/ci/create-test-configuration.sh, which appends
+  # COMPOSE_PROFILES=processing and TIKA_URL=http://orbit-tika:9998 to
+  # .env-orbit, so `orbit-tika` is up and the application knows where to
+  # reach it -- which is what tests/e2e/v19-document-extraction.spec.ts
+  # needs. This script must never write to .env-orbit (a real deployment's
+  # file can be sitting in the checkout), so the same two values arrive here
+  # instead: the profile through COMPOSE_PROFILES in the script's compose()
+  # wrapper, the address through this environment entry, which overrides
+  # docker-compose.yml's `env_file: .env-orbit` reading of an empty TIKA_URL.
+  # COMPOSE_PROFILES is repeated into the container deliberately: the
+  # application's own startup check (src/lib/startup-config.ts) reads the
+  # pair, so leaving one half out would exercise a shape CI never runs.
+  orbit-tika:
+    # docker-compose.yml pins container_name: orbit-tika, the same trap the
+    # renames above exist for -- and one an extraction session commonly has
+    # running on this host already.
+    container_name: ${COMPOSE_PROJECT_NAME}-tika
