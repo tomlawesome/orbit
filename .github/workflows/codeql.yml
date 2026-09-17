@@ -1,5 +1,22 @@
 name: CodeQL
 
+# Read this before assuming the triggers below are what actually runs (#948).
+# On 2026-09-16 the GitHub API reported this file as `disabled_manually` and
+# `dynamic/github-code-scanning/codeql` -- GitHub's *default* code-scanning
+# setup -- as the thing doing the analysing. The two are mutually exclusive:
+# switching default setup on in Settings > Code security disables the
+# committed workflow, and only the owner can switch it back.
+#
+# That matters because the two scan different code. This file scans every push
+# to `dev`, `preview` and `hotfix/**`; default setup scans the default branch
+# and pull requests against it. The default branch here is `main`, frozen at
+# v1.2.0 until v1.3.0 promotes (#547), and GitLab has been where changes are
+# reviewed since #801, so there are no GitHub pull requests either. CodeQL on
+# the mirror is therefore analysing v1.2.0 and nothing newer.
+#
+# Deciding which of the two to keep is the owner's, and it is a repository
+# setting rather than a change to this file, so nothing here can fix it.
+
 on:
   push:
     branches:
