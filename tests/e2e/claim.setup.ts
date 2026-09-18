@@ -13,7 +13,7 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
  * (verified: `--project=desktop-chromium <single spec>` still lists this
  * project ahead of it).
  *
- * This project itself depends on "unclaimed" (#1046), the project holding
+ * This project itself depends on "unclaimed" (#1039), the project holding
  * only tests/e2e/bootstrap-protection.spec.ts -- the one spec whose whole
  * subject is the state before any claim. That dependency is transitive
  * through the same mechanism: Playwright will not start this project until
