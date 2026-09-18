@@ -26,8 +26,15 @@ import { redirect } from "@sveltejs/kit";
  * gate to protect. It is deliberately NOT in `DOORS` below: maintenance
  * closes it like any other screen, because setting a password is not the
  * administrator action a window exists to allow.
+ *
+ * `/approve/[token]` is open because the person it is written for must NOT be
+ * signed in (#1033, ADR-0027 §4): the link finishes somebody else's sign-in,
+ * on a phone that may never have seen this instance before, and approving on
+ * it deliberately signs nobody in. It reads no session either -- the token in
+ * the address is the whole authorisation -- and it is not in `DOORS`, for the
+ * same reason `/setup/[token]` is not.
  */
-const OPEN_ROUTES = new Set(["/", "/login", "/logout", "/maintenance", "/invite/[token]", "/setup/[token]"]);
+const OPEN_ROUTES = new Set(["/", "/login", "/logout", "/maintenance", "/invite/[token]", "/setup/[token]", "/approve/[token]"]);
 
 /**
  * The screens maintenance never closes (#526; ADR-0013 decision 3): the door
