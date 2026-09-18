@@ -20,7 +20,7 @@ import { claimCodeFromLog, claimInstanceAsAdministrator, stackLog } from "./supp
  * happens once per stack, so an unclaimed instance is a resource exactly one
  * file can hold. Three things give it to this one, and each is deliberate:
  *
- *   1. ITS OWN PROJECT (#1046, playwright.config.ts): this file is the only
+ *   1. ITS OWN PROJECT (#1039, playwright.config.ts): this file is the only
  *      thing matched by the "unclaimed" project, which every browser project
  *      excludes via `testIgnore`, and "setup" -- the project that claims the
  *      stack (tests/e2e/claim.setup.ts) -- declares as a `dependencies` entry.

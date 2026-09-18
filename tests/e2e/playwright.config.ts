@@ -54,7 +54,7 @@ export default defineConfig({
       : undefined,
   },
   projects: [
-    // #1046: bootstrap-protection.spec.ts's whole subject is the state an
+    // #1039: bootstrap-protection.spec.ts's whole subject is the state an
     // instance is in before anything claims it, so it cannot share a project
     // with "setup" below -- it needs to run and finish BEFORE the claim, not
     // merely outside "setup"'s own dependents. Giving it its own project and
