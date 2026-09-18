@@ -92,6 +92,25 @@ describe("the sections editor", () => {
     expect(sectionRowsOf(household)[0]).toMatchObject({ visible: true, icon: "home", accent: "sage" });
   });
 
+  // #867: `shipped` decides whether a row's mark is a button. It is the
+  // section's own id, never what it happens to be wearing — a user section
+  // saved before this issue still wears "home"/"sage" (2b's open question,
+  // never actually chosen) but is not mistaken for the real Home section.
+  it("says a row's mark is shipped by its id, not by what it wears", () => {
+    const household = {
+      sections: [
+        { id: "home", name: "Home", icon: "home", accent: "sage", visible: true },
+        { id: "s-a", name: "A pre-#867 section", icon: "home", accent: "sage", visible: true },
+      ],
+      items: [],
+    };
+    const [shipped, legacy] = sectionRowsOf(household);
+    expect(shipped.shipped).toBe(true);
+    expect(legacy.shipped).toBe(false);
+    // Nothing about its mark was rewritten — that is the migration choice.
+    expect(legacy).toMatchObject({ icon: "home", accent: "sage" });
+  });
+
   // The command replaces the LIST, so the list is what travels — mapped back
   // to the engine's own field names, with the interface's arithmetic left
   // behind.

@@ -42,7 +42,7 @@
  * @property {boolean} [canManage]
  * @property {boolean} [requested]
  * @property {ChartItem[]} [items]
- * @property {{ id: string, name: string }[]} [sections]
+ * @property {{ id: string, name: string, icon?: string, accent?: string }[]} [sections]
  *
  * @typedef {object} ChartSuggestion
  * @property {string} id
@@ -442,6 +442,8 @@ const MONTH_LABELS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "S
  * @property {?string} household
  * @property {boolean} away
  * @property {?string} [section]
+ * @property {?string} [sectionIcon]   issue 867, the mark printed beside the row
+ * @property {?string} [sectionAccent]
  * @property {number} days
  * @property {?string} dueDate
  * @property {string} band
@@ -461,16 +463,21 @@ export function corridorOf(workspace, today, options = {}) {
   /** @type {CorridorRow[]} */
   const rows = [];
   for (const household of workspace?.households ?? []) {
-    const sections = new Map((household.sections ?? []).map((s) => [s.id, s.name]));
+    const sections = new Map((household.sections ?? []).map((s) => [s.id, s]));
     for (const item of household.items ?? []) {
       if (item.status !== "active" || !item.dueDate) continue;
       const days = daysUntil(item.dueDate, today);
+      /* #867: the mark beside the entry — the section's own stored icon and
+         accent, same as the Sections card and the dial's own legend read. */
+      const section = sections.get(/** @type {string} */ (item.sectionId));
       rows.push({
         id: item.id,
         title: item.title,
         household: household.name,
         away: household.id !== primary,
-        section: sections.get(/** @type {string} */ (item.sectionId)) ?? null,
+        section: section?.name ?? null,
+        sectionIcon: section?.icon ?? null,
+        sectionAccent: section?.accent ?? null,
         days: /** @type {number} */ (days),
         dueDate: item.dueDate,
         band: bandOfKind(kindOfItem(item), days),

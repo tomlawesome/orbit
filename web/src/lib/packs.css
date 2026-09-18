@@ -99,6 +99,11 @@
   /* #855: --upcoming clears the law as words here too, so its companion
      is the original — no pixel move. */
   --upcoming-text:var(--upcoming);
+  /* #867: the section accents, moved in from household.css — the manifest
+     on /home needs the same tokens the Sections card does, and a value
+     scoped to one screen is not shareable with a second (#491 precedent). */
+  --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
+  --sec-plum:#b79ae0; --sec-coral:#f0907a;
 }
 [data-theme=afterdark]{
   --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -175,6 +180,9 @@
   --plane-star:#cfd9ee;
   --plane-star-warm:#ffdca6;
   --plane-dust:#01020a;
+  /* #867: moved in from household.css, see the starchart block's note. */
+  --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
+  --sec-plum:#a99ae0; --sec-coral:#ef9b86;
 }
 /*
  * dawn — AND DAWN IS THE TERMINATOR (owner, §15: "'dawn' the pack means the
@@ -276,6 +284,9 @@
   --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
   /* #855: --upcoming is --accent here, so its text grade is --accent's. */
   --upcoming-text:var(--accent-text);
+  /* #867: moved in from household.css, see the starchart block's note. */
+  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+  --sec-plum:#71499a; --sec-coral:#bd4f36;
 }
 /*
  * clouds — THE CLOUD SEA, and one of Orbit's MAIN LIGHTER THEMES (owner, §15:
@@ -333,6 +344,9 @@
   --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
   /* #855: --upcoming is --accent here, so its text grade is --accent's. */
   --upcoming-text:var(--accent-text);
+  /* #867: clouds takes dawn's section accents, same as its ink family (#491) — the two packs stand on one light and answer it the same way. */
+  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+  --sec-plum:#71499a; --sec-coral:#bd4f36;
 }
 /*
  * retrograde — the fifth pack (owner, 2026-08-14). A planet in retrograde is
@@ -410,5 +424,8 @@
   --warm-text:var(--warm);
   /* #855: --upcoming clears the law as words here too — no pixel move. */
   --upcoming-text:var(--upcoming);
+  /* #867: moved in from household.css, see the starchart block's note. */
+  --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
+  --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
 }
 
