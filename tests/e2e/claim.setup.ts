@@ -13,6 +13,13 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
  * (verified: `--project=desktop-chromium <single spec>` still lists this
  * project ahead of it).
  *
+ * This project itself depends on "unclaimed" (#1046), the project holding
+ * only tests/e2e/bootstrap-protection.spec.ts -- the one spec whose whole
+ * subject is the state before any claim. That dependency is transitive
+ * through the same mechanism: Playwright will not start this project until
+ * "unclaimed" has finished, so the blanket claim below can never race ahead
+ * of the one spec that needs to see an instance nobody has claimed yet.
+ *
  * OIDC only. The local-only profile's claim is a different journey --
  * choosing the first administrator's own email and password off the claim
  * card, never signing in as a fixed identity -- and local-sign-in.spec.ts IS

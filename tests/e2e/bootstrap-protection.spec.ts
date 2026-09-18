@@ -18,28 +18,32 @@ import { claimCodeFromLog, claimInstanceAsAdministrator, stackLog } from "./supp
  *
  * The database is not reset between specs (v19-arrival.spec.ts) and the claim
  * happens once per stack, so an unclaimed instance is a resource exactly one
- * file can hold. Four things give it to this one, and each is deliberate:
+ * file can hold. Three things give it to this one, and each is deliberate:
  *
- *   1. THE NAME. Playwright runs files in path order and this suite runs on
- *      one worker (playwright.config.ts), so `bootstrap-protection` sorts
- *      ahead of `local-sign-in`, `maintenance`, `signed-out` and every
- *      `v19-*`. Renaming this file to sort later would break it.
- *   2. THE PROJECT. Two projects run every file, and the second would meet an
- *      instance the first had claimed. This is desktop-only for that reason:
- *      it is a protocol test, and nothing in it renders differently on a
- *      phone.
- *   3. NO RETRIES. A retry is a second run against a state that no longer
+ *   1. ITS OWN PROJECT (#1046, playwright.config.ts): this file is the only
+ *      thing matched by the "unclaimed" project, which every browser project
+ *      excludes via `testIgnore`, and "setup" -- the project that claims the
+ *      stack (tests/e2e/claim.setup.ts) -- declares as a `dependencies` entry.
+ *      Playwright will not start "setup" until "unclaimed" has finished, so
+ *      this file is guaranteed to run, and finish, before anything claims:
+ *      not by file-name sort order or worker count, which only ever
+ *      constrained *incidental* ordering within a shared project, but by the
+ *      project graph itself. It is desktop-shaped (Desktop Chrome) rather
+ *      than mobile for the same reason it used to run under
+ *      "desktop-chromium": it is a protocol test, and nothing in it renders
+ *      differently on a phone.
+ *   2. NO RETRIES. A retry is a second run against a state that no longer
  *      exists, so it could only ever add a confusing second failure to a real
  *      one. Turned off here rather than suite-wide.
- *   4. IT CLAIMS ON ITS WAY OUT, through `claimInstanceAsAdministrator` --
+ *   3. IT CLAIMS ON ITS WAY OUT, through `claimInstanceAsAdministrator` --
  *      the same helper every other file's `beforeAll` calls, as the same
  *      "Orbit Administrator". So the instance this file hands on is exactly
  *      the one those files would have made for themselves, and nothing
  *      downstream can tell this file ran at all.
  *
- * And if the order ever does change, the first test below fails loudly on an
- * already-claimed instance rather than skipping: a security spec that quietly
- * stops asserting is worse than one that goes red.
+ * And if the project graph above is ever loosened, the first test below
+ * fails loudly on an already-claimed instance rather than skipping: a
+ * security spec that quietly stops asserting is worse than one that goes red.
  *
  * ══ WHY THIS IS THE PROVIDER PROFILE, not the local-only one ═══════════════
  *
@@ -52,8 +56,8 @@ import { claimCodeFromLog, claimInstanceAsAdministrator, stackLog } from "./supp
  * journey is tests/e2e/local-sign-in.spec.ts.
  */
 
-/** Runs once per stack; see note 2 above. */
-const DESKTOP_PROJECT = "desktop-chromium";
+/** Runs once per stack, as the "unclaimed" project; see note 1 above. */
+const UNCLAIMED_PROJECT = "unclaimed";
 
 /** ADR-0022 §2: the claim cookie's five minutes, in seconds. */
 const CLAIM_TTL_SECONDS = 300;
@@ -178,7 +182,7 @@ test.describe.configure({ mode: "serial", retries: 0 });
 
 test.beforeAll(() => {
   test.skip(
-    test.info().project.name !== DESKTOP_PROJECT,
+    test.info().project.name !== UNCLAIMED_PROJECT,
     "the unclaimed state exists once per stack, so this file runs under one project",
   );
 });
