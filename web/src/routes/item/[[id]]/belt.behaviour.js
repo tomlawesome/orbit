@@ -352,19 +352,65 @@ export function mountBelt(root, options) {
      chrome now). Above the band's upper edge, clear of the tallest rock and
      its ring, because a body can sit anywhere along the band, including at
      the frame's edge: below or on the band, one would eventually cover them.
-     Labels hang beneath their rocks, so above is the one safe side. */
+     Labels hang beneath their rocks, so above is the one safe side.
+
+     On a phone that safe side is a sliver (#1035): the ring radius floors at
+     A_MIN, so a 390px sky sees a hugely magnified band whose crest is up in
+     the chrome's own strip. Two answers below — the label starts past its
+     side's chrome, and it is held inside the frame — and where the band has
+     taken the strip outright, no end-cap is drawn. */
   function buildEnds() {
     endsG.textContent = "";
     if (!bodies.length) return;
     const half = (geom.A * RADIAL * COS_I * 2 + geom.A * HFRAC * SIN_I * 2) / 2;
     const clear = half + 25 + 6 + 14;   /* rock r ≤ 25, its ring, breathing room */
+    /* #1035: on a narrow sky the shared chrome shares this strip, and the
+       end-caps were drawn under the way back and the account orb. belt.css
+       says how much room each side's chrome needs — nothing on a desk, where
+       the corners are empty — and the end-cap starts past it. Read from CSS
+       rather than repeated here so the breakpoint has one home; a host that
+       resolves neither reads 0 and nothing moves. */
+    const strip = getComputedStyle(root);
+    const insetStart = Number.parseFloat(strip.getPropertyValue("--endcap-inset-start")) || 0;
+    const insetEnd = Number.parseFloat(strip.getPropertyValue("--endcap-inset-end")) || 0;
+    /* #1035: and the search field is fixed in this strip as well. On a desk
+       it is a centred 360px column with the end-caps far out at the edges;
+       on a narrow sky it spans nearly the whole width and takes a row of its
+       own, which the band's crest can reach down into. Its live box says
+       where it is, so there is no second copy of belt.css's breakpoint here. */
+    const field = /** @type {HTMLElement | null} */ (root.querySelector(".find"));
+    const fieldBox = field?.getBoundingClientRect() ?? null;
     for (const [x, dir, anchor, text] of
          /** @type {[number, number, string, string][]} */
-         ([[28, +1, "start", "← sooner"], [geom.W - 28, -1, "end", "later →"]])) {
-      const y = geom.project(phiAtX(geom, x, dir), geom.A, 0).y - clear;
-      const t = el("text", { class: "endcap", x, y: y.toFixed(0), "text-anchor": anchor });
+         ([[28 + insetStart, +1, "start", "← sooner"],
+           [geom.W - 28 - insetEnd, -1, "end", "later →"]])) {
+      const line = geom.project(phiAtX(geom, x, dir), geom.A, 0).y;
+      /* #1035: `clear` above the band's line is where the label wants to be,
+         and on a short sky that is off the top of the frame — a phone was
+         drawing "← sooner" half cut off. So it is floored at 20, but never
+         lower than eight above the topmost ink a body at this x can reach,
+         which is the clearance this whole placement exists to keep. */
+      const bodyTop = line - half - 25 - 6;
+      let y = Math.min(bodyTop - 8, Math.max(20, line - clear));
+      /* Drawn before it is placed, because only the laid-out text knows how
+         wide it is, and how wide it is decides whether it shares a column
+         with the search field. */
+      const t = /** @type {SVGTextContentElement} */ (
+        el("text", { class: "endcap", x, y: y.toFixed(0), "text-anchor": anchor }));
       t.textContent = text;
       endsG.appendChild(t);
+      const w = t.getComputedTextLength();
+      const left = anchor === "end" ? x - w : x;
+      if (fieldBox && left < fieldBox.right + 6 && left + w > fieldBox.left - 6) {
+        /* Above the field, never through it. Raising it is always safe: it
+           only ever moves the label further from the band. */
+        y = Math.min(y, fieldBox.top - 10);
+      }
+      /* And where even that has left the frame, the band has taken the whole
+         strip and the label is not drawn at all: the search field's own note
+         ("← → steps in date order") still says which way time runs. */
+      if (y < 12) { t.remove(); continue; }
+      t.setAttribute("y", y.toFixed(0));
     }
   }
 
