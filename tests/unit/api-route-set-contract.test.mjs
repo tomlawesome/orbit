@@ -62,6 +62,10 @@ const EXPECTED_ROUTES = [
   // re-issues a `recovery` token for a local user who has forgotten their
   // password; the initial link comes back from the plain POST above.
   "/api/admin/users/[userId]/setup-link",
+  // Deciding a pending sign-in (#1033, ADR-0027 §4): signed out by design --
+  // the person reading the approval mail is not signed in, and answering does
+  // not sign them in. The token in the body is its whole authorisation.
+  "/api/auth/approve",
   "/api/auth/availability",
   // The claim (M7, ADR-0022 §2): signed out by design, and called by the
   // door and by the e2e claim helper, never by the identity provider.
@@ -75,6 +79,13 @@ const EXPECTED_ROUTES = [
   "/api/auth/link/oidc/start",
   // Local sign-in (M7, ADR-0023 §4): signed out by design, called by the door.
   "/api/auth/local/login",
+  // The waiting tab's two routes (#1033, ADR-0027 §4, §8). Both are signed out
+  // and both are authorised by the pending-sign-in cookie alone, never by
+  // anything in the body: `pending` is where the session is finally minted,
+  // for that browser and no other, and `resend` posts the link again inside
+  // the send limits.
+  "/api/auth/local/login/pending",
+  "/api/auth/local/login/resend",
   // Sets or changes the signed-in caller's own password (M7 slice 8, #911,
   // ADR-0023 §6-§7): a session route, guarded by `write()`.
   "/api/auth/local/password",
@@ -86,6 +97,9 @@ const EXPECTED_ROUTES = [
   "/api/auth/methods",
   "/api/auth/methods/local",
   "/api/auth/methods/oidc/[identityId]",
+  // The one line a refused sign-in leaves for its owner (#1033): a session
+  // route, and a read that spends the notice as it answers.
+  "/api/auth/sign-in-notice",
   "/api/auth/logout",
   "/api/auth/session",
   "/api/auth/session/refresh",
@@ -169,7 +183,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 68 route families -- no fewer, no more", () => {
+  it("has exactly the expected 72 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
