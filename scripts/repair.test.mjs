@@ -1445,6 +1445,58 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("diagnosis result=healthy");
   });
 
+  // #1026: the #822 retry loop above rides out a container passing through
+  // "exited", but its budget is still finite. A container that never once
+  // holds still long enough for the readability check to succeed exhausts
+  // that budget every time — exactly what a credential-mismatched app does
+  // once Docker's own restart-policy backoff for it grows past the budget.
+  // Before this fix, hitting that budget silently fell back to reading the
+  // database's own copy of the credential (which always "authenticates"
+  // against itself), so the dangerous pass saw no finding at all — "no fault
+  // found" and "could not determine" were indistinguishable on the wire.
+  // ORBIT_REPAIR_APP_SECRET_BUDGET lets this test exhaust the real budget in
+  // well under a second rather than waiting out the full 75s.
+  it("reports database-credential-unverifiable (fail), never a guessed mismatch, when the app container never holds still long enough to prove its credential either way — #1026", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--check"],
+      {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        app: { present: true, health: "healthy" },
+        appState: "running",
+        appSecretReadable: false,
+      },
+      { env: { ORBIT_REPAIR_APP_SECRET_BUDGET: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-credential-unverifiable target=database severity=fail");
+    expect(result.stdout).not.toContain("database-credential-mismatch");
+    expect(result.stdout).not.toContain("diagnosis result=healthy");
+  });
+
+  it("plans database-credential-unverifiable as manual, never as an automatic rotate-database-credential guess — #1026", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        app: { present: true, health: "healthy" },
+        appState: "running",
+        appSecretReadable: false,
+      },
+      { input: "rotate\n", env: { ORBIT_REPAIR_PROMPTS: "machine", ORBIT_REPAIR_APP_SECRET_BUDGET: "1" } },
+    );
+
+    expect(result.stdout).toContain("execute action=manual resolves=database-credential-unverifiable result=skipped");
+    expect(result.stdout).toContain("dangerous result=empty done=0 failed=0 reason=none");
+    expect(result.stdout).not.toContain("rotate-database-credential");
+  });
+
   it("reports database-unreachable (fail) when the orbit-db container is absent", () => {
     const targetDir = makeFixture();
 
