@@ -229,12 +229,18 @@ test("nothing signed out says which identity provider this instance trusts", asy
      there is a provider at all, which the door has to know to draw itself --
      and there is deliberately no field that could carry an issuer, a client
      identifier, an endpoint or a raw provider error. A new key here is a new
-     thing a stranger is told, so the key set is asserted rather than sampled. */
+     thing a stranger is told, so the key set is asserted rather than sampled.
+
+     `secondFactor` (#1033, ADR-0027 §2) is the one addition since, and it is
+     the same kind of fact as `oidc`: a boolean about the INSTANCE, which the
+     door and the settings screen both have to read from one place so they
+     cannot disagree. It names no account -- the factor is on for everybody or
+     off for everybody -- and no provider, host or endpoint. */
   expect(Object.keys(body).sort()).toEqual(
     ["claimed", "configured", "contactAddress", "methods", "phase"],
   );
   expect(Object.keys(body["methods"] as Record<string, unknown>).sort())
-    .toEqual(["local", "localAccounts", "oidc"]);
+    .toEqual(["local", "localAccounts", "oidc", "secondFactor"]);
   for (const value of Object.values(body)) {
     expect(typeof value === "string" ? value : "", JSON.stringify(body)).not.toMatch(/:\/\//u);
   }
