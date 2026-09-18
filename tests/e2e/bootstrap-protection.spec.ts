@@ -54,10 +54,15 @@ import { claimCodeFromLog, claimInstanceAsAdministrator, stackLog } from "./supp
  * provider to refuse, so this file runs against the ordinary acceptance stack
  * (compose/docker-compose.acceptance.yml). The local-only profile's own claim
  * journey is tests/e2e/local-sign-in.spec.ts.
+ *
+ * The "unclaimed" project exists in BOTH profiles, because there is one
+ * config and the local-only run reaches this project through "setup"'s
+ * dependency on it whatever --spec filter selected the run. So the guard
+ * below asks the stack which profile it is, exactly as claim.setup.ts does,
+ * rather than asking which project is running: keying it on the project name
+ * ran this file in the local-only lane, where its own precondition -- a
+ * configured provider -- is deliberately false (#1039).
  */
-
-/** Runs once per stack, as the "unclaimed" project; see note 1 above. */
-const UNCLAIMED_PROJECT = "unclaimed";
 
 /** ADR-0022 §2: the claim cookie's five minutes, in seconds. */
 const CLAIM_TTL_SECONDS = 300;
@@ -180,10 +185,12 @@ async function refusal(response: { json: () => Promise<unknown> }): Promise<stri
 
 test.describe.configure({ mode: "serial", retries: 0 });
 
-test.beforeAll(() => {
+test.beforeAll(async ({ request }) => {
+  const { methods } = await availability(request);
   test.skip(
-    test.info().project.name !== UNCLAIMED_PROJECT,
-    "the unclaimed state exists once per stack, so this file runs under one project",
+    !methods.oidc,
+    "no OIDC provider configured: this file is the provider profile's claim, and the "
+      + "local-only profile's is tests/e2e/local-sign-in.spec.ts",
   );
 });
 
