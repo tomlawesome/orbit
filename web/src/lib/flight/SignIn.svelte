@@ -4,6 +4,7 @@
   import Dawn from "./Dawn.svelte";
   import Claim from "./Claim.svelte";
   import Identity from "./Identity.svelte";
+  import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
   import {
     CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
@@ -124,6 +125,25 @@
   /** Orbit's own words for a refusal — never the server's. */
   let message = $state("");
 
+  /*
+   * THE SECOND SCREEN (#1033, ADR-0027 §1, §4). A correct password no longer
+   * ends the journey: the server answers with a pending sign-in, this card
+   * becomes "waiting", and the tab holds until somebody reading the emailed
+   * link approves it. Nothing about the dawn, the ring or the launch's timings
+   * moves -- the same `markLaunch()` fires at the same beat, just later, when
+   * the session actually arrives.
+   */
+  /** "waiting" while nobody has answered; "denied" and "lapsed" are ends. */
+  let pendingState = $state(/** @type {"waiting" | "denied" | "lapsed"} */ ("waiting"));
+  /** Epoch ms when another mail may be asked for (ADR-0027 §8's minute). */
+  let canResendAt = $state(0);
+  /** ADR-0027 §8's fifth send in an hour: read the mail we already sent. */
+  let limited = $state(false);
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let approvalTimer;
+  /** Set by the component's own teardown, so a poll in flight lands nowhere. */
+  let approvalStopped = false;
+
   let claimCode = $state("");
   let email = $state("");
   let displayName = $state("");
@@ -169,9 +189,15 @@
    * returning an HTML error page can no more put its own text on this screen
    * than a hostile body can.
    *
+   * Answers the parsed body on success -- `{}` when there is nothing readable
+   * in it -- and `null` on any refusal, so a caller can still write
+   * `if (await present(...))` and a caller that needs what came back (the
+   * sign-in card, since #1033: a correct password answers with a PENDING
+   * sign-in rather than a session) can read it without a second request.
+   *
    * @param {string} url
    * @param {Record<string, string>} body
-   * @returns {Promise<boolean>} whether it worked
+   * @returns {Promise<Record<string, any> | null>} the answer, or null if it did not work
    */
   async function present(url, body) {
     busy = true;
@@ -184,7 +210,13 @@
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (response.ok) return true;
+      if (response.ok) {
+        try {
+          return (await response.json()) ?? {};
+        } catch {
+          return {};
+        }
+      }
       /* The envelope `authErrorResponse` writes is `{ error: { code, message } }`;
          only the code is read, never the message. */
       let code;
@@ -194,10 +226,10 @@
         code = undefined;
       }
       message = cardMessageFor(code);
-      return false;
+      return null;
     } catch {
       message = cardMessageFor(undefined);
-      return false;
+      return null;
     } finally {
       busy = false;
     }
@@ -227,13 +259,114 @@
     }
   }
 
-  /** Local sign-in (ADR-0023 §4). Lands wherever the door was asked for. */
+  /**
+   * Local sign-in (ADR-0023 §4, ADR-0027 §1). Lands wherever the door was
+   * asked for -- once the emailed approval has come back.
+   *
+   * Two answers now. An instance with no mail relay has no second factor to
+   * apply (ADR-0027 §2) and signs the reader straight in, exactly as before.
+   * Every other instance answers with a pending sign-in, and this card gives
+   * way to the waiting one. The password is cleared either way, the moment it
+   * has been spent.
+   */
   async function submitSignIn() {
     if (busy) return;
-    if (await present("/api/auth/local/login", { email, password })) {
-      password = "";
-      markLaunch();
-      location.href = returnTo;
+    const answer = await present("/api/auth/local/login", { email, password });
+    if (!answer) return;
+    password = "";
+    if (answer.pending) {
+      waitForApproval(answer.pending);
+      return;
+    }
+    markLaunch();
+    location.href = returnTo;
+  }
+
+  /** Raises the waiting card and starts asking. @param {Record<string, any>} pending */
+  function waitForApproval(pending) {
+    message = "";
+    pendingState = "waiting";
+    limited = pending.limited === true;
+    canResendAt = Date.parse(pending.canResendAt) || 0;
+    card = "waiting";
+    showCard(true);
+    askAgain();
+  }
+
+  /**
+   * One round of "has anybody answered yet", every two seconds.
+   *
+   * The claim cookie the sign-in route handed this browser is the whole of the
+   * request: nothing is sent in the body, and a tab without that cookie gets
+   * `unknown` however long it asks (ADR-0027 §4, build ruling 2026-09-18).
+   *
+   * An unreadable answer is not an end -- a proxy hiccup must not throw a
+   * reader out of a sign-in that is still perfectly live -- so only the
+   * server's own three words stop the loop.
+   */
+  function askAgain() {
+    if (approvalStopped) return;
+    approvalTimer = setTimeout(async () => {
+      if (approvalStopped) return;
+      let answer = null;
+      try {
+        const response = await fetch("/api/auth/local/login/pending", {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        answer = response.ok ? await response.json() : null;
+      } catch {
+        answer = null;
+      }
+      if (approvalStopped) return;
+      if (answer?.state === "approved") {
+        /* The session is already in this browser's cookie jar: the poll route
+           minted it for THIS tab and nobody else. The ratified launch plays
+           from here exactly as it does after any other way in. */
+        markLaunch();
+        location.href = returnTo;
+        return;
+      }
+      if (answer?.state === "denied") {
+        pendingState = "denied";
+        return;
+      }
+      if (answer?.state === "unknown") {
+        pendingState = "lapsed";
+        return;
+      }
+      askAgain();
+    }, 2000);
+  }
+
+  /** "Send it again", inside ADR-0027 §8's limits, which the server keeps. */
+  async function resendApproval() {
+    if (busy) return;
+    busy = true;
+    message = "";
+    try {
+      const response = await fetch("/api/auth/local/login/resend", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const answer = response.ok ? await response.json() : null;
+      if (!answer) {
+        message = cardMessageFor(undefined);
+        return;
+      }
+      if (answer.state === "limited") limited = true;
+      else if (answer.state === "unknown") pendingState = "lapsed";
+      else canResendAt = Date.parse(answer.canResendAt) || 0;
+    } catch {
+      message = cardMessageFor(undefined);
+    } finally {
+      busy = false;
     }
   }
 
@@ -417,6 +550,8 @@
 
     return () => {
       disposed = true;
+      approvalStopped = true;
+      clearTimeout(approvalTimer);
       clearTimeout(pollTimer);
       cancelAnimationFrame(frame);
       timers.forEach(clearTimeout);
@@ -492,6 +627,8 @@
     </div>
     {#if card === "claim"}
       <Claim bind:claim={claimCode} {busy} {message} onsubmit={submitClaim} />
+    {:else if card === "waiting"}
+      <Waiting phase={pendingState} {canResendAt} {limited} {busy} {message} onresend={resendApproval} />
     {:else if card === "create"}
       <Identity mode="create" bind:email bind:displayName bind:password
                 provider={providerOffered} {busy} {message}
