@@ -211,8 +211,14 @@
   /* Keyboard only, and in the app's own focus ink (the accent, as everywhere
      a field or a swatch says "you are here"). */
   .sun-link:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
-  .group{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
-  .group.seen{opacity:1;transform:none}
+  /* #1050: scoped to .desk (this route's own wrapper, matching the pattern
+     already used for .desk .sky above). SvelteKit does not unload a visited
+     route's CSS chunk on client-side navigation, so an unscoped .group here
+     kept matching inbox's own <div class="group"> lane wrappers after a
+     visit to /home, leaving them permanently at opacity:0 with nothing on
+     /inbox ever adding .seen. */
+  .desk .group{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
+  .desk .group.seen{opacity:1;transform:none}
   .item{scroll-margin-top:130px}
   .item:target{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
   .dialwrap{position:relative}
@@ -267,10 +273,13 @@
   .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
 
   .manifest{max-width:820px;margin:34px auto 0}
-  .group{margin-bottom:30px}
-  .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+  /* #1050: same scoping as the .group fade-in above, and for the same
+     reason - this is the same class name, so the leftover chunk would keep
+     adding a stray 30px margin under inbox's lane groups too. */
+  .desk .group{margin-bottom:30px}
+  .desk .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
             color:var(--ink-quiet);margin-bottom:10px;padding-left:4px}
-  .group h3 .closest{color:var(--warm);text-transform:none;letter-spacing:.04em}
+  .desk .group h3 .closest{color:var(--warm);text-transform:none;letter-spacing:.04em}
   /* The manifest rows are links to the item view now (#424). CON-5 is
      unchanged - a click on a dial body still anchors to its row; the row is
      what carries you onward. As anchors they need the row's own ink and no
