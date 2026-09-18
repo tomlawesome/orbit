@@ -50,7 +50,7 @@ html body{overflow-y:auto;overflow-x:hidden;line-height:1.55}
 @keyframes spark-breathe{0%,100%{opacity:var(--o)}50%{opacity:calc(var(--o) * .34)}}
 .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 50%, transparent 52%, rgba(0,0,0,.30) 100%)}
-[data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+[data-theme=clouds] .vignette,[data-theme=dawn] .vignette{background:none}
 
 /* §14/#474: the instance's ACTUAL households, in the distance. Display only —
    no pointer events, no hover, no flight. They are drawn in chart ink rather

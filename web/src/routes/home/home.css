@@ -17,37 +17,26 @@
    * still serves all five and the dark packs are untouched. Drift stays — it
    * is POL-11's owner rule and a moving sky is not a luminous device.
    */
-  [data-theme=atlas] .dial circle[filter="url(#sun)"],
   [data-theme=dawn] .dial circle[filter="url(#sun)"],
   [data-theme=clouds] .dial circle[filter="url(#sun)"]{
     filter:none}
   /* Paper has no specular. */
-  [data-theme=atlas] .dial [fill^="rgba(255,255,255"],
   [data-theme=dawn] .dial [fill^="rgba(255,255,255"],
   [data-theme=clouds] .dial [fill^="rgba(255,255,255"]{
     fill:transparent}
-  /* Bodies become flat ink discs — ON ATLAS ALONE now (§15, the pack refresh).
-     This rule was written when no light pack owned the planet stops, so the
-     only way to stop a glossy sphere sitting on paper was to overwrite the fill
-     with the pack's status token. dawn and clouds now own --p-* in full — the
-     hazy pastels the temperature story ratified, seen through morning air — so
-     the fill they render is already the right paint and overwriting it here
-     would throw the refresh away one rule after packs.css declared it. Atlas
-     keeps the flattening because atlas keeps no stops of its own.
-
-     CSS fill beats the presentation attribute, so the shared markup is
-     untouched and POL-10's storm selectors still match. */
-  [data-theme=atlas] .dial [fill="url(#p-jade)"]{fill:var(--ok)}
-  [data-theme=atlas] .dial [fill="url(#p-amber)"]{fill:var(--warm)}
-  [data-theme=atlas] .dial [fill="url(#p-ruby)"]{fill:var(--overdue)}
-  [data-theme=atlas] .dial [fill="url(#p-sky)"]{fill:var(--upcoming)}
+  /* Bodies were flattened to ink discs here, for the one light pack that kept
+     no planet stops of its own. That pack was atlas, which #865 renamed away,
+     and dawn and clouds both own --p-* in full (§15, the pack refresh) — the
+     hazy pastels the temperature story ratified, seen through morning air. So
+     the fill they render is already the right paint, and there is no longer a
+     pack this flattening would be correct for. The rules are gone rather than
+     re-pointed at clouds: re-pointing them would throw the refresh away one
+     rule after packs.css declared it (#1047). */
   /* Engraving is line work, so the chart's rules carry more weight than they
      do behind a glow. */
-  [data-theme=atlas]{--chart-line:rgba(28,43,74,.78); --chart-line-soft:rgba(28,43,74,.42)}
   [data-theme=dawn]{--chart-line:rgba(26,34,51,.72); --chart-line-soft:rgba(26,34,51,.38)}
   [data-theme=clouds]{--chart-line:rgba(26,34,51,.72); --chart-line-soft:rgba(26,34,51,.38)}
   /* Printed stars do not twinkle. Drift is untouched. */
-  [data-theme=atlas] body.quiet .sky .near circle,
   [data-theme=dawn] body.quiet .sky .near circle,
   [data-theme=clouds] body.quiet .sky .near circle{animation:none}
   /*
@@ -62,23 +51,17 @@
    * beats the presentation attribute. The starfield is unaffected: its stroke
    * comes from CSS above, not from an attribute.
    */
-  [data-theme=atlas] .dial [stroke-width=".5"],
   [data-theme=dawn] .dial [stroke-width=".5"],
   [data-theme=clouds] .dial [stroke-width=".5"]{stroke-width:.8}
-  [data-theme=atlas] .dial [stroke-width=".75"],
   [data-theme=dawn] .dial [stroke-width=".75"],
   [data-theme=clouds] .dial [stroke-width=".75"]{stroke-width:1.1}
-  [data-theme=atlas] .dial [stroke-width="1"],
   [data-theme=dawn] .dial [stroke-width="1"],
   [data-theme=clouds] .dial [stroke-width="1"]{stroke-width:1.4}
-  [data-theme=atlas] .dial [stroke-width="1.3"],
   [data-theme=dawn] .dial [stroke-width="1.3"],
   [data-theme=clouds] .dial [stroke-width="1.3"]{stroke-width:1.8}
-  [data-theme=atlas] .dial [stroke-width="1.5"],
   [data-theme=dawn] .dial [stroke-width="1.5"],
   [data-theme=clouds] .dial [stroke-width="1.5"]{stroke-width:2.1}
   /* The constellations are the same engraving at another scale. */
-  [data-theme=atlas] .minisys [stroke-width="1"],
   [data-theme=dawn] .minisys [stroke-width="1"],
   [data-theme=clouds] .minisys [stroke-width="1"]{stroke-width:1.4}
   /*
@@ -91,10 +74,8 @@
    * distance still reads. The leader rule follows, because renderGalaxy
    * measures the rendered text rather than estimating it.
    */
-  [data-theme=atlas] .minisys,
   [data-theme=dawn] .minisys,
   [data-theme=clouds] .minisys{opacity:clamp(.72, calc(var(--dim, 1) + .22), 1)}
-  [data-theme=atlas] .minisys text,
   [data-theme=dawn] .minisys text,
   [data-theme=clouds] .minisys text{font-size:11.5px;opacity:1}
 
@@ -128,17 +109,14 @@
      Size is lifted with a stroke rather than by setting r, because a stroke
      adds the same width to every star and so preserves that radius variation,
      where a flat r would erase it. Owner call, 2026-08-14. */
-  [data-theme=atlas] .sky .far circle,
   [data-theme=dawn] .sky .far circle,
   [data-theme=clouds] .sky .far circle{opacity:.5;
        stroke:var(--star-far);stroke-width:.7}
-  [data-theme=atlas] .sky .near circle,
   [data-theme=dawn] .sky .near circle,
   [data-theme=clouds] .sky .near circle{opacity:.8;
        stroke:var(--star-near);stroke-width:.7}
   .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-  [data-theme=atlas] .vignette{background:none}
 
   .page{position:relative;z-index:2;max-width:1160px;margin:0 auto;padding:0 24px 100px}
   .hero{display:grid;place-items:center;padding:0;min-height:100vh;position:relative}
@@ -1036,7 +1014,8 @@
   background-attachment:fixed}
 /* …and the horizon carries the light. The dark packs' vignette darkens the
    edges; these two warm the bottom instead — the only packs whose sky is
-   BRIGHTENING. Atlas keeps `background:none`, above: paper is not lit. */
+   BRIGHTENING, so they replace that darkening outright rather than clearing
+   it the way the other light-pack screens do. */
 [data-theme=dawn] .vignette,[data-theme=clouds] .vignette{
   background:linear-gradient(0deg,rgba(255,193,124,.26) 0%,
     rgba(255,214,164,.10) 20%,transparent 44%)}
@@ -1081,8 +1060,9 @@
   filter:drop-shadow(0 0 3px rgba(255,240,220,.85))}
 /* The sun gets its bloom back — it is the reason the sky is warming, and it is
    the ONE thing in these packs allowed to glow. Later than the engraved
-   `filter:none` at the head of this file, deliberately: that rule is still
-   right for atlas, and the sheets keep the pair in exactly this order. */
+   `filter:none` at the head of this file, deliberately: that rule flattens the
+   sun for every light pack, and this one hands the bloom back to these two.
+   The sheets keep the pair in exactly this order. */
 [data-theme=dawn] .dial circle[filter="url(#sun)"],
 [data-theme=clouds] .dial circle[filter="url(#sun)"]{filter:url(#sun);opacity:.85}
 
