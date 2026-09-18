@@ -161,16 +161,23 @@ photographs the settled login/logout end states), so there was nothing to
 regress against; this before/after check is the only pixel evidence that
 exists for this path.
 
-**Out of scope, and not fixed.** The first implicated cause — `ringcard.css`'s
-`.bigring .ringglass` and `.bigring .ringorbit` transitioning `width`/`height`
-directly (500px → 302.4px) rather than a `transform: scale()`, which forces
-layout (and, with `.ringglass`'s `backdrop-filter`, a full backdrop re-blur) on
-every frame of the reclaim — lives in `web/src/lib/ringcard.css`, outside this
-change's permitted paths (`web/src/lib/flight/`, the launch-timing spec, this
-doc). That file was left untouched. Given the reclaim is CSS-driven and the
-ascent is canvas-driven, this is plausibly the larger of the two named causes
-for the reclaim phase specifically, and it stands as the next actionable
-finding for whoever can touch that file.
+**Was out of scope, now fixed — the compensated split.** The first implicated
+cause — `ringcard.css`'s `.bigring .ringglass` transitioning `width`/`height`
+directly (500px → 302.4px) rather than a `transform: scale()`, which forced
+layout and, with that box's `backdrop-filter`, a full backdrop re-blur on every
+frame of the reclaim — was left untouched by the flight-side change above and
+has since been fixed on its own (#873, note 17341: worst-case paint 0.97ms
+against the 7.06ms measured before).
+
+The ring is now two boxes rather than one. `.ringglass` keeps the fill, the
+backdrop blur and the shadow, carries no border, and closes by
+`transform: scale(.6048)`, which the compositor runs without a layout pass;
+`.ringstroke` is a new plain box carrying the 4.2px line alone, unblurred, and
+still closes by `width`/`height` so the line cannot thin. `.ringorbit` is
+unchanged. Scaling the whole ring instead was rejected: it thins the stroke and
+drifts the orb. Timings, easing, the 620ms hand-over and the 302.4px landing
+are all exactly as ratified — only which part of the pipeline does the work
+changed.
 
 **Re-measured with the same harness, five packs, one run each, same command,
 same shared container:**
