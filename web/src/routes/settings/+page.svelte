@@ -226,6 +226,8 @@
   let methods = $state(/** @type {Awaited<ReturnType<typeof readSignInMethods>> | null} */ (null));
   /** Whether this instance has a provider at all — no provider, no offer to link. */
   let providerOffered = $state(false);
+  /** #1033: whether a password sign-in here is finished by an emailed approval. */
+  let emailApproval = $state(false);
   /** @type {string | null} */
   let methodsProblem = $state(null);
   /**
@@ -451,9 +453,10 @@
       const wanted = parameters.get("signin") ?? "both";
       methods = /** @type {any} */ (SIGN_IN_METHODS_FIXTURES)[wanted] ?? SIGN_IN_METHODS_FIXTURES.both;
       providerOffered = true;
+      emailApproval = true;
     } else {
       try {
-        [methods, { oidc: providerOffered }] = await Promise.all([
+        [methods, { oidc: providerOffered, secondFactor: emailApproval }] = await Promise.all([
           readSignInMethods(),
           readAuthMethodsOffered(),
         ]);
@@ -568,6 +571,37 @@
                              onconfirm={confirmMethod} oncancel={cancelMethod} />
           {/if}
         {/if}
+
+        <!-- THE SECOND FACTOR, WHICH NOBODY CHOOSES (#1033, ADR-0027 §1-§2).
+             It sits among the methods because that is where a reader looks to
+             find out how they get in, and it carries no control at all: there
+             is no per-user switch and no remembered browser. The one thing
+             that moves it is the instance having a mail relay, and the screen
+             says which of the two it is plainly -- an instance with no relay
+             has a password and nothing else, and a reader is owed that fact
+             rather than a promise of a factor that is not running. -->
+        <div class="kv">
+          <span>email approval</span>
+          <span class="method">
+            {#if emailApproval}
+              <b>on · every password sign-in</b>
+            {:else}
+              <b>off · this instance has no mail relay configured</b>
+            {/if}
+          </span>
+        </div>
+        <div class="note">
+          {#if emailApproval}
+            Signing in with your password sends a link to your email address.
+            Nobody gets in until it is approved — including you, every time.
+            Signing in with your identity provider is not asked, and neither is
+            a setup or recovery link.
+          {:else}
+            Until an administrator configures outgoing mail, a password is the
+            whole of a sign-in here. Orbit cannot ask for an approval it has no
+            way to send.
+          {/if}
+        </div>
 
         {#if methodOutcome}<div class="note ok">{methodOutcome}</div>{/if}
       {/if}

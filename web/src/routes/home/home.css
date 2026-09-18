@@ -1588,3 +1588,23 @@ body.pinned .desk,body.pinned .pocket{transition:none!important}
   body.dispersing .desk .dial,body.dispersing .desk .minisys{animation:none!important}
   body.dispersing .desk,body.dispersing .pocket{transition:none}
 }
+
+/* ── THE REFUSED-SIGN-IN LINE (#1033, ADR-0027 consequences) ──────────────
+   One line, across the top of the sky, the first time the account holder gets
+   in after somebody said "this wasn't me" to an approval mail. It is fixed
+   rather than in the flow because .desk is display:contents and has no flow of
+   its own to put it in, and because it must not push the dial down by a line
+   on the one load it appears.
+
+   Warm, not red: this is a thing that went RIGHT — the door held — and a
+   klaxon over a successful refusal teaches people to fear the mechanism that
+   just protected them. It carries the one action that answers it and nothing
+   else; there is no dismiss, because asking for it already spent it. */
+.refused{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:60;
+      max-width:min(92vw,720px);margin:0;text-align:center;
+      font:11.5px/1.7 var(--mono);letter-spacing:.03em;color:var(--ink-mid);
+      background:rgba(6,10,22,.72);border:1px solid var(--line-soft);
+      border-radius:999px;padding:8px 18px;backdrop-filter:blur(6px)}
+.refused a{color:var(--warm);text-decoration:underline;text-underline-offset:2px;
+      text-decoration-thickness:1px;white-space:nowrap}
+.refused a:hover{color:var(--ink)}

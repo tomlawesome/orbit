@@ -14,7 +14,7 @@
   import { markDoor } from "../household/[id]/door.js";
   import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin, signOut } from "$lib/data/workspace.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, money } from "$lib/format.js";
+  import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
@@ -137,6 +137,33 @@
        over home. A fixture waits for the household to arrive first, so the
        beats after the landing have a dial to land on. */
     if (launching && !fixtureFlight) flight?.ascend();
+  });
+
+  /* ---- A REFUSED SIGN-IN, SAID ONCE (#1033, ADR-0027 consequences) -------
+   * Somebody pressed "This wasn't me" on an approval mail, so nobody got in
+   * — and somebody knew this account's password. The sky is where that is
+   * said, because it is the first thing the account holder sees after the
+   * sign-in that DID work, and it is said in one line with the one action
+   * that answers it: change the password.
+   *
+   * Asking takes it, so it appears once and does not follow the reader
+   * around; never asked under fixtures, because a refusal is a real event on
+   * a real account and the fidelity gate must not photograph one.
+   */
+  /** @type {string | null} */
+  let refusedAt = $state(null);
+  onMount(async () => {
+    if (data?.fixtures) return;
+    try {
+      const response = await fetch("/api/auth/sign-in-notice", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) return;
+      refusedAt = (await response.json())?.notice?.deniedAt ?? null;
+    } catch {
+      /* A notice that cannot be read is a notice not shown. It is still
+         unstamped, so the next load says it instead — which is the right way
+         round for something worth saying at all. */
+      refusedAt = null;
+    }
   });
   async function driveFixture() {
     if (!fixtureFlight) return;
@@ -670,6 +697,16 @@
 <div class="desk" class:arrive role="main">
 <!-- #843: sr-only, since the wordmark and dial carry the title visually. -->
 <h1 class="sr-only">Orbit</h1>
+<!-- THE REFUSAL LINE (#1033). Above everything, because it is the one thing
+     on this screen that is about the reader rather than about their things,
+     and it is gone the moment they have read it: nothing dismisses it,
+     because asking for it already spent it. -->
+{#if refusedAt}
+  <p class="refused" role="status">
+    A sign-in with your password was refused {agoLong(refusedAt, new Date().toISOString())}.
+    Nobody got in — <a href={resolve("/settings")}>change your password</a>.
+  </p>
+{/if}
 <!-- ══ THE SKY WAVE (§15, the v1.3.0 roster) ═════════════════════════════════
      Three packs gained their own sky in the same batch, and every layer below
      belongs to exactly one of them. All of them live INSIDE .desk, which is
