@@ -58,10 +58,21 @@ body.showform.grounded #formlayer{animation:settleback .85s cubic-bezier(.2,.9,.
    full strength while it closes and clears in .16s once it has arrived, and
    the reclaimed login chrome (flight.css/arrival.css) is held back to meet
    it there. Both land before the ascent starts at 620ms, so the ratified
-   launch runs unchanged. */
-body.reclaimed :where(.arrival) .bigring .ringglass{width:302.4px;height:302.4px;
+   launch runs unchanged.
+
+   THREE BOXES CLOSE, NOT ONE (#873). Same 500ms, same easing, same landing
+   diameter; what changed is who does the work. The blurred glass closes by
+   `transform: scale(.6048)` — 302.4/500 — so the compositor scales one
+   already-painted layer instead of the engine re-laying-out and re-blurring
+   it every frame. The stroke and the orb carry no backdrop filter, so they
+   still close by width/height and the 4.2px line and the orb's station stay
+   exact. Geometry at rest, open and closed, is identical to what this rule
+   produced before the split. */
+body.reclaimed :where(.arrival) .bigring .ringglass{transform:scale(.6048);
       background:rgba(7,11,24,0);
       -webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px)}
+
+body.reclaimed :where(.arrival) .bigring .ringstroke{width:302.4px;height:302.4px}
 
 body.reclaimed :where(.arrival) .bigring .ringorbit{width:302.4px;height:302.4px}
 
@@ -185,7 +196,8 @@ body.belong .nf .belong{opacity:1}
    journey, and the journey is already over. Fixture-only: nothing sets
    `pinned` in the product. */
 body.pinned #formlayer,body.pinned :where(.arrival) .card,body.pinned .nf,body.pinned :where(.arrival) .bigring,
-body.pinned :where(.arrival) .bigring .ringglass,body.pinned :where(.arrival) .bigring .ringorbit,
+body.pinned :where(.arrival) .bigring .ringglass,body.pinned :where(.arrival) .bigring .ringstroke,
+body.pinned :where(.arrival) .bigring .ringorbit,
 body.pinned .nf .disc,body.pinned .nf .belong{transition:none!important}
 body.pinned .nf .minisys,body.pinned .nf .nstar{animation:none!important;opacity:1}
 
@@ -196,7 +208,8 @@ body.pinned .nf .minisys,body.pinned .nf .nstar{animation:none!important;opacity
    Only the movement goes. */
 @media (prefers-reduced-motion: reduce){
   .nf *{animation:none!important}
-  #formlayer,:where(.arrival) .card,.nf,:where(.arrival) .bigring,:where(.arrival) .bigring .ringglass,:where(.arrival) .bigring .ringorbit{
+  #formlayer,:where(.arrival) .card,.nf,:where(.arrival) .bigring,:where(.arrival) .bigring .ringglass,
+  :where(.arrival) .bigring .ringstroke,:where(.arrival) .bigring .ringorbit{
     transition-duration:.7s!important;transition-timing-function:ease!important}
   #formlayer{animation:none!important}
   .nf .minisys,.nf .nstar{opacity:1}
