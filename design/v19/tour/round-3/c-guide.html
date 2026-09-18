@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en" data-direction="C">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tour round 3 — C · guide</title>
+<style>
+  /* Pack tokens, verbatim from round-1/b-across-the-ship.html (default pack).
+     Nothing below invents a colour. */
+  :root {
+    --bg:#060b1c; --panel-raised:rgba(19,28,58,.75); --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-quiet:#8b95b6; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --mono:'JetBrains Mono Variable','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--ui);overflow:hidden}
+  /* The stage is the product at 1280x800, scaled to whatever window the
+     reviewer has. Every coordinate in this file is in stage pixels. */
+  .stage{position:absolute;left:50%;top:50%;width:1280px;height:800px;transform-origin:0 0;overflow:hidden;background:var(--bg)}
+  .stage img.bg{position:absolute;inset:0;width:1280px;height:800px;opacity:0;transition:opacity .35s ease}
+  .stage img.bg.on{opacity:1}
+  /* the dimming mechanic, as tour.css: everything else drops to the faint
+     tier, the lit thing stays at full strength */
+  .veil{position:absolute;inset:0;background:var(--bg);opacity:0;transition:opacity .45s ease;pointer-events:none}
+  .veil.on{opacity:.62}
+  svg.fx{position:absolute;inset:0;width:1280px;height:800px;overflow:visible;pointer-events:none}
+  .hl{position:absolute;border-radius:14px;box-shadow:0 0 0 1.5px var(--accent),0 0 0 8px color-mix(in srgb,var(--accent) 18%,transparent),0 0 34px color-mix(in srgb,var(--accent) 35%,transparent);opacity:0;transition:opacity .45s ease,box-shadow .3s ease}
+  .hl.on{opacity:1}
+  .hl.round{border-radius:50%}
+  .hl.strong{box-shadow:0 0 0 1.5px var(--accent),0 0 0 8px color-mix(in srgb,var(--accent) 26%,transparent),0 0 46px color-mix(in srgb,var(--accent) 50%,transparent)}
+  /* a chip that has been chosen keeps a quiet ring once the tour moves on */
+  .hl.quiet{box-shadow:0 0 0 1.25px var(--accent)}
+  /* a windowed cut-out: the lit thing shows through the veil at full strength */
+  .cut{position:absolute;background-image:var(--src);background-size:1280px 800px;border-radius:14px;opacity:0;transition:opacity .35s ease}
+  .cut.on{opacity:1}
+  .cut.round{border-radius:50%}
+  /* the typed text, carried from round-1's .typed (caret, ink, field ground) */
+  .typed{position:absolute;font:700 22px var(--ui);letter-spacing:-.02em;color:var(--ink);white-space:nowrap;overflow:hidden;border-right:2px solid var(--accent);background:#0d121f;height:30px;line-height:30px}
+  .typed.done{border-right-color:transparent}
+  .field-blank{position:absolute;background:#0d121f}
+
+  /* ---- the create drawer's own controls -------------------------------- */
+  /* create.png shows the drawer at the moment the north star opens it: the
+     type chips and the drop zone, no name, date, cost, repeat or add. Those
+     five are blanked in and drawn here, the way round 1 blanked and typed
+     the name over the heading. */
+  #layer{transition:opacity .35s ease}
+  .ctl{position:absolute}
+  .flabel{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-quiet);margin:0 0 4px 2px}
+  .fbox{box-sizing:border-box;border:1px solid var(--line);border-radius:10px;background:rgba(0,0,0,.18);display:flex;align-items:center;gap:2px;padding:0 12px;font:13px var(--mono);color:var(--ink)}
+  .fbox .pre{color:var(--ink-quiet)}
+  .cur{display:inline-block;width:0;border-right:2px solid var(--accent);height:16px;vertical-align:-3px}
+  .cur.off{border-right-color:transparent}
+  .chip{position:absolute;box-sizing:border-box;border:1px solid var(--line);border-radius:15.5px;display:flex;align-items:center;justify-content:center;font:12.5px var(--mono);color:var(--ink-mid)}
+  .chip.sel{border-color:var(--accent);color:var(--accent)}
+  .btnadd{position:absolute;box-sizing:border-box;border:1px solid var(--accent);border-radius:10px;display:flex;align-items:center;justify-content:center;font:12px var(--mono);letter-spacing:.08em;color:var(--accent)}
+
+  /* ---- the callout: explanation pinned to the thing just acted on ------- */
+  .callout{position:absolute;box-sizing:border-box;max-width:260px;width:max-content;
+    background:var(--panel-raised);backdrop-filter:blur(14px);border:1px solid var(--line);
+    border-radius:12px;padding:11px 14px;font:13.5px/1.45 var(--ui);color:var(--ink);
+    opacity:0;z-index:25;transition:opacity .24s ease-out,transform .24s ease-out}
+  .callout.on{opacity:1;transform:translate(0,0)!important}
+  .callout.out{opacity:0;transition:opacity .18s ease}
+  .callout .stem{position:absolute;width:14px;height:14px;background:var(--panel-raised);
+    backdrop-filter:blur(14px);border:1px solid var(--line);transform:rotate(45deg);z-index:-1}
+
+  /* ---- direction C: the guide pointer ---------------------------------- */
+  .ptr{position:absolute;left:0;top:0;width:0;height:0;z-index:27;pointer-events:none;opacity:0;transition:opacity .3s ease}
+  .ptr.on{opacity:1}
+  .ptr .ring{position:absolute;left:-7px;top:-7px;width:14px;height:14px;border-radius:50%;
+    border:1px solid color-mix(in srgb,var(--accent) 85%,transparent);
+    box-shadow:0 0 10px color-mix(in srgb,var(--accent) 25%,transparent)}
+  .ptr .dot{position:absolute;left:-1.5px;top:-1.5px;width:3px;height:3px;border-radius:50%;background:var(--accent)}
+  .ptr .rip{position:absolute;left:-7px;top:-7px;width:14px;height:14px;border-radius:50%;
+    border:1px solid var(--accent);opacity:0}
+  /* ---- direction D: the travelling dot that becomes the ring ----------- */
+  .dot6{position:absolute;left:0;top:0;width:0;height:0;z-index:27;pointer-events:none;opacity:0;transition:opacity .2s ease}
+  .dot6.on{opacity:1}
+  .dot6 i{position:absolute;left:-3px;top:-3px;width:6px;height:6px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 10px color-mix(in srgb,var(--accent) 25%,transparent)}
+
+  /* ---- stage chrome: the strip, the counter, skip ---------------------- */
+  .prog{position:absolute;left:0;top:0;height:2px;width:0;background:var(--accent);z-index:26;transition:width .5s cubic-bezier(.25,.1,.25,1)}
+  .chrome{position:absolute;top:22px;right:140px;z-index:26;display:flex;align-items:center;gap:14px}
+  .chrome .ctr,.chrome .fskip{font:10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-quiet)}
+  .chrome .fskip{background:none;border:0;padding:0;cursor:pointer}
+  .chrome .fskip:hover{color:var(--accent)}
+  .endline{position:absolute;left:0;right:0;bottom:36px;text-align:center;z-index:26;
+    font:11px var(--mono);letter-spacing:.1em;color:var(--ink-faint);opacity:0;transition:opacity .4s ease}
+  .endline.on{opacity:1}
+
+  /* ---- reviewer-only chrome, outside the film -------------------------- */
+  .tag{position:fixed;left:14px;bottom:12px;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);z-index:30}
+  .rev{position:fixed;right:14px;bottom:10px;z-index:30;display:flex;gap:8px}
+  .rev button{font:11px var(--mono);color:var(--ink-mid);background:rgba(6,11,28,.72);border:1px solid var(--line);border-radius:9px;padding:6px 11px;cursor:pointer}
+  .rev button:hover{border-color:var(--accent);color:var(--accent)}
+  .rev button:disabled{opacity:.35;cursor:default}
+
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;transition-duration:0s!important}
+    .callout{transform:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <img class="bg" id="bgA" alt="">
+  <img class="bg" id="bgB" alt="">
+  <div class="veil" id="veil"></div>
+  <div id="cuts"></div>
+  <svg class="fx" id="fx" viewBox="0 0 1280 800" aria-hidden="true">
+    <defs>
+      <radialGradient id="p-jade" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#b8f5cf"/><stop offset="45%" stop-color="#2fae6a"/><stop offset="100%" stop-color="#12603a"/></radialGradient>
+      <radialGradient id="p-sky" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#dbe9ff"/><stop offset="45%" stop-color="#6f9fe6"/><stop offset="100%" stop-color="#2b4f8f"/></radialGradient>
+      <radialGradient id="p-amber" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#ffe7a8"/><stop offset="45%" stop-color="#e0a020"/><stop offset="100%" stop-color="#7a4f08"/></radialGradient>
+    </defs>
+    <g id="orbit"></g>
+    <g id="body"></g>
+    <g id="extra"></g>
+  </svg>
+  <div id="layer"></div>
+  <div class="ptr" id="ptr"><i class="rip" id="rip"></i><i class="ring" id="ring"></i><i class="dot"></i></div>
+  <div class="dot6" id="dot6"><i></i></div>
+  <div class="prog" id="prog"></div>
+  <div class="chrome"><span class="ctr" id="ctr">1 / 10</span><button class="fskip" id="fskip">skip</button></div>
+  <div class="endline" id="endline">round 3 ends here — beats 4–6 and 8–10 follow the same rules</div>
+</div>
+<div class="tag" id="tag">ROUND 3 · C · GUIDE</div>
+<div class="rev">
+  <button id="back">back</button><button id="replay">replay · r</button><button id="next">next</button><button id="rskip">skip</button>
+</div>
+<script>
+/* ===========================================================================
+   Round 3 settles how the film moves. Two directions share every rule below;
+   DIR picks which one this file is. C = Guide (a visible pointer), D = Lift
+   (no pointer; the control itself rises and acts).
+
+   Timings and the pointer spec are the owner's steer of 2026-09-18:
+   "the pointer needs to be elegant and the tour needs to be timed for the
+   average human."
+   =========================================================================== */
+const DIR = "C";
+
+const T = {
+  cross: 350,          /* screen change */
+  travelBase: 500, travelPx: 0.6,   /* + 0.6ms per stage-pixel travelled */
+  ease: "cubic-bezier(.25,.1,.25,1)",
+  settle: 120,         /* C: glow falls to 45% as the pointer lands */
+  hover: 350,          /* a human hovers before clicking */
+  press: 120,          /* cut-out to .96 and back */
+  grow: 200,           /* D: the dot becomes the control's outline */
+  lift: 300,           /* D: the control rises 2px */
+  typeLead: 300, typeChar: 70,
+  field: 600,          /* between fields in the drawer */
+  calloutIn: 120, calloutOut: 180,
+  holdBase: 1000, holdWord: 350, holdMin: 2400,
+  bloom: 600,
+  rmHold: 1200,        /* reduced motion: every state simply held */
+};
+
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const R = reduced;
+
+/* ---- the sky's law, in stage pixels (chart.js, x640/380 about (640,400)) --- */
+const K = 640 / 380, CX = 640, CY = 400;
+const pos = (days) => {
+  const a = (Math.max(-90, Math.min(days, 430)) - 90) * Math.PI / 180;
+  const r = days >= 0 ? Math.min(62 + 0.242 * days, 166) : Math.max(24, 62 - 0.625 * -days);
+  return [CX + Math.cos(a) * r * K, CY + Math.sin(a) * r * K];
+};
+const paint = (days) => days <= 30 ? "amber" : days <= 90 ? "sky" : "jade";
+const S = 6; /* the MOT's body: a cheap item, a small body */
+const ns = "http://www.w3.org/2000/svg";
+const el = (n, at) => { const e = document.createElementNS(ns, n); for (const k in at) e.setAttribute(k, at[k]); return e; };
+function drawBody(days, opacity = 1) {
+  const g = document.getElementById("body"); g.innerHTML = "";
+  const [x, y] = pos(days), p = paint(days);
+  const wrap = el("g", { opacity });
+  wrap.appendChild(el("circle", { cx: x, cy: y, r: S, fill: `url(#p-${p})`, style: p === "amber" ? "stroke:var(--bg);stroke-width:2" : "" }));
+  wrap.appendChild(el("path", { d: `M${x} ${y - S} A${S} ${S} 0 0 1 ${x} ${y + S} Z`, fill: "rgba(0,0,0,.42)" }));
+  wrap.appendChild(el("circle", { cx: x - 0.2 * S, cy: y + 0.25 * S, r: 0.33 * S, fill: "rgba(255,255,255,.38)" }));
+  // label sits on the sunward side of the body, so it never runs into the month ring
+  const dx = CX - x, dy = CY - y, len = Math.hypot(dx, dy) || 1, off = S + 18;
+  const label = el("text", { x: x + dx / len * off, y: y + dy / len * off + 4, "text-anchor": "middle", style: "font:10px var(--mono);fill:var(--ink-mid);letter-spacing:.06em" });
+  label.textContent = `MOT · T−${days}D`;
+  wrap.appendChild(label);
+  g.appendChild(wrap);
+  return wrap;
+}
+function landing(days) {
+  const [x, y] = pos(days); const g = document.getElementById("extra");
+  const ring = el("circle", { cx: x, cy: y, r: S + 2, fill: "none", stroke: "var(--accent)", "stroke-width": 1.5 });
+  g.appendChild(ring);
+  if (R) { ring.remove(); return; }
+  ring.animate([{ r: S + 2, opacity: .9 }, { r: S + 34, opacity: 0 }], { duration: T.bloom, easing: "ease-out" }).onfinish = () => ring.remove();
+}
+
+/* ---- the clock: one cancellable timeline, plus a dry run for the total ---- */
+const CANCEL = Symbol("cancel");
+let token = 0, dry = false, budget = 0;
+function wait(ms) {
+  budget += ms;
+  const my = token;
+  if (dry) return Promise.resolve();
+  return new Promise((res, rej) => setTimeout(() => (my === token ? res() : rej(CANCEL)), Math.max(0, ms)));
+}
+const w = (ms) => wait(R && !dry ? 0 : ms);       /* motion: gone under reduced motion */
+const hold = (ms) => wait(R && !dry ? T.rmHold : ms);
+const words = (s) => s.trim().split(/\s+/).length;
+const holdFor = (s) => Math.max(T.holdMin, T.holdBase + T.holdWord * words(s));
+/* review hook: window.__hold = "<mark>" stops the timeline at that moment */
+async function mark(name) { window.__mark = name; if (window.__hold === name) throw CANCEL; }
+
+/* ---- stage plumbing ------------------------------------------------------ */
+const shots = (f) => `shots/${f}`;
+const stage = document.getElementById("stage");
+const layer = document.getElementById("layer"), cuts = document.getElementById("cuts");
+const ptr = document.getElementById("ptr"), ring = document.getElementById("ring"), rip = document.getElementById("rip");
+const dot6 = document.getElementById("dot6");
+const put = (html) => { layer.insertAdjacentHTML("beforeend", html); return layer.lastElementChild; };
+function mkCut(bg, x, y, wd, ht, o = {}) {
+  const c = document.createElement("div");
+  c.className = "cut" + (o.round ? " round" : "");
+  c.style.cssText = `--src:url(${shots(bg)});left:${x}px;top:${y}px;width:${wd}px;height:${ht}px;` +
+    `background-position:-${x}px -${y}px;border-radius:${o.round ? "50%" : (o.r || 14) + "px"}`;
+  cuts.appendChild(c); requestAnimationFrame(() => c.classList.add("on"));
+  return c;
+}
+function mkHl(x, y, wd, ht, o = {}) {
+  const h = document.createElement("div");
+  h.className = "hl" + (o.round ? " round" : "");
+  h.style.cssText = `left:${x}px;top:${y}px;width:${wd}px;height:${ht}px;border-radius:${o.round ? "50%" : (o.r || 14) + "px"}`;
+  cuts.appendChild(h); return h;
+}
+
+/* ---- the pointer (C) and the travelling dot (D) -------------------------- */
+let at = [656, 416];   /* where the pointer/dot is now, in stage pixels */
+const bez = (p0, c, p1, t) => { const u = 1 - t; return [u * u * p0[0] + 2 * u * t * c[0] + t * t * p1[0], u * u * p0[1] + 2 * u * t * c[1] + t * t * p1[1]]; };
+const mover = () => DIR === "C" ? ptr : dot6;
+/* C's pointer is on screen throughout; D has no pointer, only a dot in flight */
+const showMover = () => { if (DIR === "C") ptr.classList.add("on"); };
+function placeMover(p) { const m = mover(); m.getAnimations().forEach((a) => a.cancel()); m.style.transform = `translate(${p[0]}px,${p[1]}px)`; }
+function travel(to, dur) {
+  if (DIR === "D") dot6.classList.add("on");
+  const from = at.slice(), d = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  const ms = dur === undefined ? T.travelBase + T.travelPx * d : dur;
+  at = to.slice();
+  if (R || dry || d < 0.5) { placeMover(to); return w(ms); }
+  /* a gentle arc: the control point sits 12% of the distance off the chord */
+  const nx = -(to[1] - from[1]) / d, ny = (to[0] - from[0]) / d;
+  const c = [(from[0] + to[0]) / 2 + nx * d * 0.12, (from[1] + to[1]) / 2 + ny * d * 0.12];
+  const kf = []; for (let i = 0; i <= 32; i++) { const p = bez(from, c, to, i / 32); kf.push({ transform: `translate(${p[0]}px,${p[1]}px)` }); }
+  const m = mover(); m.getAnimations().forEach((a) => a.cancel());
+  m.animate(kf, { duration: ms, easing: T.ease, fill: "forwards" });
+  return w(ms);
+}
+function settle() {   /* C: the glow eases to 45% as it lands. No flash. */
+  if (DIR !== "C" || R || dry) return w(T.settle);
+  ring.animate([{ boxShadow: "0 0 10px color-mix(in srgb,var(--accent) 25%,transparent)" },
+                { boxShadow: "0 0 10px color-mix(in srgb,var(--accent) 45%,transparent)" }],
+    { duration: T.settle, easing: "ease-out", fill: "forwards" });
+  return w(T.settle);
+}
+function ptrPress() {
+  if (DIR !== "C" || R || dry) return;
+  ring.animate([{ transform: "scale(1)" }, { transform: "scale(.714)" }],
+    { duration: 100, easing: T.ease, fill: "forwards" }).onfinish = () =>
+    ring.animate([{ transform: "scale(.714)" }, { transform: "scale(1)" }], { duration: 160, easing: T.ease, fill: "forwards" });
+  rip.animate([{ transform: "scale(1)", opacity: .55 }, { transform: "scale(2.571)", opacity: 0 }],
+    { duration: 420, easing: "ease-out" });
+}
+function growInto(hl) {   /* D: the 6px dot becomes the control's outline */
+  hl.classList.add("on");
+  if (R || dry) { dot6.classList.remove("on"); return w(T.grow); }
+  const x = parseFloat(hl.style.left), y = parseFloat(hl.style.top);
+  const wd = parseFloat(hl.style.width), ht = parseFloat(hl.style.height);
+  hl.animate([
+    { left: (at[0] - 3) + "px", top: (at[1] - 3) + "px", width: "6px", height: "6px", borderRadius: "50%" },
+    { left: x + "px", top: y + "px", width: wd + "px", height: ht + "px", borderRadius: hl.style.borderRadius },
+  ], { duration: T.grow, easing: T.ease });
+  dot6.classList.remove("on");
+  return w(T.grow);
+}
+
+/* ---- a control: something the tour can visit, lift and press ------------- */
+function ctl(o) { return Object.assign({ lifted: false }, o); }
+function xf(c) { return (c.lifted ? "translateY(-2px)" : "translate(0,0)"); }
+async function goto(c, o = {}) {
+  await travel(c.pt);
+  if (DIR === "C") {
+    if (c.hl) { c.hl.classList.add("on"); }
+    await settle();
+  } else {
+    if (c.hl) await growInto(c.hl); else await w(T.grow);
+    if (c.el) { c.lifted = true; c.el.style.transition = `transform ${T.lift}ms ${T.ease},filter ${T.lift}ms ease`; c.el.style.transform = xf(c); c.el.style.filter = "drop-shadow(0 0 14px color-mix(in srgb,var(--accent) 34%,transparent))"; }
+    if (c.el && c.hl) c.hl.classList.add("strong");
+    await w(T.lift);
+  }
+  if (o.willPress !== false) await w(T.hover);
+}
+async function press(c) {
+  ptrPress();
+  const e = c.el;
+  if (e && !R && !dry) {
+    const base = xf(c);
+    e.style.transition = "none";
+    e.animate([{ transform: base + " scale(1)" }, { transform: base + " scale(.96)" }, { transform: base + " scale(1)" }],
+      { duration: T.press * 2, easing: "ease-in-out" });
+  }
+  await w(T.press * 2);
+}
+function unlight(c) {
+  if (c.hl) { c.hl.classList.remove("on", "strong"); }
+  if (c.el) { c.el.style.filter = "none"; c.lifted = false; c.el.style.transform = "translate(0,0)"; }
+}
+
+/* ---- the callout: the ratified line, pinned to what was just acted on ---- */
+let live = null;
+function showCallout(text, pt, side, dy) {
+  const c = document.createElement("div");
+  c.className = "callout"; c.textContent = text;
+  const stem = document.createElement("i"); stem.className = "stem"; c.appendChild(stem);
+  stage.appendChild(c);
+  const wd = c.offsetWidth, ht = c.offsetHeight, gap = 18, m = 16;
+  let x, y;
+  if (side === "left") { x = pt[0] - gap - wd; y = pt[1] - ht / 2; }
+  else if (side === "right") { x = pt[0] + gap; y = pt[1] - ht / 2; }
+  else if (side === "top") { x = pt[0] - wd / 2; y = pt[1] - gap - ht; }
+  else { x = pt[0] - wd / 2; y = pt[1] + gap; }
+  /* never off the stage; the stem then slides along the edge to keep pointing */
+  if (dy) y += dy;   /* nudge clear of a label the box would otherwise clip */
+  x = Math.max(m, Math.min(x, 1280 - m - wd));
+  y = Math.max(m, Math.min(y, 800 - m - ht));
+  c.style.left = x + "px"; c.style.top = y + "px";
+  if (side === "left" || side === "right") {
+    const sy = Math.max(12, Math.min(pt[1] - y, ht - 12)) - 7;
+    stem.style.top = sy + "px";
+    stem.style[side === "left" ? "right" : "left"] = "-8px";
+  } else {
+    const sx = Math.max(14, Math.min(pt[0] - x, wd - 14)) - 7;
+    stem.style.left = sx + "px";
+    stem.style[side === "top" ? "bottom" : "top"] = "-8px";
+  }
+  const slide = { left: [6, 0], right: [-6, 0], top: [0, 6], bottom: [0, -6] }[side];
+  c.style.transform = R ? "translate(0,0)" : `translate(${slide[0]}px,${slide[1]}px)`;
+  requestAnimationFrame(() => c.classList.add("on"));
+  return c;
+}
+async function callout(text, pt, side, dy, rest) {
+  /* rests 16px lower-right of what the callout points at, and does not wander */
+  const rp = rest || pt;
+  if (DIR === "C") await travel([rp[0] + 16, rp[1] + 16], R ? 0 : 220);
+  await w(T.calloutIn);
+  live = showCallout(text, pt, side, dy);
+  await hold(holdFor(text));
+}
+function dropCallout() {   /* leaves as the next travel begins */
+  if (!live) return;
+  const c = live; live = null;
+  c.classList.add("out");
+  setTimeout(() => c.remove(), T.calloutOut + 40);
+}
+
+/* ---- backgrounds --------------------------------------------------------- */
+const bgs = [document.getElementById("bgA"), document.getElementById("bgB")];
+let flip = false;
+function setBg(file, instant) {
+  const next = bgs[flip ? 0 : 1], prev = bgs[flip ? 1 : 0];
+  if (next.getAttribute("src") !== shots(file)) next.src = shots(file);
+  if (instant) { next.style.transition = "none"; prev.style.transition = "none"; requestAnimationFrame(() => { next.style.transition = ""; prev.style.transition = ""; }); }
+  next.classList.add("on"); prev.classList.remove("on"); flip = !flip;
+}
+const veil = (on) => document.getElementById("veil").classList.toggle("on", !!on);
+
+/* ===========================================================================
+   The four beats. Copy is the ratified copy from web/src/lib/tour/stops.js
+   and the round-1 beat table; nothing here is new prose.
+   =========================================================================== */
+const BEATS = [
+  {
+    n: 1, bg: "home-empty.png",
+    async play() {
+      setBg("home-empty.png", true); veil(false);
+      at = [656, 416]; placeMover(at); showMover();
+      const dial = ctl({ pt: [405, 314], hl: mkHl(390, 150, 500, 500, { round: true }) });
+      await goto(dial, { willPress: false });
+      await callout("This is your star chart.", dial.pt, "left");
+      await mark("b1-callout1");
+      dropCallout(); unlight(dial);
+      const sun = ctl({ pt: [640, 400], hl: mkHl(616, 376, 48, 48, { round: true }) });
+      await goto(sun, { willPress: false });
+      await callout("Every sun is a household you belong to.", [640, 388], "top", 0, sun.pt);
+      await mark("b1-callout2");
+    },
+  },
+  {
+    n: 2, bg: "create.png",
+    async play() {
+      /* the north star is pressed on the sky the reader is standing on */
+      setBg("home-empty.png", true); veil(false);
+      placeMover(at); showMover();
+      const star = ctl({ pt: [640, 20] });
+      await travel(star.pt);
+      veil(true);
+      star.el = mkCut("home-empty.png", 618, 0, 44, 44, { round: true });
+      star.hl = mkHl(618, 0, 44, 44, { round: true });
+      if (DIR === "C") { star.hl.classList.add("on"); await settle(); }
+      else { await growInto(star.hl); star.lifted = true; star.el.style.transition = `transform ${T.lift}ms ${T.ease}`; star.el.style.transform = xf(star); star.hl.classList.add("strong"); await w(T.lift); }
+      await w(T.hover);
+      await press(star);
+      await mark("b2-star");
+
+      /* the drawer opens */
+      setBg("create.png");
+      cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+      await w(T.cross);
+      cuts.innerHTML = "";
+      const card = ctl({ pt: [540, 234], el: mkCut("create.png", 340, 234, 600, 332, { r: 16 }), hl: mkHl(340, 234, 600, 332, { r: 16 }) });
+      buildForm();
+      if (DIR === "C") { card.hl.classList.add("on"); }
+      else { await travel(card.pt); await growInto(card.hl); card.hl.classList.add("strong"); }
+      await callout("Add anything from the north star.", card.pt, "top");
+      await mark("b2-drawer");
+      dropCallout();
+      card.hl.classList.remove("on", "strong");
+
+      /* the name */
+      const name = ctl({ pt: [451, 279], el: document.getElementById("f-name"), hl: mkHl(373, 259, 218, 38, { r: 10 }) });
+      await goto(name);
+      await press(name);
+      await typeInto(document.getElementById("t-name"), "Car MOT — Volvo V60", "b2-typing", [605, 311]);
+      document.getElementById("t-name").classList.add("done");
+      unlight(name); name.hl.remove();
+      await w(T.field);
+
+      /* the type: inspection */
+      const insp = ctl({ pt: [646, 369], el: mkCut("create.png", 586, 354, 120, 31, { r: 15.5 }), hl: mkHl(583, 351, 126, 37, { r: 18.5 }) });
+      await goto(insp);
+      await press(insp);
+      insp.hl.classList.remove("strong"); insp.hl.classList.add("quiet");
+      if (insp.el) { insp.el.style.filter = "none"; insp.lifted = false; insp.el.style.transform = "translate(0,0)"; }
+      await mark("b2-chip");
+      await w(T.field);
+
+      /* the date */
+      const due = ctl({ pt: [507, 466], el: document.getElementById("f-due"), hl: mkHl(373, 447, 268, 38, { r: 12 }) });
+      await goto(due);
+      await press(due);
+      await typeInto(document.getElementById("t-due"), "29 Aug 2027", null, [651, 495]);
+      unlight(due); due.hl.remove();
+      await mark("b2-date");
+      await w(T.field);
+
+      /* the cost */
+      const cost = ctl({ pt: [781, 466], el: document.getElementById("f-cost"), hl: mkHl(657, 447, 249, 38, { r: 12 }) });
+      await goto(cost);
+      await press(cost);
+      await typeInto(document.getElementById("t-cost"), "54.85", null, [916, 495]);
+      unlight(cost); cost.hl.remove();
+      await mark("b2-cost");
+      await w(T.field);
+
+      /* every year */
+      const yr = ctl({ pt: [517, 517], el: document.getElementById("c-year"), hl: mkHl(457, 498, 120, 39, { r: 19 }) });
+      await goto(yr);
+      await press(yr);
+      document.getElementById("c-year").classList.add("sel");
+      yr.hl.classList.remove("strong", "on"); unlight(yr);
+      await mark("b2-yearly");
+      await w(T.field);
+
+      /* add */
+      const add = ctl({ pt: [852, 517], el: document.getElementById("b-add"), hl: mkHl(798, 498, 108, 39, { r: 14 }) });
+      await goto(add);
+      await press(add);
+      await mark("b2-add");
+    },
+  },
+  {
+    n: 3, bg: "home.png",
+    async play() {
+      /* the drawer closes and the sky takes the new body */
+      setBg("create.png", true); veil(true);
+      cuts.innerHTML = ""; layer.innerHTML = "";
+      mkCut("create.png", 340, 234, 600, 332, { r: 16 });
+      buildForm(true);
+      placeMover(at); showMover();
+      await w(80);
+      setBg("home.png"); veil(false);
+      cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+      layer.style.opacity = 0;
+      await w(T.cross);
+      cuts.innerHTML = ""; layer.innerHTML = ""; layer.style.opacity = 1;
+      drawBody(381);
+      if (!R && !dry) document.getElementById("body").animate([{ opacity: 0 }, { opacity: 1 }], { duration: T.bloom, easing: "ease-out" });
+      landing(381);
+      await w(T.bloom);
+      const nb = ctl({ pt: [740, 158], hl: mkHl(713, 138, 40, 40, { round: true }) });
+      await goto(nb, { willPress: false });
+      await callout("It lands where its date falls.", [740, 150], "right");
+      await mark("b3-landed");
+    },
+  },
+  {
+    n: 7, bg: "belt.png",
+    async play() {
+      setBg("home.png", true); veil(false);
+      drawBody(381);
+      placeMover(at); showMover();
+      const body = ctl({ pt: [733, 158], hl: mkHl(713, 138, 40, 40, { round: true }) });
+      await travel(body.pt);
+      veil(true);
+      if (DIR === "C") { body.hl.classList.add("on"); await settle(); }
+      else { await growInto(body.hl); body.hl.classList.add("strong"); await w(T.lift); }
+      await w(T.hover);
+      ptrPress();
+      document.getElementById("body").style.transformOrigin = "733px 158px";
+      if (!R && !dry) document.getElementById("body").animate(
+        [{ transform: "scale(1)" }, { transform: "scale(.96)" }, { transform: "scale(1)" }],
+        { duration: T.press * 2, easing: "ease-in-out" });
+      await w(T.press * 2);
+
+      /* the belt */
+      setBg("belt.png");
+      cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+      document.getElementById("body").animate([{ opacity: 1 }, { opacity: 0 }], { duration: T.cross, fill: "forwards" });
+      await w(T.cross);
+      cuts.innerHTML = ""; document.getElementById("body").innerHTML = "";
+      const cert = ctl({ pt: [282, 317], el: mkCut("belt.png", 282, 247, 140, 140, { round: true }), hl: mkHl(282, 247, 140, 140, { round: true }) });
+      mkCut("belt.png", 866, 266, 140, 140, { round: true });
+      mkHl(866, 266, 140, 140, { round: true }).classList.add("on");
+      mkCut("belt.png", 445, 154, 390, 372, { r: 16 });
+      if (DIR === "C") { cert.hl.classList.add("on"); await travel([306, 333]); await settle(); }
+      else { await travel(cert.pt); await growInto(cert.hl); cert.hl.classList.add("strong"); await w(T.lift); }
+      await callout("A body's paper rides beside it.", cert.pt, "left");
+      await mark("b7-belt");
+      document.getElementById("endline").classList.add("on");
+      await mark("end-line");
+    },
+  },
+];
+
+/* ---- the drawer's drawn controls ----------------------------------------- */
+function buildForm(filled) {
+  layer.style.opacity = 0; requestAnimationFrame(() => { layer.style.opacity = 1; });
+  put(`<div class="field-blank" style="left:376px;top:262px;width:152px;height:34px"></div>`);
+  put(`<div class="ctl" id="f-name" style="left:377px;top:263px"><span class="typed" id="t-name">${filled ? "Car MOT — Volvo V60" : ""}</span></div>`);
+  put(`<div class="field-blank" style="left:377px;top:430px;width:526px;height:110px"></div>`);
+  put(`<div class="ctl" id="f-due" style="left:377px;top:434px;width:260px">
+        <div class="flabel">due</div>
+        <div class="fbox" style="height:30px"><span id="t-due">${filled ? "29 Aug 2027" : ""}</span><i class="cur off"></i></div>
+      </div>`);
+  put(`<div class="ctl" id="f-cost" style="left:661px;top:434px;width:241px">
+        <div class="flabel">cost</div>
+        <div class="fbox" style="height:30px"><span class="pre">£</span><span id="t-cost">${filled ? "54.85" : ""}</span><i class="cur off"></i></div>
+      </div>`);
+  put(`<div class="ctl" style="left:377px;top:485px"><div class="flabel">repeats</div></div>`);
+  put(`<div class="chip" style="left:377px;top:502px;width:76px;height:31px">once</div>`);
+  put(`<div class="chip${filled ? " sel" : ""}" id="c-year" style="left:461px;top:502px;width:112px;height:31px">every year</div>`);
+  put(`<div class="btnadd" id="b-add" style="left:802px;top:502px;width:100px;height:31px">add</div>`);
+}
+async function typeInto(node, text, markName, park) {
+  if (park && DIR === "C") await travel(park, R ? 0 : 220);
+  const cur = node.parentElement.querySelector(".cur");
+  if (cur) cur.classList.remove("off");
+  await w(T.typeLead);
+  if (R || dry) { node.textContent = text; if (cur) cur.classList.add("off"); return; }
+  for (let k = 0; k < text.length; k++) {
+    node.textContent = text.slice(0, k + 1);
+    if (markName && k === Math.floor(text.length * 0.55)) await mark(markName);
+    await w(T.typeChar);
+  }
+  if (cur) cur.classList.add("off");
+}
+
+/* ---- the player ---------------------------------------------------------- */
+let i = 0;
+function reset() {
+  token++;
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  document.getElementById("extra").innerHTML = ""; document.getElementById("body").innerHTML = "";
+  document.querySelectorAll(".callout").forEach((c) => c.remove()); live = null;
+  document.getElementById("endline").classList.remove("on");
+  ptr.classList.remove("on"); dot6.classList.remove("on");
+  ring.getAnimations().forEach((a) => a.cancel()); ring.style.transform = "";
+}
+function show(n) {
+  i = Math.max(0, Math.min(n, BEATS.length - 1));
+  reset();
+  const b = BEATS[i];
+  document.getElementById("ctr").textContent = `${b.n} / 10`;
+  document.getElementById("prog").style.width = (1280 * b.n / 10) + "px";
+  document.getElementById("back").disabled = i === 0;
+  document.getElementById("next").disabled = i === BEATS.length - 1;
+  location.hash = `beat-${b.n}`;
+  const my = ++token;
+  b.play().catch((e) => { if (e !== CANCEL) throw e; });
+  return my;
+}
+function end() {
+  reset();
+  veil(false);
+  document.getElementById("prog").style.width = "1280px";
+}
+document.getElementById("next").onclick = () => show(i + 1);
+document.getElementById("back").onclick = () => show(i - 1);
+document.getElementById("replay").onclick = () => show(i);
+document.getElementById("rskip").onclick = end;
+document.getElementById("fskip").onclick = end;
+addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") show(i + 1);
+  if (e.key === "ArrowLeft") show(i - 1);
+  if (e.key === "r" || e.key === "R") show(i);
+  if (e.key === "Escape") end();
+});
+function fit() { const s = Math.min(innerWidth / 1280, innerHeight / 800); stage.style.transform = `translate(${-640 * s}px,${-400 * s}px) scale(${s})`; }
+addEventListener("resize", fit); fit();
+for (const f of ["home-empty.png", "create.png", "home.png", "belt.png"]) { const im = new Image(); im.src = shots(f); }
+
+/* review hook: the running time of the four beats, in ms */
+window.__runtime = async () => {
+  const keep = window.__hold; window.__hold = null;
+  dry = true; budget = 0;
+  for (let k = 0; k < BEATS.length; k++) { reset(); at = [656, 416]; token++; try { await BEATS[k].play(); } catch (e) { if (e !== CANCEL) throw e; } }
+  dry = false; window.__hold = keep; const total = budget; reset(); show(i); return total;
+};
+window.__show = show;
+
+const hashBeat = parseInt((location.hash.match(/beat-(\d+)/) || [])[1]);
+show(Math.max(0, BEATS.findIndex((b) => b.n === hashBeat)));
+</script>
+</body>
+</html>
