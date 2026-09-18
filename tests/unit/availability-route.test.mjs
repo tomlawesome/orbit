@@ -18,12 +18,14 @@ const mocks = vi.hoisted(() => ({
   readPublicContactAddress: vi.fn(),
   getBootPhase: vi.fn(),
   hasAnyLocalCredential: vi.fn(),
+  secondFactorConfigured: vi.fn(),
 }));
 
 vi.mock("orbit/lib/env", () => ({ getAuthConfig: mocks.getAuthConfig }));
 vi.mock("orbit/server/instance-contact", () => ({ readPublicContactAddress: mocks.readPublicContactAddress }));
 vi.mock("orbit/server/boot", () => ({ getBootPhase: mocks.getBootPhase }));
 vi.mock("orbit/server/local-credentials", () => ({ hasAnyLocalCredential: mocks.hasAnyLocalCredential }));
+vi.mock("orbit/server/sign-in-approvals", () => ({ secondFactorConfigured: mocks.secondFactorConfigured }));
 
 describe("GET /api/auth/availability", () => {
   beforeEach(() => {
@@ -33,6 +35,8 @@ describe("GET /api/auth/availability", () => {
     mocks.getBootPhase.mockReset();
     mocks.hasAnyLocalCredential.mockReset();
     mocks.hasAnyLocalCredential.mockResolvedValue(false);
+    mocks.secondFactorConfigured.mockReset();
+    mocks.secondFactorConfigured.mockReturnValue(false);
     mocks.getAuthConfig.mockReturnValue({ oidc: null });
     mocks.readPublicContactAddress.mockResolvedValue(null);
   });
@@ -73,7 +77,7 @@ describe("GET /api/auth/availability", () => {
     expect(body).toEqual({
       configured: false,
       claimed: true,
-      methods: { local: true, oidc: false, localAccounts: false },
+      methods: { local: true, oidc: false, localAccounts: false, secondFactor: false },
       phase: "running",
       contactAddress: "ops@example.com",
     });
@@ -87,7 +91,7 @@ describe("GET /api/auth/availability", () => {
     const response = await GET();
     const body = await response.json();
 
-    expect(body.methods).toEqual({ local: true, oidc: true, localAccounts: false });
+    expect(body.methods).toEqual({ local: true, oidc: true, localAccounts: false, secondFactor: false });
     expect(body.claimed).toBe(true);
   });
 
@@ -101,4 +105,25 @@ describe("GET /api/auth/availability", () => {
     mocks.hasAnyLocalCredential.mockRejectedValue(new Error("database away"));
     expect((await (await GET()).json()).methods.localAccounts).toBe(false);
   });
+
+  /*
+   * #1033, ADR-0027 §2. The factor is an instance-wide fact, and the signed-out
+   * door and the settings screen read it from this one field, so it cannot say
+   * one thing here and another there. A read that throws answers false, the
+   * same direction every other field on this route fails in: understate what
+   * the instance does rather than promise a factor it cannot apply.
+   */
+  it("reports methods.secondFactor from secondFactorConfigured, and false when that read throws (#1033)", async () => {
+    mocks.getBootPhase.mockReturnValue("running");
+    mocks.secondFactorConfigured.mockReturnValue(true);
+
+    const { GET } = await import("../../web/src/routes/api/auth/availability/+server.js");
+    expect((await (await GET()).json()).methods.secondFactor).toBe(true);
+
+    vi.resetModules();
+    mocks.secondFactorConfigured.mockImplementation(() => { throw new Error("unreadable"); });
+    const again = await import("../../web/src/routes/api/auth/availability/+server.js");
+    expect((await (await again.GET()).json()).methods.secondFactor).toBe(false);
+  });
+
 });

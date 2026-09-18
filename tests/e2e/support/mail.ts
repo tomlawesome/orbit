@@ -147,3 +147,39 @@ export async function waitForSenderVerificationToken(address: string, timeoutMs 
   const detail = lastError instanceof Error ? `; last error: ${lastError.message}` : "";
   throw new Error(`#745: no sender-verification mail to ${address} arrived within ${timeoutMs}ms${detail}`);
 }
+
+/**
+ * Waits for the sign-in approval mail (#1033, ADR-0027 §5) and returns its
+ * one `/approve/<token>` link.
+ *
+ * The third direction this module reads in, and the only one where the mail
+ * IS the security control rather than a convenience: without this link nobody
+ * gets past a password, so a journey that proves the factor works has to find
+ * it the way its reader would -- in a mailbox, not in a database.
+ *
+ * The subject is fixed rather than a parameter, unlike `waitForInvitationLink`:
+ * there is exactly one approval mail and `src/server/sign-in-approvals/mail.test.ts`
+ * pins its subject, so a caller choosing its own string could only get it
+ * wrong.
+ */
+export async function waitForApprovalLink(address: string, timeoutMs = 60_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  const linkPattern = /https?:\/\/\S+\/approve\/\S+/u;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      const body = await latestMatchingBody(address, "Approve your Orbit sign-in");
+      if (body) {
+        const match = body.match(linkPattern);
+        if (match) return match[0].replace(/[).,]+$/u, "");
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+
+  const detail = lastError instanceof Error ? `; last error: ${lastError.message}` : "";
+  throw new Error(`#1033: no sign-in approval mail to ${address} arrived within ${timeoutMs}ms${detail}`);
+}
