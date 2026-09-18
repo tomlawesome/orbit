@@ -276,3 +276,18 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
   :where(.ringcard) .bigring .ringorbit{animation:none!important}
   .err.shown{animation:none!important}
 }
+
+/* ── THE WAITING CARD (#1033, ADR-0027 §4) ───────────────────────────────
+   Sign-in's second screen: a password has been accepted and a link is in the
+   post. It has no fields and no act -- the act is happening in a mailbox --
+   so all it needs beyond the card it already is, is a heading in the display
+   face and a little air under the sentences. The one control it does carry is
+   `.quietline`, which is already the card's voice for an offer. */
+:where(.ringcard) .card.waiting{text-align:center}
+:where(.ringcard) .card.waiting .waiting-head{font:600 15px var(--display);color:var(--ink);
+      letter-spacing:.01em;margin:0 0 14px}
+:where(.ringcard) .card.waiting .note{margin:0 0 14px;line-height:1.9}
+:where(.ringcard) .card.waiting .waiting-resend{margin-bottom:0}
+/* The countdown reads as the line the button will become, not as a disabled
+   button: a greyed-out control invites the press it is refusing. */
+:where(.ringcard) .card.waiting .waiting-wait{color:#6f7b93}

@@ -1,0 +1,48 @@
+/* THE APPROVAL CARD (#1033, ADR-0027 §4; composition ruled 2026-09-18).
+
+   Everything structural is already in ringcard.css -- the stage, the ring,
+   the 300px card, the note and the refusal line. What is here is the one
+   thing that screen does not have: two acts of equal weight, stacked.
+
+   A PHONE SCREEN FIRST, and that is what decides the shape. One column, no
+   row of buttons: at 300px a pair side by side puts the refusal at half the
+   width of the approval and teaches the thumb which one is "the button". So
+   Approve is full width on top and This wasn't me is exactly the same size
+   underneath it, differing only in colour -- gold for the act that lets
+   somebody in, a quiet outline for the one that does not. The reader who did
+   not expect this mail has to find the second one as easily as the reader who
+   was waiting for the first. */
+
+.card.approve{text-align:center}
+
+/* The question, in the card's own display face. Not an <h1>: the screen's one
+   heading is the visually-hidden landmark, the arrival's rule. */
+.card.approve .approve-head{font:600 15px var(--display);color:var(--ink);
+      letter-spacing:.01em;margin:0 0 16px}
+
+/* The four facts, as the mail lists them. Bulletless, because the marker
+   would be the only left-set thing on a centred card. */
+.card.approve .approve-facts{list-style:none;margin:0 0 22px;padding:0;
+      font:11px var(--mono);color:#9aa6bf;letter-spacing:.04em;line-height:2}
+.card.approve .approve-facts b{font-weight:400;color:#c0cade}
+
+/* Full width, and the ratified gate's own weight and radius: this IS the act
+   the card is for. It deliberately does NOT reuse `.act`, whose rule centres a
+   pill at its own intrinsic width -- the ruling asks for full width. */
+.card.approve .approve-yes,.card.approve .approve-no{display:block;width:100%;
+      font:600 13px var(--display);border-radius:99px;padding:13px 20px;
+      letter-spacing:.04em;line-height:normal;cursor:pointer;
+      transition:filter .35s ease,box-shadow .3s ease,opacity .4s ease,
+                 border-color .3s ease,color .3s ease}
+.card.approve .approve-yes{color:#04060e;background:#d8b45a;border:0;
+      box-shadow:0 0 28px rgba(216,180,90,.22)}
+.card.approve .approve-no{margin-top:10px;color:#c0cade;background:none;
+      border:1px solid rgba(240,244,251,.26)}
+
+.card.approve .approve-yes:hover:not(:disabled){filter:brightness(1.08)}
+.card.approve .approve-no:hover:not(:disabled){color:#f0f4fb;border-color:rgba(240,244,251,.5)}
+.card.approve .approve-yes:disabled,.card.approve .approve-no:disabled{opacity:.34;cursor:default;box-shadow:none}
+.card.approve .approve-yes:focus-visible,.card.approve .approve-no:focus-visible{
+      outline:2px solid #d8b45a;outline-offset:3px}
+
+.card.approve .note{margin:18px 0 0}

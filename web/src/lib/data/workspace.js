@@ -1679,15 +1679,26 @@ export async function readSignInMethods() {
  * the direction that shows the reader one fewer control rather than one that
  * cannot work.
  *
- * @returns {Promise<{ local: boolean, oidc: boolean }>}
+ * Since #1033 it carries one more instance-wide fact, for the same reason and
+ * read the same way: whether a password sign-in here is finished by an emailed
+ * approval (ADR-0027 §2).
+ *
+ * @returns {Promise<{ local: boolean, oidc: boolean, secondFactor: boolean }>}
  */
 export async function readAuthMethodsOffered() {
   try {
-    /** @type {{ methods?: { local?: boolean, oidc?: boolean } }} */
+    /** @type {{ methods?: { local?: boolean, oidc?: boolean, secondFactor?: boolean } }} */
     const body = await json(await fetch("/api/auth/availability", { credentials: "same-origin" }));
-    return { local: body.methods?.local ?? true, oidc: body.methods?.oidc ?? false };
+    return {
+      local: body.methods?.local ?? true,
+      oidc: body.methods?.oidc ?? false,
+      /* #1033: whether a password sign-in here is finished by an emailed
+         approval. False on a failed read, so a hiccup understates what the
+         instance does rather than promising a factor it cannot apply. */
+      secondFactor: body.methods?.secondFactor ?? false,
+    };
   } catch {
-    return { local: true, oidc: false };
+    return { local: true, oidc: false, secondFactor: false };
   }
 }
 

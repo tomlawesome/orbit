@@ -668,7 +668,17 @@
               <!-- A fresh link for somebody who never used theirs, or who has
                    forgotten their password (ADR-0023 §3). Issuing it kills the
                    earlier one, and it goes to their registered address — this
-                   screen never sees it. -->
+                   screen never sees it.
+
+                   IT IS ALSO THE WAY PAST A BROKEN MAILBOX (#1033, ADR-0027
+                   §7). Every password sign-in here waits on an emailed
+                   approval, so somebody whose mail is not arriving cannot get
+                   in at all — and this link is the answer, because a setup or
+                   recovery link IS the second factor (owner ruling,
+                   2026-09-18): opening one signs them in with no approval
+                   asked for. It is the same button, the same step-up and the
+                   same `setup_link_issue` intent; nothing new was built for
+                   it, which is the point. -->
               <button class="place" onclick={() => challengeThen("setup_link_issue", () => {
                         resendFor = resendFor === person.id ? null : person.id;
                         resendDays = SETUP_LINK_DAYS.fallback;
