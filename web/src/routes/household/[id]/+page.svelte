@@ -2,7 +2,9 @@
   import { onMount, tick } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
+  import Mark from "$lib/Mark.svelte";
   import { fillStarTiles } from "$lib/sky.js";
+  import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { MAX_SECTIONS, deletionNameMatches, entriesLabel } from "$lib/data/household.js";
   import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
@@ -54,15 +56,14 @@
    */
 
   /**
-   * The sections editor's own row: a SectionRow while it is being edited, so
-   * an unchosen icon/accent (2b's open question) is null rather than forced
-   * to a pen nothing picked, and `fresh` marks a row this editor added and
-   * the server has never seen.
-   * @typedef {Omit<SectionRow, "icon" | "accent"> & {
-   *   icon: string | null,
-   *   accent: string | null,
-   *   fresh?: boolean,
-   * }} EditorRow
+   * The sections editor's own row: a SectionRow while it is being edited.
+   * 2b's open question is answered (#867) — a row always wears a real mark,
+   * assigned the moment it arrives, never a pen nothing picked. `fresh`
+   * marks a row this editor added and the server has never seen (its tray
+   * opens on arrival); `open` is which row's swap tray is showing, held on
+   * the row rather than a separate id so at most one can ever disagree with
+   * its own button's `aria-expanded`.
+   * @typedef {SectionRow & { fresh?: boolean, open?: boolean }} EditorRow
    */
 
   /** @type {{ data: { household: HouseholdView } }} */
@@ -240,34 +241,90 @@
 
   function addSection() {
     if (shown.length >= MAX_SECTIONS) return;
+    /* #867 — assigned on arrival: the first asterism no OTHER row in this
+       household is wearing yet. Nothing for the owner to fill in, and the
+       tray opens straight away so the assignment is never a surprise. */
+    const icon = nextMark(shown.map((row) => row.icon));
     rows = [...rows, {
       /* A new section needs an id before it can be saved, and the engine's
          schema takes any string: a uuid keeps it unique without pretending to
-         mean anything. Choosing a MARK for a new section is not drawn yet
-         (the mockup's own open question), so it wears the neutral pen. */
+         mean anything. */
       id: crypto.randomUUID(),
       name: "",
-      icon: null,
-      accent: null,
+      icon,
+      accent: inkOf(icon),
+      shipped: false,
       visible: true,
       count: 0,
       removable: true,
       fresh: true,
+      open: true,
     }];
+  }
+
+  /** @param {EditorRow} row */
+  function toggleTray(row) {
+    row.open = !row.open;
+  }
+
+  /**
+   * A row's tray: the figure it wears, then every asterism no OTHER row in
+   * this household currently wears — the same pool `addSection` draws from.
+   * @param {EditorRow} row
+   * @returns {string[]}
+   */
+  function trayOptions(row) {
+    const wornByOthers = new Set(shown.filter((other) => other.id !== row.id).map((other) => other.icon));
+    return [row.icon, ...PEN_ORDER.filter((icon) => icon !== row.icon && !wornByOthers.has(icon))];
+  }
+
+  /**
+   * Picking a mark in the tray updates the row in place. It closes nothing
+   * else (owner, 2026-09-16: "Tap to swap") and reaches the server only when
+   * the whole list is saved.
+   * @param {EditorRow} row
+   * @param {string} icon
+   */
+  function chooseMark(row, icon) {
+    row.icon = icon;
+    row.accent = inkOf(icon);
+  }
+
+  /** @param {string} rowId @param {string} icon */
+  function focusTrayItem(rowId, icon) {
+    queueMicrotask(() => document.getElementById(`swap-${rowId}-${icon}`)?.focus());
+  }
+
+  /**
+   * The tray's own keyboard contract (#867). Enter/Space opening the button
+   * is free on a real `<button>`; arrows moving the selection and Esc
+   * closing it are not, because `role=radio` buttons do not get a native
+   * radio group's arrow-key behaviour for nothing.
+   * @param {KeyboardEvent} event
+   * @param {EditorRow} row
+   */
+  function onTrayKeydown(event, row) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      row.open = false;
+      queueMicrotask(() => document.getElementById(`swap-${row.id}`)?.focus());
+      return;
+    }
+    if (!["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) return;
+    event.preventDefault();
+    const options = trayOptions(row);
+    const i = options.indexOf(row.icon);
+    const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
+    const next = options[(i + (forward ? 1 : -1) + options.length) % options.length];
+    chooseMark(row, next);
+    focusTrayItem(row.id, next);
   }
 
   async function saveSections() {
     sectionsProblem = null;
     saidSections = false;
     try {
-      await writeSections(v.id, rows.map((row) => ({
-        ...row,
-        /* The engine's schema requires both; an undrawn choice is not a
-           reason to send nothing, so a fresh row takes the family's first
-           pen until 2b's open question is answered. */
-        icon: row.icon ?? "home",
-        accent: row.accent ?? "sage",
-      })));
+      await writeSections(v.id, rows);
       saidSections = true;
       await invalidateAll();
     } catch (error) {
@@ -609,46 +666,6 @@
 
 <svelte:head><title>Orbit — {v.name}</title></svelte:head>
 
-<!-- No JSDoc /** @type */ comment can sit in this snippet's own parameter
-     list or body: rolldown's build mis-parses one there (bisected while
-     reconciling #624). The ternary default gives `icon`/`accent` the
-     `string | null` an annotation would, without a comment. -->
-{#snippet mark({ icon = (true ? null : ""), accent = (true ? null : "") })}
-  <span class="mark" style="--sec:var({accent ? `--sec-${accent}` : "--ink-faint"})" aria-hidden="true">
-    {#if icon === "home"}
-      <svg width="17" height="17" viewBox="0 0 16 16">
-        <path d="M2.6 7.7 8 3.1l5.4 4.6"/><path d="M4.3 7.4v5.6h7.4V7.4"/>
-      </svg>
-    {:else if icon === "vehicle"}
-      <svg width="17" height="17" viewBox="0 0 16 16">
-        <path d="M2.7 10.6V9.1l1.6-2.7h7.4l1.6 2.7v1.5"/>
-        <circle cx="5.2" cy="10.7" r="1.15"/><circle cx="10.8" cy="10.7" r="1.15"/>
-      </svg>
-    {:else if icon === "device"}
-      <svg width="17" height="17" viewBox="0 0 16 16">
-        <rect x="4.2" y="2.7" width="7.6" height="10.6" rx="1.5"/>
-        <path d="M6.7 11.6h2.6"/>
-      </svg>
-    {:else if icon === "service"}
-      <svg width="17" height="17" viewBox="0 0 24 24" style="stroke-width:1.7">
-        <path d="M14.6 6.4a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8z"/>
-      </svg>
-    {:else if icon === "calendar"}
-      <svg width="17" height="17" viewBox="0 0 16 16">
-        <rect x="2.6" y="3.6" width="10.8" height="9.8" rx="1.4"/>
-        <path d="M2.6 6.6h10.8M5.6 2.3v2.2M10.4 2.3v2.2"/>
-      </svg>
-    {:else}
-      <!-- the neutral pen: a new section has no glyph of its own yet, and how
-           one is CHOSEN is an open question, so nothing is invented here -->
-      <svg width="17" height="17" viewBox="0 0 16 16">
-        <circle cx="8" cy="8" r="4.6" stroke-dasharray="2 2"/>
-      </svg>
-    {/if}
-    <i></i>
-  </span>
-{/snippet}
-
 <div class="household-page" class:member={!v.canManage} bind:this={stage} role="main">
 <!-- your own system, drawn from the inside (§15 H2). Behind the dust, not in
      front of it: your system is the structure you are standing in, and the dust
@@ -835,7 +852,16 @@
         <div>
           {#each shown as row (row.id)}
             <div class="sec" class:off={!row.visible} class:empty={row.removable}>
-              {@render mark(row)}
+              {#if row.shipped}
+                <!-- a shipped section's glyph never changes meaning — not a button -->
+                <Mark icon={row.icon} accent={row.accent} aria-hidden="true" />
+              {:else}
+                <!-- #867 tap to swap: a user-named row's mark is a real button -->
+                <Mark icon={row.icon} accent={row.accent} tag="button" class="mark swap"
+                      id="swap-{row.id}" aria-expanded={Boolean(row.open)}
+                      aria-label="Mark for {row.name || 'this section'} — choose another"
+                      onclick={() => toggleTray(row)} />
+              {/if}
               <input maxlength="30" aria-label="Section name" placeholder={row.fresh ? "name it" : null}
                      bind:value={row.name}>
               <span class="used">{entriesLabel(row.count)}</span>
@@ -845,6 +871,20 @@
               <button class="drop" title="remove" aria-label="Remove section"
                       onclick={() => dropSection(row)}>×</button>
             </div>
+            {#if !row.shipped && row.open}
+              <!-- the worn figure plus every asterism this household has not
+                   worn (row.icon is always first). Picking one updates the row
+                   in place, closes nothing else, and saves with the list. -->
+              <div class="tray" role="radiogroup" aria-label="Marks the pen has not used" tabindex="-1"
+                   onkeydown={(event) => onTrayKeydown(event, row)}>
+                {#each trayOptions(row) as icon (icon)}
+                  <Mark {icon} accent={inkOf(icon)} tag="button" role="radio" aria-label={icon}
+                        aria-checked={icon === row.icon} id="swap-{row.id}-{icon}"
+                        tabindex={icon === row.icon ? 0 : -1}
+                        onclick={() => chooseMark(row, icon)} />
+                {/each}
+              </div>
+            {/if}
           {/each}
         </div>
 

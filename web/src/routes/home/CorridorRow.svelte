@@ -14,6 +14,7 @@
    */
   import { resolve } from "$app/paths";
   import { money } from "$lib/format.js";
+  import Mark from "$lib/Mark.svelte";
   import { BAND_VAR, T_CLASS, tlabel } from "./bands.js";
   import ItemView from "./ItemView.svelte";
 
@@ -120,6 +121,10 @@
     <span class="planet" class:ter={row.kind === "inspection"} class:con={row.kind === "renewal"}
           class:exp={row.kind === "expiry"}
           style="color:var({BAND_VAR[row.band]})" aria-hidden="true"><i></i></span>
+    <!-- #867: the section's own mark, beside the entry, 14px (12px svg,
+         4px dot) — the manifest's own copy of the shared table (Mark.svelte,
+         marks.js), not a redraw. -->
+    {#if row.sectionIcon}<Mark icon={row.sectionIcon} accent={row.sectionAccent} size={12} aria-hidden="true" />{/if}
     <div class="body"><b>{row.title}</b><span>{meta.join(" · ")}</span></div>
     {#if row.dueDate}
       <div class="t {T_CLASS[row.band]}">{tlabel(row)}<small>{short(row.dueDate)}</small></div>
