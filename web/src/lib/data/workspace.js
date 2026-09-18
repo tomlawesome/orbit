@@ -336,15 +336,17 @@
  */
 
 /**
- * One row of the sections editor — what sectionRowsOf makes. `count` and
- * `removed` are the interface's own arithmetic and state, not the household's:
- * they never travel to the server, they decide what may be sent.
+ * One row of the sections editor — what sectionRowsOf makes. `count`,
+ * `removed` and `shipped` are the interface's own arithmetic and state, not
+ * the household's: they never travel to the server, they decide what may be
+ * sent (and, for `shipped`, whether the mark is a button — #867).
  *
  * @typedef {object} SectionRow
  * @property {string} id
  * @property {string} name
  * @property {string} icon
  * @property {string} accent
+ * @property {boolean} shipped
  * @property {boolean} visible
  * @property {number} count        entries sitting in this section
  * @property {boolean} [removable] emptiness is the only thing that earns a ×

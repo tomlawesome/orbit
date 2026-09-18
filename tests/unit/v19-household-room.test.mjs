@@ -76,8 +76,8 @@ describe("the stars are the entries (the chart law, not a copy of it)", () => {
 
   it("joins each section's entries in date order, in that section's accent", () => {
     expect(lawson().figures).toEqual([
-      { id: "s-home", name: "Home", accent: "sage", members: ["i-gutter", "i-boiler", "i-chimney"] },
-      { id: "s-vehicles", name: "Vehicles", accent: "blue", members: ["i-mot", "i-svc"] },
+      { id: "s-home", name: "Home", accent: "sage", icon: "home", members: ["i-gutter", "i-boiler", "i-chimney"] },
+      { id: "s-vehicles", name: "Vehicles", accent: "blue", icon: "vehicle", members: ["i-mot", "i-svc"] },
     ]);
   });
 
