@@ -992,17 +992,72 @@ sidecar_images:
     entrypoint: [""]
     pull_policy: if-not-present
   timeout: 15m
+  # #944 (owner ruling on #923 rec 16a, 2026-09-09): this and
+  # launcher_install_compat used to queue for a slot on this runner and only
+  # then, inside `script:`, decide from ORBIT_SYSTEM that there was nothing to
+  # do -- 143-300 s of `big` plus a 443-589 s queued tail on nearly every
+  # merge request, for a job that never ran. `rules:` cannot read
+  # ORBIT_SYSTEM: it is a dotenv variable `classify` writes to an artifact,
+  # and `rules:` is evaluated before any job runs. `changes:` does not need
+  # it -- it reads the merge diff directly -- so the decision moves here.
+  #
+  # The list has to stand in for classify-changed-paths.mjs's systemPatterns
+  # *and* its catch-all: classifyCiRisk defaults an unmatched path to system
+  # risk (.gitleaksignore included -- nothing in fastPatterns or
+  # systemPatterns names it, so it falls through), and `changes:` has no way
+  # to say "anything not fast and not integration". Rather than chase that
+  # negation, this lists everything except the paths classify always treats
+  # as fast (docs/, root-level markdown, LICENSE, .gitignore) -- wider than
+  # ORBIT_SYSTEM's true positives, deliberately: #944 -- "where you are
+  # unsure, be wider, not narrower". This also drops the narrower
+  # ignore/policy and CI-definition lanes this job never belonged to (it was
+  # never in `orbit_lane_admits`'s per-lane lists, only admitted by `full`),
+  # so nothing here reruns any lane behaviour to preserve. Delivery branches
+  # and the merge request into `main` keep running unconditionally, same as
+  # `orbit_full_gate` gave every job that called `.system_lane_gate`.
   rules:
     - *not_scheduled
-    - when: on_success
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        paths:
+          - .gitlab-ci.yml
+          - .dockerignore
+          - .env-orbit.example
+          - .gitattributes
+          - .gitleaksignore
+          - Dockerfile
+          - cosign.pub
+          - docker-compose.kek-rotation.yml
+          - docker-compose.mail.yml
+          - docker-compose.yml
+          - drizzle.config.ts
+          - eslint.config.mjs
+          - package.json
+          - pnpm-lock.yaml
+          - pnpm-workspace.yaml
+          - renovate.json
+          - tsconfig.json
+          - vitest.config.ts
+          - .github/**/*
+          - compose/**/*
+          - config/**/*
+          - demo-tls/**/*
+          - design/**/*
+          - drizzle/**/*
+          - scripts/**/*
+          - src/**/*
+          - supply-chain/**/*
+          - tests/**/*
+          - web/**/*
+    - when: manual
+      allow_failure: true
   allow_failure:
     exit_codes:
       - 3
   needs: *needs_gated
   script:
-    - *reach_helpers
-    - orbit_lane_admits sidecar_images || exit 0
-    - *system_lane_gate
     - *apk_retry
     # bash before the reuse gate: this image is Alpine, and both the gate and
     # the evidence it writes are bash scripts.
@@ -1887,22 +1942,45 @@ launcher_install_compat:
     # Overridable the same way the workflow's workflow_dispatch input was;
     # dev is orbit-launcher's own default branch.
     LAUNCHER_REF: dev
+  # #944 (owner ruling on #923 rec 16a, 2026-09-09): this used to queue for
+  # the privileged `orbit-build` slot and only then, inside `script:`, read
+  # ORBIT_LAUNCHER_COMPAT and decide there was nothing to do -- a 443-589 s
+  # queued tail on nearly every merge request. `rules:` cannot read
+  # ORBIT_LAUNCHER_COMPAT (a dotenv variable `classify` writes to an
+  # artifact, after `rules:` has already run), but `changes:` reads the
+  # merge diff directly, so the decision moves here. The list below is
+  # `touchesLauncherInstallCompat`'s own `launcherCompatPatterns`
+  # (scripts/classify-changed-paths.mjs) -- unlike ORBIT_SYSTEM this axis has
+  # no catch-all default, so the translation is exact rather than widened.
+  # Delivery branches and the merge request into `main` -- the preview ->
+  # main promotion gate -- still run unconditionally, same as the script's
+  # own special case for a merge request into `main` did.
   rules:
     - *not_scheduled
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+      changes:
+        paths:
+          - scripts/install.sh
+          - .gitlab-ci.yml
+          - Dockerfile
+          - .dockerignore
+          - docker-compose.yml
+          - docker-compose.mail.yml
+          - .env-orbit.example
+          - config/tika-config.json
+          - scripts/configure.sh
+          - scripts/installer-ui.sh
+          - scripts/configuration.sh
+          - scripts/backup.sh
+          - scripts/restore.sh
+          - scripts/repair.sh
+          - scripts/engine-check.sh
     - when: manual
       allow_failure: true
   allow_failure: false
   script:
-    - |
-      set -eu
-      if [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ]; then
-        echo "Merge request into main — this is the promotion gate."
-      elif [ "${ORBIT_LAUNCHER_COMPAT:-true}" != "true" ]; then
-        echo "skipped: neither scripts/install.sh nor this job's own definition (.gitlab-ci.yml) changed"
-        exit 0
-      fi
     - *reuse_gate
     - *docker_in_job
     - *step_outputs

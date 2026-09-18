@@ -54,8 +54,37 @@ export default defineConfig({
       : undefined,
   },
   projects: [
-    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "mobile-chromium", use: { ...devices["Pixel 7"] } },
+    // #1039: bootstrap-protection.spec.ts's whole subject is the state an
+    // instance is in before anything claims it, so it cannot share a project
+    // with "setup" below -- it needs to run and finish BEFORE the claim, not
+    // merely outside "setup"'s own dependents. Giving it its own project and
+    // making "setup" depend on it (not the other way around) puts that
+    // ordering in the project graph itself: Playwright will not start a
+    // project's tests until every project in its `dependencies` has finished
+    // all of its own, so "setup" cannot claim until this project's one spec
+    // is done, whatever worker count or --project/--spec filter selected the
+    // run. Two projects with no dependency edge between them have no such
+    // guarantee and may be scheduled concurrently -- that laxer arrangement
+    // (just leaving the spec out of "setup"'s dependents) is what raced here.
+    { name: "unclaimed", testMatch: /bootstrap-protection\.spec\.ts/, use: { ...devices["Desktop Chrome"] } },
+    // #1039: claims the stack once "unclaimed" above has finished, so any
+    // other spec means what it says run alone with --spec against a fresh
+    // stack instead of relying on an earlier spec in the same run having
+    // claimed it first. See tests/e2e/claim.setup.ts for what it does and
+    // does not cover (OIDC only) and why.
+    { name: "setup", testMatch: /.*\.setup\.ts/, dependencies: ["unclaimed"] },
+    {
+      name: "desktop-chromium",
+      testIgnore: /bootstrap-protection\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+    },
+    {
+      name: "mobile-chromium",
+      testIgnore: /bootstrap-protection\.spec\.ts/,
+      use: { ...devices["Pixel 7"] },
+      dependencies: ["setup"],
+    },
   ],
   outputDir: "../../test-results",
 });
