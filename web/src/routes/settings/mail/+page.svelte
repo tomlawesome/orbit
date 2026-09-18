@@ -76,6 +76,7 @@
   <title>Orbit — your relay</title>
 </svelte:head>
 
+<div class="relay-page">
 <div class="satellites" bind:this={backdropRoot} aria-hidden="true"></div>
 
 <!-- The shared chrome (#1010, owner 2026-09-16): the way back goes to the
@@ -107,3 +108,4 @@
   outbound reminder email remains configured by your administrator</div>
 </div></div>
 <div class="vignette"></div>
+</div>
