@@ -332,6 +332,34 @@
      card. */
   .belt-page .find{position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:6;
         text-align:center;width:min(360px,calc(100vw - 48px))}
+
+  /* ---- THE TOP STRIP ON A NARROW SKY (#1035) ---------------------------
+     Three things are fixed into the same strip across the top: the shared
+     chrome (#1010), which takes the way back on the left and the account orb
+     on the right; the search field, centred; and the band's two end-caps,
+     which ride above the band where it leaves the frame and so also land in
+     that strip once the sky is short.
+
+     They share one row only while the field's own edges clear the chrome.
+     The way back ("← YOUR SKY") ends at x=115 and the orb starts 66px in from
+     the right, so a 360px-wide field needs about 614px of sky before its left
+     edge passes the way back. Below that the field is drawn straight through
+     the way back, the orb and both end-caps — which is what a phone shows.
+
+     So under 680px (that threshold, rounded up) the strip stacks: the chrome
+     keeps row one, the field takes a row of its own beneath it, and the
+     end-caps are inset past the chrome on their own side. The insets are read
+     by belt.behaviour.js's buildEnds — the end-caps are SVG text placed on
+     the band, so CSS can say where the chrome is but cannot move them.
+     28px is the end-caps' own margin, so each inset is what the chrome needs
+     on top of it: 99 puts "← sooner" at x=127, twelve clear of the way back;
+     50 ends "later →" at 78 in from the right, twelve clear of the orb. */
+  .belt-page{--endcap-inset-start:0px;--endcap-inset-end:0px}
+  @media (max-width:680px){
+    .belt-page{--endcap-inset-start:99px;--endcap-inset-end:50px}
+    /* clear of the chrome's row: the orb is 40px tall from y=22. */
+    .belt-page .find{top:72px}
+  }
   .belt-page .find>input,.belt-page .find>.findnote{position:relative}
   .belt-page .find input{background:none;border:0;outline:0;border-bottom:1px solid var(--line);
     width:100%;text-align:center;font:12.5px var(--mono);color:var(--ink);
