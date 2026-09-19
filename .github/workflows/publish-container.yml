@@ -686,6 +686,14 @@ jobs:
           TESTED_IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: bash scripts/ci/verify-tika-processor.sh
 
+      # The processor check leaves orbit-tika running under the Compose project
+      # "orbit", and the #536 isolation preflight refuses to start the smoke
+      # stack beside it (#953). Same position, and the same reason, as the
+      # GitLab job's stop before its installer stack.
+      - name: Stop processor check services
+        if: steps.processor_scope.outputs.required == 'true'
+        run: bash scripts/ci/stop-acceptance-stack.sh
+
       - name: Build disposable OIDC acceptance provider
         run: docker compose --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml build orbit-oidc
 
