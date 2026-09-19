@@ -270,6 +270,20 @@
      the band, their labels hang below it. */
   .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-faint);
           text-transform:uppercase}
+  /* #1062: and each end-cap is a control, in the same idiom as the seats
+     above -- a transparent target, the screen's dashed accent ring on focus
+     and nothing at rest. The ink stays 9.5px; buildEnds squares the target up
+     around it at the product's 44px floor. At an exhausted end the control
+     dims and stops taking the press; it keeps its place in the Tab order so a
+     reader can still find it and be told it is spent. */
+  .endcap-hit{pointer-events:auto;cursor:pointer}
+  .endcap-hit:focus-visible{outline:none}
+  .endcap-hit .fring{opacity:0}
+  .endcap-hit:focus-visible .fring{opacity:1}
+  .endcap-hit:hover .endcap{fill:var(--ink-mid)}
+  .endcap-hit.off{cursor:default}
+  .endcap-hit.off .endcap,
+  .endcap-hit.off:hover .endcap{fill:var(--ink-faint);opacity:.4}
 
   /* ---- THE DOCUMENTS' MARK -------------------------------------------
      The owner: "a different coloured perimeter line around them, and/or
@@ -471,7 +485,9 @@
       <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
-  <g id="ends" aria-hidden="true"></g>
+  <!-- #1062: the end-caps are controls, so this group is no longer hidden
+       from a screen reader — it holds the two buttons that step the belt. -->
+  <g id="ends"></g>
   <g id="seats"></g>
   <g id="caps"></g>
 </svg>
@@ -1094,19 +1110,96 @@ function buildSeats() {
    leaves the frame, held above its upper edge (#1010, owner 2026-09-16): the
    far corners they used to keep belong to the shared chrome now, and above
    the band is the one side a jumbled body never reaches -- rocks sit in the
-   band, their labels hang below it. */
+   band, their labels hang below it.
+
+   #1062: and each one is a CONTROL, in the position it already had. This
+   sheet drew them as inert <text> and the build matched the drawing, which
+   left stepping keyboard-only -- so on a phone there was no way along the
+   belt at all. A <g role="button"> rather than an HTML <button> in a
+   <foreignObject>: the label is placed in the band's own coordinates against
+   a line this function solves for, and the seats beside it are already
+   <g role="button" tabindex="0">, so this is the sheet's existing idiom. The
+   press is stepBy(d) -- the very thing the arrow keys call. */
+const MIN_TARGET = 44;   /* the pocket sheet's floor: design/v19/tour/round-2 */
+const END_PAD = 6;       /* breathing room round the ink before squaring up */
 function buildEnds() {
   const ends = document.getElementById("ends");
   ends.textContent = "";
   if (!bodies.length) return;
   const half = (A * RADIAL * COS_I * 2 + A * HFRAC * SIN_I * 2) / 2;
   const clear = half + 25 + 6 + 14;   /* rock r ≤ 25, its ring, breathing room */
-  for (const [x, dir, anchor, text] of
-       [[28, +1, "start", "← sooner"], [W - 28, -1, "end", "later →"]]) {
+  /* The accessible name says what pressing it DOES. "Sooner" and "later"
+     alone are these two words read back, which tells a reader who cannot see
+     the band nothing about where they would land. */
+  /* `dir` is which branch of the band's curve this x sits on and has nothing
+     to do with which way a press moves you: the SOONER end is the far branch.
+     `step` is the direction, and it is the arrow key's own -1 / +1. They are
+     opposite here, which is exactly why it is spelt out rather than reused. */
+  for (const [x, dir, step, anchor, text, name] of
+       [[28, +1, -1, "start", "← sooner",
+         "Move one item sooner along the belt, towards what is due first"],
+        [W - 28, -1, +1, "end", "later →",
+         "Move one item later along the belt, towards what is due last"]]) {
     const y = project(phiAtX(x, dir), A, 0).y - clear;
+    const cap = el("g", { class: "endcap-hit", role: "button", tabindex: "0",
+      "aria-label": name, "data-step": step });
+    const target = el("rect", { class: "endtarget", fill: "transparent" });
+    const ring = el("rect", { class: "fring", rx: "9", fill: "none",
+      stroke: "var(--accent)", "stroke-width": "1.4", "stroke-dasharray": "3 3" });
     const t = el("text", { class: "endcap", x, y: y.toFixed(0), "text-anchor": anchor });
     t.textContent = text;
-    ends.appendChild(t);
+    cap.append(target, ring, t);
+    ends.appendChild(cap);
+    /* The ink stays 9.5px; the TARGET does not. MIN_TARGET square at the
+       least, squared up around the words and centred on them, so nothing
+       painted moves a pixel. Held inside the frame so a thumb gets all of it.
+       #seats is drawn after #ends, so a rock crossing the box still takes the
+       tap ahead of it. */
+    const w = t.getComputedTextLength();
+    const left = anchor === "end" ? x - w : x;
+    const boxW = Math.max(w + END_PAD * 2, MIN_TARGET);
+    /* 9.5px capitals stand about 7px off the baseline, so the ink's middle is
+       three and a half above it. */
+    const boxY = Math.max(0, Math.min(H - MIN_TARGET, y - 3.5 - MIN_TARGET / 2));
+    for (const box of [target, ring]) {
+      box.setAttribute("x", (left + w / 2 - boxW / 2).toFixed(1));
+      box.setAttribute("y", boxY.toFixed(1));
+      box.setAttribute("width", boxW.toFixed(1));
+      box.setAttribute("height", String(MIN_TARGET));
+    }
+    cap.addEventListener("click", () => pressEnd(cap, step));
+    cap.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pressEnd(cap, step); }
+    });
+  }
+  markEnds();
+}
+
+/* An end-cap pressed: one press, one step, through the same stepBy the arrow
+   keys call, so the animation and the landing are the arrow key's. */
+function pressEnd(cap, d) {
+  if (cap.getAttribute("aria-disabled") === "true") return;
+  stepBy(d);
+}
+
+/* Which way the belt can still go. At an exhausted end the control that
+   cannot move says so -- aria-disabled, read out as unavailable -- rather
+   than taking the press and doing nothing. It keeps its place in the Tab
+   order so a reader can still find it and hear that it is spent.
+
+   Read against bloomTo, where the papers are heading rather than where they
+   are mid-roll: that is the state stepBy will be read against by the time a
+   press lands. */
+function markEnds() {
+  const order = bodies.map((_, i) => i).filter((i) => {
+    const b = bodies[i];
+    return b.kind !== "doc" || (bloomTo[b.itemIdx] ?? 0) > 0.5;
+  });
+  const at = order.indexOf(selected);
+  for (const cap of document.getElementById("ends").children) {
+    const off = order[at + Number(cap.getAttribute("data-step"))] === undefined;
+    cap.setAttribute("aria-disabled", String(off));
+    cap.classList.toggle("off", off);
   }
 }
 
@@ -1427,7 +1520,7 @@ function centre(i) {
   rollFrom = roll; rollTo = bodies[selected].off; rollT0 = performance.now();
   bloomFrom = bloom.slice(); bloomTo = bloomTargets(selected);
   berthFrom = berthNow; berthTo = berthFor(selected);
-  syncDemos();
+  syncDemos(); markEnds();   /* #1062: an end just got nearer, or ran out */
 
   const wrap = document.getElementById("cardwrap");
   clearTimeout(swapTimer);
@@ -1483,7 +1576,7 @@ function arriveAt(id) {
   wrap.style.removeProperty("opacity");
   wrap.style.setProperty("--cdx", "0px"); wrap.style.setProperty("--cdy", "0px");
   wrap.style.setProperty("--csc", "1");
-  renderCard(); syncDemos(); paintMembers(1); measureCard(); paintBand();
+  renderCard(); syncDemos(); markEnds(); paintMembers(1); measureCard(); paintBand();
 }
 
 /* ==================================================================== *
@@ -1635,7 +1728,10 @@ function renderHits() {
   }
   const items = bodies.filter((b) => b.kind === "item").length;
   if (!query) {
-    note.textContent = `${items} items · ← → steps in date order`;
+    /* #1062: the note says what ORDER the belt is in, not which keys move
+       it. The end-caps are the visible way along it now, and the arrow keys
+       keep working as the shortcut they always were. */
+    note.textContent = `${items} items · in date order, sooner to later`;
     box.classList.remove("open");
     return;
   }
