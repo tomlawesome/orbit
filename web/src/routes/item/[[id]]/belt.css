@@ -150,7 +150,7 @@
      web/src/lib/packs.css and is deliberately not re-declared here. */
   [data-theme=starchart]{--rubble:#7d88ab; --rubble-gain:1; --paper:#8fb8ff} /* the documents' own line — see THE DOCUMENTS */
   [data-theme=afterdark]{--rubble:#78849b; --rubble-gain:1; --paper:#c4b5fd}
-  [data-theme=atlas]{--rubble:#3d4a70; --rubble-gain:1.55; --paper:#2b6cb0}
+  [data-theme=clouds]{--rubble:#3d4a70; --rubble-gain:1.55; --paper:#2b6cb0}
   [data-theme=dawn]{--rubble:#3a4966; --rubble-gain:1.5; --paper:#6d28d9}
   [data-theme=retrograde]{--rubble:#6ea6b8; --rubble-gain:1; --paper:#2de2e6}
 
@@ -182,7 +182,7 @@
   .belt-page .sky .near{animation:driftn 195s linear infinite}
   .belt-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-  [data-theme=atlas] .belt-page .vignette,[data-theme=dawn] .belt-page .vignette{background:none}
+  [data-theme=clouds] .belt-page .vignette,[data-theme=dawn] .belt-page .vignette{background:none}
 
   /* ---- the band ------------------------------------------------------
      Two canvases sandwich the card, because the card is IN the band:

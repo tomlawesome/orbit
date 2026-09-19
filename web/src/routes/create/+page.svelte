@@ -67,6 +67,7 @@
   <title>Orbit — new entry</title>
 </svelte:head>
 
+<div class="create-page">
 <div class="backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
 
 <!-- The shared chrome (#1010, owner 2026-09-16): the way back to the sky and
@@ -291,3 +292,4 @@
 </div>
 
 <div class="vignette"></div>
+</div>

@@ -15,121 +15,131 @@
  *   .kv                               design/family/settings-mail.html — the
  *                                     ratified label/value row for read-only detail
  *   .note                             the same, for small print
+ *
+ * #1051: every rule below is scoped under .suggestion-page (Suggestion.svelte's
+ * own wrapper). This sheet is lazy-loaded only for the amend-then-accept
+ * overlay (see Suggestion.svelte's own comment), but SvelteKit does not unload
+ * a visited route's CSS chunk on client-side navigation, so a bare .kv/.note/
+ * .field/etc. here used to keep matching the same class names on every other
+ * route's own markup (settings, inbox, administration, household, create...)
+ * once a suggestion had been opened once in the visit. Same hazard as #1050,
+ * same fix: scope under this screen's own wrapper.
  */
 
 /* create.html's override: the family stage centres a fixed card, and a detail
-   view has to be able to grow past the fold. Doubled selectors because
+   view has to be able to grow past the fold. Doubled classes because
    family.css loads via <link> after this bundled sheet and would win a tie
-   (the create form's unscrollable-card bug, owner-found 2026-08-15). */
+   (the create form's unscrollable-card bug, owner-found 2026-08-15) — the
+   wrapper prefix carries the same specificity the old .stage.stage doubling did. */
 html body{overflow-y:auto;overflow-x:hidden}
-.stage.stage{height:auto;min-height:100%;display:flex;align-items:flex-start;
+.suggestion-page .stage{height:auto;min-height:100%;display:flex;align-items:flex-start;
        justify-content:center;padding:56px 20px}
 
 /* Each screen names its own card and sizes it. The relay is 430px, the create
    form 600px; an item sits between them. */
-.item-card{width:100%;max-width:520px;padding:30px 34px}
-.item-card h2{font:600 22px var(--display);line-height:1.25}
-.item-card .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
+.suggestion-page .item-card{width:100%;max-width:520px;padding:30px 34px}
+.suggestion-page .item-card h2{font:600 22px var(--display);line-height:1.25}
+.suggestion-page .item-card .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
                 margin:6px 0 22px}
 
 /* settings-mail.html's read-only row, unchanged. */
-.kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
+.suggestion-page .kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
     color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
-.kv:last-of-type{border:0}
-.kv b{color:var(--ink);font-weight:500;text-align:right}
-.kv .over{color:var(--overdue-text)}
+.suggestion-page .kv:last-of-type{border:0}
+.suggestion-page .kv b{color:var(--ink);font-weight:500;text-align:right}
+.suggestion-page .kv .over{color:var(--overdue-text)}
 
 /* Section headings inside the card borrow the drawer's, which is the design's
    existing "quiet label above a group" treatment. */
-.item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+.suggestion-page .item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
               color:var(--ink-quiet);margin:22px 0 8px}
 
 /* home.css's document row, which is already the ratified way to list a
    document with a size beneath it. */
-.doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
+.suggestion-page .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
      border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
-.doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
+.suggestion-page .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
 
-.note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:18px;line-height:1.8}
+.suggestion-page .note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:18px;line-height:1.8}
 
 /* The action pills: create.html's .types button grammar, carrying each
    action's own ink (owner, 2026-08-15: more colour, especially the action
    buttons) — completing is the ok green, rescheduling the upcoming blue,
    snoozing the warm amber, editing the accent, retiring the overdue red. */
-.acts{display:flex;flex-wrap:wrap;gap:8px}
+.suggestion-page .acts{display:flex;flex-wrap:wrap;gap:8px}
 /* #854: the letterform reads --act-text (the -text-graded companion of
    whichever status colour --act is set to), set beside --act at each of
    this screen's usage sites; the ring and the fill keep reading --act's own
    raw colour unchanged, because a mark is not a letterform (#491's own
    distinction, extended to this variable). */
-.acts button{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
+.suggestion-page .acts button{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
   border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
   border-radius:999px;padding:7px 14px;cursor:pointer}
-.acts button:hover{border-color:var(--act,var(--ink))}
-.acts button[aria-pressed=true]{border-color:var(--act,var(--accent));
+.suggestion-page .acts button:hover{border-color:var(--act,var(--ink))}
+.suggestion-page .acts button[aria-pressed=true]{border-color:var(--act,var(--accent));
   background:color-mix(in srgb, var(--act,var(--accent)) 14%, transparent)}
-.acts button:disabled{opacity:.5;cursor:default}
+.suggestion-page .acts button:disabled{opacity:.5;cursor:default}
 
 /* The panels reuse create.html's field grammar (create.css .field/.row2/
    .save-row/.btn-primary/.cancel-link); only their placement inside this card
    is local. */
-.panel{margin-top:16px;padding-top:4px}
-.panel .field{margin-bottom:13px}
-.panel .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;
+.suggestion-page .panel{margin-top:16px;padding-top:4px}
+.suggestion-page .panel .field{margin-bottom:13px}
+.suggestion-page .panel .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;
   color:var(--ink-quiet);text-transform:uppercase;margin:0 0 6px}
-.panel .field input,.panel .field textarea{width:100%;background:var(--panel);
+.suggestion-page .panel .field input,.suggestion-page .panel .field textarea{width:100%;background:var(--panel);
   border:1px solid var(--line);border-radius:9px;color:var(--ink);font-size:13.5px;
   padding:9px 12px;font-family:var(--ui)}
-.panel .field input:focus,.panel .field textarea:focus{border-color:var(--accent)}
-.panel .field textarea{resize:vertical;line-height:1.5}
-.panel .field.mono input{font-family:var(--mono)}
-.panel .row2{display:flex;gap:14px}
-.panel .row2>.field{flex:1;min-width:0}
-.save-row{display:flex;align-items:center;gap:18px;margin-top:6px}
-.btn-primary{flex:0 0 auto;padding:10px 22px;border-radius:11px;border:0;cursor:pointer;
+.suggestion-page .panel .field input:focus,.suggestion-page .panel .field textarea:focus{border-color:var(--accent)}
+.suggestion-page .panel .field textarea{resize:vertical;line-height:1.5}
+.suggestion-page .panel .field.mono input{font-family:var(--mono)}
+.suggestion-page .panel .row2{display:flex;gap:14px}
+.suggestion-page .panel .row2>.field{flex:1;min-width:0}
+.suggestion-page .save-row{display:flex;align-items:center;gap:18px;margin-top:6px}
+.suggestion-page .btn-primary{flex:0 0 auto;padding:10px 22px;border-radius:11px;border:0;cursor:pointer;
   font:600 13px var(--display);color:var(--bg);background:var(--act,var(--accent))}
-.btn-primary:hover{filter:brightness(1.05)}
-.btn-primary:disabled{opacity:.5;cursor:default}
+.suggestion-page .btn-primary:hover{filter:brightness(1.05)}
+.suggestion-page .btn-primary:disabled{opacity:.5;cursor:default}
 /* create.html's cancel link as a button — same type, no chrome. */
-.cancel-link{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;
+.suggestion-page .cancel-link{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;
   cursor:pointer;padding:0}
-.cancel-link:hover{color:var(--ink-mid)}
+.suggestion-page .cancel-link:hover{color:var(--ink-mid)}
 /* A quieter sibling for the secondary destructive choice: the pill grammar
    at the save-row's size. */
-.btn-quiet{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
+.suggestion-page .btn-quiet{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
   border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
   border-radius:999px;padding:8px 16px;cursor:pointer}
-.btn-quiet:hover{border-color:var(--act,var(--ink))}
+.suggestion-page .btn-quiet:hover{border-color:var(--act,var(--ink))}
 
 /* Failure carries a line of type in the server's own words — create.css's
    save-note treatment, toned with the urgency ink the design already uses. */
-.problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:14px;line-height:1.6}
+.suggestion-page .problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:14px;line-height:1.6}
 
 /* create.html's cancel link, which is its established way back. Scoped to
    the card: this sheet is bundled into the belt route's CSS whatever the
    comment in +page.svelte hopes, and a bare .back reached the shared
    chrome's link of the same name and pushed it 20px down the sky (#1010). */
-.item-card .back{display:inline-block;margin-top:20px;font:11.5px var(--mono);
+.suggestion-page .item-card .back{display:inline-block;margin-top:20px;font:11.5px var(--mono);
       color:var(--ink-mid);text-decoration:none}
-.item-card .back:hover{color:var(--accent-text)}
+.suggestion-page .item-card .back:hover{color:var(--accent-text)}
 
 /* POL-11, the owner rule that every page's starfield drifts: perceptible
    within a few seconds, one direction, seamless over a tiled field. The same
    two speeds home uses, so this is the same sky from another page. */
-.sky svg{position:absolute;inset:0;width:100%;height:100%}
-.sky .far{animation:driftf 400s linear infinite}
-.sky .near{animation:driftn 195s linear infinite}
+.suggestion-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.suggestion-page .sky .far{animation:driftf 400s linear infinite}
+.suggestion-page .sky .near{animation:driftn 195s linear infinite}
 @media (prefers-reduced-motion:reduce){
-  .sky .far,.sky .near{animation:none}
+  .suggestion-page .sky .far,.suggestion-page .sky .near{animation:none}
 }
 
 /* #434 amend-then-accept: the suggestion wears the create form's grammar —
    the heading IS the name (create.css .name-title, mirrored here because this
    screen does not load that sheet), and a field extraction read from the
    document carries the from-document mark (create.css .field.sugg). */
-.name-title{display:block;width:100%;background:none;border:0;padding:0;
+.suggestion-page .name-title{display:block;width:100%;background:none;border:0;padding:0;
   font:600 22px var(--display);line-height:1.25;color:var(--ink)}
-.name-title:focus{border-bottom:1px solid var(--accent)}
-.name-title.sugg{border-left:3px solid var(--accent);padding-left:10px}
-.panel .field.sugg input{border-left:3px solid var(--accent)}
-.item-card .save-row .back{margin-top:0}
+.suggestion-page .name-title:focus{border-bottom:1px solid var(--accent)}
+.suggestion-page .name-title.sugg{border-left:3px solid var(--accent);padding-left:10px}
+.suggestion-page .panel .field.sugg input{border-left:3px solid var(--accent)}
+.suggestion-page .item-card .save-row .back{margin-top:0}

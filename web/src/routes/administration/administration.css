@@ -28,15 +28,15 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
     rgba(0,0,0,.8) 0%, rgba(0,0,0,1) 90%);
   mask-image:radial-gradient(ellipse 32% 30% at 50% 50%,
     rgba(0,0,0,.8) 0%, rgba(0,0,0,1) 90%)}
-/* atlas/dawn's chart-alpha damper (owner-ratified, 01fb4cd: "dark ink on pale
+/* clouds/dawn's chart-alpha damper (owner-ratified, 01fb4cd: "dark ink on pale
    paper already carries; the ISS lands softer here"). Neither family.css nor
    packs.css carries --chart-alpha yet (create.css reads it with fallback 1
    and no pack sets it), so it is added here, scoped to this screen, rather
    than widened to every --chart-alpha reader at once. */
-[data-theme=atlas] .mission-page,[data-theme=dawn] .mission-page{--chart-alpha:.82}
+[data-theme=clouds] .mission-page,[data-theme=dawn] .mission-page{--chart-alpha:.82}
 .mission-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=atlas] .mission-page .vignette,[data-theme=dawn] .mission-page .vignette{background:none}
+[data-theme=clouds] .mission-page .vignette,[data-theme=dawn] .mission-page .vignette{background:none}
 
 .mission-page .page{position:relative;z-index:2;max-width:980px;margin:0 auto;padding:96px 24px 120px}
 .mission-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
