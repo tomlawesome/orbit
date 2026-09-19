@@ -114,6 +114,22 @@ Two things the shots cannot show, drawn in rather than invented around:
 One change to round 1's framing: the belt's two circular cut-outs grew from
 124px to 140px. At 124 the veil cut the caption to "T certificate 2025".
 
-## Verdicts
+## Verdicts (owner, 2026-09-19)
+
+*"The lift tour is better but it's still not right. You didn't show any of the
+stuff below the dial, nor click on any of the documents or cycle through any of
+the items in the meteor belt. You didn't show how to get to the inbox, or show
+the menu with the themes. I also prefer the idea of the tour being one
+continuous uninterrupted journey. There should be a little more information
+along the way, and I'd like to try having a time bar and a play/pause/stop
+button instead of next back and skip."*
+
+- **Lift survives; Guide is closed.** The control acts; nothing that is not the
+  reader's cursor travels the screen.
+- Beats are closed as a mechanic: round 4 is one continuous film with a time
+  bar and play / pause / stop.
+- Round 4 must show: the manifest below the dial, a document brought in from
+  the belt and the belt cycled, the way to the inbox, the account menu and its
+  themes — and carry more of the ratified copy along the way.
 
 Written by Claude Opus 5, 2026-09-18.
