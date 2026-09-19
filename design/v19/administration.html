@@ -169,6 +169,23 @@
                  border:0;cursor:pointer;padding:4px;flex:none}
   .person .place:hover{color:var(--accent-text)}
 
+  /* THE NEW-SYSTEM FORM, OPEN (#1052, decision of 2026-09-19). The resting
+     sheet is unchanged -- this is drawn open so the record shows what the
+     button does. A name, the acting administrator's own password, and then
+     the People as owner buttons: pressing one is the submit, exactly as
+     pressing a system is the submit in the People card's "place in a
+     system..." picker. The system starts empty and the administrator is not
+     in it. */
+  .newsystem{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;
+             padding:10px 2px 2px;border-bottom:1px solid var(--line-soft);margin-bottom:6px}
+  .newsystem label{font:10.5px var(--mono);letter-spacing:.06em;color:var(--ink-faint)}
+  .newsystem input{font:12px var(--mono);color:var(--ink);background:var(--panel-raised);
+                   border:1px solid var(--line);border-radius:9px;padding:7px 10px;width:100%}
+  .newsystem .owners{display:flex;gap:6px;flex-wrap:wrap;padding:4px 2px}
+  .newsystem .owners button{font:10.5px var(--mono);color:var(--ink-mid);background:none;
+                            border:1px solid var(--line);border-radius:9px;padding:5px 10px;cursor:pointer}
+  .newsystem .owners button:hover{border-color:var(--accent);color:var(--accent-text)}
+
   .system{display:flex;align-items:center;gap:14px;padding:10px 2px;
           border-bottom:1px solid var(--line-soft)}
   .system:last-child{border:0}
@@ -294,6 +311,23 @@
 
     <div class="card">
       <div class="cardhead"><h3>Systems</h3><button>new system</button></div>
+      <!-- Drawn OPEN for the record (#1052): pressing the button above puts
+           this under the card head. A name, the challenge every other admin
+           action on this screen asks for, and the People as owner buttons. -->
+      <div class="newsystem">
+        <label for="newsystem-name">name</label>
+        <input id="newsystem-name" value="Ridge Farm" />
+        <label for="newsystem-current">your current password</label>
+        <input id="newsystem-current" type="password" value="" />
+        <span></span>
+        <div class="owners">
+          <button>Tom Lawson</button>
+          <button>Emma Lawson</button>
+          <button>Rob Lawson</button>
+          <button>Sue Lawson</button>
+          <button>Gran</button>
+        </div>
+      </div>
       <div class="system">
         <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
           <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
