@@ -188,7 +188,7 @@ jobs:
           ORBIT_TEST_COVERAGE: "true"
         run: bash scripts/test-backend.sh
 
-      - name: Build production application
+      - name: Build the production application, if it is not already built
         if: >-
           ${{
             (
@@ -197,7 +197,10 @@ jobs:
             ) &&
             needs.changes.outputs.build == 'true'
           }}
-        run: pnpm --filter orbit-web build
+        # The step above has already built it, so this builds only when it
+        # somehow did not (#1061) -- the same guard the GitLab `fast` job uses,
+        # so the two definitions keep saying the same thing.
+        run: node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build
 
       # The render proof, run here as well as inside the image (#735). The
       # container build is the authoritative gate, but it is minutes away;

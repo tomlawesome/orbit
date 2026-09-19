@@ -1,3 +1,7 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { expect, test } from "@playwright/test";
 
 /*
@@ -24,9 +28,28 @@ import { expect, test } from "@playwright/test";
  * see docs/launch-animation-timings.md for the numbers and what they
  * implicate. This file only has to keep collecting them the same way, run
  * after run.
+ *
+ * Where it runs changed on #1048: this is the `launch-timing` Playwright
+ * project, not the `fidelity` one, so the per-merge-request visual gate no
+ * longer collects it. It runs once per promotion, from the `launch_timing`
+ * job in .gitlab-ci.yml, because "the same way, run after run" is exactly
+ * what a shared machine could not give it.
  */
 
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
+
+/*
+ * Where each pack's numbers are left for something other than a human to read
+ * (#1048). The console line below is still what docs/launch-animation-timings
+ * .md is written from; this is the same summary as JSON, one file per pack,
+ * so the `launch_timing` CI job can carry a promotion's numbers forward and
+ * set the next promotion's beside them. One file per pack rather than one
+ * shared file because these tests run in sequence in one worker and a shared
+ * file would need locking to stay honest about that.
+ */
+const REPORT_DIR =
+  process.env.ORBIT_LAUNCH_TIMING_DIR ??
+  join(dirname(fileURLToPath(import.meta.url)), "..", "..", "test-results", "launch-timing");
 
 /*
  * Every pack in play (src/lib/theme.js's THEME_PACKS), because switching one
@@ -170,15 +193,21 @@ for (const pack of THEME_PACKS) {
     const createIntervals = intervalsOf([createPhase.submitAt, ...handoffSamples]);
     const homeIntervals = intervalsOf(homePhase.samples);
 
+    const measured = {
+      pack,
+      create: { ...summarise(createIntervals), raw: createIntervals.map((n) => Math.round(n * 100) / 100) },
+      home: { ...summarise(homeIntervals), raw: homeIntervals.map((n) => Math.round(n * 100) / 100) },
+    };
+
     /* The report a human reads: docs/launch-animation-timings.md is built
        from this, pack by pack, run by hand and copied in — not asserted on,
        because a smoothness verdict is the next step's call, not this one's. */
-    console.log(
-      `LAUNCH_TIMING ${JSON.stringify({
-        pack,
-        create: { ...summarise(createIntervals), raw: createIntervals.map((n) => Math.round(n * 100) / 100) },
-        home: { ...summarise(homeIntervals), raw: homeIntervals.map((n) => Math.round(n * 100) / 100) },
-      })}`,
-    );
+    console.log(`LAUNCH_TIMING ${JSON.stringify(measured)}`);
+
+    /* And the same numbers for the promotion gate to keep (#1048). Still no
+       verdict here: the comparison is the job's, and it needs the previous
+       release candidate's file to make one. */
+    mkdirSync(REPORT_DIR, { recursive: true });
+    writeFileSync(join(REPORT_DIR, `${pack}.json`), `${JSON.stringify(measured, null, 2)}\n`, "utf8");
   });
 }

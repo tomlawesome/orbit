@@ -120,9 +120,29 @@ objects also moved into small companion modules (`due-next-view.svelte.js`,
 `bands.js`) for the same reason. #782 stays open to carry the upstream
 constraint and the workaround, but no file needs it worked around today.
 
-The same job compiles `web/` (`pnpm --filter orbit-web build`, about ten
+The same job compiles `web/` (`pnpm --filter orbit-web build`, about twenty
 seconds). Before that, a `.svelte` file that did not compile could merge green
 and first fail at the container build on the `preview` push.
+
+It compiles it **once** (#1061). The build used to happen three times in one
+pipeline — `scripts/test-backend.sh` did it, `fast` did it again on the same
+checkout, and the fidelity gate's Playwright `webServer` did it a third time
+from source. `fast` now publishes `web/build` as an artefact and `fidelity`
+takes it. What stops a stale build being served instead is
+`scripts/web-build-stamp.mjs`: the build records a hash of everything it was
+made from — `web/` less its tests, `src/`, and the manifests that pin the
+dependency versions — and anything wanting to serve that build re-reads those
+files and compares. A mismatch, an absent build or an unstamped one all mean
+"build it here", which is what makes `pnpm --filter orbit-web fidelity` still
+work from a clean checkout with nothing to set up; `ORBIT_FORCE_WEB_BUILD=1`
+forces one anyway. Timestamps cannot do this
+job: a CI job clones the sources after the artefact was built, so the build
+always looks older than what it was built from.
+
+The container image still builds `web/` in its own `web-builder` stage, so the
+published image stays reproducible from the `Dockerfile` alone, and the jobs
+that load the image tarball run the application from the image rather than
+from `web/build`.
 
 ## CI target
 
@@ -365,6 +385,44 @@ release evidence is never inferred from a cheaper merge-request lane. Until a
 forge-native combined-state queue is available, only one release train is
 admitted to protected CI at a time while
 independent implementation and local validation continue concurrently.
+
+### Launch timing runs at the promotion gate, not on every merge (#1048)
+
+Frame timings through the launch hand-off used to run on every front-end
+merge request, because `web/package.json`'s `fidelity` script was a bare
+`playwright test` and so collected `launch-timing.spec.js` along with the
+screen comparisons. On a shared host the run-to-run noise was larger than the
+effect being measured: the same unchanged build photographed twice differed by
+up to 189 pixels, and a CSS-only phase nobody had touched moved as much as the
+phase under test (measured on #873, 2026-09-17). A correct fix could read as a
+regression and a bad one as a win.
+
+The spec is now its own Playwright project. `fidelity` runs the `fidelity`
+project — appearance, every front-end merge request, unchanged otherwise — and
+the `launch_timing` job runs the `launch-timing` project at the `dev` →
+`preview` promotion: the merge request whose target branch is `preview`, and
+the push to `preview` that lands it. Those two `rules:` conditions are written
+out rather than reusing `orbit_full_gate`, whose first arm matches every push
+to `dev` — the merge frequency this job exists to escape — and whose second
+targets `main`, which is the later gate.
+
+Quiet, as far as the lanes allow: the project's own `orbit-build` runner,
+which no other project's jobs reach, in the last stage with no `needs:`, so
+nothing else of Orbit's is running beside it, and a `resource_group` so two
+promotions cannot measure at once. Both runners share one host, and M11 rules
+out new capacity, so another project's shared-runner work is residual noise
+that cannot be removed here.
+
+The comparison is candidate against candidate.
+`scripts/ci/launch-timing-report.mjs` collects the per-pack numbers, reads the
+report this job left on `preview` at the previous promotion, and prints the
+two side by side with the commit range between them, which is what a
+regression is bisected over. It takes no verdict from the numbers: nobody has
+measured this measurement's noise floor on the quiet lane, and a threshold
+invented before that is how #873 went wrong. Three or four promotions' reports,
+or one run with `--repeat-each`, would earn one. The trade the owner accepted
+(2026-09-18): a signal you can trust, late, instead of one you cannot trust,
+immediately.
 
 ### Required behaviour
 
