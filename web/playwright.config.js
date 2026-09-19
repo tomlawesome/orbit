@@ -38,10 +38,23 @@ export default defineConfig({
     {
       /*
        * The adapter-node output, not `vite preview` — the gate should judge
-       * what actually ships, including its server rendering. Rebuilt each run
-       * so a stale build can never pass for a current one.
+       * what actually ships, including its server rendering.
+       *
+       * It used to rebuild on every run, so that a stale build could never
+       * pass for a current one. That guarantee is now the stamp's rather than
+       * the rebuild's (#1061): `web-build-stamp.mjs check` succeeds only when
+       * web/build was built from the same file contents this checkout has, so
+       * anything else — no build, a build from another branch, one file edited
+       * since — falls through to `pnpm build`. In CI the `fast` job has
+       * already built it and hands web/build over as an artefact, so the
+       * check passes and the gate serves those exact bytes; running this from
+       * a clean checkout builds it here instead, with nothing to remember.
+       *
+       * `||` and `&&` bind equally and left to right, so this reads
+       * (check || build) && serve: the server starts after whichever of the
+       * first two answered, and not at all if the build failed.
        */
-      command: "pnpm build && node build/index.js",
+      command: "node ../scripts/web-build-stamp.mjs check || pnpm build && node build/index.js",
       /* ORBIT_FIXTURES turns on the fixture /api routes (#451) so the seam's
          real fetch path renders known data. Production never sets it, and
          since the cut (#735) that is the whole of the protection — the

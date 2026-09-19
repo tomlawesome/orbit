@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "node scripts/collect-font-licences.mjs && vite build",
+    "build": "node scripts/collect-font-licences.mjs && vite build && node ../scripts/web-build-stamp.mjs write",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "scaffold": "node scripts/scaffold-screen.mjs",
