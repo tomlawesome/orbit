@@ -167,4 +167,24 @@ describe("scripts/compose-isolation-preflight.sh", () => {
     expect(result.stderr).toContain("could not resolve a Compose project name");
     expect(result.stderr).not.toContain("readonly variable");
   });
+
+  // #1040, other half: the same readonly caller must still get a clean
+  // accept for a valid project name -- proving the guard reads its own
+  // argument rather than silently falling back to the caller's `project` in
+  // either direction, not just the refusal one.
+  it("accepts a valid project even when the caller has made `project` readonly", () => {
+    const env = stubDockerOnPath({ projectName: "orbit-demo", runningContainers: [] });
+    const result = run(
+      `source "${lib}" &&
+       project="orbit-demo" &&
+       readonly project &&
+       compose_isolation_preflight "orbit-demo" "docker compose -p orbit-unique up" &&
+       echo "preflight-passed"`,
+      env,
+    );
+
+    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
+    expect(result.stdout.trim()).toBe("preflight-passed");
+    expect(result.stderr).not.toContain("readonly variable");
+  });
 });
