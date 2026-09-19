@@ -115,6 +115,9 @@ const test: TestUserConfig = {
           // Same reason (#995): uses node:test. Run standalone with
           // `node --test scripts/scratch-dir-ignored.test.mjs`.
           "scripts/scratch-dir-ignored.test.mjs",
+          // Same reason (#1020): uses node:test. Run standalone with
+          // `node --test scripts/ci/repin-base-image.test.mjs`.
+          "scripts/ci/repin-base-image.test.mjs",
           // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
           // unprivileged `big` lane, which has no `docker` binary on PATH.
           // test-e2e-local-reuse.test.mjs joined the list on #947: it drives
