@@ -382,8 +382,9 @@ export function mountBelt(root, options) {
      against a line this module solves for, and lifting it out into HTML
      would mean keeping a second copy of that arithmetic in sync. The seats
      beside it are already `<g role="button" tabindex="0">` (buildSeats), so
-     this is the screen's existing idiom rather than a new one — same
-     transparent target, same dashed accent ring on focus, same Enter/Space.
+     it borrows their shape: a transparent target, and Enter and Space. Not
+     their focus ring — belt.css says why the ring here is an `outline` on the
+     control itself rather than a shape drawn inside it.
      The press itself is handed straight to the screen's own ← / → handler. */
   function buildEnds() {
     endsG.textContent = "";
@@ -434,13 +435,14 @@ export function mountBelt(root, options) {
          with the search field. */
       const cap = el("g", { class: "endcap-hit", role: "button", tabindex: "0",
         "aria-label": name, "data-step": step });
+      /* No focus-ring shape in here: belt.css puts the ring on the control
+         itself as an `outline`, because the keyboard audit reads the computed
+         style of the focused element and a child cannot answer for it. */
       const target = el("rect", { class: "endtarget", fill: "transparent" });
-      const ring = el("rect", { class: "fring", rx: "9", fill: "none",
-        stroke: "var(--accent)", "stroke-width": "1.4", "stroke-dasharray": "3 3" });
       const t = /** @type {SVGTextContentElement} */ (
         el("text", { class: "endcap", x, y: y.toFixed(0), "text-anchor": anchor }));
       t.textContent = text;
-      cap.append(target, ring, t);
+      cap.append(target, t);
       endsG.appendChild(cap);
       const w = t.getComputedTextLength();
       const left = anchor === "end" ? x - w : x;
@@ -466,12 +468,10 @@ export function mountBelt(root, options) {
       /* 9.5px capitals stand about 7px off the baseline, so the ink's middle
          is three and a half above it. */
       const boxY = Math.max(0, Math.min(geom.H - MIN_TARGET, y - 3.5 - MIN_TARGET / 2));
-      for (const box of [target, ring]) {
-        box.setAttribute("x", boxX.toFixed(1));
-        box.setAttribute("y", boxY.toFixed(1));
-        box.setAttribute("width", boxW.toFixed(1));
-        box.setAttribute("height", String(MIN_TARGET));
-      }
+      target.setAttribute("x", boxX.toFixed(1));
+      target.setAttribute("y", boxY.toFixed(1));
+      target.setAttribute("width", boxW.toFixed(1));
+      target.setAttribute("height", String(MIN_TARGET));
       cap.addEventListener("click", () => pressEnd(cap, step));
       cap.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pressEnd(cap, step); }

@@ -110,18 +110,32 @@ for (const { width, height } of VIEWPORTS) {
     }
     expect(seen.sort(), "Tab did not reach both end-caps").toEqual(["-1", "1"]);
 
-    /* And the focus ring is really showing, not merely declared: belt.css
-       hides .fring at rest and shows it on :focus-visible, which a Tab is. */
+    /* And the ring is really showing, read the way the e2e keyboard audit
+       reads it: the computed style of THE ELEMENT THAT HAS FOCUS
+       (tests/e2e/support/keyboard.ts's focusVisible — an outline, or a
+       box-shadow). The first cut of this control drew the ring as a child
+       rect and asserted the CHILD's opacity here, which passed while the
+       focused <g> itself carried nothing, and the audit caught in CI what
+       this test had waved through (pipeline 1281). Asserting the same
+       property the audit does is the point. */
     const focused = await page.evaluate(() => {
       const cap = document.activeElement?.closest?.("#ends [data-step]");
-      const ring = cap?.querySelector(".fring");
+      const cs = cap ? getComputedStyle(cap) : null;
       return {
         step: cap?.getAttribute("data-step") ?? null,
         name: cap?.getAttribute("aria-label") ?? "",
-        ring: ring ? getComputedStyle(ring).opacity : "no ring",
+        outlineStyle: cs?.outlineStyle ?? "none",
+        outlineWidth: cs?.outlineWidth ?? "0px",
+        boxShadow: cs?.boxShadow ?? "none",
       };
     });
-    expect(Number(focused.ring), "the focused end-cap has no visible focus ring").toBeGreaterThan(0);
+    const outlined = focused.outlineStyle !== "none" && focused.outlineWidth !== "0px";
+    const shadowed = Boolean(focused.boxShadow) && focused.boxShadow !== "none";
+    expect(outlined || shadowed,
+      `the focused end-cap paints no indicator on itself: ${JSON.stringify(focused)}`).toBe(true);
+    /* Not a hairline that merely satisfies the check: it has to be seen
+       against the band. */
+    if (outlined) expect(Number.parseFloat(focused.outlineWidth)).toBeGreaterThanOrEqual(2);
     /* The name says what it does, rather than reading the two painted words
        back to somebody who cannot see them. */
     expect(focused.name.toLowerCase()).toContain("along the belt");

@@ -270,16 +270,24 @@
      the band, their labels hang below it. */
   .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-faint);
           text-transform:uppercase}
-  /* #1062: and each end-cap is a control, in the same idiom as the seats
-     above -- a transparent target, the screen's dashed accent ring on focus
-     and nothing at rest. The ink stays 9.5px; buildEnds squares the target up
-     around it at the product's 44px floor. At an exhausted end the control
-     dims and stops taking the press; it keeps its place in the Tab order so a
-     reader can still find it and be told it is spent. */
+  /* #1062: and each end-cap is a control -- a transparent target with the
+     screen's dashed accent ring on focus and nothing at rest. The ink stays
+     9.5px; buildEnds squares the target up around it at the product's 44px
+     floor. At an exhausted end the control dims and stops taking the press;
+     it keeps its place in the Tab order so a reader can still find it and be
+     told it is spent.
+
+     The ring is an OUTLINE on the control itself, not a dashed shape drawn
+     inside it. The seats above do it the other way -- a .fring circle that
+     opens at :focus-visible while the seat itself is outline:none -- and the
+     built screen's keyboard audit reads the computed style of THE ELEMENT
+     THAT HAS FOCUS, so a ring painted by a child leaves the focused <g>
+     carrying nothing. Chromium paints outline on an SVG element around its
+     bounding box, so this is one ring, on the thing the focus is on. 2px and
+     offset, not a hairline: it has to read against the band on a phone as
+     well as on a desk. */
   .endcap-hit{pointer-events:auto;cursor:pointer}
-  .endcap-hit:focus-visible{outline:none}
-  .endcap-hit .fring{opacity:0}
-  .endcap-hit:focus-visible .fring{opacity:1}
+  .endcap-hit:focus-visible{outline:2px dashed var(--accent);outline-offset:3px}
   .endcap-hit:hover .endcap{fill:var(--ink-mid)}
   .endcap-hit.off{cursor:default}
   .endcap-hit.off .endcap,
@@ -1143,12 +1151,14 @@ function buildEnds() {
     const y = project(phiAtX(x, dir), A, 0).y - clear;
     const cap = el("g", { class: "endcap-hit", role: "button", tabindex: "0",
       "aria-label": name, "data-step": step });
+    /* No focus-ring shape in here: the stylesheet puts the ring on the
+       control itself as an `outline`, because a built screen's keyboard audit
+       reads the computed style of the focused element and a child cannot
+       answer for it. */
     const target = el("rect", { class: "endtarget", fill: "transparent" });
-    const ring = el("rect", { class: "fring", rx: "9", fill: "none",
-      stroke: "var(--accent)", "stroke-width": "1.4", "stroke-dasharray": "3 3" });
     const t = el("text", { class: "endcap", x, y: y.toFixed(0), "text-anchor": anchor });
     t.textContent = text;
-    cap.append(target, ring, t);
+    cap.append(target, t);
     ends.appendChild(cap);
     /* The ink stays 9.5px; the TARGET does not. MIN_TARGET square at the
        least, squared up around the words and centred on them, so nothing
@@ -1161,12 +1171,10 @@ function buildEnds() {
     /* 9.5px capitals stand about 7px off the baseline, so the ink's middle is
        three and a half above it. */
     const boxY = Math.max(0, Math.min(H - MIN_TARGET, y - 3.5 - MIN_TARGET / 2));
-    for (const box of [target, ring]) {
-      box.setAttribute("x", (left + w / 2 - boxW / 2).toFixed(1));
-      box.setAttribute("y", boxY.toFixed(1));
-      box.setAttribute("width", boxW.toFixed(1));
-      box.setAttribute("height", String(MIN_TARGET));
-    }
+    target.setAttribute("x", (left + w / 2 - boxW / 2).toFixed(1));
+    target.setAttribute("y", boxY.toFixed(1));
+    target.setAttribute("width", boxW.toFixed(1));
+    target.setAttribute("height", String(MIN_TARGET));
     cap.addEventListener("click", () => pressEnd(cap, step));
     cap.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pressEnd(cap, step); }
