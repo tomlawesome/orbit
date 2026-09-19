@@ -102,23 +102,47 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
 /* The glass: the night sky itself, held still and quieted, inside the ring
    and nowhere else. It is a darkening rather than a paint, so a light pack
    cannot wash it out — the per-pack opacity exception that opened this
-   issue is deleted above, not extended here. */
+   issue is deleted above, not extended here.
+
+   THE GLASS AND THE STROKE ARE TWO BOXES (#873, "the ring close uses the
+   compensated split"). They were one, and closing that one box from 500px to
+   302.4px meant re-laying-out and re-blurring the whole backdrop on every
+   frame of the hand-over — worst-case paint 7.06ms against a 16ms budget.
+   Split, the expensive half (this one: the fill, the backdrop blur, the
+   shadow, and no border at all) closes with `transform: scale()`, which the
+   compositor runs without touching layout, and the line weight lives on
+   `.ringstroke` below, which stays unblurred and therefore cheap to resize.
+
+   Scaling the whole ring instead was rejected: a rasterised-then-scaled ring
+   thins its own 4.2px stroke and drifts the orb off its station. The split is
+   what keeps both exact while the blur still rides the compositor. */
 :where(.arrival, .ringcard) .bigring .ringglass{width:500px;height:500px;border-radius:50%;
-      border:4.2px solid #8791b3;
       background:rgba(6,10,22,.56);
       -webkit-backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
       backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
       box-shadow:0 40px 120px -50px rgba(0,0,0,.8),
                  0 0 90px -40px rgba(216,180,90,.18) inset;
-      transition:width .5s cubic-bezier(.55,0,.2,1),
-                 height .5s cubic-bezier(.55,0,.2,1),
+      transition:transform .5s cubic-bezier(.55,0,.2,1),
                  background .5s ease,backdrop-filter .5s ease}
+
+/* The stroke: the ring's own 4.2px line, on a plain box with nothing blurred
+   behind it, still closing by width/height so the line never thins. It is
+   `position:relative;z-index:1` because the glass takes a transform while it
+   closes, and a transformed sibling paints above plain in-flow boxes — without
+   this the glass would slide over the line for the length of the close. */
+:where(.arrival, .ringcard) .bigring .ringstroke{width:500px;height:500px;border-radius:50%;
+      border:4.2px solid #8791b3;
+      position:relative;z-index:1;
+      transition:width .5s cubic-bezier(.55,0,.2,1),
+                 height .5s cubic-bezier(.55,0,.2,1)}
 
 /* The orb keeps its 29.4px and its station: the login orb's own angle held
    as a percentage, so it keeps its place on the ring at any size — one turn
    per 40s, the only motion CON-19 allows the mark (@keyframes spinback is
-   flight.css's, shared rather than redeclared). */
-:where(.arrival, .ringcard) .bigring .ringorbit{width:500px;height:500px;position:relative;
+   flight.css's, shared rather than redeclared). Untouched by the #873 split:
+   it already resizes on its own unblurred box. It is lifted with `z-index`
+   for the same reason `.ringstroke` is — the closing glass is transformed. */
+:where(.arrival, .ringcard) .bigring .ringorbit{width:500px;height:500px;position:relative;z-index:1;
        animation:spinback 40s linear infinite;
        transition:width .5s cubic-bezier(.55,0,.2,1),
                   height .5s cubic-bezier(.55,0,.2,1)}
@@ -271,7 +295,8 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    motion-driven. Only the movement goes. */
 @media (prefers-reduced-motion: reduce){
   #formlayer,:where(.ringcard) .card,:where(.ringcard) .bigring,
-  :where(.ringcard) .bigring .ringglass,:where(.ringcard) .bigring .ringorbit{
+  :where(.ringcard) .bigring .ringglass,:where(.ringcard) .bigring .ringstroke,
+  :where(.ringcard) .bigring .ringorbit{
     transition-duration:.7s!important;transition-timing-function:ease!important}
   :where(.ringcard) .bigring .ringorbit{animation:none!important}
   .err.shown{animation:none!important}
