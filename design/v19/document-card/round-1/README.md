@@ -194,4 +194,30 @@ question or this card's?
 
 ## Verdicts
 
-Not yet given.
+Owner, 2026-09-19, verbatim:
+
+> the full page zoom of the reading room is great, but it should be a
+> window over the top of the belt, not a separate page. We need to be able
+> to zoom the document size for readability. What I don't like is having a
+> wholly separate card for the document. In the past there was a view where
+> you can drag and drop a file and the view expands with a full page view
+> on the right. I loved that full page top sheet view, it was really slick.
+> I'd like the view to open like that when you click on a document. If it's
+> on the left, open it left. If it's on the right, open it on the right.
+> Clicking off anywhere on the belt that's not already clickable (dead
+> space) closes the preview view.
+
+What that means for the three:
+
+- **A, B and C are dropped as drawn.** The separate document card — page
+  one in the plate's seat, the card grown, the room — goes. A document is
+  never the centred body; the item card stays at the apex.
+- **C's full-page feel survives** as the reader inside the sheet, with a
+  real zoom control; C's page rail and its band tile do not.
+- **What replaces them** is create-v3's top sheet (`design/v19/create-v3.html`,
+  `design/owner-decisions.md` 421–431) opened over the belt on the paper's
+  own side, closed by dead space. That is round 2, direction D:
+  `../round-2/`.
+- Questions 1, 3 and 5 above are answered by the verdict (D; kill the tile;
+  remove lives on the sheet's foot). 2 and 4 stay open and are carried to
+  round 2.
