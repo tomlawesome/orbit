@@ -1,8 +1,9 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { householdRegister } from "./support/households";
 import { FIXTURE_PASSWORD, ensureLocalPassword } from "./support/local-credentials";
-import { waitForApprovalLink } from "./support/mail";
+import { newestApprovalUid, waitForApprovalLink } from "./support/mail";
 
 /**
  * THE EMAIL SECOND FACTOR, WALKED (#1033, ADR-0027).
@@ -30,6 +31,13 @@ import { waitForApprovalLink } from "./support/mail";
  *   Orbit Member     never gains a password, so the "not challenged" test can
  *                    say "no approval mail reached this mailbox" and mean it
  *
+ * THREE SENDS OF THE OUTSIDER'S FIVE. ADR-0027 §8 allows five approval mails
+ * per account per hour, and this file spends three of them (one, then two).
+ * That is comfortable on a fresh stack and is the whole allowance on a stack
+ * run twice within the hour: a second run against a kept stack (--reuse) gets
+ * "check the mail we already sent" and no new mail, which is the limit
+ * working rather than anything here failing.
+ *
  * Each test drives its own page, and the approving reader is always a SEPARATE
  * browser context -- the whole design is that the browser which approves is
  * not the browser which gets in, and sharing a context would quietly prove the
@@ -40,6 +48,61 @@ const DESKTOP_PROJECT = "desktop-chromium";
 
 const OUTSIDER = { name: "Orbit Outsider", email: "outsider@example.test", password: FIXTURE_PASSWORD["Orbit Outsider"] };
 const MEMBER = { name: "Orbit Member", email: "member@example.test" };
+
+const households = householdRegister();
+/** Whether this run made a household, so a skipped project sweeps nothing. */
+let seated = false;
+
+/**
+ * SOMEWHERE FOR THE OUTSIDER TO BELONG, because two screens this journey ends
+ * on are gated ones, and hooks.server.js sends a reader who belongs to no
+ * household anywhere to the arrival instead (#840).
+ *
+ * That bounce is what broke this file first time out: the step-up inside
+ * `ensureLocalPassword` comes back to /settings, the hook sent it to `/`, and
+ * the helper waited twenty seconds for a URL that was never coming. The
+ * refusal line the second test reads is drawn on /home, which is gated the
+ * same way, so the same seat is what lets that assertion be made at all.
+ *
+ * The shape sign-in-methods.spec.ts uses for the same reason, swept the same
+ * way (#730), and only when the arrival says this reader is adrift -- on a
+ * kept stack (--reuse) they already have one.
+ */
+async function ensureHousehold(page: Page) {
+  const adrift = await page.locator("#gobtn").or(page.getByRole("heading", { name: "where do you belong?" }))
+    .first().isVisible().catch(() => false);
+  if (!adrift) return;
+  const created = await page.evaluate(async (householdName) => {
+    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const householdId = crypto.randomUUID();
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+      body: JSON.stringify({
+        type: "household.create",
+        household: {
+          id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
+          memberCount: 1, canManage: true, onboardingComplete: true,
+          sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
+          items: [],
+        },
+      }),
+    });
+    if (!response.ok) throw new Error(`household.create failed: ${response.status}`);
+    return { id: householdId, name: householdName };
+  }, `Second factor ${Date.now()}`);
+  households.track(created);
+  seated = true;
+}
+
+/* #730: swept from the administrator's own session when the file is done -- a
+   hard delete is an instance-admin power and this reader is deliberately
+   ordinary. A project that skipped the file made nothing to sweep. */
+test.afterAll(async ({ browser }) => {
+  if (!seated) return;
+  await claimInstanceAsAdministrator(browser, { afterSignIn: (page) => households.sweep(page) });
+});
 
 test.describe.configure({ mode: "serial", retries: 0 });
 
@@ -84,18 +147,34 @@ async function signOut(page: Page): Promise<void> {
   expect(status).toBe(200);
 }
 
-/** Types a password on the real door and leaves the tab where it lands. */
-async function typeThePassword(page: Page): Promise<void> {
+/**
+ * Types a password on the real door and leaves the tab where it lands.
+ *
+ * Returns the mailbox mark taken just before the door was knocked on, which
+ * is what tells the approval THIS sign-in causes from the ones already in the
+ * outsider's inbox -- see `waitForApprovalLink`.
+ */
+async function typeThePassword(page: Page): Promise<number> {
+  const mark = await newestApprovalUid(OUTSIDER.email);
   await page.goto("/login");
-  /* Mixed mode: the ratified gate is unchanged and the quiet line under it
-     opens the local card (§2.7). On a local-only door the card is already up,
-     so the line is optional rather than asserted. */
+  /* THE DOOR DECIDES ITS OWN FACE, and it does it client-side: /login is
+     prerendered and asks /api/auth/availability in onMount (SignIn.svelte's
+     run()), so for a moment after the page loads it is showing neither. A
+     `count()` taken in that moment reads zero and means nothing -- which is
+     how this file first went red on the quiet line's absence rather than on
+     anything it claims.
+     Mixed mode: the ratified gate is unchanged and the quiet line under it
+     opens the local card (§2.7). On a local-only door that card is already
+     up, so whichever of the two arrives first is the one to follow. */
   const localLine = page.locator("#localopen");
-  if (await localLine.count() > 0) await localLine.click();
-  await expect(page.locator("#idemail")).toBeVisible({ timeout: 30_000 });
+  const email = page.locator("#idemail");
+  await expect(localLine.or(email).first()).toBeVisible({ timeout: 30_000 });
+  if (await localLine.isVisible()) await localLine.click();
+  await expect(email).toBeVisible({ timeout: 30_000 });
   await page.fill("#idemail", OUTSIDER.email);
   await page.fill("#idpassword", OUTSIDER.password);
   await page.locator("#idbtn").click();
+  return mark;
 }
 
 /**
@@ -133,12 +212,14 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
 
   await claimInstanceAsAdministrator(browser);
   await signInWithProvider(page, OUTSIDER.name);
+  /* Before any gated screen is asked for -- see ensureHousehold. */
+  await ensureHousehold(page);
   await page.goto("/settings");
   /* The one thing the product cannot do for itself yet -- see the helper. */
   await ensureLocalPassword(page, OUTSIDER.name, OUTSIDER.password);
   await signOut(page);
 
-  await typeThePassword(page);
+  const knocked = await typeThePassword(page);
 
   /* THE SECOND SCREEN. The password was right, and it bought a wait rather
      than a session -- asserted on the server too, so this cannot pass on a
@@ -148,7 +229,7 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
   await expect(page).toHaveURL(/\/login$/);
   expect((await page.request.get("/api/auth/session")).status()).toBe(401);
 
-  const link = await waitForApprovalLink(OUTSIDER.email);
+  const link = await waitForApprovalLink(OUTSIDER.email, 60_000, knocked);
   await decideOnAnotherDevice(browser, link, "#approveyes");
 
   /* The waiting tab lets itself in, on its own, with no further typing. */
@@ -162,10 +243,10 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
 test("\"this wasn't me\" turns the sign-in away, and the account holder is told next time", async ({ page, browser }) => {
   test.setTimeout(240_000);
 
-  await typeThePassword(page);
+  const knocked = await typeThePassword(page);
   await expect(page.locator(".card.waiting")).toBeVisible({ timeout: 30_000 });
 
-  const refused = await waitForApprovalLink(OUTSIDER.email);
+  const refused = await waitForApprovalLink(OUTSIDER.email, 60_000, knocked);
   await decideOnAnotherDevice(browser, refused, "#approveno");
 
   /* The tab is told, and stays out. */
@@ -175,13 +256,19 @@ test("\"this wasn't me\" turns the sign-in away, and the account holder is told 
 
   /* AND THE OTHER HALF OF A REFUSAL: somebody knew that password, so the next
      sign-in that DOES work carries one line about it. */
-  await typeThePassword(page);
+  const knockedAgain = await typeThePassword(page);
   await expect(page.locator(".card.waiting")).toBeVisible({ timeout: 30_000 });
-  const approved = await waitForApprovalLink(OUTSIDER.email);
+  const approved = await waitForApprovalLink(OUTSIDER.email, 60_000, knockedAgain);
   await decideOnAnotherDevice(browser, approved, "#approveyes");
-  await settleArrival(page);
 
-  await page.goto("/home");
+  /* THE SKY THEY LAND ON, and not a second visit to it. Asking for the notice
+     is what spends it -- /api/auth/sign-in-notice takes it in the statement
+     that answers -- so the first /home this tab draws is the only one that can
+     carry the line. The approved tab goes there on its own, because this
+     reader has a household; navigating again afterwards would be reading a sky
+     whose notice the landing had already taken. */
+  await settleArrival(page);
+  await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
   const notice = page.locator(".refused");
   await expect(notice).toBeVisible({ timeout: 30_000 });
   await expect(notice).toContainText("refused");
