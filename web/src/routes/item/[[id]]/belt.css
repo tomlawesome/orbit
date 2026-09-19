@@ -210,6 +210,20 @@
      the band, their labels hang below it. */
   .belt-page .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-quiet);
           text-transform:uppercase}
+  /* #1062: and each end-cap is a control, in the same idiom as the seats
+     above -- a transparent target, the screen's dashed accent ring on focus
+     and nothing at rest. The ink stays 9.5px; belt.behaviour.js squares the
+     target up around it at the product's 44px floor. At an exhausted end the
+     control dims and stops taking the press; it keeps its place in the Tab
+     order so a reader can still find it and be told it is spent. */
+  .belt-page .endcap-hit{pointer-events:auto;cursor:pointer}
+  .belt-page .endcap-hit:focus-visible{outline:none}
+  .belt-page .endcap-hit .fring{opacity:0}
+  .belt-page .endcap-hit:focus-visible .fring{opacity:1}
+  .belt-page .endcap-hit:hover .endcap{fill:var(--ink-mid)}
+  .belt-page .endcap-hit.off{cursor:default}
+  .belt-page .endcap-hit.off .endcap,
+  .belt-page .endcap-hit.off:hover .endcap{fill:var(--ink-quiet);opacity:.4}
 
   /* ---- THE DOCUMENTS' MARK -------------------------------------------
      The owner: "a different coloured perimeter line around them, and/or
