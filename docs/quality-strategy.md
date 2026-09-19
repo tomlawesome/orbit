@@ -120,9 +120,29 @@ objects also moved into small companion modules (`due-next-view.svelte.js`,
 `bands.js`) for the same reason. #782 stays open to carry the upstream
 constraint and the workaround, but no file needs it worked around today.
 
-The same job compiles `web/` (`pnpm --filter orbit-web build`, about ten
+The same job compiles `web/` (`pnpm --filter orbit-web build`, about twenty
 seconds). Before that, a `.svelte` file that did not compile could merge green
 and first fail at the container build on the `preview` push.
+
+It compiles it **once** (#1061). The build used to happen three times in one
+pipeline — `scripts/test-backend.sh` did it, `fast` did it again on the same
+checkout, and the fidelity gate's Playwright `webServer` did it a third time
+from source. `fast` now publishes `web/build` as an artefact and `fidelity`
+takes it. What stops a stale build being served instead is
+`scripts/web-build-stamp.mjs`: the build records a hash of everything it was
+made from — `web/` less its tests, `src/`, and the manifests that pin the
+dependency versions — and anything wanting to serve that build re-reads those
+files and compares. A mismatch, an absent build or an unstamped one all mean
+"build it here", which is what makes `pnpm --filter orbit-web fidelity` still
+work from a clean checkout with nothing to set up; `ORBIT_FORCE_WEB_BUILD=1`
+forces one anyway. Timestamps cannot do this
+job: a CI job clones the sources after the artefact was built, so the build
+always looks older than what it was built from.
+
+The container image still builds `web/` in its own `web-builder` stage, so the
+published image stays reproducible from the `Dockerfile` alone, and the jobs
+that load the image tarball run the application from the image rather than
+from `web/build`.
 
 ## CI target
 
