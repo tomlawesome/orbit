@@ -358,6 +358,44 @@ forge-native combined-state queue is available, only one release train is
 admitted to protected CI at a time while
 independent implementation and local validation continue concurrently.
 
+### Launch timing runs at the promotion gate, not on every merge (#1048)
+
+Frame timings through the launch hand-off used to run on every front-end
+merge request, because `web/package.json`'s `fidelity` script was a bare
+`playwright test` and so collected `launch-timing.spec.js` along with the
+screen comparisons. On a shared host the run-to-run noise was larger than the
+effect being measured: the same unchanged build photographed twice differed by
+up to 189 pixels, and a CSS-only phase nobody had touched moved as much as the
+phase under test (measured on #873, 2026-09-17). A correct fix could read as a
+regression and a bad one as a win.
+
+The spec is now its own Playwright project. `fidelity` runs the `fidelity`
+project — appearance, every front-end merge request, unchanged otherwise — and
+the `launch_timing` job runs the `launch-timing` project at the `dev` →
+`preview` promotion: the merge request whose target branch is `preview`, and
+the push to `preview` that lands it. Those two `rules:` conditions are written
+out rather than reusing `orbit_full_gate`, whose first arm matches every push
+to `dev` — the merge frequency this job exists to escape — and whose second
+targets `main`, which is the later gate.
+
+Quiet, as far as the lanes allow: the project's own `orbit-build` runner,
+which no other project's jobs reach, in the last stage with no `needs:`, so
+nothing else of Orbit's is running beside it, and a `resource_group` so two
+promotions cannot measure at once. Both runners share one host, and M11 rules
+out new capacity, so another project's shared-runner work is residual noise
+that cannot be removed here.
+
+The comparison is candidate against candidate.
+`scripts/ci/launch-timing-report.mjs` collects the per-pack numbers, reads the
+report this job left on `preview` at the previous promotion, and prints the
+two side by side with the commit range between them, which is what a
+regression is bisected over. It takes no verdict from the numbers: nobody has
+measured this measurement's noise floor on the quiet lane, and a threshold
+invented before that is how #873 went wrong. Three or four promotions' reports,
+or one run with `--repeat-each`, would earn one. The trade the owner accepted
+(2026-09-18): a signal you can trust, late, instead of one you cannot trust,
+immediately.
+
 ### Required behaviour
 
 - Superseded runs are cancelled where safe.
