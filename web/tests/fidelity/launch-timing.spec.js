@@ -173,7 +173,6 @@ for (const pack of THEME_PACKS) {
     /* The report a human reads: docs/launch-animation-timings.md is built
        from this, pack by pack, run by hand and copied in — not asserted on,
        because a smoothness verdict is the next step's call, not this one's. */
-    // eslint-disable-next-line no-console
     console.log(
       `LAUNCH_TIMING ${JSON.stringify({
         pack,

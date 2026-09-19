@@ -444,6 +444,10 @@
          `body.reclaimed` below) — see arrival.css for the ring itself. -->
     <div class="bigring" aria-hidden="true">
       <div class="ringglass"></div>
+      <!-- the ring's line, on its own unblurred box (#873): the glass
+           closes on the compositor, this closes by width/height so the
+           4.2px stroke never thins. See ringcard.css. -->
+      <div class="ringstroke"></div>
       <div class="ringorbit"><i></i></div>
     </div>
     <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
