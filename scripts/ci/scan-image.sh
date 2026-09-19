@@ -18,6 +18,13 @@
 #   ORBIT_REVISION        source revision recorded in the evidence
 #   GITHUB_WORKSPACE      optional; defaults to the repository root
 #   RUNNER_TEMP           optional; defaults to $TMPDIR or /tmp
+#   TRIVY_CACHE_DIR       optional; overrides where the Trivy database cache
+#                         lives on the host, in place of the default under
+#                         RUNNER_TEMP. GitLab's supply_chain_image job points
+#                         this at a shared, dated cache directory instead
+#                         (#946) -- RUNNER_TEMP itself is wiped at the end of
+#                         every job on that runner, so a cache placed there
+#                         could never survive to the next pipeline.
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -31,14 +38,15 @@ cd "${repo_root}"
 
 workspace="${GITHUB_WORKSPACE:-${repo_root}}"
 runner_temp="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
-readonly workspace runner_temp
+trivy_cache_dir="${TRIVY_CACHE_DIR:-${runner_temp}/trivy-cache}"
+readonly workspace runner_temp trivy_cache_dir
 
-mkdir -p .orbit-supply-chain "${runner_temp}/trivy-cache"
+mkdir -p .orbit-supply-chain "${trivy_cache_dir}"
 bash scripts/trivy-db-retry.sh docker run --rm \
   --env TRIVY_DB_REPOSITORY \
   --volume /var/run/docker.sock:/var/run/docker.sock \
   --volume "${workspace}:/workspace" \
-  --volume "${runner_temp}/trivy-cache:/root/.cache/trivy" \
+  --volume "${trivy_cache_dir}:/root/.cache/trivy" \
   "${TRIVY_IMAGE}" image \
   --scanners vuln \
   --format json \
@@ -48,14 +56,14 @@ bash scripts/trivy-db-retry.sh docker run --rm \
   --env TRIVY_DB_REPOSITORY \
   --volume /var/run/docker.sock:/var/run/docker.sock \
   --volume "${workspace}:/workspace" \
-  --volume "${runner_temp}/trivy-cache:/root/.cache/trivy" \
+  --volume "${trivy_cache_dir}:/root/.cache/trivy" \
   "${TRIVY_IMAGE}" image \
   --scanners vuln \
   --format spdx-json \
   --output /workspace/.orbit-supply-chain/image.spdx.json \
   "${TESTED_IMAGE_TAG}"
 docker run --rm \
-  --volume "${runner_temp}/trivy-cache:/root/.cache/trivy" \
+  --volume "${trivy_cache_dir}:/root/.cache/trivy" \
   "${TRIVY_IMAGE}" version --format json \
   > .orbit-supply-chain/trivy-version.json
 node scripts/supply-chain-policy.mjs image \
