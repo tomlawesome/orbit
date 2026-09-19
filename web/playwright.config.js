@@ -12,6 +12,30 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],
+  /*
+   * Two projects, because this directory holds two different kinds of test
+   * and they belong at different moments (#1048, owner 2026-09-18).
+   *
+   * `fidelity` guards an appearance: it photographs a screen and compares it
+   * with a committed baseline, and it has to run on every merge request that
+   * moves the front end, because that is when a screen breaks.
+   *
+   * `launch-timing` guards nothing. It measures frame intervals through the
+   * launch hand-off, and on a shared machine the run-to-run noise is larger
+   * than the effect being measured -- the same unchanged build differed by up
+   * to 189 pixels, and a CSS-only phase nobody had touched moved as much as
+   * the phase under test. So it runs once per promotion instead, on the
+   * quietest lane this host has, from the `launch_timing` CI job.
+   *
+   * Selecting by project rather than by path keeps the split in one place:
+   * `pnpm --filter orbit-web fidelity` and `pnpm --filter orbit-web
+   * launch-timing` each name their own, and neither can pick up the other's
+   * files by accident when a new spec lands in this directory.
+   */
+  projects: [
+    { name: "fidelity", testIgnore: "**/launch-timing.spec.js" },
+    { name: "launch-timing", testMatch: "**/launch-timing.spec.js" },
+  ],
   use: {
     /*
      * 1600x1000 is the design's own SVG viewBox, so the artwork is judged at
@@ -38,10 +62,23 @@ export default defineConfig({
     {
       /*
        * The adapter-node output, not `vite preview` — the gate should judge
-       * what actually ships, including its server rendering. Rebuilt each run
-       * so a stale build can never pass for a current one.
+       * what actually ships, including its server rendering.
+       *
+       * It used to rebuild on every run, so that a stale build could never
+       * pass for a current one. That guarantee is now the stamp's rather than
+       * the rebuild's (#1061): `web-build-stamp.mjs check` succeeds only when
+       * web/build was built from the same file contents this checkout has, so
+       * anything else — no build, a build from another branch, one file edited
+       * since — falls through to `pnpm build`. In CI the `fast` job has
+       * already built it and hands web/build over as an artefact, so the
+       * check passes and the gate serves those exact bytes; running this from
+       * a clean checkout builds it here instead, with nothing to remember.
+       *
+       * `||` and `&&` bind equally and left to right, so this reads
+       * (check || build) && serve: the server starts after whichever of the
+       * first two answered, and not at all if the build failed.
        */
-      command: "pnpm build && node build/index.js",
+      command: "node ../scripts/web-build-stamp.mjs check || pnpm build && node build/index.js",
       /* ORBIT_FIXTURES turns on the fixture /api routes (#451) so the seam's
          real fetch path renders known data. Production never sets it, and
          since the cut (#735) that is the whole of the protection — the

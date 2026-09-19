@@ -375,10 +375,16 @@ variables:
 
 # The same wait, for the two jobs that already took `fast`'s artefacts, and
 # that still wait on the policy jobs (#945 did not touch this anchor).
+#
+# `artifacts: true` is spelled out rather than left to the default since #1061:
+# `fast` now publishes the built web application here, and `fidelity` serves it
+# rather than building its own. A `needs:` that stopped delivering artefacts
+# would not fail — the gate would quietly rebuild — so the delivery says so.
 .needs_gated_with_fast_artifacts: &needs_gated_with_fast_artifacts
   - job: classify
     artifacts: true
   - job: fast
+    artifacts: true
   - job: fast_docker
     artifacts: false
     optional: true
@@ -826,12 +832,20 @@ fast:
     - *drop_to_node
     # ORBIT_TEST_SKIP_DOCKER excludes the suites fast_docker owns, below.
     - orbit_as_node 'ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh'
-    # The production build and the render proof, run here as well as inside the
-    # image: the container build is the authoritative gate but it is minutes
-    # away, and this fails in seconds when a packaging change breaks previews.
+    # The render proof, run here as well as inside the image: the container
+    # build is the authoritative gate but it is minutes away, and this fails in
+    # seconds when a packaging change breaks previews.
+    #
+    # The build itself is the one test-backend.sh above has just done (#1061).
+    # This used to repeat it outright -- the same `pnpm --filter orbit-web
+    # build` twice in one job, about 20 s each. The stamp check is kept rather
+    # than the line simply deleted so this step still stands up on its own if
+    # the script above ever stops building: it builds only when web/build is
+    # not already this checkout's.
     - |
       if [ "${ORBIT_BUILD:-true}" = "true" ]; then
-        orbit_as_node 'pnpm --filter orbit-web build && pnpm test:web-pdfjs'
+        orbit_as_node 'node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build'
+        orbit_as_node 'pnpm test:web-pdfjs'
       else
         echo "skipped: no build-risk change"
       fi
@@ -840,6 +854,16 @@ fast:
     name: orbit-coverage
     paths:
       - coverage/
+      # The built web application, so `fidelity` serves these bytes instead of
+      # building its own copy (#1061, ADR-0028 slice 1). About 7 MB.
+      #
+      # It shares this block's `expire_in`, because a job may declare only one
+      # `artifacts:` block and this one also carries the reuse evidence a later
+      # pipeline's gate reads for days. A `fast` that stood on an earlier run
+      # leaves no web/build behind at all; that is safe rather than stale,
+      # because the fidelity gate's webServer checks the stamp and builds when
+      # there is nothing to serve.
+      - web/build/
       - ci-evidence/
     expire_in: 14 days
     when: on_success
@@ -1287,6 +1311,12 @@ gitleaks:
 
 # The only automatic check the v19 presentation layer has (#620). A change that
 # moves web/ pays for this; one that does not never sees it.
+#
+# Appearance only, since #1048. `pnpm --filter orbit-web fidelity` names the
+# `fidelity` Playwright project rather than running everything in
+# web/tests/fidelity/, so launch-timing.spec.js -- a measurement, not a
+# guard -- no longer rides along on every front-end merge request. It is the
+# `launch_timing` job at the end of this file, at promotion frequency.
 fidelity:
   stage: acceptance
   tags: [light]
@@ -1317,6 +1347,18 @@ fidelity:
       # that tsconfig while loading its config, before the webServer command
       # that would have built it ever runs.
       pnpm --filter orbit-web exec svelte-kit sync
+      # The gate's webServer no longer builds the application (#1061): `fast`
+      # built it and handed web/build over as an artefact, and the stamp inside
+      # it proves it was made from this same commit's sources.
+      #
+      # Asked here as well as inside the webServer, purely so the trace says
+      # which way it went: the webServer's own output is thrown away
+      # (`stdout: "ignore"` in web/playwright.config.js), so without this the
+      # job would be silent about whether it built the application again. A
+      # "rebuilding" line is not a failure -- the gate still passes -- but it
+      # means the artefact did not arrive and the build this issue removed is
+      # back.
+      node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
       pnpm --filter orbit-web fidelity
     - *reuse_evidence
   artifacts:
@@ -2914,3 +2956,94 @@ base_image_repin:
       bash scripts/ci/repin-base-image.sh --red
       echo "base_image_repin: real run — compares the artifact digest to the pin"
       bash scripts/ci/repin-base-image.sh
+
+# --- the promotion gate's own measurement ------------------------------------
+
+# Launch frame timings, once per promotion (#1048, owner ruling 2026-09-18).
+#
+# This used to ride along inside `fidelity`, because `web/package.json`'s
+# `fidelity` script was a bare `playwright test` and so collected everything
+# under web/tests/fidelity/, launch-timing.spec.js included. That put a
+# measurement on every front-end merge request, in a container sharing a host
+# with whatever else was running, and the noise swamped the signal: the same
+# unchanged build photographed twice differed by up to 189 pixels, and the
+# create phase -- CSS only, untouched by the change under test -- moved as
+# much as the phase that was actually fixed. A correct fix could read as a
+# regression and a bad one as a win. The spec now sits in its own Playwright
+# project and is run here instead.
+#
+# `rules:` rather than `orbit_full_gate`. That helper's first arm is
+# `orbit_on_delivery_branch`, which matches a push to `dev` -- every merge
+# into `dev`, which is the merge frequency this job exists to escape -- and
+# its second arm targets `main`, which is the later preview -> main gate.
+# Neither is the dev -> preview promotion. The two events below are: the merge
+# request whose target branch is `preview`, and the push to `preview` that
+# lands it. Everything else is `never`, including a branch pipeline started by
+# hand, so nothing can reach this job by accident. These are all predefined
+# variables, so the decision is taken before a runner slot is claimed and the
+# job needs no classifier dotenv and no `orbit_lane_admits` call.
+#
+# No reuse gate (#898), deliberately. A promotion measures the candidate it is
+# promoting; standing on a run from an earlier pipeline would hand the next
+# promotion an older candidate's numbers as its baseline, which is the one
+# thing the comparison must not do. It runs at most twice per promotion, so
+# there is nothing worth saving. That is also why it has no entry in
+# scripts/ci/job-inputs.json: that file and the reuse gate are a matched pair,
+# and scripts/job-inputs.test.mjs holds them to it -- an entry without the gate
+# fails as loudly as a gate without an entry.
+#
+# The quiet machine, as far as the runner lanes allow. `orbit-build` is the
+# project's own runner: no other project's jobs reach it, unlike the shared
+# group runner's `big` and `light` lanes, where #878 measured a 42-minute
+# queue behind another project's shards. The privilege it grants is unused
+# here, exactly as it is for `classify`. `maintenance` is the last stage and
+# this job takes no `needs:`, so it starts only once every other job in the
+# pipeline has finished -- including the publish lane on the promotion push --
+# and nothing of Orbit's is running beside it. `resource_group` stops two
+# promotions measuring at once. What none of that can buy is the rest of the
+# host: both runners live on the same machine, and new runner capacity is
+# ruled out for M11 (owner, 2026-09-09). So the residual noise is another
+# project's shared-runner work, which is why the comparison is candidate
+# against candidate and why no threshold is asserted yet.
+#
+# The artefact is the baseline. `launch-timing-report.mjs` reads this job's own
+# last successful report on `preview` and prints the two candidates side by
+# side, with the commit range between them so a regression is bisected rather
+# than guessed at. Kept a year rather than the usual fortnight: promotions are
+# further apart than that, and a baseline that expires between them leaves the
+# next promotion with nothing to compare against. It is a few kilobytes of
+# JSON.
+launch_timing:
+  stage: maintenance
+  extends: .privileged_runner
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  timeout: 30m
+  resource_group: launch_timing
+  rules:
+    - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+    - when: never
+  script:
+    - |
+      set -eu
+      # Same preparation as `fidelity`: the image ships its own Node and the
+      # matching browser build, so only pnpm is missing and corepack is not
+      # the route in this image. `svelte-kit sync` because web/tsconfig.json
+      # extends the gitignored .svelte-kit/tsconfig.json that Playwright reads
+      # while loading its config, before any webServer command has run.
+      npm install --global "$(node -p "require('./package.json').packageManager")"
+      pnpm install --frozen-lockfile
+      pnpm --filter orbit-web exec svelte-kit sync
+      pnpm --filter orbit-web launch-timing
+    - |
+      set -eu
+      node scripts/ci/launch-timing-report.mjs web/test-results/launch-timing
+  artifacts:
+    name: orbit-launch-timing
+    paths:
+      - web/test-results/launch-timing/
+    expire_in: 1 year
+    when: always
