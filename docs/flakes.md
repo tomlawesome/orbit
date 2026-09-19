@@ -22,29 +22,43 @@ fixing the cause deletes the heading in the same commit.
 
 - 2026-09-09 · 9e27d38 · pipeline 822 / repair_journeys (!908) · `docker run … busybox:stable sleep 600` failed after the four journeys before it passed; the job was green on 810–815 the same morning on unchanged harness code (M7 touches nothing in `scripts/test-repair-journeys.sh`). The `docker run` sends its own output to `/dev/null` (`test-repair-journeys.sh:955-960`), so the log cannot say whether it was a Docker Hub pull failure or something else; the next sighting should show that output first.
 
-## Three keyboard/door specs exhaust the 60-stop Tab cap or lose their target — mobile-chromium and desktop-chromium
+## The /home account panel does not register as open when armed — desktop and pocket — #1064
 
-- 2026-09-10 · cb9cbfd · pipeline 907 / smoke (job 10645, !911) · four failures in one run, all passing on the retried job 10651 on the same commit:
-  - `v19-keyboard.spec.ts:463` "inbox: reachable via the account panel, and keyboard-navigable" (desktop-chromium) — `home account panel: Tab never reached the requested control within 60 presses`.
-  - `v19-keyboard-pocket.spec.ts:276` "home (pocket): the account menu's Inbox link is reachable by Tab and navigates on Enter" (mobile-chromium) — failed, and its one retry failed too, with `expect(locator).toHaveClass(expected)` and then `page.goto: net::ERR_ABORTED at http://127.0.0.1:3000/home`.
-  - `v19-first-run-door.spec.ts:250` "a claimed local-only instance shows the sign-in card in the ring" (mobile-chromium) — `expect(locator).toBeVisible()` failed, element not found.
+- 2026-09-10 · cb9cbfd · pipeline 907 / smoke (job 10645, !911) · two in one run, both passing on the retried job 10651 on the same commit: `v19-keyboard.spec.ts:463` "inbox: reachable via the account panel" (desktop-chromium) — `home account panel: Tab never reached the requested control within 60 presses`; and `v19-keyboard-pocket.spec.ts:276` "home (pocket): the account menu's Inbox link is reachable by Tab" (mobile-chromium) — `expect(locator).toHaveClass(expected)`, its retry aborting the /home navigation instead (that half is the heading below).
 - 2026-09-15 · 332f237 · pipeline 1127 / smoke (job 13931, !918) · `v19-keyboard-pocket.spec.ts:262` "home (pocket): the account menu is light-dismiss by keyboard" (mobile-chromium) — `expect(locator).toHaveClass(/open/)` on the sheet. Passed on the retried job 13936 on the same commit, in 1.4s.
+- 2026-09-19 · 977a74d · pipeline 1275 / smoke (job 16651, !946) · five at once, four of which Playwright itself reported flaky (passed on retry, same run, same commit): `v19-axe-sweep.spec.ts:209` (desktop, `button.orb` stayed `aria-expanded="false"`), `v19-axe-sweep.spec.ts:225` (mobile, `#morb` the same), `v19-keyboard-pocket.spec.ts:276` (mobile, `#maccount` stayed `"msheet"`), and `v19-keyboard.spec.ts:539` and `:568` (desktop, the 60-press cap inside `openSettingsFromHome`).
 
-The 60-press cap is the same one the `v19-keyboard.spec.ts:432` heading above
-records, and that entry's diagnosis — an unbounded sessions list eating the cap
-on a reused stack — is the first thing to check here. `net::ERR_ABORTED` on a
-navigation points elsewhere though: to specs sharing one Orbit instance, which
-is #949. Grouped under one heading until a second sighting says whether these
-are one cause or three; split it then.
+This is the split the previous heading asked for on its next sighting, and the
+2026-09-19 run settles it the other way round from the guess there: the three
+shapes are one fault, not three. `openSettingsFromHome`
+(`v19-keyboard.spec.ts:226`) arms `button.orb` and then Tabs for the Settings
+link, which lives INSIDE the panel — so a panel that never opened burns the
+whole 60-press cap, and reports it against "home account panel". The sessions
+list has nothing to do with it.
 
-The 2026-09-15 sighting is that second one, and it does not settle the split so
-much as narrow it. It exhausted no Tab cap and aborted no navigation: the sheet
-simply did not carry `open` when the assertion looked, and the same test passed
-in 1.4s on a retry of the same commit. That is the shape of a sheet asserted on
-before its transition has committed, which is a different fault from either the
-60-press cap or the shared instance — and it is the second `v19-keyboard-pocket`
-test to fail this way. Split the heading on the next sighting: the pocket sheet
-timing looks like its own flake, not a member of this family.
+It is not a transition that has yet to commit either: `toHaveAttribute` polled
+thirteen times across five seconds and read `"false"` every time. Five seconds
+is not a missed frame, it is a lost event. `settled` / `settleHome`
+(`support/keyboard.ts:298`) waits for `#explore` to be attached, which its own
+comment admits is only "home rendered its normal markup at all" — something the
+server-rendered HTML already satisfies. The toggle ships from the server
+carrying `aria-expanded="false"`, so a press landing before Svelte attaches its
+handler is swallowed in silence. #1064 has the detail and the fix shape.
+
+Neither the axe sweep nor accessibility is a subject here: both axe tests died
+on the `aria-expanded` precondition before `axeCheck()` ran, and no run has
+reported an axe violation.
+
+## v19-first-run-door.spec.ts:250, and `net::ERR_ABORTED` on a /home navigation — mobile-chromium
+
+- 2026-09-10 · cb9cbfd · pipeline 907 / smoke (job 10645, !911) · `v19-first-run-door.spec.ts:250` "a claimed local-only instance shows the sign-in card in the ring" — `expect(locator).toBeVisible()` failed, element not found. Passed on the retried job 10651 on the same commit.
+- 2026-09-19 · 977a74d · pipeline 1275 / smoke (job 16651, !946) · `v19-keyboard.spec.ts:568` "administration: the local-user controls are reachable and announced" (desktop-chromium), retry #1 — `page.goto: net::ERR_ABORTED at http://127.0.0.1:3000/home`. Its first attempt was the account-panel flake above; the retry died before reaching the screen at all, so this test has never yet reported on its own subject in CI.
+
+`net::ERR_ABORTED` on a navigation points at specs sharing one Orbit instance,
+which is #949 — a sibling spec's teardown or sign-out landing on top of this
+one. The door card not being found may be the same thing wearing a different
+hat, or may be its own timing; two sightings do not say. The third gets an
+issue.
 
 ## v19-tour.spec.ts:354 "journey 1: the first landing on home gets the walk, and skipping ends it"
 
