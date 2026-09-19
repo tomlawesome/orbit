@@ -112,3 +112,9 @@ sheets" grammar for no gain a phone reader would feel.
 top, results downwards, first tap summons the item's sheet, second tap
 approaches?** Yes ratifies B for #1057's mobile half; no, with what is
 wrong, opens round 2.
+
+## Verdict
+
+Owner, 2026-09-19: "1058 search looks good." **B ratified** as #1057's mobile
+half: the palette as a bottom sheet on the keyboard, field at the top, results
+downwards, first tap summons the item's sheet, second tap approaches.
