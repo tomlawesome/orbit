@@ -281,6 +281,34 @@ system risk, which `changes:` cannot express as a negation, so the list
 covers everything except what the classifier calls definitely fast (`docs/`,
 root-level markdown, `LICENSE`, `.gitignore`).
 
+### Two more caches: the image build and the vulnerability database (#946)
+
+`build_image` rebuilt its `deps`, `web-deps` and `cli-builder` stages from
+scratch every pipeline (#923 finding 6a: 0 `CACHED` lines, ~26 s, even when
+the lockfile had not changed). It now reads and writes a BuildKit registry
+cache, one tag under this project's own registry
+(`$CI_REGISTRY_IMAGE/build-cache:main`). Every build reads it; only a
+delivery-branch push writes it, the same trust boundary `record_image`'s push
+already draws — an ordinary merge request never writes the shared cache, only
+benefits from what the last delivery push left there. The export is a
+separate, best-effort build of the same already-warm graph rather than folded
+into the main build: a combined build-and-export fails the whole build when
+the push fails, where an export-only invocation cannot touch the image
+already built. A registry outage or a login failure degrades to an uncached
+build, never a red pipeline.
+
+The three Trivy scanner jobs (`supply_chain_source`, `sidecar_images`,
+`supply_chain_image`) each downloaded the ~111 MB vulnerability database
+fresh on every pipeline (#923 finding 6c). They now share one GitLab `cache:`
+key, dated inside by the job rather than by the key — GitLab's own
+`cache:key:` has no way to read today's date, so each job instead looks for a
+subdirectory named for the current UTC date and downloads only when that is
+missing, removing whatever is left from an earlier day first. A calendar-day
+boundary is the whole invalidation story and happens to match Trivy's own
+update cadence, so nothing here can serve a database more than about a day
+old; a cold miss (first run of a new day, or an empty cache) costs exactly
+what every run cost before this.
+
 ### The second browser lane: an Orbit with no identity provider (#916)
 
 Since [ADR-0023](adr/0023-registration-linking-and-recent-authentication.md) §1
