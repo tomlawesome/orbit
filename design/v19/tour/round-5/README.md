@@ -141,3 +141,18 @@ film does not keep. The second callout, "Now it's yours.", is unchanged.
 
 The shipped tour's own copy (`web/src/lib/tour/stops.js`) never carried the
 claim, so nothing outside this round needed changing.
+
+## Second correction, 2026-09-19 (owner)
+
+Chapter 9 said **"Nothing is ever finished on a sky; it comes round."** That is
+false, and the product itself says so: an expiry is a one-off and the item
+screen prints *"one-off — does not come round"* for it (#1005). The line now
+reads **"A repeat is never finished; it comes round. A one-off simply ends."**,
+which is true of both kinds and teaches the distinction the sky actually draws.
+
+Also found in the same pass and **not** fixed here, because it needs a product
+decision first: chapter 8 presses two small arrow buttons to step along the
+belt, and no such control exists — the real screen steps on `ArrowLeft` /
+`ArrowRight` only, and `← sooner` / `later →` are inert SVG labels. Filed as
+**#1062**. Round 6 removes the invented control; what replaces it depends on
+that issue's answer.
