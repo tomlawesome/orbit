@@ -106,11 +106,20 @@ string alone.
 - The ratified sheet overflows at 390px on its own; the pocket wraps from
   round 1 are carried (a base defect for an issue of its own).
 
-## Open questions for the owner
+## Verdict (owner, 2026-09-19)
 
-- Relax the information boundary so job rows can name the document
-  (the *with document names* scene), or keep the kind-only row?
-- Machinery rows redrawn in the row grammar (content verbatim) — is that
-  departure from §15's key/value register accepted?
-- Should the server remember the last test result so the pill survives a
-  reload?
+Verbatim: "1055 much better, good job. approved."
+
+The three open questions, answered the same day:
+
+- Job rows stay kind-only; they never name the document ("Kind only").
+- The machinery rows' move to the row grammar is accepted ("Yes").
+- The server remembers the last mail-test result so the pill survives a
+  reload ("Yes").
+
+Also that day, on the sign-in door: "don't provide admin emails. People
+will know who to contact anyway." Whether the Public contact card (#860)
+is retired as a result is a separate question still with the owner; the
+drawing keeps the card until it is answered.
+
+Build: #1071.
