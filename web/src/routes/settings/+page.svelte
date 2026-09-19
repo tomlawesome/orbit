@@ -579,7 +579,15 @@
              that moves it is the instance having a mail relay, and the screen
              says which of the two it is plainly -- an instance with no relay
              has a password and nothing else, and a reader is owed that fact
-             rather than a promise of a factor that is not running. -->
+             rather than a promise of a factor that is not running.
+
+             THE ROW IS THE WHOLE OF IT, and no paragraph under it (Fable's
+             composition call, 2026-09-19). `.note` on this screen is the
+             problem-notice slot -- methodsProblem, reminderProblem,
+             revokeProblem all land in one -- so prose in a `.note` here would
+             read as something having gone wrong. The row states the fact; why
+             it works the way it does is in docs/authentication.md and
+             ADR-0027, where somebody asking that question is already looking. -->
         <div class="kv">
           <span>email approval</span>
           <span class="method">
@@ -590,19 +598,6 @@
             {/if}
           </span>
         </div>
-        <div class="note">
-          {#if emailApproval}
-            Signing in with your password sends a link to your email address.
-            Nobody gets in until it is approved — including you, every time.
-            Signing in with your identity provider is not asked, and neither is
-            a setup or recovery link.
-          {:else}
-            Until an administrator configures outgoing mail, a password is the
-            whole of a sign-in here. Orbit cannot ask for an approval it has no
-            way to send.
-          {/if}
-        </div>
-
         {#if methodOutcome}<div class="note ok">{methodOutcome}</div>{/if}
       {/if}
       {#if methodsProblem}<div class="note">{methodsProblem}</div>{/if}
