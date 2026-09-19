@@ -219,3 +219,23 @@ create-v3's is 404px. Keep 480, or match 404 and let fit sit nearer 40%?
 ## Verdicts
 
 Not yet given.
+
+## Verdict (owner, 2026-09-19)
+
+Verbatim, with a screenshot of the reading card on the owner's own screen
+(page 3 of 3 at "fit" = 26%, the page a small rectangle in the middle of
+a full-height card, a full-width primary button beneath):
+
+> 1059 nope. The document front page is no where near enough of the card.
+> The download button is pointlessly, clumsily big. It's not elegant.
+>
+> Look at it - most of the space is taken up by ... nothing but useless
+> fluff?
+
+What the shot shows: "fit" fits the page's HEIGHT into a card that is
+always full-height, so on a shorter screen than the 1600×1000 gate the
+page shrinks to a stamp while the head, page bar, attach row and button
+keep their full size — roughly half the card is furniture. Round 4 makes
+the page the card: fit means fit the card's width, the card's height
+follows the page, and download and remove are quiet words in the attach
+row as in create-v3 — no primary button.
