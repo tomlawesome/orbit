@@ -245,3 +245,15 @@ the size and scan state with the page controls on line two?
 ## Verdicts
 
 Not yet given.
+
+## Verdict (owner, 2026-09-19)
+
+Verbatim: "1059, the aspect ratio is all fubar now and you're missing the
+multipage backdrop to it that stylised it."
+
+What that points at: on a short screen the page is cropped inside the
+card and scrolls, so what is seen is not page-shaped; and the tilted
+under-sheet only draws for files with more than one page (`.sheet.stack`),
+so the one-page MOT certificate has none. Round 5 fixes both: the whole
+page is always visible in its true proportions, the card's width follows
+the page, and the under-sheet is always there.
