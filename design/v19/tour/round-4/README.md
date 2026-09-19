@@ -153,6 +153,16 @@ The film runs headless end to end with **no console errors**, ends on
 `3:34 / 3:34`, holds its reading dead still for three seconds when paused, and
 lands on chapters 4, 8 and 11 from their ticks.
 
-## Verdicts
+## Verdict
 
-Written by Claude Opus 5, 2026-09-19.
+Owner, 2026-09-19, verbatim:
+
+> "Your is very close now. Some things:
+> Why is some of it in star chart theme not the default after dark?
+> The play bar button is ENORMOUS. Far far too big. It should be a much
+> smaller thing centralised at the bottom.
+> The transition to the relay is not smooth.
+> The belt tour doesn't show off the document preview nicely - no image loads
+> and the image off to the side doesn't show?"
+
+Round 4 is closed; the four fixes are round 5 (`../round-5/`).

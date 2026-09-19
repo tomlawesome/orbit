@@ -1,0 +1,1352 @@
+<!doctype html>
+<html lang="en" data-direction="F">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tour round 5 — F · one take</title>
+<style>
+  /* Pack tokens, verbatim from web/src/lib/packs.css [data-theme=afterdark] —
+     the pack every backdrop was captured in. Round 4 carried star chart's
+     tokens by mistake (they had ridden along mislabelled since round 1), so
+     everything drawn sat one pack away from the screens it sat on. Nothing
+     below invents a colour. */
+  :root {
+    --bg:#05070d; --panel-raised:rgba(15,21,36,.8); --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#9fa6b2; --ink-quiet:#768295; --ink-faint:#717c8e;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --mono:'JetBrains Mono Variable','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--ui);overflow:hidden}
+  /* The stage is the product at 1280x800, scaled to whatever window the
+     reviewer has. Every coordinate in this file is in stage pixels. */
+  .stage{position:absolute;left:50%;top:50%;width:1280px;height:800px;transform-origin:0 0;overflow:hidden;background:var(--bg)}
+  .stage img.bg{position:absolute;inset:0;width:1280px;height:800px;opacity:0;transition:opacity .35s ease}
+  .stage img.bg.on{opacity:1}
+  /* the scrolling home strip: the sky and the manifest under it, one image,
+     translated the way the page itself scrolls */
+  #scroll{position:absolute;left:0;top:0;width:1280px;height:1689px;opacity:0;transition:opacity .35s ease}
+  #scroll.on{opacity:1}
+  /* the dimming mechanic, as tour.css: everything else drops to the faint
+     tier, the lit thing stays at full strength */
+  .veil{position:absolute;inset:0;background:var(--bg);opacity:0;transition:opacity .45s ease;pointer-events:none}
+  .veil.on{opacity:.62}
+  svg.fx{position:absolute;inset:0;width:1280px;height:800px;overflow:visible;pointer-events:none}
+  .hl{position:absolute;border-radius:14px;box-shadow:0 0 0 1.5px var(--accent),0 0 0 8px color-mix(in srgb,var(--accent) 18%,transparent),0 0 34px color-mix(in srgb,var(--accent) 35%,transparent);opacity:0;transition:opacity .45s ease,box-shadow .3s ease}
+  .hl.on{opacity:1}
+  .hl.round{border-radius:50%}
+  .hl.strong{box-shadow:0 0 0 1.5px var(--accent),0 0 0 8px color-mix(in srgb,var(--accent) 26%,transparent),0 0 46px color-mix(in srgb,var(--accent) 50%,transparent)}
+  /* a chip that has been chosen keeps a quiet ring once the tour moves on */
+  .hl.quiet{box-shadow:0 0 0 1.25px var(--accent)}
+  /* a windowed cut-out: the lit thing shows through the veil at full strength */
+  .cut{position:absolute;background-size:1280px 800px;border-radius:14px;opacity:0;transition:opacity .35s ease}
+  .cut.on{opacity:1}
+  .cut.round{border-radius:50%}
+  /* the typed text, carried from round-1's .typed (caret, ink, field ground) */
+  .typed{position:absolute;font:700 22px var(--ui);letter-spacing:-.02em;color:var(--ink);white-space:nowrap;overflow:hidden;border-right:2px solid var(--accent);background:#0d121f;height:30px;line-height:30px}
+  .typed.done{border-right-color:transparent}
+  .field-blank{position:absolute;background:#0d121f}
+
+  /* ---- the create drawer's own controls -------------------------------- */
+  /* create.png shows the drawer at the moment the north star opens it: the
+     type chips and the drop zone, no name, date, cost, repeat or add. Those
+     five are blanked in and drawn here, the way round 1 blanked and typed
+     the name over the heading. */
+  #layer{transition:opacity .35s ease}
+  .ctl{position:absolute}
+  .flabel{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-quiet);margin:0 0 4px 2px}
+  .fbox{box-sizing:border-box;border:1px solid var(--line);border-radius:10px;background:rgba(0,0,0,.18);display:flex;align-items:center;gap:2px;padding:0 12px;font:13px var(--mono);color:var(--ink)}
+  .fbox .pre{color:var(--ink-quiet)}
+  .cur{display:inline-block;width:0;border-right:2px solid var(--accent);height:16px;vertical-align:-3px}
+  .cur.off{border-right-color:transparent}
+  .chip{position:absolute;box-sizing:border-box;border:1px solid var(--line);border-radius:15.5px;display:flex;align-items:center;justify-content:center;font:12.5px var(--mono);color:var(--ink-mid)}
+  .chip.sel{border-color:var(--accent);color:var(--accent)}
+  .btnadd{position:absolute;box-sizing:border-box;border:1px solid var(--accent);border-radius:10px;display:flex;align-items:center;justify-content:center;font:12px var(--mono);letter-spacing:.08em;color:var(--accent);background:rgba(5,7,13,.55)}
+
+  /* the reminder toast and the flying envelope, round 1's own drawings */
+  .toast{position:absolute;left:50%;top:-90px;transform:translateX(-50%);width:360px;background:var(--panel-raised);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:14px;padding:12px 16px;transition:top .5s cubic-bezier(.2,.8,.2,1);z-index:24}
+  .toast.on{top:96px}
+  .toast b{display:block;font:500 13.5px var(--ui);color:var(--ink)}
+  .toast small{font:11px var(--mono);color:var(--warm);letter-spacing:.06em}
+  .paper{position:absolute;width:26px;height:18px;border:1.5px solid var(--accent);border-radius:3px;background:var(--bg);opacity:0;z-index:24}
+  .paper::after{content:"";position:absolute;left:3px;right:3px;top:2px;height:7px;border:1.5px solid var(--accent);border-top:none;border-radius:0 0 3px 3px;transform:scaleY(.8)}
+
+  /* the one control the page does not carry: the belt's arrow keys */
+  .keycap{position:absolute;box-sizing:border-box;width:34px;height:28px;border:1px solid var(--line);
+    border-radius:7px;background:rgba(5,7,13,.72);display:flex;align-items:center;justify-content:center;
+    font:13px var(--mono);color:var(--ink-mid);z-index:24}
+
+  /* ---- the callout: explanation pinned to the thing just acted on ------- */
+  .callout{position:absolute;box-sizing:border-box;max-width:260px;width:max-content;text-wrap:balance;
+    background:var(--panel-raised);backdrop-filter:blur(14px);border:1px solid var(--line);
+    border-radius:12px;padding:11px 14px;font:13.5px/1.45 var(--ui);color:var(--ink);
+    opacity:0;z-index:25;transition:opacity .24s ease-out,transform .24s ease-out}
+  .callout.on{opacity:1;transform:translate(0,0)!important}
+  .callout.out{opacity:0;transition:opacity .18s ease}
+  .callout.label{font:11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mid)}
+  .callout .stem{position:absolute;width:14px;height:14px;background:var(--panel-raised);
+    backdrop-filter:blur(14px);border:1px solid var(--line);transform:rotate(45deg);z-index:-1}
+
+  /* ---- the travelling dot that becomes the control (round 3's Lift) ----- */
+  .dot6{position:absolute;left:0;top:0;width:0;height:0;z-index:27;pointer-events:none;opacity:0;transition:opacity .2s ease}
+  .dot6.on{opacity:1}
+  .dot6 i{position:absolute;left:-3px;top:-3px;width:6px;height:6px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 10px color-mix(in srgb,var(--accent) 25%,transparent)}
+
+  /* ---- the transport: a compact centred control, not a chrome bar --------
+     Round 4 spanned the stage edge to edge and the owner called it enormous.
+     The painted marks are small; every hit target is still at least 32px
+     (the ticks get the tallest, widest transparent hit the tick spacing
+     allows: 18x38 around a 1x8 painted mark). */
+  .bar{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+    width:470px;height:44px;z-index:40;
+    box-sizing:border-box;display:flex;align-items:center;gap:2px;padding:0 16px 0 8px;
+    background:var(--panel-raised);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:22px;
+    opacity:1;transition:opacity .6s ease}
+  /* while the film plays the transport recedes; it returns on hover or
+     focus, and fully whenever the film is paused or holding */
+  .bar.dim{opacity:.38}
+  .bar.dim:hover,.bar.dim:focus-within{opacity:1}
+  .bar.gone{opacity:.16}
+  .bar.gone:hover,.bar.gone:focus-within{opacity:1}
+  .bar button{background:none;border:0;padding:0;margin:0;cursor:pointer;color:var(--ink);
+    display:flex;align-items:center;justify-content:center}
+  .bar .pp,.bar .stp{width:32px;height:32px;border-radius:50%}
+  .bar .pp:focus-visible,.bar .stp:focus-visible{outline:1.5px solid var(--accent);outline-offset:1px}
+  .bar .pp svg{width:12px;height:12px}
+  .bar .stp svg{width:10px;height:10px}
+  .bar .pp svg,.bar .stp svg{display:block;fill:currentColor}
+  .bar .pp:hover,.bar .stp:hover{color:var(--accent)}
+  .track{position:relative;flex:1;height:44px;margin-left:4px}
+  .track .rail{position:absolute;left:0;right:0;top:29px;height:2px;background:var(--line-soft)}
+  .track .fill{position:absolute;left:0;top:29px;height:2px;width:0;background:var(--accent)}
+  .track .head{position:absolute;top:27px;left:0;width:6px;height:6px;margin-left:-3px;border-radius:50%;
+    background:var(--accent);box-shadow:0 0 8px color-mix(in srgb,var(--accent) 45%,transparent)}
+  .track .tick{position:absolute;top:6px;width:18px;height:38px;margin-left:-9px;padding:0;
+    background:none;border:0;cursor:pointer}
+  .track .tick::after{content:"";position:absolute;left:50%;top:20px;width:1px;height:8px;
+    margin-left:-.5px;background:var(--ink-faint)}
+  .track .tick:hover::after,.track .tick.here::after{background:var(--accent)}
+  .track .tick:focus-visible{outline:1.5px solid var(--accent);outline-offset:-8px;border-radius:8px}
+  .track .now{position:absolute;top:8px;left:0;white-space:nowrap;
+    font:9.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-quiet)}
+  .track .tip{position:absolute;top:8px;left:0;white-space:nowrap;opacity:0;
+    font:9.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
+    transition:opacity .15s ease}
+  .track .tip.on{opacity:1}
+  /* a tip and the chapter label share the lane; the label yields */
+  .track.tipping .now{opacity:0}
+  .clock{font:10px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);white-space:nowrap;margin-left:8px}
+
+  /* ---- the dawn pack, for the one chapter that wears it ---------------- */
+  .stage.dawn{--ink-mid:#5b6478;--ink-quiet:#5b6478;--accent:#1f7ac2}
+  .stage.dawn .bar{background:rgba(250,247,242,.78);border-color:#c6cad6}
+  .stage.dawn .bar button{color:#333c4f}
+  .stage.dawn .track .rail{background:#c9cdd9}
+  .stage.dawn .callout,.stage.dawn .callout .stem{background:rgba(252,250,246,.86);border-color:#c6cad6}
+  .stage.dawn .callout{color:#2b3346}
+
+  /* ---- documents wear their pages (#1059) ------------------------------
+     Drawn, not captured: the belt backdrops predate #1059, so the page a
+     document body wears — and the render in the centred card — are drawn
+     over them. The page pixels themselves are real: Orbit's own renderer
+     (src/server/documents/preview.ts, the preview endpoint's renderer)
+     rendered page one of the two PDFs into shots/preview-*.png. */
+  .wear{opacity:0;transition:opacity .35s ease,filter .45s ease}
+  .wear.on{opacity:1}
+  /* under the veil with nothing lighting them, the pages dim with the screen */
+  .wear.dim{filter:brightness(.4)}
+  .page-tile{position:absolute;box-sizing:border-box;background-color:#fff;
+    background-size:100% auto;background-position:top center;background-repeat:no-repeat;
+    border:1px solid rgba(231,233,238,.8);border-radius:2.5px;
+    box-shadow:0 2px 8px rgba(0,0,0,.6)}
+  .card-blank{position:absolute;background:#0d121f}
+  .card-note{position:absolute;font:10.5px/1.9 var(--mono);color:var(--ink-quiet)}
+  .card-note b{color:var(--ink);font-weight:700}
+  .card-cap{position:absolute;text-align:center;font:9px var(--mono);letter-spacing:.18em;
+    text-transform:uppercase;color:var(--ink-quiet)}
+  .reader{position:absolute;left:428px;top:74px;width:424px;height:600px;
+    background-color:#fff;background-size:100% auto;background-position:top center;
+    background-repeat:no-repeat;border-radius:6px;z-index:24;
+    box-shadow:0 18px 70px rgba(0,0,0,.72),0 0 0 1px rgba(231,233,238,.14);
+    opacity:0;transform:translateY(12px);transition:opacity .35s ease,transform .35s ease}
+  .reader.on{opacity:1;transform:translateY(0)}
+  .reader-cap{position:absolute;left:428px;top:684px;width:424px;text-align:center;z-index:24;
+    font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-quiet);
+    opacity:0;transition:opacity .35s ease}
+  .reader-cap.on{opacity:1}
+
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;transition-duration:0s!important}
+    .callout{transform:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <img class="bg" id="bgA" alt="">
+  <img class="bg" id="bgB" alt="">
+  <img id="scroll" alt="">
+  <div class="veil" id="veil"></div>
+  <div id="cuts"></div>
+  <svg class="fx" id="fx" viewBox="0 0 1280 800" aria-hidden="true">
+    <defs>
+      <radialGradient id="p-jade" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#b8f5cf"/><stop offset="45%" stop-color="#2fae6a"/><stop offset="100%" stop-color="#12603a"/></radialGradient>
+      <radialGradient id="p-sky" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#dbe9ff"/><stop offset="45%" stop-color="#6f9fe6"/><stop offset="100%" stop-color="#2b4f8f"/></radialGradient>
+      <radialGradient id="p-amber" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#ffe7a8"/><stop offset="45%" stop-color="#e0a020"/><stop offset="100%" stop-color="#7a4f08"/></radialGradient>
+      <!-- the same three bodies in the dawn pack, sampled off shots/home-dawn.png -->
+      <radialGradient id="d-jade" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#e8f6ee"/><stop offset="45%" stop-color="#acd9bd"/><stop offset="100%" stop-color="#6fad8b"/></radialGradient>
+      <radialGradient id="d-sky" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#f1f5ff"/><stop offset="45%" stop-color="#b6cbe8"/><stop offset="100%" stop-color="#7f9bc4"/></radialGradient>
+      <radialGradient id="d-amber" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#fdf3de"/><stop offset="45%" stop-color="#ddc499"/><stop offset="100%" stop-color="#a98a4a"/></radialGradient>
+    </defs>
+    <g id="orbit"></g>
+    <g id="body"></g>
+    <g id="extra"></g>
+  </svg>
+  <div id="layer"></div>
+  <div class="toast" id="toast" role="status"><b>Car MOT — Volvo V60 is coming up</b><small>T−16D · 29 AUG · REMINDER SENT 21 DAYS BEFORE</small></div>
+  <div class="dot6" id="dot6"><i></i></div>
+
+  <div class="bar" id="bar" role="group" aria-label="Tour transport">
+    <button class="pp" id="pp" aria-label="Pause" title="Pause · space"><svg id="ppicon" viewBox="0 0 12 12" width="12" height="12"></svg></button>
+    <button class="stp" id="stp" aria-label="Stop" title="Stop · esc"><svg viewBox="0 0 10 10" width="10" height="10"><rect x="0" y="0" width="10" height="10" rx="1"/></svg></button>
+    <div class="track" id="track">
+      <div class="rail"></div><div class="fill" id="fill"></div>
+      <div class="now" id="now">ARRIVE</div>
+      <div class="tip" id="tip"></div>
+      <div class="head" id="head"></div>
+    </div>
+    <div class="clock" id="clock">0:00 / 0:00</div>
+  </div>
+</div>
+<script>
+/* ===========================================================================
+   ROUND 5 — F, ONE TAKE.
+
+   Round 4 verbatim ("very close now", owner 2026-09-19) except the four
+   fixes that verdict named: after dark's tokens instead of star chart's, a
+   compact centred transport, the relay arrival as one movement, and the belt
+   chapter showing a real page-one render (#1059) with a reader beat.
+   Everything below that is not one of those four is round 4's, unchanged.
+
+   Round 3 settled the mechanic (Lift: no pointer; the control itself rises,
+   glows and presses) and the owner closed beats as a structure on 2026-09-19:
+   "I also prefer the idea of the tour being one continuous uninterrupted
+   journey... I'd like to try having a time bar and a play/pause/stop button
+   instead of next back and skip."
+
+   So this file is one film, arrival to end, with a transport under it. The
+   Lift mechanic, the callouts, the veil and cut-outs and every timing are
+   round 3's, unchanged. What is new is the clock: one pausable film budget
+   that everything — waits, typing, tweens, the time bar — reads from.
+   =========================================================================== */
+
+const T = {
+  cross: 350,          /* screen change */
+  travelBase: 500, travelPx: 0.6,   /* + 0.6ms per stage-pixel travelled */
+  ease: "cubic-bezier(.25,.1,.25,1)",
+  hover: 350,          /* a human hovers before clicking */
+  press: 120,          /* pressed control to .96 and back */
+  grow: 200,           /* the dot becomes the control's outline */
+  lift: 300,           /* the control rises 2px */
+  typeLead: 300, typeChar: 70,
+  field: 600,          /* between fields in the drawer */
+  calloutIn: 120, calloutOut: 180,
+  holdBase: 1000, holdWord: 350, holdMin: 2400,
+  bloom: 600,
+  scroll: 600,         /* the page scrolls to the manifest and back */
+  rmHold: 1200,        /* reduced motion: every state simply held */
+};
+
+const R = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const CANCEL = Symbol("cancel");
+
+/* ---- the clock ----------------------------------------------------------
+   One film budget in milliseconds. `cursor` is where the film is; `sched` is
+   where the coroutine has got to, exactly, so a frame's overshoot never
+   accumulates into drift. Nothing anywhere uses wall-clock time directly:
+   pause simply stops advancing the cursor, and every wait, tween and typed
+   character is hanging off it. --------------------------------------------- */
+let playing = false, cursor = 0, sched = 0, total = 0, token = 0;
+let dry = false, budget = 0;
+const waiters = [];
+const frameCbs = new Set();
+let held = [];
+let lastTs = 0;
+
+function wait(ms) {
+  ms = Math.max(0, ms);
+  if (dry) { budget += ms; return Promise.resolve(); }
+  const my = token;
+  sched += ms;
+  const at = sched;
+  return new Promise((res, rej) => waiters.push({ at, fire: () => (my === token ? res() : rej(CANCEL)) }));
+}
+/* Motion time is gone under reduced motion; READING time is not motion, so a
+   callout is held for exactly as long in either mode. Round 3 collapsed both
+   to 1200ms, which left its own copy unreadable there. `rmHold` now only
+   covers a state with nothing to read — the dawn pack's look at itself. */
+const w = (ms) => wait(R ? 0 : ms);
+const hold = (ms) => wait(ms);
+const words = (s) => s.trim().split(/\s+/).length;
+const holdFor = (s) => Math.max(T.holdMin, T.holdBase + T.holdWord * words(s));
+
+/* a per-frame tween on the film clock, so a pause freezes it mid-move */
+function tween(ms, fn) {
+  if (dry || R) { fn(1); return w(ms); }
+  const start = sched, my = token;
+  const cb = () => { const t = Math.min(1, (cursor - start) / ms); fn(t); if (t >= 1) frameCbs.delete(cb); };
+  frameCbs.add(cb);
+  return wait(ms).then(() => { frameCbs.delete(cb); fn(1); },
+    (e) => { frameCbs.delete(cb); throw e; });
+}
+
+function frame(ts) {
+  requestAnimationFrame(frame);
+  const dt = lastTs ? Math.min(ts - lastTs, 120) : 0;
+  lastTs = ts;
+  if (playing) {
+    cursor += dt;
+    for (const cb of [...frameCbs]) cb();
+    for (let k = waiters.length - 1; k >= 0; k--) {
+      if (waiters[k].at <= cursor) waiters.splice(k, 1)[0].fire();
+    }
+  }
+  paintBar();
+}
+
+/* review hook: window.__hold = "<mark>" stops the film at that moment, and
+   holds the coroutine there — a pause that let the next line run would tear
+   the state down before it could be photographed */
+let resumers = [];
+async function mark(name) {
+  window.__mark = name;
+  if (window.__hold === name) {
+    const my = token;
+    setPlaying(false); window.__held = name;
+    await new Promise((res) => resumers.push(res));
+    if (my !== token) throw CANCEL;   /* resumed by a jump, not by the reader */
+  }
+}
+
+/* ---- the sky's law, in stage pixels (chart.js, x640/380 about (640,400)) --- */
+const K = 640 / 380, CX = 640, CY = 400;
+const pos = (days) => {
+  const a = (Math.max(-90, Math.min(days, 430)) - 90) * Math.PI / 180;
+  const r = days >= 0 ? Math.min(62 + 0.242 * days, 166) : Math.max(24, 62 - 0.625 * -days);
+  return [CX + Math.cos(a) * r * K, CY + Math.sin(a) * r * K];
+};
+const paint = (days) => days <= 30 ? "amber" : days <= 90 ? "sky" : "jade";
+const S = 6; /* the MOT's body: a cheap item, a small body */
+const ns = "http://www.w3.org/2000/svg";
+const el = (n, at) => { const e = document.createElementNS(ns, n); for (const k in at) e.setAttribute(k, at[k]); return e; };
+let dawnPack = false;   /* chapter 11 wears the dawn pack; the body wears it too */
+function drawBody(days, opacity = 1) {
+  const g = document.getElementById("body"); g.innerHTML = "";
+  /* a fill-forwards fade from an earlier chapter outranks the inline style,
+     so it is cancelled here rather than left holding the sky's body at 0 */
+  g.getAnimations().forEach((a) => a.cancel());
+  g.style.opacity = "";
+  const [x, y] = pos(days), p = (dawnPack ? "d-" : "p-") + paint(days);
+  const wrap = el("g", { opacity });
+  wrap.appendChild(el("circle", { cx: x, cy: y, r: S, fill: `url(#${p})`, style: paint(days) === "amber" && !dawnPack ? "stroke:var(--bg);stroke-width:2" : "" }));
+  wrap.appendChild(el("path", { d: `M${x} ${y - S} A${S} ${S} 0 0 1 ${x} ${y + S} Z`, fill: dawnPack ? "rgba(90,80,70,.22)" : "rgba(0,0,0,.42)" }));
+  wrap.appendChild(el("circle", { cx: x - 0.2 * S, cy: y + 0.25 * S, r: 0.33 * S, fill: "rgba(255,255,255,.38)" }));
+  // label sits on the sunward side of the body, so it never runs into the month ring
+  const dx = CX - x, dy = CY - y, len = Math.hypot(dx, dy) || 1, off = S + 18;
+  const label = el("text", { x: x + dx / len * off, y: y + dy / len * off + 4, "text-anchor": "middle", style: "font:10px var(--mono);fill:var(--ink-mid);letter-spacing:.06em" });
+  label.textContent = `MOT · T−${days}D`;
+  wrap.appendChild(label);
+  g.appendChild(wrap);
+  return wrap;
+}
+function landing(days) {
+  const [x, y] = pos(days); const g = document.getElementById("extra");
+  const ring = el("circle", { cx: x, cy: y, r: S + 2, fill: "none", stroke: "var(--accent)", "stroke-width": 1.5 });
+  g.appendChild(ring);
+  if (R || dry) { ring.remove(); return; }
+  anim(ring, [{ r: S + 2, opacity: .9 }, { r: S + 34, opacity: 0 }], { duration: T.bloom, easing: "ease-out" })
+    .then(() => ring.remove(), () => ring.remove());
+}
+/* the body walks round the ring on the film clock, not on its own rAF */
+const walk = (from, to, ms) => tween(ms, (t) => {
+  const e = 1 - Math.pow(1 - t, 3);
+  drawBody(Math.round(from + (to - from) * e));
+});
+
+/* ---- stage plumbing ------------------------------------------------------ */
+const shots = (f) => `shots/${f}`;
+const stage = document.getElementById("stage");
+const layer = document.getElementById("layer"), cuts = document.getElementById("cuts");
+const dot6 = document.getElementById("dot6");
+const scrollImg = document.getElementById("scroll");
+const put = (html) => { layer.insertAdjacentHTML("beforeend", html); return layer.lastElementChild; };
+
+/* every .animate in this file goes through here, so a pause can hold it and
+   nothing is ever waiting on an animation the clock cannot reach */
+function anim(node, frames, opts) {
+  if (R || dry) return Promise.resolve();
+  const a = node.animate(frames, opts);
+  if (!playing) a.pause();
+  return a.finished.catch(() => {});
+}
+
+/*
+ * A cut-out. `o.sheet` lets a window be taken from an image that is not the
+ * 1280x800 backdrop — the scrolling home strip is 1280x1689 — and `o.off`
+ * shifts the source by however far that image has been translated.
+ */
+function mkCut(bg, x, y, wd, ht, o = {}) {
+  const c = document.createElement("div");
+  c.className = "cut" + (o.round ? " round" : "");
+  const [sw, sh] = o.sheet || [1280, 800];
+  const [ox, oy] = o.off || [0, 0];
+  c.style.cssText = `background-image:url(${shots(bg)});background-size:${sw}px ${sh}px;` +
+    `left:${x}px;top:${y}px;width:${wd}px;height:${ht}px;` +
+    `background-position:-${x + ox}px -${y + oy}px;border-radius:${o.round ? "50%" : (o.r || 14) + "px"}`;
+  cuts.appendChild(c); requestAnimationFrame(() => c.classList.add("on"));
+  return c;
+}
+function mkHl(x, y, wd, ht, o = {}) {
+  const h = document.createElement("div");
+  h.className = "hl" + (o.round ? " round" : "");
+  h.style.cssText = `left:${x}px;top:${y}px;width:${wd}px;height:${ht}px;border-radius:${o.round ? "50%" : (o.r || 14) + "px"}`;
+  cuts.appendChild(h); return h;
+}
+
+/* ---- the travelling dot (round 3's Lift) --------------------------------- */
+let at = [656, 416];
+const bez = (p0, c, p1, t) => { const u = 1 - t; return [u * u * p0[0] + 2 * u * t * c[0] + t * t * p1[0], u * u * p0[1] + 2 * u * t * c[1] + t * t * p1[1]]; };
+function placeMover(p) { dot6.getAnimations().forEach((a) => a.cancel()); dot6.style.transform = `translate(${p[0]}px,${p[1]}px)`; }
+function travel(to, dur) {
+  dropCallout();   /* a callout leaves as the next travel begins */
+  dot6.classList.add("on");
+  const from = at.slice(), d = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  const ms = dur === undefined ? T.travelBase + T.travelPx * d : dur;
+  at = to.slice();
+  if (R || dry || d < 0.5) { placeMover(to); return w(ms); }
+  /* a gentle arc: the control point sits 12% of the distance off the chord */
+  const nx = -(to[1] - from[1]) / d, ny = (to[0] - from[0]) / d;
+  const c = [(from[0] + to[0]) / 2 + nx * d * 0.12, (from[1] + to[1]) / 2 + ny * d * 0.12];
+  const kf = []; for (let i = 0; i <= 32; i++) { const p = bez(from, c, to, i / 32); kf.push({ transform: `translate(${p[0]}px,${p[1]}px)` }); }
+  dot6.getAnimations().forEach((a) => a.cancel());
+  anim(dot6, kf, { duration: ms, easing: T.ease, fill: "forwards" });
+  return w(ms);
+}
+function growInto(hl) {   /* the 6px dot becomes the control's outline */
+  hl.classList.add("on");
+  if (R || dry) { dot6.classList.remove("on"); return w(T.grow); }
+  const x = parseFloat(hl.style.left), y = parseFloat(hl.style.top);
+  const wd = parseFloat(hl.style.width), ht = parseFloat(hl.style.height);
+  anim(hl, [
+    { left: (at[0] - 3) + "px", top: (at[1] - 3) + "px", width: "6px", height: "6px", borderRadius: "50%" },
+    { left: x + "px", top: y + "px", width: wd + "px", height: ht + "px", borderRadius: hl.style.borderRadius },
+  ], { duration: T.grow, easing: T.ease });
+  dot6.classList.remove("on");
+  return w(T.grow);
+}
+
+/* ---- a control: something the tour can visit, lift and press ------------- */
+function ctl(o) { return Object.assign({ lifted: false }, o); }
+function xf(c) { return (c.lifted ? "translateY(-2px)" : "translate(0,0)"); }
+async function goto(c, o = {}) {
+  await travel(c.pt);
+  if (c.hl) await growInto(c.hl); else await w(T.grow);
+  if (c.el) {
+    c.lifted = true;
+    c.el.style.transition = `transform ${T.lift}ms ${T.ease},filter ${T.lift}ms ease`;
+    c.el.style.transform = xf(c);
+    c.el.style.filter = "drop-shadow(0 0 14px color-mix(in srgb,var(--accent) 34%,transparent))";
+  }
+  if (c.el && c.hl) c.hl.classList.add("strong");
+  else if (c.hl) c.hl.classList.add("strong");
+  await w(T.lift);
+  if (o.willPress !== false) await w(T.hover);
+}
+async function press(c) {
+  const e = c.el;
+  if (e && !R && !dry) {
+    const base = xf(c);
+    e.style.transition = "none";
+    anim(e, [{ transform: base + " scale(1)" }, { transform: base + " scale(.96)" }, { transform: base + " scale(1)" }],
+      { duration: T.press * 2, easing: "ease-in-out" });
+  }
+  await w(T.press * 2);
+}
+function unlight(c) {
+  if (c.hl) c.hl.classList.remove("on", "strong");
+  if (c.el) { c.el.style.filter = "none"; c.lifted = false; c.el.style.transform = "translate(0,0)"; }
+}
+/* visit a control, press it, and leave it dark again */
+async function tap(c, o = {}) { await goto(c, o); await press(c); if (o.keep !== true) unlight(c); }
+
+/* ---- the callout: the ratified line, pinned to what was just acted on ---- */
+let live = null;
+function showCallout(text, pt, side, dy, cls, maxw) {
+  const c = document.createElement("div");
+  c.className = "callout" + (cls ? " " + cls : ""); c.textContent = text;
+  if (maxw) c.style.maxWidth = maxw + "px";
+  const stem = document.createElement("i"); stem.className = "stem"; c.appendChild(stem);
+  stage.appendChild(c);
+  const wd = c.offsetWidth, ht = c.offsetHeight, gap = 18, m = 16;
+  let x, y;
+  if (side === "left") { x = pt[0] - gap - wd; y = pt[1] - ht / 2; }
+  else if (side === "right") { x = pt[0] + gap; y = pt[1] - ht / 2; }
+  else if (side === "top") { x = pt[0] - wd / 2; y = pt[1] - gap - ht; }
+  else { x = pt[0] - wd / 2; y = pt[1] + gap; }
+  if (dy) y += dy;   /* nudge clear of a label the box would otherwise clip */
+  /* never off the stage, and never under the transport bar (top edge 748) */
+  x = Math.max(m, Math.min(x, 1280 - m - wd));
+  y = Math.max(m, Math.min(y, 740 - ht));
+  c.style.left = x + "px"; c.style.top = y + "px";
+  if (side === "left" || side === "right") {
+    const sy = Math.max(12, Math.min(pt[1] - y, ht - 12)) - 7;
+    stem.style.top = sy + "px";
+    stem.style[side === "left" ? "right" : "left"] = "-8px";
+  } else {
+    const sx = Math.max(14, Math.min(pt[0] - x, wd - 14)) - 7;
+    stem.style.left = sx + "px";
+    stem.style[side === "top" ? "bottom" : "top"] = "-8px";
+  }
+  const slide = { left: [6, 0], right: [-6, 0], top: [0, 6], bottom: [0, -6] }[side];
+  c.style.transform = R ? "translate(0,0)" : `translate(${slide[0]}px,${slide[1]}px)`;
+  requestAnimationFrame(() => c.classList.add("on"));
+  return c;
+}
+async function callout(text, pt, side, o = {}) {
+  dropCallout();
+  await w(T.calloutIn);
+  live = showCallout(text, pt, side, o.dy, o.cls, o.w);
+  await hold(o.hold || holdFor(text));
+  if (o.mark) await mark(o.mark);
+}
+function dropCallout() {
+  if (!live) return;
+  const c = live; live = null;
+  c.classList.add("out");
+  setTimeout(() => c.remove(), T.calloutOut + 240);
+}
+
+/* ---- backgrounds --------------------------------------------------------- */
+const bgs = [document.getElementById("bgA"), document.getElementById("bgB")];
+let flip = false;
+function setBg(file, instant) {
+  const showing = bgs[flip ? 1 : 0];
+  if (showing.getAttribute("src") === shots(file) && showing.classList.contains("on")) return;
+  const next = bgs[flip ? 0 : 1], prev = bgs[flip ? 1 : 0];
+  if (next.getAttribute("src") !== shots(file)) next.src = shots(file);
+  if (instant) { next.style.transition = "none"; prev.style.transition = "none"; requestAnimationFrame(() => { next.style.transition = ""; prev.style.transition = ""; }); }
+  next.classList.add("on"); prev.classList.remove("on"); flip = !flip;
+}
+const veil = (on) => document.getElementById("veil").classList.toggle("on", !!on);
+
+/* ---- documents wear their pages (#1059) ----------------------------------
+   The two ringed bodies in the belt are documents. #1059 gives a document
+   body its page: a small page tile at belt scale (a raster thumbnail there
+   would be grey mush; a white page-shaped tile carrying the top of the real
+   render stays legible), and the card's line-plate retires in favour of the
+   render itself. Overlays are synced to whichever belt screen is up and the
+   page pixels are real — Orbit's own renderer made shots/preview-*.png. */
+const DOCWEAR = {
+  "belt.png": [
+    `<div class="wear page-tile field" style="left:334px;top:294px;width:28px;height:38px;background-image:url(shots/preview-mot-certificate.png)"></div>`,
+    `<div class="wear page-tile field" style="left:919px;top:314px;width:28px;height:38px;background-image:url(shots/preview-service-history.png)"></div>`,
+  ],
+  "belt-doc.png": [
+    /* the ringed MOT certificate keeps its page out in the belt */
+    `<div class="wear page-tile field" style="left:144px;top:350px;width:28px;height:38px;background-image:url(shots/preview-mot-certificate.png)"></div>`,
+    /* the centred card: the line-plate and the "not something Orbit holds
+       yet" note retire; page one takes the plate's seat */
+    `<div class="wear card-blank" style="left:466px;top:156px;width:114px;height:148px"></div>`,
+    `<div class="wear page-tile" id="card-page" style="left:471px;top:161px;width:100px;height:141px;background-image:url(shots/preview-service-history.png)"></div>`,
+    `<div class="wear card-cap" style="left:471px;top:308px;width:100px">page 1 of 2</div>`,
+    `<div class="wear card-blank" style="left:465px;top:399px;width:346px;height:100px"></div>`,
+    `<div class="wear card-note" style="left:471px;top:405px;width:337px"><b>Car MOT — Volvo V60</b> is the ringed body beside you in the belt.</div>`,
+  ],
+};
+let docLayer = [], docShot = null;
+function wearDim(on) {
+  /* only the pages out in the field: the card's own overlays sit on a lit cut */
+  for (const el of docLayer) if (el.classList.contains("field")) el.classList.toggle("dim", !!on);
+}
+function wearDocs(shot) {
+  if (shot === docShot) return;
+  docShot = shot;
+  for (const el of docLayer) { el.classList.remove("on"); setTimeout(() => el.remove(), 420); }
+  docLayer = [];
+  for (const h of DOCWEAR[shot] || []) {
+    const el = put(h);
+    docLayer.push(el);
+    if (R || dry) el.classList.add("on");
+    else requestAnimationFrame(() => el.classList.add("on"));
+  }
+}
+
+/* ===========================================================================
+   THE FILM. Twelve chapters, played back to back with nothing between them.
+   Every line of explanation is the ratified copy — web/src/lib/tour/stops.js
+   and round 1's beat table — except the two mono labels the round allows: the
+   belt's arrow-key hint and the theme roster.
+   =========================================================================== */
+
+/* shorthand for the sky's recurring controls */
+const NSTAR = () => ctl({ pt: [640, 20], el: mkCut("home-empty.png", 618, 0, 44, 44, { round: true }), hl: mkHl(618, 0, 44, 44, { round: true }) });
+
+const CH = [
+/* ---------------------------------------------------------------- 1 ARRIVE */
+{ id: "arrive", name: "Arrive", enter: [656, 416], async play() {
+  setBg("home-empty.png", true); veil(false);
+  const dial = ctl({ pt: [405, 314], hl: mkHl(390, 150, 500, 500, { round: true }) });
+  await goto(dial, { willPress: false });
+  await callout("This is your star chart.", dial.pt, "left", { mark: "arrive-chart" });
+  unlight(dial);
+
+  /* every sun on the sky, this household's and the four around it */
+  const suns = [[640, 400, 24], [274, 218, 46], [1101, 283, 46], [314, 645, 46], [965, 645, 46]];
+  const lit = suns.map(([x, y, r]) => mkHl(x - r, y - r, r * 2, r * 2, { round: true }));
+  const sun = ctl({ pt: [640, 400], hl: lit[0] });
+  await goto(sun, { willPress: false });
+  lit.slice(1).forEach((h) => h.classList.add("on"));
+  await callout("Every sun is a household you belong to.", [640, 376], "top", { mark: "arrive-suns" });
+  lit.slice(1).forEach((h) => h.classList.remove("on"));
+  await callout("That's your sun, at centre — your household, always here.", [640, 424], "bottom");
+  unlight(sun); lit.forEach((h) => h.remove());
+
+  const gran = ctl({ pt: [1101, 283], hl: mkHl(1053, 235, 96, 96, { round: true }) });
+  await goto(gran, { willPress: false });
+  await callout("The rest of the sky holds systems you don't belong to — tap one to ask to join.",
+    [1053, 283], "left", { mark: "arrive-gran" });
+  unlight(gran); dropCallout();
+} },
+
+/* ------------------------------------------------------------------- 2 ADD */
+{ id: "add", name: "Add", enter: [1101, 283], async play() {
+  setBg("home-empty.png", true); veil(false);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  const star = NSTAR();
+  await travel(star.pt);
+  veil(true);
+  await growInto(star.hl);
+  star.lifted = true; star.el.style.transition = `transform ${T.lift}ms ${T.ease}`;
+  star.el.style.transform = xf(star); star.hl.classList.add("strong");
+  await w(T.lift); await w(T.hover);
+  await press(star);
+  await mark("add-star");
+
+  /* the drawer opens */
+  setBg("create.png");
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  await w(T.cross);
+  cuts.innerHTML = "";
+  const card = ctl({ pt: [540, 234], el: mkCut("create.png", 340, 234, 600, 332, { r: 16 }), hl: mkHl(340, 234, 600, 332, { r: 16 }) });
+  buildForm();
+  await travel(card.pt); await growInto(card.hl); card.hl.classList.add("strong");
+  await callout("Add anything here, by hand or by forwarding a document.", card.pt, "top", { mark: "add-drawer" });
+  dropCallout();
+  card.hl.classList.remove("on", "strong");
+
+  const name = ctl({ pt: [451, 279], el: document.getElementById("f-name"), hl: mkHl(373, 259, 218, 38, { r: 10 }) });
+  await goto(name); await press(name);
+  await typeInto(document.getElementById("t-name"), "Car MOT — Volvo V60", "add-typing");
+  document.getElementById("t-name").classList.add("done");
+  unlight(name); name.hl.remove();
+  await w(T.field);
+
+  const insp = ctl({ pt: [646, 369], el: mkCut("create.png", 586, 354, 120, 31, { r: 15.5 }), hl: mkHl(583, 351, 126, 37, { r: 18.5 }) });
+  await goto(insp); await press(insp);
+  insp.hl.classList.remove("strong"); insp.hl.classList.add("quiet");
+  insp.el.style.filter = "none"; insp.lifted = false; insp.el.style.transform = "translate(0,0)";
+  await w(T.field);
+
+  const due = ctl({ pt: [507, 466], el: document.getElementById("f-due"), hl: mkHl(373, 447, 268, 38, { r: 12 }) });
+  await goto(due); await press(due);
+  await typeInto(document.getElementById("t-due"), "29 Aug 2027");
+  unlight(due); due.hl.remove();
+  await w(T.field);
+
+  const cost = ctl({ pt: [781, 466], el: document.getElementById("f-cost"), hl: mkHl(657, 447, 249, 38, { r: 12 }) });
+  await goto(cost); await press(cost);
+  await typeInto(document.getElementById("t-cost"), "54.85");
+  unlight(cost); cost.hl.remove();
+  await w(T.field);
+
+  const yr = ctl({ pt: [517, 517], el: document.getElementById("c-year"), hl: mkHl(457, 498, 120, 39, { r: 19 }) });
+  await goto(yr); await press(yr);
+  document.getElementById("c-year").classList.add("sel");
+  unlight(yr); yr.hl.classList.remove("on");
+  await mark("add-yearly");
+  await w(T.field);
+
+  const add = ctl({ pt: [852, 517], el: document.getElementById("b-add"), hl: mkHl(798, 498, 108, 39, { r: 14 }) });
+  await goto(add); await press(add);
+  await mark("add-add");
+} },
+
+/* ----------------------------------------------------------------- 3 LANDS */
+{ id: "lands", name: "Lands", enter: [852, 517], async play() {
+  /* the drawer, filled, the instant before it closes */
+  setBg("create.png", true); veil(true);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  mkCut("create.png", 340, 234, 600, 332, { r: 16 }).classList.add("on");
+  buildForm(true);
+  await w(80);
+  setBg("home.png"); veil(false);
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  layer.style.opacity = 0;
+  await w(T.cross);
+  cuts.innerHTML = ""; layer.innerHTML = ""; layer.style.opacity = 1;
+  drawBody(381);
+  anim(document.getElementById("body"), [{ opacity: 0 }, { opacity: 1 }], { duration: T.bloom, easing: "ease-out" });
+  landing(381);
+  await w(T.bloom);
+
+  const nb = ctl({ pt: [733, 158], hl: mkHl(708, 133, 50, 50, { round: true }) });
+  await goto(nb, { willPress: false });
+  await callout("Bodies orbit by when they're due.", [733, 133], "top", { mark: "lands-body" });
+  unlight(nb);
+
+  const ring = ctl({ pt: [815, 225], hl: mkHl(392, 152, 496, 496, { round: true }) });
+  await goto(ring, { willPress: false });
+  await callout("The nearer the ring, the sooner.", [815, 225], "right", { mark: "lands-ring" });
+  unlight(ring); dropCallout();
+} },
+
+/* ------------------------------------------------------- 4 BELOW THE DIAL */
+{ id: "manifest", name: "Below the dial", enter: [815, 225], async play() {
+  setBg("home.png", true); veil(false); drawBody(381);
+  /* the page scrolls. The strip is the sky with the manifest under it, one
+     image; the two orbs are position:fixed on the real page, so they are
+     drawn back over the top rather than scrolling away with it. */
+  cuts.innerHTML = "";
+  scrollImg.src = shots("home-scroll.png");
+  scrollImg.style.transform = "translateY(0)";
+  scrollImg.classList.add("on");
+  const orbs = [mkCut("home.png", 1164, 22, 40, 40, { round: true }),
+    mkCut("home.png", 1190, 18, 18, 18, { round: true }),   /* the inbox badge */
+    mkCut("home.png", 1214, 22, 40, 40, { round: true })];
+  orbs.forEach((o) => o.classList.add("on"));
+  await w(T.cross);
+  const fx = document.getElementById("fx");
+  await w(400);
+  await tween(T.scroll, (t) => {
+    const e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    scrollImg.style.transform = `translateY(${-800 * e}px)`;
+    fx.style.transform = `translateY(${-800 * e}px)`;
+  });
+  await mark("manifest-scrolled");
+
+  veil(true);
+  /* the manifest column, cut out of the strip at the offset it now sits at */
+  const col = mkCut("home-scroll.png", 236, 16, 828, 720, { r: 14, sheet: [1280, 1689], off: [0, 800] });
+  const today = ctl({ pt: [246, 134], hl: mkHl(232, 120, 832, 28, { r: 8 }) });
+  await goto(today, { willPress: false });
+  await callout("The manifest lists what's ahead, nearest first.", [232, 134], "left", { w: 196, mark: "manifest-today" });
+  unlight(today); today.hl.remove();
+
+  const row = ctl({ pt: [276, 202], hl: mkHl(270, 160, 786, 84, { r: 14 }) });
+  await goto(row, { willPress: false });
+  await callout("Same law as the dial, read top to bottom instead of round the ring.",
+    [270, 202], "left", { mark: "manifest-row" });
+  unlight(row); row.hl.remove(); dropCallout();
+
+  veil(false); col.classList.remove("on");
+  await w(T.cross);
+  await tween(T.scroll, (t) => {
+    const e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    scrollImg.style.transform = `translateY(${-800 * (1 - e)}px)`;
+    fx.style.transform = `translateY(${-800 * (1 - e)}px)`;
+  });
+  fx.style.transform = "";
+  scrollImg.classList.remove("on");
+  await w(T.cross);
+  cuts.innerHTML = "";
+  at = [640, 400];  /* the dot rejoins the sky where the sun is */
+  placeMover(at);
+} },
+
+/* ------------------------------------------------------------ 5 TIME RUNS */
+{ id: "time", name: "Time runs", enter: [640, 400], async play() {
+  setBg("home.png", true); veil(false);
+  drawBody(381);
+  await w(400);
+  await walk(381, 16, 2600);
+  await mark("time-warmed");
+  const body = ctl({ pt: [671, 293], hl: mkHl(646, 268, 50, 50, { round: true }) });
+  await goto(body, { willPress: false });
+  await callout("Time runs. The nearer the sun, the sooner.", [671, 318], "bottom");
+  unlight(body);
+
+  document.getElementById("toast").classList.add("on");
+  await w(500);
+  await callout("At a month out it warms, and Orbit reminds you — 21 and 7 days before.",
+    [640, 160], "bottom", { mark: "time-toast" });
+  dropCallout();
+  document.getElementById("toast").classList.remove("on");
+  await w(400);
+} },
+
+/* -------------------------------------------------------- 6 PAPER BY POST */
+{ id: "relay", name: "Paper by post", enter: [640, 156], async play() {
+  setBg("home.png", true); veil(false); drawBody(16);
+  cuts.innerHTML = "";
+  /* one movement into the relay: the sky dims first — the body dimming with
+     it — and the relay then fades up under the veil. Round 4 switched the
+     background twice back to back here, the first switch a cut, with the
+     drawn body vanishing between the two. */
+  await w(250);
+  veil(true);
+  const g = document.getElementById("body");
+  anim(g, [{ opacity: 1 }, { opacity: 0 }], { duration: 450, fill: "forwards" });
+  await w(450);
+  g.getAnimations().forEach((a) => a.cancel());
+  g.innerHTML = ""; g.style.opacity = "";
+  setBg("relay.png");
+  await w(T.cross);
+  const addr = ctl({ pt: [640, 284], el: mkCut("relay.png", 458, 264, 364, 40, { r: 10 }), hl: mkHl(458, 264, 364, 40, { r: 10 }) });
+  await goto(addr, { willPress: false });
+  await callout("Forward a bill to your relay address and Orbit reads a copy.", [640, 264], "top", { mark: "relay-addr" });
+  /* the envelope round 1 flew: posted, and arriving without being redirected */
+  if (!R && !dry) {
+    const paper = put(`<div class="paper" style="left:626px;top:275px"></div>`);
+    paper.style.opacity = "1";
+    anim(paper, [{ transform: "translate(0,0) scale(1)", opacity: 1 }, { transform: "translate(420px,-200px) scale(.4)", opacity: 0 }],
+      { duration: 1500, easing: "cubic-bezier(.4,0,.6,1)", fill: "forwards" });
+    setTimeout(() => paper.remove(), 3000);
+  }
+  await w(1500);
+  await callout("Your mail is never redirected — it keeps arriving exactly where it always has.",
+    [640, 304], "bottom", { mark: "relay-never" });
+  unlight(addr); dropCallout();
+} },
+
+/* ----------------------------------------------------------------- 7 INBOX */
+{ id: "inbox", name: "Inbox", enter: [640, 284], async play() {
+  /* back to the sky, and in at the door the inbox actually has: its orb */
+  setBg("relay.png", true); veil(true);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  setBg("home.png"); veil(false);
+  /* the body fades in with the sky's own crossfade instead of popping in
+     after it (same seam smoothing as the relay arrival) */
+  drawBody(16);
+  anim(document.getElementById("body"), [{ opacity: 0 }, { opacity: 1 }], { duration: T.cross, easing: "ease-out" });
+  await w(T.cross);
+  const orb = ctl({ pt: [1184, 42], el: mkCut("home.png", 1164, 22, 40, 40, { round: true }), hl: mkHl(1160, 18, 48, 48, { round: true }) });
+  await travel(orb.pt);
+  veil(true);
+  await growInto(orb.hl);
+  orb.lifted = true; orb.el.style.transition = `transform ${T.lift}ms ${T.ease}`;
+  orb.el.style.transform = xf(orb); orb.hl.classList.add("strong");
+  await w(T.lift);
+  await callout("Mail lands here first — filed, waiting for review, or still being read.",
+    [1160, 42], "left", { mark: "inbox-orb" });
+  await w(T.hover);
+  await press(orb);
+
+  setBg("inbox.png");
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  document.getElementById("body").innerHTML = "";
+  dropCallout();
+  await w(T.cross);
+  cuts.innerHTML = "";
+
+  const lanes = [
+    /* each label stands clear of its own lane, on the side that has room */
+    { r: [18, 166, 378, 194], pt: [207, 263], at: [207, 360], side: "bottom", label: "Filed" },
+    { r: [408, 164, 466, 292], pt: [641, 310], at: [641, 456], side: "bottom", label: "For your review" },
+    { r: [886, 164, 378, 152], pt: [1075, 240], at: [1075, 164], side: "top", label: "Still reading" },
+  ];
+  for (const ln of lanes) {
+    const c = ctl({ pt: ln.pt, el: mkCut("inbox.png", ...ln.r, { r: 14 }), hl: mkHl(...ln.r, { r: 14 }) });
+    await goto(c, { willPress: false });
+    await callout(ln.label, ln.at, ln.side, { cls: "label", hold: 1500, mark: "inbox-lane-" + ln.label });
+    dropCallout();
+    unlight(c);
+  }
+  await mark("inbox-lanes");
+
+  const card = mkCut("inbox.png", 408, 164, 466, 292, { r: 14 });
+  card.classList.add("on");
+  const addbtn = ctl({ pt: [484, 405], el: mkCut("inbox.png", 430, 381, 108, 48, { r: 10 }), hl: mkHl(430, 381, 108, 48, { r: 10 }) });
+  await goto(addbtn);
+  await press(addbtn);
+  await mark("inbox-add");
+  await callout("Nothing joins your orbit without your say-so.", [538, 405], "right", { mark: "inbox-sayso" });
+  unlight(addbtn); dropCallout();
+} },
+
+/* -------------------------------------------------------------- 8 THE BELT */
+{ id: "belt", name: "The belt", enter: [484, 405], async play() {
+  setBg("inbox.png", true); veil(true);
+  cuts.innerHTML = "";
+  setBg("home.png"); veil(false);
+  /* the body fades in with the sky, as chapter 7's seam */
+  drawBody(16);
+  anim(document.getElementById("body"), [{ opacity: 0 }, { opacity: 1 }], { duration: T.cross, easing: "ease-out" });
+  await w(T.cross);
+  const body = ctl({ pt: [671, 293], hl: mkHl(646, 268, 50, 50, { round: true }) });
+  await travel(body.pt);
+  veil(true);
+  await growInto(body.hl); body.hl.classList.add("strong");
+  await w(T.lift); await w(T.hover);
+  const g = document.getElementById("body");
+  g.style.transformOrigin = "671px 293px";
+  anim(g, [{ transform: "scale(1)" }, { transform: "scale(.96)" }, { transform: "scale(1)" }], { duration: T.press * 2, easing: "ease-in-out" });
+  await w(T.press * 2);
+
+  setBg("belt.png");
+  wearDocs("belt.png");
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  anim(g, [{ opacity: 1 }, { opacity: 0 }], { duration: T.cross, fill: "forwards" });
+  await w(T.cross);
+  cuts.innerHTML = ""; g.innerHTML = ""; g.style.opacity = "";
+
+  const card = mkCut("belt.png", 445, 154, 390, 372, { r: 16 });
+  const cert = ctl({ pt: [352, 317], el: mkCut("belt.png", 282, 247, 140, 140, { round: true }), hl: mkHl(282, 247, 140, 140, { round: true }) });
+  const svc = ctl({ pt: [936, 336], el: mkCut("belt.png", 866, 266, 140, 140, { round: true }), hl: mkHl(866, 266, 140, 140, { round: true }) });
+  card.classList.add("on");
+  await goto(cert, { willPress: false });
+  await callout("Every body carries its documents in a belt around it.", [282, 317], "left", { mark: "belt-cert" });
+  unlight(cert);
+  await goto(svc, { willPress: false });
+  await callout("The belt is what you have attached to it.", [1006, 336], "right", { w: 220, mark: "belt-svc" });
+  dropCallout();
+
+  /* the right-hand ringed document is pressed and comes to centre: the card
+     becomes the document's, and the MOT takes the seat on the left ring */
+  await w(T.hover);
+  await press(svc);
+  setBg("belt-doc.png");
+  wearDocs("belt-doc.png");
+  /* the certificate's page has no lit window behind it while the card holds
+     the light, so it dims with the veiled screen */
+  wearDim(true);
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  await w(T.cross);
+  cuts.innerHTML = "";
+  const doc = mkCut("belt-doc.png", 445, 138, 390, 418, { r: 16 });
+  doc.classList.add("on");
+  await callout("Click one to bring it in.", [640, 138], "top", { cls: "label", hold: 2000, mark: "belt-doc" });
+
+  /* NEW BEAT (#1059): the page is pressed and opens to read. The pixels are
+     Orbit's own render of page one — no drawn or invented page anywhere. */
+  const pgEl = document.getElementById("card-page");
+  const pg = ctl({ pt: [521, 231], el: pgEl, hl: mkHl(471, 161, 100, 141, { r: 4 }) });
+  await goto(pg);
+  await press(pg);
+  const cap = put(`<div class="reader-cap">Service history · page 1 of 2</div>`);
+  const reader = put(`<div class="reader" style="background-image:url(shots/preview-service-history.png)"></div>`);
+  if (R || dry) { reader.classList.add("on"); cap.classList.add("on"); }
+  else requestAnimationFrame(() => { reader.classList.add("on"); cap.classList.add("on"); });
+  unlight(pg); pg.hl.remove();
+  await w(T.cross);
+  await callout("The page itself, read without leaving the sky.", [852, 300], "right", { mark: "belt-read" });
+  dropCallout();
+  reader.classList.remove("on"); cap.classList.remove("on");
+  await w(T.cross);
+  reader.remove(); cap.remove();
+  doc.classList.remove("on");
+  veil(false);
+  wearDim(false);
+  cuts.innerHTML = "";
+  await w(T.cross);
+
+  /* and the belt is stepped, on the one control the page does not carry */
+  const left = put(`<div class="keycap" style="left:1136px;top:672px">←</div>`);
+  const right = put(`<div class="keycap" style="left:1176px;top:672px">→</div>`);
+  left.style.opacity = "0"; right.style.opacity = "0";
+  anim(left, [{ opacity: 0 }, { opacity: 1 }], { duration: 250, fill: "forwards" });
+  anim(right, [{ opacity: 0 }, { opacity: 1 }], { duration: 250, fill: "forwards" });
+  if (R || dry) { left.style.opacity = "1"; right.style.opacity = "1"; }
+  await w(250);
+  await callout("← → step through the belt", [1156, 672], "top", { cls: "label", hold: 2200, mark: "belt-keys" });
+  dropCallout();
+
+  const rk = ctl({ pt: [1193, 686], el: right, hl: mkHl(1176, 672, 34, 28, { r: 7 }) });
+  const lk = ctl({ pt: [1153, 686], el: left, hl: mkHl(1136, 672, 34, 28, { r: 7 }) });
+  for (const [k, shot, m] of [[rk, "belt-n1.png", "belt-step1"], [rk, "belt-n2.png", "belt-step2"],
+                              [lk, "belt-n1.png", null], [lk, "belt.png", "belt-back"]]) {
+    await tap(k);
+    setBg(shot);
+    wearDocs(shot);
+    await w(T.cross);
+    if (m) await mark(m);
+    await w(300);
+  }
+  anim(left, [{ opacity: 1 }, { opacity: 0 }], { duration: 250, fill: "forwards" });
+  anim(right, [{ opacity: 1 }, { opacity: 0 }], { duration: 250, fill: "forwards" });
+  await w(250);
+  left.remove(); right.remove();
+  cuts.innerHTML = "";
+} },
+
+/* ------------------------------------------------------------------ 9 DONE */
+{ id: "done", name: "Done", enter: [1153, 686], async play() {
+  setBg("belt.png", true); veil(true);
+  cuts.innerHTML = "";
+  wearDocs("belt.png");
+  /* the card is the lit thing here; the pages out in the field dim with the
+     veiled screen instead of floating above it */
+  wearDim(true);
+  const card = mkCut("belt.png", 445, 154, 390, 372, { r: 16 });
+  card.classList.add("on");
+  const done = ctl({ pt: [513, 406], el: mkCut("belt.png", 467, 388, 92, 36, { r: 10 }), hl: mkHl(467, 388, 92, 36, { r: 10 }) });
+  await goto(done);
+  await callout("MOT passed — mark it done and it swings back out to next year.", [455, 406], "left", { w: 240, mark: "done-complete" });
+  await press(done);
+  dropCallout();
+
+  setBg("home.png"); veil(false);
+  wearDocs("home.png");
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  drawBody(16);
+  anim(document.getElementById("body"), [{ opacity: 0 }, { opacity: 1 }], { duration: T.cross, easing: "ease-out" });
+  await w(T.cross);
+  cuts.innerHTML = "";
+  await w(200);
+  await walk(16, 381, 2200);
+  landing(381);
+  await mark("done-swung");
+  const nb = ctl({ pt: [733, 158], hl: mkHl(708, 133, 50, 50, { round: true }) });
+  await goto(nb, { willPress: false });
+  await callout("Nothing is ever finished on a sky; it comes round.", [733, 133], "top", { mark: "done-round" });
+  unlight(nb); dropCallout();
+} },
+
+/* ------------------------------------------------------ 10 OTHER HOUSEHOLDS */
+{ id: "others", name: "Other households", enter: [733, 158], async play() {
+  setBg("home.png", true); veil(false); drawBody(381);
+  cuts.innerHTML = "";
+  const gran = ctl({ pt: [1101, 283], el: mkCut("home.png", 1053, 235, 96, 96, { round: true }), hl: mkHl(1053, 235, 96, 96, { round: true }) });
+  veil(true);
+  await goto(gran);
+  await callout("The rest of the sky holds households you don't belong to.", [1053, 283], "left", { mark: "others-gran" });
+  await press(gran);
+  dropCallout();
+  /* DRAWN, NOT CAPTURED: the fixture harness makes the reader a member of
+     every household, so it has no ask-to-join state to photograph. The chip
+     is the create drawer's own accent-outline button, in place. */
+  const chip = put(`<div class="btnadd" id="askjoin" style="left:1041px;top:342px;width:120px;height:30px">ask to join</div>`);
+  chip.style.opacity = "0";
+  anim(chip, [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 300, fill: "forwards" });
+  if (R || dry) chip.style.opacity = "1";
+  const ask = ctl({ pt: [1101, 357], hl: mkHl(1041, 342, 120, 30, { r: 10 }) });
+  await goto(ask, { willPress: false });
+  await callout("Tap one to ask to join — Gran's flat, the narrowboat.", [1041, 357], "left", { mark: "others-ask" });
+  unlight(ask); unlight(gran); dropCallout();
+  anim(chip, [{ opacity: 1 }, { opacity: 0 }], { duration: 250, fill: "forwards" });
+  await w(250);
+  chip.remove();
+  veil(false);
+} },
+
+/* -------------------------------------------------------------- 11 YOUR SKY */
+{ id: "sky", name: "Your sky", enter: [1101, 357], async play() {
+  setBg("home.png", true); veil(false); drawBody(381);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  const orb = ctl({ pt: [1234, 42], el: mkCut("home.png", 1214, 22, 40, 40, { round: true }), hl: mkHl(1210, 18, 48, 48, { round: true }) });
+  veil(true);
+  await goto(orb);
+  await press(orb);
+  await mark("sky-orb");
+
+  setBg("menu.png");
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  await w(T.cross);
+  cuts.innerHTML = "";
+  const menu = mkCut("menu.png", 1014, 70, 240, 296, { r: 14 });
+  menu.classList.add("on");
+  const settings = ctl({ pt: [1068, 213], hl: mkHl(1030, 200, 210, 28, { r: 8 }) });
+  await goto(settings, { willPress: false });
+  await callout("Settings holds your sky, your relay and this walk — take it again anytime.",
+    [1030, 213], "left", { mark: "sky-settings" });
+  unlight(settings); settings.hl.remove();
+
+  const sw = ctl({ pt: [1143, 301], hl: mkHl(1068, 284, 148, 34, { r: 17 }) });
+  await goto(sw, { willPress: false });
+  await callout("star chart · after dark · clouds · dawn · retrograde", [1030, 301], "left",
+    { cls: "label", hold: 2600, mark: "sky-swatches" });
+  unlight(sw); sw.hl.remove(); dropCallout();
+
+  /* dawn is pressed, and the whole sky wears it */
+  const dawn = ctl({ pt: [1170, 301], el: mkCut("menu.png", 1159, 290, 22, 22, { round: true }), hl: mkHl(1157, 288, 26, 26, { round: true }) });
+  await goto(dawn);
+  await press(dawn);
+  unlight(dawn); dawn.el.remove(); dawn.hl.remove();
+  menu.classList.remove("on");
+  veil(false);
+  dawnPack = true; stage.classList.add("dawn");
+  drawBody(381);
+  setBg("menu-dawn.png");
+  await w(T.cross);
+  await mark("sky-dawn");
+  await hold(R ? Math.max(T.rmHold, 2400) : 2400);
+
+  /* and back to the sky it came in on */
+  veil(true);
+  const back = mkCut("menu-dawn.png", 1014, 70, 240, 296, { r: 14 });
+  back.classList.add("on");
+  const ad = ctl({ pt: [1114, 301], el: mkCut("menu-dawn.png", 1103, 290, 22, 22, { round: true }), hl: mkHl(1101, 288, 26, 26, { round: true }) });
+  await goto(ad);
+  await press(ad);
+  unlight(ad); back.classList.remove("on"); ad.el.remove(); ad.hl.remove();
+  veil(false);
+  dawnPack = false; stage.classList.remove("dawn");
+  drawBody(381);
+  setBg("home.png");
+  await w(T.cross);
+  cuts.innerHTML = "";
+  await mark("sky-back");
+} },
+
+/* ----------------------------------------------------------------- 12 YOURS */
+{ id: "yours", name: "Yours", enter: [1114, 301], async play() {
+  setBg("home.png", true); veil(false); drawBody(381);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  await w(300);
+  /* the year, once more, in one turn of the ring */
+  await walk(381, 20, 1500);
+  await walk(20, 381, 1500);
+  landing(381);
+  await mark("yours-year");
+  const sun = ctl({ pt: [640, 400], hl: mkHl(616, 376, 48, 48, { round: true }) });
+  await goto(sun, { willPress: false });
+  await callout("That was a year in a minute.", [640, 376], "top", { mark: "yours-year-line" });
+  await callout("Now it's yours.", [640, 448], "bottom", { mark: "yours-close" });
+  unlight(sun); dropCallout();
+  await w(600);
+} },
+];
+
+/* ---- the drawer's drawn controls ----------------------------------------- */
+function buildForm(filled) {
+  layer.style.opacity = 0; requestAnimationFrame(() => { layer.style.opacity = 1; });
+  put(`<div class="field-blank" style="left:376px;top:262px;width:152px;height:34px"></div>`);
+  put(`<div class="ctl" id="f-name" style="left:377px;top:263px"><span class="typed" id="t-name">${filled ? "Car MOT — Volvo V60" : ""}</span></div>`);
+  put(`<div class="field-blank" style="left:377px;top:430px;width:526px;height:110px"></div>`);
+  put(`<div class="ctl" id="f-due" style="left:377px;top:434px;width:260px">
+        <div class="flabel">due</div>
+        <div class="fbox" style="height:30px"><span id="t-due">${filled ? "29 Aug 2027" : ""}</span><i class="cur off"></i></div>
+      </div>`);
+  put(`<div class="ctl" id="f-cost" style="left:661px;top:434px;width:241px">
+        <div class="flabel">cost</div>
+        <div class="fbox" style="height:30px"><span class="pre">£</span><span id="t-cost">${filled ? "54.85" : ""}</span><i class="cur off"></i></div>
+      </div>`);
+  put(`<div class="ctl" style="left:377px;top:485px"><div class="flabel">repeats</div></div>`);
+  put(`<div class="chip" style="left:377px;top:502px;width:76px;height:31px">once</div>`);
+  put(`<div class="chip${filled ? " sel" : ""}" id="c-year" style="left:461px;top:502px;width:112px;height:31px">every year</div>`);
+  put(`<div class="btnadd" id="b-add" style="left:802px;top:502px;width:100px;height:31px">add</div>`);
+}
+/* typing hangs off the film clock, one character per wait, so a pause stops
+   it mid-word and playing again picks the word up where it was left */
+async function typeInto(node, text, markName) {
+  const cur = node.parentElement.querySelector(".cur");
+  if (cur) cur.classList.remove("off");
+  await w(T.typeLead);
+  if (R || dry) {
+    node.textContent = text;
+    if (dry) for (let k = 0; k < text.length; k++) await w(T.typeChar);
+    if (cur) cur.classList.add("off");
+    return;
+  }
+  for (let k = 0; k < text.length; k++) {
+    node.textContent = text.slice(0, k + 1);
+    if (markName && k === Math.floor(text.length * 0.55)) await mark(markName);
+    await w(T.typeChar);
+  }
+  if (cur) cur.classList.add("off");
+}
+
+/* ===========================================================================
+   THE TRANSPORT. Play/pause, stop, and a time bar that reads the film's own
+   budget rather than the wall clock — so a jump to a chapter tick lands the
+   bar on exactly the reading that chapter starts at.
+   =========================================================================== */
+const bar = document.getElementById("bar"), track = document.getElementById("track");
+const fill = document.getElementById("fill"), head = document.getElementById("head");
+const nowLabel = document.getElementById("now"), tip = document.getElementById("tip");
+const clock = document.getElementById("clock"), ppicon = document.getElementById("ppicon");
+let OFFSETS = CH.map(() => 0);
+let chapter = 0, ended = false;
+
+const mmss = (ms) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+function setIcon() {
+  ppicon.innerHTML = playing
+    ? `<rect x="1" y="0" width="3.5" height="12"/><rect x="7.5" y="0" width="3.5" height="12"/>`
+    : `<path d="M1 0 L12 6 L1 12 Z"/>`;
+  const b = document.getElementById("pp");
+  b.setAttribute("aria-label", playing ? "Pause" : "Play");
+  b.setAttribute("title", (playing ? "Pause" : "Play") + " · space");
+}
+function paintBar() {
+  const t = total ? Math.min(1, cursor / total) : 0;
+  const wdt = track.clientWidth || 1;
+  fill.style.width = (t * wdt) + "px";
+  head.style.left = (t * wdt) + "px";
+  clock.textContent = `${mmss(Math.min(cursor, total))} / ${mmss(total)}`;
+  const lw = nowLabel.offsetWidth;
+  nowLabel.style.left = Math.max(0, Math.min(t * wdt - lw / 2, wdt - lw)) + "px";
+}
+function buildTicks() {
+  for (const old of track.querySelectorAll(".tick")) old.remove();
+  CH.forEach((c, k) => {
+    const b = document.createElement("button");
+    b.className = "tick"; b.type = "button";
+    b.style.left = (total ? OFFSETS[k] / total * 100 : 0) + "%";
+    b.title = c.name;
+    b.setAttribute("aria-label", `Chapter ${k + 1}: ${c.name}`);
+    b.onclick = () => jump(k);
+    b.onmouseenter = b.onfocus = () => {
+      tip.textContent = c.name;
+      tip.classList.add("on");
+      track.classList.add("tipping");
+      const x = total ? OFFSETS[k] / total * track.clientWidth : 0;
+      tip.style.left = Math.max(0, Math.min(x - tip.offsetWidth / 2, track.clientWidth - tip.offsetWidth)) + "px";
+    };
+    b.onmouseleave = b.onblur = () => { tip.classList.remove("on"); track.classList.remove("tipping"); };
+    track.insertBefore(b, head);
+  });
+}
+function markChapter(k) {
+  chapter = k;
+  nowLabel.textContent = CH[k].name;
+  track.querySelectorAll(".tick").forEach((t, i) => t.classList.toggle("here", i === k));
+}
+function setPlaying(on) {
+  if (on === playing) return;
+  playing = on;
+  bar.classList.toggle("dim", on);
+  if (!on) {
+    held = document.getAnimations().filter((a) => {
+      const t = a.effect && a.effect.target;
+      return a.playState === "running" && t && !bar.contains(t);
+    });
+    held.forEach((a) => { try { a.pause(); } catch { /* already done */ } });
+  } else {
+    held.forEach((a) => { try { a.play(); } catch { /* gone */ } });
+    held = [];
+    resumers.splice(0).forEach((r) => r());
+  }
+  setIcon();
+}
+
+function clearStage() {
+  token++;
+  waiters.splice(0).forEach((wt) => wt.fire());
+  resumers.splice(0).forEach((r) => r());
+  frameCbs.clear();
+  held = [];
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  document.getElementById("extra").innerHTML = "";
+  const g = document.getElementById("body");
+  g.getAnimations().forEach((a) => a.cancel());
+  g.innerHTML = ""; g.style.opacity = "";
+  document.getElementById("fx").style.transform = "";
+  document.querySelectorAll(".callout").forEach((c) => c.remove()); live = null;
+  document.getElementById("toast").classList.remove("on");
+  scrollImg.classList.remove("on"); scrollImg.style.transform = "translateY(0)";
+  dot6.classList.remove("on");
+  docLayer = []; docShot = null;
+  dawnPack = false; stage.classList.remove("dawn");
+  at = [656, 416]; placeMover(at);
+}
+
+async function run(from) {
+  const my = token;
+  try {
+    for (let k = from; k < CH.length; k++) {
+      if (my !== token) return;
+      markChapter(k);
+      at = CH[k].enter.slice(); placeMover(at);
+      await CH[k].play();
+    }
+  } catch (e) {
+    if (e !== CANCEL) throw e;
+    return;
+  }
+  if (my === token) finish();
+}
+function finish() {
+  ended = true;
+  cursor = total; sched = total;
+  clearStage();
+  veil(false);
+  setPlaying(false);
+  bar.classList.add("gone");
+  window.__ended = true;
+}
+function jump(k) {
+  ended = false; window.__ended = false;
+  clearStage();
+  bar.classList.remove("gone");
+  cursor = sched = OFFSETS[k];
+  lastTs = 0;
+  if (!playing) setPlaying(true);
+  markChapter(k);
+  run(k);
+}
+function stop() {
+  clearStage();
+  veil(false);
+  setPlaying(false);
+  ended = true; window.__ended = true;
+  bar.classList.add("gone");
+}
+
+document.getElementById("pp").onclick = () => {
+  if (ended) { jump(0); return; }
+  setPlaying(!playing);
+};
+document.getElementById("stp").onclick = stop;
+addEventListener("keydown", (e) => {
+  if (e.key === " " || e.key === "Spacebar") { e.preventDefault(); document.getElementById("pp").onclick(); }
+  if (e.key === "Escape") stop();
+});
+function fit() { const s = Math.min(innerWidth / 1280, innerHeight / 800); stage.style.transform = `translate(${-640 * s}px,${-400 * s}px) scale(${s})`; }
+addEventListener("resize", fit); fit();
+
+/* ---- the dry run: every chapter's start, and the whole length, at load ---- */
+async function measure() {
+  dry = true; budget = 0;
+  const offs = [];
+  for (let k = 0; k < CH.length; k++) {
+    offs.push(budget);
+    clearStage();
+    at = CH[k].enter.slice();
+    try { await CH[k].play(); } catch (e) { if (e !== CANCEL) throw e; }
+  }
+  const t = budget;
+  dry = false;
+  clearStage();
+  return { offs, total: t };
+}
+
+const FILES = ["home-empty.png", "create.png", "home.png", "home-scroll.png", "relay.png",
+  "inbox.png", "belt.png", "belt-doc.png", "belt-n1.png", "belt-n2.png", "menu.png",
+  "menu-dawn.png", "home-dawn.png", "preview-service-history.png", "preview-mot-certificate.png"];
+
+(async function boot() {
+  await Promise.all(FILES.map((f) => new Promise((res) => { const im = new Image(); im.onload = im.onerror = res; im.src = shots(f); })));
+  const m = await measure();
+  OFFSETS = m.offs; total = m.total;
+  window.__total = total;
+  window.__offsets = OFFSETS.slice();
+  window.__chapters = CH.map((c, k) => ({ id: c.id, name: c.name, at: OFFSETS[k] }));
+  buildTicks(); setIcon(); paintBar();
+  requestAnimationFrame(frame);
+  const wanted = parseInt((location.hash.match(/^#c(\d+)/) || [])[1]);
+  jump(Number.isFinite(wanted) ? Math.max(0, Math.min(wanted - 1, CH.length - 1)) : 0);
+})();
+
+/* review hooks */
+window.__jump = jump;
+window.__stop = stop;
+window.__pause = () => setPlaying(false);
+window.__play = () => setPlaying(true);
+window.__reading = () => ({ cursor, total, chapter, text: clock.textContent, name: nowLabel.textContent });
+</script>
+</body>
+</html>
