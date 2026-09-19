@@ -1111,7 +1111,7 @@ const CH = [
   await mark("yours-year");
   const sun = ctl({ pt: [640, 400], hl: mkHl(616, 376, 48, 48, { round: true }) });
   await goto(sun, { willPress: false });
-  await callout("That was a year in a minute.", [640, 376], "top", { mark: "yours-year-line" });
+  await callout("That was a year, in one turn of the ring.", [640, 376], "top", { mark: "yours-year-line" });
   await callout("Now it's yours.", [640, 448], "bottom", { mark: "yours-close" });
   unlight(sun); dropCallout();
   await w(600);

@@ -130,3 +130,14 @@ fades the pill, hover brings it back.
   receded pill (and the end-state ghost) overlap it there.
 - The reader shows page one only; page-turning is #1059's to design against
   the real endpoint, which serves page one today.
+
+## Correction, 2026-09-19 (owner)
+
+The closing line said **"That was a year in a minute."** — round 1's copy,
+written when the film was a minute long. It is 3:41. The claim was inaccurate,
+so it is gone: the line is now **"That was a year, in one turn of the ring."**,
+which says what the chapter actually shows and stops promising a length the
+film does not keep. The second callout, "Now it's yours.", is unchanged.
+
+The shipped tour's own copy (`web/src/lib/tour/stops.js`) never carried the
+claim, so nothing outside this round needed changing.
