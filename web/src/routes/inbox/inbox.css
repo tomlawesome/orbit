@@ -13,7 +13,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .sky .near{animation:driftn 195s linear infinite}
 .inbox-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=atlas] .inbox-page .vignette,[data-theme=dawn] .inbox-page .vignette{background:none}
+[data-theme=clouds] .inbox-page .vignette,[data-theme=dawn] .inbox-page .vignette{background:none}
 
 .inbox-page .page{position:relative;z-index:2;max-width:1400px;margin:0 auto;padding:96px 24px 120px}
 .inbox-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
