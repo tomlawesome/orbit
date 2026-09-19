@@ -60,4 +60,16 @@ box scrolls as before (`?scene=zoom`, 150%).
 
 ## Verdict
 
-Awaiting the owner.
+Owner, 2026-09-19, no fault found with the page or the under-sheet; the
+next changes came instead (verbatim, answered in `../round-6/`):
+
+> Still scanning - animated the page with a line that moves up and down in
+> the same colour as the outline, with a slighly luminescent glow.
+> The preview should be extremely basic. It's nearly edge to edge PDF
+> preview top, right end left sides. Below, there's a page number and an
+> arrow left/right (only show when you can go back/forward) to flick through
+> the page preview images.
+> This text: 2 documents ride in the belt beside this item — the ringed
+> bodies either side. click one to open it. changes to: N documents.
+> The document preview image goes back to being clickable, and expands into
+> the reader view that was approved before.
