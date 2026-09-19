@@ -318,10 +318,16 @@ variables:
 
 # The same wait, for the two jobs that already took `fast`'s artefacts, and
 # that still wait on the policy jobs (#945 did not touch this anchor).
+#
+# `artifacts: true` is spelled out rather than left to the default since #1061:
+# `fast` now publishes the built web application here, and `fidelity` serves it
+# rather than building its own. A `needs:` that stopped delivering artefacts
+# would not fail — the gate would quietly rebuild — so the delivery says so.
 .needs_gated_with_fast_artifacts: &needs_gated_with_fast_artifacts
   - job: classify
     artifacts: true
   - job: fast
+    artifacts: true
   - job: fast_docker
     artifacts: false
     optional: true
@@ -769,12 +775,20 @@ fast:
     - *drop_to_node
     # ORBIT_TEST_SKIP_DOCKER excludes the suites fast_docker owns, below.
     - orbit_as_node 'ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh'
-    # The production build and the render proof, run here as well as inside the
-    # image: the container build is the authoritative gate but it is minutes
-    # away, and this fails in seconds when a packaging change breaks previews.
+    # The render proof, run here as well as inside the image: the container
+    # build is the authoritative gate but it is minutes away, and this fails in
+    # seconds when a packaging change breaks previews.
+    #
+    # The build itself is the one test-backend.sh above has just done (#1061).
+    # This used to repeat it outright -- the same `pnpm --filter orbit-web
+    # build` twice in one job, about 20 s each. The stamp check is kept rather
+    # than the line simply deleted so this step still stands up on its own if
+    # the script above ever stops building: it builds only when web/build is
+    # not already this checkout's.
     - |
       if [ "${ORBIT_BUILD:-true}" = "true" ]; then
-        orbit_as_node 'pnpm --filter orbit-web build && pnpm test:web-pdfjs'
+        orbit_as_node 'node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build'
+        orbit_as_node 'pnpm test:web-pdfjs'
       else
         echo "skipped: no build-risk change"
       fi
@@ -783,6 +797,16 @@ fast:
     name: orbit-coverage
     paths:
       - coverage/
+      # The built web application, so `fidelity` serves these bytes instead of
+      # building its own copy (#1061, ADR-0028 slice 1). About 7 MB.
+      #
+      # It shares this block's `expire_in`, because a job may declare only one
+      # `artifacts:` block and this one also carries the reuse evidence a later
+      # pipeline's gate reads for days. A `fast` that stood on an earlier run
+      # leaves no web/build behind at all; that is safe rather than stale,
+      # because the fidelity gate's webServer checks the stamp and builds when
+      # there is nothing to serve.
+      - web/build/
       - ci-evidence/
     expire_in: 14 days
     when: on_success
@@ -1254,6 +1278,18 @@ fidelity:
       # that tsconfig while loading its config, before the webServer command
       # that would have built it ever runs.
       pnpm --filter orbit-web exec svelte-kit sync
+      # The gate's webServer no longer builds the application (#1061): `fast`
+      # built it and handed web/build over as an artefact, and the stamp inside
+      # it proves it was made from this same commit's sources.
+      #
+      # Asked here as well as inside the webServer, purely so the trace says
+      # which way it went: the webServer's own output is thrown away
+      # (`stdout: "ignore"` in web/playwright.config.js), so without this the
+      # job would be silent about whether it built the application again. A
+      # "rebuilding" line is not a failure -- the gate still passes -- but it
+      # means the artefact did not arrive and the build this issue removed is
+      # back.
+      node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
       pnpm --filter orbit-web fidelity
     - *reuse_evidence
   artifacts:

@@ -73,7 +73,8 @@
       "tsconfig.json",
       "package.json",
       "pnpm-lock.yaml",
-      "pnpm-workspace.yaml"
+      "pnpm-workspace.yaml",
+      "scripts/web-build-stamp.mjs"
     ],
     "build_image": [
       "@image"
