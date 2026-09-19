@@ -160,3 +160,17 @@ line cover it, with the reader finding out from the administrator?
 
 **4** Confirm C is not built — the lapsed links stay on the setup card, the
 approval page and the invite screen.
+
+## Verdict (owner, 2026-09-19)
+
+**B — the held dawn, refused — is ratified**, with one change: the
+contact-address sentence goes. Owner: *"I preferred B, the held dawn. But we
+don't give out admin emails."* The first reaction (*"These suck"* /
+*"really, very horrible"*) was withdrawn as a misunderstanding of what the
+three files were; a round 2 on the ring card was started and cancelled on the
+owner's instruction. A and C are dropped.
+
+What ships from B: the held pre-dawn sky for "sign-in didn't complete" with
+the pill kept (retry plays the sunrise), and the refused face for
+`account_disabled` with no pill. Both sublines lose the "let us know at
+«address»" sentence entirely; the sentence is not replaced.
