@@ -80,7 +80,20 @@ if command -v pnpm >/dev/null 2>&1; then
   pnpm typecheck
   pnpm lint
   node scripts/check-rolldown-jsdoc-trap.mjs
-  pnpm --filter orbit-web build
+  # Only when there is not already a build of these exact sources (#1061). The
+  # web app used to be built three times in one pipeline; it is now built once
+  # and shared. Locally this is still a plain rebuild, because a clean checkout
+  # has no build to stand on and any edit moves the stamp.
+  #
+  # `svelte-kit sync` in the other branch because check-v19-types.mjs below
+  # runs svelte-check, and web/tsconfig.json extends ./.svelte-kit/tsconfig.json
+  # -- a generated, gitignored file the build happens to produce. Skipping the
+  # build without it leaves svelte-check with no tsconfig to read.
+  if node scripts/web-build-stamp.mjs check; then
+    pnpm --filter orbit-web exec svelte-kit sync
+  else
+    pnpm --filter orbit-web build
+  fi
   node scripts/check-v19-types.mjs
   if [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
     pnpm test:coverage
@@ -94,9 +107,13 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
   node node_modules/eslint/bin/eslint.js . --concurrency auto
   node scripts/check-rolldown-jsdoc-trap.mjs
   # Mirrors web/package.json's own `build`: the licence collector writes
-  # static/licenses, which the SvelteKit build then bundles.
-  (cd web && node scripts/collect-font-licences.mjs \
-    && node ../node_modules/vite/bin/vite.js build)
+  # static/licenses, which the SvelteKit build then bundles, and the stamp
+  # records what it was built from (#1061).
+  if ! node scripts/web-build-stamp.mjs check; then
+    (cd web && node scripts/collect-font-licences.mjs \
+      && node ../node_modules/vite/bin/vite.js build \
+      && node ../scripts/web-build-stamp.mjs write)
+  fi
   node scripts/check-v19-types.mjs
   if [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
     node node_modules/vitest/vitest.mjs run --coverage
