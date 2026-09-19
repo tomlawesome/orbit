@@ -5,6 +5,7 @@
     commandContact,
     commandMailbox,
     createLocalUser,
+    createSystem,
     readAdminScreen,
     readSignInMethods,
     sendSetupLink,
@@ -12,6 +13,7 @@
   } from "$lib/data/workspace.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf, galaxyOf } from "$lib/data/chart.js";
+  import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
   import Chrome from "$lib/Chrome.svelte";
@@ -85,6 +87,70 @@
       busy = null;
     }
   }
+
+  /* A NEW SYSTEM, MADE FOR SOMEBODY ELSE (#1052, Fable's decision of
+     2026-09-19). The Systems card's head button was drawn from the mockup and
+     never wired; this is the flow behind it, and it is deliberately the
+     People card's own picker turned around. There, a person is chosen and the
+     systems are the buttons; here a name is typed and the PEOPLE are the
+     buttons, because what is being chosen is the owner.
+
+     What an administrator-made system is: a household with a named owner,
+     starting empty. Never owned by the administrator by default — they may
+     not be a member of it at all — and never ownerless, because every
+     household has exactly one owner. The owner invites the rest from their
+     own household screen, as anyone would.
+
+     The whole screen is re-read afterwards rather than patched, for the same
+     reason placing a person re-reads it: the Systems list, the sky behind it
+     and the header's counts are all derived from the households, so a patch
+     would leave half of them describing the instance as it was. */
+  let creatingSystem = $state(false);
+  let systemName = $state("");
+  let systemPassword = $state("");
+  let systemBusy = $state(false);
+  /** @type {string | null} */
+  let systemProblem = $state(null);
+
+  /** Opens or closes the form, challenging first where a challenge is owed. */
+  function toggleNewSystem() {
+    if (creatingSystem) { creatingSystem = false; systemPassword = ""; return; }
+    systemProblem = null;
+    challengeThen("system_create", () => {
+      creatingSystem = true;
+      systemName = "";
+      systemPassword = "";
+    }, (message) => (systemProblem = message));
+  }
+
+  /**
+   * Pressing an owner button is the submit: the name is already typed, and the
+   * person pressed is who the system belongs to.
+   *
+   * @param {string} ownerId
+   */
+  async function createSystemNow(ownerId) {
+    if (systemBusy) return;
+    systemBusy = true;
+    systemProblem = null;
+    try {
+      await createSystem({
+        name: systemName,
+        ownerId,
+        ...(actorHasPassword ? { currentPassword: systemPassword } : {}),
+      });
+      creatingSystem = false;
+      systemName = "";
+      systemPassword = "";
+      provenIntent = "";
+      view = await readAdminScreen();
+    } catch (error) {
+      systemProblem = setupWords(error);
+    } finally {
+      systemBusy = false;
+    }
+  }
+
   /* ADD A LOCAL USER, AND SEND A NEW SETUP LINK (#915, ADR-0023 §3, §5;
      composition ruled in docs/plans/m7-local-accounts.md §2.7).
 
@@ -197,10 +263,15 @@
    * gets the field under it; one without is handed to the provider and comes
    * back here with the proof.
    *
+   * A handover that never left says so on the card the action belongs to, not
+   * on whichever card happens to own `localProblem` — #1052 added a third
+   * caller on a second card, so `report` names the line rather than assuming.
+   *
    * @param {string} intent
    * @param {() => void} openField
+   * @param {(message: string) => void} [report]
    */
-  async function challengeThen(intent, openField) {
+  async function challengeThen(intent, openField, report = (message) => (localProblem = message)) {
     localProblem = null;
     resendProblem = null;
     if (actorHasPassword || provenIntent === intent) { openField(); return; }
@@ -208,7 +279,7 @@
       stashDraft();
       await startStepUp({ intent, returnTo: `/administration?stepup=${encodeURIComponent(intent)}` });
     } catch (error) {
-      localProblem = setupWords(error);
+      report(setupWords(error));
     }
   }
 
@@ -602,7 +673,14 @@
       {/if}
 
       <div class="card">
-        <div class="cardhead"><h2>People</h2><button>invite someone</button></div>
+        <!-- "invite someone" is the head of the row below it, not a second
+             flow: inviting somebody in Orbit IS creating their account and
+             mailing them a setup link (#481, ADR-0023 §3), and that form is
+             always open under this head. So the button takes the reader to
+             it rather than opening anything — the one thing left to do is
+             type the address. -->
+        <div class="cardhead"><h2>People</h2>
+          <button onclick={() => document.getElementById("localuser-email")?.focus()}>invite someone</button></div>
 
         <!-- ADD A LOCAL USER (#915, ADR-0023 §3; composition §2.7): the row
              above the roster. Three things and a button — who they are, and
@@ -718,7 +796,41 @@
       </div>
 
       <div class="card">
-        <div class="cardhead"><h2>Systems</h2><button>new system</button></div>
+        <div class="cardhead"><h2>Systems</h2>
+          <button onclick={toggleNewSystem} aria-expanded={creatingSystem}
+                  aria-controls="newsystem">new system</button></div>
+
+        <!-- A NEW SYSTEM (#1052). The People card's picker, turned around: the
+             name is typed, and the PEOPLE are the buttons, because what is
+             being chosen is the owner. Pressing one is the submit — there is
+             no separate confirm, exactly as pressing a system places a person
+             over in the People card. Not a <form>: with the owner buttons as
+             the submit there is no single default action for Enter to take,
+             and a form whose Enter key does nothing is a dead end. -->
+        {#if creatingSystem}
+          <div class="localuser newsystem" id="newsystem">
+            <label for="newsystem-name">name</label>
+            <input id="newsystem-name" autocomplete="off" placeholder="Seaside Cottage"
+                   maxlength={NAME_LIMIT} bind:value={systemName} required />
+            {#if actorHasPassword}
+              <!-- The same inline challenge the sibling admin actions ask for
+                   (ADR-0023 §5); an OIDC-only administrator was handed to
+                   their provider by the head button instead. -->
+              <label for="newsystem-current">your current password</label>
+              <input id="newsystem-current" type="password" autocomplete="current-password"
+                     bind:value={systemPassword} required />
+            {/if}
+            <div class="placerow localuserrow" role="group"
+                 aria-label="choose who will own the new system">
+              {#each view.users as person (person.id)}
+                <button disabled={systemBusy || systemName.trim().length === 0}
+                        onclick={() => createSystemNow(person.id)}>{person.displayName}</button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+        {#if systemProblem}<div class="adminproblem">{systemProblem}</div>{/if}
+
         {#each view.households as household (household.id)}
           <div class="system">
             <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
