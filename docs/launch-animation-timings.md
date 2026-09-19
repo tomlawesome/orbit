@@ -5,6 +5,12 @@ so the next step can name what to change instead of guessing. Nothing about
 the animation — its timing, easing, transforms or geometry — was touched to
 get these numbers.
 
+Where it runs, since #1048: the `launch_timing` CI job at the `dev` →
+`preview` promotion, not the per-merge-request `fidelity` gate, because the
+noise on a shared machine was larger than the effect. Each promotion's numbers
+are kept as that job's artefact and the next promotion is printed beside them.
+Locally it is `pnpm --filter orbit-web launch-timing`.
+
 ## What "the launch" is
 
 The create card's hand-off into the flight (`Arrival.svelte`'s `submit()`):

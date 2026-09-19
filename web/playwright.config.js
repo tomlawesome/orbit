@@ -12,6 +12,30 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],
+  /*
+   * Two projects, because this directory holds two different kinds of test
+   * and they belong at different moments (#1048, owner 2026-09-18).
+   *
+   * `fidelity` guards an appearance: it photographs a screen and compares it
+   * with a committed baseline, and it has to run on every merge request that
+   * moves the front end, because that is when a screen breaks.
+   *
+   * `launch-timing` guards nothing. It measures frame intervals through the
+   * launch hand-off, and on a shared machine the run-to-run noise is larger
+   * than the effect being measured -- the same unchanged build differed by up
+   * to 189 pixels, and a CSS-only phase nobody had touched moved as much as
+   * the phase under test. So it runs once per promotion instead, on the
+   * quietest lane this host has, from the `launch_timing` CI job.
+   *
+   * Selecting by project rather than by path keeps the split in one place:
+   * `pnpm --filter orbit-web fidelity` and `pnpm --filter orbit-web
+   * launch-timing` each name their own, and neither can pick up the other's
+   * files by accident when a new spec lands in this directory.
+   */
+  projects: [
+    { name: "fidelity", testIgnore: "**/launch-timing.spec.js" },
+    { name: "launch-timing", testMatch: "**/launch-timing.spec.js" },
+  ],
   use: {
     /*
      * 1600x1000 is the design's own SVG viewBox, so the artwork is judged at
