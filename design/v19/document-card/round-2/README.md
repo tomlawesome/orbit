@@ -203,6 +203,17 @@ straight to download?
 the paper, opened), or leave a strip of belt so the paper stays in view
 beside its sheet?
 
-## Verdicts
+## Verdict
 
-Not yet given.
+Owner, 2026-09-19, verbatim:
+
+> 1059 no, you clearly didn't bother checking the old mockups did you? You
+> just briefed the agent and ignored what I said
+
+Rejected. What was wrong: the owner's reference is `design/v19/create-v3.html`
+in its `doc` and `snap` states ("That's the exact mockup I meant"), where
+one grid widens so the form card slides off centre and the reading card
+grows out beside it — one view expanding, the pair centred together. Round
+2 dropped a separate tall panel at the screen edge and left the item card
+where it was: two unconnected things, not one view expanding. Round 3
+(`../round-3/`) draws the create-v3 mechanism on the belt.
