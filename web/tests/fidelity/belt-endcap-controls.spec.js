@@ -139,12 +139,12 @@ for (const { width, height } of VIEWPORTS) {
     const boxes = await page.evaluate(() =>
       [...document.querySelectorAll("#ends [data-step]")].map((cap) => {
         const target = cap.getBoundingClientRect();
-        const ink = cap.querySelector(".endcap")?.getBoundingClientRect();
+        const ink = cap.querySelector(".endcap");
         return {
           step: cap.getAttribute("data-step"),
           w: target.width, h: target.height,
           /* The painted words are NOT allowed to have grown with the target. */
-          ink: ink ? getComputedStyle(cap.querySelector(".endcap")).fontSize : "none",
+          ink: ink ? getComputedStyle(ink).fontSize : "none",
         };
       }));
 
