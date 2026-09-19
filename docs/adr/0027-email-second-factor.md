@@ -55,3 +55,42 @@ for setup and recovery.
 - A mail outage locks the door for everyone with a password; the admin
   link is the only way through. That is accepted, and is why the factor
   switches off as a whole when no relay is configured.
+
+## Rulings of 2026-09-18
+
+Added when #1033 was built. The first list is the owner's; the second is the
+set of calls the build had to make to carry it out, recorded here so the next
+reader finds them beside the decision rather than in a merge request.
+
+**Ruled (owner, 2026-09-18):** setup and recovery links count as the factor —
+getting in through one sends no approval email, and the approval link uses the
+same email route as the setup link. No-email accounts do not exist (email is
+mandatory) — build no branch for them. Show the requester's IP address on the
+approval page and in the mail; a private (LAN) address reads *from your home
+network*; take the client address from the forwarded-for header only when the
+request came from the instance's own proxy (look at how the app is fronted in
+`compose/` and what SvelteKit's `getClientAddress` returns under it — if there
+is no existing proxy-trust convention, use `event.getClientAddress()` and note
+it). Country flag / named location are #1053, NOT this build.
+
+**Settled at build time (Fable, 2026-09-18):** opening the link never approves
+anything — only pressing Approve or This wasn't me changes state (mail scanners
+follow links). Only the browser that typed the password can collect the
+session: the waiting tab holds a short-lived cookie tied to its pending
+sign-in; polling without it gets nothing. The approval page is a phone screen
+first: one column, Approve full-width on top, This wasn't me the same size
+beneath in a quieter colour. "Relay configured" means the SMTP settings are
+present, not that the server answers now. A refused sign-in shows the waiting
+tab "this sign-in was refused", counts as a failed attempt in the existing
+per-credential backoff, and leaves a one-line notice on the sky at the next
+successful sign-in (when, and a link to change the password).
+
+### What the build settled about the client address
+
+Orbit is fronted by nothing: `docker-compose.yml` publishes the application's
+own port, and the only proxy in the repository belongs to the disposable demo
+stack. There is therefore no proxy-trust convention to honour, and no
+forwarded-for header this instance has any reason to believe — so the address
+is `event.getClientAddress()`, noted here as the ruling asks. An operator who
+puts a reverse proxy in front of Orbit will need that convention before the
+address on the approval page means what it says.

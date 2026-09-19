@@ -1,9 +1,19 @@
-import { sessionCookieName, setSessionCookie } from "orbit/lib/auth/cookies";
+import {
+  clearPendingSignInCookie,
+  sessionCookieName,
+  setPendingSignInCookie,
+  setSessionCookie,
+} from "orbit/lib/auth/cookies";
 import { AuthError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
 import { assertSameOrigin, createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 import { verifyCredential } from "orbit/server/local-credentials";
+import {
+  SIGN_IN_APPROVAL_TTL_MS,
+  secondFactorConfigured,
+  startSignInApproval,
+} from "orbit/server/sign-in-approvals";
 
 import { api } from "$lib/server/api.js";
 
@@ -23,7 +33,16 @@ import { api } from "$lib/server/api.js";
  * more politely.
  *
  * A successful sign-in replaces the browser's previous session exactly as the
- * OIDC callback does.
+ * OIDC callback does -- when there is one to replace it with. Since #1033 the
+ * ordinary answer to a correct password is a PENDING sign-in rather than a
+ * session (ADR-0027 §1): the reader is mailed an approval link and this tab
+ * waits. The session is minted by `login/pending` once somebody has pressed
+ * Approve, so the only way past this route is through a mailbox.
+ *
+ * The factor is off as a whole, and only as a whole, when the instance has no
+ * mail relay configured (ADR-0027 §2) -- an instance that cannot send has no
+ * way to ask, and locking every password out of it would be worse than the
+ * door it already has. There is no per-user switch and no remembered browser.
  */
 const INVALID_MESSAGE = "That email address and password do not match an Orbit account";
 
@@ -66,6 +85,49 @@ export const POST = api(
     }
 
     await deleteSessionToken(event.cookies.get(sessionCookieName(config)));
+
+    if (secondFactorConfigured()) {
+      /* The address the approval is judged on. SvelteKit's own
+         `getClientAddress` is the whole of it: Orbit ships fronted by nothing
+         (docker-compose.yml publishes the app's port directly), so there is no
+         proxy-trust convention to honour and no forwarded-for header this
+         instance has any reason to believe. An operator who puts a proxy in
+         front of Orbit will need that convention before the address on the
+         approval page means what it says. */
+      let clientAddress = null;
+      try {
+        clientAddress = event.getClientAddress();
+      } catch {
+        /* An adapter that cannot say is answered by the page's own wording for
+           an address it could not read, never by a guess. */
+        clientAddress = null;
+      }
+      const pending = await startSignInApproval(verdict.userId, {
+        userAgent: event.request.headers.get("user-agent"),
+        clientAddress,
+      });
+      setPendingSignInCookie(event.cookies, pending.claim, config, Math.floor(SIGN_IN_APPROVAL_TTL_MS / 1000));
+
+      /* Deliberately bounded: whether a link is waiting, when it lapses, and
+         when this tab may ask for another. Never the address it went to, and
+         never the link. `limited` is ADR-0027 §8's "check the mail we already
+         sent" and is the one thing the card says differently. */
+      return new Response(
+        JSON.stringify({
+          authenticated: false,
+          pending: {
+            expiresAt: pending.expiresAt.toISOString(),
+            canResendAt: pending.canResendAt.toISOString(),
+            limited: pending.limited,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
+      );
+    }
+
+    /* No relay, so no factor: the password is the whole of the sign-in, and
+       this is the route as it stood before #1033. */
+    clearPendingSignInCookie(event.cookies, config);
     let session;
     try {
       session = await createSession(verdict.userId, config, event.request.headers.get("user-agent"));
