@@ -46,7 +46,12 @@ async function streamToString(stream: NodeJS.ReadableStream): Promise<string> {
  * attempt is simpler than managing one long-lived client across a poll, and
  * this runs at most a handful of times.
  */
-async function latestMatchingBody(address: string, subjectContains: string): Promise<string | null> {
+async function latestMatchingBody(
+  address: string,
+  subjectContains: string,
+  /** Ignore anything already in the mailbox when the caller took its mark. */
+  afterUid = 0,
+): Promise<string | null> {
   const client = new ImapFlow({
     host: "127.0.0.1",
     port: IMAPS_PORT,
@@ -66,9 +71,10 @@ async function latestMatchingBody(address: string, subjectContains: string): Pro
   await client.connect();
   try {
     await client.mailboxOpen("INBOX", { readOnly: true });
-    const uids = await client.search({ subject: subjectContains }, { uid: true });
-    if (!uids || uids.length === 0) return null;
-    const newestUid = uids[uids.length - 1];
+    const found = await client.search({ subject: subjectContains }, { uid: true });
+    const uids = (found || []).filter((uid) => uid > afterUid);
+    if (uids.length === 0) return null;
+    const newestUid = Math.max(...uids);
 
     const message = await client.fetchOne(newestUid, { uid: true, bodyStructure: true }, { uid: true });
     if (!message) return null;
@@ -148,6 +154,36 @@ export async function waitForSenderVerificationToken(address: string, timeoutMs 
   throw new Error(`#745: no sender-verification mail to ${address} arrived within ${timeoutMs}ms${detail}`);
 }
 
+/** The subject `src/server/sign-in-approvals/mail.ts` sends, pinned by its own test. */
+const APPROVAL_SUBJECT = "Approve your Orbit sign-in";
+
+/**
+ * What the mailbox already holds, before a sign-in is started.
+ *
+ * The number itself means nothing outside IMAP -- it is only ever handed
+ * straight back to `waitForApprovalLink`, which uses it to ignore everything
+ * that was there first. Zero for a mailbox with no approval in it, which is
+ * every mailbox on a fresh stack.
+ */
+export async function newestApprovalUid(address: string): Promise<number> {
+  const client = new ImapFlow({
+    host: "127.0.0.1",
+    port: IMAPS_PORT,
+    secure: true,
+    tls: { rejectUnauthorized: false },
+    auth: { user: address, pass: "orbit-e2e-mail-helper" },
+    logger: false,
+  });
+  await client.connect();
+  try {
+    await client.mailboxOpen("INBOX", { readOnly: true });
+    const uids = await client.search({ subject: APPROVAL_SUBJECT }, { uid: true });
+    return !uids || uids.length === 0 ? 0 : Math.max(...uids);
+  } finally {
+    await client.logout().catch(() => client.close());
+  }
+}
+
 /**
  * Waits for the sign-in approval mail (#1033, ADR-0027 §5) and returns its
  * one `/approve/<token>` link.
@@ -162,14 +198,30 @@ export async function waitForSenderVerificationToken(address: string, timeoutMs 
  * pins its subject, so a caller choosing its own string could only get it
  * wrong.
  */
-export async function waitForApprovalLink(address: string, timeoutMs = 60_000): Promise<string> {
+export async function waitForApprovalLink(
+  address: string,
+  timeoutMs = 60_000,
+  /**
+   * The mark `newestApprovalUid` took before the sign-in was started, so this
+   * waits for the approval THAT sign-in caused.
+   *
+   * Without it the wait answers with whatever approval the mailbox already
+   * holds, because "the newest" is only the new one once the new mail has
+   * actually landed -- and a link that has already been pressed opens the
+   * approval page's finished face, which reads as a broken page rather than
+   * as a wait that answered too early. Every sign-in in a file gets its own
+   * mark; a stack kept between runs (--reuse) holds the previous run's mail
+   * too, so the first sign-in needs one just as much as the second.
+   */
+  afterUid = 0,
+): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   const linkPattern = /https?:\/\/\S+\/approve\/\S+/u;
   let lastError: unknown;
 
   while (Date.now() < deadline) {
     try {
-      const body = await latestMatchingBody(address, "Approve your Orbit sign-in");
+      const body = await latestMatchingBody(address, APPROVAL_SUBJECT, afterUid);
       if (body) {
         const match = body.match(linkPattern);
         if (match) return match[0].replace(/[).,]+$/u, "");
