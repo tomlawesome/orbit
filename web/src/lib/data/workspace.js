@@ -673,6 +673,23 @@ export async function addMember(householdId, userId) {
 }
 
 /**
+ * An administrator creates a system for somebody else —
+ * POST /api/admin/systems (#1052, Fable's decision of 2026-09-19).
+ *
+ * A name and an owner, and nothing else: the household starts empty with the
+ * named person as its owner, and the administrator is not put in it. The
+ * administrator is re-challenged like every other admin action on that screen
+ * (ADR-0023 §5), so `currentPassword` rides along where they have one and is
+ * left out where a step-up proof cookie answers instead.
+ *
+ * @param {{ name: string, ownerId: string, currentPassword?: string }} draft
+ * @returns {Promise<{ household: { id: string, name: string, ownerId: string } }>}
+ */
+export async function createSystem(draft) {
+  return json(await csrfFetch("/api/admin/systems", { body: draft }));
+}
+
+/**
  * "Today" for chart arithmetic. The workspace fixture pins it to the date the
  * designs were drawn against so the fidelity gate is deterministic; the real
  * API carries no such field, so live data uses the real clock.

@@ -139,56 +139,58 @@
   <title>{sform.title} — Orbit</title>
 </svelte:head>
 
-<div class="sky" aria-hidden="true" bind:this={sky}></div>
+<div class="suggestion-page">
+  <div class="sky" aria-hidden="true" bind:this={sky}></div>
 
-<div class="stage">
-  <article class="glass item-card" style="--act:var(--ok);--act-text:var(--ok-text)">
-    <input class="name-title" bind:value={sform.title} aria-label="name"
-           class:sugg={marked("title")}>
-    <div class="sub">suggested from your documents · {item.sourceDocument}</div>
+  <div class="stage">
+    <article class="glass item-card" style="--act:var(--ok);--act-text:var(--ok-text)">
+      <input class="name-title" bind:value={sform.title} aria-label="name"
+             class:sugg={marked("title")}>
+      <div class="sub">suggested from your documents · {item.sourceDocument}</div>
 
-    <div class="panel">
-      <div class="row2">
-        <div class="field" class:sugg={marked("dueDate")}>
-          <!-- #1005: a one-off ends; it does not renew and it is not owed. -->
-          <label for="s-due">{proposal.scheduleKind === "expiry" ? "ends" : "renews / due"}</label>
-          <input id="s-due" type="date" bind:value={sform.dueDate}></div>
-        <div class="field" class:sugg={marked("recurrenceMonths")}>
-          <label for="s-recur">orbital period (months)</label>
-          <input id="s-recur" inputmode="numeric" bind:value={sform.recurrenceMonths}></div>
+      <div class="panel">
+        <div class="row2">
+          <div class="field" class:sugg={marked("dueDate")}>
+            <!-- #1005: a one-off ends; it does not renew and it is not owed. -->
+            <label for="s-due">{proposal.scheduleKind === "expiry" ? "ends" : "renews / due"}</label>
+            <input id="s-due" type="date" bind:value={sform.dueDate}></div>
+          <div class="field" class:sugg={marked("recurrenceMonths")}>
+            <label for="s-recur">orbital period (months)</label>
+            <input id="s-recur" inputmode="numeric" bind:value={sform.recurrenceMonths}></div>
+        </div>
+        <div class="row2">
+          <div class="field" class:sugg={marked("provider")}>
+            <label for="s-provider">provider</label>
+            <input id="s-provider" bind:value={sform.provider} placeholder="optional"></div>
+          <div class="field" class:sugg={marked("reference")}>
+            <label for="s-reference">reference</label>
+            <input id="s-reference" bind:value={sform.reference} placeholder="optional"></div>
+        </div>
+        <div class="field mono" class:sugg={marked("costMinor")}>
+          <label for="s-cost">cost</label>
+          <input id="s-cost" inputmode="decimal" bind:value={sform.cost} placeholder="optional"></div>
+        {#if (item.attachmentCount ?? 0) > 0}
+          <div class="note">◆ {item.sourceDocument} will be attached on acceptance</div>
+        {/if}
+        {#if unreadable}
+          <div class="note">{unreadable}</div>
+        {/if}
+        <div class="save-row">
+          <button class="btn-primary" disabled={busy || proposalLocked || !sform.title.trim()} onclick={accept}>
+            accept into orbit
+          </button>
+          <button class="btn-quiet" style="--act:var(--overdue);--act-text:var(--overdue-text)" disabled={busy} onclick={dismissSuggestion}>
+            {acceptArmedDismiss ? "tap again to dismiss" : "dismiss"}
+          </button>
+          <a class="back" style="margin-top:0" href={resolve("/home")}>← back to your orbit</a>
+        </div>
+        {#if problem}
+          <div class="problem" role="alert">{problem}</div>
+        {/if}
+        <div class="note">nothing is created without your acceptance — an
+          unaccepted suggestion simply expires and is purged</div>
       </div>
-      <div class="row2">
-        <div class="field" class:sugg={marked("provider")}>
-          <label for="s-provider">provider</label>
-          <input id="s-provider" bind:value={sform.provider} placeholder="optional"></div>
-        <div class="field" class:sugg={marked("reference")}>
-          <label for="s-reference">reference</label>
-          <input id="s-reference" bind:value={sform.reference} placeholder="optional"></div>
-      </div>
-      <div class="field mono" class:sugg={marked("costMinor")}>
-        <label for="s-cost">cost</label>
-        <input id="s-cost" inputmode="decimal" bind:value={sform.cost} placeholder="optional"></div>
-      {#if (item.attachmentCount ?? 0) > 0}
-        <div class="note">◆ {item.sourceDocument} will be attached on acceptance</div>
-      {/if}
-      {#if unreadable}
-        <div class="note">{unreadable}</div>
-      {/if}
-      <div class="save-row">
-        <button class="btn-primary" disabled={busy || proposalLocked || !sform.title.trim()} onclick={accept}>
-          accept into orbit
-        </button>
-        <button class="btn-quiet" style="--act:var(--overdue);--act-text:var(--overdue-text)" disabled={busy} onclick={dismissSuggestion}>
-          {acceptArmedDismiss ? "tap again to dismiss" : "dismiss"}
-        </button>
-        <a class="back" style="margin-top:0" href={resolve("/home")}>← back to your orbit</a>
-      </div>
-      {#if problem}
-        <div class="problem" role="alert">{problem}</div>
-      {/if}
-      <div class="note">nothing is created without your acceptance — an
-        unaccepted suggestion simply expires and is purged</div>
-    </div>
-  </article>
+    </article>
+  </div>
+  <div class="vignette" aria-hidden="true"></div>
 </div>
-<div class="vignette" aria-hidden="true"></div>
