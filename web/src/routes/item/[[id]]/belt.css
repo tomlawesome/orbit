@@ -210,6 +210,32 @@
      the band, their labels hang below it. */
   .belt-page .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-quiet);
           text-transform:uppercase}
+  /* #1062: and each end-cap is a control -- a transparent target with the
+     screen's dashed accent ring on focus and nothing at rest. The ink stays
+     9.5px; belt.behaviour.js squares the target up around it at the product's
+     44px floor. At an exhausted end the control dims and stops taking the
+     press; it keeps its place in the Tab order so a reader can still find it
+     and be told it is spent.
+
+     The ring is an OUTLINE on the control itself, not a dashed shape drawn
+     inside it. The seats above do it the other way -- a .fring circle that
+     opens at :focus-visible while the seat itself is outline:none -- and that
+     is not the screen's proven answer, only its untested one: paintMembers
+     drops a seat nobody can see to tabindex="-1", the keyboard audit's
+     household holds one item, and that item is the card, so no seat has ever
+     been focused by tests/e2e/support/keyboard.ts. The audit reads the
+     computed style of THE ELEMENT THAT HAS FOCUS, so a ring painted by a
+     child leaves the focused <g> carrying nothing -- which is what pipeline
+     1281 caught, and it was right to. Chromium paints outline on an SVG
+     element around its bounding box, so this is one ring, on the thing the
+     focus is actually on. 2px and offset, not a hairline: it has to read
+     against the band on a phone as well as on a desk. */
+  .belt-page .endcap-hit{pointer-events:auto;cursor:pointer}
+  .belt-page .endcap-hit:focus-visible{outline:2px dashed var(--accent);outline-offset:3px}
+  .belt-page .endcap-hit:hover .endcap{fill:var(--ink-mid)}
+  .belt-page .endcap-hit.off{cursor:default}
+  .belt-page .endcap-hit.off .endcap,
+  .belt-page .endcap-hit.off:hover .endcap{fill:var(--ink-quiet);opacity:.4}
 
   /* ---- THE DOCUMENTS' MARK -------------------------------------------
      The owner: "a different coloured perimeter line around them, and/or
