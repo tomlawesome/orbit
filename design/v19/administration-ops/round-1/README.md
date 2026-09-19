@@ -147,3 +147,18 @@ that would justify it is parked.
 - Server nuance, not design: `imap-test` collapses `credential_locked`
   into `unsafe_input`, so the verdict cannot say "the saved sign-in is
   locked" as the mailbox row can.
+
+## Verdict (owner, 2026-09-19)
+
+Both directions killed. In the owner's own words: *"Neither of the Admin
+panels are acceptable either, they're not in keeping with the rest of the
+UI and they're unclear. Random text strings that appear and disappear are
+easily missed - if you're trained not to see anything there you don't
+even scroll down to check."*
+
+What went wrong: both directions spoke in the machinery panel's small
+mono sublines — a verdict was a grey string that appeared under a row and
+later went away. The rest of the screen does not talk like that. The
+People and Systems cards are the screen's grammar: readable rows, state
+pills, a button at the card head, a row button. Round 2 reuses that
+grammar verbatim and nothing appears-then-vanishes.
