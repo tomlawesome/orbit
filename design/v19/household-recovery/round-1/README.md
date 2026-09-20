@@ -101,5 +101,8 @@ nothing changes; the build simply never draws restore on the household page.
 ## Verdict
 
 Owner, 2026-09-20, verbatim: "56 b the row." B — the row on the clock — is
-the direction. A stays as the record. Question 57 (restore admin-only in the
-interface) was still open at the time of writing.
+the direction. A stays as the record.
+
+Question 57, owner, 2026-09-20, verbatim: "57 admin only." Restore is drawn
+on administration only; the household page never shows it, whatever the
+server would allow.
