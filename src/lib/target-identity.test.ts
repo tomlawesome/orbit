@@ -175,7 +175,7 @@ describe("readEnvironmentValue (install.sh's own line-scanner, used by derive_co
 describe("deriveComposeProjectName (guarantee #12)", () => {
   it("derives a sanitized name from the fallback basename when nothing else is configured", () => {
     const result = deriveComposeProjectName(targetDir, undefined, "My Orbit Deployment!");
-    expect(result).toEqual({ composeProjectName: "my-orbit-deployment-", explicit: false });
+    expect(result).toEqual({ composeProjectName: "my-orbit-deployment-", explicit: false, provisional: true });
   });
 
   it("strips leading dashes and underscores produced by sanitizing the fallback basename", () => {
@@ -190,7 +190,7 @@ describe("deriveComposeProjectName (guarantee #12)", () => {
   it("uses the configured .env-orbit value when present and valid", () => {
     writeFileSync(join(targetDir, ".env-orbit"), "COMPOSE_PROJECT_NAME=configured-project\n", { mode: 0o600 });
     const result = deriveComposeProjectName(targetDir, undefined, "fallback");
-    expect(result).toEqual({ composeProjectName: "configured-project", explicit: true });
+    expect(result).toEqual({ composeProjectName: "configured-project", explicit: true, provisional: false });
   });
 
   it("refuses an invalid configured .env-orbit project name", () => {
@@ -202,12 +202,12 @@ describe("deriveComposeProjectName (guarantee #12)", () => {
     writeFileSync(join(targetDir, "real-env"), "COMPOSE_PROJECT_NAME=configured-project\n");
     symlinkSync(join(targetDir, "real-env"), join(targetDir, ".env-orbit"));
     const result = deriveComposeProjectName(targetDir, undefined, "fallback-name");
-    expect(result).toEqual({ composeProjectName: "fallback-name", explicit: false });
+    expect(result).toEqual({ composeProjectName: "fallback-name", explicit: false, provisional: true });
   });
 
   it("prefers an explicit requested name over the fallback when no file is configured", () => {
     const result = deriveComposeProjectName(targetDir, "requested-project", "fallback");
-    expect(result).toEqual({ composeProjectName: "requested-project", explicit: true });
+    expect(result).toEqual({ composeProjectName: "requested-project", explicit: true, provisional: false });
   });
 
   it("refuses an invalid requested project name", () => {
@@ -217,7 +217,7 @@ describe("deriveComposeProjectName (guarantee #12)", () => {
   it("accepts a requested name that matches the already-configured file value", () => {
     writeFileSync(join(targetDir, ".env-orbit"), "COMPOSE_PROJECT_NAME=same-project\n", { mode: 0o600 });
     const result = deriveComposeProjectName(targetDir, "same-project", "fallback");
-    expect(result).toEqual({ composeProjectName: "same-project", explicit: true });
+    expect(result).toEqual({ composeProjectName: "same-project", explicit: true, provisional: false });
   });
 
   it("refuses when the requested name conflicts with the configured file value", () => {
@@ -228,6 +228,77 @@ describe("deriveComposeProjectName (guarantee #12)", () => {
   it("treats an empty requested name the same as unset (bash's -n test)", () => {
     writeFileSync(join(targetDir, ".env-orbit"), "COMPOSE_PROJECT_NAME=configured-project\n", { mode: 0o600 });
     const result = deriveComposeProjectName(targetDir, "", "fallback");
-    expect(result).toEqual({ composeProjectName: "configured-project", explicit: true });
+    expect(result).toEqual({ composeProjectName: "configured-project", explicit: true, provisional: false });
+  });
+
+  // #999/#1043: docker-compose.yml:1 declares `name: orbit` and nothing read
+  // it, so a fresh install into ~/apps/household named the Compose project
+  // "household". The declaration now outranks the basename and is not
+  // provisional, so no caller derives again over the top of it.
+  it("reads the target docker-compose.yml's own name: in preference to the fallback basename", () => {
+    writeFileSync(join(targetDir, "docker-compose.yml"), "name: orbit\n\nservices: {}\n");
+    const result = deriveComposeProjectName(targetDir, undefined, "household");
+    expect(result).toEqual({ composeProjectName: "orbit", explicit: false, provisional: false });
+  });
+
+  it("marks the fallback basename provisional when no compose file is in the target yet", () => {
+    const result = deriveComposeProjectName(targetDir, undefined, "household");
+    expect(result).toEqual({ composeProjectName: "household", explicit: false, provisional: true });
+  });
+
+  it("keeps the configured .env-orbit value above the compose file's name:", () => {
+    writeFileSync(join(targetDir, ".env-orbit"), "COMPOSE_PROJECT_NAME=configured-project\n", { mode: 0o600 });
+    writeFileSync(join(targetDir, "docker-compose.yml"), "name: orbit\n");
+    expect(deriveComposeProjectName(targetDir, undefined, "household")).toEqual({
+      composeProjectName: "configured-project",
+      explicit: true,
+      provisional: false,
+    });
+  });
+
+  it("keeps an explicitly requested name above the compose file's name:", () => {
+    writeFileSync(join(targetDir, "docker-compose.yml"), "name: orbit\n");
+    expect(deriveComposeProjectName(targetDir, "requested-project", "household")).toEqual({
+      composeProjectName: "requested-project",
+      explicit: true,
+      provisional: false,
+    });
+  });
+
+  it("falls through to the basename for a name: Compose itself would not accept, rather than refusing", () => {
+    writeFileSync(join(targetDir, "docker-compose.yml"), "name: Not_Valid!\n");
+    expect(deriveComposeProjectName(targetDir, undefined, "household")).toEqual({
+      composeProjectName: "household",
+      explicit: false,
+      provisional: true,
+    });
+  });
+
+  it("ignores a name: in a symlinked docker-compose.yml (only a real, regular file is trusted)", () => {
+    writeFileSync(join(targetDir, "real-compose.yml"), "name: orbit\n");
+    symlinkSync(join(targetDir, "real-compose.yml"), join(targetDir, "docker-compose.yml"));
+    expect(deriveComposeProjectName(targetDir, undefined, "household")).toEqual({
+      composeProjectName: "household",
+      explicit: false,
+      provisional: true,
+    });
+  });
+
+  it("ignores a service-level or indented name key, reading only the top-level one", () => {
+    writeFileSync(join(targetDir, "docker-compose.yml"), "services:\n  orbit-app:\n    name: sneaky\n");
+    expect(deriveComposeProjectName(targetDir, undefined, "household")).toEqual({
+      composeProjectName: "household",
+      explicit: false,
+      provisional: true,
+    });
+  });
+
+  it("strips an inline comment and surrounding quotes from the declared name, as the bash does", () => {
+    writeFileSync(join(targetDir, "docker-compose.yml"), 'name: "orbit"   # the project every script addresses\n');
+    expect(deriveComposeProjectName(targetDir, undefined, "household")).toEqual({
+      composeProjectName: "orbit",
+      explicit: false,
+      provisional: false,
+    });
   });
 });

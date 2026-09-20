@@ -673,6 +673,23 @@ export async function addMember(householdId, userId) {
 }
 
 /**
+ * An administrator creates a system for somebody else —
+ * POST /api/admin/systems (#1052, Fable's decision of 2026-09-19).
+ *
+ * A name and an owner, and nothing else: the household starts empty with the
+ * named person as its owner, and the administrator is not put in it. The
+ * administrator is re-challenged like every other admin action on that screen
+ * (ADR-0023 §5), so `currentPassword` rides along where they have one and is
+ * left out where a step-up proof cookie answers instead.
+ *
+ * @param {{ name: string, ownerId: string, currentPassword?: string }} draft
+ * @returns {Promise<{ household: { id: string, name: string, ownerId: string } }>}
+ */
+export async function createSystem(draft) {
+  return json(await csrfFetch("/api/admin/systems", { body: draft }));
+}
+
+/**
  * "Today" for chart arithmetic. The workspace fixture pins it to the date the
  * designs were drawn against so the fidelity gate is deterministic; the real
  * API carries no such field, so live data uses the real clock.
@@ -1679,15 +1696,26 @@ export async function readSignInMethods() {
  * the direction that shows the reader one fewer control rather than one that
  * cannot work.
  *
- * @returns {Promise<{ local: boolean, oidc: boolean }>}
+ * Since #1033 it carries one more instance-wide fact, for the same reason and
+ * read the same way: whether a password sign-in here is finished by an emailed
+ * approval (ADR-0027 §2).
+ *
+ * @returns {Promise<{ local: boolean, oidc: boolean, secondFactor: boolean }>}
  */
 export async function readAuthMethodsOffered() {
   try {
-    /** @type {{ methods?: { local?: boolean, oidc?: boolean } }} */
+    /** @type {{ methods?: { local?: boolean, oidc?: boolean, secondFactor?: boolean } }} */
     const body = await json(await fetch("/api/auth/availability", { credentials: "same-origin" }));
-    return { local: body.methods?.local ?? true, oidc: body.methods?.oidc ?? false };
+    return {
+      local: body.methods?.local ?? true,
+      oidc: body.methods?.oidc ?? false,
+      /* #1033: whether a password sign-in here is finished by an emailed
+         approval. False on a failed read, so a hiccup understates what the
+         instance does rather than promising a factor it cannot apply. */
+      secondFactor: body.methods?.secondFactor ?? false,
+    };
   } catch {
-    return { local: true, oidc: false };
+    return { local: true, oidc: false, secondFactor: false };
   }
 }
 

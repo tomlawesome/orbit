@@ -172,8 +172,11 @@ describe("exact-image publication workflow", () => {
     expect(fast).toContain("github.event_name == 'push'");
     /* The production build is the front end's since the cut (#735): there is
        no root `build` script any more, because the SvelteKit output IS the
-       application server. */
-    expect(fast).toContain("run: pnpm --filter orbit-web build");
+       application server. Behind the stamp check since #1061: the static and
+       unit step before it has already built the application, so this step is
+       the one that catches a build that somehow did not happen rather than a
+       second run of the same work. */
+    expect(fast).toContain("run: node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build");
     expect(integration).toContain("needs.changes.outputs.integration == 'true'");
     expect(integration).toContain("github.event_name == 'push'");
     // The changed-paths filter is a cost filter, not a publication gate, so

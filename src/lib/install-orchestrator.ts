@@ -47,7 +47,9 @@ import {
   stageGuidedInstallConfiguration,
 } from "./guided-configuration";
 import {
+  COMPOSE_FILE,
   ComposeProjectNameRefusal,
+  type DeriveComposeProjectNameResult,
   TargetValidationRefusal,
   deriveComposeProjectName,
   readEnvironmentValue,
@@ -343,6 +345,7 @@ export async function runInstall(
     targetWasEmpty,
     composeProjectNameExplicit: false,
     composeProjectName: "",
+    composeProjectNameProvisional: false,
   };
   try {
     volumeState = verifyDatabaseVolumeSafety(
@@ -546,6 +549,50 @@ export async function runInstall(
 
     let committed = false;
     try {
+      // install.sh's second derive_compose_project_name call (#999, ported
+      // by #1043). The bundled docker-compose.yml has been staged and
+      // syntax-checked but is not in the target yet, and this is the last
+      // moment before anything writes a project name down, so its own
+      // `name: orbit` is read from the staged copy: a fresh install had
+      // nothing but the working directory's name to go on until now, which
+      // is how installing into ~/apps/household produced the Compose project
+      // "household". It has to happen before the migration below and not
+      // after the assets are installed — an unattended pre-provisioned
+      // bootstrap arrives with its own .env-orbit, that migration writes the
+      // name it is given into it, and a derivation running afterwards would
+      // read that value straight back as an explicit one and keep the
+      // directory name for good. An operator's requested name, a value
+      // already persisted in .env-orbit and the project that owns a
+      // recognised database volume all outrank the declaration and leave
+      // `composeProjectNameProvisional` false, so none of them is touched
+      // here. No `compose`-wrapped call has run yet either (the first is the
+      // config validation below), so telling the docker adapter again here
+      // is enough to make every later call use it.
+      if (volumeState.composeProjectNameProvisional) {
+        let rederived: DeriveComposeProjectNameResult;
+        try {
+          rederived = deriveComposeProjectName(
+            context.targetDir,
+            context.requestedComposeProjectName,
+            context.fallbackBasename,
+            join(scratchDir, COMPOSE_FILE),
+          );
+        } catch (error) {
+          // Unreachable in practice — the same basename already derived
+          // once, above — but a refusal is still a refusal, never an escaped
+          // throw (issue #383's contract).
+          if (!(error instanceof ComposeProjectNameRefusal)) throw error;
+          return fail("compose", "compose", error.message);
+        }
+        volumeState = {
+          ...volumeState,
+          composeProjectName: rederived.composeProjectName,
+          composeProjectNameExplicit: rederived.explicit,
+          composeProjectNameProvisional: rederived.provisional,
+        };
+        adapters.docker.setComposeProjectName(volumeState.composeProjectName);
+      }
+
       // Configuration preflight + migrate for an *existing* .env-orbit,
       // before any fetched asset is installed (install.sh:1441-1448,
       // guarantee #50, first of the two configuration_migration_completed

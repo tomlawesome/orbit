@@ -279,6 +279,16 @@
       <span>identity provider</span>
       <span class="method"><b>id.lawson-home.example · linked 2 Jun 2026</b><button>unlink</button></span>
     </div>
+    <!-- The second factor, which nobody chooses (#1033, ADR-0027 §1-§2): on
+         for everybody or off for everybody, and the only thing that moves it
+         is whether the instance has a mail relay. So the row has no control on
+         it, unlike the two above — it is a fact about this Orbit, stated where
+         a reader looks to find out how they get in. This instance has a relay,
+         so it reads "on"; without one the same row says so instead. -->
+    <div class="kv">
+      <span>email approval</span>
+      <span class="method"><b>on · every password sign-in</b></span>
+    </div>
   </div>
 
   <div class="card wide">
