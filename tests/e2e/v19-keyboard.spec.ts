@@ -6,6 +6,7 @@ import {
   auditLightDismiss,
   auditTabOrder,
   currentFocus,
+  dismissTourIfShown,
   fillCreateForm,
   installKeyboardAudit,
   settled,
@@ -306,6 +307,50 @@ test("home: the account panel and the three drawers are light-dismiss by keyboar
     await auditLightDismiss(page, "home", "#edge-health", "#statusdrawer");
     await auditLightDismiss(page, "home", "#keydrawer .handle", "#keydrawer");
   } finally {
+    await cleanup(page, household);
+  }
+});
+
+/**
+ * #1064: the press that arrives before home can answer.
+ *
+ * The server renders home whole (#842), so the avatar is on screen, lettered
+ * and tabbable long before the client's own readHome() has resolved and the
+ * behaviour has been bound to it. A press inside that window used to be
+ * dropped outright — no listener, no replay — and the panel stayed shut for
+ * good, which is what the CI flake looked like from the outside:
+ * `aria-expanded` stuck at "false" across a whole 5s poll.
+ *
+ * Driven by delaying `/api/workspace`, the slowest of readHome()'s three
+ * reads, so the window is wide enough to press into on purpose rather than
+ * by luck. The panel must end up open: either the press is held and applied
+ * when the screen goes live, or the wait was never needed.
+ */
+test("home: an Enter on the avatar before home goes live still opens the account panel", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installKeyboardAudit(page);
+  await signIn(page, "/home");
+  const household = await seedHousehold(page);
+  try {
+    await page.route("**/api/workspace", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 8_000));
+      await route.continue();
+    });
+    await page.goto("/home");
+    await dismissTourIfShown(page);
+    /* Deliberately NOT settled(): this test exists to press while the screen
+       is still the server's own render. The orb is here because the server
+       sent it — assert that, so a future markup change cannot turn this into
+       a test that presses nothing. */
+    await expect(page.locator("button.orb")).toBeVisible();
+    await expect(page.locator("body[data-home-ready]")).toHaveCount(0);
+    await tabTo(page, { selector: "button.orb" }, { screen: "home (not yet live)" });
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#account")).toHaveClass(/open/, { timeout: 20_000 });
+    await expect(page.locator("button.orb")).toHaveAttribute("aria-expanded", "true");
+  } finally {
+    await page.unroute("**/api/workspace").catch(() => {});
     await cleanup(page, household);
   }
 });
