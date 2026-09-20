@@ -989,3 +989,22 @@ Two further composition calls were made in the same ruling and belong to the
 slices that build them, not to this screen: settings' **Sign-in methods**
 block with its inline recent-authentication challenge, and administration's
 **Add a local user** row with its shown-once setup link (§2.7, second half).
+
+## 19. Household recovery lives on the household's row in Systems (owner, 2026-09-20)
+
+Asked A (a danger banner per household on the clock, above the
+administration grid) or B (the household's own row in the Systems card
+carries the state and both acts), the owner ruled: **"56 b the row."**
+
+- A household on its 30-day clock shows in Systems with a dashed red ring,
+  a red sun and the line "on the clock · N days left · gone for good <date>"
+  in place of members/owner/items; beneath the name sit `restore` (the
+  accent, one tap) and `delete now →`.
+- `delete now` is the household danger line's own protocol: the opener
+  prints the cost, the system's name is typed exactly, then the button asks
+  twice. Admin-only, as §15 already ruled.
+- Nothing is drawn when nothing is scheduled; a second household on the
+  clock costs one more row, not one more card.
+- Record: `design/v19/household-recovery/round-1/b-the-row-on-the-clock.html`
+  and its README.
+
