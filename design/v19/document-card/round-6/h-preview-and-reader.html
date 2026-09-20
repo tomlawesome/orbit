@@ -668,12 +668,15 @@
   .rd-bar .zoom .quiet{min-width:44px;justify-content:center;border-radius:999px}
   .rd-bar .zoom .quiet[aria-pressed=true]{color:var(--accent-text)}
   .rd-bar .pct{color:var(--ink);font-variant-numeric:tabular-nums;min-width:44px;text-align:center}
-  .rd-bar .words{display:flex;align-items:center;gap:2px}
+  .rd-bar .words{display:flex;align-items:center;gap:8px}
+  .rd-bar .acts a,.rd-bar .acts button{font:11px var(--mono);color:var(--act);background:var(--panel);text-decoration:none;
+    border:1px solid color-mix(in srgb,var(--act) 40%,transparent);border-radius:999px;padding:8px 16px;min-height:34px;
+    display:inline-flex;align-items:center;cursor:pointer;letter-spacing:.02em}
+  .rd-bar .acts a:hover,.rd-bar .acts button:hover{border-color:var(--act)}
+  .rd-bar .acts button.armed{background:var(--act);color:var(--bg);border-color:var(--act)}
   .rd-bar .quiet{display:inline-flex;align-items:center;font:10.5px var(--mono);color:var(--ink-faint);
                  background:none;border:0;cursor:pointer;padding:0 8px;height:44px;text-decoration:none;letter-spacing:.02em}
   .rd-bar .quiet:hover{color:var(--ink)}
-  .rd-bar button.quiet.rm:hover{color:var(--overdue)}
-  .rd-bar button.quiet.armed{color:var(--overdue-text)}
   .rd-bar .quiet:disabled{opacity:.3;cursor:default;color:var(--ink-faint)}
   @media (max-width:700px){
     .reader{padding:10px 12px 8px}
@@ -2369,10 +2372,13 @@ function previewFoot(d, mode) {
    at the tail — download, and the two-press remove (#1054). */
 function readerBar(d) {
   const z = rdZoom, v = rdZoomVal();
+  /* the item card's own action pills (owner, round 6: louder now they have
+     moved here from the preview) — download in the accent, remove in the
+     overdue tone as the card's retire is; armed, remove fills */
   const words = armed
-    ? `<button type="button" class="quiet rm armed" onclick="armRemove()" aria-label="Remove ${d.name}: press again to confirm">tap again to remove</button>`
-    : `<a class="quiet" href="#" onclick="return false" aria-label="Download ${d.name}">download</a>
-       <button type="button" class="quiet rm" onclick="armRemove()" aria-label="Remove ${d.name}">remove</button>`;
+    ? `<button type="button" class="rm armed" style="--act:var(--overdue)" onclick="armRemove()" aria-label="Remove ${d.name}: press again to confirm">tap again to remove</button>`
+    : `<a href="#" style="--act:var(--accent)" onclick="return false" aria-label="Download ${d.name}">download</a>
+       <button type="button" class="rm" style="--act:var(--overdue)" onclick="armRemove()" aria-label="Remove ${d.name}">remove</button>`;
   return `${pager(d)}
       <span class="zoom" role="group" aria-label="Zoom">
         <button class="quiet" onclick="setZoom('fit')" aria-pressed="${z === "fit"}" title="0">fit</button>
@@ -2380,7 +2386,7 @@ function readerBar(d) {
         <span class="pct" aria-live="polite">${Math.round(v * 100)}%</span>
         <button class="quiet" onclick="setZoom(zoomStep(1))" aria-label="Larger" title="+ or ctrl+wheel" ${v >= 4 ? "disabled" : ""}>+</button>
       </span>
-      <span class="words">${words}</span>`;
+      <span class="words acts">${words}</span>`;
 }
 const RETICLE = `<svg class="reticle" viewBox="0 0 96 96" aria-hidden="true">
           <circle cx="48" cy="48" r="43" fill="none" stroke="var(--chart-line)" stroke-width="1" stroke-dasharray="3 7" opacity=".8"/>
