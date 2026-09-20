@@ -57,21 +57,23 @@ ringed bodies either side. click one to open it." is now "2 documents."
 
 **The reader.** Opens over the belt: the belt dims to 82% of the pack's
 background and blurs, nothing on it moves. Head: the file's name, the item
-it is attached to, `page N of M`, and `close · esc`. The page as large as
-the window allows in its own proportions, on the cream sheet with the deep
-shadow, landing with create-v3's settle. The bar beneath: the same pager
-at its head; `fit − 75% +` in the middle (100% is A4 at 96dpi; keys + − 0,
-ctrl+wheel, pinch on touch; past fit the page scrolls inside the window,
-never the belt; below fit is not offered); `download` and `remove` at its
-tail as the item card's own action pills — download in the accent, remove
+it is attached to and `page N of M` at the left; `fit − 75% +` centred
+(100% is A4 at 96dpi; keys + − 0, ctrl+wheel, pinch on touch; past fit the
+page scrolls inside the window, never the belt; below fit is not offered);
+`close · esc` at the right. The page as large as the window allows in its
+own proportions, on the cream sheet with the deep shadow, landing with
+create-v3's settle. Either side of the page, a round glass arrow — only
+where there is a page that way: none on the left on page 1, none on the
+right on the last. Foot: `2 of 3` centred; `download` and `remove` at the
+right as the item card's own action pills — download in the accent, remove
 in the overdue tone like the card's `retire`, filling when armed — remove
-being the two-press "tap again to remove" (#1054). (Owner, 2026-09-20, on
-first sight of H: "The download and remove buttons should now actually
-made a bit louder that theyve moved into the reader view.") Esc, the
-close word, or a press on the dim outside the page closes the reader back
-to the preview, focus returning to the page. Turning a page in the reader
-turns it in the preview too. `role="dialog" aria-modal`, focus moved in
-on open; page number and percentage are polite live regions.
+being the two-press "tap again to remove" (#1054). Esc, the close word, or
+a press on the dim outside the page closes the reader back to the preview,
+focus returning to the page. Turning a page in the reader turns it in the
+preview too. `role="dialog" aria-modal`, focus moved in on open; page
+number and percentage are polite live regions. On a phone the head is two
+rows (title and close, then the zoom), the arrows 44px at the page's
+edges, the pills under the page number.
 
 ## Measured
 
@@ -104,9 +106,22 @@ had swallowed the mockup's demo rail, which then sat over the bar.
 
 ## Verdict
 
-Owner, 2026-09-20: "Very good job on 1059 at last. I have just one, very
-small criticism. The download and remove buttons should now actually made
-a bit louder that theyve moved into the reader view." Done in place
-(pills, above) rather than as a new round, at the owner's request: "We
-don't need a full mockup for that, just show me a quick screen shot".
-Approval of the whole awaits that screenshot.
+Owner, 2026-09-20, in three steps, each verbatim:
+
+> Very good job on 1059 at last. I have just one, very small criticism. The
+> download and remove buttons should now actually made a bit louder that
+> theyve moved into the reader view.
+
+> Very good, all approved.
+
+> Move the scale thing to the top center. Move the page number bottom
+> center. Can we put the arrows left/right of the reader window instead?
+> Obviously not that colour and properly sized/styled. […] Obviously the
+> left arrow won't show on the first page, and the right won't show on the
+> last
+
+**Ratified** as it stands after those two tweaks (the pills; the head, foot
+and arrows), both done in place at the owner's request rather than as a
+new round. `review/h-reader-tweak.png` is the state approved. #1059 and
+#1054 build from this file; `design/owner-decisions.md` §18 has the
+decision.

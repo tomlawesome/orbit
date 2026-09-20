@@ -650,8 +650,10 @@
   .reader.open{opacity:1}
   .reader[hidden]{display:none}
   .reader:focus{outline:none}
-  .rd-top{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:44px;
+  /* head: the title left, the zoom centred, close right (owner, 2026-09-20) */
+  .rd-top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px;min-height:44px;
           font:11px var(--mono);letter-spacing:.06em;color:var(--ink-mid)}
+  .rd-top .rd-close{justify-self:end}
   .rd-top b{color:var(--ink);font-weight:400}
   .rd-stage{overflow:auto;display:grid;place-items:center;min-height:0;min-width:0;
             touch-action:pan-x pan-y;overscroll-behavior:contain;scrollbar-width:thin;cursor:zoom-out}
@@ -661,26 +663,44 @@
   .rd-sheet img{display:block;border-radius:2px;background:#fff;width:auto;height:auto;
                 max-height:var(--rd-h,none);max-width:var(--rd-w,none)}
   .reader.zoomed .rd-sheet img{max-height:none;max-width:none}
-  .rd-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
-          font:11px var(--mono);color:var(--ink-mid);letter-spacing:.02em}
-  .rd-bar .pager{min-height:44px}
-  .rd-bar .zoom{display:flex;align-items:center;gap:0}
-  .rd-bar .zoom .quiet{min-width:44px;justify-content:center;border-radius:999px}
-  .rd-bar .zoom .quiet[aria-pressed=true]{color:var(--accent-text)}
-  .rd-bar .pct{color:var(--ink);font-variant-numeric:tabular-nums;min-width:44px;text-align:center}
+  /* foot: the page number centred, download and remove right; the arrows
+     stand either side of the page itself, not here */
+  .rd-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;
+          font:11px var(--mono);color:var(--ink-mid);letter-spacing:.02em;min-height:44px}
+  .rd-bar .pgn{grid-column:2;color:var(--ink);font-variant-numeric:tabular-nums}
+  .rd-bar .words{grid-column:3;justify-self:end}
+  .rd-arrow{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:999px;
+            display:grid;place-items:center;font:20px/1 var(--mono);color:var(--ink-mid);cursor:pointer;
+            background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(8px);
+            transition:color .15s,border-color .15s}
+  .rd-arrow:hover{color:var(--ink);border-color:var(--ink-mid)}
+  .rd-arrow:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  .rd-arrow.prev{left:26px} .rd-arrow.next{right:26px}
+  .rd-arrow.none{visibility:hidden}
+  .rd-top .zoom{display:flex;align-items:center;gap:0}
+  .rd-top .zoom .quiet{min-width:44px;justify-content:center;border-radius:999px}
+  .rd-top .zoom .quiet[aria-pressed=true]{color:var(--accent-text)}
+  .rd-top .pct{color:var(--ink);font-variant-numeric:tabular-nums;min-width:44px;text-align:center}
   .rd-bar .words{display:flex;align-items:center;gap:8px}
   .rd-bar .acts a,.rd-bar .acts button{font:11px var(--mono);color:var(--act);background:var(--panel);text-decoration:none;
     border:1px solid color-mix(in srgb,var(--act) 40%,transparent);border-radius:999px;padding:8px 16px;min-height:34px;
     display:inline-flex;align-items:center;cursor:pointer;letter-spacing:.02em}
   .rd-bar .acts a:hover,.rd-bar .acts button:hover{border-color:var(--act)}
   .rd-bar .acts button.armed{background:var(--act);color:var(--bg);border-color:var(--act)}
-  .rd-bar .quiet{display:inline-flex;align-items:center;font:10.5px var(--mono);color:var(--ink-faint);
+  .rd-top .quiet,.rd-bar .quiet{display:inline-flex;align-items:center;font:10.5px var(--mono);color:var(--ink-faint);
                  background:none;border:0;cursor:pointer;padding:0 8px;height:44px;text-decoration:none;letter-spacing:.02em}
-  .rd-bar .quiet:hover{color:var(--ink)}
-  .rd-bar .quiet:disabled{opacity:.3;cursor:default;color:var(--ink-faint)}
+  .rd-top .quiet:hover,.rd-bar .quiet:hover{color:var(--ink)}
+  .rd-top .quiet:disabled{opacity:.3;cursor:default;color:var(--ink-faint)}
   @media (max-width:700px){
     .reader{padding:10px 12px 8px}
-    .rd-bar{justify-content:center}
+    .rd-top{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;gap:4px 10px;letter-spacing:.03em}
+    .rd-top #rd-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rd-top .zoom{grid-column:1 / -1;grid-row:2;justify-self:center}
+    .rd-top .rd-close{grid-column:2;grid-row:1}
+    .rd-bar{grid-template-columns:1fr;justify-items:center;gap:6px}
+    .rd-bar .pgn,.rd-bar .words{grid-column:1;justify-self:center}
+    .rd-arrow{width:44px;height:44px}
+    .rd-arrow.prev{left:8px} .rd-arrow.next{right:8px}
   }
 
   /* THE FOOT: create-v3's .attach row, verbatim in its register — 11px mono,
@@ -845,9 +865,11 @@
 </div>
 
 <div class="reader" id="reader" role="dialog" aria-modal="true" aria-label="Reading a document" tabindex="-1" hidden>
-  <div class="rd-top"><span id="rd-title"></span>
+  <div class="rd-top"><span id="rd-title"></span><span id="rdzoom"></span>
     <button class="rd-close" onclick="closeReader(true)">close<span class="kb"> · esc</span></button></div>
   <div class="rd-stage" id="rdstage"><div class="rd-sheet"><img alt=""></div></div>
+  <button class="rd-arrow prev" id="rd-prev" onclick="turnTo(sheetPage-1)" aria-label="Previous page" title="← or PageUp">←</button>
+  <button class="rd-arrow next" id="rd-next" onclick="turnTo(sheetPage+1)" aria-label="Next page" title="→ or PageDown">→</button>
   <div class="rd-bar" id="rdbar"></div>
 </div>
 <div class="demos" aria-label="Mockup state demos">
@@ -2379,14 +2401,23 @@ function readerBar(d) {
     ? `<button type="button" class="rm armed" style="--act:var(--overdue)" onclick="armRemove()" aria-label="Remove ${d.name}: press again to confirm">tap again to remove</button>`
     : `<a href="#" style="--act:var(--accent)" onclick="return false" aria-label="Download ${d.name}">download</a>
        <button type="button" class="rm" style="--act:var(--overdue)" onclick="armRemove()" aria-label="Remove ${d.name}">remove</button>`;
-  return `${pager(d)}
-      <span class="zoom" role="group" aria-label="Zoom">
+  return `<span class="pgn" aria-live="polite">${sheetPage} of ${d.pages}</span>
+      <span class="words acts">${words}</span>`;
+}
+function readerZoom() {
+  const z = rdZoom, v = rdZoomVal();
+  return `<span class="zoom" role="group" aria-label="Zoom">
         <button class="quiet" onclick="setZoom('fit')" aria-pressed="${z === "fit"}" title="0">fit</button>
         <button class="quiet" onclick="setZoom(zoomStep(-1))" aria-label="Smaller" title="− or ctrl+wheel" ${z === "fit" ? "disabled" : ""}>−</button>
         <span class="pct" aria-live="polite">${Math.round(v * 100)}%</span>
         <button class="quiet" onclick="setZoom(zoomStep(1))" aria-label="Larger" title="+ or ctrl+wheel" ${v >= 4 ? "disabled" : ""}>+</button>
-      </span>
-      <span class="words acts">${words}</span>`;
+      </span>`;
+}
+/* the arrows either side of the page: shown only where there is a page that way */
+function paintArrows() {
+  const n = sheetDoc?.pages ?? 0;
+  document.getElementById("rd-prev").classList.toggle("none", !(sheetPage > 1));
+  document.getElementById("rd-next").classList.toggle("none", !(sheetPage < n));
 }
 const RETICLE = `<svg class="reticle" viewBox="0 0 96 96" aria-hidden="true">
           <circle cx="48" cy="48" r="43" fill="none" stroke="var(--chart-line)" stroke-width="1" stroke-dasharray="3 7" opacity=".8"/>
@@ -2495,7 +2526,12 @@ function sizeReader() {
   if (rdZoom === "fit") { img.style.width = ""; return; }
   img.style.width = Math.round(A4_W * rdZoom) + "px";
 }
-function paintBar() { if (sheetDoc) document.getElementById("rdbar").innerHTML = readerBar(sheetDoc); }
+function paintBar() {
+  if (!sheetDoc) return;
+  document.getElementById("rdbar").innerHTML = readerBar(sheetDoc);
+  document.getElementById("rdzoom").innerHTML = readerZoom();
+  paintArrows();
+}
 function paintReader() {
   const d = sheetDoc, img = rdImg();
   img.src = pageSrc(d, sheetPage); img.alt = `Page ${sheetPage} of ${d.name}`;
@@ -2627,7 +2663,7 @@ function bindPinch() {
       const f = fitVal();
       rdZoom = z <= f + 0.01 ? "fit" : Math.round(z * 20) / 20;
       sizeReader();
-      const pct = rd.querySelector(".zoom .pct"); if (pct) pct.textContent = Math.round(Math.max(f, z) * 100) + "%";
+      const pct = rd.querySelector(".rd-top .pct"); if (pct) pct.textContent = Math.round(Math.max(f, z) * 100) + "%";
     }
   }, { passive: false });
   const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) { if (pinch) setZoom(rdZoom); pinch = null; } };
