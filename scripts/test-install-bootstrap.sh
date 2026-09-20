@@ -84,9 +84,18 @@ free_port() {
 }
 
 workdir="$(mktemp -d /tmp/orbit-bootstrap.XXXXXX)"
-# The target directory name becomes the Compose project the installer
-# persists, so everything this run creates carries a name no other deployment
-# on this host can own. See AGENTS.md on Compose project collisions.
+# This run names its own Compose project, so everything it creates carries a
+# name no other deployment on this host can own. See AGENTS.md on Compose
+# project collisions.
+#
+# It used to take that name from the target directory, which install.sh fell
+# back to when nothing better was offered. Since #999 nothing better means
+# docker-compose.yml's own `name: orbit`, so the install would land in the
+# `orbit` project while the teardown below still went looking for
+# orbit-bootstrap-*: the stack would survive the trap, and the workdir that
+# points at it is removed straight afterwards. The name is stated on the
+# install now; COMPOSE_PROJECT_NAME still outranks the compose file.
+#
 # Lowercased: this becomes a Docker image tag as well as the Compose
 # project, and a tag must be lowercase.
 project_suffix="${workdir##*.}"
@@ -246,6 +255,7 @@ note "installing into $target as Compose project $project_name (this pulls a rea
 # installer has no stdin of its own and no controlling terminal, which is the
 # unattended path an operator following the README actually takes.
 if ! (cd "$target" && env PATH="$workdir/shim:$PATH" ORBIT_CHANNEL="$channel" \
+  COMPOSE_PROJECT_NAME="$project_name" \
   timeout 1800 bash "$workdir/install.sh") > "$workdir/install.log" 2>&1; then
   tail -30 "$workdir/install.log" >&2
   fail "the published bootstrap did not complete"
