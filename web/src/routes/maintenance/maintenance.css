@@ -1,10 +1,21 @@
 
+/* #1051: every class rule below is scoped under .maintenance-page (this
+   route's own wrapper, added around the page's markup for this fix). Before
+   this only .body was scoped this way (#1050's own fix, kept here as
+   evidence of the pattern); the rest of the file was bare class selectors —
+   .when, .back, .earlier, .log and friends are common enough words that
+   SvelteKit's not unloading a visited route's CSS chunk on client-side
+   navigation let them reach other routes' own elements of the same name
+   (household.css's .when, item.css's .back, and more). Body-level selectors
+   (`body{...}`, `[data-theme=...] body{...}`) are left as they were: they
+   cannot be scoped to a wrapper div, and are the same kind of global reset
+   every other route stylesheet in this family also declares on `body`. */
 body{background:#060a18}
-.sky-drift-far{animation:driftf 380s linear infinite}
-.sky-drift-near{animation:driftn 185s linear infinite}
+.maintenance-page .sky-drift-far{animation:driftf 380s linear infinite}
+.maintenance-page .sky-drift-near{animation:driftn 185s linear infinite}
 /* driftf/driftn and the twinkle curve come from $lib/atmosphere.css (#445);
    totality's own range — the day stars are brighter than any night screen's. */
-.tw{--tw-min:.2;--tw-max:.85;animation:twinkle 5s ease-in-out infinite alternate}
+.maintenance-page .tw{--tw-min:.2;--tw-max:.85;animation:twinkle 5s ease-in-out infinite alternate}
 
 /* Totality is night whatever the pack: the ground here is always #060a18,
    so the two daylight packs' dark inks, ink-coloured stars (#893) and blue
@@ -19,13 +30,13 @@ body{background:#060a18}
    string's period, offset a little from its neighbours (both set per bead by
    sky.js), lit for about a quarter of the cycle, so a run of beads lights and
    goes out one by one somewhere on the ring, never the same place twice */
-.glints .glint{opacity:0;transform-box:fill-box;transform-origin:center;
+.maintenance-page .glints .glint{opacity:0;transform-box:fill-box;transform-origin:center;
           animation:glint 6s ease-in-out infinite}
 @keyframes glint{0%,64%{opacity:0;transform:scale(.6)}70%{opacity:.85;transform:scale(1)}
                  78%{opacity:.6}84%{opacity:.75}100%{opacity:0;transform:scale(.8)}}
 
 /* corona layers — every group breathes on its own period, nothing in sync */
-.corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
+.maintenance-page .corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes cbreathe{from{opacity:.66}to{opacity:1}}
 /* #902: the three swaying layers are now rasters, so `transform-box` is
    spelled out rather than left to the default the way `.flare` below always
@@ -34,38 +45,38 @@ body{background:#060a18}
    <image> has a different bounding box from the <g> it replaced. Every
    current browser already defaults to view-box, so nothing moves today; the
    line is here so nothing can move later either. */
-.streamers-a{transform-origin:800px 440px;transform-box:view-box;
+.maintenance-page .streamers-a{transform-origin:800px 440px;transform-box:view-box;
              animation:sway-a 26s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes sway-a{from{transform:rotate(-3.4deg) scale(1);opacity:.62}to{transform:rotate(3.8deg) scale(1.035);opacity:1}}
-.streamers-b{transform-origin:800px 440px;transform-box:view-box;
+.maintenance-page .streamers-b{transform-origin:800px 440px;transform-box:view-box;
              animation:sway-b 39s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes sway-b{from{transform:rotate(3deg) scale(1.03);opacity:.8}to{transform:rotate(-2.8deg) scale(1);opacity:.45}}
-.streamers-b{animation-delay:-13s}
-.filaments{transform-origin:800px 440px;transform-box:view-box;
+.maintenance-page .streamers-b{animation-delay:-13s}
+.maintenance-page .filaments{transform-origin:800px 440px;transform-box:view-box;
            animation:sway-c 31s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes sway-c{from{transform:rotate(2deg);opacity:.6}to{transform:rotate(-2.6deg);opacity:1}}
-.prom{animation:flicker 7s ease-in-out infinite alternate}
-.prom.p2{animation-duration:9.5s;animation-delay:-3s}
-.prom.p3{animation-duration:6.2s;animation-delay:-1.4s}
+.maintenance-page .prom{animation:flicker 7s ease-in-out infinite alternate}
+.maintenance-page .prom.p2{animation-duration:9.5s;animation-delay:-3s}
+.maintenance-page .prom.p3{animation-duration:6.2s;animation-delay:-1.4s}
 @keyframes flicker{from{opacity:.55}to{opacity:.95}}
-.ring-inner{animation:shimmer 8s ease-in-out infinite alternate}
+.maintenance-page .ring-inner{animation:shimmer 8s ease-in-out infinite alternate}
 @keyframes shimmer{from{opacity:.75}to{opacity:1}}
-.horizon{animation:horiz 17s ease-in-out infinite alternate}
+.maintenance-page .horizon{animation:horiz 17s ease-in-out infinite alternate}
 @keyframes horiz{from{opacity:.75}to{opacity:1}}
 
 /* #902: the rasters stay invisible until every one has loaded, then all
    appear in the same frame (the page script flips `ready`). visibility, not
    opacity, because the flicker/sway keyframes above own opacity. */
-.world[data-rasterised="pending"] image[data-r]{visibility:hidden}
+.maintenance-page .world[data-rasterised="pending"] image[data-r]{visibility:hidden}
 /* The corona's rasters take a second or two to build, so they land after
    the moon, the ring and the words. The two `.lands` groups fade up over
    that landing instead of popping (owner, 2026-09-09). The fade is on the
    group, not the images, because the images' own keyframes own opacity. */
-.lands{transition:opacity 1.6s ease-out}
-.world[data-rasterised="pending"] .lands{opacity:0}
+.maintenance-page .lands{transition:opacity 1.6s ease-out}
+.maintenance-page .world[data-rasterised="pending"] .lands{opacity:0}
 
 /* the diamond ring — service returning; demo loops every 36s */
-.flare{opacity:0;animation:ringflash 36s linear infinite}
+.maintenance-page .flare{opacity:0;animation:ringflash 36s linear infinite}
 @keyframes ringflash{
   0%,60%{opacity:0;transform:scale(.2)}
   63%{opacity:.6;transform:scale(.6)}
@@ -73,9 +84,9 @@ body{background:#060a18}
   72%{opacity:.5;transform:scale(1.15)}
   77%,100%{opacity:0;transform:scale(.2)}
 }
-.flare{transform-origin:948px 348px;transform-box:view-box}
+.maintenance-page .flare{transform-origin:948px 348px;transform-box:view-box}
 /* the shockwave ring racing out from third contact */
-.flarewave{opacity:0;transform-origin:948px 348px;transform-box:view-box;
+.maintenance-page .flarewave{opacity:0;transform-origin:948px 348px;transform-box:view-box;
            animation:flarewave 36s linear infinite}
 @keyframes flarewave{
   0%,62%{opacity:0;transform:scale(.3)}
@@ -83,14 +94,14 @@ body{background:#060a18}
   74%{opacity:0;transform:scale(9)}
   75%,100%{opacity:0;transform:scale(.3)}
 }
-.wash{opacity:0;animation:washflash 36s linear infinite;pointer-events:none}
+.maintenance-page .wash{opacity:0;animation:washflash 36s linear infinite;pointer-events:none}
 @keyframes washflash{
   0%,61%{opacity:0}
   66%{opacity:.96}
   73%{opacity:.3}
   78%,100%{opacity:0}
 }
-.ringflare{opacity:0;animation:ringlit 36s linear infinite}
+.maintenance-page .ringflare{opacity:0;animation:ringlit 36s linear infinite}
 @keyframes ringlit{
   0%,60%{opacity:0}
   64%{opacity:1}
@@ -102,44 +113,44 @@ body{background:#060a18}
    ratio, and the text starts clear of the corona's glow (owner, 2026-09-09)
    — and runs to the bottom, so the drawer has somewhere to open into. Everything in it is centred and narrow:
    an announcement, not a document. */
-.notice{position:fixed;left:0;right:0;top:69vh;bottom:0;z-index:3;
+.maintenance-page .notice{position:fixed;left:0;right:0;top:69vh;bottom:0;z-index:3;
         display:flex;flex-direction:column;align-items:center;gap:12px;
         padding:0 24px calc(16px + env(safe-area-inset-bottom));text-align:center}
-.notice p{margin:0}
-.msg{margin:0;font:500 16px var(--mono);letter-spacing:.28em;color:var(--ink);
+.maintenance-page .notice p{margin:0}
+.maintenance-page .msg{margin:0;font:500 16px var(--mono);letter-spacing:.28em;color:var(--ink);
      text-transform:uppercase}
-.latest{display:flex;flex-direction:column;gap:6px;max-width:44ch}
-.when{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
+.maintenance-page .latest{display:flex;flex-direction:column;gap:6px;max-width:44ch}
+.maintenance-page .when{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
       text-transform:uppercase}
-.body{font:400 18px/1.5 var(--ui);color:var(--ink)}
-.back{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink);
+.maintenance-page .body{font:400 18px/1.5 var(--ui);color:var(--ink)}
+.maintenance-page .back{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink);
       text-transform:uppercase}
-.back time{color:var(--accent)}
+.maintenance-page .back time{color:var(--accent)}
 
 /* The arrow. A native disclosure so the keyboard and the screen reader get it
    for free; the marker is replaced with the chevron, which turns when open. */
-.earlier{display:flex;flex-direction:column;align-items:center;
+.maintenance-page .earlier{display:flex;flex-direction:column;align-items:center;
          flex:1 1 auto;min-height:0;max-width:44ch;width:100%;
          overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--ink-faint) transparent}
-.earlier summary{list-style:none;cursor:pointer;color:var(--ink-quiet);
+.maintenance-page .earlier summary{list-style:none;cursor:pointer;color:var(--ink-quiet);
                  padding:6px 12px;border-radius:999px;display:inline-flex;
                  position:sticky;top:0;transition:color .18s ease}
-.earlier[open]{mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent)}
-.earlier summary::-webkit-details-marker{display:none}
-.earlier summary:hover{color:var(--ink)}
-.earlier summary:focus-visible{outline:1.5px solid var(--accent);outline-offset:2px;
+.maintenance-page .earlier[open]{mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent)}
+.maintenance-page .earlier summary::-webkit-details-marker{display:none}
+.maintenance-page .earlier summary:hover{color:var(--ink)}
+.maintenance-page .earlier summary:focus-visible{outline:1.5px solid var(--accent);outline-offset:2px;
                                color:var(--ink)}
-.earlier summary svg{transition:transform .22s ease}
-.earlier[open] summary svg{transform:rotate(180deg)}
+.maintenance-page .earlier summary svg{transition:transform .22s ease}
+.maintenance-page .earlier[open] summary svg{transform:rotate(180deg)}
 /* The drawer takes whatever height is left beneath it and scrolls inside
    that — the scroll is on the <details> itself, because a <details> does not
    lay its content out as a flex item, and the arrow stays put on top. */
-.log{list-style:none;margin:6px 0 0;padding:0 12px;width:100%}
-.log li{display:flex;flex-direction:column;gap:4px;padding:10px 0;
+.maintenance-page .log{list-style:none;margin:6px 0 0;padding:0 12px;width:100%}
+.maintenance-page .log li{display:flex;flex-direction:column;gap:4px;padding:10px 0;
         border-top:1px solid rgba(233,237,248,.08)}
-.log .body{font-size:13px;color:var(--ink-mid)}
+.maintenance-page .log .body{font-size:13px;color:var(--ink-mid)}
 @media (prefers-reduced-motion: reduce){
-  .flare,.wash,.ringflare,.flarewave{opacity:0!important}
-  .glints .glint{animation:none;opacity:.45}
-  .earlier summary,.earlier summary svg{transition:none}
+  .maintenance-page .flare,.maintenance-page .wash,.maintenance-page .ringflare,.maintenance-page .flarewave{opacity:0!important}
+  .maintenance-page .glints .glint{animation:none;opacity:.45}
+  .maintenance-page .earlier summary,.maintenance-page .earlier summary svg{transition:none}
 }

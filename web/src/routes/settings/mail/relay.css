@@ -5,37 +5,49 @@
  *
  * Global rather than component-scoped, alongside family.css: Svelte would
  * prune the state selectors this sheet depends on.
+ *
+ * #1051: "not a Svelte component" is a reason to skip a Svelte `<style>`
+ * block, not a reason to skip a plain wrapper CLASS — every other route
+ * stylesheet in this family (administration.css, inbox.css, settings.css,
+ * home/pocket.css) is also plain global CSS and still scopes under its own
+ * route wrapper. This file previously had none at all: SvelteKit does not
+ * unload a visited route's CSS chunk on client-side navigation, so bare
+ * .dish/.alias/.kv/.note here kept matching inbox's own relay-status markup
+ * (inbox/+page.svelte's own .dish, .relaybar .alias and .fields .kv, which
+ * are themselves properly scoped under .inbox-page) once /settings/mail had
+ * been visited in the session. .relay-page is the wrapper, added around this
+ * route's own markup in +page.svelte.
  */
 
-.relay-card{width:430px;padding:30px 32px}
-.relay-card h1{font:600 19px var(--display)}
-.relay-card .sub{font:11px var(--mono);color:var(--ink-mid);margin:6px 0 22px;line-height:1.8}
-.dish{position:relative;width:54px;height:54px;margin:0 auto 6px}
-.dish i{position:absolute;inset:22px;border-radius:50%;background:var(--ok)}
-.dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;
+.relay-page .relay-card{width:430px;padding:30px 32px}
+.relay-page .relay-card h1{font:600 19px var(--display)}
+.relay-page .relay-card .sub{font:11px var(--mono);color:var(--ink-mid);margin:6px 0 22px;line-height:1.8}
+.relay-page .dish{position:relative;width:54px;height:54px;margin:0 auto 6px}
+.relay-page .dish i{position:absolute;inset:22px;border-radius:50%;background:var(--ok)}
+.relay-page .dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;
            animation:signal 3s ease-out infinite;opacity:0}
-.dish span:nth-child(2){animation-delay:1s}.dish span:nth-child(3){animation-delay:2s}
+.relay-page .dish span:nth-child(2){animation-delay:1s}.relay-page .dish span:nth-child(3){animation-delay:2s}
 @keyframes signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
-.alias{font:13px var(--mono);color:var(--accent-text);background:var(--panel);
+.relay-page .alias{font:13px var(--mono);color:var(--accent-text);background:var(--panel);
        border:1px dashed var(--line);border-radius:10px;padding:11px 14px;text-align:center;margin:14px 0}
-.kv{display:flex;justify-content:space-between;font:11.5px var(--mono);
+.relay-page .kv{display:flex;justify-content:space-between;font:11.5px var(--mono);
     color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
-.kv:last-of-type{border:0}
-.kv b{color:var(--ok-text);font-weight:500}
-.note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:16px;line-height:1.8}
-.btns{display:flex;gap:10px;margin-top:16px}
-.btns button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
+.relay-page .kv:last-of-type{border:0}
+.relay-page .kv b{color:var(--ok-text);font-weight:500}
+.relay-page .note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:16px;line-height:1.8}
+.relay-page .btns{display:flex;gap:10px;margin-top:16px}
+.relay-page .btns button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
              background:none;border:1px solid var(--line);color:var(--ink-mid)}
-.btns button.pri{color:var(--accent-text);border-color:var(--accent)}
+.relay-page .btns button.pri{color:var(--accent-text);border-color:var(--accent)}
 
 /* #434: mail that arrived but could not become a suggestion — the relay is
    where the user looks for "did my forward make it", so its failures live
    here, in the card's own kv grammar, toned as small print not alarm. */
-.failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
-.failures h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+.relay-page .failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
+.relay-page .failures h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
   color:var(--ink-quiet);margin:0 0 8px}
-.failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
-.failures .kv span:last-child{color:var(--overdue-text);text-align:right}
+.relay-page .failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
+.relay-page .failures .kv span:last-child{color:var(--overdue-text);text-align:right}
 
 /*
  * The living backdrop (#475, §14), ported from design/v19/relay-satellites.html.
@@ -50,38 +62,45 @@
  * lands 80px left and 50px up of where the sheet draws it, which the
  * fidelity gate measured at 1.1%. The vignette is likewise the sheet's own
  * (a touch higher and lighter than the family's, and gone on the light packs).
- */
-.satellites{display:contents}
+ *
+ * .satellites is unique to this route and its descendants below (.sky,
+ * .traffic, .tw, .hull, .lamp, .beam) are all built by satellites.js only
+ * inside it, so `.satellites .x` / `.satellites ~ .x` already cannot reach
+ * another route's markup — the same idiom home.css's retrograde rules use
+ * for `.desk .sky`. .traffic/.tw/.hull/.lamp/.beam were bare before this fix,
+ * though, so they are additionally prefixed with .relay-page for the same
+ * reason as the rest of the sheet. */
+.relay-page .satellites{display:contents}
 /* The sheet's stage, not the family's: the card is centred when the sky has
    room and simply starts at the top when it hasn't — a short laptop must
    never clip the note off the bottom (relay-satellites.html). The family's
    grid centres and clips; so the body scrolls here, and only here. The sheet
    keeps 102px under its stage for its demos rail, which the gate trims out. */
 body:has(.satellites){overflow:auto}
-.satellites ~ .stage{height:auto;min-height:100vh;display:flex;align-items:flex-start;
+.relay-page .satellites ~ .stage{height:auto;min-height:100vh;display:flex;align-items:flex-start;
                      justify-content:center;padding:64px 20px 16px}
-.satellites ~ .stage .relay-card{max-width:100%;margin:auto}
-@media (max-width:620px){.satellites ~ .stage{padding:52px 16px 12px}}
-.satellites .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+.relay-page .satellites ~ .stage .relay-card{max-width:100%;margin:auto}
+@media (max-width:620px){.relay-page .satellites ~ .stage{padding:52px 16px 12px}}
+.relay-page .satellites .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
                  transition:opacity .4s;z-index:0}
-.satellites .sky svg{position:absolute;inset:0;width:100%;height:100%}
-.traffic{position:fixed;inset:0;pointer-events:none;z-index:1}
-.traffic svg{position:absolute;inset:0;width:100%;height:100%}
-.satellites ~ .vignette{z-index:3;
+.relay-page .satellites .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.relay-page .traffic{position:fixed;inset:0;pointer-events:none;z-index:1}
+.relay-page .traffic svg{position:absolute;inset:0;width:100%;height:100%}
+.relay-page .satellites ~ .vignette{z-index:3;
           background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=atlas] .satellites ~ .vignette,[data-theme=dawn] .satellites ~ .vignette{background:none}
+[data-theme=clouds] .satellites ~ .vignette,[data-theme=dawn] .satellites ~ .vignette{background:none}
 
 /* a subset of stars breathes — life without a strobe */
 @keyframes tw-breathe{0%,100%{opacity:var(--o0)}50%{opacity:var(--o1)}}
-.tw{animation:tw-breathe var(--twd) ease-in-out infinite}
+.relay-page .tw{animation:tw-breathe var(--twd) ease-in-out infinite}
 
 /* attitude: the barely-perceptible sway of something station-keeping */
 @keyframes craft-sway{from{transform:rotate(calc(var(--sw) * -1))}to{transform:rotate(var(--sw))}}
-.hull .sway{animation:craft-sway var(--swdur) ease-in-out infinite alternate;
+.relay-page .hull .sway{animation:craft-sway var(--swdur) ease-in-out infinite alternate;
             transform-box:fill-box;transform-origin:center}
 /* the station light: a slow blink, never a strobe */
 @keyframes craft-blink{0%,62%{opacity:.16}72%,86%{opacity:1}100%{opacity:.16}}
-.lamp{opacity:.85;animation:craft-blink var(--bldur) ease-in-out infinite}
+.relay-page .lamp{opacity:.85;animation:craft-blink var(--bldur) ease-in-out infinite}
 /* the conveyed message: dashes travelling craft → relay dish */
 @keyframes craft-convey{from{stroke-dashoffset:var(--doff)}to{stroke-dashoffset:0}}
-.beam{stroke-dasharray:var(--dash);animation:craft-convey var(--bmdur) linear infinite}
+.relay-page .beam{stroke-dasharray:var(--dash);animation:craft-convey var(--bmdur) linear infinite}

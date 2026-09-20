@@ -1250,6 +1250,37 @@ run_check() {
 # never delegated, and why the very first `.env-orbit` creation on a fresh
 # checkout always stays bash-only).
 
+# read_compose_project_name <compose-manifest>
+#
+# The same function install.sh, repair.sh, engine-check.sh and
+# end-maintenance.sh carry, copied here rather than sourced: these scripts are
+# deliberately standalone and source-less, and
+# scripts/compose-project-name-resolution.test.mjs proves the five copies are
+# the same text. #999 is why this one exists: every other derivation reached
+# docker-compose.yml's own `name:` before guessing from the directory, and
+# this one did not, so a deployment whose .env-orbit carries no
+# COMPOSE_PROJECT_NAME -- a legacy file, or a pre-provisioned bootstrap before
+# migration writes the key -- had configure.sh addressing <dirname> while
+# install.sh, repair.sh and engine-check.sh all addressed `orbit`.
+read_compose_project_name() {
+  local compose_manifest="$1" line value
+  [[ -f "$compose_manifest" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]%%#*}"
+      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      value="${value%\"}"
+      value="${value#\"}"
+      value="${value%\'}"
+      value="${value#\'}"
+      [[ -n "$value" ]] || return 1
+      printf '%s' "$value"
+      return 0
+    fi
+  done < "$compose_manifest"
+  return 1
+}
+
 engine_configure_project_name() {
   local candidate="" line
   if [[ -f "$environment_file" && ! -L "$environment_file" ]]; then
@@ -1265,6 +1296,11 @@ engine_configure_project_name() {
   fi
   if [[ -n "${COMPOSE_PROJECT_NAME:-}" && "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
     printf '%s' "$COMPOSE_PROJECT_NAME"
+    return 0
+  fi
+  candidate="$(read_compose_project_name "docker-compose.yml" 2>/dev/null || true)"
+  if [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    printf '%s' "$candidate"
     return 0
   fi
   candidate="$(basename -- "$(pwd -P)" 2>/dev/null || true)"
