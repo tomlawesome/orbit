@@ -2164,6 +2164,17 @@ launcher_install_compat:
       allow_failure: true
   allow_failure: false
   script:
+    # #1076: the `rules:` above and `build_image`'s lane gate used to
+    # disagree. `.gitlab-ci.yml` is in the `changes:` list, so a
+    # pipeline-definition change starts this job; the same change puts the
+    # pipeline in the `ci` lane, which does not admit `build_image`. That
+    # job then exits 0 and its after_script leaves an empty `image.tar`
+    # placeholder so its `artifacts:` declaration still resolves -- and this
+    # job downloaded the placeholder and died on `docker load: unrecognized
+    # image format`. Every other consumer of *needs_gated_image already
+    # carries its own `orbit_lane_admits` line; this one did not.
+    - *reach_helpers
+    - orbit_lane_admits launcher_install_compat || exit 0
     - *reuse_gate
     - *docker_in_job
     - *step_outputs
