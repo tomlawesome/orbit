@@ -989,3 +989,45 @@ Two further composition calls were made in the same ruling and belong to the
 slices that build them, not to this screen: settings' **Sign-in methods**
 block with its inline recent-authentication challenge, and administration's
 **Add a local user** row with its shown-once setup link (§2.7, second half).
+
+## 18. The document preview and the reader over the belt (owner, 2026-09-20)
+
+**"Very good, all approved."** — #1059 (document previews and a reader) and
+#1054 (download and restore), ratified against
+`design/v19/document-card/round-6/h-preview-and-reader.html` after six
+rounds (the owner counts five). The round READMEs hold every verdict
+verbatim; this is the shape that stands.
+
+- **A document is never the centred body.** The item card stays at the apex;
+  a document is a paper riding the belt beside its item, and the item card
+  says only `N documents.` (round 1, then round 6).
+- **Pressing a paper opens the preview** in create-v3's reading card on the
+  paper's own side — the one grid widening so the item card slides over and
+  the reading card grows beside it, the pair centred together, exactly
+  `design/v19/create-v3.html`'s `doc`/`snap` states (rounds 2–3: "That's the
+  exact mockup I meant").
+- **The preview is extremely basic.** The page nearly edge to edge, top, left
+  and right, always whole and in its own proportions, on the cream sheet
+  with the tilted second sheet under it for every file; beneath, `1 of 3`
+  with an arrow either side only where there is a page that way. Nothing
+  else: no head, no file row, no zoom, no close control of its own. Esc or
+  dead space on the belt closes it; on a phone it is the bottom sheet.
+- **The honest states** are the focus block held still: the line says what
+  is happening; the foot holds only what can be done — `restore` for a
+  removed file, `download` for one Orbit could not draw, nothing while
+  scanning. While scanning, a line in the plate's outline colour sweeps the
+  plate up and down with a glow.
+- **The page is a button. Pressing it opens the reader** — round 1's reading
+  room as a window over the belt, never a separate page. The belt dims and
+  blurs beneath. Head: name · item · page N of M left, `fit − % +` centred,
+  `close · esc` right. The page as large as the window allows; a round
+  glass arrow either side of it, the left absent on page 1 and the right on
+  the last. Foot: the page number centred; `download` and `remove` at the
+  right as the item card's own action pills (download in the accent, remove
+  in the overdue tone, filled when armed for the two-press remove). Zoom by
+  keys, ctrl+wheel and pinch; past fit the page scrolls inside the window.
+  No thumbnail rail.
+
+Left open by the rounds and not decided here: pages after the first (a page
+parameter on the preview endpoint or PDF.js in the browser — round 1's
+question 2), which is a build call for #1059.
