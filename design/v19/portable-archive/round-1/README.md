@@ -92,7 +92,8 @@ the warning is `--warm`, refusals `--overdue`, the meter's "both match"
   refusal can be said before any bytes leave the browser, and again by the
   route.
 
-## Open for the owner
+## Verdict
 
-**63** Approved as drawn? The one call inside it: document contents are
-never exported (no switch). Say if you want the switch.
+Owner, 2026-09-20, verbatim: "63. What's the point in exporting if there's
+no documents?" then "The UI itself is fine otherwise". The card stands; the
+documents go in, both ways, always — `../round-2/`.
