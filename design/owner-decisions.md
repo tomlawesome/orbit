@@ -1031,3 +1031,27 @@ verbatim; this is the shape that stands.
 Left open by the rounds and not decided here: pages after the first (a page
 parameter on the preview endpoint or PDF.js in the browser — round 1's
 question 2), which is a build call for #1059.
+
+## 19. Household recovery lives on the household's row in Systems (owner, 2026-09-20)
+
+Asked A (a danger banner per household on the clock, above the
+administration grid) or B (the household's own row in the Systems card
+carries the state and both acts), the owner ruled: **"56 b the row."**
+
+- A household on its 30-day clock shows in Systems with a dashed red ring,
+  a red sun and the line "on the clock · N days left · gone for good <date>"
+  in place of members/owner/items; beneath the name sit `restore` (the
+  accent, one tap) and `delete now →`.
+- `delete now` is the household danger line's own protocol: the opener
+  prints the cost, the system's name is typed exactly, then the button asks
+  twice. Admin-only, as §15 already ruled.
+- **Restore is admin-only in the interface too** (owner: "57 admin only").
+  The server lets a household owner call it; the household page still never
+  draws it — its danger line keeps saying "an instance admin can turn this
+  back until then".
+- Nothing is drawn when nothing is scheduled; a second household on the
+  clock costs one more row, not one more card.
+- **Ratified as drawn** (owner: "58. As drawn."). Record:
+  `design/v19/household-recovery/round-1/b-the-row-on-the-clock.html` and
+  its README.
+
