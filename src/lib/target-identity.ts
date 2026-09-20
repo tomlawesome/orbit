@@ -26,7 +26,8 @@ import { join } from "node:path";
 // genuinely depend on sequential `docker` calls; this module has none.
 
 const ENVIRONMENT_FILE = ".env-orbit";
-const COMPOSE_FILE = "docker-compose.yml";
+/** The deployment asset whose own top-level `name:` names the Compose project (#999). */
+export const COMPOSE_FILE = "docker-compose.yml";
 const SECRETS_DIRECTORY = ".orbit-secrets";
 export const DATABASE_VOLUME_KEY = "orbit-db-data";
 
@@ -205,6 +206,48 @@ export function readEnvironmentValue(targetDir: string, key: string): string | u
   return found ? value : undefined;
 }
 
+/**
+ * read_compose_project_name (install.sh:479-496, brought there from
+ * end-maintenance.sh / engine-check.sh / repair.sh by #999): the target's
+ * own `docker-compose.yml` declares `name: orbit` on its first line, and
+ * until #999 neither implementation ever read it. Returns undefined
+ * wherever bash returns 1 with nothing printed — no such line, an empty
+ * value, or a file that cannot be read — so the caller falls through to
+ * the working-directory basename exactly as before.
+ *
+ * Deliberately a top-level-key line read, not a YAML parse, matching the
+ * bash byte for byte: `name:` is Compose's own top-level scalar key, so a
+ * line anchored at column 0 is enough. An inline `#` comment is cut, the
+ * remainder trimmed, and one layer of surrounding double then single
+ * quotes stripped — the same four `${var%...}`/`${var#...}` steps, in the
+ * same order.
+ */
+function readComposeProjectName(composeManifestPath: string): string | undefined {
+  let content: string;
+  try {
+    content = readFileSync(composeManifestPath, "utf8");
+  } catch {
+    return undefined;
+  }
+  // bash's `while IFS= read -r line` over the file: a line is whatever sits
+  // between newlines, and a trailing \r survives into the value the way it
+  // does in bash — where the [[:space:]] trim below then removes it.
+  for (const line of content.split("\n")) {
+    const match = /^name:[ \t\r\f\v]*(.*)$/.exec(line);
+    if (match === null) continue;
+    let value = match[1];
+    const commentIndex = value.indexOf("#");
+    if (commentIndex !== -1) value = value.slice(0, commentIndex);
+    value = value.replace(/^[ \t\r\f\v]+/, "").replace(/[ \t\r\f\v]+$/, "");
+    if (value.endsWith('"')) value = value.slice(0, -1);
+    if (value.startsWith('"')) value = value.slice(1);
+    if (value.endsWith("'")) value = value.slice(0, -1);
+    if (value.startsWith("'")) value = value.slice(1);
+    return value === "" ? undefined : value;
+  }
+  return undefined;
+}
+
 /** Thrown by deriveComposeProjectName wherever install.sh's derive_compose_project_name calls `fail`. */
 export class ComposeProjectNameRefusal extends Error {
   constructor(message: string) {
@@ -217,15 +260,39 @@ export interface DeriveComposeProjectNameResult {
   composeProjectName: string;
   /** Mirrors install.sh's `compose_project_name_explicit`. */
   explicit: boolean;
+  /**
+   * Mirrors install.sh's `compose_project_name_provisional` (#999): true only
+   * when the working-directory basename was the last resort, so a caller that
+   * later puts the bundled `docker-compose.yml` into the target can derive
+   * again and improve on it. False for every name with a real source — a
+   * configured `.env-orbit` value, an explicit request, or the compose file's
+   * own `name:`.
+   */
+  provisional: boolean;
 }
 
 /**
- * derive_compose_project_name (install.sh:431-462, guarantee #12): the
+ * derive_compose_project_name (install.sh:504-554, guarantee #12): the
  * Compose project name — whether read from an existing `.env-orbit`,
- * supplied via the `COMPOSE_PROJECT_NAME` override, or derived from the
- * working-directory basename — must match `^[a-z0-9][a-z0-9_-]*$`; a
- * configured file value and an explicitly requested value that disagree
- * refuse rather than silently pick one.
+ * supplied via the `COMPOSE_PROJECT_NAME` override, read from the target's
+ * own `docker-compose.yml` `name:`, or derived from the working-directory
+ * basename — must match `^[a-z0-9][a-z0-9_-]*$`; a configured file value
+ * and an explicitly requested value that disagree refuse rather than
+ * silently pick one.
+ *
+ * The compose-file step is #999's fix, ported here by #1043: the repository
+ * declares `name: orbit` on docker-compose.yml's first line and nothing
+ * reached it, so installing into ~/apps/household created and persisted the
+ * Compose project "household". It sits below both explicit sources and
+ * above the basename, is read only through the same regular-file,
+ * no-symlink gate as every other target read, and a `name:` Compose itself
+ * would not accept falls through to the basename rather than aborting a
+ * healthy run — exactly what the bash does.
+ *
+ * `composeManifestPath` mirrors install.sh's own optional argument to
+ * derive_compose_project_name: it defaults to the target's own
+ * docker-compose.yml, and a caller deriving again once the bundled file has
+ * been staged but not yet installed passes that staged copy instead.
  *
  * `requestedName` mirrors `${COMPOSE_PROJECT_NAME:-}` (undefined or ""
  * both mean "not requested", matching bash's `-n` test); `fallbackBasename`
@@ -234,20 +301,26 @@ export interface DeriveComposeProjectNameResult {
  *
  * install.sh's derive_compose_project_name reads and writes
  * `compose_project_name`/`compose_project_name_explicit` as globals that
- * would, in principle, persist across multiple calls within one script run
- * (an `elif "$compose_project_name_explicit" == 1: return` early-exit
- * exists for exactly that case). In practice install.sh has exactly one
- * call site (inside `verify_database_volume_safety`), so that branch is
- * dead code today; this function models a single, self-contained call
- * (`explicit` always starts false) and does not accept prior-call state.
- * If a future slice ever calls this a second time within one run, that
- * simplification would need revisiting — see
- * docs/adr-notes/295-install-port-plan.md.
+ * persist across calls within one script run (an `elif
+ * "$compose_project_name_explicit" == 1: return` early-exit exists for
+ * exactly that case). #999 gave install.sh a second call site — the
+ * re-derivation from the staged copy of the bundled compose file, before
+ * anything persists a name (install.sh:1663-1665) — so the "exactly one
+ * call site, that branch is dead code" simplification this port was built
+ * on no longer holds, and
+ * docs/adr-notes/295-install-port-plan.md records which way it went: this
+ * function still models a single, self-contained call (`explicit` always
+ * starts false) rather than accepting prior-call state, and the caller
+ * decides whether to call it again by reading `provisional`. The state bash
+ * carries in globals between the two calls is exactly what `provisional`
+ * reports, so nothing is lost; install-orchestrator.ts drives the second
+ * call, and the early-exit branch stays unreachable here by construction.
  */
 export function deriveComposeProjectName(
   targetDir: string,
   requestedName: string | undefined,
   fallbackBasename: string,
+  composeManifestPath: string = join(targetDir, COMPOSE_FILE),
 ): DeriveComposeProjectNameResult {
   let composeProjectName = "";
   let explicit = false;
@@ -276,11 +349,23 @@ export function deriveComposeProjectName(
         "The configured Docker Compose project name does not match the requested project; refusing to start Compose.",
       );
     }
-    return { composeProjectName: requestedName, explicit: true };
+    return { composeProjectName: requestedName, explicit: true, provisional: false };
   }
 
   if (explicit) {
-    return { composeProjectName, explicit };
+    return { composeProjectName, explicit, provisional: false };
+  }
+
+  // docker-compose.yml's own `name: orbit` (#999, ported by #1043). On a
+  // fresh install the bundled compose file has not been staged yet when this
+  // first runs, so nothing is found here and the basename below stands in
+  // provisionally; install-orchestrator.ts derives again once the staged copy
+  // exists, which is what makes `orbit` reachable at all.
+  if (isRegularNonSymlinkFile(composeManifestPath)) {
+    const declaredName = readComposeProjectName(composeManifestPath);
+    if (declaredName !== undefined && PROJECT_NAME_PATTERN.test(declaredName)) {
+      return { composeProjectName: declaredName, explicit: false, provisional: false };
+    }
   }
 
   let sanitized = fallbackBasename.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
@@ -292,13 +377,14 @@ export function deriveComposeProjectName(
       "Could not determine a safe Docker Compose project name; refusing to start Compose.",
     );
   }
-  return { composeProjectName: sanitized, explicit: false };
+  return { composeProjectName: sanitized, explicit: false, provisional: true };
 }
 
 // Re-exported for tests that need to assert on raw filesystem facts without
 // duplicating the predicate logic above (mirrors install-transaction.ts's
 // own `internal` export).
 export const internal = {
+  readComposeProjectName,
   isRegularNonSymlinkFile,
   isRealNonSymlinkDirectory,
   hasMode,
