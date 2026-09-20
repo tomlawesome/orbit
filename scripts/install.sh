@@ -495,7 +495,14 @@ read_compose_project_name() {
   return 1
 }
 
+# derive_compose_project_name [compose-manifest]
+#
+# <compose-manifest> defaults to the target's own docker-compose.yml. The
+# re-derivation below passes the staged copy instead, because it has to run
+# before the first configuration migration persists a name and that is a
+# moment when the bundled file is still in the staging directory (#999).
 derive_compose_project_name() {
+  local compose_manifest="${1:-$compose_file}"
   local requested_name="" configured_name="" declared_name=""
   if is_regular_non_symlink_file "$environment_file" &&
     configured_name="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null)"; then
@@ -526,8 +533,8 @@ derive_compose_project_name() {
     # been extracted yet when this first runs, so nothing is found here and
     # the guess below stands in; the install path re-derives once the file is
     # in place, which is what makes `orbit` reachable at all.
-    if is_regular_non_symlink_file "$compose_file"; then
-      declared_name="$(read_compose_project_name "$compose_file" 2>/dev/null || true)"
+    if is_regular_non_symlink_file "$compose_manifest"; then
+      declared_name="$(read_compose_project_name "$compose_manifest" 2>/dev/null || true)"
     fi
     if [[ "$declared_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
       compose_project_name="$declared_name"
@@ -1638,6 +1645,25 @@ preflight_final_paths
 prepare_rollback_area
 file_transaction_active=1
 
+# The bundled docker-compose.yml has been staged and syntax-checked but is
+# not in the target yet, and this is the last moment before anything writes a
+# project name down, so its own `name: orbit` is read from the staged copy
+# (#999). A fresh install had nothing but the working directory's name to go
+# on until now, which is how installing into ~/apps/household produced the
+# Compose project "household" and left the declaration in the compose file
+# unreachable. It has to happen before the migration below and not after the
+# assets move: an unattended pre-provisioned bootstrap arrives with its own
+# .env-orbit, that migration writes the name it is given into it, and a
+# derivation running afterwards would read that value straight back as an
+# explicit one and keep the directory name for good. An operator's
+# COMPOSE_PROJECT_NAME, a value already persisted in .env-orbit, and the
+# project that owns a recognised database volume all outrank the declaration
+# and are never provisional, so none of them is touched here. No Compose
+# command has run yet either.
+if [[ "$compose_project_name_provisional" == 1 ]]; then
+  derive_compose_project_name "$staging_dir/$compose_file"
+fi
+
 # Validate and, for a legacy v0 file, add only the schema marker before any
 # extracted asset or configure.sh mutation. The transaction above owns rollback.
 if [[ -e "$environment_file" ]]; then
@@ -1672,19 +1698,6 @@ for asset in "${deployment_assets[@]}"; do
   mv -f -- "$staging_dir/$asset" "$asset" ||
     fail "Could not install ${asset}; restoring the previous deployment."
 done
-
-# The bundled docker-compose.yml only exists here, so this is the first
-# moment its own `name: orbit` can be read (#999). A fresh install had
-# nothing but the working directory's name to go on until now, which is how
-# installing into ~/apps/household produced the Compose project "household"
-# and left the declaration in the compose file unreachable. An operator's
-# COMPOSE_PROJECT_NAME, a value already persisted in .env-orbit, and the
-# project that owns a recognised database volume all outrank it and are
-# never provisional, so none of them is touched here. Nothing has run a
-# Compose command yet, and the name is persisted further down.
-if [[ "$compose_project_name_provisional" == 1 ]]; then
-  derive_compose_project_name
-fi
 
 # The resolved digest is exported before configuration runs so VAPID key
 # generation and every other configuration step use the immutable published

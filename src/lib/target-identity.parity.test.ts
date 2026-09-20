@@ -95,7 +95,7 @@ function buildDriverScript(): string {
     '    requested="${1:-}"',
     '    if [[ -n "$requested" ]]; then export COMPOSE_PROJECT_NAME="$requested"; fi',
     "    derive_compose_project_name",
-    "    printf 'compose_project_name=%s explicit=%s\\n' \"$compose_project_name\" \"$compose_project_name_explicit\"",
+    "    printf 'compose_project_name=%s explicit=%s provisional=%s\\n' \"$compose_project_name\" \"$compose_project_name_explicit\" \"$compose_project_name_provisional\"",
     "    ;;",
     "esac",
     "",
@@ -223,7 +223,9 @@ describe("derive_compose_project_name parity", () => {
     const bash = runDriver("derive", dir);
     expect(bash.status).toBe(0);
     const result = deriveComposeProjectName(dir, undefined, basename(realpathSync(dir)));
-    expect(bash.stdout).toBe(`compose_project_name=${result.composeProjectName} explicit=${result.explicit ? 1 : 0}`);
+    expect(bash.stdout).toBe(
+      `compose_project_name=${result.composeProjectName} explicit=${result.explicit ? 1 : 0} provisional=${result.provisional ? 1 : 0}`,
+    );
   });
 
   it("agrees: a configured .env-orbit value wins over the fallback", () => {
@@ -231,10 +233,11 @@ describe("derive_compose_project_name parity", () => {
     writeFileSync(join(dir, ".env-orbit"), "COMPOSE_PROJECT_NAME=configured-project\n", { mode: 0o600 });
     const bash = runDriver("derive", dir);
     expect(bash.status).toBe(0);
-    expect(bash.stdout).toBe("compose_project_name=configured-project explicit=1");
+    expect(bash.stdout).toBe("compose_project_name=configured-project explicit=1 provisional=0");
     expect(deriveComposeProjectName(dir, undefined, basename(realpathSync(dir)))).toEqual({
       composeProjectName: "configured-project",
       explicit: true,
+      provisional: false,
     });
   });
 
@@ -256,10 +259,60 @@ describe("derive_compose_project_name parity", () => {
     const dir = makeSandbox();
     const bash = runDriver("derive", dir, "requested-project");
     expect(bash.status).toBe(0);
-    expect(bash.stdout).toBe("compose_project_name=requested-project explicit=1");
+    expect(bash.stdout).toBe("compose_project_name=requested-project explicit=1 provisional=0");
     expect(deriveComposeProjectName(dir, "requested-project", basename(realpathSync(dir)))).toEqual({
       composeProjectName: "requested-project",
       explicit: true,
+      provisional: false,
+    });
+  });
+
+  // The case this suite was missing (#1043). Every fixture above leaves the
+  // target without a `docker-compose.yml` carrying a `name:` line, so
+  // neither implementation ever reached #999's new branch and the two could
+  // disagree about it in silence -- which is exactly what happened: the bash
+  // was fixed by #999 and this port was not, and the suite stayed green.
+  // Against the pre-#1043 deriveComposeProjectName this fails, reporting the
+  // sandbox directory's own basename where bash reports "orbit".
+  it("agrees: the target's own docker-compose.yml name: outranks the fallback basename", () => {
+    const dir = makeSandbox();
+    writeFileSync(join(dir, "docker-compose.yml"), "name: orbit\n\nservices: {}\n");
+    const bash = runDriver("derive", dir);
+    expect(bash.status).toBe(0);
+    expect(bash.stdout).toBe("compose_project_name=orbit explicit=0 provisional=0");
+    expect(deriveComposeProjectName(dir, undefined, basename(realpathSync(dir)))).toEqual({
+      composeProjectName: "orbit",
+      explicit: false,
+      provisional: false,
+    });
+  });
+
+  it("agrees: a declared name Compose would not accept falls through to the basename on both sides", () => {
+    const dir = makeSandbox();
+    writeFileSync(join(dir, "docker-compose.yml"), "name: Not_Valid!\n");
+    const bash = runDriver("derive", dir);
+    expect(bash.status).toBe(0);
+    const result = deriveComposeProjectName(dir, undefined, basename(realpathSync(dir)));
+    // Both sides fell through to the sanitized basename rather than refusing:
+    // mkdtemp's suffix is mixed case and the sanitizer lowercases it.
+    expect(result.composeProjectName).toBe(basename(realpathSync(dir)).toLowerCase());
+    expect(result.provisional).toBe(true);
+    expect(bash.stdout).toBe(
+      `compose_project_name=${result.composeProjectName} explicit=${result.explicit ? 1 : 0} provisional=${result.provisional ? 1 : 0}`,
+    );
+  });
+
+  it("agrees: a configured .env-orbit value still outranks a declared compose name", () => {
+    const dir = makeSandbox();
+    writeFileSync(join(dir, ".env-orbit"), "COMPOSE_PROJECT_NAME=configured-project\n", { mode: 0o600 });
+    writeFileSync(join(dir, "docker-compose.yml"), "name: orbit\n");
+    const bash = runDriver("derive", dir);
+    expect(bash.status).toBe(0);
+    expect(bash.stdout).toBe("compose_project_name=configured-project explicit=1 provisional=0");
+    expect(deriveComposeProjectName(dir, undefined, basename(realpathSync(dir)))).toEqual({
+      composeProjectName: "configured-project",
+      explicit: true,
+      provisional: false,
     });
   });
 });

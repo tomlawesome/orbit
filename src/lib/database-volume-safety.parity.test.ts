@@ -245,6 +245,7 @@ function buildDriverScript(): string {
     "    printf 'database_volume_name=%s\\n' \"$database_volume_name\"",
     "    printf 'compose_project_name=%s\\n' \"$compose_project_name\"",
     "    printf 'compose_project_name_explicit=%s\\n' \"$compose_project_name_explicit\"",
+    "    printf 'compose_project_name_provisional=%s\\n' \"$compose_project_name_provisional\"",
     "    ;;",
     "  verify-recheck)",
     '    target_dir="$1"; database_volume_name="$2"; database_volume_seen="$3"',
@@ -364,6 +365,7 @@ function freshState(overrides: Partial<DatabaseVolumeSafetyState> = {}): Databas
     targetWasEmpty: false,
     composeProjectNameExplicit: false,
     composeProjectName: "",
+    composeProjectNameProvisional: false,
     ...overrides,
   };
 }
@@ -408,6 +410,10 @@ describe("verify_database_volume_safety parity — fresh check", () => {
     // database-volume-safety.ts's `nextState = { ...nextState,
     // composeProjectName: discoveredProject }` line).
     expect(bash.stdout).toContain("compose_project_name_explicit=0");
+    // install.sh:659 clears compose_project_name_provisional on this path:
+    // the project that owns a proven volume is the deployment's real
+    // identity, so #999's later re-derivation must never replace it.
+    expect(bash.stdout).toContain("compose_project_name_provisional=0");
 
     const result = verifyDatabaseVolumeSafety(dir, undefined, "fallback", freshState(), password, referenceAdapter);
     expect(result).toEqual({
@@ -417,7 +423,34 @@ describe("verify_database_volume_safety parity — fresh check", () => {
       targetWasEmpty: false,
       composeProjectNameExplicit: false,
       composeProjectName: PROJECT,
+      composeProjectNameProvisional: false,
     });
+  });
+
+  // The case this suite was missing too (#1043): no fixture put a
+  // `name:`-carrying docker-compose.yml in the target, so the derivation
+  // inside verify_database_volume_safety never reached #999's branch on
+  // either side and the suite stayed green while the two implementations
+  // disagreed. With no candidate volume to attach, the compose file's own
+  // declaration is what both sides must report -- not the basename, and not
+  // provisionally.
+  it("agrees: with no candidate volume, the target's docker-compose.yml name: is the project both sides report", () => {
+    const dir = makeSandbox();
+    seedTargetWithImage(dir);
+    writeFileSync(join(dir, "docker-compose.yml"), "name: orbit\n\nservices: {}\n");
+    const password = seedReadyPassword(dir);
+    writeScenario({ volumeLsSubstring: { "orbit-db-data": "" } });
+
+    const bash = runDriver("verify", dir, "0");
+    expect(bash.status).toBe(0);
+    expect(bash.stdout).toContain("compose_project_name=orbit");
+    expect(bash.stdout).toContain("compose_project_name_explicit=0");
+    expect(bash.stdout).toContain("compose_project_name_provisional=0");
+
+    const result = verifyDatabaseVolumeSafety(dir, undefined, "fallback", freshState(), password, referenceAdapter);
+    expect(result.composeProjectName).toBe("orbit");
+    expect(result.composeProjectNameExplicit).toBe(false);
+    expect(result.composeProjectNameProvisional).toBe(false);
   });
 
   it("agrees: an existing volume against an otherwise-empty target refuses with install.sh's exact message (#15)", () => {
