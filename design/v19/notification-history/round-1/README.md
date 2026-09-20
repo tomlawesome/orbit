@@ -54,6 +54,7 @@ Reminders sits in a two-column grid beside Your relay and Your systems.
   plain sentences; unknown errors say "couldn't send" alone.
 - The row's link goes to the item on the belt.
 
-## Open for the owner
+## Verdict
 
-**61** Approved as drawn? If so #1003 builds from this file.
+Owner, 2026-09-20, verbatim: "61 approved". **Ratified as drawn.** #1003
+builds from this file; `design/owner-decisions.md` §20 has the decision.

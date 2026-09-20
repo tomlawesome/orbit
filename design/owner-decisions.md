@@ -989,3 +989,24 @@ Two further composition calls were made in the same ruling and belong to the
 slices that build them, not to this screen: settings' **Sign-in methods**
 block with its inline recent-authentication challenge, and administration's
 **Add a local user** row with its shown-once setup link (§2.7, second half).
+
+## 20. Sent to you lately — notification history in the Reminders card (owner, 2026-09-20)
+
+Asked whether a member should see the reminders Orbit has sent them, and
+where, the owner ruled **"60. a."**: yes, in the settings Reminders card
+under the two switches. Round 1 was then approved as drawn (**"61
+approved"**).
+
+- The last five sends for the signed-in user, newest first, read from
+  `notification_deliveries`: the item's name (a link to the item), the
+  small line "first warning · email" / "final warning · browser alert", and
+  when it went.
+- A send that did not go says so in its row — "couldn't send · <plain
+  reason>" in `--overdue`, "still trying · <reason>" in `--warm`. Nothing
+  is hidden.
+- Nothing sent yet: one line saying when the first warning goes out.
+  Both switches off: a warm line above the list; past sends stay.
+- Nothing in the list is a control; the switches are the controls.
+- Record: `design/v19/notification-history/round-1/a-sent-to-you-lately.html`
+  and its README.
+
