@@ -173,6 +173,8 @@ export interface DatabaseVolumeSafetyState {
   composeProjectNameExplicit: boolean;
   /** install.sh `compose_project_name` */
   composeProjectName: string;
+  /** install.sh `compose_project_name_provisional` (#999) */
+  composeProjectNameProvisional: boolean;
 }
 
 export interface PostgresPasswordFacts {
@@ -230,6 +232,7 @@ export function verifyDatabaseVolumeSafety(
     ...state,
     composeProjectName: derived.composeProjectName,
     composeProjectNameExplicit: derived.explicit,
+    composeProjectNameProvisional: derived.provisional,
   };
 
   const volumeList = adapter.listVolumesByKeySubstring(DATABASE_VOLUME_KEY);
@@ -310,7 +313,12 @@ export function verifyDatabaseVolumeSafety(
   // used). Setting it here was an early mistake in this port, caught by
   // database-volume-safety.parity.test.ts's byte-for-byte comparison
   // against the real script's globals after a successful attach.
-  nextState = { ...nextState, composeProjectName: discoveredProject };
+  // The project that owns the recognised volume is the deployment's real
+  // identity, so it is never provisional: install.sh:659 clears the flag on
+  // exactly this path, so that the later re-derivation (#999) cannot replace
+  // a proven owner with the compose file's declared name and address a
+  // project this host has not got.
+  nextState = { ...nextState, composeProjectName: discoveredProject, composeProjectNameProvisional: false };
 
   if (!(postgresPasswordFacts.isRegularNonSymlinkFile && postgresPasswordFacts.mode === 0o600)) {
     throw new DatabaseVolumeSafetyRefusal(

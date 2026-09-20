@@ -154,6 +154,9 @@ database_volume_seen=0
 database_volume_checked=0
 compose_project_name=""
 compose_project_name_explicit=0
+# 1 while the project name is only the working-directory guess, so a later
+# derivation may still improve on it (#999); see derive_compose_project_name.
+compose_project_name_provisional=0
 database_volume_name=""
 configuration_migration_completed=0
 installer_ui_loaded=0
@@ -456,8 +459,51 @@ validate_target() {
   fail "The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap. Refusing to install here."
 }
 
+# read_compose_project_name <compose-manifest>
+#
+# Prints <compose-manifest>'s own top-level `name:` value and returns 0, or
+# returns 1 with nothing printed when the file has no such line -- the
+# caller's directory-basename fallback then runs exactly as before (#921:
+# docker-compose.yml:1 declares `name: orbit`, but this derivation used to
+# fall from an explicit COMPOSE_PROJECT_NAME straight to a guess from the
+# current directory's basename, never reading the compose file's own name,
+# so a worktree or an operator directory not literally called "orbit"
+# addressed a Compose project that was never created). Deliberately a
+# top-level-key line read, not a YAML parse -- `name:` is Compose's own
+# top-level scalar key, so a line anchored at column 0 is enough, and this
+# must stay dependency-free (no docker, no node) since it runs inside the
+# same standalone, source-less scripts as read_environment_value above.
+# Identical text in end-maintenance.sh, engine-check.sh and repair.sh --
+# scripts/compose-project-name-resolution.test.mjs proves that. #999 brought
+# the same function here; install.sh was the one place #921 left out.
+read_compose_project_name() {
+  local compose_manifest="$1" line value
+  [[ -f "$compose_manifest" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]%%#*}"
+      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      value="${value%\"}"
+      value="${value#\"}"
+      value="${value%\'}"
+      value="${value#\'}"
+      [[ -n "$value" ]] || return 1
+      printf '%s' "$value"
+      return 0
+    fi
+  done < "$compose_manifest"
+  return 1
+}
+
+# derive_compose_project_name [compose-manifest]
+#
+# <compose-manifest> defaults to the target's own docker-compose.yml. The
+# re-derivation below passes the staged copy instead, because it has to run
+# before the first configuration migration persists a name and that is a
+# moment when the bundled file is still in the staging directory (#999).
 derive_compose_project_name() {
-  local requested_name="" configured_name=""
+  local compose_manifest="${1:-$compose_file}"
+  local requested_name="" configured_name="" declared_name=""
   if is_regular_non_symlink_file "$environment_file" &&
     configured_name="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null)"; then
     [[ "$configured_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
@@ -478,6 +524,23 @@ derive_compose_project_name() {
   elif [[ "$compose_project_name_explicit" == 1 ]]; then
     return
   else
+    # docker-compose.yml's own `name: orbit` (#999). Read only through the
+    # same regular-file, no-symlink gate every other target read uses, and
+    # only trusted when it is a name Compose itself would accept -- anything
+    # else falls through to the basename guess below rather than aborting an
+    # otherwise healthy run, exactly as the three maintenance scripts #921
+    # fixed already do. On a fresh install the bundled compose file has not
+    # been extracted yet when this first runs, so nothing is found here and
+    # the guess below stands in; the install path re-derives once the file is
+    # in place, which is what makes `orbit` reachable at all.
+    if is_regular_non_symlink_file "$compose_manifest"; then
+      declared_name="$(read_compose_project_name "$compose_manifest" 2>/dev/null || true)"
+    fi
+    if [[ "$declared_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+      compose_project_name="$declared_name"
+      compose_project_name_provisional=0
+      return
+    fi
     requested_name="$(basename -- "$(pwd -P)")" ||
       fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
     requested_name="$(printf '%s' "$requested_name" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')" ||
@@ -486,6 +549,7 @@ derive_compose_project_name() {
     [[ -n "$requested_name" && "$requested_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
       fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
     compose_project_name="$requested_name"
+    compose_project_name_provisional=1
   fi
 }
 
@@ -599,6 +663,11 @@ verify_database_volume_safety() {
       fail "The configured Docker Compose project does not match the recognized database volume; refusing to start Compose."
     fi
     compose_project_name="$discovered_project"
+    # The project that owns the recognised volume is the deployment's real
+    # identity: never let the later re-derivation (#999) replace it with the
+    # compose file's declared name and address a project this host has not
+    # got.
+    compose_project_name_provisional=0
     if ! is_regular_non_symlink_file "$secrets_directory/postgres-password" ||
       ! has_mode "$secrets_directory/postgres-password" 600; then
       fail "An existing Orbit database volume requires the preserved POSTGRES_PASSWORD_FILE; refusing to start Compose."
@@ -1575,6 +1644,25 @@ fi
 preflight_final_paths
 prepare_rollback_area
 file_transaction_active=1
+
+# The bundled docker-compose.yml has been staged and syntax-checked but is
+# not in the target yet, and this is the last moment before anything writes a
+# project name down, so its own `name: orbit` is read from the staged copy
+# (#999). A fresh install had nothing but the working directory's name to go
+# on until now, which is how installing into ~/apps/household produced the
+# Compose project "household" and left the declaration in the compose file
+# unreachable. It has to happen before the migration below and not after the
+# assets move: an unattended pre-provisioned bootstrap arrives with its own
+# .env-orbit, that migration writes the name it is given into it, and a
+# derivation running afterwards would read that value straight back as an
+# explicit one and keep the directory name for good. An operator's
+# COMPOSE_PROJECT_NAME, a value already persisted in .env-orbit, and the
+# project that owns a recognised database volume all outrank the declaration
+# and are never provisional, so none of them is touched here. No Compose
+# command has run yet either.
+if [[ "$compose_project_name_provisional" == 1 ]]; then
+  derive_compose_project_name "$staging_dir/$compose_file"
+fi
 
 # Validate and, for a legacy v0 file, add only the schema marker before any
 # extracted asset or configure.sh mutation. The transaction above owns rollback.
