@@ -99,6 +99,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "created_at", "updated_at"],
   credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
   step_up_proofs: ["id", "session_id", "intent", "expires_at", "consumed_at", "created_at"],
+  sign_in_approvals: ["id", "user_id", "token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "outcome", "decided_at", "send_count", "last_sent_at", "notice_shown_at", "created_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -197,6 +198,7 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   user_email_unique_index: { table: "users", columns: ["email_index"], unique: true },
   credential_setup_tokens_user_idx: { table: "credential_setup_tokens", columns: ["user_id"], unique: false },
   step_up_proofs_session_idx: { table: "step_up_proofs", columns: ["session_id"], unique: false },
+  sign_in_approvals_user_idx: { table: "sign_in_approvals", columns: ["user_id"], unique: false },
   // user_email_unique_ci is a functional index (lower(email)): PostgreSQL
   // records its indkey as 0 for the expression column, which readSchemaContract's
   // introspection join over pg_attribute cannot resolve, so it never appears
@@ -347,6 +349,10 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   credential_setup_tokens_created_by_users_id_fk: foreign("credential_setup_tokens", ["created_by_user_id"], "users", ["id"], "set_null"),
   step_up_proofs_pkey: primary("step_up_proofs", ["id"]),
   step_up_proofs_session_id_sessions_id_fk: foreign("step_up_proofs", ["session_id"], "sessions", ["id"], "cascade"),
+  sign_in_approvals_pkey: primary("sign_in_approvals", ["id"]),
+  sign_in_approvals_token_hash_unique: unique("sign_in_approvals", ["token_hash"]),
+  sign_in_approvals_claim_hash_unique: unique("sign_in_approvals", ["claim_hash"]),
+  sign_in_approvals_user_id_users_id_fk: foreign("sign_in_approvals", ["user_id"], "users", ["id"], "cascade"),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;

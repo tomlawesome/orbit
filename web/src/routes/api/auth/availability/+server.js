@@ -5,6 +5,7 @@ import { getAuthConfig } from "orbit/lib/env";
 import { getBootPhase } from "orbit/server/boot";
 import { readPublicContactAddress } from "orbit/server/instance-contact";
 import { hasAnyLocalCredential } from "orbit/server/local-credentials";
+import { secondFactorConfigured } from "orbit/server/sign-in-approvals";
 
 /**
  * Whether the signed-out sign-in door may offer to sign in, and where to say
@@ -43,6 +44,15 @@ import { hasAnyLocalCredential } from "orbit/server/local-credentials";
  * table, never keyed by anything the visitor sent; false on a failed read,
  * so a hiccup hides a line rather than inventing one.
  *
+ * `secondFactor` (#1033, ADR-0027 §2) says whether a password sign-in on this
+ * instance is finished by an emailed approval. It is not a per-account fact
+ * and cannot be: the factor is on for everybody or off for everybody, and the
+ * only thing that switches it off is the instance having no mail relay
+ * configured. Signed-out surfaces are told because the settings screen and the
+ * door both have to say the same thing about it, and false on a failed read
+ * for the same reason `localAccounts` is -- a hiccup understates what the
+ * instance does rather than promising something it cannot do.
+ *
  * `claimed` (M7, ADR-0022) says whether the instance already has a primary
  * administrator: false is what puts the claim card in front of an anonymous
  * visitor. It is the presence of the `instance_authority` row and nothing
@@ -72,6 +82,12 @@ export async function GET() {
   } catch {
     localAccounts = false;
   }
+  let emailSecondFactor = false;
+  try {
+    emailSecondFactor = secondFactorConfigured();
+  } catch {
+    emailSecondFactor = false;
+  }
   let contactAddress = null;
   try {
     contactAddress = await readPublicContactAddress();
@@ -85,7 +101,7 @@ export async function GET() {
     {
       configured,
       claimed,
-      methods: { local: true, oidc: oidcMethodAvailable, localAccounts },
+      methods: { local: true, oidc: oidcMethodAvailable, localAccounts, secondFactor: emailSecondFactor },
       phase,
       contactAddress,
     },

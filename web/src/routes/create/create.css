@@ -3,10 +3,21 @@
  * here from that point on. The mockup was the input to this file, not a live
  * dependency of it: changes are made here and judged in the running app.
  *
- * Not scoped to a component. The design styles `body` and depends on state
- * selectors (`.disclose.open`, `.field.sugg .tag`, `body.doc`) that Svelte
- * would prune as unused, so this stays plain global CSS, linked alongside
- * family.css.
+ * Not scoped to a Svelte component. The design styles `body` and depends on
+ * state selectors (`.disclose.open`, `.field.sugg .tag`, `body.doc`) that
+ * Svelte would prune as unused, so this stays plain global CSS, linked
+ * alongside family.css. #1051: that is a reason to avoid a Svelte `<style>`
+ * block, not a reason to skip the same plain wrapper CLASS every other route
+ * stylesheet in this family uses — `.create-page`, added around this route's
+ * own markup below. SvelteKit does not unload a visited route's CSS chunk on
+ * client-side navigation, so this sheet's own bare .card/.sub/.field/etc used
+ * to keep matching the same class names on administration, settings,
+ * household and more, once /create had been visited once in the session (the
+ * worst instance: bare .lit{opacity:0;animation:lit .5s ease forwards} also
+ * matched <body class="lit">, which $lib/flight sets on /setup). `body.doc`
+ * and `body.snap` stay unscoped — they gate on a class this route alone
+ * toggles on <body> itself, which cannot be wrapped in a div, the same way
+ * every other route's own `html body` reset stays unscoped.
  *
  * Three rulings drawn at once (§14, #474/#475/#476):
  *   1. the backdrop carries this instance's OWN households, floating in the
@@ -29,7 +40,7 @@ html body{overflow-y:auto;overflow-x:hidden;line-height:1.55}
 
 /* the backdrop root: constellations.js draws fixed-position children into it,
    so the wrapper itself must not take part in layout. */
-.backdrop{display:contents}
+.create-page .backdrop{display:contents}
 
 /* The living backdrop (#475, §14). $lib/backdrops/constellations.js builds
    the actual .sky/.chartback markup into `.backdrop`; everything here is
@@ -37,32 +48,32 @@ html body{overflow-y:auto;overflow-x:hidden;line-height:1.55}
    family.css bleeds `.sky` 5% past the viewport for the old tiled drift, but
    this sky is streamed — positioned by the same clock as the chart marks —
    so it is pinned to the viewport instead (the relay.css precedent, #475). */
-.sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+.create-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
      transition:opacity .4s;z-index:0}
-.sky svg{position:absolute;inset:0;width:100%;height:100%}
+.create-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
 /* a handful of nearer stars breathe, so the field is alive rather than printed.
    The one twinkle that is not the shared curve: it dips to a FRACTION of each
    star's own opacity and returns, rather than crossing a fixed pair, so it
    keeps its own keyframes — under its own name, because five screens sharing
    the name `twinkle` for five different curves was a collision, not sharing
    (#445; route stylesheets accumulate across a client-side navigation). */
-.spark{opacity:var(--o,.7);animation:spark-breathe 9s ease-in-out infinite}
+.create-page .spark{opacity:var(--o,.7);animation:spark-breathe 9s ease-in-out infinite}
 @keyframes spark-breathe{0%,100%{opacity:var(--o)}50%{opacity:calc(var(--o) * .34)}}
-.vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+.create-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 50%, transparent 52%, rgba(0,0,0,.30) 100%)}
-[data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+[data-theme=clouds] .vignette,[data-theme=dawn] .vignette{background:none}
 
 /* §14/#474: the instance's ACTUAL households, in the distance. Display only —
    no pointer events, no hover, no flight. They are drawn in chart ink rather
    than accent precisely so they do not claim to be clickable (on home, accent
    means "you may fly here"). Faint, small, and further = fainter. */
-.chartback{position:fixed;inset:0;pointer-events:none;z-index:1;
+.create-page .chartback{position:fixed;inset:0;pointer-events:none;z-index:1;
            opacity:var(--chart-alpha,1);transition:opacity .8s ease}
-.chartback svg{position:absolute;inset:0;width:100%;height:100%}
+.create-page .chartback svg{position:absolute;inset:0;width:100%;height:100%}
 body.doc .chartback{opacity:calc(var(--chart-alpha,1) * .62)}  /* recedes while you read */
 #inprogress{transition:opacity .6s ease}
 body.doc #inprogress{opacity:0}      /* the plot waits; the document has the floor */
-.csys{animation:arrive-sys 1.4s ease backwards}
+.create-page .csys{animation:arrive-sys 1.4s ease backwards}
 @keyframes arrive-sys{from{opacity:0}to{opacity:1}}
 
 /* §14/#474 ruling 2: vertically centred, and it GROWS FROM ITS MIDDLE.
@@ -71,151 +82,156 @@ body.doc #inprogress{opacity:0}      /* the plot waits; the document has the flo
    so the centre of the card stays pinned to the centre of the viewport. The
    padding is deliberately symmetric: the card's centre and the viewport's
    centre are the same point, so growth is visibly even.
-   .stage.stage: family.css's own `.stage` (grid, place-items:center, no
-   padding) loses ties on specificity alone since it loads after this sheet. */
-.stage.stage{position:relative;z-index:2;height:auto;min-height:100vh;display:flex;
+   .create-page .stage: family.css's own `.stage` (grid, place-items:center, no
+   padding) loses ties on specificity alone since it loads after this sheet —
+   the wrapper prefix carries the same two-class specificity the old
+   .stage.stage doubling did. */
+.create-page .stage{position:relative;z-index:2;height:auto;min-height:100vh;display:flex;
              align-items:center;justify-content:center;padding:62px 24px}
-.lanes{margin:auto;display:grid;align-items:center;
+.create-page .lanes{margin:auto;display:grid;align-items:center;
        grid-template-columns:minmax(0,600px) minmax(0,0px);gap:0;
        transition:grid-template-columns .75s cubic-bezier(.4,.5,.15,1),gap .75s cubic-bezier(.4,.5,.15,1)}
 /* ruling 3: the two lanes. Widening the grid to the right slides the form
    card left of centre — one transition, no re-layout, no jump. */
 body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 
-.card{width:100%;padding:30px 36px;min-width:0}
-.card h2{font:600 22px var(--display)}
-.sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;margin:6px 0 22px}
+.create-page .card{width:100%;padding:30px 36px;min-width:0}
+.create-page .card h2{font:600 22px var(--display)}
+.create-page .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;margin:6px 0 22px}
 
-.field{margin-bottom:13px}
-.field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
+.create-page .field{margin-bottom:13px}
+.create-page .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
              text-transform:uppercase;margin:0 0 6px}
-.field input,.field select,.field textarea{width:100%;background:var(--panel);border:1px solid var(--line);
+.create-page .field input,.create-page .field select,.create-page .field textarea{width:100%;background:var(--panel);border:1px solid var(--line);
        border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
-.field input::placeholder{color:var(--ink-quiet)}
-.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent)}
-.field textarea{resize:vertical;line-height:1.5}
-.field.mono input{font-family:var(--mono)}
+.create-page .field input::placeholder{color:var(--ink-quiet)}
+.create-page .field input:focus,.create-page .field select:focus,.create-page .field textarea:focus{border-color:var(--accent)}
+.create-page .field textarea{resize:vertical;line-height:1.5}
+.create-page .field.mono input{font-family:var(--mono)}
 
 /* The heading IS the name (owner, 2026-08-15): you edit the title of the
    card itself, so there is no separate name box. Styled as the card's h2. */
-.name-title{display:block;width:100%;background:none;border:0;padding:0;
+.create-page .name-title{display:block;width:100%;background:none;border:0;padding:0;
   font:600 22px var(--display);line-height:1.25;color:var(--ink)}
-.name-title:focus{border-bottom:1px solid var(--accent)}
+.create-page .name-title:focus{border-bottom:1px solid var(--accent)}
 
-.types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
-.types button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
+.create-page .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.create-page .types button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
               border-radius:99px;padding:7px 14px;cursor:pointer;letter-spacing:.02em}
-.types button:hover{color:var(--ink)}
-.types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
+.create-page .types button:hover{color:var(--ink)}
+.create-page .types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
 
-.dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:19px;text-align:center;
+.create-page .dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:19px;text-align:center;
           cursor:pointer;transition:border-color .2s,background .2s}
-.dropzone:hover,.dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04)}
+.create-page .dropzone:hover,.create-page .dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04)}
 /* #848: the dashed border's colour shift alone is too quiet for a keyboard
    user to find; the same ring as every other field. */
-.dropzone:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.dropzone .dz-main{font-size:13.5px;color:var(--ink-mid)}
-.dropzone .dz-hint{font:10px var(--mono);color:var(--ink-quiet);margin-top:7px;letter-spacing:.06em}
+.create-page .dropzone:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.create-page .dropzone .dz-main{font-size:13.5px;color:var(--ink-mid)}
+.create-page .dropzone .dz-hint{font:10px var(--mono);color:var(--ink-quiet);margin-top:7px;letter-spacing:.06em}
 /* once the document is in the right-hand lane, the zone states the fact */
 body.doc .dropzone{border-style:solid;border-color:var(--line-soft);cursor:default;background:none}
 body.doc .dropzone .dz-main,body.doc .dropzone .dz-hint{display:none}
-.dz-held{display:none;font:11px var(--mono);color:var(--ink-mid);letter-spacing:.03em}
-.dz-held b{color:var(--accent-text);font-weight:400}
+.create-page .dz-held{display:none;font:11px var(--mono);color:var(--ink-mid);letter-spacing:.03em}
+.create-page .dz-held b{color:var(--accent-text);font-weight:400}
 body.doc .dz-held{display:block}
 
-.disclose{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .55s ease,opacity .4s ease}
-.disclose.open{grid-template-rows:1fr;opacity:1}
-.disclose-inner{overflow:hidden}
-.disclose-content{padding-top:20px;margin-top:18px;border-top:1px solid var(--line-soft)}
+.create-page .disclose{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .55s ease,opacity .4s ease}
+.create-page .disclose.open{grid-template-rows:1fr;opacity:1}
+.create-page .disclose-inner{overflow:hidden}
+.create-page .disclose-content{padding-top:20px;margin-top:18px;border-top:1px solid var(--line-soft)}
 
-.docnote{display:none;font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.6;margin:0 0 18px}
-.docnote.show{display:block}
+.create-page .docnote{display:none;font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.6;margin:0 0 18px}
+.create-page .docnote.show{display:block}
 
-.row2{display:flex;gap:14px}
-.row2>.field{flex:1;min-width:0}
-.daterow{display:flex;gap:14px}
-.daterow .f-date{flex:1.4}
-.daterow .f-recur{flex:1}
+.create-page .row2{display:flex;gap:14px}
+.create-page .row2>.field{flex:1;min-width:0}
+.create-page .daterow{display:flex;gap:14px}
+.create-page .daterow .f-date{flex:1.4}
+.create-page .daterow .f-recur{flex:1}
 
-.prefix-wrap{position:relative}
-.prefix-wrap .prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);
+.create-page .prefix-wrap{position:relative}
+.create-page .prefix-wrap .prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);
                       color:var(--ink-mid);font-size:13.5px;pointer-events:none}
-.prefix-wrap input{padding-left:24px}
+.create-page .prefix-wrap input{padding-left:24px}
 
-.field.sugg input,.field.sugg select{border-left:3px solid var(--accent)}
-.field .tag{display:none;align-items:center;gap:8px;margin-top:7px;font:10px var(--mono);
+.create-page .field.sugg input,.create-page .field.sugg select{border-left:3px solid var(--accent)}
+.create-page .field .tag{display:none;align-items:center;gap:8px;margin-top:7px;font:10px var(--mono);
             color:var(--accent-text);letter-spacing:.04em}
-.field.sugg .tag{display:flex}
-.field .tag button{font:10px var(--mono);color:var(--bg);background:var(--accent);border:0;
+.create-page .field.sugg .tag{display:flex}
+.create-page .field .tag button{font:10px var(--mono);color:var(--bg);background:var(--accent);border:0;
                    border-radius:6px;padding:2px 9px;cursor:pointer}
-.field .tag button:hover{filter:brightness(1.12)}
+.create-page .field .tag button:hover{filter:brightness(1.12)}
 
-.save-row{display:flex;align-items:center;gap:18px;margin-top:20px}
-.btn-primary{flex:0 0 auto;padding:12px 26px;border-radius:11px;border:0;cursor:pointer;
+.create-page .save-row{display:flex;align-items:center;gap:18px;margin-top:20px}
+.create-page .btn-primary{flex:0 0 auto;padding:12px 26px;border-radius:11px;border:0;cursor:pointer;
              font:600 14px var(--display);color:var(--bg);background:var(--accent)}
-.btn-primary:hover{filter:brightness(1.05)}
-.cancel-link{font:12px var(--mono);color:var(--ink-quiet);text-decoration:none}
-.cancel-link:hover{color:var(--ink-mid)}
+.create-page .btn-primary:hover{filter:brightness(1.05)}
+.create-page .cancel-link{font:12px var(--mono);color:var(--ink-quiet);text-decoration:none}
+.create-page .cancel-link:hover{color:var(--ink-mid)}
 
 /* ---- the right lane: reading, then the top sheet (#476 placeholder) ---- */
-.readcard{width:100%;min-width:0;overflow:hidden;padding:26px 26px 22px;
+.create-page .readcard{width:100%;min-width:0;overflow:hidden;padding:26px 26px 22px;
           opacity:0;transform:translateX(-16px);pointer-events:none;
           transition:opacity .55s ease .18s,transform .65s cubic-bezier(.4,.5,.15,1) .18s}
 body.doc .readcard{opacity:1;transform:none;pointer-events:auto}
-.readcard h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+.create-page .readcard h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
              color:var(--ink-quiet);margin-bottom:16px}
 
-.focus{display:flex;flex-direction:column;align-items:center;text-align:center;padding:16px 0 6px}
+.create-page .focus{display:flex;flex-direction:column;align-items:center;text-align:center;padding:16px 0 6px}
 body.snap .focus{display:none}
-.reticle{width:96px;height:96px;margin-bottom:20px}
-.reticle .sweep{transform-origin:48px 48px;animation:sweep 9s linear infinite}
-.reticle .pull{transform-origin:48px 48px;animation:pull 3.6s ease-in-out infinite}
+.create-page .reticle{width:96px;height:96px;margin-bottom:20px}
+.create-page .reticle .sweep{transform-origin:48px 48px;animation:sweep 9s linear infinite}
+.create-page .reticle .pull{transform-origin:48px 48px;animation:pull 3.6s ease-in-out infinite}
 @keyframes sweep{to{transform:rotate(360deg)}}
 @keyframes pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
 /* the owner's words, breathing — slow, never a spinner */
-.focusline{font:600 15.5px var(--display);letter-spacing:.01em;color:var(--ink);
+.create-page .focusline{font:600 15.5px var(--display);letter-spacing:.01em;color:var(--ink);
            animation:breathe 4.2s ease-in-out infinite}
 @keyframes breathe{0%,100%{opacity:.96}50%{opacity:.42}}
-.focus .why{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.9;margin-top:12px}
+.create-page .focus .why{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.9;margin-top:12px}
 
 /* the top sheet: a real picture of page one, so the eye can confirm it.
    #476: the product has no server render yet, so this stays the sheet's own
    honest placeholder, unreachable — see create.behaviour.js. */
-.topsheet{display:none}
+.create-page .topsheet{display:none}
 body.snap .topsheet{display:block;animation:landed .6s cubic-bezier(.3,.7,.2,1) backwards}
 @keyframes landed{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
-.sheet{position:relative;background:#f6f4ee;border-radius:5px;padding:9px;
+.create-page .sheet{position:relative;background:#f6f4ee;border-radius:5px;padding:9px;
        box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset}
 /* the sheet under it — this is the TOP sheet of a four-page file */
-.sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
+.create-page .sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
                transform:rotate(-1.1deg) translate(-4px,3px);z-index:-1}
-.sheet svg{display:block;width:100%;height:auto;border-radius:2px}
-.cap{font:10.5px var(--mono);color:var(--ink-mid);line-height:1.8;margin-top:14px;text-align:center}
-.cap b{color:var(--ink);font-weight:400}
-.honest{font:9.5px var(--mono);color:var(--ink-quiet);line-height:1.8;margin-top:8px;text-align:center}
-.attach{display:flex;flex-wrap:wrap;align-items:center;gap:5px 10px;font:11px var(--mono);
+.create-page .sheet svg{display:block;width:100%;height:auto;border-radius:2px}
+.create-page .cap{font:10.5px var(--mono);color:var(--ink-mid);line-height:1.8;margin-top:14px;text-align:center}
+.create-page .cap b{color:var(--ink);font-weight:400}
+.create-page .honest{font:9.5px var(--mono);color:var(--ink-quiet);line-height:1.8;margin-top:8px;text-align:center}
+.create-page .attach{display:flex;flex-wrap:wrap;align-items:center;gap:5px 10px;font:11px var(--mono);
         color:var(--ink-mid);border:1px solid var(--line-soft);border-radius:9px;
         padding:9px 12px;margin-top:16px}
-.attach .file{flex:1 1 100%;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.attach .clean{color:var(--ok-text)}
-.attach button{margin-left:auto;font:10.5px var(--mono);color:var(--ink-quiet);
+.create-page .attach .file{flex:1 1 100%;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.create-page .attach .clean{color:var(--ok-text)}
+.create-page .attach button{margin-left:auto;font:10.5px var(--mono);color:var(--ink-quiet);
                background:none;border:0;cursor:pointer;padding:0}
-.attach button:hover{color:var(--overdue)}
-/* the three marks the read actually produced, lit on the page they came from */
-.lit{opacity:0;animation:lit .5s ease forwards}
+.create-page .attach button:hover{color:var(--overdue)}
+/* the three marks the read actually produced, lit on the page they came from.
+   #1051: this was a bare .lit{...} rule, which also matched <body class="lit">
+   — $lib/flight sets that on /setup for its own reveal — once this chunk had
+   stayed loaded past a client-side navigation. */
+.create-page .lit{opacity:0;animation:lit .5s ease forwards}
 body.snap .lit:nth-of-type(1){animation-delay:.55s}
 body.snap .lit:nth-of-type(2){animation-delay:.75s}
 body.snap .lit:nth-of-type(3){animation-delay:.95s}
 @keyframes lit{to{opacity:1}}
 
 @media (max-width:1040px){
-  .lanes,body.doc .lanes{grid-template-columns:minmax(0,600px);gap:0}
-  .readcard{grid-row:2;display:none}
+  .create-page .lanes,body.doc .lanes{grid-template-columns:minmax(0,600px);gap:0}
+  .create-page .readcard{grid-row:2;display:none}
   body.doc .readcard{display:block;margin-top:22px}
 }
 @media (prefers-reduced-motion: reduce){
-  *{animation:none!important;transition:none!important}
-  .lit{opacity:1}
+  .create-page *{animation:none!important;transition:none!important}
+  .create-page .lit{opacity:1}
 }
 
 /* Interim, and the only rule on this screen the design did not draw: the save
@@ -223,5 +239,5 @@ body.snap .lit:nth-of-type(3){animation-delay:.95s}
    that can fail silently is worse than one carrying a line of type. Typeset as
    the form's own small print, not as an alarm — recorded as an open design
    question rather than a decision taken here. */
-.save-note{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;line-height:1.5}
-.save-note:empty{display:none}
+.create-page .save-note{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;line-height:1.5}
+.create-page .save-note:empty{display:none}

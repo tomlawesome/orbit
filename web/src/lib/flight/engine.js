@@ -38,8 +38,10 @@ import { seededRng } from "$lib/sky.js";
 
 /**
  * A prop schedule entry (PROPS_UP/PROPS_DOWN), extended in `prime()` with the
- * per-run fields (`p`, `rad`, `rot0`, and the shape's own `pts`/`bodies`) and
- * further in `step()` with the fields the pen draws from (`al`, `hair`).
+ * per-run fields (`p`, `rad`, `rot0`, and the "sys" kind's own `bodies`) and
+ * further in `step()` with the fields the pen draws from (`al`, `hair`). The
+ * "con" kind's shape (`pts`) is a fixed, cached Path2D keyed by `shape`
+ * instead (#873) — it never varied per run, only per constellation shape.
  * @typedef {object} Prop
  * @property {"grat" | "con" | "sys" | "craft" | "comet"} kind
  * @property {number} t0
@@ -52,7 +54,6 @@ import { seededRng } from "$lib/sky.js";
  * @property {number} [p]
  * @property {number} [rad]
  * @property {number} [rot0]
- * @property {number[][]} [pts]
  * @property {Array<[number, number, string, number]>} [bodies]
  * @property {number} [al]
  * @property {number} [hair]
@@ -76,9 +77,8 @@ import { seededRng } from "$lib/sky.js";
 
 /**
  * A prop as the pen functions see it: always called from `step()`'s props
- * loop, strictly after `prime()` has set `rad`/`rot0` (and `pts`/`bodies` for
- * the kinds that carry them) and after that same loop iteration has just set
- * `al`/`hair`.
+ * loop, strictly after `prime()` has set `rad`/`rot0` (and `bodies` for the
+ * "sys" kind) and after that same loop iteration has just set `al`/`hair`.
  * @typedef {Prop & { al: number, hair: number, rad: number, rot0: number }} HydratedProp
  */
 
@@ -297,6 +297,75 @@ export function createFlight(canvas, options = {}) {
   const cancel = options.cancelFrame ?? ((id) => cancelAnimationFrame(id));
   const clock = options.now ?? (() => performance.now());
 
+  /*
+   * #873: every prop pen below used to build a fresh CanvasGradient or trace
+   * a fresh Path2D from scratch on every single frame it was on screen — cost
+   * that grew with how many props were in flight at once (the issue's second
+   * named candidate, and what the launch-timing measurement's climbing
+   * home-phase intervals point at). None of the geometry or colour stops
+   * built here ever change frame to frame: they are the pen's own fixed
+   * drawing, always read in LOCAL space before `step()`'s translate/rotate/
+   * scale is applied. A CanvasGradient or Path2D is not baked into device
+   * pixels at creation — both are resolved against whatever transform is
+   * active at draw time — so building one once and reusing it every frame
+   * paints exactly the same pixels as rebuilding it fresh each time; only the
+   * allocation is cut. Nothing here changes what the flight shows.
+   */
+  const craftWakeGradient = ctx.createLinearGradient(-52, 0, -108, 0);
+  craftWakeGradient.addColorStop(0, "rgba(216,180,90,.55)");
+  craftWakeGradient.addColorStop(1, "rgba(216,180,90,0)");
+  const cometTailGradient = ctx.createLinearGradient(0, 0, -260, 0);
+  cometTailGradient.addColorStop(0, "rgba(216,180,90,.85)");
+  cometTailGradient.addColorStop(1, "rgba(216,180,90,0)");
+  const cometHeadGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 26);
+  cometHeadGradient.addColorStop(0, "rgba(255,246,230,.95)");
+  cometHeadGradient.addColorStop(0.35, "rgba(255,233,196,.4)");
+  cometHeadGradient.addColorStop(1, "rgba(255,233,196,0)");
+  const systemRing78 = new Path2D(); systemRing78.arc(0, 0, 78, 0, 6.284);
+  const systemRing52 = new Path2D(); systemRing52.arc(0, 0, 52, 0, 6.284);
+  const systemRing30 = new Path2D(); systemRing30.arc(0, 0, 30, 0, 6.284);
+  const systemSunDot = new Path2D(); systemSunDot.arc(0, 0, 4.5, 0, 6.284);
+  const graticuleArcs = new Path2D();
+  for (const r of [230, 300, 372]) {
+    /* `moveTo` the arc's own start point first: three `.arc()` calls back
+       to back on one Path2D would otherwise each draw a connecting line
+       from the previous arc's end, which the original's three separate
+       beginPath()/arc()/stroke() calls never did. */
+    graticuleArcs.moveTo(r * Math.cos(-0.95), r * Math.sin(-0.95));
+    graticuleArcs.arc(0, 0, r, -0.95, 0.95);
+  }
+  const graticuleSpokes = new Path2D();
+  for (let k = -3; k <= 3; k++) {
+    const a = k * 0.28;
+    graticuleSpokes.moveTo(Math.cos(a) * 224, Math.sin(a) * 224);
+    graticuleSpokes.lineTo(Math.cos(a) * 380, Math.sin(a) * 380);
+  }
+  /** one cached path per constellation shape: the polyline, its dashed accent
+      leg, and the point dots, all keyed by CONS's own index (`g.shape`). */
+  const consPolylines = CONS.map((pts) => {
+    const p = new Path2D();
+    p.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) p.lineTo(pts[i][0], pts[i][1]);
+    return p;
+  });
+  const consAccents = CONS.map((pts) => {
+    const p = new Path2D();
+    p.moveTo(pts[0][0], pts[0][1]);
+    p.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+    return p;
+  });
+  const consDots = CONS.map((pts) => {
+    const p = new Path2D();
+    /* `moveTo` to each circle's own start point first, so `arc()` never draws
+       the connecting line it otherwise would from the previous point — every
+       circle stays its own subpath, exactly as separate fill() calls drew it. */
+    for (const pt of pts) {
+      p.moveTo(pt[0] + pt[2], pt[1]);
+      p.arc(pt[0], pt[1], pt[2], 0, 6.284);
+    }
+    return p;
+  });
+
   let W = 0, H = 0, DIAG = 0;
   let VPX = 0, VPY = 0, A0 = 0, A1 = 0, RMAX = 0;
   let rnd = seededRng(FLIGHT_SEED);
@@ -356,39 +425,33 @@ export function createFlight(canvas, options = {}) {
 
   /** @param {HydratedProp} g @param {number} [_t] */
   function penConstellation(g, _t) {
-    const pts = /** @type {number[][]} */ (g.pts);
+    const shape = /** @type {number} */ (g.shape);
     ctx.lineWidth = g.hair; ctx.strokeStyle = PACK.pen; ctx.globalAlpha = g.al * 0.95;
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-    ctx.stroke();
+    ctx.stroke(consPolylines[shape]);
     /* the dashed accent leg — POL-5's constellation, drawn in gold */
     ctx.setLineDash([1.5 * g.hair, 6 * g.hair]);
     ctx.strokeStyle = PACK.accent; ctx.globalAlpha = g.al * 0.55;
-    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
-    ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]); ctx.stroke();
+    ctx.stroke(consAccents[shape]);
     ctx.setLineDash([]);
     ctx.globalAlpha = g.al;
-    for (const p of pts) {
-      ctx.fillStyle = PACK.starNear;
-      ctx.beginPath(); ctx.arc(p[0], p[1], p[2], 0, 6.284); ctx.fill();
-    }
+    ctx.fillStyle = PACK.starNear;
+    ctx.fill(consDots[shape]);
   }
   /** @param {HydratedProp} g @param {number} [_t] */
   function penSystem(g, _t) {
     /* another household's gravity well, seen in passing — home's minisys */
     ctx.lineWidth = g.hair; ctx.globalAlpha = g.al;
     ctx.strokeStyle = PACK.pen;
-    ctx.beginPath(); ctx.arc(0, 0, 78, 0, 6.284); ctx.stroke();
+    ctx.stroke(systemRing78);
     ctx.strokeStyle = PACK.penLo;
-    ctx.beginPath(); ctx.arc(0, 0, 52, 0, 6.284); ctx.stroke();
+    ctx.stroke(systemRing52);
     ctx.setLineDash([3 * g.hair, 5 * g.hair]);
     ctx.strokeStyle = "#f87171"; ctx.globalAlpha = g.al * 0.45;
-    ctx.beginPath(); ctx.arc(0, 0, 30, 0, 6.284); ctx.stroke();
+    ctx.stroke(systemRing30);
     ctx.setLineDash([]);
     ctx.globalAlpha = g.al;
     ctx.fillStyle = PACK.sun;
-    ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, 6.284); ctx.fill();
+    ctx.fill(systemSunDot);
     for (const b of /** @type {Array<[number, number, string, number]>} */ (g.bodies)) {
       ctx.fillStyle = b[2];
       ctx.beginPath(); ctx.arc(b[0], b[1], b[3], 0, 6.284); ctx.fill();
@@ -402,16 +465,8 @@ export function createFlight(canvas, options = {}) {
   function penGraticule(g, _t) {
     /* the fine graticule linework of the identity, seen edge-on */
     ctx.lineWidth = g.hair; ctx.strokeStyle = PACK.penLo; ctx.globalAlpha = g.al * 0.95;
-    for (const r of [230, 300, 372]) {
-      ctx.beginPath(); ctx.arc(0, 0, r, -0.95, 0.95); ctx.stroke();
-    }
-    for (let k = -3; k <= 3; k++) {
-      const a = k * 0.28;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * 224, Math.sin(a) * 224);
-      ctx.lineTo(Math.cos(a) * 380, Math.sin(a) * 380);
-      ctx.stroke();
-    }
+    ctx.stroke(graticuleArcs);
+    ctx.stroke(graticuleSpokes);
   }
   /** @param {HydratedProp} g @param {number} t */
   function penCraft(g, t) {
@@ -446,10 +501,7 @@ export function createFlight(canvas, options = {}) {
     ctx.lineWidth = hair;
     ctx.beginPath(); ctx.moveTo(48, 0); ctx.lineTo(74, 0); ctx.stroke();
     ctx.beginPath(); ctx.arc(74, 0, 3, 0, 6.284); ctx.stroke();
-    const pg = ctx.createLinearGradient(-52, 0, -108, 0);
-    pg.addColorStop(0, "rgba(216,180,90,.55)");
-    pg.addColorStop(1, "rgba(216,180,90,0)");
-    ctx.fillStyle = pg;
+    ctx.fillStyle = craftWakeGradient;
     ctx.beginPath(); ctx.moveTo(-52, -7); ctx.lineTo(-108, 0); ctx.lineTo(-52, 7); ctx.closePath(); ctx.fill();
     ctx.globalAlpha = g.al * (0.45 + 0.55 * Math.abs(Math.sin(t / 320)));
     ctx.fillStyle = PACK.accent;
@@ -458,18 +510,12 @@ export function createFlight(canvas, options = {}) {
   }
   /** @param {HydratedProp} g @param {number} [_t] */
   function penComet(g, _t) {
-    const grd = ctx.createLinearGradient(0, 0, -260, 0);
-    grd.addColorStop(0, "rgba(216,180,90,.85)");
-    grd.addColorStop(1, "rgba(216,180,90,0)");
     ctx.globalAlpha = g.al;
-    ctx.strokeStyle = grd; ctx.lineWidth = 7 * g.hair; ctx.lineCap = "round";
+    ctx.strokeStyle = cometTailGradient; ctx.lineWidth = 7 * g.hair; ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-300, 0); ctx.stroke();
     ctx.strokeStyle = "rgba(143,184,255,.4)"; ctx.lineWidth = 2.4 * g.hair;
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-220, -30); ctx.stroke();
-    const hg = ctx.createRadialGradient(0, 0, 0, 0, 0, 26);
-    hg.addColorStop(0, "rgba(255,246,230,.95)"); hg.addColorStop(0.35, "rgba(255,233,196,.4)");
-    hg.addColorStop(1, "rgba(255,233,196,0)");
-    ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(0, 0, 26, 0, 6.284); ctx.fill();
+    ctx.fillStyle = cometHeadGradient; ctx.beginPath(); ctx.arc(0, 0, 26, 0, 6.284); ctx.fill();
     ctx.fillStyle = "#fff6e6";
     ctx.beginPath(); ctx.arc(0, 0, 5, 0, 6.284); ctx.fill();
   }
@@ -619,11 +665,18 @@ export function createFlight(canvas, options = {}) {
       /* prime() has already set every nebula's `rad` before step() ever runs. */
       const nrad = /** @type {number} */ (n.rad);
       const x = VPX + Math.cos(nrad) * r, y = VPY + Math.sin(nrad) * r;
+      const a = n.al * Math.min(1, n.p / 0.18) * Math.min(1, (1.25 - n.p) / 0.3);
+      /* `a<=0` means every stop below clamps to fully transparent — this
+         nebula would paint nothing this frame. The full-canvas gradient fill
+         still cost the same as one that is visible, so skipping it here
+         changes no pixel (a transparent fill and no fill are the same
+         picture) while cutting one of the four unconditional full-canvas
+         draws every frame otherwise pays regardless of what is on screen. */
+      if (a <= 0) continue;
       const rad = H * n.size * (0.35 + n.p * 0.95);
       const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
-      const a = n.al * Math.min(1, n.p / 0.18) * Math.min(1, (1.25 - n.p) / 0.3);
-      g.addColorStop(0, hexa(n.col, Math.max(0, a)));
-      g.addColorStop(0.55, hexa(n.col, Math.max(0, a * 0.34)));
+      g.addColorStop(0, hexa(n.col, a));
+      g.addColorStop(0.55, hexa(n.col, a * 0.34));
       g.addColorStop(1, hexa(n.col, 0));
       ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     }
@@ -721,7 +774,6 @@ export function createFlight(canvas, options = {}) {
       g.p = P.rev ? 1 : 0;             /* reversed, the traffic starts at the edge */
       g.rad = g.ang * Math.PI / 180;
       g.rot0 = (g.spin || 0) * -0.5;
-      if (g.kind === "con") g.pts = CONS[/** @type {number} */ (g.shape)];
       if (g.kind === "sys") g.bodies = systemBodies(/** @type {number} */ (g.k));
     }
     for (const n of NEB) {

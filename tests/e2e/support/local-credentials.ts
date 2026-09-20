@@ -44,6 +44,12 @@ export const FIXTURE_PASSWORD = {
  *
  * The page must already be on an Orbit URL: the CSRF pair is read from the
  * session this browser is holding, and its Origin from where the page is.
+ *
+ * AND the reader must belong to a household. The step-up comes back to
+ * /settings, which is a gated screen, and #840 sends a reader with no
+ * household anywhere to the arrival instead -- so the wait below times out on
+ * `/` twenty seconds later, naming a navigation rather than the seat that was
+ * missing (pipeline 1268, smoke). Every caller seats one first.
  */
 export async function ensureLocalPassword(page: Page, account: string, password: string): Promise<void> {
   const started = await page.request.post("/api/auth/step-up/start", {

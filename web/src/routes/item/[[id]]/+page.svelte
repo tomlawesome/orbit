@@ -191,6 +191,9 @@
         cardId = body?.id ?? null;
         cardBody = body;
       },
+      /* #1062: the end-caps' press. The same function the arrow keys call —
+         the band draws the controls, the screen owns the step. */
+      onStep: step,
       async onSettle(_i, band) {
         bloom = band.bloom.slice();
         bodies = band.bodies;
@@ -248,7 +251,10 @@
     !bodies.length
       ? "the belt is empty"
       : !query.trim()
-        ? `${itemCount} items · ← → steps in date order`
+        /* #1062: the note says what ORDER the belt is in, not which keys move
+           it. The end-caps are the visible way along it now, and the arrow
+           keys keep working as the shortcut they always were. */
+        ? `${itemCount} items · in date order, sooner to later`
         : hitList.length
           ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
           : "nothing matches · the belt keeps its shape",
@@ -282,19 +288,30 @@
     return target instanceof Element
       && (target === findEl || Boolean(target.closest("input, textarea, select")));
   }
+  /**
+   * One step along the belt. The whole of what ← and → do — and, since
+   * #1062, the whole of what the two end-caps do as well: they are handed
+   * this function, so a press and a key press are one code path and land the
+   * same way rather than two that have to be kept agreeing.
+   *
+   * @param {number} d  -1 for sooner, +1 for later
+   */
+  function step(d) {
+    const next = stepFrom(bodies, selected, bloom, d);
+    if (next >= 0) belt?.centre(next);
+  }
+
   /** @param {KeyboardEvent} event */
   function onKeydown(event) {
     if (event.key === "Escape" && panel) { panel = null; armed = null; return; }
     if (typing(event.target)) return;
     if (event.key === "ArrowLeft") {
       event.preventDefault();
-      const next = stepFrom(bodies, selected, bloom, -1);
-      if (next >= 0) belt?.centre(next);
+      step(-1);
     }
     if (event.key === "ArrowRight") {
       event.preventDefault();
-      const next = stepFrom(bodies, selected, bloom, 1);
-      if (next >= 0) belt?.centre(next);
+      step(1);
     }
     if (event.key === "/" || ((event.metaKey || event.ctrlKey) && event.key === "k")) {
       event.preventDefault();
@@ -445,7 +462,9 @@
         <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
       </filter>
     </defs>
-    <g id="ends" aria-hidden="true"></g>
+    <!-- #1062: the end-caps are controls, so this group is no longer hidden
+         from a screen reader — it holds the two buttons that step the belt. -->
+    <g id="ends"></g>
     <g id="seats"></g>
     <g id="caps"></g>
   </svg>
