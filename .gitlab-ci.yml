@@ -2172,7 +2172,9 @@ launcher_install_compat:
     # placeholder so its `artifacts:` declaration still resolves -- and this
     # job downloaded the placeholder and died on `docker load: unrecognized
     # image format`. Every other consumer of *needs_gated_image already
-    # carries its own `orbit_lane_admits` line; this one did not.
+    # carries its own lane gate; this one did not. (Naming the helper in
+    # this comment would trip gitlab-ci-lanes.test.mjs, which finds the call
+    # by position.)
     - *reach_helpers
     - orbit_lane_admits launcher_install_compat || exit 0
     - *reuse_gate
