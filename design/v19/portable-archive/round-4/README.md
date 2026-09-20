@@ -34,6 +34,8 @@ one in); export open 1012×645; inside 1012×644; brought 1012×297. Content
 sits left in a 600px column, the danger line's own manner on this page.
 Phone 390: 388×346 / 388×230 at rest; danger line below; no new overflow.
 
-## Open for the owner
+## Verdict
 
-**66** Approved as drawn?
+Owner, 2026-09-20, verbatim: "I like it, just need a small tweak. This
+makes it look like it's three tabs but the archive is just a heading."
+Answered in `../round-5/`.
