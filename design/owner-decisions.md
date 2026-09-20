@@ -1009,6 +1009,7 @@ carries the state and both acts), the owner ruled: **"56 b the row."**
   back until then".
 - Nothing is drawn when nothing is scheduled; a second household on the
   clock costs one more row, not one more card.
-- Record: `design/v19/household-recovery/round-1/b-the-row-on-the-clock.html`
-  and its README.
+- **Ratified as drawn** (owner: "58. As drawn."). Record:
+  `design/v19/household-recovery/round-1/b-the-row-on-the-clock.html` and
+  its README.
 

@@ -106,3 +106,7 @@ the direction. A stays as the record.
 Question 57, owner, 2026-09-20, verbatim: "57 admin only." Restore is drawn
 on administration only; the household page never shows it, whatever the
 server would allow.
+
+Question 58, owner, 2026-09-20, verbatim: "58. As drawn." **Ratified.**
+`b-the-row-on-the-clock.html` is the state approved; #1001 builds from this
+file; `design/owner-decisions.md` §19 has the decision.
