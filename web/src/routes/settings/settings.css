@@ -14,7 +14,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .helm-page .sky .near{animation:driftn 195s linear infinite}
 .helm-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=atlas] .helm-page .vignette,[data-theme=dawn] .helm-page .vignette{background:none}
+[data-theme=clouds] .helm-page .vignette,[data-theme=dawn] .helm-page .vignette{background:none}
 
 .helm-page .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
 /* §14: the helm uses the desk — one full row for the sky, two columns for

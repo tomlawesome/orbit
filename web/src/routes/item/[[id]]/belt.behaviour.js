@@ -27,7 +27,7 @@
 import {
   AMBIENT_SEED, BAND_MARGIN, BERTH_NARROW, COS_I, DRIFT, GLIDE, HFRAC, RAD, RADIAL,
   SIN_I, SWEEP, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, clamp01, ease,
-  geometryOf, lehmer, phiAtX, rollRangeOf, seatOf, spawnInto,
+  geometryOf, lehmer, phiAtX, rollRangeOf, seatOf, spawnInto, stepFrom,
 } from "./band.js";
 
 /**
@@ -81,9 +81,22 @@ import {
  * @property {(i: number, band: BeltApi) => void} [onSelect]  the apex changed
  * @property {(i: number, band: BeltApi) => void} [onSwap]    swap the card now
  * @property {(i: number, band: BeltApi) => void} [onSettle]  the roll is over
+ * @property {(d: number) => void} [onStep]  one step along the belt: -1 sooner,
+ *   +1 later. The end-caps call it, and the screen hands in the same function
+ *   its ← and → keys call, so there is one step and not two (#1062).
  */
 
 const NS = "http://www.w3.org/2000/svg";
+/**
+ * The smallest a pointer target on this product is allowed to be, in CSS
+ * pixels. Not a number invented here: it is the pocket sheet's own — "grab
+ * bar, 44 px buttons", design/v19/tour/round-2/README.md, drawn as
+ * `min-height:44px` in that round's sheet — and docs/feature-register.md asks
+ * every control to meet a touch target without naming one.
+ */
+const MIN_TARGET = 44;
+/** Breathing room around an end-cap's ink before the target is squared up. */
+const END_PAD = 6;
 /**
  * @param   {string} name
  * @param   {Record<string, string | number>} [attrs]
@@ -236,6 +249,7 @@ export function mountBelt(root, options) {
     onSelect = () => {},
     onSwap = () => {},
     onSettle = () => {},
+    onStep,
   } = options;
 
   const bandC = /** @type {HTMLCanvasElement} */ (root.querySelector("#band"));
@@ -352,19 +366,148 @@ export function mountBelt(root, options) {
      chrome now). Above the band's upper edge, clear of the tallest rock and
      its ring, because a body can sit anywhere along the band, including at
      the frame's edge: below or on the band, one would eventually cover them.
-     Labels hang beneath their rocks, so above is the one safe side. */
+     Labels hang beneath their rocks, so above is the one safe side.
+
+     On a phone that safe side is a sliver (#1035): the ring radius floors at
+     A_MIN, so a 390px sky sees a hugely magnified band whose crest is up in
+     the chrome's own strip. Two answers below — the label starts past its
+     side's chrome, and it is held inside the frame — and where the band has
+     taken the strip outright, no end-cap is drawn.
+
+     #1062: and each one is a CONTROL, in the position it already had. Not a
+     caption saying which way time runs but the thing that moves you that
+     way, because stepping was keyboard-only and a phone has no arrow keys.
+     Built as `<g role="button">` rather than an HTML `<button>` in a
+     `<foreignObject>`: the label is placed in the band's own coordinates,
+     against a line this module solves for, and lifting it out into HTML
+     would mean keeping a second copy of that arithmetic in sync. The seats
+     beside it are already `<g role="button" tabindex="0">` (buildSeats), so
+     it borrows their shape: a transparent target, and Enter and Space. Not
+     their focus ring — belt.css says why the ring here is an `outline` on the
+     control itself rather than a shape drawn inside it.
+     The press itself is handed straight to the screen's own ← / → handler. */
   function buildEnds() {
     endsG.textContent = "";
     if (!bodies.length) return;
     const half = (geom.A * RADIAL * COS_I * 2 + geom.A * HFRAC * SIN_I * 2) / 2;
     const clear = half + 25 + 6 + 14;   /* rock r ≤ 25, its ring, breathing room */
-    for (const [x, dir, anchor, text] of
-         /** @type {[number, number, string, string][]} */
-         ([[28, +1, "start", "← sooner"], [geom.W - 28, -1, "end", "later →"]])) {
-      const y = geom.project(phiAtX(geom, x, dir), geom.A, 0).y - clear;
-      const t = el("text", { class: "endcap", x, y: y.toFixed(0), "text-anchor": anchor });
+    /* #1035: on a narrow sky the shared chrome shares this strip, and the
+       end-caps were drawn under the way back and the account orb. belt.css
+       says how much room each side's chrome needs — nothing on a desk, where
+       the corners are empty — and the end-cap starts past it. Read from CSS
+       rather than repeated here so the breakpoint has one home; a host that
+       resolves neither reads 0 and nothing moves. */
+    const strip = getComputedStyle(root);
+    const insetStart = Number.parseFloat(strip.getPropertyValue("--endcap-inset-start")) || 0;
+    const insetEnd = Number.parseFloat(strip.getPropertyValue("--endcap-inset-end")) || 0;
+    /* #1035: and the search field is fixed in this strip as well. On a desk
+       it is a centred 360px column with the end-caps far out at the edges;
+       on a narrow sky it spans nearly the whole width and takes a row of its
+       own, which the band's crest can reach down into. Its live box says
+       where it is, so there is no second copy of belt.css's breakpoint here. */
+    const field = /** @type {HTMLElement | null} */ (root.querySelector(".find"));
+    const fieldBox = field?.getBoundingClientRect() ?? null;
+    /* Two things that look like one and are not. `dir` is which branch of the
+       band's curve this x sits on; `step` is which way a press moves you, the
+       arrow key's own -1 / +1. At each end they are OPPOSITE, so a press
+       wired from `dir` walks the belt backwards — which is why the direction
+       is spelt out rather than borrowed.
+
+       And the accessible name says what pressing it DOES. "Sooner" and
+       "later" alone are the drawing's two words read back, which tells a
+       reader who cannot see the band nothing about where they would land. */
+    for (const [x, dir, step, anchor, text, name] of
+         /** @type {[number, number, number, string, string, string][]} */
+         ([[28 + insetStart, +1, -1, "start", "← sooner",
+            "Move one item sooner along the belt, towards what is due first"],
+           [geom.W - 28 - insetEnd, -1, +1, "end", "later →",
+            "Move one item later along the belt, towards what is due last"]])) {
+      const line = geom.project(phiAtX(geom, x, dir), geom.A, 0).y;
+      /* #1035: `clear` above the band's line is where the label wants to be,
+         and on a short sky that is off the top of the frame — a phone was
+         drawing "← sooner" half cut off. So it is floored at 20, but never
+         lower than eight above the topmost ink a body at this x can reach,
+         which is the clearance this whole placement exists to keep. */
+      const bodyTop = line - half - 25 - 6;
+      let y = Math.min(bodyTop - 8, Math.max(20, line - clear));
+      /* Drawn before it is placed, because only the laid-out text knows how
+         wide it is, and how wide it is decides whether it shares a column
+         with the search field. */
+      const cap = el("g", { class: "endcap-hit", role: "button", tabindex: "0",
+        "aria-label": name, "data-step": step });
+      /* No focus-ring shape in here: belt.css puts the ring on the control
+         itself as an `outline`, because the keyboard audit reads the computed
+         style of the focused element and a child cannot answer for it. */
+      const target = el("rect", { class: "endtarget", fill: "transparent" });
+      const t = /** @type {SVGTextContentElement} */ (
+        el("text", { class: "endcap", x, y: y.toFixed(0), "text-anchor": anchor }));
       t.textContent = text;
-      endsG.appendChild(t);
+      cap.append(target, t);
+      endsG.appendChild(cap);
+      const w = t.getComputedTextLength();
+      const left = anchor === "end" ? x - w : x;
+      if (fieldBox && left < fieldBox.right + 6 && left + w > fieldBox.left - 6) {
+        /* Above the field, never through it. Raising it is always safe: it
+           only ever moves the label further from the band. */
+        y = Math.min(y, fieldBox.top - 10);
+      }
+      /* And where even that has left the frame, the band has taken the whole
+         strip and the label is not drawn at all: the search field's own note
+         (which says the order) still carries which way time runs. */
+      if (y < 12) { cap.remove(); continue; }
+      t.setAttribute("y", y.toFixed(0));
+      /* #1062: the ink stays 9.5px; the TARGET does not. MIN_TARGET square
+         at the least, squared up around the words and centred on them, so
+         nothing painted moves a pixel. Held inside the frame, because at the
+         top of a phone's sky the label is already at y=20 and half the box
+         would otherwise hang off the sky where no thumb can reach it. The
+         seats are drawn after #ends, so a rock crossing the box still takes
+         the tap ahead of it. */
+      const boxW = Math.max(w + END_PAD * 2, MIN_TARGET);
+      const boxX = left + w / 2 - boxW / 2;
+      /* 9.5px capitals stand about 7px off the baseline, so the ink's middle
+         is three and a half above it. */
+      const boxY = Math.max(0, Math.min(geom.H - MIN_TARGET, y - 3.5 - MIN_TARGET / 2));
+      target.setAttribute("x", boxX.toFixed(1));
+      target.setAttribute("y", boxY.toFixed(1));
+      target.setAttribute("width", boxW.toFixed(1));
+      target.setAttribute("height", String(MIN_TARGET));
+      cap.addEventListener("click", () => pressEnd(cap, step));
+      cap.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pressEnd(cap, step); }
+      });
+    }
+    markEnds();
+  }
+
+  /**
+   * An end-cap pressed. One press, one step, through the screen's own ← / →
+   * handler — so the animation and the landing are the arrow key's, because
+   * they ARE the arrow key's.
+   *
+   * @param {Element} cap
+   * @param {number}  d  -1 sooner, +1 later
+   */
+  function pressEnd(cap, d) {
+    if (cap.getAttribute("aria-disabled") === "true") return;
+    onStep?.(d);
+  }
+
+  /**
+   * Which way the belt can still go. At an exhausted end the control that
+   * cannot move says so — `aria-disabled`, read out as unavailable — rather
+   * than taking the press and doing nothing (#1062). It stays in the Tab
+   * order so a reader can still find it and hear that it is spent.
+   *
+   * Read against `bloomTo`, where the papers are heading rather than where
+   * they are mid-roll: that is the state the screen's own handler will be
+   * read against by the time a press lands.
+   */
+  function markEnds() {
+    for (const cap of endsG.children) {
+      const off = stepFrom(bodies, selected, bloomTo, Number(cap.getAttribute("data-step"))) < 0;
+      cap.setAttribute("aria-disabled", String(off));
+      cap.classList.toggle("off", off);
     }
   }
 
@@ -641,6 +784,7 @@ export function mountBelt(root, options) {
     bloomFrom = bloom.slice(); bloomTo = bloomTargetsOf(bodies, selected, manifest.length);
     berthFrom = berthNow; berthTo = berthFor(bodies, selected, manifest.length);
     onSelect(selected, api);
+    markEnds();                       /* #1062: an end just got nearer, or ran out */
 
     clearTimeout(swapTimer);
     if (reduced()) {
@@ -695,6 +839,7 @@ export function mountBelt(root, options) {
     wrap.style.setProperty("--cdx", "0px"); wrap.style.setProperty("--cdy", "0px");
     wrap.style.setProperty("--csc", "1");
     onSelect(selected, api); onSwap(selected, api);
+    markEnds();                       /* #1062 */
     paintMembers(1); measureCard(); paintBand();
     onSettle(selected, api);
   }

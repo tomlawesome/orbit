@@ -100,12 +100,29 @@
 #                             the packages axis be exercised without a real
 #                             stale image, which is not something that can be
 #                             fabricated to order.
+#   BASE_IMAGE_MANIFEST_SIMULATION
+#                             Testing seam: canned `docker buildx imagetools
+#                             inspect --format '{{json .Manifest}}'` output,
+#                             used instead of running docker. Lets the axis-1
+#                             corroboration step (#708) be exercised without a
+#                             real registry.
 #   BASE_REPIN_BRANCH         The branch this script pushes and opens a
 #                             merge request from. Defaults to
 #                             chore/base-image-repin -- fixed, not per-run,
 #                             so a second finding updates the same merge
 #                             request instead of opening a duplicate.
 #   BASE_REPIN_TARGET_BRANCH  The merge request's target. Defaults to `dev`.
+#   BASE_REPIN_PUSH_URL       Testing seam: overrides the URL this script
+#                             pushes the re-pin branch to, which is otherwise
+#                             always built from CI_SERVER_HOST and
+#                             CI_PROJECT_PATH. Lets the commit-and-push half
+#                             (#1020's Debt) be exercised against a local bare
+#                             repository instead of a real GitLab remote.
+#   BASE_REPIN_STOP_AFTER_PUSH
+#                             Testing seam: once the push above succeeds, exit
+#                             0 immediately rather than checking for or
+#                             opening a merge request. Lets the commit-and-push
+#                             half be proven without a GitLab API to call.
 set -Eeuo pipefail
 # Belt and braces on top of never putting a token in argv below: forced off
 # regardless of how this script is invoked (a stray `bash -x`, an inherited
@@ -434,7 +451,9 @@ fi
 
 log "corroborating the artifact against the live tag before trusting it..."
 manifest_json=""
-if ! manifest_json="$(docker buildx imagetools inspect "$pinned_tag" --format '{{json .Manifest}}' 2>/dev/null)"; then
+if [[ -n "${BASE_IMAGE_MANIFEST_SIMULATION:-}" ]]; then
+  manifest_json="$BASE_IMAGE_MANIFEST_SIMULATION"
+elif ! manifest_json="$(docker buildx imagetools inspect "$pinned_tag" --format '{{json .Manifest}}' 2>/dev/null)"; then
   fail "could not resolve ${pinned_tag} to corroborate the artifact's digest"
 fi
 
@@ -568,11 +587,16 @@ git -C "$repo_dir" commit -m "$commit_message"
 # documented push pattern) so only the one named here is consulted.
 credential_file="$(new_secret_file)"
 printf 'https://oauth2:%s@%s\n' "$BASE_REPIN_TOKEN" "$CI_SERVER_HOST" > "$credential_file"
-push_url="https://${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+push_url="${BASE_REPIN_PUSH_URL:-https://${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git}"
 git -C "$repo_dir" \
   -c credential.helper= \
   -c "credential.helper=store --file=${credential_file}" \
   push --force "$push_url" "HEAD:refs/heads/${branch_name}"
+
+if [[ -n "${BASE_REPIN_STOP_AFTER_PUSH:-}" ]]; then
+  log "BASE_REPIN_STOP_AFTER_PUSH set: stopping after the push (testing seam); not checking for or opening a merge request."
+  exit 0
+fi
 
 header_file="$(new_secret_file)"
 body_file="$(new_secret_file)"

@@ -49,6 +49,47 @@ password, and the sign-in screen shows only that form. This is a complete,
 supported way to run Orbit — nothing about local-only mode is a reduced or
 temporary state.
 
+## Every password sign-in is approved by email
+
+Signing in with a password is two screens, not one. You type your email and
+password, Orbit sends a link to the address on your account, and the tab you
+typed in waits. Open the link — on your phone, or wherever your mail is — and
+it shows you what is being approved:
+
+- which Orbit, by its address
+- which browser, roughly ("Chrome on Linux")
+- where from: your own network reads **your home network**, anything else
+  shows the address it came from
+- when
+
+Two buttons: **Approve** lets the waiting tab in, and **This wasn't me**
+refuses it. Opening the link on its own does nothing at all — mail scanners
+follow links, so only a press changes anything. The page you approve on is not
+signed in, whichever you press: the browser that typed the password is the one
+that gets in, and only that one.
+
+This is on for everybody, every time. There is no per-user switch, no "trust
+this browser" and no way to turn it off for one account. The one thing that
+changes it is the instance: **with no outgoing mail configured, there is no
+second factor at all**, because Orbit cannot ask for an approval it has no way
+to send. Settings → Sign-in methods says which of the two your instance is.
+
+**Signing in with an identity provider is not challenged.** The provider is
+the identity and runs its own second factor; Orbit cannot see it and does not
+ask a second time.
+
+**Setup and recovery links are not challenged either — they are the factor.**
+Opening one sets a password and signs you in with no approval mail, which is
+also the way past a broken mailbox: if approval mail is not reaching somebody,
+an administrator sends them a new setup link (Administration → the person's
+row → "send a new setup link"), and that gets them in.
+
+The link lasts ten minutes and works once. You can ask for another after a
+minute, and up to five in an hour; past that, the answer is to read the mail
+already sent. A refused sign-in counts as a failed attempt in the same backoff
+a wrong password does, and leaves a one-line notice on your sky the next time
+you do get in, with a link to change your password — somebody knew it.
+
 ## Adding OIDC later
 
 Local-only and OIDC are not a one-time choice. To turn OIDC on for an existing
@@ -99,7 +140,9 @@ link, chooses a password, and is signed in.
 
 This means outbound mail is a prerequisite for adding local users: **an
 instance with no working SMTP configured cannot add a local user**, because
-there is nowhere else the link can go. This is the same limit household
+there is nowhere else the link can go. It is also how somebody gets in when
+approval mail is not reaching them: a setup or recovery link is the second
+factor, so opening one signs them in with no approval asked for. This is the same limit household
 invitations already carry (see [administrator
 operations](administrator-operations.md#mailbox-provider-operation) for SMTP
 setup). If sending fails, the administrator sees a bounded reason and a Retry
@@ -255,10 +298,14 @@ Membership and owner checks are repeated by every household-scoped API. Client-s
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/auth/availability` | Signed-out: whether the instance is claimed and which sign-in methods are offered. Reveals nothing about accounts. |
+| `GET` | `/api/auth/availability` | Signed-out: whether the instance is claimed, which sign-in methods are offered, and whether password sign-ins are approved by email. Reveals nothing about accounts. |
 | `POST` | `/api/auth/bootstrap/claim` | Verifies the claim code and sets a short-lived claim cookie. |
 | `POST` | `/api/auth/bootstrap/local` | Creates the first administrator with a password, under the claim cookie. |
-| `POST` | `/api/auth/local/login` | Signs a local user in with email and password. |
+| `POST` | `/api/auth/local/login` | Checks email and password. Answers with a pending sign-in (and mails its approval link) unless the instance has no mail relay, in which case it signs the user in directly. |
+| `POST` | `/api/auth/local/login/pending` | The waiting tab asks whether its sign-in has been approved; mints the session for that browser when it has. Authorised by the pending-sign-in cookie alone. |
+| `POST` | `/api/auth/local/login/resend` | Sends the approval link again, inside the send limits. Same cookie, same rule. |
+| `POST` | `/api/auth/approve` | Records **Approve** or **This wasn't me** for a pending sign-in. Signed out, and signs nobody in. |
+| `GET` | `/api/auth/sign-in-notice` | The one line a refused sign-in left for its owner. Asking for it spends it. |
 | `GET` | `/api/auth/login?returnTo=/path` | Starts OIDC sign-in and redirects to the provider (`auth_not_configured` when OIDC is off). |
 | `GET` | `/api/auth/callback` | Validates the provider response and completes sign-in, bootstrap, linking, or step-up, depending on what started the transaction. |
 | `GET` | `/api/auth/session` | Returns the current user, expiry, household context, and CSRF token. |
@@ -313,6 +360,12 @@ await fetch("/api/auth/session/refresh", {
 - Session refresh rotates the credential atomically. Logout deletes it server-side and expires the cookie.
 - State-changing session actions require an exact same-origin request and a session-bound HMAC synchronizer token.
 - Production cookies use `Secure`, `HttpOnly`, `SameSite=Lax`, and the `__Host-`/`__Secure-` prefixes where their path constraints permit.
+- Every password sign-in is completed by a link emailed to the account
+  (ADR-0027). The link and the waiting tab's claim are separate 32-byte
+  secrets, stored only as SHA-256 hashes, and each is spent once: the link
+  decides whether the sign-in is allowed, the claim decides which browser may
+  collect the session. Ten minutes, one live link per pending sign-in, and the
+  approval page changes nothing until a button is pressed.
 - Local users are enumerable by nobody outside the administrator user list:
   every sign-in failure is one word, one status, one cost, regardless of
   which of the three causes produced it.

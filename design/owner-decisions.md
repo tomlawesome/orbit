@@ -989,3 +989,149 @@ Two further composition calls were made in the same ruling and belong to the
 slices that build them, not to this screen: settings' **Sign-in methods**
 block with its inline recent-authentication challenge, and administration's
 **Add a local user** row with its shown-once setup link (§2.7, second half).
+
+## 18. The document preview and the reader over the belt (owner, 2026-09-20)
+
+**"Very good, all approved."** — #1059 (document previews and a reader) and
+#1054 (download and restore), ratified against
+`design/v19/document-card/round-6/h-preview-and-reader.html` after six
+rounds (the owner counts five). The round READMEs hold every verdict
+verbatim; this is the shape that stands.
+
+- **A document is never the centred body.** The item card stays at the apex;
+  a document is a paper riding the belt beside its item, and the item card
+  says only `N documents.` (round 1, then round 6).
+- **Pressing a paper opens the preview** in create-v3's reading card on the
+  paper's own side — the one grid widening so the item card slides over and
+  the reading card grows beside it, the pair centred together, exactly
+  `design/v19/create-v3.html`'s `doc`/`snap` states (rounds 2–3: "That's the
+  exact mockup I meant").
+- **The preview is extremely basic.** The page nearly edge to edge, top, left
+  and right, always whole and in its own proportions, on the cream sheet
+  with the tilted second sheet under it for every file; beneath, `1 of 3`
+  with an arrow either side only where there is a page that way. Nothing
+  else: no head, no file row, no zoom, no close control of its own. Esc or
+  dead space on the belt closes it; on a phone it is the bottom sheet.
+- **The honest states** are the focus block held still: the line says what
+  is happening; the foot holds only what can be done — `restore` for a
+  removed file, `download` for one Orbit could not draw, nothing while
+  scanning. While scanning, a line in the plate's outline colour sweeps the
+  plate up and down with a glow.
+- **The page is a button. Pressing it opens the reader** — round 1's reading
+  room as a window over the belt, never a separate page. The belt dims and
+  blurs beneath. Head: name · item · page N of M left, `fit − % +` centred,
+  `close · esc` right. The page as large as the window allows; a round
+  glass arrow either side of it, the left absent on page 1 and the right on
+  the last. Foot: the page number centred; `download` and `remove` at the
+  right as the item card's own action pills (download in the accent, remove
+  in the overdue tone, filled when armed for the two-press remove). Zoom by
+  keys, ctrl+wheel and pinch; past fit the page scrolls inside the window.
+  No thumbnail rail.
+
+Left open by the rounds and not decided here: pages after the first (a page
+parameter on the preview endpoint or PDF.js in the browser — round 1's
+question 2), which is a build call for #1059.
+
+## 19. Household recovery lives on the household's row in Systems (owner, 2026-09-20)
+
+Asked A (a danger banner per household on the clock, above the
+administration grid) or B (the household's own row in the Systems card
+carries the state and both acts), the owner ruled: **"56 b the row."**
+
+- A household on its 30-day clock shows in Systems with a dashed red ring,
+  a red sun and the line "on the clock · N days left · gone for good <date>"
+  in place of members/owner/items; beneath the name sit `restore` (the
+  accent, one tap) and `delete now →`.
+- `delete now` is the household danger line's own protocol: the opener
+  prints the cost, the system's name is typed exactly, then the button asks
+  twice. Admin-only, as §15 already ruled.
+- **Restore is admin-only in the interface too** (owner: "57 admin only").
+  The server lets a household owner call it; the household page still never
+  draws it — its danger line keeps saying "an instance admin can turn this
+  back until then".
+- Nothing is drawn when nothing is scheduled; a second household on the
+  clock costs one more row, not one more card.
+- **Ratified as drawn** (owner: "58. As drawn."). Record:
+  `design/v19/household-recovery/round-1/b-the-row-on-the-clock.html` and
+  its README.
+
+
+## 20. Sent to you lately — notification history in the Reminders card (owner, 2026-09-20)
+
+Asked whether a member should see the reminders Orbit has sent them, and
+where, the owner ruled **"60. a."**: yes, in the settings Reminders card
+under the two switches. Round 1 was then approved as drawn (**"61
+approved"**).
+
+- The last five sends for the signed-in user, newest first, read from
+  `notification_deliveries`: the item's name (a link to the item), the
+  small line "first warning · email" / "final warning · browser alert", and
+  when it went.
+- A send that did not go says so in its row — "couldn't send · <plain
+  reason>" in `--overdue`, "still trying · <reason>" in `--warm`. Nothing
+  is hidden.
+- Nothing sent yet: one line saying when the first warning goes out.
+  Both switches off: a warm line above the list; past sends stay.
+- Nothing in the list is a control; the switches are the controls.
+- Record: `design/v19/notification-history/round-1/a-sent-to-you-lately.html`
+  and its README.
+
+## 21. The archive — one owner-only card on the household page (owner, 2026-09-20)
+
+Seven rounds, 2026-09-20. Round 1's card stood from the start ("The UI
+itself is fine otherwise"); the rest was what it holds and how it reads.
+Rulings, verbatim: **"63. What's the point in exporting if there's no
+documents?"** and **"64a yeah documents always in because there's zero
+point in an export without them, as there's nothing to then import."**;
+**"I'd rather it read more as a list."**; **"I don't hate it but this could
+be two tabs on the same card"**; then **"Round 7 approved."**
+
+- One card, **The archive**, on the household's own page above the danger
+  line, owner-only (`own-only`; members never see it). Two tabs on it:
+  **take it with you** (export) · **bring one in** (import). Everything on
+  each tab is a sentence, a list and one quiet button at rest; it opens
+  only when stepped toward.
+- Documents are always in the file, both ways. There is no "without
+  documents" option on the surface or the route. Over the 128 MiB cap the
+  card says so under the list and offers no button.
+- What a file holds is a **list** (`.man`): a figure, a name, a small note
+  — entries, dates (and the reminders on them), sections, documents with
+  their size, and `0 people · never in the file`. The same list says what
+  an import holds, what was written, and what was brought in.
+- Export asks for the account password again at the point of export
+  ("nothing leaves without it"), then a passphrase twice, 12+ characters,
+  and says in warm on the surface that Orbit never keeps it. The written
+  file is offered for 24 hours and leaves one line on the household's
+  record.
+- Import: choose a file, its passphrase, `look inside`; the preview lists
+  what is in it and names each entry already here — those stay out, said
+  in warm, never merged over. `bring in N entries` is the household page's
+  own two-tap. People never come in from a file; the card says so.
+- Refusals in the preview's place, in `--overdue`: wrong passphrase; file
+  too big (said before upload, from the file's size); not an Orbit
+  archive.
+- Record: `design/v19/portable-archive/round-7/g-a-switch-not-a-hint.html`
+  and the seven READMEs.
+
+## 22. Tabs on a card — the grammar, and where it applies (owner, 2026-09-20)
+
+v19 had no tabs before #1002. Three tries at making the two tabs read as
+tabs and the heading as a heading ("This makes it look like it's three
+tabs but the archive is just a heading." / "68 still unclear." / "69. Try
+one more time, they're still too subtle.") settled it:
+
+- The card heading stays left in its own grammar. The tabs are one joined
+  pill pair at the **far end of the card head**, in the page's ghost-button
+  voice (11px mono, 1px `--line`); the chosen tab is **filled with
+  `--accent`** in `--bg` text, as the page's primary button is. No
+  underlines, nothing between heading and tabs.
+- `role=tablist` labelled by the heading; `role=tab` with `aria-selected`
+  and `aria-controls`; the panel `role=tabpanel`; one tab in the Tab
+  order, ← → between them; the unchosen panel `hidden`. An act that opens
+  on a panel selects its tab first.
+- Under 560px the pair follows the heading on its line if it fits, else
+  wraps under it.
+- Where tabs go, asked and answered (**"67. a reminders only."**): the
+  settings **Reminders** card becomes *reminders · sent to you lately*
+  (§20's list on the second tab). The household **Members** card is not
+  tabbed; nothing else is. "We don't need to tab everything."

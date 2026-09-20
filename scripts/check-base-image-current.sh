@@ -40,7 +40,14 @@ fail() { printf 'base image: %s\n' "$1" >&2; }
 # race depended on the machine, which is why it passed on GitHub's runner for
 # months and failed on the busybox base_image job here (GitLab pipeline 169).
 # One process reading only as far as it needs cannot lose that race at all.
-pinned_reference="$(sed -n '/^FROM[[:space:]]/{s/^FROM[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p;q;}' "$dockerfile")"
+#
+# A function, not inlined, because the moved-tag check below needs the same
+# extraction applied to `dev`'s Dockerfile as well as this branch's.
+first_pinned_reference() {
+  sed -n '/^FROM[[:space:]]/{s/^FROM[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p;q;}'
+}
+
+pinned_reference="$(first_pinned_reference < "$dockerfile")"
 if [[ -z "$pinned_reference" || "$pinned_reference" != *@sha256:* ]]; then
   fail "the first FROM in $dockerfile is not a digest-pinned reference: '${pinned_reference:-<none>}'"
   fail "this check cannot verify an unpinned base, and an unpinned base must not ship."
@@ -87,6 +94,49 @@ print("")
 if [[ -z "$current_digest" ]]; then
   printf 'base image: tag %s has no linux/amd64 entry to compare; skipping the moved-tag check\n' "$pinned_tag"
 elif [[ "$current_digest" != "$pinned_digest" ]]; then
+  # A branch that is merely behind the default branch looks identical to a
+  # moved tag: if `dev` already re-pinned to the current digest, this branch
+  # just has not merged that yet. Telling the reader to hand-edit the FROM
+  # line in that case goes green while leaving the branch behind, and writes
+  # a second, conflicting re-pin commit against the one already on `dev`
+  # (#1027). Ask what `dev` pins before handing out that advice.
+  #
+  # `BASE_REPIN_TARGET_BRANCH` is the same variable scripts/ci/repin-base-image.sh
+  # already reads for this; a remote named anything but `origin` is a local
+  # checkout's own naming (this repository's own working copies vary), never
+  # what a GitLab CI job sees, so the remote is not read from a branch-name
+  # variable but stays independently overridable for the rare non-CI caller.
+  dev_branch="${BASE_REPIN_TARGET_BRANCH:-dev}"
+  dev_remote="${ORBIT_BASE_IMAGE_DEV_REMOTE:-origin}"
+  dockerfile_dir="$(cd "$(dirname "$dockerfile")" && pwd)"
+
+  dev_content=""
+  dev_reachable=0
+  if dev_content="$(git -C "$dockerfile_dir" show "$dev_remote/$dev_branch:Dockerfile" 2>/dev/null)"; then
+    dev_reachable=1
+  elif git -C "$dockerfile_dir" fetch --no-tags --quiet "$dev_remote" "$dev_branch" 2>/dev/null \
+      && dev_content="$(git -C "$dockerfile_dir" show "FETCH_HEAD:Dockerfile" 2>/dev/null)"; then
+    dev_reachable=1
+  fi
+  # Anything else -- no git repository at all, a shallow clone with neither
+  # ref nor a reachable remote, a detached HEAD with no origin configured --
+  # leaves dev_reachable at 0 and falls straight through to today's message
+  # below. A check that cannot ask `dev` must not guess it is clean.
+
+  if [[ "$dev_reachable" -eq 1 ]]; then
+    dev_pinned_reference="$(printf '%s\n' "$dev_content" | first_pinned_reference)"
+    dev_pinned_digest="${dev_pinned_reference##*@}"
+    if [[ -n "$dev_pinned_reference" && "$dev_pinned_digest" == "$current_digest" ]]; then
+      fail "the tag has moved, but '$dev_branch' already pins the current digest:"
+      fail "  $current_digest"
+      fail ""
+      fail "This branch is behind '$dev_branch', not behind the registry. Merge"
+      fail "'$dev_branch' into this branch and run again -- do not hand-edit the FROM"
+      fail "line here, it would conflict with the re-pin already on '$dev_branch'."
+      exit 1
+    fi
+  fi
+
   fail "the tag has moved. '$pinned_tag' now resolves to:"
   fail "  $current_digest"
   fail "and this repository pins:"

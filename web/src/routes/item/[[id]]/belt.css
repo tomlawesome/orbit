@@ -150,7 +150,7 @@
      web/src/lib/packs.css and is deliberately not re-declared here. */
   [data-theme=starchart]{--rubble:#7d88ab; --rubble-gain:1; --paper:#8fb8ff} /* the documents' own line — see THE DOCUMENTS */
   [data-theme=afterdark]{--rubble:#78849b; --rubble-gain:1; --paper:#c4b5fd}
-  [data-theme=atlas]{--rubble:#3d4a70; --rubble-gain:1.55; --paper:#2b6cb0}
+  [data-theme=clouds]{--rubble:#3d4a70; --rubble-gain:1.55; --paper:#2b6cb0}
   [data-theme=dawn]{--rubble:#3a4966; --rubble-gain:1.5; --paper:#6d28d9}
   [data-theme=retrograde]{--rubble:#6ea6b8; --rubble-gain:1; --paper:#2de2e6}
 
@@ -182,7 +182,7 @@
   .belt-page .sky .near{animation:driftn 195s linear infinite}
   .belt-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-  [data-theme=atlas] .belt-page .vignette,[data-theme=dawn] .belt-page .vignette{background:none}
+  [data-theme=clouds] .belt-page .vignette,[data-theme=dawn] .belt-page .vignette{background:none}
 
   /* ---- the band ------------------------------------------------------
      Two canvases sandwich the card, because the card is IN the band:
@@ -210,6 +210,32 @@
      the band, their labels hang below it. */
   .belt-page .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-quiet);
           text-transform:uppercase}
+  /* #1062: and each end-cap is a control -- a transparent target with the
+     screen's dashed accent ring on focus and nothing at rest. The ink stays
+     9.5px; belt.behaviour.js squares the target up around it at the product's
+     44px floor. At an exhausted end the control dims and stops taking the
+     press; it keeps its place in the Tab order so a reader can still find it
+     and be told it is spent.
+
+     The ring is an OUTLINE on the control itself, not a dashed shape drawn
+     inside it. The seats above do it the other way -- a .fring circle that
+     opens at :focus-visible while the seat itself is outline:none -- and that
+     is not the screen's proven answer, only its untested one: paintMembers
+     drops a seat nobody can see to tabindex="-1", the keyboard audit's
+     household holds one item, and that item is the card, so no seat has ever
+     been focused by tests/e2e/support/keyboard.ts. The audit reads the
+     computed style of THE ELEMENT THAT HAS FOCUS, so a ring painted by a
+     child leaves the focused <g> carrying nothing -- which is what pipeline
+     1281 caught, and it was right to. Chromium paints outline on an SVG
+     element around its bounding box, so this is one ring, on the thing the
+     focus is actually on. 2px and offset, not a hairline: it has to read
+     against the band on a phone as well as on a desk. */
+  .belt-page .endcap-hit{pointer-events:auto;cursor:pointer}
+  .belt-page .endcap-hit:focus-visible{outline:2px dashed var(--accent);outline-offset:3px}
+  .belt-page .endcap-hit:hover .endcap{fill:var(--ink-mid)}
+  .belt-page .endcap-hit.off{cursor:default}
+  .belt-page .endcap-hit.off .endcap,
+  .belt-page .endcap-hit.off:hover .endcap{fill:var(--ink-quiet);opacity:.4}
 
   /* ---- THE DOCUMENTS' MARK -------------------------------------------
      The owner: "a different coloured perimeter line around them, and/or
@@ -332,6 +358,34 @@
      card. */
   .belt-page .find{position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:6;
         text-align:center;width:min(360px,calc(100vw - 48px))}
+
+  /* ---- THE TOP STRIP ON A NARROW SKY (#1035) ---------------------------
+     Three things are fixed into the same strip across the top: the shared
+     chrome (#1010), which takes the way back on the left and the account orb
+     on the right; the search field, centred; and the band's two end-caps,
+     which ride above the band where it leaves the frame and so also land in
+     that strip once the sky is short.
+
+     They share one row only while the field's own edges clear the chrome.
+     The way back ("← YOUR SKY") ends at x=115 and the orb starts 66px in from
+     the right, so a 360px-wide field needs about 614px of sky before its left
+     edge passes the way back. Below that the field is drawn straight through
+     the way back, the orb and both end-caps — which is what a phone shows.
+
+     So under 680px (that threshold, rounded up) the strip stacks: the chrome
+     keeps row one, the field takes a row of its own beneath it, and the
+     end-caps are inset past the chrome on their own side. The insets are read
+     by belt.behaviour.js's buildEnds — the end-caps are SVG text placed on
+     the band, so CSS can say where the chrome is but cannot move them.
+     28px is the end-caps' own margin, so each inset is what the chrome needs
+     on top of it: 99 puts "← sooner" at x=127, twelve clear of the way back;
+     50 ends "later →" at 78 in from the right, twelve clear of the orb. */
+  .belt-page{--endcap-inset-start:0px;--endcap-inset-end:0px}
+  @media (max-width:680px){
+    .belt-page{--endcap-inset-start:99px;--endcap-inset-end:50px}
+    /* clear of the chrome's row: the orb is 40px tall from y=22. */
+    .belt-page .find{top:72px}
+  }
   .belt-page .find>input,.belt-page .find>.findnote{position:relative}
   .belt-page .find input{background:none;border:0;outline:0;border-bottom:1px solid var(--line);
     width:100%;text-align:center;font:12.5px var(--mono);color:var(--ink);

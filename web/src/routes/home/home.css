@@ -17,37 +17,26 @@
    * still serves all five and the dark packs are untouched. Drift stays — it
    * is POL-11's owner rule and a moving sky is not a luminous device.
    */
-  [data-theme=atlas] .dial circle[filter="url(#sun)"],
   [data-theme=dawn] .dial circle[filter="url(#sun)"],
   [data-theme=clouds] .dial circle[filter="url(#sun)"]{
     filter:none}
   /* Paper has no specular. */
-  [data-theme=atlas] .dial [fill^="rgba(255,255,255"],
   [data-theme=dawn] .dial [fill^="rgba(255,255,255"],
   [data-theme=clouds] .dial [fill^="rgba(255,255,255"]{
     fill:transparent}
-  /* Bodies become flat ink discs — ON ATLAS ALONE now (§15, the pack refresh).
-     This rule was written when no light pack owned the planet stops, so the
-     only way to stop a glossy sphere sitting on paper was to overwrite the fill
-     with the pack's status token. dawn and clouds now own --p-* in full — the
-     hazy pastels the temperature story ratified, seen through morning air — so
-     the fill they render is already the right paint and overwriting it here
-     would throw the refresh away one rule after packs.css declared it. Atlas
-     keeps the flattening because atlas keeps no stops of its own.
-
-     CSS fill beats the presentation attribute, so the shared markup is
-     untouched and POL-10's storm selectors still match. */
-  [data-theme=atlas] .dial [fill="url(#p-jade)"]{fill:var(--ok)}
-  [data-theme=atlas] .dial [fill="url(#p-amber)"]{fill:var(--warm)}
-  [data-theme=atlas] .dial [fill="url(#p-ruby)"]{fill:var(--overdue)}
-  [data-theme=atlas] .dial [fill="url(#p-sky)"]{fill:var(--upcoming)}
+  /* Bodies were flattened to ink discs here, for the one light pack that kept
+     no planet stops of its own. That pack was atlas, which #865 renamed away,
+     and dawn and clouds both own --p-* in full (§15, the pack refresh) — the
+     hazy pastels the temperature story ratified, seen through morning air. So
+     the fill they render is already the right paint, and there is no longer a
+     pack this flattening would be correct for. The rules are gone rather than
+     re-pointed at clouds: re-pointing them would throw the refresh away one
+     rule after packs.css declared it (#1047). */
   /* Engraving is line work, so the chart's rules carry more weight than they
      do behind a glow. */
-  [data-theme=atlas]{--chart-line:rgba(28,43,74,.78); --chart-line-soft:rgba(28,43,74,.42)}
   [data-theme=dawn]{--chart-line:rgba(26,34,51,.72); --chart-line-soft:rgba(26,34,51,.38)}
   [data-theme=clouds]{--chart-line:rgba(26,34,51,.72); --chart-line-soft:rgba(26,34,51,.38)}
   /* Printed stars do not twinkle. Drift is untouched. */
-  [data-theme=atlas] body.quiet .sky .near circle,
   [data-theme=dawn] body.quiet .sky .near circle,
   [data-theme=clouds] body.quiet .sky .near circle{animation:none}
   /*
@@ -62,23 +51,17 @@
    * beats the presentation attribute. The starfield is unaffected: its stroke
    * comes from CSS above, not from an attribute.
    */
-  [data-theme=atlas] .dial [stroke-width=".5"],
   [data-theme=dawn] .dial [stroke-width=".5"],
   [data-theme=clouds] .dial [stroke-width=".5"]{stroke-width:.8}
-  [data-theme=atlas] .dial [stroke-width=".75"],
   [data-theme=dawn] .dial [stroke-width=".75"],
   [data-theme=clouds] .dial [stroke-width=".75"]{stroke-width:1.1}
-  [data-theme=atlas] .dial [stroke-width="1"],
   [data-theme=dawn] .dial [stroke-width="1"],
   [data-theme=clouds] .dial [stroke-width="1"]{stroke-width:1.4}
-  [data-theme=atlas] .dial [stroke-width="1.3"],
   [data-theme=dawn] .dial [stroke-width="1.3"],
   [data-theme=clouds] .dial [stroke-width="1.3"]{stroke-width:1.8}
-  [data-theme=atlas] .dial [stroke-width="1.5"],
   [data-theme=dawn] .dial [stroke-width="1.5"],
   [data-theme=clouds] .dial [stroke-width="1.5"]{stroke-width:2.1}
   /* The constellations are the same engraving at another scale. */
-  [data-theme=atlas] .minisys [stroke-width="1"],
   [data-theme=dawn] .minisys [stroke-width="1"],
   [data-theme=clouds] .minisys [stroke-width="1"]{stroke-width:1.4}
   /*
@@ -91,10 +74,8 @@
    * distance still reads. The leader rule follows, because renderGalaxy
    * measures the rendered text rather than estimating it.
    */
-  [data-theme=atlas] .minisys,
   [data-theme=dawn] .minisys,
   [data-theme=clouds] .minisys{opacity:clamp(.72, calc(var(--dim, 1) + .22), 1)}
-  [data-theme=atlas] .minisys text,
   [data-theme=dawn] .minisys text,
   [data-theme=clouds] .minisys text{font-size:11.5px;opacity:1}
 
@@ -107,17 +88,20 @@
   html,body{min-height:100%}
   body{background:var(--bg);color:var(--ink);font-family:var(--ui);
        line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
-  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+  /* #1051: .sky/.vignette/.page were bare here, unlike every other rule in
+     this section — .desk is this route's own wrapper (see the note above
+     "THE SKY WAVE"), so these three are scoped to match. */
+  .desk .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
        transition:opacity .4s;z-index:0}
-  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .desk .sky svg{position:absolute;inset:0;width:100%;height:100%}
   /* the camera: each household has its own absolute starfield offset, so a
      flight animates between two truths and never snaps back */
   .cam{transition:transform 1.25s cubic-bezier(.5,.4,.15,1)}
   /* the sky never sits still — constant seamless drift, perceptible within
      a few seconds (owner rule), wrapping over a tiled field so it never
      snaps or reverses */
-  .sky .far{animation:driftf 400s linear infinite}
-  .sky .near{animation:driftn 195s linear infinite}
+  .desk .sky .far{animation:driftf 400s linear infinite}
+  .desk .sky .near{animation:driftn 195s linear infinite}
   /* POL-11 on a daylit sky. The generator's per-star alphas (far .12–.35,
      near .30–.70) were tuned for bright points on a night ground, where the
      eye is most sensitive. Inverted — small dark specks on a bright ground —
@@ -128,19 +112,16 @@
      Size is lifted with a stroke rather than by setting r, because a stroke
      adds the same width to every star and so preserves that radius variation,
      where a flat r would erase it. Owner call, 2026-08-14. */
-  [data-theme=atlas] .sky .far circle,
   [data-theme=dawn] .sky .far circle,
   [data-theme=clouds] .sky .far circle{opacity:.5;
        stroke:var(--star-far);stroke-width:.7}
-  [data-theme=atlas] .sky .near circle,
   [data-theme=dawn] .sky .near circle,
   [data-theme=clouds] .sky .near circle{opacity:.8;
        stroke:var(--star-near);stroke-width:.7}
-  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+  .desk .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-  [data-theme=atlas] .vignette{background:none}
 
-  .page{position:relative;z-index:2;max-width:1160px;margin:0 auto;padding:0 24px 100px}
+  .desk .page{position:relative;z-index:2;max-width:1160px;margin:0 auto;padding:0 24px 100px}
   .hero{display:grid;place-items:center;padding:0;min-height:100vh;position:relative}
   .hero-foot{position:absolute;top:calc(75vh + 160px);left:50%;
              transform:translate(-50%,-50%);
@@ -211,10 +192,18 @@
   /* Keyboard only, and in the app's own focus ink (the accent, as everywhere
      a field or a swatch says "you are here"). */
   .sun-link:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
-  .group{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
-  .group.seen{opacity:1;transform:none}
-  .item{scroll-margin-top:130px}
-  .item:target{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  /* #1050: scoped to .desk (this route's own wrapper, matching the pattern
+     already used for .desk .sky above). SvelteKit does not unload a visited
+     route's CSS chunk on client-side navigation, so an unscoped .group here
+     kept matching inbox's own <div class="group"> lane wrappers after a
+     visit to /home, leaving them permanently at opacity:0 with nothing on
+     /inbox ever adding .seen. */
+  .desk .group{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
+  .desk .group.seen{opacity:1;transform:none}
+  /* #1051: scoped to .desk for the same reason as .group above — inbox's own
+     <div class="item"> rows kept this rule after a visit to /home. */
+  .desk .item{scroll-margin-top:130px}
+  .desk .item:target{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
   .dialwrap{position:relative}
   /* no baseline gap — the dial centre IS the hero centre. #485 (owner ruling
      2026-08-22): below 1096px the dial also shrinks, so its keep-out never
@@ -267,27 +256,40 @@
   .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
 
   .manifest{max-width:820px;margin:34px auto 0}
-  .group{margin-bottom:30px}
-  .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+  /* #1050: same scoping as the .group fade-in above, and for the same
+     reason - this is the same class name, so the leftover chunk would keep
+     adding a stray 30px margin under inbox's lane groups too. */
+  .desk .group{margin-bottom:30px}
+  .desk .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
             color:var(--ink-quiet);margin-bottom:10px;padding-left:4px}
-  .group h3 .closest{color:var(--warm);text-transform:none;letter-spacing:.04em}
+  .desk .group h3 .closest{color:var(--warm);text-transform:none;letter-spacing:.04em}
   /* The manifest rows are links to the item view now (#424). CON-5 is
      unchanged - a click on a dial body still anchors to its row; the row is
      what carries you onward. As anchors they need the row's own ink and no
      underline, or the browser draws a manifest of blue links. */
-  .item{color:inherit;text-decoration:none;
+  /* #1050/#1051: .item and .dot* scoped to .desk — inbox/+page.svelte uses
+     both class names on its own lane rows, and SvelteKit does not unload a
+     visited route's CSS chunk on client-side navigation. */
+  .desk .item{color:inherit;text-decoration:none;
         display:flex;align-items:center;gap:15px;border-radius:14px;
         padding:14px 18px;margin-bottom:6px;border:1px solid var(--line-soft);
         background:var(--panel);backdrop-filter:blur(8px)}
-  .item:hover{background:var(--panel-raised);border-color:var(--line)}
-  .dot{width:8px;height:8px;border-radius:50%;flex:none}
-  .dot.ter{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)!important;
+  .desk .item:hover{background:var(--panel-raised);border-color:var(--line)}
+  .desk .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .desk .dot.ter{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)!important;
            background-color:currentColor!important}
-  .dot.con{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)!important}
-  .dot.sug{background:none!important;border:1.6px solid currentColor}
-  .item .body{flex:1;min-width:0}
-  .item .body b{display:block;font-size:14.5px;font-weight:520}
-  .item .body span{font-size:12.5px;color:var(--ink-mid)}
+  .desk .dot.con{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)!important}
+  .desk .dot.sug{background:none!important;border:1.6px solid currentColor}
+  .desk .item .body{flex:1;min-width:0}
+  .desk .item .body b{display:block;font-size:14.5px;font-weight:520}
+  .desk .item .body span{font-size:12.5px;color:var(--ink-mid)}
+  /* #867: the section mark, printed beside the entry — 14px (12px svg,
+     4px dot), Mark.svelte's own base styles plus this route's sizing. */
+  .desk .item .mark{position:relative;flex:none;width:14px;height:14px;display:grid;place-items:center}
+  .desk .item .mark svg{display:block;fill:none;stroke:var(--ink-mid);stroke-width:1.15;
+                   stroke-linecap:round;stroke-linejoin:round;opacity:.9}
+  .desk .item .mark i{position:absolute;right:-2px;bottom:0;width:4px;height:4px;border-radius:50%;
+                 background:var(--sec);opacity:.92}
   .t{font:500 13.5px var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
   .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-quiet)}
   .t.over{color:var(--overdue-text)} .t.soon{color:var(--warm)}
@@ -299,7 +301,7 @@
   .suggest .actions{display:flex;gap:8px}
   /* #434: a refused approval speaks in the server's own words, in the
      urgency ink the design already uses (the item view's .problem twin). */
-  .mail-problem{flex-basis:100%;font:10.5px var(--mono);color:var(--overdue-text);
+  .desk .mail-problem{flex-basis:100%;font:10.5px var(--mono);color:var(--overdue-text);
     margin-top:8px;line-height:1.6}
   .suggest button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:default;
                   border:1px solid var(--line);background:none;color:var(--ink-mid)}
@@ -324,7 +326,7 @@
    * Scoped under .itemview so home borrows the grammar without inheriting
    * item.css, which also carries page-level rules this screen must not have.
    */
-  .item.open{border-color:var(--accent);background:var(--panel-raised);
+  .desk .item.open{border-color:var(--accent);background:var(--panel-raised);
              border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0}
   .itemview{border:1px solid var(--accent);border-top:0;background:var(--panel-raised);
             backdrop-filter:blur(8px);border-radius:0 0 14px 14px;
@@ -370,7 +372,7 @@
      the card is capped at 76vh and scrolls internally, so without this,
      reaching the end of a long document list chains the scroll to the page and
      the card dismisses itself out from under whoever is reading it. */
-  .docview{position:fixed;z-index:9;top:50%;left:calc(75% + 10px);transform:translateY(-50%) scale(.97);
+  .desk .docview{position:fixed;z-index:9;top:50%;left:calc(75% + 10px);transform:translateY(-50%) scale(.97);
            max-height:76vh;overflow:auto;overscroll-behavior:contain;
            width:300px;background:var(--panel-raised);backdrop-filter:blur(16px);
            border:1px solid var(--line);border-radius:16px;padding:20px 22px;
@@ -379,7 +381,7 @@
               order, on the same delayed-visibility rule as .account above. */
            visibility:hidden;
            transition:opacity .25s,transform .25s,visibility 0s .25s}
-  .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%);
+  .desk .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%);
                 visibility:visible;transition-delay:0s}
   .drawer{position:fixed;top:0;bottom:0;z-index:10;width:290px;
           background:var(--panel-raised);backdrop-filter:blur(16px);
@@ -406,19 +408,19 @@
   .drawer-right{right:0;border-left:1px solid var(--line);transform:translateX(102%)}
   .drawer-right.open{transform:none}
   .drawer-right .close{left:14px}
-  .svc{display:flex;align-items:center;gap:9px;font:12.5px var(--mono);color:var(--ink-mid);padding:7px 2px}
-  .svc i{width:7px;height:7px;border-radius:50%;flex:none}
-  .svc b{color:var(--ink);font-weight:500;flex:1}
-  .svc small{color:var(--ink-quiet);font-size:10.5px}
+  .desk .svc{display:flex;align-items:center;gap:9px;font:12.5px var(--mono);color:var(--ink-mid);padding:7px 2px}
+  .desk .svc i{width:7px;height:7px;border-radius:50%;flex:none}
+  .desk .svc b{color:var(--ink);font-weight:500;flex:1}
+  .desk .svc small{color:var(--ink-quiet);font-size:10.5px}
   .keyrow{display:flex;align-items:center;gap:10px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
   .keyrow .sw{width:12px;height:12px;border-radius:50%;flex:none}
-  .docview h2{font-size:14.5px;font-weight:600}
-  .docview .sub{font:11px var(--mono);color:var(--ink-quiet);margin:2px 0 14px}
-  .docview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
+  .desk .docview h2{font-size:14.5px;font-weight:600}
+  .desk .docview .sub{font:11px var(--mono);color:var(--ink-quiet);margin:2px 0 14px}
+  .desk .docview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
                 border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
-  .docview .doc:hover{border-color:var(--accent)}
-  .docview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
-  .docview .close{position:absolute;top:12px;right:14px;background:none;border:0;
+  .desk .docview .doc:hover{border-color:var(--accent)}
+  .desk .docview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
+  .desk .docview .close{position:absolute;top:12px;right:14px;background:none;border:0;
                   color:var(--ink-quiet);font:14px var(--mono);cursor:pointer}
 
   /* CON-12 (new): the north star — creation lives in the sky. The star is
@@ -491,7 +493,7 @@
   .now-month{fill:var(--accent-text);font-weight:600}
   /* POL-4: bidirectional highlight */
   .body-link.lit :is(circle,path){transform:scale(1.6)}
-  .item.lit{border-color:var(--accent)}
+  .desk .item.lit{border-color:var(--accent)}
   /* POL-5: constellations light on section hover */
   .celestial polyline{transition:stroke-opacity .3s}
   .constellation-lit .celestial polyline{stroke-opacity:.85}
@@ -644,7 +646,7 @@
     /* #841: the health dot's breathe, the waiting inbox orb's, and the
        overdue/amber bodies' `.breathe` on the dial were the continuous
        animations this block missed. */
-    .sky .far,.sky .near,.nstar .glint,.rotor,.handle i,.inbox-orb.waiting svg,.breathe{animation:none!important}
+    .desk .sky .far,.desk .sky .near,.nstar .glint,.rotor,.handle i,.inbox-orb.waiting svg,.breathe{animation:none!important}
   }
 
 /* ---- #453: the labelled sky's quiet centre and the one question -------- */
@@ -1020,7 +1022,8 @@
   background-attachment:fixed}
 /* …and the horizon carries the light. The dark packs' vignette darkens the
    edges; these two warm the bottom instead — the only packs whose sky is
-   BRIGHTENING. Atlas keeps `background:none`, above: paper is not lit. */
+   BRIGHTENING, so they replace that darkening outright rather than clearing
+   it the way the other light-pack screens do. */
 [data-theme=dawn] .vignette,[data-theme=clouds] .vignette{
   background:linear-gradient(0deg,rgba(255,193,124,.26) 0%,
     rgba(255,214,164,.10) 20%,transparent 44%)}
@@ -1065,8 +1068,9 @@
   filter:drop-shadow(0 0 3px rgba(255,240,220,.85))}
 /* The sun gets its bloom back — it is the reason the sky is warming, and it is
    the ONE thing in these packs allowed to glow. Later than the engraved
-   `filter:none` at the head of this file, deliberately: that rule is still
-   right for atlas, and the sheets keep the pair in exactly this order. */
+   `filter:none` at the head of this file, deliberately: that rule flattens the
+   sun for every light pack, and this one hands the bloom back to these two.
+   The sheets keep the pair in exactly this order. */
 [data-theme=dawn] .dial circle[filter="url(#sun)"],
 [data-theme=clouds] .dial circle[filter="url(#sun)"]{filter:url(#sun);opacity:.85}
 
@@ -1581,3 +1585,23 @@ body.pinned .desk,body.pinned .pocket{transition:none!important}
   body.dispersing .desk .dial,body.dispersing .desk .minisys{animation:none!important}
   body.dispersing .desk,body.dispersing .pocket{transition:none}
 }
+
+/* ── THE REFUSED-SIGN-IN LINE (#1033, ADR-0027 consequences) ──────────────
+   One line, across the top of the sky, the first time the account holder gets
+   in after somebody said "this wasn't me" to an approval mail. It is fixed
+   rather than in the flow because .desk is display:contents and has no flow of
+   its own to put it in, and because it must not push the dial down by a line
+   on the one load it appears.
+
+   Warm, not red: this is a thing that went RIGHT — the door held — and a
+   klaxon over a successful refusal teaches people to fear the mechanism that
+   just protected them. It carries the one action that answers it and nothing
+   else; there is no dismiss, because asking for it already spent it. */
+.refused{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:60;
+      max-width:min(92vw,720px);margin:0;text-align:center;
+      font:11.5px/1.7 var(--mono);letter-spacing:.03em;color:var(--ink-mid);
+      background:rgba(6,10,22,.72);border:1px solid var(--line-soft);
+      border-radius:999px;padding:8px 18px;backdrop-filter:blur(6px)}
+.refused a{color:var(--warm);text-decoration:underline;text-underline-offset:2px;
+      text-decoration-thickness:1px;white-space:nowrap}
+.refused a:hover{color:var(--ink)}
