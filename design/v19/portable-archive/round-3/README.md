@@ -51,6 +51,7 @@ the documents' byte total) for export, and from the preview response for
 import; the preview needs to return the source household's export date and
 the documents' byte total, which it does not today.
 
-## Open for the owner
+## Verdict
 
-**65** Approved as drawn?
+Owner, 2026-09-20, verbatim: "I don't hate it but this could be two tabs on
+the same card". Drawn as tabs in `../round-4/`.
