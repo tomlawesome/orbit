@@ -18,6 +18,7 @@ Served at
 `http://<LAN address>:8336/1002-portable-archive/design/v19/portable-archive/round-6/f-tabs-at-the-far-end.html`,
 same scenes as round 4.
 
-## Open for the owner
+## Verdict
 
-**69** Approved as drawn?
+Owner, 2026-09-20: "69. Try one more time, they're still too subtle."
+Answered in `../round-7/`.
