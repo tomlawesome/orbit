@@ -336,6 +336,61 @@ export const credentialSetupTokens = pgTable("credential_setup_tokens", {
 ]);
 
 /**
+ * One pending password sign-in, waiting on its emailed approval (ADR-0027).
+ *
+ * Every password sign-in makes one of these instead of a session: the browser
+ * that typed the password waits, and the link mailed to the account's own
+ * address is what lets it through. Two secrets, never one, and each column
+ * here holds only the digest of its own:
+ *
+ *  - `tokenHash` is the approval link — 32 random bytes, sha256 at rest, the
+ *    same shape as `credential_setup_tokens` — and it travels by email. It
+ *    says *whether* this sign-in is allowed.
+ *  - `claimHash` is the waiting tab's own cookie, minted in the same breath
+ *    and never leaving that browser. It says *which browser* may collect the
+ *    session. Without it, anyone who watched the approval happen could poll
+ *    for the session the approval unlocked, and a forwarded link would hand
+ *    the reader the account rather than the choice ADR-0027 §4 gives them.
+ *
+ * `outcome` is null while nobody has pressed anything: opening the link
+ * changes nothing at all, because mail scanners follow links (build ruling,
+ * 2026-09-18). `consumedAt` is stamped when the waiting tab collects its
+ * session, so an approval spends exactly once.
+ *
+ * `userAgent` and `clientAddress` are what the approval page and the mail
+ * show about the request being approved. The address is stored as the server
+ * read it; the wording a reader sees ("from your home network" for a private
+ * address) is decided at render time, never here.
+ *
+ * `noticeShownAt` belongs to the other half of a refusal: a recorded "this
+ * wasn't me" is worth telling the account holder about, once, on their next
+ * successful sign-in. Stamping it is what keeps "once" true.
+ */
+export const signInApprovals = pgTable("sign_in_approvals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  claimHash: text("claim_hash").notNull().unique(),
+  userAgent: text("user_agent"),
+  clientAddress: text("client_address"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  outcome: text("outcome"),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  /* The send limits of ADR-0027 §8, counted where they cannot be forgotten by
+     a restart: how many links this pending sign-in has put in the post, and
+     when the last one went. "Five per account per hour" is these counts summed
+     across the account's rows, and "resend after 60 s" is this timestamp. */
+  sendCount: integer("send_count").notNull().default(0),
+  lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+  noticeShownAt: timestamp("notice_shown_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("sign_in_approvals_user_idx").on(table.userId),
+  check("sign_in_approvals_outcome", sql`${table.outcome} IS NULL OR ${table.outcome} IN ('approved','denied')`),
+]);
+
+/**
  * One row per OIDC step-up proof, so a proof can be spent once and only once
  * (ADR-0023 §5, owner ruling 2026-09-09).
  *

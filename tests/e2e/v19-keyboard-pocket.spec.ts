@@ -7,6 +7,7 @@ import {
   currentFocus,
   dismissTourIfShown,
   fillCreateForm,
+  homeIsLive,
   installKeyboardAudit,
   tabTo,
 } from "./support/keyboard";
@@ -160,6 +161,11 @@ async function settledPocket(p: Page) {
   await dismissTourIfShown(p);
   await p.waitForFunction(() => !document.body.classList.contains("launching"), null, { timeout: 60_000 });
   await expect(p.locator(".morb")).not.toHaveText("", { timeout: 60_000 });
+  /* ...and the avatar carries its initials from the server's own render
+     (#842), so that says the markup arrived, not that anything is listening
+     to it. `homeIsLive` is the wait that means the sheet will open when the
+     orb is pressed (#1064). */
+  await homeIsLive(p);
 }
 
 /**

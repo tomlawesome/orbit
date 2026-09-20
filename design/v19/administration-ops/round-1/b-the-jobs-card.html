@@ -1,0 +1,1014 @@
+<!doctype html>
+<html lang="en" data-theme="afterdark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — administration: mission control (proposal, issue #452)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* The instance from above: every person, every system, the mail machinery,
+     and a porthole onto operations. §15 — the relay lives in one place (the
+     helm's card); what stands here is the instance's mail MACHINERY, and it
+     sits with operations in one panel. Admins see everything by design
+     (owner ruling §11); admins can place anyone anywhere. §15-2g: JOIN
+     REQUESTS LIVE IN HOUSEHOLD MANAGEMENT ONLY — this screen carries no
+     join-request block at all, because admin surfaces are for admin-only
+     functions; an admin who needs owner powers sees the owner's household
+     screen for the system chosen on the dial. Each system's ring wears its
+     REAL due-state dots — the same truths its constellation shows on home. */
+  /*
+ * The theme packs, and the font stacks they share (#433).
+ *
+ * These lived in home.css, which meant they applied to home and nowhere else:
+ * picking a light pack and walking to /create put you back in a fixed dark
+ * palette, because family.css hardcoded one. Measured before this move — the
+ * light pack on /home gave a warm body colour; every other screen gave
+ * rgb(7,13,31).
+ *
+ * Imported by the root layout so every screen sees them. family.css keeps what
+ * is genuinely family-specific — the stage, the glass surface, the sky — and
+ * stops owning the palette, so there is one definition rather than two that
+ * drift.
+ */
+
+:root{
+  --mono:'JetBrains Mono Variable','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+  --display:'Space Grotesk',var(--ui);
+}
+/*
+ * THE TEXT-GRADE COMPANIONS (#491, one pack decision instead of five local
+ * fixes). The audit that raised it found the same failure in three unrelated
+ * places: --ink-faint used as TEXT fails 4.5:1 on every pack, and --accent and
+ * --ok used as TEXT fail on the daylight packs. Three concept files each
+ * invented their own patch — an --ink-quiet in EVA, promoted inks in the
+ * Movement, a proposed --accent-text/--ok-text pair — which is exactly the
+ * drift a token system exists to prevent.
+ *
+ * So three companions join every pack, and their contract is narrow and
+ * literal: they are for INK THAT CARRIES WORDS. The originals keep their jobs
+ * — --ink-faint is still the hairline, the rule, the tick and the swatch;
+ * --accent and --ok are still the fill of a body, the stroke of a ring, the
+ * ground of a chip — because a mark is not a letterform and the law that
+ * applies to one does not apply to the other.
+ *
+ * Measured, not asserted. Each value clears 4.5:1 against the WORST ground the
+ * pack actually paints text on, which on the daylight packs is the raw sky at
+ * the cool top of the gradient (#b0bed6) rather than the comfortable panel:
+ *
+ *   --ink-quiet    starchart  #8b95b6  6.59:1 on #060b1c
+ *                  after dark #717c8e  4.77:1 on #05070d  (= its lifted faint)
+ *                  dawn       #414d62  4.55:1 on #b0bed6  (= its lifted faint)
+ *                  clouds     #414d62  4.55:1 on #b0bed6  (= its lifted faint)
+ *                  retrograde #74a4b4  7.25:1 on #080a14
+ *   --accent-text  dark packs = --accent, which already passes as text:
+ *                  9.88 / 12.08 / 6.92:1 (star-chart, after dark, retrograde)
+ *                  dawn       #134a72  4.86:1   (--accent itself: 2.42:1)
+ *                  clouds     #134a72  4.86:1
+ *                  — set against the ground the on-sky labels MEASURE on,
+ *                    rgb(174,188,211), not against the token #b0bed6, where
+ *                    they read 4.97:1
+ *   --ok-text      dark packs = --ok: 11.24 / 11.56 / 13.55:1
+ *                  dawn       #0d4e30  5.09:1   (--ok itself: 2.34:1)
+ *                  clouds     #0d4e30  5.09:1
+ *
+ * On the three dark packs the companions ARE the originals, so a sweep of text
+ * usages cannot move a single pixel there — which is the whole reason the
+ * companions are tokens rather than a hunt through the stylesheets.
+ */
+[data-theme=starchart]{
+  --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+  --line:#243259; --line-soft:#17203f;
+  /*
+   * THE FAINT TIER, LIFTED (#500, owner ruling 2026-08-17: the
+   * accessibility-friendly option wins IN ALL CASES, originals banked for
+   * revert in the issue). --ink-faint and --chart-ink were both #4d5878,
+   * 2.70-2.78:1 on this pack's own ground and on the panels it actually
+   * sits on — real text, real fail, and the one sweep #491 cut from that
+   * wave because it moves the primary pack's every first viewport. It is
+   * cut no longer.
+   *
+   * Lifted alone, not the whole family: --ink-mid (#8791b3, 6.28:1) already
+   * clears the law and sits far enough from --ink that lifting it too would
+   * crowd the ladder rather than open it, unlike the after-dark and dawn
+   * cases where the mid tier had to move to make room. Measured on home,
+   * settings and inbox's own grounds: #737e9e reads 4.71-4.86:1, over the
+   * law on all three, with --ink-mid untouched above it at 6.28:1.
+   */
+  --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+  --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+  --degraded:#fb8b24;
+  --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+  /* Far stars are the pack's ink, near stars one step further from the
+     background - the relationship the design already used when both fills
+     were literals (#e9edf8 is exactly --ink here). */
+  --star-far:#e9edf8; --star-near:#f4f0ff;
+  --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+  /* #491: the text-grade trio. The accent and the green already clear the law
+     as words on this ground, so they are the same colour by definition. */
+  --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 item 3: overdue and degraded already clear the law as words here
+     (7.08:1 / 8.23:1 on this pack's ground), so their companions are the
+     originals — no pixel moves on the dark packs or retrograde. */
+  --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: --warm already clears the law as words here (10.51:1 on --bg,
+     10.12:1 on --panel), so its companion is the original — no pixel move. */
+  --warm-text:var(--warm);
+  /* #855: --upcoming clears the law as words here too, so its companion
+     is the original — no pixel move. */
+  --upcoming-text:var(--upcoming);
+  /* #867: the section accents, moved in from household.css — the manifest
+     on /home needs the same tokens the Sections card does, and a value
+     scoped to one screen is not shareable with a second (#491 precedent). */
+  --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
+  --sec-plum:#b79ae0; --sec-coral:#f0907a;
+}
+[data-theme=afterdark]{
+  --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+  --line:#1c2434; --line-soft:#151b28;
+  /*
+   * THE FAINT TIER, LIFTED (#490). Measured on the pack's own bare ground
+   * before any backdrop exists: --ink-faint and --chart-ink were both #4a5468,
+   * which is 2.65:1 on #05070d — the worst faint tier in the product, and what
+   * the dial's month labels, the explore placeholder and the horizon line are
+   * drawn in. It had never met 4.5:1 in this pack.
+   *
+   * THE WHOLE FAMILY LIFTS, which is the shape #480 already established for
+   * exactly this problem in retrograde ("the whole mid-ink family lifts
+   * together... so the steps between primary, secondary and faint survive the
+   * lift instead of collapsing"). Lifting the faint tier ALONE cannot work
+   * here: to clear 4.5:1 on a near-black ground an ink needs L ≥ .1846, and
+   * --ink-mid sat at L .2364 — the faint tier would have arrived within a
+   * hundredth of the secondary one and the two would have read as one.
+   *
+   * Measured, before and after, all on #05070d:
+   *   --ink        #e7e9ee  16.58:1 → 16.58:1   unchanged
+   *   --ink-mid    #7c8699   5.49:1 → #9fa6b2  8.22:1
+   *   --ink-faint  #4a5468   2.65:1 → #717c8e  4.77:1   PASSES
+   *   --chart-ink  #4a5468   2.65:1 → #717c8e  4.77:1   PASSES
+   * The ladder is 4.77 / 8.22 / 16.58 — three real steps, each roughly a
+   * doubling, and every one of them over the law.
+   *
+   * And it is the pack being more itself rather than less: after dark's own
+   * strapline is "lights out, ink up". What makes this the darkest pack is its
+   * GROUND, which has not moved by a value; the ink is the half of that phrase
+   * that had never been honoured. --line and --line-soft are untouched — they
+   * are structure, not words, and the law that governs a letterform does not
+   * govern a hairline.
+   */
+  --ink:#e7e9ee; --ink-mid:#9fa6b2; --ink-faint:#717c8e;
+  --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+  --degraded:#fb8b24;
+  --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+  --star-far:#e9edf8; --star-near:#f4f0ff;
+  --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#717c8e;
+  /* #491 said this pack's quiet ink IS its faint ink, because the faint tier
+     cleared the law on its own. It cleared it against --bg. On this pack's
+     own --panel-raised the same value measures 4.42:1, so the words carried
+     the failure onto every raised surface (#861). Lifted just far enough to
+     clear the law on the worst ground this pack paints text on: #768295 is
+     4.80:1 on --panel-raised and 5.18:1 on --bg. --ink-faint keeps the old
+     value, because a hairline is not a letterform. */
+  --ink-quiet:#768295; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 item 3: 7.28:1 / 8.46:1 as words on this ground — the companions are
+     the originals, same reason as star-chart above. */
+  --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: 10.80:1 / 10.50:1 as words here — the companion is the original. */
+  --warm-text:var(--warm);
+  /* #855: --upcoming clears the law as words here too — no pixel move. */
+  --upcoming-text:var(--upcoming);
+  /*
+   * THE GALACTIC PLANE — after dark's own sky (§15, "after dark adopts the
+   * happy accident"; approved with the bottom glow in the deep). The pack owns
+   * the river's materials; the geometry that spends them is home's, and the
+   * stream that builds it is sky-plane.js. Carried from
+   * design/v19/afterdark-plane.html, literally.
+   *
+   * --plane-warm is the only warm light this pack allows anywhere in the sky,
+   * and it is spent at alphas in the low hundredths because the band's peak
+   * brightness is a CONTRAST BUDGET rather than a taste: light ink loses
+   * contrast as its ground rises, so the ceiling is on the ground. See the
+   * budget in home.css, where the alphas are.
+   */
+  --plane-warm:#ffcf94;
+  --plane-cool:#9fb0d6;
+  /* the extra population: the river's own stars, a shade under the base
+     field's --star-far so the plane reads as DEPTH behind the sky rather than
+     as a brighter patch of it */
+  --plane-star:#cfd9ee;
+  --plane-star-warm:#ffdca6;
+  --plane-dust:#01020a;
+  /* #867: moved in from household.css, see the starchart block's note. */
+  --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
+  --sec-plum:#a99ae0; --sec-coral:#ef9b86;
+}
+/*
+ * dawn — AND DAWN IS THE TERMINATOR (owner, §15: "'dawn' the pack means the
+ * terminator treatment (its post-fix form is hereby confirmed in)").
+ *
+ * Two ratified moves land together here, because the second is drawn on top of
+ * the first and the sheet that carries them carries both:
+ *
+ *   1. THE TEMPERATURE STORY (§15, "the pack refresh is ordered ... dawn gets
+ *      a temperature story"). Dawn was a flat cool grey that happened to be
+ *      light. It is now the one pack with a DIRECTION: cool overhead, warming
+ *      down to a pale amber horizon, hazy pastel bodies, sunrise amber, an
+ *      ember sun that is allowed to bloom because it is the reason the sky is
+ *      warming at all. The gradient itself is a rule rather than a token (see
+ *      home.css); what lives here are the five stops it spends and the
+ *      surfaces that sit on them.
+ *   2. THE TERMINATOR (§15, approved with the visibility fix): a line across
+ *      the sky where night hands it to day. The night's own starlight set is
+ *      the one thing the base cannot own — dawn inverts its starfield to ink
+ *      because its sky is lit, and on the far side of the crossing it is not.
+ *
+ * Carried literally from design/v19/dawn-terminator.html, which is the record.
+ * --bg moves from #c3ccdb to the gradient's own midpoint, so the small
+ * knockouts it backs (star strokes, corridor dots) disappear into the ground
+ * instead of sitting on a colour that no longer exists anywhere on screen.
+ */
+[data-theme=dawn]{
+  /* the temperature axis, top of the window to the horizon */
+  --sky-1:#b0bed6; --sky-2:#c2cad9; --sky-3:#d7d5cf; --sky-4:#eedfc8; --sky-5:#f8e9d2;
+  --bg:#d2d3d4;
+  /* cool, slightly-frosted morning glass — still translucent, because the
+     ground behind it is the story */
+  --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+  --line:#a6b2c5; --line-soft:#c0c8d6;
+  /*
+   * THE INK FAMILY, MEASURED AGAINST THIS PACK'S OWN SKY (#491). The
+   * temperature story set --ink and --ink-mid and let the faint tier fall
+   * through from the old flat-grey dawn, and the honest read of that on the
+   * built screen was that the two dimmer tiers do not survive their own
+   * ground. Measured on the coolest (darkest) stop of the gradient, #b0bed6,
+   * which is what the top of the dial screen actually paints:
+   *     --ink       #18202f   8.69:1   fine, unchanged
+   *     --ink-mid   #46536d   4.11:1   UNDER, on sky (6.9:1 on glass)
+   *     --ink-faint #78849b   2.01:1   UNDER by a mile — and this is what the
+   *                                    create label and the scroll cue, both
+   *                                    drawn straight on the sky, are made of
+   * So the family lifts together — third time in this wave, and the same shape
+   * #480 used for retrograde and #490 for after dark: moving the faint tier
+   * alone would put it darker than the secondary one and collapse the ladder.
+   * After, same ground:
+   *     --ink       #18202f   8.69:1
+   *     --ink-mid   #343d51   5.79:1
+   *     --ink-faint #414d62   4.55:1   PASSES
+   * Three real steps, every one over the law, and the pack reads as MORE of a
+   * temperature story rather than less: on a brightening sky the ink belongs at
+   * the dark end, and it was sitting in the middle.
+   */
+  --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+  /* the warm token is sunrise amber, not the old olive gold */
+  --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
+  --degraded:#c2570e;
+  /* the sun's core stops being pack-ink: a black disc inside a warm halo reads
+     as an eclipse, so the centre is a low ember — dark enough to hold the
+     household mark against a pale ground, warm enough to be the sun */
+  --sun:#eda253; --sun-core:#9c4a10; --stars:1; --celestial:none;
+  --star-far:var(--ink); --star-near:var(--ink);
+  --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  /* hazy pastel bodies: the same status colours seen through morning air, with
+     the middle and outer stops still saturated enough that an overdue body
+     still looks overdue. These replace the flat-ink fill overrides the
+     engraved treatment used to impose on this pack (see home.css). */
+  --p-jade-1:#e8f6ec; --p-jade-2:#95cfab; --p-jade-3:#4f9070;
+  --p-amber-1:#fff0d8; --p-amber-2:#f0c076; --p-amber-3:#ad7830;
+  --p-ruby-1:#ffe2e1; --p-ruby-2:#ec949c; --p-ruby-3:#a9505f;
+  --p-sky-1:#e6eefc; --p-sky-2:#9dbce6; --p-sky-3:#5b80b8;
+  /* THE CROSSING's own materials. A star seen against night, and ink as the
+     night draws it — the constellations out there are redrawn in starlight
+     rather than dimmed, which is the only way a mark in the dark stays
+     readable. sky-terminator.js mixes toward these by how deep into the night
+     a mark actually sits. */
+  --night-far:#dbe3f6; --night-near:#f4f7ff;
+  --n-accent:#a9cdf2; --n-ink:#eef2fb; --n-line:#96a9c9;
+  /* #491, measured against the coolest (darkest) stop of this pack's own sky,
+     #b0bed6, not against the comfortable panel: --accent as words is 2.42:1
+     there and --ok is 2.34:1. The companions clear the law at 4.54:1 and
+     4.59:1, and 5.13 / 5.18:1 on the ground the constellation labels actually
+     sit on. The faint tier now clears the law on its own (above), so this
+     pack's quiet ink IS its faint ink — stated rather than inferred. */
+  --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+  /* #491 item 3, same ground (--sky-1): overdue and degraded raw are 2.94:1
+     and 2.40:1, both under the law. The same darken-toward-black recipe used
+     elsewhere in this file — overdue-text clears at the ratified 70/30 mix
+     (4.84:1); degraded-text needed 60/40 to clear with margin (4.98:1). */
+  --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+  --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+  /* #854: --warm as words is 2.64:1 on --bg, 3.08:1 on --panel — both under
+     the law. The same 70/30 darken-toward-black split used above clears
+     4.65:1 on --bg (5.43:1 on --panel). */
+  --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
+  /* #855: --upcoming is --accent here, so its text grade is --accent's. */
+  --upcoming-text:var(--accent-text);
+  /* #867: moved in from household.css, see the starchart block's note. */
+  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+  --sec-plum:#71499a; --sec-coral:#bd4f36;
+}
+/*
+ * clouds — THE CLOUD SEA, and one of Orbit's MAIN LIGHTER THEMES (owner, §15:
+ * "clouds (the cloud-sea pack on the final roster) is not merely admitted — it
+ * is one of Orbit's MAIN LIGHTER THEMES ... clouds carries the lighter end of
+ * the range", and the roster ruling: "CLOUDS (cloud sea graduates from a dawn
+ * treatment to its own selectable pack)").
+ *
+ * Derived from design/v19/dawn-cloudsea.html's approved treatment, which is the
+ * record. The GROUND is deliberately the same temperature story dawn stands
+ * on, because that is what the sheet draws and what the owner approved: the
+ * two packs were the two skies of one light, and what separates them is the
+ * sky, exactly as it separated them when he chose between them. Everything
+ * below that is different IS different — the star wash ends far higher (the
+ * palest stars are gone well before the crest, because there is cloud where
+ * the horizon would be), the descent goes DOWN THROUGH THE DECK into
+ * under-cloud blue rather than onto warm surface light, and the pack carries
+ * its own symbols. Those live in home.css and in sky-cloudsea.js.
+ */
+[data-theme=clouds]{
+  --sky-1:#b0bed6; --sky-2:#c2cad9; --sky-3:#d7d5cf; --sky-4:#eedfc8; --sky-5:#f8e9d2;
+  --bg:#d2d3d4;
+  --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+  --line:#a6b2c5; --line-soft:#c0c8d6;
+  /* the same measured ink family dawn carries, and for the same reason: the two
+     packs stand on one light, so they answer its ground the same way (#491). */
+  --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+  --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
+  --degraded:#c2570e;
+  --sun:#eda253; --sun-core:#9c4a10; --stars:1; --celestial:none;
+  --star-far:var(--ink); --star-near:var(--ink);
+  --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  --p-jade-1:#e8f6ec; --p-jade-2:#95cfab; --p-jade-3:#4f9070;
+  --p-amber-1:#fff0d8; --p-amber-2:#f0c076; --p-amber-3:#ad7830;
+  --p-ruby-1:#ffe2e1; --p-ruby-2:#ec949c; --p-ruby-3:#a9505f;
+  --p-sky-1:#e6eefc; --p-sky-2:#9dbce6; --p-sky-3:#5b80b8;
+  /* THE SEA ITSELF is not tokens, and that is the sheet's own decision rather
+     than a shortcut: dawn-cloudsea.html builds the strata out of four-stop
+     gradients in the SVG's own defs — cool-white at the crest into the
+     rose-amber the rising light puts on the underside sixty pixels below it —
+     and a stop table is not a colour a component could reference. So the
+     material lives with the geometry that spends it, in home.css and in the
+     .weather markup, carried literally from the sheet. It is the same division
+     retrograde shipped under #480: the pack says what the light IS (--bloom,
+     the planet stops), the screen says where it falls. */
+  /* #491, measured on this pack's own coolest sky stop, as dawn's are */
+  --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+  /* #491 item 3: same ground and same values as dawn (identical --overdue,
+     --degraded and --sky-1), so the same recipe lands the same ratios —
+     overdue-text 4.84:1, degraded-text 4.98:1. */
+  --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+  --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+  /* #854: identical --warm, --bg and --panel to dawn, so the same 70/30
+     recipe lands the same ratios — 4.65:1 on --bg, 5.43:1 on --panel. */
+  --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
+  /* #855: --upcoming is --accent here, so its text grade is --accent's. */
+  --upcoming-text:var(--accent-text);
+  /* #867: clouds takes dawn's section accents, same as its ink family (#491) — the two packs stand on one light and answer it the same way. */
+  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+  --sec-plum:#71499a; --sec-coral:#bd4f36;
+}
+/*
+ * retrograde — the fifth pack (owner, 2026-08-14). A planet in retrograde is
+ * a real astronomical term and an eighties one, which is the whole brief:
+ * neon and vivid, but classy rather than tacky.
+ *
+ * What keeps it the right side of that line is restraint, not saturation.
+ * The ground is deep indigo-violet, never black, so the neons sit ON
+ * something. Exactly two signature neons carry the screen - magenta for the
+ * accent and cyan for what is coming - with mint reserved for "on track" and
+ * amber for warmth. No rainbow: every remaining token is a tint of the
+ * violet ground. The stars go lilac rather than white so the sky reads as
+ * dusk over a city rather than deep space.
+ */
+[data-theme=retrograde]{
+  /* Second revision (owner, 2026-08-15): "heavy use of purple - the
+     backdrop, the cards, the dial - different shades but very similar
+     palette". True: the ground, the panels, the rules and the muted ink were
+     all violet tints, so the neons had nothing to sit against and the pack
+     read as monochrome with a few coloured dots. The eighties this is
+     reaching for are grid-on-black, not a purple wash - so the ground drops
+     to near-black, the structure goes cyan, and magenta is left to do the
+     accenting on its own. */
+  --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+  --line:#1d4a5a; --line-soft:#12303c;
+  /* Third revision — the §15 refresh, ratified in full (owner, 2026-08-16,
+     design/v19/pack-retrograde-refresh.html, #480). Secondary copy was sinking
+     into the teal murk: every "orbital period 1 year · ~£150.00" line, every
+     service row, every month label read as texture rather than as text. The
+     whole mid-ink family lifts together — --ink-mid, and with it --ink-faint
+     and --chart-ink, which carry the same class of copy — so the steps between
+     primary, secondary and faint survive the lift instead of collapsing. */
+  --ink:#eef6ff; --ink-mid:#a9d8e6; --ink-faint:#6f9fb1;
+  /* First pass read as synthwave — violet, magenta, cyan — and the owner
+     found it short of "the typical bright 80s colours" (2026-08-14). The
+     missing notes were acid yellow, hot coral and a true neon green, so the
+     status tokens now carry them. Discipline is unchanged and is what keeps
+     this the right side of tacky: a deep ground so the neons sit ON
+     something, one job per colour, and everything structural still a tint of
+     the violet. */
+  --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+  --degraded:#ff9f1c;
+  --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+  /* The chart is the grid: cyan rules on black, the way the era drew it. */
+  --star-far:#9fd6e6; --star-near:#ffffff;
+  --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#6f9fb1;
+  /* The one dilution of the accent that bloom is allowed to use (#480). Neon
+     stays classy by being disciplined, not by being bright: exactly one colour
+     may be lit, so this token exists to be spent on ACCENT elements and on
+     nothing else — never the greens, never the reds, never the ink. Screens
+     reach for it in their own rules; the pack only says what the light is. */
+  --bloom:color-mix(in srgb,var(--accent) 45%,transparent);
+  /* The bodies are the largest coloured things on the screen, and their
+     gradients were hardcoded, so no pack could reach them - which is why the
+     first retrograde still read as a violet version of star-chart. The stops
+     now take variables whose fallbacks are the original values, so every
+     other pack is untouched and this one can put the eighties into the
+     planets themselves: neon green, acid yellow, hot coral, electric
+     turquoise. The gloss stays; these are chrome and neon, not ink. */
+  --p-jade-1:#c4ffe4; --p-jade-2:#3ef2a0; --p-jade-3:#0e7a55;
+  --p-amber-1:#fff3b0; --p-amber-2:#ffd23f; --p-amber-3:#8a6b00;
+  --p-ruby-1:#ffb3c4; --p-ruby-2:#ff3864; --p-ruby-3:#8a0f2e;
+  --p-sky-1:#b6fbff; --p-sky-2:#2de2e6; --p-sky-3:#0d6b78;
+  /* #491: the §15 refresh already lifted this pack's mid-ink family, so the
+     accent and the green clear the law as words (6.92:1 and 13.55:1) and the
+     companions are the originals. The quiet ink is the one addition: the faint
+     tier at #6f9fb1 is 6.83:1, comfortably over, so #74a4b4 exists only to
+     give this pack the same three-name vocabulary as the rest. */
+  --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 item 3: overdue and degraded clear the law as words too (5.64:1 and
+     9.61:1), so their companions are the originals — no pixel moves. */
+  --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: --warm clears the law as words too (13.67:1 on --bg, 13.17:1 on
+     --panel), so its companion is the original — no pixel move. */
+  --warm-text:var(--warm);
+  /* #855: --upcoming clears the law as words here too — no pixel move. */
+  --upcoming-text:var(--upcoming);
+  /* #867: moved in from household.css, see the starchart block's note. */
+  --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
+  --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
+}
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .sky .far{animation:drift 400s linear infinite}
+  .sky .near{animation:drift 195s linear infinite}
+  @keyframes drift{to{transform:translateX(-1600px)}}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  /* THE WAY BACK, KNOCKED OUT (#491). This label is the one piece of chrome
+     in the family sitting DIRECTLY on the starfield with nothing behind it,
+     and it was drawn in --ink-faint, which is 2.78:1 on star-chart's ground
+     before a single star is added. Two moves: the ink goes to the text-grade
+     companion (6.59:1 on star-chart), and it gets a BACKING — EVA's stencil
+     precedent, spent as a halo rather than an outline because
+     -webkit-text-stroke at any width a star could hide behind would close up
+     11px mono. --bg and not a literal, so the plate is whatever the pack's
+     ground is. */
+  .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
+        text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .back:hover{color:var(--accent-text)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .account nav a[aria-current]{color:var(--accent-text)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  .page{position:relative;z-index:2;max-width:980px;margin:0 auto;padding:96px 24px 120px}
+  header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+  header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:26px}
+  @media (max-width:880px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+        border-radius:16px;padding:20px 22px}
+  .card.wide{grid-column:1 / -1}
+  .card .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+  .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+  .card .cardhead button,.card .cardhead a{margin-left:auto;font:11px var(--mono);
+        color:var(--ink-mid);background:none;border:1px solid var(--line);
+        border-radius:9px;padding:6px 12px;cursor:pointer;text-decoration:none}
+  .card .cardhead :is(button,a):hover{border-color:var(--accent);color:var(--accent-text)}
+
+  .person{display:flex;align-items:center;gap:12px;padding:9px 2px;
+          border-bottom:1px solid var(--line-soft)}
+  .person:last-child{border:0}
+  .person .avatar{width:32px;height:32px;border-radius:50%;flex:none;
+                  border:1px solid var(--line);background:var(--panel-raised);
+                  display:grid;place-items:center;font:11px var(--mono);color:var(--ink-mid)}
+  .person .who{flex:1;min-width:0}
+  .person .who b{display:block;font-size:13.5px;font-weight:530}
+  .person .who span{display:block;font:10.5px var(--mono);color:var(--ink-faint);
+                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+        border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid);flex:none}
+  .role.admin{color:var(--accent-text);border-color:var(--accent)}
+  .person .place{font:10.5px var(--mono);color:var(--ink-faint);background:none;
+                 border:0;cursor:pointer;padding:4px;flex:none}
+  .person .place:hover{color:var(--accent-text)}
+
+  /* THE NEW-SYSTEM FORM, OPEN (#1052, decision of 2026-09-19). The resting
+     sheet is unchanged -- this is drawn open so the record shows what the
+     button does. A name, the acting administrator's own password, and then
+     the People as owner buttons: pressing one is the submit, exactly as
+     pressing a system is the submit in the People card's "place in a
+     system..." picker. The system starts empty and the administrator is not
+     in it. */
+  .newsystem{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;
+             padding:10px 2px 2px;border-bottom:1px solid var(--line-soft);margin-bottom:6px}
+  .newsystem label{font:10.5px var(--mono);letter-spacing:.06em;color:var(--ink-faint)}
+  .newsystem input{font:12px var(--mono);color:var(--ink);background:var(--panel-raised);
+                   border:1px solid var(--line);border-radius:9px;padding:7px 10px;width:100%}
+  .newsystem .owners{display:flex;gap:6px;flex-wrap:wrap;padding:4px 2px}
+  .newsystem .owners button{font:10.5px var(--mono);color:var(--ink-mid);background:none;
+                            border:1px solid var(--line);border-radius:9px;padding:5px 10px;cursor:pointer}
+  .newsystem .owners button:hover{border-color:var(--accent);color:var(--accent-text)}
+
+  .system{display:flex;align-items:center;gap:14px;padding:10px 2px;
+          border-bottom:1px solid var(--line-soft)}
+  .system:last-child{border:0}
+  .system svg{flex:none}
+  .system .who{flex:1;min-width:0}
+  .system .who b{display:block;font-size:13.5px;font-weight:530}
+  .system .who span{font:10.5px var(--mono);color:var(--ink-faint)}
+  /* §15-2g removed the joinbadge and the dashed join-request row from this
+     panel. Nothing replaces them and no spacing is patched in: the roster
+     closes on its last system (which loses its rule to :last-child), so the
+     card ends on a finished row rather than a cut edge — and the two columns
+     now sit far closer in height than they did with the decision row hanging
+     below the roster. */
+
+  .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
+      font:11.5px var(--mono);color:var(--ink-mid);padding:8px 2px;
+      border-bottom:1px solid var(--line-soft)}
+  .kv:last-child{border:0}
+  .kv b{color:var(--ink);font-weight:500}
+  .kv .on{color:var(--ok-text)}
+  .kv button{font:11px var(--mono);color:var(--ink-mid);background:none;
+             border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
+  .kv button:hover{border-color:var(--accent);color:var(--accent-text)}
+
+  /* §15: the machinery corner — the relay's instance levers are no longer a
+     panel of their own; they are MAIL MACHINERY, joined to operations in one
+     panel, split by a hairline. Each half keeps its own head and rows. */
+  .card.machinery{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
+  .card.machinery .half:last-child{padding-left:26px;border-left:1px solid var(--line-soft)}
+  @media (max-width:880px){
+    .card.machinery{grid-template-columns:1fr;gap:0}
+    .card.machinery .half:last-child{padding-left:0;padding-top:22px;margin-top:22px;
+                                     border-left:0;border-top:1px solid var(--line-soft)}
+  }
+
+  .svc{display:flex;align-items:center;gap:9px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
+  .svc i{width:7px;height:7px;border-radius:50%;flex:none}
+  .svc b{color:var(--ink);font-weight:500;flex:1}
+  .svc small{color:var(--ink-faint);font-size:10.5px}
+
+  .strip{margin-top:22px;text-align:center;font:10.5px var(--mono);
+         color:var(--ink-faint);letter-spacing:.1em}
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink-faint);padding:10px 0 40px}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important}}
+
+  /* ── #1055: the pocket holds. The ratified sheet lets a .kv row with a
+     trailing button and a .person row overflow 390px; the shipped route
+     wraps the person row (#915). Both wraps are carried here so the new
+     layer can be judged on a page that fits, and nothing above 560px moves. */
+  .person{flex-wrap:wrap}
+  .person .who{flex:1 1 60%}
+  .person .place:first-of-type{margin-left:auto}
+  @media (max-width:560px){
+    .kv{flex-wrap:wrap}
+    .kv > button{margin-left:auto}
+    .kv > button{min-height:44px}
+  }
+  /* a pressed test while it runs: the button says so and breathes; nothing
+     else on the row moves */
+  .kv button[disabled]{cursor:default;color:var(--ink-quiet);border-color:var(--line-soft)}
+  .kv button.busy{animation:breathe 1.6s ease-in-out infinite}
+  @keyframes breathe{50%{opacity:.4}}
+  .job i.spin{animation:breathe 1.2s ease-in-out infinite}
+  .fade{animation:fadein .22s ease-out}
+  @keyframes fadein{from{opacity:0;transform:translateY(-3px)}}
+
+  /* ── sheet furniture: the scene bar (not part of the design) ─────────── */
+  .demos{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:9;
+         display:flex;gap:4px;align-items:center;padding:6px 10px;border-radius:99px;
+         background:rgba(4,6,14,.82);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(10px);
+         font:10px var(--mono);letter-spacing:.06em;color:#8791b3;white-space:nowrap}
+  .demos span{margin-right:4px}
+  .demos button{font:10px var(--mono);letter-spacing:.06em;color:#8791b3;background:none;
+                border:1px solid transparent;border-radius:99px;padding:4px 9px;cursor:pointer}
+  .demos button:hover{color:#e9edf8}
+  .demos button[aria-pressed=true]{color:#d8b45a;border-color:rgba(216,180,90,.35)}
+  @media (max-width:560px){.demos{letter-spacing:.02em;padding:4px 6px;max-width:calc(100vw - 16px);
+        overflow-x:auto}.demos span{display:none}.demos button{padding:6px 6px}}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+  html.shot .demos{display:none}
+
+  /* ── #1055 B: the verdict line and the jobs card ─────────────────────── */
+  .placerow{display:flex;gap:6px;flex-wrap:wrap;padding:10px 2px 4px}
+  .placerow button{font:10.5px var(--mono);color:var(--ink-mid);background:none;
+        border:1px solid var(--line);border-radius:99px;padding:4px 11px;cursor:pointer}
+  .placerow button:hover{border-color:var(--accent);color:var(--accent-text)}
+  .placerow button[disabled]{cursor:default;color:var(--ink-quiet);border-color:var(--line-soft)}
+  .placerow button.busy{animation:breathe 1.6s ease-in-out infinite}
+  .adminproblem{margin-top:10px;font:11px var(--mono);color:var(--warm-text);min-height:1.6em}
+  .adminproblem.ok{color:var(--ok-text)}
+  .adminproblem.bad{color:var(--overdue-text)}
+  .adminproblem.quiet{color:var(--ink-quiet)}
+  @media (max-width:560px){.placerow button{min-height:44px;padding:8px 14px}}
+
+  /* the jobs card: service-row furniture, the failed rows pressable */
+  .card .count{margin-left:auto;font:10.5px var(--mono);color:var(--ink-quiet)}
+  /* the jobs card fills the empty cell beside public contact; neither card
+     stretches to the other's height */
+  #jobs-card,#jobs-card+.card,.card:has(+#jobs-card){align-self:start}
+  .job{display:flex;align-items:center;gap:9px;width:100%;text-align:left;font:12px var(--mono);
+       color:var(--ink-mid);padding:7px 2px;background:none;border:0;border-bottom:1px solid var(--line-soft);border-radius:0}
+  .job:last-of-type{border-bottom:0}
+  button.job{cursor:pointer}
+  button.job:hover b{color:var(--accent-text)}
+  button.job[aria-expanded=true] b{color:var(--accent-text)}
+  .job i{width:7px;height:7px;border-radius:50%;flex:none}
+  .job b{color:var(--ink);font-weight:500;min-width:7.5em}
+  .job .st{flex:1 0 4.5em}
+  .job .st.bad{color:var(--overdue-text)}
+  .job .st.warn{color:var(--warm-text)}
+  .job small{color:var(--ink-quiet);font-size:10.5px;text-align:right}
+  .jobfoot{font:10.5px var(--mono);color:var(--ink-quiet);padding:10px 2px 0}
+  @media (max-width:560px){
+    #jobs-card .cardhead{flex-wrap:wrap}#jobs-card h3{white-space:nowrap}#jobs-card .count{margin-left:0;flex-basis:100%}
+    .job{flex-wrap:wrap}.job small{flex-basis:100%;text-align:left;padding-left:16px}
+  }
+
+  /* the callout: the account card's own furniture, anchored to the page's
+     right column on the desk; a bottom sheet on the pocket */
+  .callout{position:fixed;z-index:7;width:320px;background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           box-shadow:0 18px 44px rgba(0,0,0,.35)}
+  .callout[hidden]{display:none}
+  .callout .head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+  .callout h4{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-quiet)}
+  .callout .close{margin-left:auto;font:11px var(--mono);color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:4px}
+  .callout .close:hover{color:var(--accent-text)}
+  .callout .state{font:12px var(--mono);color:var(--overdue-text);margin-bottom:8px}
+  .callout p{font:12px/1.6 var(--mono);color:var(--ink-mid)}
+  .callout .meta{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:8px}
+  .callout .acts{display:flex;gap:6px;flex-wrap:wrap;padding:12px 0 0}
+  .callout .acts button{font:10.5px var(--mono);color:var(--ink-mid);background:none;
+        border:1px solid var(--line);border-radius:99px;padding:5px 12px;cursor:pointer}
+  .callout .acts button:hover{border-color:var(--accent);color:var(--accent-text)}
+  .callout .acts button.danger:hover{border-color:var(--overdue);color:var(--overdue-text)}
+  .callout .acts small{flex-basis:100%;font:10.5px/1.5 var(--mono);color:var(--ink-quiet);padding-top:4px}
+  .callout .grab{display:none}
+  @media (max-width:880px){
+    .callout{left:12px;right:12px;bottom:12px;top:auto!important;width:auto;border-radius:18px;
+             animation:rise .25s ease-out}
+    .callout .grab{display:block;width:36px;height:4px;border-radius:2px;background:var(--line);margin:-6px auto 12px}
+    .callout .acts button{min-height:44px;padding:8px 16px}
+    .callout .close{min-height:44px;min-width:44px}
+  }
+  @keyframes rise{from{transform:translateY(12px);opacity:0}}
+  .scrim{position:fixed;inset:0;z-index:6;background:rgba(0,0,0,.25)}
+  .scrim[hidden]{display:none}
+  @media (min-width:881px){.scrim{background:none}}
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
+  </svg>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+
+<a class="back" href="home.html">← YOUR SKY</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">TL</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Tom Lawson</b><span>Lawson Home · owner</span></div>
+  <nav>
+    <a href="inbox.html">Inbox</a>
+    <a href="settings.html">Settings</a>
+    <a href="administration.html" aria-current="page">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button style="background:#060b1c" title="star-chart" aria-pressed="false" onclick="setSwatch('starchart',this)"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="true" onclick="setSwatch('afterdark',this)"></button>
+    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches.
+         CLOUDS joins as its own selectable pack, carrying the lighter end of
+         the range; dawn's dot follows its ground onto the temperature story.
+         Atlas, hanami, porcelain, miami and solarium are on the records shelf —
+         their packs still exist and still render if forced, but they are no
+         longer offered. -->
+    <button style="background:#eef2f9" title="clouds" aria-pressed="false" onclick="setSwatch('clouds',this)"></button>
+    <button style="background:#d2d3d4" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+    <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
+  </div>
+  <button class="signout">sign out →</button>
+</div>
+
+<div class="page">
+  <header class="screen">
+    <h1>Administration</h1>
+    <div class="sub">the instance from above · admins see everything by design · 5 people · 5 systems</div>
+  </header>
+
+  <div class="grid">
+
+    <div class="card">
+      <div class="cardhead"><h3>People</h3><button>invite someone</button></div>
+      <div class="person">
+        <span class="avatar">TL</span>
+        <div class="who"><b>Tom Lawson · you</b><span>tom@lawson.example · in 5 systems</span></div>
+        <span class="role admin">admin</span>
+      </div>
+      <div class="person">
+        <span class="avatar">EL</span>
+        <div class="who"><b>Emma Lawson</b><span>emma@lawson.example · owns 2 systems</span></div>
+        <span class="role">user</span>
+        <button class="place" title="Admins can add any user to any system">place in a system…</button>
+      </div>
+      <div class="person">
+        <span class="avatar">RL</span>
+        <div class="who"><b>Rob Lawson</b><span>rob@lawson.example · in 2 systems</span></div>
+        <span class="role">user</span>
+        <button class="place">place in a system…</button>
+      </div>
+      <div class="person">
+        <span class="avatar">SL</span>
+        <div class="who"><b>Sue Lawson</b><span>sue@lawson.example · owns 1 system</span></div>
+        <span class="role">user</span>
+        <button class="place">place in a system…</button>
+      </div>
+      <div class="person">
+        <span class="avatar">G</span>
+        <div class="who"><b>Gran</b><span>gran@lawson.example · in 1 system</span></div>
+        <span class="role">user</span>
+        <button class="place">place in a system…</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardhead"><h3>Systems</h3><button>new system</button></div>
+      <div class="system">
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+          <circle cx="17" cy="17" r="2.6" style="fill:var(--sun)"/>
+          <circle cx="15.5" cy="20.5" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+          <circle cx="12.8" cy="18.3" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+          <circle cx="14.8" cy="13" r="1.5" style="fill:var(--warm)" opacity=".8"/>
+        </svg>
+        <div class="who"><b>Lawson Home</b><span>2 members · owner Tom Lawson · 6 items</span></div>
+      </div>
+      <div class="system">
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+          <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+          <circle cx="21.7" cy="18.7" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+          <circle cx="13" cy="15.7" r="1.5" style="fill:var(--ok)" opacity=".8"/>
+          <circle cx="16" cy="12.7" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+        </svg>
+        <div class="who"><b>Seaside Cottage</b><span>3 members · owner Emma Lawson · 3 items</span></div>
+      </div>
+      <div class="system">
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+          <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+          <circle cx="20.2" cy="17.7" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+          <circle cx="12.5" cy="16.2" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+        </svg>
+        <div class="who"><b>Mum &amp; Dad’s</b><span>2 members · owner Sue Lawson · 2 items</span></div>
+      </div>
+      <div class="system">
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+          <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+          <circle cx="19.3" cy="18.8" r="1.6" style="fill:var(--upcoming)" opacity=".8"/>
+          <circle cx="13.4" cy="14.4" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+        </svg>
+        <div class="who"><b>The Narrowboat</b><span>1 member · owner Rob Lawson · 2 items</span></div>
+      </div>
+      <div class="system">
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+          <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+          <circle cx="18.5" cy="21.4" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+          <circle cx="14.6" cy="19.6" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+        </svg>
+        <div class="who"><b>Gran’s Flat</b><span>2 members · owner Emma Lawson · 2 items</span></div>
+      </div>
+    </div>
+
+    <!-- #860: one published address, never a real administrator's own mailbox.
+         Read by the sign-in door's third state (#788) with no session at all,
+         so this card is the only place it is ever set. It reuses the card
+         furniture already on this sheet — a head with its one act, and a
+         single key/value row — because it introduces no new visual idea. -->
+    <div class="card">
+      <div class="cardhead"><h3>Public contact</h3><button>set…</button></div>
+      <div class="kv"><span>address</span><b>not set</b></div>
+    </div>
+
+    <!-- #1055 B: the document queue in the grid's empty cell. The rows are
+         the Operations half's own service rows; a failed one is a button
+         that opens the callout. The card never names a document: the
+         operations route returns kind, state, attempts and a bounded reason
+         and nothing else (docs/administrator-operations.md, information
+         boundary). -->
+    <div class="card" id="jobs-card">
+      <div class="cardhead"><h3>Document jobs</h3><span class="count" id="jobs-count">2 failed · 1 retrying · 1 running · 41 done</span></div>
+      <div id="jobs"></div>
+      <div class="jobfoot">the 25 most recently touched jobs; older ones are not kept</div>
+    </div>
+
+    <!-- §15: mail machinery sits WITH operations — one panel, two halves. -->
+    <div class="card wide machinery">
+      <div class="half">
+        <div class="cardhead"><h3>Mail machinery</h3></div>
+        <div class="kv"><span>collection domain</span><b>in.lawson-home.orbit</b></div>
+        <div class="kv"><span>ingest</span><b class="on">enabled · polling every 30s</b></div>
+        <div class="kv"><span>address generation</span><span><b>1</b> · current</span><button>rotate every address</button></div>
+        <div class="kv"><span>unreviewed arrivals</span><b>burn up after 45 days</b></div>
+        <div class="kv"><span>outbound reminders</span><b class="on">configured</b></div>
+        <!-- the two tests as the half's own acts (the shipped route already
+             keeps its mailbox acts in a .placerow here), answering through
+             the one verdict line the shipped route already has -->
+        <div class="placerow">
+          <button id="imap-btn" onclick="runTest('imap')">test this mailbox</button>
+          <button id="smtp-btn" onclick="runTest('smtp')">test the relay</button>
+        </div>
+        <div class="adminproblem quiet" id="verdict" role="status" aria-live="polite"></div>
+      </div>
+
+      <div class="half">
+        <div class="cardhead"><h3>Operations</h3></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy · 40s ago</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy · 40s ago</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-clamav</b><small>healthy · scanning required</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-tika</b><small>running</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running · 12s ago</small></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="strip">ORBIT v1.3.0 · CHANNEL preview · REVISION fd6a7e6 · self-hosted — nothing leaves this machine</div>
+</div>
+
+<footer>orbit · administration · issue #452 · each ring wears its system’s real due-state dots · admins can place anyone (§11) · join requests live in household management only (§15-2g) · mail machinery sits with operations (§15)</footer>
+
+
+<div class="scrim" id="scrim" hidden onclick="closeDetail()"></div>
+<div class="callout" id="callout" role="dialog" aria-labelledby="callout-title" hidden>
+  <div class="grab" aria-hidden="true"></div>
+  <div class="head"><h4 id="callout-title">virus scan · failed</h4><button class="close" onclick="closeDetail()" aria-label="Close">close</button></div>
+  <p>The virus scanner couldn’t be reached, five times over 26 minutes. The upload is held, unscanned, until this succeeds or it is discarded.</p>
+  <div class="meta">attempt 5 of 5 · first tried 32m ago · last tried 6m ago · job 8f3a12c4</div>
+  <div class="acts"><button onclick="retry('j1')">retry</button><button class="danger">discard…</button>
+    <small>Retry queues it as attempt 1 right away. Discard rejects the document and deletes its bytes.</small></div>
+</div>
+
+<nav class="demos" aria-label="Design demo: pick a scene">
+  <span>SCENE</span>
+  <button data-scene="idle" aria-pressed="true">idle</button>
+  <button data-scene="checking" aria-pressed="false">checking</button>
+  <button data-scene="smtp-failed" aria-pressed="false">relay failed</button>
+  <button data-scene="imap-ok" aria-pressed="false">mailbox ok</button>
+  <button data-scene="jobs" aria-pressed="false">jobs</button>
+  <button data-scene="job-detail" aria-pressed="false">job detail</button>
+  <button data-scene="retried" aria-pressed="false">after retry</button>
+</nav>
+<script>
+function toggleAccount(orb){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  orb.setAttribute("aria-expanded", String(open));
+}
+function setSwatch(name, btn){
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of btn.parentElement.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b === btn));
+}
+const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
+(function stars(){
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  const NS = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 95; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.4 + rng() * 0.5).toFixed(2));
+    c.setAttribute("opacity", (0.12 + rng() * 0.23).toFixed(2));
+    far.appendChild(c);
+  }
+  for (let i = 0; i < 46; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.8 + rng() * 0.7).toFixed(2));
+    c.setAttribute("opacity", (0.3 + rng() * 0.4).toFixed(2));
+    near.appendChild(c);
+  }
+})();
+
+/* ── #1055 B demo state ──────────────────────────────────────────────────── */
+const JOBS = [['overdue', 'virus scan', 'failed', 'scanner unreachable · 6m ago', '', 'j1'], ['overdue', 'delete bytes', 'failed', 'deletion failed · 2h ago', '', 'j2'], ['warm', 're-key', 'retrying', 'attempt 2 of 5 · next in 40s', '', 'j3'], ['upcoming', 'virus scan', 'running', 'attempt 1 · 20s ago', '', 'j4'], ['ok', 'virus scan', 'done', '3m ago', '', 'j5'], ['ok', 'encrypt', 'done', '3m ago', '', 'j6']];
+const JOBS_INITIAL = JSON.stringify(JOBS);
+const WORDS = {
+  smtp: { ok: "The relay answered and accepted sign-in · just now", bad: "The relay refused sign-in · just now", busy: "Testing the relay… no message is sent" },
+  imap: { ok: "The mailbox and the relay both answered · just now", bad: "The mailbox didn’t answer · the relay did · just now", busy: "Testing the mailbox and the relay…" },
+};
+function runTest(which) {
+  const btn = document.getElementById(which + "-btn"), out = document.getElementById("verdict");
+  document.querySelectorAll(".placerow button").forEach((b) => { b.disabled = true; });
+  btn.classList.add("busy"); out.className = "adminproblem quiet"; out.textContent = WORDS[which].busy;
+  setTimeout(() => settle(which, which === "smtp" ? "bad" : "ok"), 1400);
+}
+function settle(which, tone) {
+  const out = document.getElementById("verdict");
+  document.querySelectorAll(".placerow button").forEach((b) => { b.disabled = false; b.classList.remove("busy"); });
+  out.className = "adminproblem " + tone + " fade"; out.textContent = WORDS[which][tone];
+}
+function resetTests() {
+  document.querySelectorAll(".placerow button").forEach((b) => { b.disabled = false; b.classList.remove("busy"); });
+  const out = document.getElementById("verdict"); out.className = "adminproblem quiet"; out.textContent = "";
+}
+function jobRow(j, open) {
+  const tone = j[2] === "failed" ? "bad" : j[2] === "retrying" ? "warn" : "";
+  const inner = `<i style="background:var(--${j[0]})" class="${j[2] === "running" ? "spin" : ""}"></i><b>${j[1]}</b>` +
+    `<span class="st ${tone}">${j[2]}${j[4] ? " · " + j[4] : ""}</span><small>${j[3]}</small>`;
+  return j[2] === "failed"
+    ? `<button class="job" aria-expanded="${open}" aria-controls="callout" onclick="openDetail('${j[5]}', this)">${inner}</button>`
+    : `<div class="job">${inner}</div>`;
+}
+let openJob = null;
+function renderJobs() {
+  document.getElementById("jobs").innerHTML = JOBS.map((j) => jobRow(j, openJob === j[5])).join("");
+}
+function openDetail(key, btn) {
+  openJob = key; renderJobs();
+  const c = document.getElementById("callout"), card = document.getElementById("jobs-card").getBoundingClientRect();
+  c.hidden = false; document.getElementById("scrim").hidden = false;
+  if (window.innerWidth > 880) {
+    // beside the card when the sky has room, else tucked onto its right edge
+    const w = c.offsetWidth, left = Math.min(card.right + 18, window.innerWidth - w - 16);
+    c.style.left = left + "px"; c.style.top = (card.top + 4) + "px";
+  }
+  else { c.style.left = ""; c.style.top = ""; }
+  c.querySelector(".close").focus();
+}
+function closeDetail() { openJob = null; renderJobs(); document.getElementById("callout").hidden = true; document.getElementById("scrim").hidden = true; }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openJob) closeDetail(); });
+function retry(key) {
+  const j = JOBS.find((x) => x[5] === key);
+  j[0] = "upcoming"; j[2] = "queued"; j[3] = "attempt 1 · just now"; j[4] = "";
+  document.getElementById("jobs-count").textContent = "1 failed · 1 retrying · 2 running · 41 done";
+  closeDetail();
+}
+function resetJobs() {
+  JOBS.splice(0, JOBS.length, ...JSON.parse(JOBS_INITIAL)); closeDetail();
+  document.getElementById("jobs-count").textContent = "2 failed · 1 retrying · 1 running · 41 done";
+}
+function scene(name) {
+  resetTests(); resetJobs();
+  if (name === "checking") { const b = document.getElementById("smtp-btn"); document.querySelectorAll(".placerow button").forEach((x) => { x.disabled = true; }); b.classList.add("busy"); const out = document.getElementById("verdict"); out.textContent = WORDS.smtp.busy; }
+  if (name === "smtp-failed") settle("smtp", "bad");
+  if (name === "imap-ok") settle("imap", "ok");
+  if (name === "job-detail") openDetail("j1");
+  if (name === "retried") retry("j1");
+  document.querySelectorAll(".demos button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.scene === name)));
+}
+document.querySelector(".demos").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { location.hash = b.dataset.scene; scene(b.dataset.scene); } });
+window.addEventListener("hashchange", () => scene(location.hash.slice(1) || "idle"));
+window.addEventListener("resize", () => { if (openJob) openDetail(openJob); });
+if (location.search.includes("shot")) document.documentElement.classList.add("shot");
+scene(location.hash.slice(1) || "idle");
+</script>
+</body></html>

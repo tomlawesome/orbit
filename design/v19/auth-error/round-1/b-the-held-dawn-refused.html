@@ -1,0 +1,404 @@
+<!doctype html>
+<!--
+  ORBIT · v19 · AUTH ERROR · ROUND 1 · DIRECTION B — THE HELD DAWN, REFUSED
+  #1056 (sign-in did not complete: the failed identity-provider callback)
+  design proposal only · not wired · no commit to app code
+
+  THE IDEA: the sky records that the sign-in did not happen. The reader
+  comes back from the identity provider to the door under the #788 held
+  dawn — first light not yet broken, rays folded, sun dim — with the two
+  lines saying so, and, unlike #788's three states, the pill still there:
+  "Try again". Pressing it goes to the door, whose own first light then
+  plays — so the retry IS the sunrise, exactly as the ratified recovery was.
+
+  THE SECOND FACE, and the reason this direction exists: the one code the
+  callback can send for which a retry is a lie. `account_disabled` means
+  the administrator has disabled this account, and no amount of trying
+  opens the door. That face is a fourth #788 state in every respect —
+  held dawn, no pill rendered, primary line in the ring where the handle
+  stood, subline under it — and it names the administrator plainly, as the
+  ratified table does, never blaming the reader. Every other code
+  (`provider_error`, `invalid_state`, `invalid_request`, `discovery_failed`,
+  `token_exchange_failed`, `invalid_id_token`, `missing_email`,
+  `step_up_failed`, `bootstrap_claimed`, `link_exists`, `instance_locked`,
+  `auth_not_configured`, and anything unknown) is the first face.
+
+  THE HONEST CAUTION: #788 ratified the held sky as the sign that the door
+  CANNOT open, and hid the pill with it. The first face here puts a pill on
+  a held sky, which bends that meaning: a held dawn with a handle. Direction
+  A keeps the ratified meaning intact by not holding the sky at all; this
+  sheet is offered so the two can be compared side by side.
+
+  THE WORDS are fixed Orbit copy in the ratified table's voice (#788, owner
+  2026-09-06). The provider's own error text, the callback's `code` and the
+  internal token-exchange reason appear nowhere; the only thing read off
+  the wire is the public contact address an administrator set, exactly as
+  the shipped "could not open safely" line reads it.
+
+  Artwork is the shipped door verbatim (design/v19/signin-states/round-1/
+  c-the-held-dawn.html's copy of web/src/lib/flight/: Dawn sky, first-light
+  choreography, seeded starfield). Only the state layer differs.
+
+  The demo bar at the foot is sheet furniture, not part of the design.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — sign-in did not complete · B · the held dawn, refused</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{background:#04060e;overflow:hidden;font-family:var(--ui)}
+
+  /* ── the shipped door, verbatim (flight.css dawn subset) ─────────────── */
+  .signin-stage{position:fixed;inset:0;z-index:0;background:#04060e}
+  #dawn{position:fixed;inset:0;z-index:1;opacity:0;transition:opacity .7s ease}
+  #dawn.shown{opacity:1}
+  #dawn .sky{position:absolute;inset:-4%}
+  #dawn .sky svg,#dawn .world svg{position:absolute;inset:0;width:100%;height:100%}
+  #dawn .world{position:absolute;inset:0}
+  #dawn .sky .far{animation:appr 360s linear infinite}
+  #dawn .sky .near{animation:appr 180s linear infinite}
+  @keyframes appr{to{transform:translateX(-1600px)}}
+  #dawn .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
+  @keyframes twinkle{from{opacity:.15}to{opacity:.8}}
+  .dawnlayer{opacity:0;transition:opacity 3s ease}
+  body.lit .dawnlayer{opacity:1}
+  .rim{opacity:0;transition:opacity 2.2s ease .3s}
+  body.lit .rim{opacity:1}
+  .shimmer{stroke-dasharray:3 97;animation:sweep 22s linear infinite;opacity:0;
+           transition:opacity 1.8s ease 1.2s}
+  body.lit .shimmer{opacity:.9}
+  @keyframes sweep{to{stroke-dashoffset:-100}}
+  .sunpt{opacity:0;transition:opacity 3.2s ease .5s}
+  body.lit .sunpt{opacity:1}
+  .sunpt-breathe{animation:breathe-sun 7s ease-in-out infinite alternate}
+  @keyframes breathe-sun{from{opacity:.8}to{opacity:1}}
+  .rays{transform-origin:800px 920px;opacity:0;transform:scale(1,.55);
+        transition:opacity 3.6s ease .9s,transform 4.2s cubic-bezier(.22,.6,.25,1) .9s;
+        mix-blend-mode:screen}
+  body.lit .rays{opacity:1;transform:scale(1,1)}
+  .rays .sway1{transform-origin:800px 920px;animation:sway1 41s ease-in-out infinite alternate}
+  .rays .sway2{transform-origin:800px 920px;animation:sway2 63s ease-in-out infinite alternate}
+  @keyframes sway1{from{transform:rotate(-1.8deg)}to{transform:rotate(2.1deg)}}
+  @keyframes sway2{from{transform:rotate(1.5deg)}to{transform:rotate(-1.3deg)}}
+  .scatter{animation:breathe-band 9s ease-in-out infinite alternate}
+  @keyframes breathe-band{from{opacity:.8}to{opacity:1}}
+  .zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+  @keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
+
+  .loginchrome{position:absolute;inset:0;z-index:3;display:grid;place-items:center}
+  .loginchrome .lockup{position:relative;display:inline-grid;place-items:center;text-align:center}
+  .loginchrome .lockup .glyph{grid-area:1/1;line-height:0}
+  .loginchrome .lockup .glyph .tr{animation:spinback 40s linear infinite;transform-origin:100px 100px}
+  @keyframes spinback{to{transform:rotate(360deg)}}
+  .loginchrome .lockup .name{grid-area:1/1;font:600 72px var(--display);
+        letter-spacing:.015em;line-height:1;color:#e9edf8}
+  .gate-wrap{grid-area:1/1;align-self:center;justify-self:center;transform:translateY(74px)}
+  .gate{font:600 12px var(--display);color:#04060e;background:#d8b45a;
+        border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
+        letter-spacing:.04em;line-height:normal;
+        box-shadow:0 0 28px rgba(216,180,90,.22);
+        opacity:0;transform:translateY(10px);
+        transition:opacity 1.6s ease 3.6s,transform 1.6s ease 3.6s,
+                   filter .35s ease,box-shadow .3s ease}
+  body.lit[data-state=door] .gate{opacity:1;transform:none}
+  .gate:hover{filter:brightness(1.08)}
+  .gate.flash{filter:brightness(1.25);box-shadow:0 0 0 6px rgba(216,180,90,.22),0 0 60px rgba(216,180,90,.6)}
+  /* while sign-in is unavailable the button is NOT rendered reachable */
+  body:not([data-state=door]) .gate-wrap{display:none}
+  /* recovery: NO quick-entrance override here — in this direction the
+     ratified 3.6s first-light hold is replayed deliberately, so the pill
+     arrives on the sunrise's own beat while the sky brightens under it */
+
+  /* ── DIRECTION B: the held dawn, refused ─────────────────────────────────────────
+     `data-state=incomplete` is the one state in the family where the pill
+     STAYS: the shipped rule hides `.gate-wrap` for every non-door state, and
+     this one rule puts it back for this state alone. The pill's entrance is
+     the ratified one (1.6s ease, 3.6s after first light) — the mark holds
+     the screen alone first, as it does on every arrival at the door. */
+  body[data-state=incomplete] .gate-wrap{display:block}
+  body.lit[data-state=incomplete] .gate{opacity:1;transform:none}
+
+  /* the words: both under the ring. The pill keeps the ratified slot inside
+     the ring, and a 14px display line does not fit between the pill and the
+     ring's line (tried at +111px: the full stop sat on the stroke), so the
+     primary line takes the ratified subline's slot (+174px) and the subline
+     follows it 32px down. */
+  .state{grid-area:1/1;width:100%;height:100%;position:relative;pointer-events:none}
+  body[data-state=door] .state{display:none}
+  .state-primary{position:absolute;left:50%;top:calc(50% + 172px);transform:translateX(-50%);
+        width:max-content;max-width:250px;text-align:center;
+        font:600 14px var(--display);letter-spacing:.01em;color:#cfd3e4;
+        opacity:0;transition:opacity 1.4s ease 4.1s}
+  .state-sub{position:absolute;left:50%;top:calc(50% + 204px);transform:translateX(-50%);
+        width:340px;max-width:78vw;text-align:center;
+        font:10.5px var(--mono);color:#8791b3;line-height:1.75;letter-spacing:.04em;
+        opacity:0;transition:opacity 1.4s ease 4.4s}
+  body.lit .state-primary,body.lit .state-sub{opacity:1}
+  /* a demo-bar switch should not replay the first-light hold */
+  body.switched .state-primary{transition-delay:.15s}
+  body.switched .state-sub{transition-delay:.3s}
+  body.switched .gate{transition-delay:.15s}
+  /* leaving for the door: the words exhale as the gate flashes */
+  body.returning .state-primary,body.returning .state-sub{
+        opacity:0!important;transition:opacity .7s ease!important}
+
+  /* ── the held dawn, verbatim from #788 direction C (the ratified sheet),
+     applied to both faces. Only opacities the lit sequence already animates
+     are touched; their own shipped transitions carry every change. */
+  body.lit[data-state=incomplete] .dawnlayer,
+  body.lit[data-state=refused] .dawnlayer{opacity:.32}
+  body.lit[data-state=incomplete] .rays,
+  body.lit[data-state=refused] .rays{opacity:0}
+  body.lit[data-state=incomplete] .sunpt,
+  body.lit[data-state=refused] .sunpt{opacity:.38}
+  body.lit[data-state=incomplete] .shimmer,
+  body.lit[data-state=refused] .shimmer{opacity:.35}
+  /* the refused face is a fourth #788 state: no pill (the shipped rule
+     already hides `.gate-wrap` for it), and the words in the ratified
+     state layer's own slots — primary in the ring where the handle stood,
+     subline under the ring. */
+  body[data-state=refused] .state-primary{top:calc(50% + 64px);transition-delay:3.6s}
+  body[data-state=refused] .state-sub{top:calc(50% + 174px);transition-delay:3.9s}
+  body.switched[data-state=refused] .state-primary{transition-delay:.15s}
+  body.switched[data-state=refused] .state-sub{transition-delay:.3s}
+
+  /* ── sheet furniture: demo bar (not part of the design) ──────────────── */
+  .demos{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:9;
+        display:flex;gap:4px;align-items:center;white-space:nowrap;
+        font:10px var(--mono);color:#737e9e;letter-spacing:.1em;
+        background:rgba(4,6,14,.6);border:1px solid #17203f;border-radius:99px;
+        padding:5px 12px;backdrop-filter:blur(4px)}
+  .demos span{margin-right:4px}
+  .demos button{font:10px var(--mono);letter-spacing:.06em;color:#8791b3;background:none;
+        border:1px solid transparent;border-radius:99px;padding:4px 9px;cursor:pointer}
+  .demos button:hover{color:#e9edf8}
+  .demos button[aria-pressed=true]{color:#d8b45a;border-color:rgba(216,180,90,.35)}
+  @media (max-width:560px){.demos{letter-spacing:.02em;padding:4px 8px;
+        flex-wrap:wrap;justify-content:center;border-radius:14px;
+        max-width:calc(100vw - 16px)}
+        .demos span{display:none}.demos button{padding:3px 6px}}
+
+  /* film grain, as the door wears it */
+  .grain{position:fixed;inset:0;width:100%;height:100%;z-index:7;pointer-events:none;opacity:.05}
+
+  /* ── reduced motion: the story stays, the movement goes ──────────────── */
+  @media (prefers-reduced-motion: reduce){
+    #dawn *{animation:none!important}
+    .dawnlayer,.rim,.shimmer,.sunpt,.rays,.gate,.state-primary,.state-sub{
+        transition-duration:.4s!important;transition-delay:0s!important}
+    .rays{transform:scale(1,1)}
+    .state-primary{animation:none!important}
+  }
+</style>
+</head>
+<body data-state="incomplete">
+
+<div class="signin-stage" aria-hidden="true"></div>
+<div id="dawn" class="shown">
+  <div class="sky" aria-hidden="true"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="#e9edf8"><g id="lg-far"></g><use href="#lg-far" x="1600"/></g>
+    <g class="near" fill="#f4f0ff"><g id="lg-near"></g><use href="#lg-near" x="1600"/></g>
+  </svg></div>
+  <div class="world" aria-hidden="true"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <filter id="b2l" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1640" height="1040"><feGaussianBlur stdDeviation="2"/></filter>
+      <filter id="b6l" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1680" height="1080"><feGaussianBlur stdDeviation="6"/></filter>
+      <filter id="b12l" filterUnits="userSpaceOnUse" x="-60" y="-60" width="1720" height="1120"><feGaussianBlur stdDeviation="12"/></filter>
+      <filter id="b20l" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1200"><feGaussianBlur stdDeviation="20"/></filter>
+      <filter id="rayrough" x="-30%" y="-30%" width="160%" height="160%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.004 0.03" numOctaves="2" seed="9" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="22"/><feGaussianBlur stdDeviation="17"/>
+      </filter>
+      <radialGradient id="zod" cx="50%" cy="88%" r="75%">
+        <stop offset="0%" stop-color="#f6d489" stop-opacity=".13"/>
+        <stop offset="55%" stop-color="#e8b25e" stop-opacity=".045"/>
+        <stop offset="100%" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="rayg" x1="0" y1="1" x2="0" y2="0">
+        <stop offset="0%" stop-color="#ffe4a8" stop-opacity=".26"/>
+        <stop offset="55%" stop-color="#f4c05a" stop-opacity=".07"/>
+        <stop offset="100%" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="rimg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#ffd989"/><stop offset="100%" stop-color="#e2772b"/>
+      </linearGradient>
+      <radialGradient id="sun-core" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#ffffff"/>
+        <stop offset="35%" stop-color="#ffedc2" stop-opacity=".85"/>
+        <stop offset="100%" stop-color="#ffe9c4" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="sun-mid" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#f8c95e" stop-opacity=".55"/>
+        <stop offset="60%" stop-color="#f0b429" stop-opacity=".18"/>
+        <stop offset="100%" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="sun-wide" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#e2772b" stop-opacity=".3"/>
+        <stop offset="55%" stop-color="#c2571f" stop-opacity=".12"/>
+        <stop offset="100%" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="skywash" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-opacity="0"/>
+        <stop offset="62%" stop-color="#3d2a4d" stop-opacity=".12"/>
+        <stop offset="86%" stop-color="#a2492a" stop-opacity=".2"/>
+        <stop offset="100%" stop-color="#e2772b" stop-opacity=".26"/>
+      </linearGradient>
+    </defs>
+    <g class="dawnlayer">
+      <rect x="0" y="0" width="1600" height="1000" fill="url(#skywash)"/>
+      <ellipse class="zodiacal" cx="800" cy="640" rx="300" ry="480" fill="url(#zod)" filter="url(#b20l)"/>
+      <g class="rays">
+        <g class="sway1" fill="url(#rayg)" filter="url(#rayrough)">
+          <path d="M 800 924 L 736 356 L 772 362 Z"/>
+          <path d="M 800 924 L 852 528 L 892 548 Z"/>
+          <path d="M 800 924 L 508 620 L 556 588 Z"/>
+          <path d="M 800 924 L 1096 448 L 1052 428 Z"/>
+          <path d="M 800 924 L 320 690 L 360 646 Z" opacity=".8"/>
+          <path d="M 800 924 L 1290 670 L 1244 630 Z" opacity=".8"/>
+        </g>
+        <g class="sway2" fill="url(#rayg)" filter="url(#rayrough)" opacity=".7">
+          <path d="M 800 924 L 646 404 L 680 390 Z"/>
+          <path d="M 800 924 L 962 560 L 928 544 Z"/>
+          <path d="M 800 924 L 404 610 L 448 574 Z"/>
+          <path d="M 800 924 L 1200 596 L 1156 562 Z"/>
+        </g>
+      </g>
+      <g class="scatter">
+        <circle cx="800" cy="3920" r="3122" fill="none" stroke="#7a2c18" stroke-opacity=".1" stroke-width="150" filter="url(#b20l)"/>
+        <circle cx="800" cy="3920" r="3060" fill="none" stroke="#e2772b" stroke-opacity=".16" stroke-width="84" filter="url(#b20l)"/>
+        <circle cx="800" cy="3920" r="3026" fill="none" stroke="#f0b429" stroke-opacity=".28" stroke-width="34" filter="url(#b12l)"/>
+        <circle cx="800" cy="3920" r="3010" fill="none" stroke="#ffd989" stroke-opacity=".4" stroke-width="12" filter="url(#b6l)"/>
+        <circle cx="800" cy="3920" r="3003" fill="none" stroke="#fff3d6" stroke-opacity=".65" stroke-width="4" filter="url(#b2l)"/>
+      </g>
+      <g class="sunpt">
+        <g class="sunpt-breathe">
+          <circle cx="800" cy="922" r="520" fill="url(#sun-wide)"/>
+          <circle cx="800" cy="922" r="240" fill="url(#sun-mid)"/>
+          <circle cx="800" cy="920" r="86" fill="url(#sun-core)"/>
+          <circle cx="800" cy="919" r="20" fill="#fffdf6" filter="url(#b6l)"/>
+        </g>
+        <path d="M 560 934 A 3000 3000 0 0 1 1040 934" fill="none" stroke="#ffedc2"
+              stroke-width="3" stroke-linecap="round" opacity=".7" filter="url(#b2l)"/>
+      </g>
+    </g>
+    <circle cx="800" cy="3920" r="3000" fill="#04060e"/>
+    <circle class="rim" cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg)"
+            stroke-width="6" stroke-opacity=".35" filter="url(#b6l)"/>
+    <circle class="rim" cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg)"
+            stroke-width="2.4" stroke-opacity=".85"/>
+    <circle class="shimmer" pathLength="100" cx="800" cy="3920" r="3000" fill="none"
+            stroke="#fff6e6" stroke-width="3.4" stroke-linecap="round"/>
+  </svg></div>
+
+  <div class="loginchrome">
+    <div class="lockup">
+      <div class="glyph"><svg width="420" height="420" viewBox="0 0 200 200" aria-hidden="true">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="2"/>
+        <g class="tr"><circle cx="163" cy="63.5" r="7" fill="#d8b45a"/></g></svg></div>
+      <div class="name">orbit</div>
+      <div class="gate-wrap"><button class="gate" id="gate">Try again</button></div>
+      <div class="state" role="status" aria-live="polite">
+        <div class="state-primary" id="sp"></div>
+        <div class="state-sub" id="ss"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<svg class="grain" aria-hidden="true"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="2"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .5 0"/></filter><rect width="100%" height="100%" filter="url(#gr)"/></svg>
+
+<nav class="demos" aria-label="Design demo: pick a scene">
+  <span>SCENES</span>
+  <button data-s="incomplete" aria-pressed="true">didn’t complete</button>
+  <button data-s="refused" aria-pressed="false">refused (account disabled)</button>
+  <button data-s="refused-noaddr" aria-pressed="false">refused · no address set</button>
+  <button data-s="door" aria-pressed="false">the door</button>
+</nav>
+
+<script>
+/* the shipped field exactly: one Park-Miller stream, seed 17170812, same order */
+(function(){
+  let s=17170812%2147483647; if(s<=0)s+=2147483646;
+  const rnd=()=> (s=s*48271%2147483647)/2147483647;
+  function tile(n,rMin,rSpan,oMin,oSpan,tw){
+    const out=[];
+    for(let i=0;i<n;i++){
+      const st={cx:(rnd()*1600).toFixed(1),cy:(rnd()*1000).toFixed(1),
+                r:(rMin+rnd()*rSpan).toFixed(2),o:(oMin+rnd()*oSpan).toFixed(2),d:null};
+      if(tw&&i%6===0)st.d=(rnd()*5.6).toFixed(1);
+      out.push(st);
+    }
+    return out;
+  }
+  const FAR=tile(100,.4,.5,.10,.25,true), NEAR=tile(44,.8,.8,.35,.35,false);
+  const NS='http://www.w3.org/2000/svg';
+  function draw(list,el,tw){
+    for(const st of list){
+      const c=document.createElementNS(NS,'circle');
+      c.setAttribute('cx',st.cx);c.setAttribute('cy',st.cy);
+      c.setAttribute('r',st.r);c.setAttribute('opacity',st.o);
+      if(tw&&st.d!==null){c.setAttribute('class','tw');c.style.animationDelay=st.d+'s'}
+      el.appendChild(c);
+    }
+  }
+  draw(FAR,document.getElementById('lg-far'),true);
+  draw(NEAR,document.getElementById('lg-near'),false);
+})();
+
+/* ── the state's fixed wording — Orbit's own; nothing the provider or the
+      callback sent reaches this page. The address is the public contact
+      address an administrator sets (#860), read exactly as the shipped
+      "could not open safely" line reads it; with none set, the sentence is
+      dropped, as the owner ruled for that line on 2026-09-06 ──────────── */
+const ADDRESS="tom@example.com";
+const STATES={
+  "incomplete":{st:"incomplete",p:"Sign-in didn’t complete.",
+                s:"Nothing was changed. If it keeps happening, let us know at "+ADDRESS+"."},
+  "refused":{st:"refused",p:"Sign-in was refused.",
+             s:"The administrator has disabled this account. If that’s a surprise, let us know at "+ADDRESS+"."},
+  "refused-noaddr":{st:"refused",p:"Sign-in was refused.",
+             s:"The administrator has disabled this account."}
+};
+const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const body=document.body,sp=document.getElementById('sp'),ss=document.getElementById('ss');
+
+function setState(st,first){
+  body.classList.remove('returning');
+  if(!first)body.classList.add('switched');
+  body.dataset.state=STATES[st]?STATES[st].st:'door';
+  if(STATES[st]){sp.textContent=STATES[st].p;ss.textContent=STATES[st].s}
+  else{sp.textContent='';ss.textContent=''}
+  document.querySelectorAll('.demos button').forEach(b=>
+    b.setAttribute('aria-pressed',String(b.dataset.s===st)));
+  document.getElementById('gate').textContent=STATES[st]?'Try again':'Sign in';
+}
+document.querySelector('.demos').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(b)setState(b.dataset.s,false);
+});
+/* the one action: back to the door. In the product this is a navigation to
+   /login (the gate's own 420 → 900ms flash, then the hand-over); here the
+   sheet plays the same beat and shows the door it lands on. */
+document.getElementById('gate').addEventListener('click',e=>{
+  const g=e.currentTarget;g.classList.add('flash');
+  if(body.dataset.state==='incomplete'){
+    body.classList.add('returning');
+    setTimeout(()=>{g.classList.remove('flash');setState('door',false)},RM?200:900);
+  }else setTimeout(()=>g.classList.remove('flash'),700);
+});
+
+setState('incomplete',true);
+/* first light, as the door does it */
+requestAnimationFrame(()=>setTimeout(()=>body.classList.add('lit'),180));
+</script>
+</body>
+</html>

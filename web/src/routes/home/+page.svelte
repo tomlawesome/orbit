@@ -14,7 +14,7 @@
   import { markDoor } from "../household/[id]/door.js";
   import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin, signOut } from "$lib/data/workspace.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, money } from "$lib/format.js";
+  import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
@@ -137,6 +137,33 @@
        over home. A fixture waits for the household to arrive first, so the
        beats after the landing have a dial to land on. */
     if (launching && !fixtureFlight) flight?.ascend();
+  });
+
+  /* ---- A REFUSED SIGN-IN, SAID ONCE (#1033, ADR-0027 consequences) -------
+   * Somebody pressed "This wasn't me" on an approval mail, so nobody got in
+   * — and somebody knew this account's password. The sky is where that is
+   * said, because it is the first thing the account holder sees after the
+   * sign-in that DID work, and it is said in one line with the one action
+   * that answers it: change the password.
+   *
+   * Asking takes it, so it appears once and does not follow the reader
+   * around; never asked under fixtures, because a refusal is a real event on
+   * a real account and the fidelity gate must not photograph one.
+   */
+  /** @type {string | null} */
+  let refusedAt = $state(null);
+  onMount(async () => {
+    if (data?.fixtures) return;
+    try {
+      const response = await fetch("/api/auth/sign-in-notice", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) return;
+      refusedAt = (await response.json())?.notice?.deniedAt ?? null;
+    } catch {
+      /* A notice that cannot be read is a notice not shown. It is still
+         unstamped, so the next load says it instead — which is the right way
+         round for something worth saying at all. */
+      refusedAt = null;
+    }
   });
   async function driveFixture() {
     if (!fixtureFlight) return;
@@ -558,7 +585,40 @@
     /** @type {(() => void) | null} */
     let teardown = null;
     let disposed = false;
-    const sync = () => {
+
+    /* ---- #1064: HOME IS DRAWN LONG BEFORE IT CAN ANSWER -------------------
+     * The server renders home whole (#842) — the dial, the corridor, the
+     * avatar and the menu under it — but nothing on it answers a press until
+     * readHome() below has resolved and sync() has bound the behaviour. A
+     * press on the account orb inside that window lands on markup with no
+     * listener on it and is dropped, and nothing replays it: the panel simply
+     * never opens. That is the fault #856 fixed on /create, where the first
+     * keystroke was lost the same way, and it takes the same two answers —
+     * catch up on the press nobody was listening for, and say out loud when
+     * the screen went live.
+     */
+    /** @type {HTMLElement | null} */
+    let missedPress = null;
+    /** @param {Event} event */
+    const rememberPress = (event) => {
+      const target = event.target;
+      if (target instanceof Element)
+        missedPress = /** @type {HTMLElement | null} */ (target.closest("button.orb, #morb"));
+    };
+    /* Capture phase, so the press is recorded before anything else can stop
+       it. A keyboard reader is recorded here too: both dialects' toggles are
+       real <button>s, so Enter and Space fire a click of their own. */
+    document.addEventListener("click", rememberPress, { capture: true });
+    const stopRemembering = () => document.removeEventListener("click", rememberPress, { capture: true });
+    const applyMissedPress = () => {
+      stopRemembering();
+      /* The last press wins: two presses before the screen was live are one
+         reader pressing a second time because the first did nothing. */
+      if (missedPress?.isConnected) missedPress.click();
+      missedPress = null;
+    };
+
+    const mountDialect = () => {
       teardown?.();
       /* §11 (#453): no household means the labelled sky in either dialect —
          same bearings, label only, click to ask. */
@@ -608,6 +668,16 @@
             },
           });
     };
+    const sync = () => {
+      delete document.body.dataset.homeReady;
+      mountDialect();
+      /* `body[data-home-ready]` is the observable moment home's listeners
+         exist, so a reader — or a test — can wait for the screen to be ABLE
+         to answer rather than for markup the server already sent. Set last,
+         after every listener above is attached, and taken away again whenever
+         the screen is torn down or re-mounted into the other dialect. */
+      document.body.dataset.homeReady = "true";
+    };
     /* The home view comes through the seam, live (#451). onMount must stay
        synchronous — an async callback's return value is discarded, which
        would leak every listener the teardown exists to remove — so the read
@@ -619,6 +689,9 @@
       await tick();
       if (disposed) return;
       sync();
+      /* Now that it can answer, answer the press that arrived while it could
+         not (#1064). Before openFromAddress() below, because it came first. */
+      applyMissedPress();
       resync = sync;
       query.addEventListener("change", sync);
       /* #424: the address may already name a row. Do it before the scroll
@@ -633,8 +706,10 @@
     });
     return () => {
       disposed = true;
+      stopRemembering();
       query.removeEventListener("change", sync);
       teardown?.();
+      delete document.body.dataset.homeReady;
     };
   });
 </script>
@@ -670,6 +745,16 @@
 <div class="desk" class:arrive role="main">
 <!-- #843: sr-only, since the wordmark and dial carry the title visually. -->
 <h1 class="sr-only">Orbit</h1>
+<!-- THE REFUSAL LINE (#1033). Above everything, because it is the one thing
+     on this screen that is about the reader rather than about their things,
+     and it is gone the moment they have read it: nothing dismisses it,
+     because asking for it already spent it. -->
+{#if refusedAt}
+  <p class="refused" role="status">
+    A sign-in with your password was refused {agoLong(refusedAt, new Date().toISOString())}.
+    Nobody got in — <a href={resolve("/settings")}>change your password</a>.
+  </p>
+{/if}
 <!-- ══ THE SKY WAVE (§15, the v1.3.0 roster) ═════════════════════════════════
      Three packs gained their own sky in the same batch, and every layer below
      belongs to exactly one of them. All of them live INSIDE .desk, which is

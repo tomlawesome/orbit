@@ -5,6 +5,12 @@ so the next step can name what to change instead of guessing. Nothing about
 the animation — its timing, easing, transforms or geometry — was touched to
 get these numbers.
 
+Where it runs, since #1048: the `launch_timing` CI job at the `dev` →
+`preview` promotion, not the per-merge-request `fidelity` gate, because the
+noise on a shared machine was larger than the effect. Each promotion's numbers
+are kept as that job's artefact and the next promotion is printed beside them.
+Locally it is `pnpm --filter orbit-web launch-timing`.
+
 ## What "the launch" is
 
 The create card's hand-off into the flight (`Arrival.svelte`'s `submit()`):
@@ -125,3 +131,83 @@ step 2's call, informed by these numbers, not this step's.
   the outcome a reader perceives, not a trace of what produced each one. A
   DevTools Protocol trace would be the next tool to reach for if the frame
   numbers alone are not enough to choose a fix.
+
+## Step 2: what was fixed, and what the re-measurement shows (#873)
+
+**In scope, and fixed.** The second implicated cause — `engine.js`'s canvas
+renderer allocating a fresh `CanvasGradient` or a fresh path (`beginPath()` +
+`arc()`/`moveTo()`/`lineTo()`) for every prop, on every single frame that prop
+was on screen — is real and was cut. `penCraft`'s wake gradient, `penComet`'s
+tail and head gradients, `penSystem`'s three ring arcs and sun dot, and
+`penGraticule`'s arcs and spokes are now built once (their local coordinates
+and colour stops never vary run to run) and reused every frame via cached
+`Path2D`/`CanvasGradient` objects; a fourth change skips the nebula's
+full-canvas gradient fill on the fraction of its cycle where the computed
+alpha is provably zero. None of this touches the 620ms handover, the 302.4px
+landing, any beat in `timeline.js`, or what the flight draws — same geometry,
+same colours, same schedule, only the allocation cut.
+
+**Verified pixel-safe, not just argued safe.** Canvas gradients and paths are
+resolved against whatever transform is active when they are drawn, not baked
+in at creation, so reusing one built once should paint identical pixels to
+rebuilding it fresh — but "should" was checked rather than trusted. Screenshots
+of the pinned ascent (`/home?flight=up&at=<ms>`, the app's own fixture pin) at
+six timestamps spanning the whole prop schedule were captured before and after
+the change and diffed with `pixelmatch`. The first pass caught a real bug this
+way: three graticule arcs sharing one `Path2D` without a `moveTo` between them
+drew unwanted connecting lines, a genuine content difference (up to 1123 of
+1.6M pixels). Fixed by giving each arc its own `moveTo` to its start point,
+matching the original's three independent `stroke()` calls. After that fix the
+before/after diff (0-41 of 1,600,000 pixels per frame) was checked against a
+control — the same fixed build screenshotted twice — which showed the same
+pipeline's own run-to-run noise floor is 0-189 pixels. The fix's measured
+effect does not exceed that noise floor, and no fidelity baseline in
+`screens.spec.js` covers this mid-flight canvas state at all (it only
+photographs the settled login/logout end states), so there was nothing to
+regress against; this before/after check is the only pixel evidence that
+exists for this path.
+
+**Was out of scope, now fixed — the compensated split.** The first implicated
+cause — `ringcard.css`'s `.bigring .ringglass` transitioning `width`/`height`
+directly (500px → 302.4px) rather than a `transform: scale()`, which forced
+layout and, with that box's `backdrop-filter`, a full backdrop re-blur on every
+frame of the reclaim — was left untouched by the flight-side change above and
+has since been fixed on its own (#873, note 17341: worst-case paint 0.97ms
+against the 7.06ms measured before).
+
+The ring is now two boxes rather than one. `.ringglass` keeps the fill, the
+backdrop blur and the shadow, carries no border, and closes by
+`transform: scale(.6048)`, which the compositor runs without a layout pass;
+`.ringstroke` is a new plain box carrying the 4.2px line alone, unblurred, and
+still closes by `width`/`height` so the line cannot thin. `.ringorbit` is
+unchanged. Scaling the whole ring instead was rejected: it thins the stroke and
+drifts the orb. Timings, easing, the 620ms hand-over and the 302.4px landing
+are all exactly as ratified — only which part of the pipeline does the work
+changed.
+
+**Re-measured with the same harness, five packs, one run each, same command,
+same shared container:**
+
+| pack | create-phase frames | create max interval | create mean interval | home-phase frames | home max interval | home mean interval |
+|---|---|---|---|---|---|---|
+| starchart | 12 | 100.1ms | 90.0ms | 11 | 283.3ms | 178.8ms |
+| afterdark | 9 | 100.0ms | 76.4ms | 9 | 350.0ms | 218.5ms |
+| clouds | 9 | 116.7ms | 96.8ms | 11 | 300.0ms | 174.2ms |
+| dawn | 10 | 166.6ms | 95.0ms | 10 | 283.4ms | 193.3ms |
+| retrograde | 10 | 133.4ms | 84.2ms | 9 | 266.6ms | 201.8ms |
+
+**This does not show a clean win, and that is reported rather than smoothed
+over.** Some home-phase means improved (clouds: 190.0 → 174.2); others got
+worse (dawn: 158.3 → 193.3, retrograde: 185.0 → 201.8, afterdark's max ticked
+up from 349.9 to 350.0). The tell is the **create-phase** column: the reclaim
+is pure CSS on a different page, nothing in this change touches it, yet its
+numbers moved by amounts comparable to the home-phase moves (starchart's
+create max fell from 166.6ms to 100.1ms with zero code change on that path).
+That is only explicable as the same shared-container noise the original
+measurement already flagged (other agents building and testing concurrently
+in sibling worktrees of this repository), swamping whatever this fix
+contributes. The fix is real, in scope and verified not to change any pixel
+beyond the pipeline's own noise floor, but this re-measurement cannot honestly
+be read as proof the launch is now smoother — only that the named, in-scope
+cause was addressed. A clean before/after would need an idle, dedicated
+machine, which this container is not.

@@ -226,6 +226,8 @@
   let methods = $state(/** @type {Awaited<ReturnType<typeof readSignInMethods>> | null} */ (null));
   /** Whether this instance has a provider at all — no provider, no offer to link. */
   let providerOffered = $state(false);
+  /** #1033: whether a password sign-in here is finished by an emailed approval. */
+  let emailApproval = $state(false);
   /** @type {string | null} */
   let methodsProblem = $state(null);
   /**
@@ -451,9 +453,10 @@
       const wanted = parameters.get("signin") ?? "both";
       methods = /** @type {any} */ (SIGN_IN_METHODS_FIXTURES)[wanted] ?? SIGN_IN_METHODS_FIXTURES.both;
       providerOffered = true;
+      emailApproval = true;
     } else {
       try {
-        [methods, { oidc: providerOffered }] = await Promise.all([
+        [methods, { oidc: providerOffered, secondFactor: emailApproval }] = await Promise.all([
           readSignInMethods(),
           readAuthMethodsOffered(),
         ]);
@@ -569,6 +572,32 @@
           {/if}
         {/if}
 
+        <!-- THE SECOND FACTOR, WHICH NOBODY CHOOSES (#1033, ADR-0027 §1-§2).
+             It sits among the methods because that is where a reader looks to
+             find out how they get in, and it carries no control at all: there
+             is no per-user switch and no remembered browser. The one thing
+             that moves it is the instance having a mail relay, and the screen
+             says which of the two it is plainly -- an instance with no relay
+             has a password and nothing else, and a reader is owed that fact
+             rather than a promise of a factor that is not running.
+
+             THE ROW IS THE WHOLE OF IT, and no paragraph under it (Fable's
+             composition call, 2026-09-19). `.note` on this screen is the
+             problem-notice slot -- methodsProblem, reminderProblem,
+             revokeProblem all land in one -- so prose in a `.note` here would
+             read as something having gone wrong. The row states the fact; why
+             it works the way it does is in docs/authentication.md and
+             ADR-0027, where somebody asking that question is already looking. -->
+        <div class="kv">
+          <span>email approval</span>
+          <span class="method">
+            {#if emailApproval}
+              <b>on · every password sign-in</b>
+            {:else}
+              <b>off · this instance has no mail relay configured</b>
+            {/if}
+          </span>
+        </div>
         {#if methodOutcome}<div class="note ok">{methodOutcome}</div>{/if}
       {/if}
       {#if methodsProblem}<div class="note">{methodsProblem}</div>{/if}

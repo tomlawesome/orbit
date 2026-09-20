@@ -183,6 +183,63 @@ variables:
   corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
   pnpm config set store-dir .pnpm-store
 
+# The Trivy vulnerability database, shared across the three scanner jobs
+# (`supply_chain_source`, `sidecar_images`, `supply_chain_image`) instead of
+# downloaded fresh by each of them on every pipeline (#946, owner ruling on
+# #923 rec 18, 2026-09-09; #923 finding 6c measured ~111 MB and ~9 s per job
+# per pipeline). A GitLab `cache:` under one fixed key, dated inside by the
+# job rather than by the key: each job looks for a subdirectory named for
+# today's UTC date, and downloads only when that is missing.
+#
+# The date is the whole invalidation story: a database more than about a day
+# stale is a worse failure mode than a slow download (#810 is exactly a
+# scanner trusted past the point it could still see), and a calendar-day
+# boundary happens to match Trivy's own update cadence. Whatever is there
+# from an earlier day is removed before downloading, so the cache holds one
+# day's snapshot, never an accumulating history. A cold miss -- first run of
+# a new day, or an empty/expired cache -- costs exactly what every run costs
+# today: nothing here can fail the job on its own, only fall back to the
+# unwarmed download `*apk_retry`/`trivy` would have done anyway.
+#
+# Shared by one literal key rather than scoped per branch, the same trust
+# model the `.pnpm-store` cache above already uses: this project takes no
+# external fork merge requests, so nothing untrusted can poison it.
+.trivy_db_cache: &trivy_db_cache
+  key: trivy-vulnerability-db
+  paths:
+    - .trivy-db-cache
+
+# The directory bookkeeping alone, shared by all three jobs: points
+# TRIVY_CACHE_DIR at today's subdirectory, pruning anything left from an
+# earlier day first. Absolute (`$CI_PROJECT_DIR`, not a relative path),
+# because `supply_chain_image` hands it to `docker run --volume`, which
+# refuses a relative bind-mount source; the other two run trivy natively and
+# an absolute path costs them nothing.
+#
+# Split from the download below because `supply_chain_image` never runs a
+# local trivy binary at all -- it scans through `docker run` inside
+# scripts/ci/scan-image.sh, and that trivy, run without `--skip-db-update`,
+# already downloads into whatever TRIVY_CACHE_DIR points at when it finds no
+# current database there. Nothing here needs to invoke trivy a second time.
+.trivy_db_dir: &trivy_db_dir |
+  trivy_db_dir="$CI_PROJECT_DIR/.trivy-db-cache/$(date -u +%Y-%m-%d)"
+  if [ ! -d "$trivy_db_dir" ]; then
+    rm -rf "$CI_PROJECT_DIR/.trivy-db-cache"
+    mkdir -p "$trivy_db_dir"
+  fi
+  export TRIVY_CACHE_DIR="$trivy_db_dir"
+
+# The download itself, for the two jobs that run the trivy CLI directly
+# (`supply_chain_source`, `sidecar_images`). Put after `*trivy_db_dir` in a
+# job's `script:`; a cold miss -- first run of a new day, or an
+# empty/expired cache -- costs exactly what every run cost before #946:
+# nothing here can fail the job on its own, only fall back to the unwarmed
+# download trivy would have done anyway.
+.trivy_db_warm: &trivy_db_warm |
+  if [ ! -e "$TRIVY_CACHE_DIR/db/trivy.db" ]; then
+    trivy image --download-db-only
+  fi
+
 # Which events reach the expensive lanes. `ORBIT_SYSTEM` arrives as a dotenv
 # variable from `classify`, and GitLab cannot gate `rules` on one, so the
 # reach test lives in the job body and a job that is out of reach reports
@@ -318,10 +375,16 @@ variables:
 
 # The same wait, for the two jobs that already took `fast`'s artefacts, and
 # that still wait on the policy jobs (#945 did not touch this anchor).
+#
+# `artifacts: true` is spelled out rather than left to the default since #1061:
+# `fast` now publishes the built web application here, and `fidelity` serves it
+# rather than building its own. A `needs:` that stopped delivering artefacts
+# would not fail — the gate would quietly rebuild — so the delivery says so.
 .needs_gated_with_fast_artifacts: &needs_gated_with_fast_artifacts
   - job: classify
     artifacts: true
   - job: fast
+    artifacts: true
   - job: fast_docker
     artifacts: false
     optional: true
@@ -769,12 +832,20 @@ fast:
     - *drop_to_node
     # ORBIT_TEST_SKIP_DOCKER excludes the suites fast_docker owns, below.
     - orbit_as_node 'ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh'
-    # The production build and the render proof, run here as well as inside the
-    # image: the container build is the authoritative gate but it is minutes
-    # away, and this fails in seconds when a packaging change breaks previews.
+    # The render proof, run here as well as inside the image: the container
+    # build is the authoritative gate but it is minutes away, and this fails in
+    # seconds when a packaging change breaks previews.
+    #
+    # The build itself is the one test-backend.sh above has just done (#1061).
+    # This used to repeat it outright -- the same `pnpm --filter orbit-web
+    # build` twice in one job, about 20 s each. The stamp check is kept rather
+    # than the line simply deleted so this step still stands up on its own if
+    # the script above ever stops building: it builds only when web/build is
+    # not already this checkout's.
     - |
       if [ "${ORBIT_BUILD:-true}" = "true" ]; then
-        orbit_as_node 'pnpm --filter orbit-web build && pnpm test:web-pdfjs'
+        orbit_as_node 'node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build'
+        orbit_as_node 'pnpm test:web-pdfjs'
       else
         echo "skipped: no build-risk change"
       fi
@@ -783,6 +854,16 @@ fast:
     name: orbit-coverage
     paths:
       - coverage/
+      # The built web application, so `fidelity` serves these bytes instead of
+      # building its own copy (#1061, ADR-0028 slice 1). About 7 MB.
+      #
+      # It shares this block's `expire_in`, because a job may declare only one
+      # `artifacts:` block and this one also carries the reuse evidence a later
+      # pipeline's gate reads for days. A `fast` that stood on an earlier run
+      # leaves no web/build behind at all; that is safe rather than stale,
+      # because the fidelity gate's webServer checks the stamp and builds when
+      # there is nothing to serve.
+      - web/build/
       - ci-evidence/
     expire_in: 14 days
     when: on_success
@@ -891,6 +972,7 @@ supply_chain_source:
   needs:
     - job: classify
       artifacts: true
+  cache: *trivy_db_cache
   script:
     - *reach_helpers
     - orbit_lane_admits supply_chain_source || exit 0
@@ -913,6 +995,9 @@ supply_chain_source:
       node scripts/check-override-pins.mjs --red
       node scripts/check-override-pins.mjs
       mkdir -p .orbit-supply-chain
+    - *trivy_db_dir
+    - *trivy_db_warm
+    - |
       trivy fs \
         --scanners vuln,secret \
         --format json \
@@ -1057,6 +1142,7 @@ sidecar_images:
     exit_codes:
       - 3
   needs: *needs_gated
+  cache: *trivy_db_cache
   script:
     - *apk_retry
     # bash before the reuse gate: this image is Alpine, and both the gate and
@@ -1067,23 +1153,24 @@ sidecar_images:
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       mkdir -p .orbit-supply-chain/sidecar-scans
+    # Warm the shared, dated cache (#946) rather than a job-local one: the
+    # dated directory this exports as TRIVY_CACHE_DIR now survives between
+    # pipelines, so most days only the first sidecar_images run downloads
+    # anything at all.
+    - *trivy_db_dir
+    - *trivy_db_warm
+    - |
       # Fan the scans out, four at a time: this loop is almost all network
       # wait, not CPU, because it pulls each image before scanning it. The lane
       # is capped at 8 CPUs, so four concurrent pulls cannot swamp it (#879).
       #
-      # Two things have to be true for that to work, and the first attempt got
-      # only one of them. Trivy takes an exclusive lock on its cache directory
-      # for the whole of a scan, so parallel workers sharing one cache do not
-      # queue politely -- they time out, and the job dies with "cache may be in
-      # use by another process". And a worker starting with an empty cache
-      # downloads the 111 MB vulnerability database for itself.
-      #
-      # So warm one cache, then hand each worker its own copy of it and tell it
-      # the database is already current. The copy is local and costs about a
-      # second; the download it replaces costs nine, and four of them would
-      # race for the same file.
-      export TRIVY_CACHE_DIR=/tmp/trivy-warm
-      trivy image --download-db-only
+      # Trivy takes an exclusive lock on its cache directory for the whole of
+      # a scan, so parallel workers sharing one cache do not queue politely --
+      # they time out, and the job dies with "cache may be in use by another
+      # process". Hand each worker its own copy of the warmed cache instead,
+      # and tell it the database is already current: the copy is local and
+      # costs about a second, and four workers copying would otherwise race
+      # for the same file.
       # -n 2 hands each worker one `slug reference` pair. xargs still exits
       # non-zero if any scan fails, so the job fails the way it did before.
       # --ignore-unfixed because these are images Orbit pulls rather than
@@ -1224,6 +1311,12 @@ gitleaks:
 
 # The only automatic check the v19 presentation layer has (#620). A change that
 # moves web/ pays for this; one that does not never sees it.
+#
+# Appearance only, since #1048. `pnpm --filter orbit-web fidelity` names the
+# `fidelity` Playwright project rather than running everything in
+# web/tests/fidelity/, so launch-timing.spec.js -- a measurement, not a
+# guard -- no longer rides along on every front-end merge request. It is the
+# `launch_timing` job at the end of this file, at promotion frequency.
 fidelity:
   stage: acceptance
   tags: [light]
@@ -1254,6 +1347,18 @@ fidelity:
       # that tsconfig while loading its config, before the webServer command
       # that would have built it ever runs.
       pnpm --filter orbit-web exec svelte-kit sync
+      # The gate's webServer no longer builds the application (#1061): `fast`
+      # built it and handed web/build over as an artefact, and the stamp inside
+      # it proves it was made from this same commit's sources.
+      #
+      # Asked here as well as inside the webServer, purely so the trace says
+      # which way it went: the webServer's own output is thrown away
+      # (`stdout: "ignore"` in web/playwright.config.js), so without this the
+      # job would be silent about whether it built the application again. A
+      # "rebuilding" line is not a failure -- the gate still passes -- but it
+      # means the artefact did not arrive and the build this issue removed is
+      # back.
+      node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
       pnpm --filter orbit-web fidelity
     - *reuse_evidence
   artifacts:
@@ -1342,6 +1447,16 @@ build_image:
     # Stable Git tags are the version calculator's durable baseline.
     GIT_DEPTH: 0
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
+    # The BuildKit registry cache (#946, owner ruling on #923 rec 18,
+    # 2026-09-09): one tag under this project's own registry, holding the
+    # `deps`, `web-deps` and `cli-builder` stages' layers. #923 finding 6a
+    # measured 0 CACHED lines and ~26 s rebuilding them from scratch on an
+    # unchanged lockfile, every single pipeline. Neither `runner`, the final
+    # stage, nor its ORBIT_VERSION/ORBIT_REVISION/ORBIT_CHANNEL build args are
+    # cached here: those are declared after the three cached stages in the
+    # Dockerfile, so varying them cannot invalidate this cache, and the
+    # runner stage itself is cheap (a label/env layer, no install or build).
+    ORBIT_BUILD_CACHE_REF: $CI_REGISTRY_IMAGE/build-cache:main
   script:
     - *reach_helpers
     - orbit_lane_admits build_image || exit 0
@@ -1352,6 +1467,22 @@ build_image:
     # run it is standing on. bash for the gate itself; this image is Alpine.
     - apk_add bash git nodejs curl
     - *reuse_gate
+    - |
+      set -eu
+      # Read access to the cache is attempted below on every build; write
+      # access stays on delivery branches only, the same trust boundary
+      # record_image's push down in the publish stage already draws -- an
+      # ordinary merge request reads whatever a delivery push last wrote, and
+      # never writes itself. A login failure degrades to an uncached build
+      # instead of failing the job: this project's own registry credential
+      # must never be the reason an ordinary merge request's image build
+      # goes red.
+      if echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin; then
+        orbit_build_cache_usable=true
+      else
+        echo "could not log in to $CI_REGISTRY; building without the layer cache" >&2
+        orbit_build_cache_usable=false
+      fi
     - |
       set -eu
       git fetch --quiet --tags origin
@@ -1370,8 +1501,25 @@ build_image:
         esac
       fi
       echo "building ${ORBIT_CI_IMAGE} version=${version} channel=${publication_channel}"
-      docker build \
+      # buildx rather than plain `docker build`: classic build has no
+      # registry cache exporter at all, and --cache-from there only accepts
+      # an image tag, not a dedicated cache manifest. buildx is already
+      # bundled in this pinned CLI image (verified locally: `docker buildx
+      # version` needs no extra install), and its default "docker" driver --
+      # the one that talks to this job's own dind service, no separate
+      # builder container -- already supports the registry cache exporter on
+      # this Docker version (verified locally against the exact pinned
+      # docker:29.6.2-dind/-cli images: a fresh daemon with no local state at
+      # all still reported CACHED after importing a cache pushed by an
+      # earlier, unrelated daemon).
+      cache_from_args=""
+      if [ "$orbit_build_cache_usable" = true ]; then
+        cache_from_args="--cache-from type=registry,ref=${ORBIT_BUILD_CACHE_REF}"
+      fi
+      docker buildx build \
         --file ./Dockerfile \
+        --load \
+        $cache_from_args \
         --build-arg "ORBIT_VERSION=${version}" \
         --build-arg "ORBIT_REVISION=${CI_COMMIT_SHA}" \
         --build-arg "ORBIT_CHANNEL=${publication_channel}" \
@@ -1385,6 +1533,30 @@ build_image:
         --label "io.github.tomlawesome.orbit.source-branch=${CI_COMMIT_REF_NAME}" \
         --tag "$ORBIT_CI_IMAGE" \
         .
+      # Cache export, as a separate best-effort build of the same
+      # already-warm graph rather than a `--cache-to` folded into the build
+      # above: verified locally that a *combined* build+cache-to fails the
+      # whole build when the push fails, where an export-only `--output
+      # type=cacheonly` invocation cannot -- everything it needs was just
+      # built or just imported, so this costs under a second when there is
+      # nothing new to send. Delivery branches only, matching where every
+      # other push to this registry already happens (record_image,
+      # sign_evidence, publish_channel below); `timeout` bounds a hung
+      # registry so a cache push can cost this job minutes, never its
+      # `timeout: 20m`.
+      if [ "$orbit_build_cache_usable" = true ] && orbit_on_delivery_branch; then
+        if ! timeout 180 docker buildx build \
+          --file ./Dockerfile \
+          --cache-from type=registry,ref="${ORBIT_BUILD_CACHE_REF}" \
+          --cache-to type=registry,ref="${ORBIT_BUILD_CACHE_REF}",mode=max \
+          --build-arg "ORBIT_VERSION=${version}" \
+          --build-arg "ORBIT_REVISION=${CI_COMMIT_SHA}" \
+          --build-arg "ORBIT_CHANNEL=${publication_channel}" \
+          --output type=cacheonly \
+          .; then
+          echo "could not export the build cache to ${ORBIT_BUILD_CACHE_REF}; the image built above is unaffected" >&2
+        fi
+      fi
     # The same identity assertions the workflow makes on the image it just
     # built, made by the same script: the labels and the files baked inside it
     # must agree with what this pipeline believes it built, or nothing
@@ -1480,9 +1652,13 @@ supply_chain_image:
   needs: *needs_gated_image
   variables:
     # /builds is a real volume rather than the job container's overlayfs, so
-    # the Trivy database cache does not share a writable layer with the image
-    # the daemon has just loaded.
+    # scratch space here does not share a writable layer with the image the
+    # daemon has just loaded. The Trivy database itself no longer lives under
+    # this: TRIVY_CACHE_DIR (below, #946) points scan-image.sh at the shared,
+    # dated cache instead, because RUNNER_TEMP is wiped at the end of every
+    # job (.docker_in_job_teardown) and could never survive to the next one.
     RUNNER_TEMP: $CI_BUILDS_DIR/orbit-runner-temp
+  cache: *trivy_db_cache
   rules:
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -1494,12 +1670,17 @@ supply_chain_image:
     - orbit_lane_admits supply_chain_image || exit 0
     - *system_lane_gate
     - *reuse_gate
+    - *trivy_db_dir
     - *docker_in_job
     - mkdir -p "$RUNNER_TEMP"
     - docker load --input image.tar
-    # TRIVY_IMAGE and TRIVY_DB_REPOSITORY are the pipeline-wide pins above,
-    # which are the workflow's values; the script passes the latter into the
-    # scanner container itself.
+    # TRIVY_IMAGE, TRIVY_DB_REPOSITORY and TRIVY_CACHE_DIR are exported
+    # already (the pipeline-wide pins above, and *trivy_db_dir just above);
+    # the script passes the database repository into the scanner container
+    # itself and mounts the cache directory in unmodified. scan-image.sh's
+    # own trivy, run without --skip-db-update, downloads into it exactly when
+    # it finds nothing current there -- the same check `*trivy_db_warm` makes
+    # explicitly for the other two scanner jobs.
     - |
       set -eu
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
@@ -2775,3 +2956,94 @@ base_image_repin:
       bash scripts/ci/repin-base-image.sh --red
       echo "base_image_repin: real run — compares the artifact digest to the pin"
       bash scripts/ci/repin-base-image.sh
+
+# --- the promotion gate's own measurement ------------------------------------
+
+# Launch frame timings, once per promotion (#1048, owner ruling 2026-09-18).
+#
+# This used to ride along inside `fidelity`, because `web/package.json`'s
+# `fidelity` script was a bare `playwright test` and so collected everything
+# under web/tests/fidelity/, launch-timing.spec.js included. That put a
+# measurement on every front-end merge request, in a container sharing a host
+# with whatever else was running, and the noise swamped the signal: the same
+# unchanged build photographed twice differed by up to 189 pixels, and the
+# create phase -- CSS only, untouched by the change under test -- moved as
+# much as the phase that was actually fixed. A correct fix could read as a
+# regression and a bad one as a win. The spec now sits in its own Playwright
+# project and is run here instead.
+#
+# `rules:` rather than `orbit_full_gate`. That helper's first arm is
+# `orbit_on_delivery_branch`, which matches a push to `dev` -- every merge
+# into `dev`, which is the merge frequency this job exists to escape -- and
+# its second arm targets `main`, which is the later preview -> main gate.
+# Neither is the dev -> preview promotion. The two events below are: the merge
+# request whose target branch is `preview`, and the push to `preview` that
+# lands it. Everything else is `never`, including a branch pipeline started by
+# hand, so nothing can reach this job by accident. These are all predefined
+# variables, so the decision is taken before a runner slot is claimed and the
+# job needs no classifier dotenv and no `orbit_lane_admits` call.
+#
+# No reuse gate (#898), deliberately. A promotion measures the candidate it is
+# promoting; standing on a run from an earlier pipeline would hand the next
+# promotion an older candidate's numbers as its baseline, which is the one
+# thing the comparison must not do. It runs at most twice per promotion, so
+# there is nothing worth saving. That is also why it has no entry in
+# scripts/ci/job-inputs.json: that file and the reuse gate are a matched pair,
+# and scripts/job-inputs.test.mjs holds them to it -- an entry without the gate
+# fails as loudly as a gate without an entry.
+#
+# The quiet machine, as far as the runner lanes allow. `orbit-build` is the
+# project's own runner: no other project's jobs reach it, unlike the shared
+# group runner's `big` and `light` lanes, where #878 measured a 42-minute
+# queue behind another project's shards. The privilege it grants is unused
+# here, exactly as it is for `classify`. `maintenance` is the last stage and
+# this job takes no `needs:`, so it starts only once every other job in the
+# pipeline has finished -- including the publish lane on the promotion push --
+# and nothing of Orbit's is running beside it. `resource_group` stops two
+# promotions measuring at once. What none of that can buy is the rest of the
+# host: both runners live on the same machine, and new runner capacity is
+# ruled out for M11 (owner, 2026-09-09). So the residual noise is another
+# project's shared-runner work, which is why the comparison is candidate
+# against candidate and why no threshold is asserted yet.
+#
+# The artefact is the baseline. `launch-timing-report.mjs` reads this job's own
+# last successful report on `preview` and prints the two candidates side by
+# side, with the commit range between them so a regression is bisected rather
+# than guessed at. Kept a year rather than the usual fortnight: promotions are
+# further apart than that, and a baseline that expires between them leaves the
+# next promotion with nothing to compare against. It is a few kilobytes of
+# JSON.
+launch_timing:
+  stage: maintenance
+  extends: .privileged_runner
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  timeout: 30m
+  resource_group: launch_timing
+  rules:
+    - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+    - when: never
+  script:
+    - |
+      set -eu
+      # Same preparation as `fidelity`: the image ships its own Node and the
+      # matching browser build, so only pnpm is missing and corepack is not
+      # the route in this image. `svelte-kit sync` because web/tsconfig.json
+      # extends the gitignored .svelte-kit/tsconfig.json that Playwright reads
+      # while loading its config, before any webServer command has run.
+      npm install --global "$(node -p "require('./package.json').packageManager")"
+      pnpm install --frozen-lockfile
+      pnpm --filter orbit-web exec svelte-kit sync
+      pnpm --filter orbit-web launch-timing
+    - |
+      set -eu
+      node scripts/ci/launch-timing-report.mjs web/test-results/launch-timing
+  artifacts:
+    name: orbit-launch-timing
+    paths:
+      - web/test-results/launch-timing/
+    expire_in: 1 year
+    when: always

@@ -1,0 +1,666 @@
+<!doctype html><html lang="en" data-theme="afterdark"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orbit — search on a phone: the bottom sheet (#1058 row f)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --mono:'JetBrains Mono Variable','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  /* the five packs, token blocks verbatim from web/src/lib/packs.css (comments stripped) */
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
+    --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+    --warm-text:var(--warm);
+    --upcoming-text:var(--upcoming);
+    --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
+    --sec-plum:#b79ae0; --sec-coral:#f0907a;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#9fa6b2; --ink-faint:#717c8e;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#717c8e;
+    --ink-quiet:#768295; --accent-text:var(--accent); --ok-text:var(--ok);
+    --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+    --warm-text:var(--warm);
+    --upcoming-text:var(--upcoming);
+    --plane-warm:#ffcf94;
+    --plane-cool:#9fb0d6;
+    --plane-star:#cfd9ee;
+    --plane-star-warm:#ffdca6;
+    --plane-dust:#01020a;
+    --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
+    --sec-plum:#a99ae0; --sec-coral:#ef9b86;
+  }
+  [data-theme=dawn]{
+    --sky-1:#b0bed6; --sky-2:#c2cad9; --sky-3:#d7d5cf; --sky-4:#eedfc8; --sky-5:#f8e9d2;
+    --bg:#d2d3d4;
+    --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+    --line:#a6b2c5; --line-soft:#c0c8d6;
+    --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:#eda253; --sun-core:#9c4a10; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --p-jade-1:#e8f6ec; --p-jade-2:#95cfab; --p-jade-3:#4f9070;
+    --p-amber-1:#fff0d8; --p-amber-2:#f0c076; --p-amber-3:#ad7830;
+    --p-ruby-1:#ffe2e1; --p-ruby-2:#ec949c; --p-ruby-3:#a9505f;
+    --p-sky-1:#e6eefc; --p-sky-2:#9dbce6; --p-sky-3:#5b80b8;
+    --night-far:#dbe3f6; --night-near:#f4f7ff;
+    --n-accent:#a9cdf2; --n-ink:#eef2fb; --n-line:#96a9c9;
+    --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+    --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+    --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+    --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
+    --upcoming-text:var(--accent-text);
+    --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+    --sec-plum:#71499a; --sec-coral:#bd4f36;
+  }
+  [data-theme=clouds]{
+    --sky-1:#b0bed6; --sky-2:#c2cad9; --sky-3:#d7d5cf; --sky-4:#eedfc8; --sky-5:#f8e9d2;
+    --bg:#d2d3d4;
+    --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+    --line:#a6b2c5; --line-soft:#c0c8d6;
+    --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:#eda253; --sun-core:#9c4a10; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --p-jade-1:#e8f6ec; --p-jade-2:#95cfab; --p-jade-3:#4f9070;
+    --p-amber-1:#fff0d8; --p-amber-2:#f0c076; --p-amber-3:#ad7830;
+    --p-ruby-1:#ffe2e1; --p-ruby-2:#ec949c; --p-ruby-3:#a9505f;
+    --p-sky-1:#e6eefc; --p-sky-2:#9dbce6; --p-sky-3:#5b80b8;
+    --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+    --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+    --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+    --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
+    --upcoming-text:var(--accent-text);
+    --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+    --sec-plum:#71499a; --sec-coral:#bd4f36;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#a9d8e6; --ink-faint:#6f9fb1;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#6f9fb1;
+    --bloom:color-mix(in srgb,var(--accent) 45%,transparent);
+    --p-jade-1:#c4ffe4; --p-jade-2:#3ef2a0; --p-jade-3:#0e7a55;
+    --p-amber-1:#fff3b0; --p-amber-2:#ffd23f; --p-amber-3:#8a6b00;
+    --p-ruby-1:#ffb3c4; --p-ruby-2:#ff3864; --p-ruby-3:#8a0f2e;
+    --p-sky-1:#b6fbff; --p-sky-2:#2de2e6; --p-sky-3:#0d6b78;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
+    --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+    --warm-text:var(--warm);
+    --upcoming-text:var(--upcoming);
+    --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
+    --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
+  }
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);overflow-y:auto;overflow-x:hidden}
+  input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* ── the pocket dialect, verbatim from web/src/routes/home/pocket.css ──
+   (CON-10, #430; selectors scoped .pocket exactly as shipped) */
+.pocket .sky g{animation:drift 180s linear infinite}
+@keyframes drift{to{transform:translateX(-40px)}}
+.pocket .mpage{position:relative;z-index:2;max-width:400px;margin:0 auto;padding:14px 12px 40px}
+.pocket .mtop{display:flex;justify-content:space-between;align-items:center;padding:4px 6px 10px}
+.pocket .morb{appearance:none;padding:0;margin:0;cursor:pointer;
+      width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
+      background:var(--panel);backdrop-filter:blur(8px);display:grid;place-items:center;
+      font:11px var(--mono);color:var(--ink-mid)}
+.pocket .mdial{width:100%;aspect-ratio:1;position:relative}
+.pocket .mdial svg{width:100%;height:100%}
+.pocket .skies{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 10px}
+.pocket .skies .msys{flex:none;display:flex;align-items:center;gap:8px;font:10.5px var(--mono);
+             color:var(--ink-mid);border:1px solid var(--line);border-radius:99px;
+             padding:6px 13px;background:var(--panel)}
+.pocket .skies svg{flex:none}
+.pocket .msearch{margin:8px 0 18px;text-align:center}
+.pocket .msearch input{width:88%;background:none;border:0;outline:0;border-bottom:1px solid var(--line);
+      text-align:center;font:12.5px var(--mono);color:var(--ink);padding:7px}
+.pocket .mgroup h3{font:10px var(--mono);letter-spacing:.16em;color:var(--ink-quiet);margin:14px 4px 8px}
+.pocket .mitem{display:flex;align-items:center;gap:11px;border:1px solid var(--line-soft);
+       background:var(--panel);backdrop-filter:blur(8px);border-radius:12px;
+       padding:11px 13px;margin-bottom:6px}
+.pocket .mitem b{display:block;font-size:13.5px;font-weight:520}
+.pocket .mitem span{font-size:11px;color:var(--ink-mid)}
+.pocket .mitem .flex{flex:1;min-width:0}
+.pocket .mt{font:500 12px var(--mono);text-align:right}
+.pocket .mt small{display:block;font-size:9.5px;color:var(--ink-quiet)}
+.pocket .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.pocket .sheet,.pocket .msheet{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:18px 18px 0 0;
+       background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
+       padding:18px 22px 26px;transform:translateY(105%);visibility:hidden;
+       transition:transform .3s cubic-bezier(.3,.7,.3,1),visibility 0s .3s}
+.pocket .sheet.open,.pocket .msheet.open{transform:none;visibility:visible;transition-delay:0s}
+.pocket .sheet .grab,.pocket .msheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
+.pocket .sheet b{font-size:15px;font-weight:600}
+.pocket .sheet .meta{font:12px var(--mono);color:var(--ink-mid);margin:4px 0 14px}
+.pocket .sheet .acts:not([hidden]){display:flex;gap:9px}
+.pocket .sheet .acts button{flex:1;font:12px var(--mono);padding:10px;border-radius:10px;cursor:pointer;
+      background:none;border:1px solid var(--line);color:var(--ink-mid)}
+.pocket .sheet .acts .pri{color:var(--accent-text);border-color:var(--accent)}
+.pocket{line-height:normal}
+.pocket .sky{position:fixed;inset:-5%;pointer-events:none}
+.pocket .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.pocket .mark-row{display:flex;align-items:center;gap:10px;font-family:var(--display);
+                  font-weight:600;font-size:17px;letter-spacing:.02em}
+@media (prefers-reduced-motion:reduce){ .pocket .sky g{animation:none} }
+.pocket .mitem.suggest{border-style:dashed;cursor:pointer}
+.pocket .mitem.suggest span{color:var(--accent-text)}
+.pocket .dot.sug{background:none;border:1.6px solid var(--accent)}
+.pocket .mitem.reading b{color:var(--ink-mid);font-weight:500}
+.pocket .mitem.reading .dot{background:var(--upcoming);animation:pocket-breathe 2.4s ease-in-out infinite}
+@keyframes pocket-breathe{0%,100%{opacity:1}50%{opacity:.4}}
+.pocket .mitem.failed .dot{background:var(--degraded,#fb8b24)}
+.pocket .mitem.failed span{color:var(--ink-mid)}
+.pocket .burnup{font:9.5px var(--mono);color:var(--ink-quiet);text-align:center;
+                margin:10px 0 0;letter-spacing:.06em}
+.pocket .sheet .fields:not(:empty){margin-bottom:8px}
+.pocket .sheet .kv{display:flex;justify-content:space-between;font:11px var(--mono);
+                   color:var(--ink-mid);padding:6px 2px;border-bottom:1px solid var(--line-soft)}
+.pocket .sheet .kv:last-of-type{border:0}
+.pocket .sheet .kv b{font-size:11px;font-weight:500;color:var(--ink)}
+.pocket .sheet .amend:not([hidden]){display:block;text-align:center;font:10.5px var(--mono);
+                      color:var(--ink-mid);text-decoration:none;margin-top:12px}
+@media (prefers-reduced-motion: reduce){ .pocket .mitem.reading .dot{animation:none} }
+
+  /* the pocket is scrolled under a 54px demo strip: page padding lifts it clear */
+  .pocket .mpage{padding-top:68px}
+
+  /* ── demo strip: sheet furniture, not design (steps + packs) ── */
+  .demos{position:fixed;top:0;left:0;right:0;z-index:30;height:54px;padding:6px 10px 5px;
+         background:var(--panel-raised);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);
+         display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;column-gap:8px;row-gap:3px;
+         align-items:center}
+  .demos .steps{display:flex;gap:4px}
+  .demos .steps button{width:28px;height:24px;font:11px var(--mono);color:var(--ink-mid);background:none;
+         border:1px solid var(--line);border-radius:6px;cursor:pointer;padding:0}
+  .demos .steps button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent)}
+  .demos .packs{display:flex;gap:6px;align-items:center}
+  .demos .packs button{width:14px;height:14px;border-radius:50%;border:1px solid var(--line);padding:0;cursor:pointer}
+  .demos .packs button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:1px}
+  .demos .cap{grid-column:1/3;font:10.5px var(--mono);color:var(--ink-quiet);white-space:nowrap;overflow:hidden;
+              text-overflow:ellipsis;letter-spacing:.02em}
+  .demos .cap b{color:var(--ink);font-weight:500}
+
+
+  /* ── the proposal: POL-9's palette in CON-10's dialect — a bottom sheet ──
+     Same frame as .pocket .sheet (panel-raised, blur, 18px radius, grab, .3s rise);
+     it stands on the keyboard rather than the floor, and the explore field rides
+     at its top so field, results and keys are one stack under the thumb. */
+  .pocket .qsheet{position:fixed;left:0;right:0;bottom:var(--kb,0px);z-index:10;border-radius:18px 18px 0 0;
+       background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
+       padding:14px 14px 10px;transform:translateY(105%);visibility:hidden;
+       transition:transform .3s cubic-bezier(.3,.7,.3,1),bottom .25s cubic-bezier(.3,.7,.3,1),visibility 0s .3s}
+  .pocket .qsheet.open{transform:none;visibility:visible;transition-delay:0s}
+  .pocket .qsheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 10px}
+  /* the field, exactly the page's hairline, now inside the sheet (12.5px mono, centred) */
+  .pocket .qsheet .qfield{position:relative;text-align:center;margin:0 8px 6px}
+  .pocket .qsheet .qfield input{width:100%;background:none;border:0;outline:0;border-bottom:1px solid var(--accent);
+       text-align:center;font:12.5px var(--mono);color:var(--ink);padding:9px 7px;caret-color:var(--accent)}
+  .pocket .qsheet .qfield input::placeholder{color:var(--ink-quiet)}
+  .pocket .qsheet .qfield input:focus-visible{outline:none}
+  /* results: the desk palette's rows spoken in the pocket's row grammar —
+     44px targets, 13.5px title, 11px mono meta, one accent action per match */
+  .pocket .qsheet .rows{display:flex;flex-direction:column;gap:2px;max-height:calc(100vh - var(--kb,0px) - 150px);overflow-y:auto}
+  .pocket .qsheet .row{display:flex;align-items:center;gap:11px;min-height:44px;padding:6px 10px;border-radius:10px;
+       background:none;border:0;color:inherit;font:inherit;text-align:left;width:100%;cursor:pointer;
+       animation:rowin .22s ease-out both}
+  @keyframes rowin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .pocket .qsheet .row:active,.pocket .qsheet .row:hover{background:var(--panel)}
+  .pocket .qsheet .row .dot{width:7px;height:7px;border-radius:50%;flex:none}
+  .pocket .qsheet .row .doc{font:11px var(--mono);color:var(--ink-mid);flex:none;width:12px;text-align:center;margin-left:-2px}
+  .pocket .qsheet .row .flex{flex:1;min-width:0}
+  .pocket .qsheet .row b{display:block;font-size:13.5px;font-weight:520;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pocket .qsheet .row span{display:block;font:11px var(--mono);color:var(--ink-mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pocket .qsheet .row .mt{font:500 12px var(--mono);text-align:right;flex:none}
+  .pocket .qsheet .row .mt small{display:block;font-size:9.5px;color:var(--ink-quiet)}
+  .pocket .qsheet .row.act{font:12.5px var(--mono);color:var(--accent-text);padding-left:28px}
+  .pocket .qsheet .row.act[data-armed]{color:var(--warm-text)}
+  .pocket .qsheet .none{font:12px var(--mono);color:var(--ink-mid);padding:14px 10px 8px;text-align:center}
+  .pocket .qsheet .none b{color:var(--ink);font-weight:500}
+  .pocket .qsheet .hint{font:9.5px var(--mono);color:var(--ink-quiet);text-align:center;letter-spacing:.06em;margin:6px 0 0}
+  [data-theme=retrograde] .pocket .qsheet .row.act{text-shadow:0 0 9px var(--bloom)}
+
+  /* the item sheet (the pocket's own, verbatim frame) grown to APPROACH: everything
+     Orbit holds about the item, the desk's expanded row in the sheet's grammar */
+  .pocket .sheet{max-height:82vh;overflow-y:auto}
+  .pocket .sheet .approach{display:grid;grid-template-rows:0fr;transition:grid-template-rows .3s cubic-bezier(.3,.7,.3,1)}
+  .pocket .sheet .approach>div{overflow:hidden}
+  .pocket .sheet.approaching .approach{grid-template-rows:1fr}
+  .pocket .sheet h4{font:10px var(--mono);letter-spacing:.16em;color:var(--ink-quiet);margin:12px 0 6px;font-weight:500}
+  .pocket .sheet .doc{display:flex;gap:9px;align-items:center;font:12px var(--ui);color:var(--ink);padding:8px 2px;min-height:40px}
+  .pocket .sheet .doc small{display:block;font:10px var(--mono);color:var(--ink-quiet);margin-top:2px}
+  .pocket .sheet .doc i{font-style:normal;color:var(--accent-text);font:11px var(--mono)}
+  .pocket .sheet .ivfull{display:block;text-align:center;font:10.5px var(--mono);color:var(--ink-mid);text-decoration:none;margin:12px 0 2px;min-height:24px}
+  .pocket .sheet .acts{margin-top:4px}
+  .pocket .sheet.approaching #act-open,.pocket .sheet.approaching #act-docs{display:none}
+
+  /* ── the phone's keyboard: OS chrome, drawn so the space it takes is honest ──
+     (iOS, 390 wide: 44 QuickType bar + four rows + home indicator ≈ 300px). The
+     sheet's own input is inputmode="none", so on a real phone the OS keyboard
+     stays down and this drawing stands in for it. Keys work. */
+  .kb{position:fixed;left:0;right:0;bottom:0;height:300px;z-index:20;background:#1d1d1f;
+      transform:translateY(100%);visibility:hidden;transition:transform .25s cubic-bezier(.3,.7,.3,1),visibility 0s .25s;
+      user-select:none;-webkit-user-select:none;font:22px -apple-system,'SF Pro','Segoe UI',system-ui,sans-serif;color:#fff}
+  .kb.open{transform:none;visibility:visible;transition-delay:0s}
+  .kb .qt{height:44px;display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;text-align:center;font-size:16px;color:#9a9a9e}
+  .kb .qt span{border-right:1px solid #3a3a3c;padding:4px 0}
+  .kb .qt span:last-child{border:0}
+  .kb .qt span.on{color:#fff}
+  .kb .r{display:flex;justify-content:center;gap:6px;padding:0 3px;margin-top:11px}
+  .kb .r:first-of-type{margin-top:6px}
+  .kb button{appearance:none;border:0;border-radius:5px;background:#5b5b5f;color:#fff;font:inherit;
+      width:33px;height:42px;padding:0;box-shadow:0 1px 0 #000;cursor:pointer}
+  .kb button:active{background:#8c8c90}
+  .kb button.fn{background:#3a3a3c;font-size:16px;width:42px}
+  .kb button.sp{width:186px;font-size:16px}
+  .kb button.go{width:88px;font-size:16px;background:#3a3a3c}
+  .kb button.go.ready{background:#0a84ff}
+  .kb .home{width:134px;height:5px;border-radius:3px;background:#fff;margin:14px auto 0}
+  [data-theme=dawn] .kb,[data-theme=clouds] .kb{background:#d1d5db;color:#000}
+  [data-theme=dawn] .kb button,[data-theme=clouds] .kb button{background:#fff;color:#000;box-shadow:0 1px 0 #8b8f96}
+  [data-theme=dawn] .kb button.fn,[data-theme=clouds] .kb button.fn,
+  [data-theme=dawn] .kb button.go,[data-theme=clouds] .kb button.go{background:#aab0ba}
+  [data-theme=dawn] .kb button.go.ready,[data-theme=clouds] .kb button.go.ready{background:#0a84ff;color:#fff}
+  [data-theme=dawn] .kb .qt,[data-theme=clouds] .kb .qt{color:#5c6270}
+  [data-theme=dawn] .kb .qt span,[data-theme=clouds] .kb .qt span{border-color:#b8bcc4}
+  [data-theme=dawn] .kb .qt span.on,[data-theme=clouds] .kb .qt span.on{color:#000}
+  [data-theme=dawn] .kb .home,[data-theme=clouds] .kb .home{background:#000}
+  /* the field on the page keeps its hairline while the sheet owns the query */
+  .pocket .msearch input{cursor:text}
+
+  @media (prefers-reduced-motion: reduce){
+    .pocket .qsheet,.pocket .sheet,.pocket .msheet,.kb,.pocket .sheet .approach{transition:none}
+    .pocket .qsheet .row{animation:none}
+  }
+
+</style></head><body>
+<div class="pocket">
+<div class="sky"><svg viewBox="0 0 400 850" preserveAspectRatio="xMidYMid slice">
+<g fill="var(--star-far, #e9edf8)"><circle cx="152.4" cy="196.1" r="0.52" opacity="0.37"/>
+      <circle cx="231.2" cy="586.6" r="0.79" opacity="0.22"/>
+      <circle cx="292.6" cy="490.0" r="0.95" opacity="0.3"/>
+      <circle cx="335.7" cy="373.5" r="0.51" opacity="0.14"/>
+      <circle cx="289.3" cy="142.4" r="0.86" opacity="0.29"/>
+      <circle cx="23.8" cy="666.7" r="0.42" opacity="0.36"/>
+      <circle cx="336.4" cy="183.5" r="0.91" opacity="0.32"/>
+      <circle cx="50.0" cy="569.5" r="0.49" opacity="0.37"/>
+      <circle cx="275.5" cy="833.0" r="0.44" opacity="0.2"/>
+      <circle cx="248.0" cy="517.0" r="0.53" opacity="0.37"/>
+      <circle cx="338.6" cy="256.2" r="0.5" opacity="0.3"/>
+      <circle cx="162.9" cy="563.8" r="0.75" opacity="0.22"/>
+      <circle cx="8.7" cy="114.7" r="0.72" opacity="0.32"/>
+      <circle cx="170.3" cy="632.8" r="0.78" opacity="0.36"/>
+      <circle cx="262.0" cy="273.6" r="0.5" opacity="0.12"/>
+      <circle cx="15.8" cy="733.1" r="1.01" opacity="0.33"/>
+      <circle cx="43.7" cy="561.4" r="0.49" opacity="0.37"/>
+      <circle cx="262.2" cy="637.2" r="0.83" opacity="0.23"/>
+      <circle cx="339.4" cy="817.4" r="0.57" opacity="0.23"/>
+      <circle cx="293.4" cy="578.0" r="0.69" opacity="0.24"/>
+      <circle cx="387.1" cy="234.6" r="0.55" opacity="0.31"/>
+      <circle cx="110.8" cy="762.8" r="0.63" opacity="0.38"/>
+      <circle cx="151.9" cy="752.4" r="0.93" opacity="0.32"/>
+      <circle cx="85.7" cy="139.6" r="0.42" opacity="0.15"/>
+      <circle cx="266.6" cy="54.7" r="0.57" opacity="0.27"/>
+      <circle cx="62.1" cy="279.7" r="0.56" opacity="0.3"/>
+      <circle cx="47.4" cy="847.9" r="0.82" opacity="0.31"/>
+      <circle cx="221.0" cy="423.1" r="1.08" opacity="0.37"/>
+      <circle cx="328.8" cy="25.4" r="0.81" opacity="0.38"/>
+      <circle cx="255.3" cy="436.0" r="0.85" opacity="0.15"/>
+      <circle cx="291.1" cy="666.2" r="0.45" opacity="0.25"/>
+      <circle cx="238.1" cy="299.2" r="0.88" opacity="0.38"/>
+      <circle cx="362.5" cy="261.6" r="0.51" opacity="0.36"/>
+      <circle cx="244.8" cy="705.1" r="1.01" opacity="0.18"/>
+      <circle cx="235.0" cy="257.7" r="0.96" opacity="0.31"/>
+      <circle cx="95.6" cy="425.1" r="0.82" opacity="0.17"/>
+      <circle cx="73.0" cy="403.1" r="0.45" opacity="0.25"/>
+      <circle cx="376.0" cy="702.1" r="0.44" opacity="0.35"/>
+      <circle cx="286.6" cy="601.9" r="0.42" opacity="0.33"/>
+      <circle cx="78.2" cy="682.6" r="0.63" opacity="0.21"/>
+      <circle cx="68.9" cy="737.4" r="0.56" opacity="0.36"/>
+      <circle cx="205.5" cy="126.2" r="0.86" opacity="0.26"/>
+      <circle cx="10.8" cy="700.1" r="0.59" opacity="0.11"/>
+      <circle cx="306.5" cy="618.0" r="0.67" opacity="0.16"/>
+      <circle cx="210.8" cy="498.5" r="0.88" opacity="0.25"/>
+      <circle cx="227.1" cy="612.7" r="0.53" opacity="0.15"/>
+      <circle cx="193.8" cy="641.0" r="0.96" opacity="0.36"/>
+      <circle cx="175.6" cy="606.6" r="0.47" opacity="0.22"/>
+      <circle cx="26.7" cy="710.0" r="1.1" opacity="0.3"/>
+      <circle cx="301.0" cy="316.4" r="0.96" opacity="0.13"/>
+      <circle cx="148.2" cy="298.2" r="1.0" opacity="0.15"/>
+      <circle cx="63.7" cy="76.0" r="0.99" opacity="0.19"/>
+      <circle cx="361.2" cy="266.0" r="0.99" opacity="0.16"/>
+      <circle cx="361.0" cy="827.6" r="1.01" opacity="0.31"/>
+      <circle cx="358.5" cy="777.2" r="1.07" opacity="0.18"/>
+      <circle cx="340.0" cy="662.7" r="0.64" opacity="0.15"/>
+      <circle cx="359.9" cy="401.5" r="0.77" opacity="0.37"/>
+      <circle cx="193.5" cy="214.6" r="0.88" opacity="0.26"/>
+      <circle cx="109.0" cy="588.2" r="1.03" opacity="0.17"/>
+      <circle cx="325.1" cy="640.6" r="0.77" opacity="0.16"/></g></svg></div>
+
+<div class="mpage">
+  <div class="mtop">
+    <div class="mark-row" style="font-size:15px"><svg width="22" height="22" viewBox="0 0 200 200" aria-hidden="true"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg> orbit</div>
+    <button class="morb" id="morb" aria-expanded="false" aria-controls="maccount" title="Menu">TL</button>
+  </div>
+  <div class="mdial">
+    <svg viewBox="0 0 380 380" aria-label="Your year, in orbit" role="img">
+      <circle cx="190" cy="190" r="150" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+      <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3"
+              stroke-width="1" stroke-dasharray="3 5"/>
+      <g font-size="11" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
+        <text x="190" y="26">AUG</text><text x="356" y="196">NOV</text>
+        <text x="190" y="364">FEB</text><text x="24" y="196">MAY</text></g>
+      <path d="M190 34 l6 10 h-12 Z" style="fill:var(--accent)"/>
+      <circle cx="190" cy="190" r="8" style="fill:#fff6e6"/>
+      <!-- bodies at their law positions, the same four pocket-signals.html
+           and the shipped dialBodiesOf() give this household -->
+      <circle cx="175.7" cy="140" r="8" style="fill:var(--overdue)" tabindex="0" role="button" aria-label="Gutter clearing"/>
+      <circle id="b-mot" cx="208.2" cy="126.7" r="7" style="fill:var(--warm)" tabindex="0" role="button" aria-label="Car MOT — Volvo V60"/>
+      <circle cx="222.9" cy="285.5" r="7.5" style="fill:var(--ok)" tabindex="0" role="button" aria-label="Car full service"/>
+      <ellipse cx="222.9" cy="285.5" rx="14" ry="5" transform="rotate(-24 222.9 285.5)"
+               fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
+      <g tabindex="0" role="button" aria-label="caught receipt: Home insurance renewal">
+        <circle cx="247.8" cy="143.2" r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
+        <circle cx="247.8" cy="143.2" r="6" style="fill:var(--accent)" opacity=".12"/>
+      </g>
+    </svg>
+  </div>
+  <div class="skies" tabindex="0" role="region" aria-label="Other skies">
+    <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx="5.1" cy="7.6" r="2" style="fill:var(--warm)" opacity=".6"/></svg>Seaside Cottage</div>
+    <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx="13.6" cy="14.2" r="2" style="fill:var(--ok)" opacity=".6"/></svg>Mum &amp; Dad&rsquo;s</div>
+    <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx="5.6" cy="13.3" r="2" style="fill:var(--upcoming)" opacity=".6"/></svg>The Narrowboat</div>
+    <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx="15.3" cy="8.6" r="2" style="fill:var(--warm)" opacity=".6"/></svg>Gran&rsquo;s Flat</div>
+  </div>
+  <div class="msearch"><input id="explore" placeholder="explore your world" inputmode="none" aria-label="Search items and documents" aria-haspopup="dialog" aria-controls="qsheet"></div>
+  <div class="mgroup"><h3>NEEDS ATTENTION</h3>
+    <div class="mitem" id="row-gutter"><span class="dot" style="background:var(--overdue)"></span>
+      <div class="flex"><b>Gutter clearing</b><span>Home · ~£150</span></div>
+      <div class="mt" style="color:var(--overdue)">T+16d<small>28 Jul</small></div></div>
+    <div class="mitem" id="row-mot"><span class="dot" style="background:var(--warm)"></span>
+      <div class="flex"><b>Car MOT — Volvo V60</b><span>Vehicles · £54.85</span></div>
+      <div class="mt" style="color:var(--warm)">T&#8722;16d<small>29 Aug</small></div></div>
+    <div class="mitem"><span class="dot" style="background:var(--warm)"></span>
+      <div class="flex"><b>Boiler service</b><span>Home · ~£120</span></div>
+      <div class="mt" style="color:var(--warm)">T&#8722;22d<small>04 Sep</small></div></div>
+  </div>
+  <div class="mgroup"><h3>SIGNALS — YOUR RELAY CAUGHT</h3>
+    <div class="mitem suggest">
+      <span class="dot sug"></span>
+      <div class="flex"><b>Home insurance renewal</b><span>from policy-schedule.pdf · burns up in 43d</span></div>
+      <div class="mt" style="color:var(--accent-text)">~£400<small>renews 02 Oct</small></div>
+    </div>
+    <div class="mitem reading">
+      <span class="dot"></span>
+      <div class="flex"><b>A message arrived 4m ago</b><span>still reading its document</span></div>
+    </div>
+    <div class="burnup">unreviewed arrivals burn up after 45 days · nothing is added without you</div>
+  </div>
+</div>
+
+
+<!-- the search sheet: POL-9's palette as a CON-10 bottom sheet -->
+<div class="qsheet" id="qsheet" role="dialog" aria-label="Explore your world" aria-modal="false">
+  <div class="grab"></div>
+  <div class="qfield"><input id="q" placeholder="explore your world" inputmode="none" autocomplete="off" aria-label="Search items and documents" aria-controls="qrows"></div>
+  <div class="rows" id="qrows" role="listbox" aria-label="Matches"></div>
+  <div class="hint" id="qhint">items · documents · things to do</div>
+</div>
+
+<!-- the item sheet: pocket.svelte's #sheet verbatim, plus the approach block (row g) -->
+<div class="sheet" id="sheet" role="dialog" aria-label="Item">
+  <div class="grab"></div><b id="sh-title"></b><div class="meta" id="sh-meta"></div>
+  <div class="approach" id="sh-approach"><div>
+    <div class="fields" id="sh-fields"></div>
+    <h4 id="sh-docs-h">DOCUMENTS</h4>
+    <div id="sh-docs"></div>
+    <a class="ivfull" href="#" id="sh-manage">manage this item →</a>
+  </div></div>
+  <div class="acts" id="sh-acts-item"><button class="pri" id="act-open">open</button><button id="act-docs">documents</button><button
+    data-sheet-close>close</button></div>
+</div>
+
+<!-- the phone's keyboard (OS chrome, drawn) -->
+<div class="kb" id="kb" aria-hidden="true">
+  <div class="qt" id="qt"><span></span><span></span><span></span></div>
+  <div class="r"><button data-k="q">q</button><button data-k="w">w</button><button data-k="e">e</button><button data-k="r">r</button><button data-k="t">t</button><button data-k="y">y</button><button data-k="u">u</button><button data-k="i">i</button><button data-k="o">o</button><button data-k="p">p</button></div>
+  <div class="r"><button data-k="a">a</button><button data-k="s">s</button><button data-k="d">d</button><button data-k="f">f</button><button data-k="g">g</button><button data-k="h">h</button><button data-k="j">j</button><button data-k="k">k</button><button data-k="l">l</button></div>
+  <div class="r"><button class="fn" data-k="shift">⇧</button><button data-k="z">z</button><button data-k="x">x</button><button data-k="c">c</button><button data-k="v">v</button><button data-k="b">b</button><button data-k="n">n</button><button data-k="m">m</button><button class="fn" data-k="del">⌫</button></div>
+  <div class="r"><button class="fn" data-k="123">123</button><button class="sp" data-k=" ">space</button><button class="go" id="kgo" data-k="go">search</button></div>
+  <div class="home"></div>
+</div>
+</div>
+
+<nav class="demos" aria-label="Design demo: step through a search">
+  <div class="steps" role="group" aria-label="Step">
+    <button data-step="1" aria-pressed="true" title="idle">1</button>
+    <button data-step="2" aria-pressed="false" title="tap the field">2</button>
+    <button data-step="3" aria-pressed="false" title="typing">3</button>
+    <button data-step="4" aria-pressed="false" title="results for mot">4</button>
+    <button data-step="5" aria-pressed="false" title="tap a result">5</button>
+    <button data-step="6" aria-pressed="false" title="second tap: approach">6</button>
+  </div>
+  <div class="packs" role="group" aria-label="Theme">
+    <button data-pack="afterdark" style="background:#05070d" title="after dark" aria-pressed="true"></button>
+    <button data-pack="starchart" style="background:#070d1f" title="star-chart" aria-pressed="false"></button>
+    <button data-pack="clouds" style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
+    <button data-pack="dawn" style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
+    <button data-pack="retrograde" style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde" aria-pressed="false"></button>
+  </div>
+  <div class="cap" id="cap" aria-live="polite"></div>
+</nav>
+<script>
+
+/* ── the data story: what this household holds (v19 mockups' Lawson Home) ── */
+const ITEMS=[
+  {id:"gutter",title:"Gutter clearing",sec:"Home",cost:"~£150",t:"T+16d",date:"28 Jul",tone:"--overdue",band:"overdue",
+   kv:[["due","T+16d · 28 July 2026"],["section","Home"],["type","service"],["orbital period","every year"],["cost","~£150"],["reminders","21d before · 7d before"]],docs:[]},
+  {id:"mot",title:"Car MOT — Volvo V60",sec:"Vehicles",cost:"£54.85",t:"T−16d",date:"29 Aug",tone:"--warm",band:"due-soon",
+   kv:[["due","T−16d · 29 August 2026"],["section","Vehicles"],["type","inspection"],["orbital period","every year"],["cost","£54.85"],["reminders","21d before · 7d before"]],
+   docs:[["MOT certificate 2025","added 12 Jun · 240 KB"],["Service history","added 12 Jun · 88 KB"]]},
+  {id:"boiler",title:"Boiler service",sec:"Home",cost:"~£120",t:"T−22d",date:"04 Sep",tone:"--warm",band:"due-soon",
+   kv:[["due","T−22d · 4 September 2026"],["section","Home"],["type","service"],["orbital period","every year"],["cost","~£120"],["reminders","21d before · 7d before"]],docs:[]},
+  {id:"chimney",title:"Chimney sweep",sec:"Home",cost:"~£90",t:"T−61d",date:"13 Oct",tone:"--upcoming",band:"upcoming",
+   kv:[["due","T−61d · 13 October 2026"],["section","Home"],["type","service"],["orbital period","every year"],["cost","~£90"]],docs:[]},
+  {id:"smoke",title:"Smoke alarm batteries",sec:"Home",cost:"~£12",t:"T−122d",date:"13 Dec",tone:"--ok",band:"ok",
+   kv:[["due","T−122d · 13 December 2026"],["section","Home"],["type","service"],["orbital period","every year"],["cost","~£12"]],docs:[]},
+  {id:"svc",title:"Car full service",sec:"Vehicles",cost:"~£300",t:"T−161d",date:"21 Jan",tone:"--ok",band:"ok",
+   kv:[["due","T−161d · 21 January 2027"],["section","Vehicles"],["type","service"],["orbital period","every year"],["cost","~£300"]],
+   docs:[["service-invoice-2026.pdf","added 03 Mar · 1.1 MB"],["service-checklist.pdf","added 03 Mar · 210 KB"]]},
+];
+const DOCS=[
+  {id:"d-mot",title:"MOT certificate 2025",meta:"added 12 Jun · 240 KB · scanned clean",item:"mot"},
+  {id:"d-hist",title:"Service history",meta:"added 12 Jun · 88 KB · scanned clean",item:"mot"},
+  {id:"d-inv",title:"service-invoice-2026.pdf",meta:"added 03 Mar · 1.1 MB · scanned clean",item:"svc"},
+  {id:"d-chk",title:"service-checklist.pdf",meta:"added 03 Mar · 210 KB · scanned clean",item:"svc"},
+  {id:"d-pol",title:"policy-schedule.pdf",meta:"caught by your relay 11 Aug · scanned clean",item:null},
+];
+const byId=(id)=>ITEMS.find((i)=>i.id===id);
+const TEXT={"--overdue":"var(--overdue-text)","--warm":"var(--warm-text)","--upcoming":"var(--upcoming-text)","--ok":"var(--ok-text)"};
+
+
+const packs=[...document.querySelectorAll(".demos .packs button")];
+function setPack(id){document.documentElement.dataset.theme=id;
+  for(const b of packs)b.setAttribute("aria-pressed",String(b.dataset.pack===id));}
+for(const b of packs)b.addEventListener("click",()=>setPack(b.dataset.pack));
+const stepBtns=[...document.querySelectorAll(".demos .steps button")];
+function markStep(n){for(const b of stepBtns)b.setAttribute("aria-pressed",String(+b.dataset.step===n));}
+const q=new URLSearchParams(location.search);
+if(q.get("theme"))setPack(q.get("theme"));
+
+
+const explore=document.getElementById("explore");
+const qsheet=document.getElementById("qsheet"), qin=document.getElementById("q"), rows=document.getElementById("qrows");
+const hint=document.getElementById("qhint"), kb=document.getElementById("kb"), qt=document.getElementById("qt");
+const sheet=document.getElementById("sheet");
+const reduce=matchMedia("(prefers-reduced-motion: reduce)");
+let done=new Set();
+
+/* ── the search sheet ── */
+function openSearch(){
+  sheet.classList.remove("open"); sheet.classList.remove("approaching");
+  document.documentElement.style.setProperty("--kb","300px");
+  kb.classList.add("open"); qsheet.classList.add("open");
+  render(qin.value);
+  qin.focus({preventScroll:true});
+}
+function closeSearch(){
+  qsheet.classList.remove("open"); kb.classList.remove("open");
+  document.documentElement.style.setProperty("--kb","0px");
+  explore.value=qin.value;
+}
+explore.addEventListener("focus",()=>{explore.blur();openSearch();});
+explore.addEventListener("click",()=>openSearch());
+qin.addEventListener("input",()=>render(qin.value));
+qin.addEventListener("keydown",(e)=>{if(e.key==="Escape")closeSearch();});
+
+function esc(s){return s.replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function render(q){
+  const v=q.trim().toLowerCase(); rows.innerHTML="";
+  const quick=[...qt.children]; quick.forEach((s)=>{s.textContent="";s.classList.remove("on")});
+  document.getElementById("kgo").classList.toggle("ready",v.length>0);
+  if(!v){
+    /* idle: exactly what the desk palette shows before a keystroke (home.css POL-9 /
+       +page.svelte 1170-1176): the two nearest attention rows, complete the closest, add */
+    const near=ITEMS.filter((i)=>i.band!=="overdue"&&!done.has(i.id)).slice(0,2);
+    for(const i of near)rows.append(itemRow(i));
+    if(near[0])rows.append(actRow("complete",near[0]));
+    rows.append(actRow("add"));
+    hint.textContent="items · documents · things to do"; return;
+  }
+  quick[0].textContent="“"+q.trim()+"”"; quick[0].classList.add("on");
+  const items=ITEMS.filter((i)=>!done.has(i.id)&&(i.title+" "+i.sec).toLowerCase().includes(v));
+  const docs=DOCS.filter((d)=>d.title.toLowerCase().includes(v));
+  if(!items.length&&!docs.length){
+    const n=document.createElement("div"); n.className="none";
+    n.innerHTML="nothing in your orbit is called <b>“"+esc(q.trim())+"”</b>"; rows.append(n);
+    rows.append(actRow("add",null,q.trim())); hint.textContent=""; return;
+  }
+  for(const i of items)rows.append(itemRow(i));
+  for(const d of docs)rows.append(docRow(d));
+  if(items[0]&&items[0].band!=="overdue")rows.append(actRow("complete",items[0]));
+  if(items[0]&&items[0].band==="overdue")rows.append(actRow("complete",items[0]));
+  hint.textContent=(items.length+docs.length)+" in your orbit";
+}
+function itemRow(i){
+  const b=document.createElement("button"); b.className="row"; b.setAttribute("role","option");
+  b.innerHTML='<span class="dot" style="background:var('+i.tone+')"></span><div class="flex"><b>'+esc(i.title)+'</b><span>'+esc(i.sec+" · "+i.cost)+'</span></div><div class="mt" style="color:'+TEXT[i.tone]+'">'+i.t+'<small>'+i.date+'</small></div>';
+  b.addEventListener("click",()=>openItem(i));  /* first tap: the sheet */
+  return b;
+}
+function docRow(d){
+  const b=document.createElement("button"); b.className="row"; b.setAttribute("role","option");
+  const owner=d.item?byId(d.item).title:"not yet in orbit";
+  b.innerHTML='<span class="doc">◆</span><div class="flex"><b>'+esc(d.title)+'</b><span>'+esc(d.meta)+'</span></div>';
+  b.addEventListener("click",()=>openDoc(d,owner));
+  return b;
+}
+function actRow(kind,i,q){
+  const b=document.createElement("button"); b.className="row act"; b.setAttribute("role","option");
+  b.textContent=kind==="add"?(q?"→ add “"+q+"” as an item":"→ add an item"):"→ complete “"+i.title+"”";
+  if(kind==="complete"){
+    /* the pocket two-tap: an arming button asks again in its own words */
+    b.addEventListener("click",()=>{
+      if(b.dataset.armed){complete(i);return;}
+      b.dataset.armed="1"; b.textContent="→ tap again to complete “"+i.title+"”";
+    });
+  }
+  return b;
+}
+function complete(i){
+  done.add(i.id);
+  const row=document.getElementById("row-"+i.id); if(row)row.remove();
+  if(i.id==="mot"){const c=document.getElementById("b-mot");c.style.transition=reduce.matches?"none":"fill 1.6s";c.style.fill="var(--ok)";}
+  render(qin.value);
+}
+
+/* ── the item sheet: first tap summons it, second tap approaches (CON-10) ── */
+let current=null;
+function openItem(i){
+  current=i; closeSearch();
+  document.getElementById("sh-title").textContent=i.title;
+  document.getElementById("sh-meta").textContent=[i.t,i.date,i.cost,i.docs.length?"◆ "+i.docs.length+" documents":null].filter(Boolean).join(" · ");
+  document.getElementById("sh-fields").innerHTML=i.kv.map(([k,v])=>'<div class="kv"><span>'+esc(k)+'</span><b>'+esc(v)+'</b></div>').join("");
+  document.getElementById("sh-docs").innerHTML=i.docs.map(([t,m])=>'<div class="doc"><i>◆</i><span>'+esc(t)+'<small>'+esc(m)+'</small></span></div>').join("");
+  document.getElementById("sh-docs-h").hidden=!i.docs.length;
+  document.getElementById("act-docs").hidden=!i.docs.length;
+  sheet.classList.remove("approaching"); sheet.classList.add("open");
+}
+function openDoc(d,owner){
+  current=null; closeSearch();
+  document.getElementById("sh-title").textContent=d.title;
+  document.getElementById("sh-meta").textContent=d.meta+" · "+owner;
+  document.getElementById("sh-fields").innerHTML=""; document.getElementById("sh-docs").innerHTML="";
+  document.getElementById("sh-docs-h").hidden=true; document.getElementById("act-docs").hidden=true;
+  sheet.classList.remove("approaching"); sheet.classList.add("open");
+}
+function approach(){ if(sheet.classList.contains("open"))sheet.classList.add("approaching"); }
+document.getElementById("act-open").addEventListener("click",approach);
+document.getElementById("act-docs").addEventListener("click",approach);
+document.getElementById("sh-manage").addEventListener("click",(e)=>e.preventDefault());
+for(const b of document.querySelectorAll("[data-sheet-close]"))b.addEventListener("click",()=>{sheet.classList.remove("open");sheet.classList.remove("approaching");});
+addEventListener("keydown",(e)=>{if(e.key==="Escape"){sheet.classList.remove("open");closeSearch();}});
+/* a tap outside either sheet closes it (pocket.behaviour.js's own rule) */
+document.addEventListener("click",(e)=>{
+  if(e.target.closest(".qsheet,.kb,.sheet,.demos,#explore"))return;
+  if(qsheet.classList.contains("open"))closeSearch();
+  else if(sheet.classList.contains("open")){sheet.classList.remove("open");sheet.classList.remove("approaching");}
+});
+
+/* ── the drawn keyboard's keys ── */
+kb.addEventListener("click",(e)=>{
+  const k=e.target.closest("button")?.dataset.k; if(k===undefined)return;
+  if(k==="del")qin.value=qin.value.slice(0,-1);
+  else if(k==="go"){const first=rows.querySelector(".row");if(first)first.click();return;}
+  else if(k==="shift"||k==="123")return;
+  else qin.value+=k;
+  render(qin.value); qin.focus({preventScroll:true});
+});
+
+/* ── demo steps ── */
+const CAPS={
+  1:"<b>1 idle</b> — the shipped pocket, untouched",
+  2:"<b>2 tap the field</b> — the palette rises as a sheet on the keys",
+  3:"<b>3 typing “mo”</b> — rows narrow with every key",
+  4:"<b>4 “mot”</b> — the item, its document, and the thing to do",
+  5:"<b>5 tap the item</b> — first tap: its sheet (CON-10)",
+  6:"<b>6 tap open</b> — second tap: approach (CON-10)",
+};
+function go(n){
+  markStep(n); document.getElementById("cap").innerHTML=CAPS[n];
+  sheet.classList.remove("open","approaching"); done=new Set();
+  const r=document.getElementById("row-mot");
+  if(n===1){closeSearch();qin.value="";explore.value="";return;}
+  if(n<=4){qin.value=n===2?"":n===3?"mo":"mot";openSearch();return;}
+  qin.value="mot"; openSearch(); openItem(byId("mot"));
+  if(n===6)approach();
+}
+for(const b of stepBtns)b.addEventListener("click",()=>go(+b.dataset.step));
+go(Math.min(6,Math.max(1,+q.get("step")||1)));
+
+</script>
+</body></html>

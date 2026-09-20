@@ -681,6 +681,36 @@ point.
   self-contained call and does not accept or return prior-call state. If a
   future slice ever calls it a second time within one run, this
   simplification needs revisiting.
+  - **Revisited, #999/#1043 (2026-09-20).** #999 gave `install.sh` a second
+    call site: the bundled `docker-compose.yml` declares `name: orbit`, and
+    a fresh install cannot read it at the first derivation because the file
+    is not in the target — or even staged — yet, so the working-directory
+    basename stands in and the script derives again once the staged copy
+    exists. **Which way it went: the simplification stays.**
+    `deriveComposeProjectName` still models a single self-contained call and
+    still does not accept prior-call state; it *returns* one more fact
+    instead, `provisional`, true only when the basename was the last resort.
+    That is exactly the state bash carries in
+    `compose_project_name_provisional` between its two calls, so nothing is
+    lost, and the caller — `install-orchestrator.ts`, mirroring
+    `install.sh`'s own `if [[ "$compose_project_name_provisional" == 1 ]]`
+    — decides whether to call again. The alternative, threading
+    prior-call state into the function so it could early-exit like the bash,
+    would have made a pure function stateful to keep a branch that is still
+    unreachable: the second call is made only when the first one was
+    provisional, which is precisely when `explicit` is false.
+  - The second call happens **before** the first configuration migration,
+    not after the assets are installed, and reads the *staged* compose file
+    (`deriveComposeProjectName`'s optional fourth argument, mirroring the
+    optional argument #999 gave the bash function). An unattended
+    pre-provisioned bootstrap arrives with its own `.env-orbit` carrying no
+    `COMPOSE_PROJECT_NAME`; the migration for that existing file writes down
+    whatever name the derivation has produced by then, and a derivation
+    running after it would read that value straight back as an explicit one
+    and keep the directory name for good. Both implementations were written
+    the late way first and both got this wrong; `scripts/install.test.mjs`
+    and `install-orchestrator.test.ts` each carry a pre-provisioned case
+    that fails against that ordering.
 - No shipped `docker` adapter exists yet for `database-volume-safety.ts` —
   by design, per the scope note above. The parity test's reference adapter
   (shelling out via `execFileSync`, matching bash's own blocking
