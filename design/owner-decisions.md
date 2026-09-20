@@ -1003,6 +1003,10 @@ carries the state and both acts), the owner ruled: **"56 b the row."**
 - `delete now` is the household danger line's own protocol: the opener
   prints the cost, the system's name is typed exactly, then the button asks
   twice. Admin-only, as §15 already ruled.
+- **Restore is admin-only in the interface too** (owner: "57 admin only").
+  The server lets a household owner call it; the household page still never
+  draws it — its danger line keeps saying "an instance admin can turn this
+  back until then".
 - Nothing is drawn when nothing is scheduled; a second household on the
   clock costs one more row, not one more card.
 - Record: `design/v19/household-recovery/round-1/b-the-row-on-the-clock.html`
