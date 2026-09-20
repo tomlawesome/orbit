@@ -63,7 +63,11 @@ shadow, landing with create-v3's settle. The bar beneath: the same pager
 at its head; `fit − 75% +` in the middle (100% is A4 at 96dpi; keys + − 0,
 ctrl+wheel, pinch on touch; past fit the page scrolls inside the window,
 never the belt; below fit is not offered); `download` and `remove` at its
-tail, remove being the two-press "tap again to remove" (#1054). Esc, the
+tail as the item card's own action pills — download in the accent, remove
+in the overdue tone like the card's `retire`, filling when armed — remove
+being the two-press "tap again to remove" (#1054). (Owner, 2026-09-20, on
+first sight of H: "The download and remove buttons should now actually
+made a bit louder that theyve moved into the reader view.") Esc, the
 close word, or a press on the dim outside the page closes the reader back
 to the preview, focus returning to the page. Turning a page in the reader
 turns it in the preview too. `role="dialog" aria-modal`, focus moved in
@@ -100,4 +104,9 @@ had swallowed the mockup's demo rail, which then sat over the bar.
 
 ## Verdict
 
-Awaiting the owner.
+Owner, 2026-09-20: "Very good job on 1059 at last. I have just one, very
+small criticism. The download and remove buttons should now actually made
+a bit louder that theyve moved into the reader view." Done in place
+(pills, above) rather than as a new round, at the owner's request: "We
+don't need a full mockup for that, just show me a quick screen shot".
+Approval of the whole awaits that screenshot.
