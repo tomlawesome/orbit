@@ -41,14 +41,17 @@
 # Compose would actually use -- a mismatch here would be a false-negative
 # preflight, the same failure this exists to prevent.
 resolve_compose_project() {
-  local env_file="$1"
+  # Prefixed names, same reason as compose_isolation_preflight below: this
+  # file is *sourced*, so a plain `local env_file` or `local json` would
+  # collide with a caller that already made a same-named variable readonly.
+  local _cip_env_file="$1"
   shift
-  local json
-  json="$(docker compose --env-file "$env_file" "$@" config --format json 2>/dev/null)" || return 1
+  local _cip_json
+  _cip_json="$(docker compose --env-file "$_cip_env_file" "$@" config --format json 2>/dev/null)" || return 1
   # Read the name with node rather than jq: jq is not on the fast job's image,
   # where this script's tests run, and node is on every image (the same reason
   # scripts/ci/gitlab-await-tested-image.sh reads JSON with node).
-  printf '%s' "$json" | node -e '
+  printf '%s' "$_cip_json" | node -e '
     let raw = "";
     process.stdin.on("data", (chunk) => { raw += chunk; }).on("end", () => {
       let input;

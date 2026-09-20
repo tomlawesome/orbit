@@ -1,12 +1,15 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, externalIdentities, instanceAuthority, localCredentials, memberships, sessions, users } from "@/db/schema";
+import { auditLog, externalIdentities, households, instanceAuthority, localCredentials, memberships, sections, sessions, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY, ADMINISTRATOR_LOCK_KEY } from "@/lib/auth/authority-locks";
 import type { RecentAuthentication } from "@/lib/auth/recent-auth";
+import { cloneSections } from "@/lib/workspace";
 import { openInstanceMetadataReader, type MetadataCipher, type MetadataFieldState } from "@/server/metadata/fields";
 import { requireInstanceAdministrator } from "@/server/authorization";
+import { sectionSlug } from "@/server/workspace-access";
 
 const uuidSchema = z.uuid();
 
@@ -421,4 +424,121 @@ export async function transferPrimaryAdministrator(
   });
 
   return listInstanceUsers(actorUserId);
+}
+
+/**
+ * The name and owner a new system needs, and nothing else (#1052).
+ *
+ * Length and emptiness are checked here rather than only at the route, so the
+ * refusal is the same wherever the call comes from: 60 characters is
+ * `householdWorkspaceSchema`'s own limit for a household name, and the
+ * arrival's `NAME_LIMIT` is the same number on the browser side.
+ */
+export const HOUSEHOLD_NAME_LIMIT = 60;
+
+/** What an administrator learns about the system they just made. */
+export interface CreatedHousehold {
+  id: string;
+  name: string;
+  ownerId: string;
+}
+
+/**
+ * An administrator creates a household for somebody else (#1052, Fable's
+ * decision of 2026-09-19).
+ *
+ * Until now a household only came into being at arrival, where the person
+ * creating it becomes its owner: `applyWorkspaceCommand`'s `household.create`
+ * branch inserts the owner membership for the CALLER and points the caller's
+ * session at the new household. Neither is right here — the administrator is
+ * not the owner and may not be a member at all, and their own active household
+ * must not move because they made a system for someone else. So this writes
+ * the same three tables that branch writes, with the named user as owner and
+ * no session touched.
+ *
+ * Everything else is deliberately identical to that branch: the default
+ * section set from one place (`cloneSections`), `setupCompleted` true so the
+ * owner arrives at a finished system rather than an onboarding shell, the
+ * refusal on a name a removed household is still holding, and an audit row
+ * written inside the same transaction as the insert, so the trail cannot exist
+ * without the household or the household without the trail.
+ */
+export async function createHouseholdForOwner(
+  actorUserId: string,
+  input: { name: string; ownerId: string },
+): Promise<CreatedHousehold> {
+  await requireInstanceAdministrator(actorUserId);
+
+  const name = input.name.trim();
+  if (name.length === 0) {
+    throw new AppError("invalid_request", "Give the new system a name", 422);
+  }
+  if (name.length > HOUSEHOLD_NAME_LIMIT) {
+    throw new AppError(
+      "invalid_request",
+      `A system name is at most ${HOUSEHOLD_NAME_LIMIT} characters`,
+      422,
+    );
+  }
+  if (!uuidSchema.safeParse(input.ownerId).success) {
+    throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
+  }
+
+  const householdId = randomUUID();
+  await getDb().transaction(async (transaction) => {
+    const [owner] = await transaction
+      .select({ id: users.id, disabledAt: users.disabledAt })
+      .from(users)
+      .where(eq(users.id, input.ownerId))
+      .limit(1);
+    if (!owner) {
+      throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
+    }
+    if (owner.disabledAt) {
+      throw new AppError("account_disabled", "Enable this Orbit account before making it an owner", 409);
+    }
+
+    const [recoverableName] = await transaction
+      .select({ id: households.id })
+      .from(households)
+      .where(and(
+        isNotNull(households.deletionRequestedAt),
+        sql`${households.deleteAfter} > now()`,
+        sql`lower(${households.name}) = lower(${name})`,
+      ))
+      .limit(1);
+    if (recoverableName) {
+      throw new AppError(
+        "household_name_recoverable",
+        "A removed household already uses this name. Restore it, or permanently delete it first.",
+        409,
+      );
+    }
+
+    await transaction.insert(households).values({ id: householdId, name, setupCompleted: true });
+    await transaction.insert(memberships).values({ householdId, userId: input.ownerId, role: "owner" });
+    await transaction.insert(sections).values(cloneSections().map((section, position) => {
+      const sectionId = randomUUID();
+      return {
+        id: sectionId,
+        householdId,
+        slug: sectionSlug(section.name, sectionId),
+        name: section.name,
+        icon: section.icon,
+        accent: section.accent,
+        position,
+        visible: section.visible,
+      };
+    }));
+    await transaction.insert(auditLog).values({
+      householdId,
+      actorUserId,
+      entityType: "household",
+      entityId: householdId,
+      action: "household_created",
+      changes: { name, ownerUserId: input.ownerId, createdBy: "administrator" },
+    });
+  });
+
+  return { id: householdId, name, ownerId: input.ownerId };
 }

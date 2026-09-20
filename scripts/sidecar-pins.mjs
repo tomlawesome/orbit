@@ -7,7 +7,7 @@
 // `ghcr.io/tomlawesome/orbit-base-image`, and Dependabot cannot read the
 // bespoke JSON in `.github/supply-chain-policy.json` at all.
 //
-// Three ways a sidecar pin can be behind, and the report says which, because
+// Four ways a sidecar pin can be behind, and the report says which, because
 // the remedies differ:
 //
 //   0. Drift. A pin lives in two places -- a file (`docker-compose.yml`,
@@ -21,6 +21,19 @@
 //      but its distribution has published fixes since it was built. There is
 //      nothing to re-pin to: either upstream rebuilds, or the finding becomes
 //      a named expiring entry in the policy's `exceptions[]` (see #740).
+//   3. Upstream has published a newer stable release, and the tag we pinned
+//      has *not* moved -- it still resolves to exactly the manifest we think
+//      it does, so axis 1 has nothing to say. A digest pin only ever answers
+//      "is this the tag I already named still what I think it is"; it cannot
+//      answer "has something newer shipped", because it was never told what
+//      "newer" would look like. This is why `ollama/ollama` pinned at 0.33.3
+//      read as current for months after 0.34.0 and 0.34.1 shipped (#1042):
+//      nothing ever asked upstream's tag list the question. Remedy: bump the
+//      tag to the new release, resolve its digest, and run `sync`. A rolling
+//      tag with no version in it (`node:24-alpine`, `postgres:18-alpine`) has
+//      nothing to compare, so this axis is skipped for it; a pre-release or
+//      differently-suffixed tag (`-rc*`, `-SNAPSHOT`, `-rocm`, `-slim`, ...)
+//      is never offered as the upgrade.
 //
 // Nothing is committed automatically. This reports, and a person acts.
 //
@@ -50,6 +63,19 @@ const HEX = "0123456789abcdef";
 const RESOLVE_TIMEOUT_MS = 120_000;
 // Axis 2 pulls the image first, and ollama and tika are large.
 const SIMULATE_TIMEOUT_MS = 600_000;
+// One HTTP round trip; a wedged registry should not hang the whole check.
+const REGISTRY_FETCH_TIMEOUT_MS = 30_000;
+// Docker Hub paginates tags/list at ~100 per page; ollama alone has 1000+
+// tags, so this is a real cap, not a formality, but still far more than any
+// repo here has ever needed.
+const MAX_TAG_LIST_PAGES = 20;
+
+// A pre-release marker never worth offering as an upgrade, wherever it lands
+// among a tag's hyphen-separated segments.
+const PRERELEASE_SEGMENT_PATTERN = /^(?:rc\d*|snapshot|beta\d*|alpha\d*)$/iu;
+// A tag's version part: one or more dot-separated numbers. A single number
+// with no dot (`24`, `18`) is a bare major -- a rolling tag, not a release.
+const VERSION_SEGMENT_PATTERN = /^\d+(?:\.\d+)*$/u;
 
 function escapeForRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -101,6 +127,69 @@ export function pendingUpgrades(manager, output) {
     return lines.filter((line) => line.startsWith("Inst "));
   }
   return [];
+}
+
+/**
+ * Split a policy tag reference (`ollama/ollama:0.33.3`, `node:24-alpine`)
+ * into the repository and the tag name, on the last colon after the last
+ * slash so a registry host with a port never gets mistaken for a tag.
+ */
+function splitTagReference(tagRef) {
+  const lastSlash = tagRef.lastIndexOf("/");
+  const lastColon = tagRef.lastIndexOf(":");
+  if (lastColon > lastSlash) {
+    return { repository: tagRef.slice(0, lastColon), tagName: tagRef.slice(lastColon + 1) };
+  }
+  return { repository: tagRef, tagName: "latest" };
+}
+
+/**
+ * Read a tag name as a release: its version, whether that version is a bare
+ * major with nothing to compare (`24`, `18-alpine`), whether it carries a
+ * pre-release marker, and the variant suffix left once that marker is set
+ * aside (so `4.1.0-SNAPSHOT-full` reads as variant `full`, pre-release
+ * `true` -- excluded on the pre-release rule even though its variant would
+ * otherwise match `4.0.0-full`).
+ */
+function parseVersionTag(tagName) {
+  const segments = tagName.split("-");
+  const versionSegment = segments[0];
+  if (!VERSION_SEGMENT_PATTERN.test(versionSegment)) {
+    return { valid: false, rolling: false, prerelease: false, variant: null, versionParts: [] };
+  }
+  const versionParts = versionSegment.split(".").map(Number);
+  const rest = segments.slice(1);
+  const prerelease = rest.some((segment) => PRERELEASE_SEGMENT_PATTERN.test(segment));
+  const variantSegments = rest.filter((segment) => !PRERELEASE_SEGMENT_PATTERN.test(segment));
+  return {
+    valid: true,
+    rolling: versionParts.length < 2,
+    prerelease,
+    variant: variantSegments.length > 0 ? variantSegments.join("-") : null,
+    versionParts,
+  };
+}
+
+/** Compare two dot-separated version part arrays numerically, component by component. */
+function compareVersionParts(a, b) {
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (a[index] ?? 0) - (b[index] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/** One less than a version, for --red to fabricate a pin it knows is old. `null` if it cannot go lower. */
+function decrementVersionParts(versionParts) {
+  const decremented = [...versionParts];
+  for (let index = decremented.length - 1; index >= 0; index -= 1) {
+    if (decremented[index] > 0) {
+      decremented[index] -= 1;
+      return decremented;
+    }
+  }
+  return null;
 }
 
 // --- The real registry and container calls -----------------------------------
@@ -196,6 +285,76 @@ export function dockerSimulatePackages(reference) {
     manager: lines[markerIndex].slice("__ORBIT_MANAGER__ ".length).trim(),
     output: lines.slice(markerIndex + 1).join("\n"),
   };
+}
+
+/** Where a repository's tags live, and the anonymous token scope to read them. */
+function registryForRepository(repository) {
+  if (repository.startsWith("ghcr.io/")) {
+    const repoPath = repository.slice("ghcr.io/".length);
+    return {
+      repoPath,
+      registryHost: "https://ghcr.io",
+      tokenUrl: `https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`,
+    };
+  }
+  // Docker Hub's official images (`node`, `postgres`) live under `library/`;
+  // an org-owned repository (`ollama/ollama`, `apache/tika`) already has its
+  // own namespace.
+  const repoPath = repository.includes("/") ? repository : `library/${repository}`;
+  return {
+    repoPath,
+    registryHost: "https://registry-1.docker.io",
+    tokenUrl: `https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repoPath}:pull`,
+  };
+}
+
+function nextTagsPageUrl(linkHeader, registryHost) {
+  if (!linkHeader) return null;
+  const match = /<([^>]+)>;\s*rel="next"/u.exec(linkHeader);
+  if (!match) return null;
+  return match[1].startsWith("http") ? match[1] : `${registryHost}${match[1]}`;
+}
+
+/**
+ * Every tag a repository currently publishes. The docker CLI can resolve a
+ * tag it is already given but cannot list what exists, so this goes straight
+ * to the registry v2 HTTP API with an anonymous bearer token -- every image
+ * this tool pins is public, so no credential is needed to read its tag list.
+ * Works against Docker Hub and GHCR.
+ */
+export async function dockerListTags(repository) {
+  const { repoPath, registryHost, tokenUrl } = registryForRepository(repository);
+  const tokenResponse = await fetch(tokenUrl, {
+    signal: AbortSignal.timeout(REGISTRY_FETCH_TIMEOUT_MS),
+  });
+  if (!tokenResponse.ok) {
+    throw new Error(
+      `could not get an anonymous token for ${repository}: HTTP ${tokenResponse.status}`,
+    );
+  }
+  const tokenBody = await tokenResponse.json();
+  const token = tokenBody.token ?? tokenBody.access_token;
+  if (!token) {
+    throw new Error(`registry did not return an anonymous token for ${repository}`);
+  }
+
+  const tags = [];
+  let url = `${registryHost}/v2/${repoPath}/tags/list?n=100`;
+  let pages = 0;
+  while (url && pages < MAX_TAG_LIST_PAGES) {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(REGISTRY_FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      throw new Error(`${repository} tag list request failed: HTTP ${response.status}`);
+    }
+    const body = await response.json();
+    if (Array.isArray(body.tags)) tags.push(...body.tags);
+    url = nextTagsPageUrl(response.headers.get("link"), registryHost);
+    pages += 1;
+  }
+  return tags;
 }
 
 // --- Axis 0: drift between the two places a pin lives ------------------------
@@ -326,9 +485,86 @@ async function checkPackages(entry, simulatePackages) {
   };
 }
 
+// --- Axis 3: has upstream published a newer release? -------------------------
+
+/**
+ * Ask whether upstream has shipped a release beyond the one we pinned from --
+ * a question the digest axis cannot answer, because a digest pin only checks
+ * whether the tag we already named still resolves where we left it. A
+ * rolling tag with no version (`node:24-alpine`) has nothing to compare, so
+ * it is reported `rolling`, not `current` -- "nothing found to be newer" and
+ * "there was nothing to compare" are different findings with different
+ * remedies (none, versus none needed).
+ */
+async function checkRelease(entry, listTags) {
+  const { repository, tagName } = splitTagReference(entry.tag);
+  const pinned = parseVersionTag(tagName);
+  if (!pinned.valid) {
+    return {
+      status: "not-versioned",
+      pinnedVersion: null,
+      latestVersion: null,
+      latestTag: null,
+      summary: `${entry.tag} does not carry a version this axis can read, so the upstream-release check does not apply`,
+    };
+  }
+  if (pinned.rolling) {
+    return {
+      status: "rolling",
+      pinnedVersion: pinned.versionParts.join("."),
+      latestVersion: null,
+      latestTag: null,
+      summary: `${entry.tag} is a rolling tag with no version to compare against, so the upstream-release check does not apply`,
+    };
+  }
+  const pinnedVersion = pinned.versionParts.join(".");
+  let tags;
+  try {
+    tags = await listTags(repository);
+  } catch (error) {
+    return {
+      status: "unreachable",
+      pinnedVersion,
+      latestVersion: null,
+      latestTag: null,
+      summary: `could not list ${repository}'s tags from its registry: ${
+        error instanceof Error ? error.message : "unknown failure"
+      }`,
+    };
+  }
+  let latest = null;
+  for (const candidateTag of tags) {
+    const candidate = parseVersionTag(candidateTag);
+    // Never a rolling tag, never a pre-release, and only ever the same
+    // variant as the pin -- a `-full` pin compares only against other
+    // `-full` tags, never a bare release or a `-rocm`/`-slim` build.
+    if (!candidate.valid || candidate.rolling || candidate.prerelease) continue;
+    if (candidate.variant !== pinned.variant) continue;
+    if (!latest || compareVersionParts(candidate.versionParts, latest.versionParts) > 0) {
+      latest = { versionParts: candidate.versionParts, tag: candidateTag };
+    }
+  }
+  if (!latest || compareVersionParts(latest.versionParts, pinned.versionParts) <= 0) {
+    return {
+      status: "current",
+      pinnedVersion,
+      latestVersion: latest ? latest.versionParts.join(".") : pinnedVersion,
+      latestTag: latest ? latest.tag : null,
+      summary: `${repository} has not published a stable release newer than the pinned ${tagName}`,
+    };
+  }
+  return {
+    status: "behind",
+    pinnedVersion,
+    latestVersion: latest.versionParts.join("."),
+    latestTag: latest.tag,
+    summary: `${repository} has published ${latest.tag}, newer than the pinned ${tagName}`,
+  };
+}
+
 // --- The check ---------------------------------------------------------------
 
-const BEHIND_STATUSES = new Set(["drifted", "moved", "stale"]);
+const BEHIND_STATUSES = new Set(["drifted", "moved", "stale", "behind"]);
 const BLIND_STATUSES = new Set(["unreachable", "no-package-manager"]);
 
 const SKIPPED_TAG_AXIS = {
@@ -345,16 +581,25 @@ const SKIPPED_PACKAGE_AXIS = {
   pending: [],
   summary: "not checked (pass --packages, which pulls every image)",
 };
+const SKIPPED_RELEASE_AXIS = {
+  status: "skipped",
+  pinnedVersion: null,
+  latestVersion: null,
+  latestTag: null,
+  summary: "not checked (offline)",
+};
 
 /**
- * Run the axes over every covered entry. `resolveTag` and `simulatePackages`
- * are injectable so the unit tests can run all three axes without docker.
+ * Run the axes over every covered entry. `resolveTag`, `simulatePackages` and
+ * `listTags` are injectable so the unit tests can run every axis without
+ * docker or a real registry.
  */
 export async function checkPins({
   policy,
   repoDir = REPO_DIR,
   resolveTag = dockerResolveTag,
   simulatePackages = dockerSimulatePackages,
+  listTags = dockerListTags,
   packages = false,
   offline = false,
   drift = true,
@@ -368,6 +613,7 @@ export async function checkPins({
         ? checkDrift(entry, repoDir)
         : { status: "skipped", files: [], summary: "not checked" },
       tag: offline ? SKIPPED_TAG_AXIS : await checkTag(entry, resolveTag),
+      release: offline ? SKIPPED_RELEASE_AXIS : await checkRelease(entry, listTags),
       packages:
         offline || !packages
           ? SKIPPED_PACKAGE_AXIS
@@ -452,6 +698,17 @@ export function renderReport(result) {
       );
     }
 
+    lines.push(`- **Upstream release**: ${image.axes.release.summary}`);
+    if (image.axes.release.status === "behind") {
+      lines.push(`  - pinned release: \`${image.axes.release.pinnedVersion}\``);
+      lines.push(
+        `  - latest release: \`${image.axes.release.latestVersion}\` (\`${image.axes.release.latestTag}\`)`,
+      );
+      lines.push(
+        "  - Remedy: bump the tag to the new release, resolve its digest, and run `node scripts/sidecar-pins.mjs sync` to pin both places.",
+      );
+    }
+
     lines.push(`- **Packages inside the pin**: ${image.axes.packages.summary}`);
     for (const pending of image.axes.packages.pending) {
       lines.push(`  - ${pending}`);
@@ -471,10 +728,10 @@ export function renderReport(result) {
       : result.blind
         ? "Nothing was found to be behind, but at least one image could not be checked, which is not the same as a pass."
         : result.offline
-          ? "Every pin matches the policy. The upstream tag and the packages inside each pin were not checked: this was an offline run."
+          ? "Every pin matches the policy. The upstream tag, the newest upstream release and the packages inside each pin were not checked: this was an offline run."
           : result.packagesChecked
-            ? "Every checked pin is in step with its upstream tag and its own packages."
-            : "Every checked pin matches the policy and is still the current manifest of its tag. The packages inside each pin were not checked.",
+            ? "Every checked pin is in step with its upstream tag, the newest release upstream has published, and its own packages."
+            : "Every checked pin matches the policy, is still the current manifest of its tag, and is not behind the newest release upstream has published. The packages inside each pin were not checked.",
   );
   lines.push("");
   return `${lines.join("\n")}\n`;
@@ -605,13 +862,8 @@ export function parseArguments(argv) {
   return { command, options };
 }
 
-async function runRedSelfTest({ policy, repoDir, resolveTag, only, today, write }) {
-  const entries = sidecarEntries(policy, only);
-  if (entries.length === 0) {
-    write("sidecar pins: --red found no image to test against.\n");
-    return 1;
-  }
-  const entry = entries[0];
+/** Axis 1's half of --red: fabricate a stale digest and insist the check calls it moved. */
+async function runTagRedCheck({ policy, repoDir, resolveTag, entry, today, write }) {
   const staleDigest = rotateDigest(digestOf(entry.reference));
   write(
     `sidecar pins: self-test. Pretending ${entry.tag} is pinned to ${staleDigest}, which it is not, and asking the check whether the tag has moved. Nothing is written.\n`,
@@ -634,7 +886,7 @@ async function runRedSelfTest({ policy, repoDir, resolveTag, only, today, write 
     write(
       `sidecar pins: self-test passed. The check reported the deliberately stale pin as moved (${axis.pinnedDigest} -> ${axis.currentDigest}), so it is known to fire.\n`,
     );
-    return 0;
+    return true;
   }
   // The status alone hides the cause -- pipeline 278 read "unreachable" and
   // nothing about the missing Docker client behind it -- so the axis's own
@@ -643,7 +895,91 @@ async function runRedSelfTest({ policy, repoDir, resolveTag, only, today, write 
   write(
     `sidecar pins: self-test FAILED. The check did not fire on a deliberately stale pin for ${entry.tag}; it reported '${axis?.status ?? "nothing"}'${detail}. Do not trust a green run from this check until that is fixed.\n`,
   );
-  return 1;
+  return false;
+}
+
+/**
+ * Axis 3's half of --red: fabricate a pin one release older than it really
+ * is and insist the check calls it behind. Needs an entry with an actual
+ * version to step back from, so it picks its own entry rather than reusing
+ * axis 1's -- entries[0] is often a rolling tag (`node:24-alpine`), which
+ * this axis never has anything to say about.
+ */
+async function runReleaseRedCheck({ policy, repoDir, listTags, entries, today, write }) {
+  const entry = entries.find((candidate) => {
+    const { tagName } = splitTagReference(candidate.tag);
+    const parsed = parseVersionTag(tagName);
+    return parsed.valid && !parsed.rolling;
+  });
+  if (!entry) {
+    write(
+      "sidecar pins: --red found no version-comparable image to test the upstream-release axis against; that part of the self-test is skipped.\n",
+    );
+    return true;
+  }
+  const { repository, tagName } = splitTagReference(entry.tag);
+  const parsed = parseVersionTag(tagName);
+  const decremented = decrementVersionParts(parsed.versionParts);
+  if (!decremented) {
+    write(
+      `sidecar pins: --red cannot step ${entry.tag} back any further to test the upstream-release axis; that part of the self-test is skipped.\n`,
+    );
+    return true;
+  }
+  const fakeTagName = `${decremented.join(".")}${parsed.variant ? `-${parsed.variant}` : ""}`;
+  const fakeTag = `${repository}:${fakeTagName}`;
+  write(
+    `sidecar pins: self-test. Pretending ${entry.tag} is pinned to ${fakeTag}, an older release than it really is, and asking the check whether upstream has published something newer. Nothing is written.\n`,
+  );
+  const result = await checkPins({
+    policy: { ...policy, containerImages: [{ ...entry, tag: fakeTag }] },
+    repoDir,
+    listTags,
+    // Only the release axis is under test here; give axis 1 a resolver that
+    // never shells out to the real docker CLI, so this half of --red does
+    // not depend on Docker being present.
+    resolveTag: async () => ({ indexDigest: null, platformDigest: null }),
+    drift: false,
+    packages: false,
+    today,
+  });
+  const axis = result.images[0]?.axes.release;
+  if (axis?.status === "behind") {
+    write(
+      `sidecar pins: self-test passed. The check reported the deliberately old pin as behind (${axis.pinnedVersion} -> ${axis.latestVersion}), so it is known to fire.\n`,
+    );
+    return true;
+  }
+  const detail = axis?.summary ? ` (${axis.summary})` : "";
+  write(
+    `sidecar pins: self-test FAILED. The check did not fire on a deliberately old release pin for ${fakeTag}; it reported '${axis?.status ?? "nothing"}'${detail}. Do not trust a green run from this check until that is fixed.\n`,
+  );
+  return false;
+}
+
+async function runRedSelfTest({ policy, repoDir, resolveTag, listTags, only, today, write }) {
+  const entries = sidecarEntries(policy, only);
+  if (entries.length === 0) {
+    write("sidecar pins: --red found no image to test against.\n");
+    return 1;
+  }
+  const tagPassed = await runTagRedCheck({
+    policy,
+    repoDir,
+    resolveTag,
+    entry: entries[0],
+    today,
+    write,
+  });
+  const releasePassed = await runReleaseRedCheck({
+    policy,
+    repoDir,
+    listTags,
+    entries,
+    today,
+    write,
+  });
+  return tagPassed && releasePassed ? 0 : 1;
 }
 
 export async function runSidecarPins(argv, deps = {}) {
@@ -651,6 +987,7 @@ export async function runSidecarPins(argv, deps = {}) {
     repoDir = REPO_DIR,
     resolveTag = dockerResolveTag,
     simulatePackages = dockerSimulatePackages,
+    listTags = dockerListTags,
     today = new Date().toISOString().slice(0, 10),
     write = (text) => process.stdout.write(text),
     writeError = (text) => process.stderr.write(text),
@@ -714,6 +1051,7 @@ export async function runSidecarPins(argv, deps = {}) {
       policy,
       repoDir,
       resolveTag,
+      listTags,
       only: options.only,
       today,
       write,
@@ -725,6 +1063,7 @@ export async function runSidecarPins(argv, deps = {}) {
     repoDir,
     resolveTag,
     simulatePackages,
+    listTags,
     packages: options.packages === true,
     offline: options.offline === true,
     only: options.only,
@@ -739,7 +1078,7 @@ export async function runSidecarPins(argv, deps = {}) {
 
   if (result.exitCode === 1) {
     writeError(
-      "sidecar pins: at least one pin is behind. A moved tag is re-pinned with `node scripts/sidecar-pins.mjs sync`; stale packages inside a current pin have no re-pin remedy and need upstream or a named expiring exception (#740).\n",
+      "sidecar pins: at least one pin is behind. A moved tag, or a tag behind on releases, is re-pinned with `node scripts/sidecar-pins.mjs sync`; stale packages inside a current pin have no re-pin remedy and need upstream or a named expiring exception (#740).\n",
     );
   } else if (result.exitCode === 2) {
     writeError(

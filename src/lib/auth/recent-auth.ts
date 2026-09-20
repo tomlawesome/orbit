@@ -62,6 +62,9 @@ export const stepUpIntents = [
   "local_user_create",
   "setup_link_issue",
   "primary_transfer",
+  /* Creating a system for somebody else (#1052): an administrator act that
+     hands a household to a named owner, so it is challenged like the rest. */
+  "system_create",
 ] as const;
 export type StepUpIntent = typeof stepUpIntents[number];
 
