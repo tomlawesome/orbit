@@ -52,6 +52,9 @@ Owner's 1093×614: at rest 1012×199; export open 1012×543; over the cap
   parsed in memory today; the build should stream or chunk the document
   bytes rather than base64 the lot in one JSON body.
 
-## Open for the owner
+## Verdict
 
-**64** Approved as drawn, with documents always in?
+Owner, 2026-09-20, verbatim: "I'd rather it read more as a list." then
+"64a yeah documents always in because there's zero point in an export
+without them, as there's nothing to then import." Documents always in is
+ratified; the counts become a manifest list in `../round-3/`.
