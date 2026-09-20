@@ -97,3 +97,9 @@ rest, 267px with the confirm open on a desk; restored row 95px.
 the act on administration only, and the household's danger line says so ("an
 instance admin can turn this back until then"). Keep it that way? If yes,
 nothing changes; the build simply never draws restore on the household page.
+
+## Verdict
+
+Owner, 2026-09-20, verbatim: "56 b the row." B — the row on the clock — is
+the direction. A stays as the record. Question 57 (restore admin-only in the
+interface) was still open at the time of writing.
