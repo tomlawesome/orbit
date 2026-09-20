@@ -149,6 +149,7 @@ function freshState(overrides: Partial<DatabaseVolumeSafetyState> = {}): Databas
     targetWasEmpty: false,
     composeProjectNameExplicit: false,
     composeProjectName: "",
+    composeProjectNameProvisional: false,
     ...overrides,
   };
 }
@@ -322,6 +323,10 @@ describe("verifyDatabaseVolumeSafety fresh-check path (guarantees #15, #16, #18)
       targetWasEmpty: false,
       composeProjectNameExplicit: false,
       composeProjectName: PROJECT,
+      // install.sh:659: the project that owns a proven volume is the
+      // deployment's real identity, so #999's later re-derivation must never
+      // replace it -- it is never provisional, however it was derived.
+      composeProjectNameProvisional: false,
     });
   });
 

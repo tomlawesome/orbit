@@ -1689,6 +1689,32 @@ describe("install.sh", () => {
     );
   });
 
+  // #999's other fresh-install shape: an unattended pre-provisioned
+  // bootstrap arrives with its own .env-orbit, which carries no
+  // COMPOSE_PROJECT_NAME. The configuration migration for that existing file
+  // runs before the assets move into the target, so a re-derivation placed
+  // after the move read back the name that migration had just written and
+  // kept the directory's own name for good -- the declaration in
+  // docker-compose.yml was still unreachable, quietly, for every unattended
+  // install. The derivation therefore reads the staged copy of the compose
+  // file before anything writes a name down.
+  it("names a pre-provisioned bootstrap's Compose project from docker-compose.yml too, not the target directory", () => {
+    const targetDir = makeTarget();
+    expect(basename(targetDir)).not.toBe("orbit");
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_USE_REAL_CONFIGURATION: "1" });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain("COMPOSE_PROJECT_NAME=orbit\n");
+    const projectCalls = result.calls.split("\n").filter((line) => line.includes("--project-name"));
+    expect(projectCalls.length).toBeGreaterThan(0);
+    for (const call of projectCalls) {
+      expect(call).toContain("--project-name orbit --env-file");
+    }
+    expect(projectCalls.join("\n")).not.toContain(basename(targetDir).toLowerCase());
+  });
+
   it("preserves pre-provisioned inputs byte-for-byte when pre-commit Compose validation fails", () => {
     const targetDir = makeTarget();
     makePreprovisionedDeployment(targetDir);
