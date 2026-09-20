@@ -16,6 +16,7 @@ Served at
 `http://<LAN address>:8336/1002-portable-archive/design/v19/portable-archive/round-7/g-a-switch-not-a-hint.html`,
 same scenes as round 4.
 
-## Open for the owner
+## Verdict
 
-**70** Approved as drawn?
+Owner, 2026-09-20, verbatim: "Round 7 approved." Ratified as drawn;
+recorded in `design/owner-decisions.md` §21 and §22.
