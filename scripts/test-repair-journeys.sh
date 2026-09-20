@@ -14,10 +14,16 @@
 # green tick. The `absent` list below is printed on every run for exactly
 # that reason.
 #
-# Isolation: the target directory name doubles as the Compose project name
-# install.sh persists, so everything this script creates carries the
-# orbit-repair-journeys project label and can be swept even after a SIGKILL.
-# It never touches a project it did not create.
+# Isolation: this script names the Compose project outright, so everything it
+# creates carries the orbit-repair-journeys project label and can be swept
+# even after a SIGKILL. It never touches a project it did not create.
+#
+# It used to get that label for free from the target directory's name, which
+# install.sh took as the project when nothing better was offered. Since #999
+# nothing better means `docker-compose.yml`'s own `name: orbit` — the whole
+# point of that fix — so every install would land in the `orbit` project and
+# this run's sweep would be aimed at somebody else's stack. The check after
+# install.sh proves the label rather than trusting it, and would refuse.
 #
 # Usage: scripts/test-repair-journeys.sh [--keep] [--journey <name>] [--list]
 #   ORBIT_REPAIR_JOURNEYS_IMAGE=<ref>  use this image instead of building one
@@ -232,13 +238,15 @@ install_deployment() {
 
   note 'installing the deployment under test'
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
+      COMPOSE_PROJECT_NAME="$project" \
       ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
       bash "$repo_root/scripts/install.sh" </dev/null) > "$workdir/install.log" 2>&1 ||
     { tail -n 30 "$workdir/install.log" >&2; fail "install.sh failed; log: $workdir/install.log"; }
 
-  # Confirm the isolation claim rather than trusting it: a stray
-  # COMPOSE_PROJECT_NAME would otherwise attach this run to somebody else's
-  # stack, and the teardown below removes volumes (AGENTS.md, compose trap).
+  # Confirm the isolation claim rather than trusting it: the wrong project
+  # label would attach this run to somebody else's stack, and the teardown
+  # below removes volumes (AGENTS.md, compose trap). The name is set on the
+  # install above; this proves install.sh honoured it.
   # The container name is the fixed pin from docker-compose.yml, not a
   # project-prefixed one, which is also why refuse_foreign_stack runs first.
   local owner
