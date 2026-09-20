@@ -1135,3 +1135,26 @@ one more time, they're still too subtle.") settled it:
   settings **Reminders** card becomes *reminders · sent to you lately*
   (§20's list on the second tab). The household **Members** card is not
   tabbed; nothing else is. "We don't need to tab everything."
+
+## 23. There is one tour, and it is the one-take film (owner, 2026-09-20)
+
+Said when a build turned out to have followed the superseded ten-beat
+design: **"The only tour is the one with the play and pause buttons.
+Anything else is old and superseded."** The approved tour is rounds 4 and
+5's **one take** — `design/v19/tour/round-5/f-one-take.html` and its
+README — where the beats are gone and the film runs as one continuous
+take.
+
+- **One tour, for everybody.** No second cut for a reader with no
+  household. The nine-beat adrift film and everything serving it is
+  superseded: **"No one should see the tour without a household anyway"**,
+  because the first screen a reader lands on already invites them to ask
+  to join one or start their own.
+- **When it plays.** On the first login after the reader has a household,
+  joined or created.
+- **Waiting to be let in.** A reader whose join request has not been
+  answered is told, when they log in again, that the owner or an
+  administrator has to approve it first. The households list already puts
+  a "waiting" word on the row they asked for, and that is not the same as
+  telling them what is happening.
+- **Once approved**, their next login plays the full film.
