@@ -1076,3 +1076,62 @@ approved"**).
 - Record: `design/v19/notification-history/round-1/a-sent-to-you-lately.html`
   and its README.
 
+## 21. The archive — one owner-only card on the household page (owner, 2026-09-20)
+
+Seven rounds, 2026-09-20. Round 1's card stood from the start ("The UI
+itself is fine otherwise"); the rest was what it holds and how it reads.
+Rulings, verbatim: **"63. What's the point in exporting if there's no
+documents?"** and **"64a yeah documents always in because there's zero
+point in an export without them, as there's nothing to then import."**;
+**"I'd rather it read more as a list."**; **"I don't hate it but this could
+be two tabs on the same card"**; then **"Round 7 approved."**
+
+- One card, **The archive**, on the household's own page above the danger
+  line, owner-only (`own-only`; members never see it). Two tabs on it:
+  **take it with you** (export) · **bring one in** (import). Everything on
+  each tab is a sentence, a list and one quiet button at rest; it opens
+  only when stepped toward.
+- Documents are always in the file, both ways. There is no "without
+  documents" option on the surface or the route. Over the 128 MiB cap the
+  card says so under the list and offers no button.
+- What a file holds is a **list** (`.man`): a figure, a name, a small note
+  — entries, dates (and the reminders on them), sections, documents with
+  their size, and `0 people · never in the file`. The same list says what
+  an import holds, what was written, and what was brought in.
+- Export asks for the account password again at the point of export
+  ("nothing leaves without it"), then a passphrase twice, 12+ characters,
+  and says in warm on the surface that Orbit never keeps it. The written
+  file is offered for 24 hours and leaves one line on the household's
+  record.
+- Import: choose a file, its passphrase, `look inside`; the preview lists
+  what is in it and names each entry already here — those stay out, said
+  in warm, never merged over. `bring in N entries` is the household page's
+  own two-tap. People never come in from a file; the card says so.
+- Refusals in the preview's place, in `--overdue`: wrong passphrase; file
+  too big (said before upload, from the file's size); not an Orbit
+  archive.
+- Record: `design/v19/portable-archive/round-7/g-a-switch-not-a-hint.html`
+  and the seven READMEs.
+
+## 22. Tabs on a card — the grammar, and where it applies (owner, 2026-09-20)
+
+v19 had no tabs before #1002. Three tries at making the two tabs read as
+tabs and the heading as a heading ("This makes it look like it's three
+tabs but the archive is just a heading." / "68 still unclear." / "69. Try
+one more time, they're still too subtle.") settled it:
+
+- The card heading stays left in its own grammar. The tabs are one joined
+  pill pair at the **far end of the card head**, in the page's ghost-button
+  voice (11px mono, 1px `--line`); the chosen tab is **filled with
+  `--accent`** in `--bg` text, as the page's primary button is. No
+  underlines, nothing between heading and tabs.
+- `role=tablist` labelled by the heading; `role=tab` with `aria-selected`
+  and `aria-controls`; the panel `role=tabpanel`; one tab in the Tab
+  order, ← → between them; the unchosen panel `hidden`. An act that opens
+  on a panel selects its tab first.
+- Under 560px the pair follows the heading on its line if it fits, else
+  wraps under it.
+- Where tabs go, asked and answered (**"67. a reminders only."**): the
+  settings **Reminders** card becomes *reminders · sent to you lately*
+  (§20's list on the second tab). The household **Members** card is not
+  tabbed; nothing else is. "We don't need to tab everything."
