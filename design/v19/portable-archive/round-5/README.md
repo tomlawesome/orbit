@@ -19,6 +19,7 @@ Served at
 `http://<LAN address>:8336/1002-portable-archive/design/v19/portable-archive/round-5/e-heading-apart.html`,
 same scenes as round 4.
 
-## Open for the owner
+## Verdict
 
-**68** Approved as drawn?
+Owner, 2026-09-20: "68 still unclear." — the heading still read as a tab.
+Answered in `../round-6/`.
