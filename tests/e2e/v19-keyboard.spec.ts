@@ -6,11 +6,17 @@ import {
   auditLightDismiss,
   auditTabOrder,
   currentFocus,
+  dismissTourIfShown,
   fillCreateForm,
   installKeyboardAudit,
   settled,
   tabTo,
 } from "./support/keyboard";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #496: a keyboard-only pass over the core journeys — sign-in through to
@@ -310,6 +316,50 @@ test("home: the account panel and the three drawers are light-dismiss by keyboar
   }
 });
 
+/**
+ * #1064: the press that arrives before home can answer.
+ *
+ * The server renders home whole (#842), so the avatar is on screen, lettered
+ * and tabbable long before the client's own readHome() has resolved and the
+ * behaviour has been bound to it. A press inside that window used to be
+ * dropped outright — no listener, no replay — and the panel stayed shut for
+ * good, which is what the CI flake looked like from the outside:
+ * `aria-expanded` stuck at "false" across a whole 5s poll.
+ *
+ * Driven by delaying `/api/workspace`, the slowest of readHome()'s three
+ * reads, so the window is wide enough to press into on purpose rather than
+ * by luck. The panel must end up open: either the press is held and applied
+ * when the screen goes live, or the wait was never needed.
+ */
+test("home: an Enter on the avatar before home goes live still opens the account panel", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installKeyboardAudit(page);
+  await signIn(page, "/home");
+  const household = await seedHousehold(page);
+  try {
+    await page.route("**/api/workspace", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 8_000));
+      await route.continue();
+    });
+    await page.goto("/home");
+    await dismissTourIfShown(page);
+    /* Deliberately NOT settled(): this test exists to press while the screen
+       is still the server's own render. The orb is here because the server
+       sent it — assert that, so a future markup change cannot turn this into
+       a test that presses nothing. */
+    await expect(page.locator("button.orb")).toBeVisible();
+    await expect(page.locator("body[data-home-ready]")).toHaveCount(0);
+    await tabTo(page, { selector: "button.orb" }, { screen: "home (not yet live)" });
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#account")).toHaveClass(/open/, { timeout: 20_000 });
+    await expect(page.locator("button.orb")).toHaveAttribute("aria-expanded", "true");
+  } finally {
+    await page.unroute("**/api/workspace").catch(() => {});
+    await cleanup(page, household);
+  }
+});
+
 test("home: a dial planet link is reachable and activates by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
   const household = await arriveAtHome(page, { withItem: true });
@@ -571,6 +621,29 @@ test("administration: the local-user controls are reachable and announced", asyn
   try {
     await openSettingsFromHome(page);
     await ensureLocalPassword(page, READER, KEYBOARD_PASSWORD);
+
+    /* #1077: a NEIGHBOUR on the roster, made here rather than inherited. The
+       per-person control asserted at the end of this test needs a row that is
+       somebody other than the reader, and until the database went back to its
+       seed between spec files this test was quietly relying on accounts other
+       specs happened to have created before it ran -- which is the same
+       cross-file coupling that made the tab-order failures move around.
+       Created through the route the screen's own form calls, with the
+       password `ensureLocalPassword` has just set answering the challenge, so
+       the roster it reads is a real one. The address carries the clock
+       because the account outlives this test: the reset takes it away at the
+       next spec file, but a retry of THIS file inside the same one would
+       otherwise collide with the address it used the first time. */
+    const neighbour = await page.request.post("/api/admin/users", {
+      headers: await sessionHeaders(page),
+      data: {
+        email: `roster-neighbour-${Date.now()}@example.invalid`,
+        displayName: "Roster Neighbour",
+        currentPassword: KEYBOARD_PASSWORD,
+      },
+    });
+    expect(neighbour.status(), "administration: the roster neighbour was refused").toBe(201);
+
     await page.goto("/administration");
     await expect(page.locator(".card").first()).toBeVisible({ timeout: 30_000 });
 

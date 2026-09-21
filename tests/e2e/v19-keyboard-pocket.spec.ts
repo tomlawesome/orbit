@@ -7,9 +7,15 @@ import {
   currentFocus,
   dismissTourIfShown,
   fillCreateForm,
+  homeIsLive,
   installKeyboardAudit,
   tabTo,
 } from "./support/keyboard";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #849: the pocket-dialect mirror of v19-keyboard.spec.ts — a keyboard-only
@@ -160,6 +166,11 @@ async function settledPocket(p: Page) {
   await dismissTourIfShown(p);
   await p.waitForFunction(() => !document.body.classList.contains("launching"), null, { timeout: 60_000 });
   await expect(p.locator(".morb")).not.toHaveText("", { timeout: 60_000 });
+  /* ...and the avatar carries its initials from the server's own render
+     (#842), so that says the markup arrived, not that anything is listening
+     to it. `homeIsLive` is the wait that means the sheet will open when the
+     orb is pressed (#1064). */
+  await homeIsLive(p);
 }
 
 /**

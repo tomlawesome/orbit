@@ -4,10 +4,13 @@
 #
 # AGENTS.md's "Compose commands attach to whatever project .env-orbit names"
 # trap is exactly this: `docker compose --env-file .env-orbit ...` with no
-# explicit `-p` adopts whichever project `COMPOSE_PROJECT_NAME` names --
-# environment variable, else the value in that file, else the current
-# directory's name -- and therefore that project's named volumes, from any
-# checkout or worktree. The fixed `container_name` pins in docker-compose.yml
+# explicit `-p` adopts whichever project Compose resolves -- the environment
+# variable, else the value in that file, else docker-compose.yml's own
+# top-level `name: orbit`, else the current directory's name -- and therefore
+# that project's named volumes, from any checkout or worktree. The `name:`
+# step is the one that matters in practice and the one this comment used to
+# omit: with a compose file present the directory's name is never reached
+# (#999), so every checkout lands in `orbit` unless it says otherwise. The fixed `container_name` pins in docker-compose.yml
 # then stop a second stack coexisting under its own name, so the failure mode
 # is silent data sharing rather than a loud refusal. A session that believed
 # it was running an isolated acceptance profile from a separate worktree hit
