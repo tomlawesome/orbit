@@ -3,6 +3,11 @@ import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { waitForInvitationLink } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #481: THE MAILED INVITATION, end to end. An owner sends one to an address

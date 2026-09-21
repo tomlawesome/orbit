@@ -34,7 +34,14 @@ import { failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 // scripts/lockfile-no-pnpm-exe.test.mjs): `node --test
 // scripts/compose-project-name-resolution.test.mjs`.
 
-const SCRIPTS = ["end-maintenance.sh", "engine-check.sh", "repair.sh"];
+// #999 added the fourth: install.sh was the one place #921 deliberately
+// left alone, so its fresh install kept naming the Compose project after the
+// directory it was run from.
+// #999 again: configure.sh was the fifth derivation, and the only one left
+// without the compose-file step once install.sh gained it — so a deployment
+// with no stored COMPOSE_PROJECT_NAME had its one-off `configure` addressing
+// a different project from every other script.
+const SCRIPTS = ["end-maintenance.sh", "engine-check.sh", "repair.sh", "install.sh", "configure.sh"];
 
 function extractFunction(source, name) {
   const match = source.match(new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "mu"));
@@ -59,12 +66,13 @@ function scratchDir(prefix) {
   return dir;
 }
 
-describe("read_compose_project_name is the same function in all three scripts", () => {
+describe("read_compose_project_name is the same function in all five scripts", () => {
   const bodies = SCRIPTS.map((name) => extractFunction(readFileSync(join(import.meta.dirname, name), "utf8"), "read_compose_project_name"));
 
-  it("is present, identical, in end-maintenance.sh, engine-check.sh and repair.sh", () => {
-    assert.equal(bodies[1], bodies[0]);
-    assert.equal(bodies[2], bodies[0]);
+  it("is present, identical, in end-maintenance.sh, engine-check.sh, repair.sh, install.sh and configure.sh", () => {
+    for (const [index, body] of bodies.entries()) {
+      assert.equal(body, bodies[0], `${SCRIPTS[index]} carries a different read_compose_project_name`);
+    }
   });
 
   it("reads docker-compose.yml's top-level name:, from a directory whose basename is not orbit", () => {

@@ -50,6 +50,16 @@ Neither the axe sweep nor accessibility is a subject here: both axe tests died
 on the `aria-expanded` precondition before `axeCheck()` ran, and no run has
 reported an axe violation.
 
+**Fixed, 2026-09-20 (#1064).** The guess above was right and the window is
+hydration's: home is server-rendered whole, and a press arriving before
+`readHome()` resolves and the mount binds the behaviour is dropped with
+nothing to replay it. Home now remembers that press and applies it when the
+screen goes live, and publishes `body[data-home-ready]` as the last step of
+the mount — the three settle helpers wait for that instead of for markup the
+server already sent. Reproduced on demand before the fix by delaying
+`/api/workspace`. Left here rather than deleted: a fourth sighting after this
+means the fix is wrong, not that the flake is back.
+
 ## v19-first-run-door.spec.ts:250, and `net::ERR_ABORTED` on a /home navigation — mobile-chromium
 
 - 2026-09-10 · cb9cbfd · pipeline 907 / smoke (job 10645, !911) · `v19-first-run-door.spec.ts:250` "a claimed local-only instance shows the sign-in card in the ring" — `expect(locator).toBeVisible()` failed, element not found. Passed on the retried job 10651 on the same commit.

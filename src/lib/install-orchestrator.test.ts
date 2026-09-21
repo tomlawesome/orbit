@@ -167,6 +167,12 @@ interface BundleOptions {
  * by the fake `docker cp` below — the fake's stand-in for the real bundle
  * baked in by the Dockerfile (ADR-0019).
  */
+// The real bundled compose file opens with its own project declaration
+// (docker-compose.yml:1, `name: orbit`), and since #999/#1043 both
+// implementations read exactly that line to name the Compose project, so
+// the fixture carries it rather than a content placeholder alone.
+const BUNDLED_COMPOSE_FILE = "name: orbit\ncontent-for-docker-compose.yml";
+
 function writeImageBundle(destination: string, options: BundleOptions = {}): void {
   for (const asset of DEPLOYMENT_ASSETS) {
     if (options.missing?.includes(asset)) continue;
@@ -177,6 +183,7 @@ function writeImageBundle(destination: string, options: BundleOptions = {}): voi
       continue;
     }
     let content = asset.startsWith("scripts/") ? VALID_BASH_SCRIPT : `content-for-${asset}`;
+    if (asset === "docker-compose.yml") content = BUNDLED_COMPOSE_FILE;
     if (options.contentFor?.[asset] !== undefined) content = options.contentFor[asset];
     if (options.empty?.includes(asset)) content = "";
     writeFileSync(path, content);
@@ -495,6 +502,41 @@ describe("runInstall — success paths", () => {
     const calledMethods = scenario.docker.calls.map((call) => call.method);
     expect(calledMethods).toContain("probeTikaHealth");
     expect(calledMethods).toContain("probeOllamaHealth");
+  });
+
+  // #999/#1043: the bundled docker-compose.yml declares `name: orbit`, and
+  // until this fix a fresh install through the CLI port never reached it.
+  // With no .env-orbit, no requested override and no pre-existing volume,
+  // deriveComposeProjectName ran once, before the compose file was in the
+  // target, and the working-directory basename won -- so installing into
+  // ~/apps/household created and addressed the Compose project "household".
+  // The orchestrator now derives again once the asset is in place, which is
+  // the only moment `name: orbit` can be read. Against the pre-fix
+  // orchestrator every assertion below reads "household".
+  it("names a fresh install's Compose project from the bundled docker-compose.yml, not the target directory (#999, #1043)", async () => {
+    const targetDir = newTarget();
+    // A pre-provisioned bootstrap is the sharper case: it arrives with its
+    // own .env-orbit carrying no COMPOSE_PROJECT_NAME, so the configuration
+    // migration for that existing file writes down whatever name the
+    // derivation has produced by then. Deriving after the assets are
+    // installed would read that value straight back as an explicit one and
+    // keep "household" for good, which is why the derivation reads the
+    // staged compose file before the migration runs.
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { context: { requestedAction: "install", fallbackBasename: "household" } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome.status).toBe("ok");
+    if (outcome.status === "ok") expect(outcome.composeProjectName).toBe("orbit");
+    const composeCalls = scenario.docker.calls.filter((call) =>
+      ["composePull", "composeUp", "composeConfigValidate", "composeDown"].includes(call.method),
+    );
+    expect(composeCalls.length).toBeGreaterThan(0);
+    for (const call of composeCalls) {
+      expect(call.args[0]).toBe("orbit");
+    }
+    expect(readFileSync(join(targetDir, "docker-compose.yml"), "utf8")).toContain("name: orbit");
   });
 
   it("resolves the Docker Compose project name from a pre-existing volume's own label and uses it for every compose call, even though it differs from the fallback basename (install.sh:573)", async () => {

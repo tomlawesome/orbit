@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 // #450, re-solved by #735: there is no longer anything to compose. The v19
 // front end and the API are one SvelteKit server on one origin, so the path

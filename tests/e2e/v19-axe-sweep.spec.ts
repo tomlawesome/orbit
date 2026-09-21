@@ -2,6 +2,12 @@ import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { homeIsLive } from "./support/keyboard";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #496: a full axe sweep across every SIGNED-IN v19 route, in both dialects.
@@ -70,6 +76,11 @@ async function settleHome(page: Page) {
     await expect(card).toHaveCount(0);
   }
   await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1);
+  /* Both dials are server-rendered (#842), so a visible one says the markup
+     is here and nothing about whether home's behaviour is bound yet. #1064:
+     wait for the mount's own marker before any state below arms a control —
+     the account orb's press is dropped outright if it lands first. */
+  await homeIsLive(page);
 }
 
 /**

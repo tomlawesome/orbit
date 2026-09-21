@@ -85,12 +85,15 @@ while [[ "$orbit_port" == "$registry_port" ]]; do
 done
 repository="acceptance/orbit"
 issuer="https://oidc.acceptance.invalid/application/o/orbit/"
-# The target directory name doubles as the Compose project name the
-# installer persists (derive_compose_project_name in install.sh falls back
-# to the target directory's basename when COMPOSE_PROJECT_NAME is not set),
-# so every container/volume/network this script creates carries this run's
-# project label and can be swept even after an untrappable SIGKILL left
-# debris behind.
+# The target directory is named after this run's project so debris is
+# recognisable by eye. The project name itself is stated to the installer by
+# run_installer below rather than inferred from that directory: since #999 a
+# fresh install defaults to docker-compose.yml's own `name: orbit`, so every
+# run would otherwise share one project and one set of volumes, and either
+# run's sweep would take the other's. Stating it keeps every
+# container/volume/network this script creates carrying this run's project
+# label, so it can be swept even after an untrappable SIGKILL left debris
+# behind.
 target="$workdir/$project_name"
 # Slice 4 (#907): the local-only run (local_only_scenario) gets its own
 # target directory and its own Compose project name, so the sweep can tell
@@ -189,7 +192,14 @@ make_local_only_preprovisioned_target() {
 }
 
 run_installer() {
+  # COMPOSE_PROJECT_NAME is the operator override install.sh has always
+  # honoured ahead of everything else, and this harness needs it: without it
+  # a fresh install now takes docker-compose.yml's own `name: orbit` (#999)
+  # and two concurrent runs would collide exactly as they did before #894.
+  # local_only_scenario exports its own before calling here, so honour that
+  # when it is set.
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
+    COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$project_name}" \
     ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
     timeout 900 bash "$repo_root/scripts/install.sh" </dev/null) \
     > "$workdir/install.log" 2>&1

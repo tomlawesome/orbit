@@ -301,12 +301,27 @@ export async function settled(p: Page) {
      it to hand off to the settled dial before anything measures the page
      (Flight.svelte removes "launching" at the end of its own sequence). */
   await p.waitForFunction(() => !document.body.classList.contains("launching"), null, { timeout: SETTLE_TIMEOUT });
-  /* #explore sits in the branch home/+page.svelte renders whenever `view`
-     is not yet an empty-sky household (true from the very first paint,
-     since `view` starts null) — so its presence is really just "home
-     rendered its normal markup at all", independent of whether the async
-     readHome() read has resolved yet. */
+  /* #explore is still the desk dialect's own marker — this helper is
+     desktop-only and asks for it so a pocket run cannot settle here by
+     accident — but it proves nothing about the page being live: it sits in
+     the branch home/+page.svelte renders from the very first paint, which
+     the SERVER already sent (#842). */
   await p.locator("#explore").waitFor({ state: "attached", timeout: SETTLE_TIMEOUT });
+  await homeIsLive(p);
+}
+
+/** #1064: home's behaviour — the account orb included — is bound only after
+ *  the client's own readHome() has resolved, and home/+page.svelte writes
+ *  `data-home-ready` on <body> as the last step of that mount. Waiting for
+ *  it is waiting for the screen to be ABLE to answer a press; waiting for
+ *  markup instead means arming a toggle that has no listener on it yet, and
+ *  the press is dropped with nothing to replay it. That is what made the
+ *  account panel "intermittently not open when armed" in three different
+ *  shapes — `aria-expanded` stuck at false, `#maccount` stuck without
+ *  `open`, and the 60-press Tab cap burnt hunting a link inside a panel that
+ *  never opened. */
+export async function homeIsLive(p: Page) {
+  await p.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: SETTLE_TIMEOUT });
 }
 
 /**
