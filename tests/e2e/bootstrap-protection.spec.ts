@@ -16,9 +16,15 @@ import { claimCodeFromLog, claimInstanceAsAdministrator, stackLog } from "./supp
  *
  * ══ HOW THIS FILE IS ISOLATED, since it needs a state that exists once ═════
  *
- * The database is not reset between specs (v19-arrival.spec.ts) and the claim
- * happens once per stack, so an unclaimed instance is a resource exactly one
- * file can hold. Three things give it to this one, and each is deliberate:
+ * The claim happens once per stack, so an unclaimed instance is a resource
+ * exactly one file can hold. Three things give it to this one, and each is
+ * deliberate:
+ *
+ * #1077's reset does not reach here, and cannot: the seed it restores is the
+ * state AFTER the claim, so restoring it would destroy the one precondition
+ * this file exists to test. It is the single spec file that does not call
+ * `resetDatabaseBetweenSpecFiles` (support/database.ts), and it does not need
+ * to -- it runs before anything has had a chance to leave anything behind.
  *
  *   1. ITS OWN PROJECT (#1039, playwright.config.ts): this file is the only
  *      thing matched by the "unclaimed" project, which every browser project

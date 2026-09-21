@@ -1,5 +1,8 @@
-import { test } from "@playwright/test";
+import { dirname } from "node:path";
+import { expect, test } from "@playwright/test";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { assertEverySpecFileResets, captureDatabaseSeed } from "./support/database";
+import { sessionHeaders } from "./support/households";
 
 /**
  * Claims the stack once, ahead of every project's specs (#1039), so a spec
@@ -30,15 +33,53 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
  * claim ahead of it and break that journey's precondition.
  *
  * Idempotent for the same reason claimInstanceAsAdministrator is (its own
- * comment): the database is not reset between specs, so this may already be
- * claimed -- the --reuse path (#947) -- and a second claim is a no-op, not a
- * failure.
+ * comment): the stack may already be claimed -- the --reuse path (#947) --
+ * and a second claim is a no-op, not a failure.
+ *
+ * Since #1077 this also takes the seed every other spec file goes back to.
+ * It is the right moment for it: the claim has just completed, so the seed
+ * holds everything the suite assumes and nothing any spec has done yet.
  */
 test("the stack is claimed before any spec depends on it", async ({ request, browser }) => {
+  /* #1077, and before the profile check below so it is answered in every
+     profile: a spec file that never puts the database back is the leak
+     coming straight back, so it fails the run here, named, rather than as
+     somebody else's tab-order test twenty minutes in. */
+  assertEverySpecFileResets(dirname(test.info().file));
+
   const availability = (await (await request.get("/api/auth/availability")).json()) as {
     methods: { oidc: boolean };
   };
   test.skip(!availability.methods.oidc, "no OIDC provider configured: the local-only profile claims itself (tests/e2e/local-sign-in.spec.ts)");
 
-  await claimInstanceAsAdministrator(browser);
+  await claimInstanceAsAdministrator(browser, {
+    /* #1077: the seed records the administrator as having already taken the
+       first-run walk, through the route "take the walk again" writes.
+       Without this the reset hands every spec file an administrator who has
+       never seen it, so the tour card goes up over /home in file after file
+       and covers the controls specs click -- v19-mail-review timed out twice
+       that way. It is also the state the suite has always actually had:
+       before the reset, the first file to reach /home skipped the walk and
+       the remaining twenty-four inherited a reader who had taken it.
+       The three files whose subject IS the walk are unaffected, because each
+       puts the record into the state it needs through this same route rather
+       than relying on it never having been written (v19-tour.spec.ts's own
+       note, and v19-axe-sweep/v19-screen-reader do the same). */
+    afterSignIn: async (page) => {
+      const recorded = await page.request.put("/api/settings/tour", {
+        headers: await sessionHeaders(page),
+        data: { tourSeenAt: new Date().toISOString() },
+      });
+      expect(recorded.ok(), `the seed could not record the walk as taken (HTTP ${recorded.status()})`).toBe(true);
+    },
+  });
+
+  /* #1077: with the instance claimed and the first administrator in place,
+     this is the state every other spec expects to start from -- so copy it
+     now, before any of them has run, and let each spec file come back to it
+     (tests/e2e/support/database.ts). Taken here rather than in the harness
+     because this is the moment the seed is complete and still clean, and
+     because a Playwright dependency project runs whatever `--project` or
+     `--spec` filter selected the run. */
+  captureDatabaseSeed();
 });
