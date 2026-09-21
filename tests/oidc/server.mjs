@@ -14,7 +14,7 @@ jwk.kid = "orbit-browser-test-key";
 jwk.use = "sig";
 jwk.alg = "RS256";
 
-const users = new Map([
+const fixedUsers = new Map([
   ["administrator", { sub: "oidc-test-administrator", email: "administrator@example.test", name: "Orbit Administrator" }],
   ["member", { sub: "oidc-test-member", email: "member@example.test", name: "Orbit Member" }],
   ["outsider", { sub: "oidc-test-outsider", email: "outsider@example.test", name: "Orbit Outsider" }],
@@ -38,6 +38,45 @@ const users = new Map([
    * reader who belongs to nothing has to be one nothing else has touched.
    */
   ["doorstep", { sub: "oidc-test-doorstep", email: "doorstep@example.test", name: "Orbit Doorstep" }],
+]);
+
+/*
+ * PER-WORKER IDENTITY SETS (#1080). The suite runs Playwright workers in
+ * parallel, one administrator per worker (owner ruling, 2026-09-21), and the
+ * same reasoning that gave "newcomer" and "doorstep" identities of their own
+ * extends to every role: two workers sharing any identity share its sky, its
+ * mailbox and its sessions. So each worker slot k gets a full set — signed in
+ * by tests/e2e/support/worker-identity.ts, keyed on TEST_PARALLEL_INDEX, and
+ * promoted to administrator through the real administration API (never here;
+ * this provider only says who somebody is).
+ *
+ * WORKER_IDENTITY_SETS in tests/e2e/support/worker-identity.ts must match
+ * the count below: it refuses a parallel index this map has no set for.
+ *
+ * Two constraints shape the names:
+ *  - No name may be a substring of another (legacy names included):
+ *    getByRole's `name` option matches substrings by default, and the
+ *    chooser page below lists everything at once.
+ *  - The administrators are listed FIRST: v19-keyboard.spec.ts reaches its
+ *    identity by pressing Tab under tabTo's 60-press cap, so this worker's
+ *    administrator link must sit within the first few tab stops whatever
+ *    slot it is in.
+ */
+const WORKER_IDENTITY_SETS = 8;
+const workerIdentity = (slot, role, title) => [
+  `w${slot}-${role}`,
+  { sub: `oidc-test-w${slot}-${role}`, email: `w${slot}-${role}@example.test`, name: `Orbit W${slot} ${title}` },
+];
+const slots = Array.from({ length: WORKER_IDENTITY_SETS }, (_, slot) => slot);
+const users = new Map([
+  ...slots.map((slot) => workerIdentity(slot, "administrator", "Administrator")),
+  ...fixedUsers,
+  ...slots.flatMap((slot) => [
+    workerIdentity(slot, "member", "Member"),
+    workerIdentity(slot, "outsider", "Outsider"),
+    workerIdentity(slot, "newcomer", "Newcomer"),
+    workerIdentity(slot, "doorstep", "Doorstep"),
+  ]),
 ]);
 const codes = new Map();
 

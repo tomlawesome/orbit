@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
-import { FIXTURE_PASSWORD, ensureLocalPassword } from "./support/local-credentials";
+import { ensureLocalPassword } from "./support/local-credentials";
+import { ensureWorkerAdministrator, workerAccount, workerFixturePassword, workerScopedAddress } from "./support/worker-identity";
 import {
   auditLightDismiss,
   auditTabOrder,
@@ -79,7 +80,8 @@ resetDatabaseBetweenSpecFiles();
  * ring).
  */
 
-const READER = "Orbit Administrator";
+/* #1080: this worker's own administrator, resolved lazily (worker env only). */
+const READER = () => workerAccount("administrator");
 
 /* The pocket layouts are different screens with their own chrome; their walk
    is #849. This file covers the desktop screens. */
@@ -89,7 +91,9 @@ test.beforeEach(({ isMobile }) => {
 
 async function signIn(page: Page, returnTo: string) {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: READER }).click();
+  await page.getByRole("link", { name: READER() }).click();
+  /* #1080: waits for the session, then holds administrator access. */
+  await ensureWorkerAdministrator(page);
 }
 
 /**
@@ -280,7 +284,7 @@ test("arrive: the sign-in door opens by Tab and Enter alone", async ({ page, con
     /* The provider lists identities as links (tests/e2e/v19-entry.spec.ts);
        Tab to the one this suite signs in as and press Enter rather than
        clicking it. */
-    await tabTo(page, { tag: "A", textIncludes: READER }, { screen: "identity provider" });
+    await tabTo(page, { tag: "A", textIncludes: READER() }, { screen: "identity provider" });
     await page.keyboard.press("Enter");
 
     await expect(page).toHaveURL(/\/home$/, { timeout: 15_000 });
@@ -553,7 +557,7 @@ test("sign out: the two-tap control ends the session by keyboard alone", async (
        the arrival journey proved, so this test's own household can still be
        removed once it revoked the session that was carrying it. */
     await page.goto("/api/auth/login?returnTo=/home");
-    await tabTo(page, { tag: "A", textIncludes: READER }, { screen: "identity provider" });
+    await tabTo(page, { tag: "A", textIncludes: READER() }, { screen: "identity provider" });
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/home$/, { timeout: 15_000 });
   } finally {
@@ -584,14 +588,14 @@ test("sign out: the two-tap control ends the session by keyboard alone", async (
  * retried file meets the state the first attempt did.
  * ──────────────────────────────────────────────────────────────────────── */
 
-const KEYBOARD_PASSWORD = FIXTURE_PASSWORD[READER];
+const KEYBOARD_PASSWORD = () => workerFixturePassword(READER());
 
 test("settings: the sign-in-methods challenge arms by keyboard and is reachable", async ({ page }) => {
   test.setTimeout(90_000);
   const household = await arriveAtHome(page);
   try {
     await openSettingsFromHome(page);
-    await ensureLocalPassword(page, READER, KEYBOARD_PASSWORD);
+    await ensureLocalPassword(page, READER(), KEYBOARD_PASSWORD());
     await page.goto("/settings");
     await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
 
@@ -620,7 +624,7 @@ test("administration: the local-user controls are reachable and announced", asyn
   const household = await arriveAtHome(page);
   try {
     await openSettingsFromHome(page);
-    await ensureLocalPassword(page, READER, KEYBOARD_PASSWORD);
+    await ensureLocalPassword(page, READER(), KEYBOARD_PASSWORD());
 
     /* #1077: a NEIGHBOUR on the roster, made here rather than inherited. The
        per-person control asserted at the end of this test needs a row that is
@@ -633,13 +637,18 @@ test("administration: the local-user controls are reachable and announced", asyn
        the roster it reads is a real one. The address carries the clock
        because the account outlives this test: the reset takes it away at the
        next spec file, but a retry of THIS file inside the same one would
-       otherwise collide with the address it used the first time. */
+       otherwise collide with the address it used the first time.
+       #1080: and it carries THIS WORKER's slot, because the roster is
+       instance-wide -- every worker's neighbours are on the list this test
+       tabs through, so two workers minting the same address in the same
+       millisecond would be a unique-constraint failure, and a neighbour with
+       no slot in its name could not be told from another worker's. */
     const neighbour = await page.request.post("/api/admin/users", {
       headers: await sessionHeaders(page),
       data: {
-        email: `roster-neighbour-${Date.now()}@example.invalid`,
+        email: workerScopedAddress(`roster-neighbour-${Date.now()}`),
         displayName: "Roster Neighbour",
-        currentPassword: KEYBOARD_PASSWORD,
+        currentPassword: KEYBOARD_PASSWORD(),
       },
     });
     expect(neighbour.status(), "administration: the roster neighbour was refused").toBe(201);

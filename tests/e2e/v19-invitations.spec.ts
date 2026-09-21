@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { waitForInvitationLink } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -31,10 +32,13 @@ resetDatabaseBetweenSpecFiles();
  * cascades the membership away too and gives the invariant back.
  */
 
-const OWNER_ACCOUNT = "Orbit Member";
-const ADMIN_ACCOUNT = "Orbit Administrator";
-const NEWCOMER_ACCOUNT = "Orbit Newcomer";
-const NEWCOMER_EMAIL = "newcomer@example.test";
+/* #1080: this worker's own identities, resolved lazily (worker env only).
+   The invited address must be the newcomer identity's own, so the invite
+   mail lands in the mailbox that identity signs in from. */
+const OWNER_ACCOUNT = () => workerAccount("member");
+const ADMIN_ACCOUNT = () => workerAccount("administrator");
+const NEWCOMER_ACCOUNT = () => workerAccount("newcomer");
+const NEWCOMER_EMAIL = () => workerEmail("newcomer");
 const HOUSEHOLD = `Invitation Proving Ground ${Date.now()}`;
 
 const households = householdRegister();
@@ -86,7 +90,9 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await signInAs(page, ADMIN_ACCOUNT);
+    await signInAs(page, ADMIN_ACCOUNT());
+    /* #1080: the sweep's hard delete is an instance-admin power. */
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -102,7 +108,7 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
      below need it. */
   await claimInstanceAsAdministrator(browser);
 
-  await signInAs(page, OWNER_ACCOUNT);
+  await signInAs(page, OWNER_ACCOUNT());
   const created = await createHousehold(page, HOUSEHOLD);
   households.track(created);
   seeded = true;
@@ -111,12 +117,12 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
   const headers = await sessionHeaders(page);
   const sendResponse = await page.request.post(`/api/households/${created.id}/invitations`, {
     headers,
-    data: { email: NEWCOMER_EMAIL },
+    data: { email: NEWCOMER_EMAIL() },
   });
   expect(sendResponse.ok(), `invitation send failed: ${sendResponse.status()}`).toBe(true);
 
   // The real pipe: SMTP delivery to GreenMail, read back like a real client.
-  const link = await waitForInvitationLink(NEWCOMER_EMAIL, HOUSEHOLD);
+  const link = await waitForInvitationLink(NEWCOMER_EMAIL(), HOUSEHOLD);
   expect(link).toMatch(/\/invite\//u);
 
   // #871: redemption now lands on the arrival at `/` -- the newcomer's own
@@ -131,7 +137,7 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
     // Signed out: the load handler parks the token in its own cookie and
     // sends the browser to the identity provider -- the same door every
     // other spec signs in through.
-    await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT }).click();
+    await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT() }).click();
     // The callback reads the parked token back, redeems it, and lands here.
     await expect(newcomerPage).toHaveURL(/\/home$/, { timeout: 30_000 });
 
@@ -153,7 +159,7 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
      below need it. */
   await claimInstanceAsAdministrator(browser);
 
-  await signInAs(page, OWNER_ACCOUNT);
+  await signInAs(page, OWNER_ACCOUNT());
   const invitedHousehold = `${HOUSEHOLD} (invited landing)`;
   const created = await createHousehold(page, invitedHousehold);
   households.track(created);
@@ -162,11 +168,11 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
   const headers = await sessionHeaders(page);
   const sendResponse = await page.request.post(`/api/households/${created.id}/invitations`, {
     headers,
-    data: { email: NEWCOMER_EMAIL },
+    data: { email: NEWCOMER_EMAIL() },
   });
   expect(sendResponse.ok(), `invitation send failed: ${sendResponse.status()}`).toBe(true);
 
-  const link = await waitForInvitationLink(NEWCOMER_EMAIL, invitedHousehold);
+  const link = await waitForInvitationLink(NEWCOMER_EMAIL(), invitedHousehold);
   expect(link).toMatch(/\/invite\//u);
 
   /* Reduced motion, deliberately: `.nf .belong` never renders REGARDLESS of
@@ -177,7 +183,7 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
   const newcomerPage = await newcomerContext.newPage();
   try {
     await newcomerPage.goto(link);
-    await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT }).click();
+    await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT() }).click();
 
     // The redemption's own redirect target (#871): the arrival, not /home
     // directly -- this is the newcomer's landing, playing for a reader whose

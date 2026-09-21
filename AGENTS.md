@@ -160,7 +160,10 @@ Check the list before building a test rig or handing a check to the owner.
   runs too (#916). `--reuse PROJECT` skips the build and `compose up` and
   runs Playwright straight against a stack a prior `--keep` run left up,
   identified by Compose's project/service labels and health-checked before
-  anything runs; it never tears that stack down (#947)
+  anything runs; it never tears that stack down (#947). `--ci-cap` adds the
+  cpu/memory overlay CI's acceptance stack always runs under, so a local
+  timing measurement transfers; off by default because an uncapped stack is
+  the faster iteration loop (#1080)
 - `scripts/test-install-acceptance.sh` — real fresh install to a healthy
   `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
   fixture, so no provider credentials are needed

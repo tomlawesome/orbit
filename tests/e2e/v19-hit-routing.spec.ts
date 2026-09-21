@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -109,7 +110,9 @@ async function arriveAdrift(page: Page, browser: Browser, account: string) {
   const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const adminPage = await adminContext.newPage();
   try {
-    await signIn(adminPage, "Orbit Administrator");
+    await signIn(adminPage, workerAccount("administrator"));
+    /* #1080: the hard delete below is an instance-admin power. */
+    await ensureWorkerAdministrator(adminPage);
     await cleanupHousehold(adminPage, await sessionHeaders(adminPage), household.id, household.name);
   } finally {
     await adminContext.close();
@@ -194,7 +197,7 @@ test.describe.configure({ mode: "serial" });
 test.beforeEach(async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the labelled sky is the desk dialect; the pocket draws no constellations");
   await stubSky(page, FULL_SKY);
-  await arriveAdrift(page, browser, "Orbit Outsider");
+  await arriveAdrift(page, browser, workerAccount("outsider"));
   await expect(page.getByRole("heading", { name: "you’re adrift" })).toBeVisible();
 });
 
@@ -293,7 +296,7 @@ test("a household the packed sky cannot draw is still reachable by name", async 
   try {
     const newcomer = await newcomerContext.newPage();
     await stubSky(newcomer, OVERFULL_SKY);
-    await signIn(newcomer, "Orbit Outsider");
+    await signIn(newcomer, workerAccount("outsider"));
     await newcomer.goto("/");
     const belong = newcomer.getByRole("group", { name: "Where do you belong?" });
     await expect(belong).toBeVisible();

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { gotoCreate } from "./support/keyboard";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -35,7 +36,8 @@ resetDatabaseBetweenSpecFiles();
  * on a fresh session, exactly as v19-tour.spec.ts's `afterAll` does.
  */
 
-const READER = "Orbit Administrator";
+/* #1080: this worker's own administrator, resolved lazily (worker env only). */
+const READER = () => workerAccount("administrator");
 const NAME_PREFIX = "screen-reader-";
 
 const ROLES_NEEDING_NAMES = [
@@ -52,7 +54,7 @@ const UNBOUNDED_TEXT_PATTERNS: [RegExp, string][] = [
 
 async function signIn(page: Page, returnTo = "/home") {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: READER }).click();
+  await page.getByRole("link", { name: READER() }).click();
   // The click starts a redirect chain through the identity provider and back
   // through /api/auth/callback, which is what actually sets the session
   // cookie -- proceeding before it lands (as every other spec's idiom does)
@@ -65,6 +67,8 @@ async function signIn(page: Page, returnTo = "/home") {
   // not literally on returnTo.
   const escaped = returnTo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   await page.waitForURL((url) => new RegExp(`${escaped}$`).test(url.pathname) || url.pathname === "/", { timeout: 30_000 });
+  /* #1080: the sweep's hard delete is an instance-admin power. */
+  await ensureWorkerAdministrator(page);
 }
 
 /**
