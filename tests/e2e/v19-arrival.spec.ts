@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -144,12 +145,16 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    /* #665: ask for /home and assert we are ON it. `/\/(home)?$/` matches "/"
-       as well, so it resolves while the app is still navigating -- the race
-       this spec was fixed for. The sweep talks to the API, not the page, but
-       the loose wait is not to be reintroduced anywhere in this file. */
-    await signInAs(page, "Orbit Administrator", "/home");
-    await expect(page).toHaveURL(/\/home$/);
+    /* #665 forbade the loose `/\/(home)?$/` wait that resolved mid-
+       navigation; the strict wait here is now inside
+       ensureWorkerAdministrator (#1080), which polls the session itself
+       until it is authenticated — no URL involved. A URL assertion cannot
+       stand in this hook any more: until the promotion lands, a fresh
+       worker administrator belongs to nothing and is parked on the arrival
+       at `/`, not /home. The sweep talks to the API, and the hard delete it
+       ends with is an instance-admin power. */
+    await signInAs(page, workerAccount("administrator"), "/home");
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -171,7 +176,7 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
      owns the default sections and the owner membership. */
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
-  await signInAs(ownerPage, "Orbit Member", "/home");
+  await signInAs(ownerPage, workerAccount("member"), "/home");
   /* Not a fixed destination: this is "Orbit Member"'s own first sign-in with
      no household yet, exactly the reader #840 sends to the arrival instead
      -- createSystem below talks to the API from whatever page that landed
@@ -186,7 +191,7 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
 
   /* THE READER. Through the door, by its own button, so the launch is owed and
      the climb plays. */
-  await signInThroughTheDoor(page, "Orbit Newcomer");
+  await signInThroughTheDoor(page, workerAccount("newcomer"));
 
   /* The door KEEPS them: first-run sits on top of the login screen, and a
      reader with no household is not handed on to a home they do not have. */
@@ -241,7 +246,7 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
 
   const requests = await pendingRequests(ownerPage);
   expect(requests.map((one) => `${one.householdName}/${one.displayName}`))
-    .toContain(`${HOUSEHOLD}/Orbit Newcomer`);
+    .toContain(`${HOUSEHOLD}/${workerAccount("newcomer")}`);
 
   /* Asking twice cannot file twice: the row has nothing left to press. */
   await expect(row.getByRole("button")).toBeDisabled();
@@ -257,7 +262,7 @@ test("naming your own system: the sealed refusal, then the create, then the laun
      membership. Straight at the login route this time — no marker, so no climb;
      the question is served already arrived at, the way /logout serves the
      goodbye already arrived at. */
-  await signInAs(page, "Orbit Newcomer");
+  await signInAs(page, workerAccount("newcomer"));
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
   expect((await workspaceOf(page)).households).toEqual([]);

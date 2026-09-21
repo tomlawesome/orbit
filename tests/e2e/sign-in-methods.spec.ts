@@ -2,7 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
-import { FIXTURE_PASSWORD, ensureLocalPassword } from "./support/local-credentials";
+import { ensureLocalPassword } from "./support/local-credentials";
+import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -42,9 +43,10 @@ resetDatabaseBetweenSpecFiles();
 
 /* Fixed, not per-run: the accounts keep their password across files and
    across runs on a kept stack, and only the current one answers a challenge
-   (FIXTURE_PASSWORD). The administrator's is shared with v19-keyboard.spec.ts. */
-const PASSWORD = FIXTURE_PASSWORD["Orbit Outsider"];
-const ADMINISTRATOR_PASSWORD = FIXTURE_PASSWORD["Orbit Administrator"];
+   (workerFixturePassword). Per worker, so two workers never race one
+   account through a password change. */
+const PASSWORD = () => workerFixturePassword(workerAccount("outsider"));
+const ADMINISTRATOR_PASSWORD = () => workerFixturePassword(workerAccount("administrator"));
 const NEW_PASSWORD = `helm-changed-${Date.now()}`;
 /* One address per run: the account outlives the test (there is no
    remove-a-user route, and disabling is the strongest thing an administrator
@@ -97,7 +99,9 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await signInAs(page, "Orbit Administrator", { household: false });
+    await signInAs(page, workerAccount("administrator"), { household: false });
+    /* #1080: the sweep's hard delete is an instance-admin power. */
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -129,7 +133,7 @@ test("the helm lists the sign-in methods an account actually has", async ({ page
   /* Somebody has to hold the instance before anyone else can sign in at all
      (ADR-0022); it is not this reader, who is deliberately ordinary. */
   await claimInstanceAsAdministrator(browser);
-  await signInAs(page, "Orbit Member");
+  await signInAs(page, workerAccount("member"));
   await openSettings(page);
 
   await expect(page.getByRole("heading", { name: "Sign-in methods" })).toBeVisible();
@@ -155,10 +159,10 @@ test("a reader changes their password from the helm, inline", async ({ page }) =
   test.skip(test.info().project.name.startsWith("mobile"), "the block is asserted on the desk dialect");
   test.setTimeout(120_000);
 
-  await signInAs(page, "Orbit Outsider");
+  await signInAs(page, workerAccount("outsider"));
   await openSettings(page);
   /* The one thing the product cannot do for itself yet — see the helper. */
-  await ensureLocalPassword(page, "Orbit Outsider", PASSWORD);
+  await ensureLocalPassword(page, workerAccount("outsider"), PASSWORD());
 
   try {
     await openSettings(page);
@@ -180,7 +184,7 @@ test("a reader changes their password from the helm, inline", async ({ page }) =
 
     /* The real one goes through, and the screen says what it cost: a changed
        password ends every other session (ADR-0023 §7). */
-    await challenge.getByLabel("current password").fill(PASSWORD);
+    await challenge.getByLabel("current password").fill(PASSWORD());
     await challenge.getByLabel("new password").fill(NEW_PASSWORD);
     await challenge.getByRole("button", { name: "save it" }).click();
     await expect(page.locator(".note.ok")).toContainText("password changed");
@@ -195,7 +199,7 @@ test("a reader changes their password from the helm, inline", async ({ page }) =
     /* Put it back, so a retried file meets the state the first attempt did. */
     await page.request.post("/api/auth/local/password", {
       headers: await sessionHeaders(page),
-      data: { password: PASSWORD, currentPassword: NEW_PASSWORD },
+      data: { password: PASSWORD(), currentPassword: NEW_PASSWORD },
     });
   }
 });
@@ -204,11 +208,12 @@ test("an administrator adds a local user and is told where the link went", async
   test.skip(test.info().project.name.startsWith("mobile"), "the row is asserted on the desk dialect");
   test.setTimeout(120_000);
 
-  await signInAs(page, "Orbit Administrator");
+  await signInAs(page, workerAccount("administrator"));
+  await ensureWorkerAdministrator(page);
   await openSettings(page);
   /* An administrator who can answer the inline challenge. Without a password
      of their own the challenge is a step-up, which is a journey of its own. */
-  await ensureLocalPassword(page, "Orbit Administrator", ADMINISTRATOR_PASSWORD);
+  await ensureLocalPassword(page, workerAccount("administrator"), ADMINISTRATOR_PASSWORD());
 
   await page.goto("/administration");
   await expect(page.locator(".card").first()).toBeVisible({ timeout: 30_000 });
@@ -222,7 +227,7 @@ test("an administrator adds a local user and is told where the link went", async
   /* Create arms the challenge rather than creating anything. */
   await row.getByRole("button", { name: "create", exact: true }).click();
   await expect(row.getByLabel("your current password")).toBeVisible();
-  await row.getByLabel("your current password").fill(ADMINISTRATOR_PASSWORD);
+  await row.getByLabel("your current password").fill(ADMINISTRATOR_PASSWORD());
   await row.getByRole("button", { name: "create and send the link" }).click();
 
   /* WHERE IT WENT AND WHEN IT LAPSES — never the link itself (owner ruling,
@@ -241,19 +246,20 @@ test("an administrator sends a new setup link from somebody's row", async ({ pag
   test.skip(test.info().project.name.startsWith("mobile"), "the row is asserted on the desk dialect");
   test.setTimeout(120_000);
 
-  await signInAs(page, "Orbit Administrator");
+  await signInAs(page, workerAccount("administrator"));
+  await ensureWorkerAdministrator(page);
   await openSettings(page);
-  await ensureLocalPassword(page, "Orbit Administrator", ADMINISTRATOR_PASSWORD);
+  await ensureLocalPassword(page, workerAccount("administrator"), ADMINISTRATOR_PASSWORD());
 
   await page.goto("/administration");
-  const person = page.locator(".person", { hasText: "Orbit Member" }).first();
+  const person = page.locator(".person", { hasText: workerAccount("member") }).first();
   await expect(person).toBeVisible({ timeout: 30_000 });
 
   await person.getByRole("button", { name: /send a new setup link/ }).click();
   const resend = page.locator("form.localuser.resend");
   await expect(resend).toBeVisible();
   await resend.getByLabel("link valid for").fill("14");
-  await resend.getByLabel("your current password").fill(ADMINISTRATOR_PASSWORD);
+  await resend.getByLabel("your current password").fill(ADMINISTRATOR_PASSWORD());
   await resend.getByRole("button", { name: "send it" }).click();
 
   await expect(page.locator(".adminproblem.ok")).toContainText("Setup link sent to");

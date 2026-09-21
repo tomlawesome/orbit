@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -76,7 +77,8 @@ resetDatabaseBetweenSpecFiles();
  */
 
 /** The reader every journey here takes the walk as. */
-const READER = "Orbit Administrator";
+/* #1080: this worker's own administrator, resolved lazily (worker env only). */
+const READER = () => workerAccount("administrator");
 
 /* #730: every household this file makes is removed once the file is done. */
 const households = householdRegister();
@@ -86,6 +88,9 @@ let seeded = false;
 async function signInAs(page: Page, account: string, returnTo = "/home") {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: account }).click();
+  /* #1080: waits for the session, then holds administrator access — the
+     sweep's hard delete is an instance-admin power. */
+  await ensureWorkerAdministrator(page);
 }
 
 /**
@@ -131,7 +136,7 @@ async function anEmptySky(page: Page) {
  * put the record where it wants it before any landing can act on it.
  */
 async function signInAwayFromHome(page: Page) {
-  await signInAs(page, READER, "/inbox");
+  await signInAs(page, READER(), "/inbox");
   /* Not always /inbox: #840 sends a session with no household of its own to
      the arrival at `/` instead of returnTo, and this is often this
      administrator's very first sign-in on what may still be a genuinely
@@ -350,7 +355,7 @@ test.describe("the first-run walk", () => {
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     try {
-      await signInAs(page, READER, "/home");
+      await signInAs(page, READER(), "/home");
       await expect(page).toHaveURL(/\/home$/);
       await households.sweep(page);
     } finally {

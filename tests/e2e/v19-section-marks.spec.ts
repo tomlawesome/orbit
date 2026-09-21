@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -28,11 +29,14 @@ test.beforeEach(({ isMobile }) => {
   test.skip(isMobile, "desktop Sections card only; the pocket dialect is #849's own file");
 });
 
-const READER = "Orbit Administrator";
+/* #1080: this worker's own administrator, resolved lazily (worker env only). */
+const READER = () => workerAccount("administrator");
 
 async function signIn(page: Page, returnTo: string) {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: READER }).click();
+  await page.getByRole("link", { name: READER() }).click();
+  /* #1080: waits for the session, then holds administrator access. */
+  await ensureWorkerAdministrator(page);
 }
 
 /**

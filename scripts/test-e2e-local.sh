@@ -15,7 +15,13 @@
 # validation.
 #
 # Usage:
-#   bash scripts/test-e2e-local.sh [--profile NAME] [--spec PATH] [--project NAME] [--reuse PROJECT]
+#   bash scripts/test-e2e-local.sh [--profile NAME] [--spec PATH] [--project NAME] [--keep] [--ci-cap] [--reuse PROJECT]
+#
+#   --ci-cap        Apply compose/docker-compose.ci-cap.yml — the cpu/memory
+#                    cap CI's acceptance stack always runs under — so local
+#                    timing and worker-count measurements transfer to CI
+#                    (#1080). Off by default: an uncapped stack is the faster
+#                    everyday iteration loop.
 #
 #   --reuse PROJECT Skip the image build, the OIDC sidecar build and
 #                    `compose up`; run Playwright straight against the
@@ -155,11 +161,16 @@ spec=""
 playwright_project=""
 profile="oidc"
 keep=0
+ci_cap=0
 reuse_project=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep)
       keep=1
+      shift
+      ;;
+    --ci-cap)
+      ci_cap=1
       shift
       ;;
     --reuse)
@@ -186,7 +197,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help)
-      printf 'Usage: %s [--profile oidc|local-only] [--spec PATH] [--project desktop-chromium|mobile-chromium] [--keep] [--reuse PROJECT]\n' "$0"
+      printf 'Usage: %s [--profile oidc|local-only] [--spec PATH] [--project desktop-chromium|mobile-chromium] [--keep] [--ci-cap] [--reuse PROJECT]\n' "$0"
       exit 0
       ;;
     *)
@@ -267,10 +278,17 @@ readonly project_name
 # container renaming and the published-port agreement, which every local run
 # needs whatever it is testing.
 if [[ "$profile" == "local-only" ]]; then
-  readonly compose_files=(-f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.local-e2e.yml)
+  compose_files=(-f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.local-e2e.yml)
 else
-  readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.local-e2e.yml)
+  compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.local-e2e.yml)
 fi
+# #1080: --ci-cap appends the same cpu/memory cap overlay CI runs the
+# acceptance stack under (compose/docker-compose.ci-cap.yml, #801 step 1) —
+# for measuring what a change costs where CI will actually pay it. The
+# capped app is the bottleneck there, so a worker-count or timing result
+# taken on an uncapped stack does not transfer.
+[[ "$ci_cap" == 1 ]] && compose_files+=(-f compose/docker-compose.ci-cap.yml)
+readonly compose_files
 
 # COMPOSE_PROFILES=processing is what turns the `orbit-tika` document parser
 # on (#920). CI gets it from .env-orbit, which
