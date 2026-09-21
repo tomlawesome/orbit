@@ -3,6 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { homeIsLive } from "./support/keyboard";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -31,12 +32,15 @@ resetDatabaseBetweenSpecFiles();
  * than filtered or skipped — see the individual `expect` calls below.
  */
 
-const READER = "Orbit Administrator";
+/* #1080: this worker's own administrator, resolved lazily (worker env only). */
+const READER = () => workerAccount("administrator");
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 async function signIn(page: Page, returnTo: string) {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: READER }).click();
+  await page.getByRole("link", { name: READER() }).click();
+  /* #1080: waits for the session, then holds administrator access. */
+  await ensureWorkerAdministrator(page);
 }
 
 /**

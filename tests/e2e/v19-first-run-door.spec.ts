@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { householdRegister } from "./support/households";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -62,8 +63,13 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await signInAs(page, "Orbit Administrator", "/home");
-    await expect(page).toHaveURL(/\/home$/);
+    /* #1080: no URL wait here — until the promotion inside
+       ensureWorkerAdministrator lands, a fresh worker administrator belongs
+       to nothing and is parked on the arrival at `/`, not /home. The strict
+       synchronisation is the helper's own session poll, and the sweep's
+       hard delete is an instance-admin power. */
+    await signInAs(page, workerAccount("administrator"), "/home");
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -81,7 +87,7 @@ test("a fresh sign-in returned to /home meets the arrival, not the item form", a
      is the server hook this spec exists to prove, not the arrival's own
      client-side decision, which every other arrival spec already covers by
      visiting `/` directly. */
-  await signInAs(page, "Orbit Doorstep", "/home");
+  await signInAs(page, workerAccount("doorstep"), "/home");
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
 
   /* Whichever stage answers. A genuinely empty instance answers with the
