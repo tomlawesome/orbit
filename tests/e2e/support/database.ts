@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "@playwright/test";
+import { GATE_HOOK_TIMEOUT_MS, enterSpecFile, leaveSpecFile } from "./reset-gate";
 
 /**
  * #1077: the acceptance stack's database goes back to its seed between spec
@@ -26,10 +27,17 @@ import { test } from "@playwright/test";
  * it is redundant in the happy path now, but it is still the thing that fails
  * loudly when a household outlives its test.
  *
- * SAFE BECAUSE THE SUITE IS SERIAL. tests/e2e/playwright.config.ts pins
- * `workers: 1` everywhere (also #730: these specs share one instance, one
- * database, one sky), so there is no concurrent worker whose rows this could
- * pull out from under a running test.
+ * NO LONGER SAFE BY SERIALITY (#1080). This helper was written when
+ * tests/e2e/playwright.config.ts pinned `workers: 1` everywhere, and said so:
+ * with one worker there is no concurrent worker whose rows a restore could
+ * pull out from under a running test. #1080 removed that pin, so the restore
+ * now needs a moment at which it is provably alone. The gate in
+ * tests/e2e/support/reset-gate.ts is that moment, and the long comment at the
+ * top of it is the argument for the shape it takes.
+ *
+ * With one worker -- the local-only profile, and any `--spec`
+ * run -- the gate is transparent and this file still resets between every pair
+ * of spec files, exactly as #1077 wrote it.
  *
  * THE DATABASE, NOT THE STACK. `compose down`/`up` per file would cost a
  * stack start each -- a minute or more, twenty-five times over -- and would
@@ -212,15 +220,88 @@ export function resetDatabaseToSeed(): void {
 }
 
 /**
+ * How far above its seed one table may grow before a reset is due (#1080).
+ *
+ * This is the invariant #1077 was defending, said out loud. Its fault was a
+ * list that grew until `tabTo`'s 60-press cap could not reach the end of it,
+ * so what has to be bounded is list length, and every list in the suite is
+ * one table's rows. Twenty is comfortably inside sixty for a screen that also
+ * has chrome to tab through, and well under the 113 sessions and 168 rows
+ * docs/flakes.md watched a run reach.
+ *
+ * Two tables are allowed more, each for a stated reason. Nothing else gets an
+ * entry without one: a table quietly given a larger budget is the growth
+ * coming back.
+ */
+const DEFAULT_ROW_BUDGET = 20;
+const ROW_BUDGETS: Record<string, number> = {
+  /* Not a list anybody walks. The activity feed reads it through a bounded,
+     household-filtered, createdAt-descending query (src/db/schema.ts's
+     `audit_household_activity_idx` exists for exactly that read), so its
+     length reaches no screen's tab order. It grows about seven rows per spec
+     file, and a budget of twenty here would mean a reset every third file. */
+  audit_log: 300,
+  /* The sessions list is per reader, not instance-wide
+     (src/lib/auth/session.ts lists `where(eq(sessions.userId, userId))`), and
+     since #1080 each worker reads it as its own identity -- so the instance
+     total is shared out between the live workers and no single reader sees
+     all of it. Forty instance-wide keeps every reader inside the cap. */
+  sessions: 40,
+};
+
+/**
+ * The table furthest above its seed, and by how much, in one round trip.
+ *
+ * `query_to_xml` is how a single statement can count every table without
+ * knowing their names: it runs the generated query and returns its one row as
+ * XML, which `xpath` reads back out. The alternative is a `do` block, and a
+ * `do` block cannot return anything.
+ *
+ * A table the seed has never heard of counts as entirely excess, which is the
+ * right answer: under `--reuse` (#947) that is a table a migration added after
+ * the seed was taken, and its rows are all growth.
+ */
+function worstExcess(): { table: string; excess: number } | null {
+  const answer = runSql(`
+    select t.tablename,
+           (xpath('/row/n/text()',
+                  query_to_xml(format('select count(*) as n from public.%I', t.tablename),
+                               false, true, '')))[1]::text::bigint
+         - case when to_regclass('${SEED_SCHEMA}.' || quote_ident(t.tablename)) is null then 0
+                else (xpath('/row/n/text()',
+                            query_to_xml(format('select count(*) as n from ${SEED_SCHEMA}.%I', t.tablename),
+                                         false, true, '')))[1]::text::bigint
+           end as excess
+      from pg_tables t
+     where t.schemaname = 'public'
+     order by 2 desc;
+  `);
+
+  let worst: { table: string; excess: number } | null = null;
+  for (const line of answer.split("\n")) {
+    const [table, excess] = line.split("|");
+    if (!table || excess === undefined) continue;
+    const over = Number(excess) - (ROW_BUDGETS[table] ?? DEFAULT_ROW_BUDGET);
+    if (over > 0 && (!worst || over > worst.excess)) worst = { table, excess: Number(excess) };
+  }
+  return worst;
+}
+
+/**
  * Registers the reset as the FIRST `beforeAll` of the spec file that calls
  * it, which is why it is a call at the top of the file rather than something
  * imported for its side effect. Playwright runs a file's `beforeAll` hooks in
  * the order they were registered, so this has to be registered before the
  * spec registers its own -- otherwise the reset would wipe the fixtures the
  * file's own setup had just made. Registering it from a module's top level
- * cannot work: with `workers: 1` every spec file is loaded into the same
- * process, the module is evaluated once, and the hook would attach to
- * whichever file happened to import it first.
+ * cannot work: the module is evaluated once per worker process and the hook
+ * would attach to whichever file that worker happened to load first.
+ *
+ * It also registers the matching `afterAll`, which is why the pair is one
+ * call. Declared first, that hook runs BEFORE the spec's own cleanup, so it
+ * does not release this worker outright -- it marks it as tearing down, which
+ * still holds the gate shut (tests/e2e/support/reset-gate.ts). #730's
+ * household sweep runs in that window and still needs its session.
  *
  * Absent snapshot is a no-op, and says so. That is the local-only profile
  * (`--profile local-only`, CI's `smoke_local_only`): it has no identity
@@ -234,13 +315,38 @@ export function resetDatabaseBetweenSpecFiles(): void {
       console.log("#1077: no database seed on this stack (local-only profile); leaving it as found");
       return;
     }
-    /* Timed out loud, because the whole case for a reset over per-spec
-       cleanup rests on it being cheap: a run whose resets have quietly grown
-       to seconds each is a different trade-off, and this is where that shows
-       up rather than in the total. */
-    const started = Date.now();
-    resetDatabaseToSeed();
-    console.log(`#1077: database back to its seed in ${Date.now() - started}ms`);
+    /* The gate's wait is not this spec's own time and must not be charged to
+       it: a worker waits for the longest file still running, which at four
+       workers was measured at fifty seconds, and the ordinary 60s hook budget
+       failed four spec files that way. Raised only where there is something
+       to wait for, so a single-worker run keeps the ordinary budget and a
+       hook that genuinely hangs there still fails in a minute. */
+    if (test.info().config.workers > 1) test.setTimeout(GATE_HOOK_TIMEOUT_MS);
+
+    await enterSpecFile({
+      /* The configured count, not how many Playwright happens to have
+         started: a worker that is alone only because the others have not
+         spun up yet must still take the gate. */
+      workers: test.info().config.workers,
+      overBudget: () => {
+        const worst = worstExcess();
+        return worst ? `${worst.table} is ${worst.excess} rows above its seed` : null;
+      },
+      /* Timed out loud, because the whole case for a reset over per-spec
+         cleanup rests on it being cheap: a run whose resets have quietly
+         grown to seconds each is a different trade-off, and this is where
+         that shows up rather than in the total. */
+      reset: () => {
+        const started = Date.now();
+        resetDatabaseToSeed();
+        console.log(`#1077: database back to its seed in ${Date.now() - started}ms`);
+      },
+    });
+  });
+
+  test.afterAll(async () => {
+    if (!snapshotExists() || test.info().config.workers <= 1) return;
+    leaveSpecFile();
   });
 }
 
