@@ -2,6 +2,11 @@ import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #754/#477: THE FIRST-RUN WALK, END TO END. The five journeys of slice 4,
@@ -20,11 +25,13 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
  * WHICH SKY THE WALK IS TAKEN ON, AND WHY THE SPEC MAKES ITS OWN. Journey 4
  * needs a household with NOTHING on it: the example body is drawn only where
  * the dial has no real body to point at (example.js, `needsExampleBody`), so on
- * a populated dial that journey would pass without testing anything. The
- * database is not reset between specs, so no household that is merely lying
- * around can be relied on to be empty — and since #730 the specs that make
- * households sweep them again afterwards, so one cannot be relied on to be
- * there either.
+ * a populated dial that journey would pass without testing anything. No
+ * household that is merely lying around can be relied on to be empty, and
+ * since #730 the specs that make households sweep them again afterwards, so
+ * one cannot be relied on to be there either — #1077's reset between spec
+ * files makes the second half certain rather than likely, and changes
+ * nothing about the first: the journeys here run one after another inside
+ * this file, with no reset between them.
  *
  * So every journey here makes its own, through the same `household.create` the
  * arrival uses, and registers it for the sweep. That is not only tidiness: the

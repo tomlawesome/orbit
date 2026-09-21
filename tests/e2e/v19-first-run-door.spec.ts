@@ -2,6 +2,11 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { householdRegister } from "./support/households";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * THE FIRST-RUN DOOR, EVERYWHERE (#840).
@@ -21,9 +26,11 @@ import { householdRegister } from "./support/households";
  * the road #840 exists to fix, and asserts the browser ends up at `/` anyway
  * before it ever gets a household.
  *
- * ITS OWN IDENTITY, for the reason "newcomer" needed a fourth: the database
- * is not reset between specs, and this journey's precondition is a reader who
- * belongs to NOTHING. "Doorstep" is signed in nowhere else.
+ * ITS OWN IDENTITY, for the reason "newcomer" needed a fourth: this journey's
+ * precondition is a reader who belongs to NOTHING, and the specs inside a
+ * file run against one another's leavings. "Doorstep" is signed in nowhere
+ * else. #1077's reset between spec files makes that easier to hold, not
+ * unnecessary: within this file the identity is still the only guarantee.
  */
 
 const OWN_SYSTEM = `Doorstep's Own ${Date.now()}`;

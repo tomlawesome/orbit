@@ -3,6 +3,11 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { homeIsLive } from "./support/keyboard";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #496: a full axe sweep across every SIGNED-IN v19 route, in both dialects.
