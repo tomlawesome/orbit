@@ -4,6 +4,11 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { householdRegister } from "./support/households";
 import { FIXTURE_PASSWORD, ensureLocalPassword } from "./support/local-credentials";
 import { newestApprovalUid, waitForApprovalLink } from "./support/mail";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * THE EMAIL SECOND FACTOR, WALKED (#1033, ADR-0027).
