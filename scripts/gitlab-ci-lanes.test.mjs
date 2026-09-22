@@ -206,6 +206,25 @@ describe("pipeline lanes", () => {
    * request could only ever be made cheaper; `ci: acceptance` is how one asks
    * for the whole pipeline back.
    */
+  /**
+   * #1092, found while building #1078: `orbit_lane_admits` is consulted before
+   * `orbit_full_gate` is ever reached, so a promotion sitting in a narrow lane
+   * would skip the acceptance stage however emphatically the full gate said
+   * yes. That was survivable while a `dev` push ran everything. #1078 moved
+   * that catch-all onto this promotion, so a promotion that can still skip is
+   * the one thing it cannot afford.
+   *
+   * Asserted against the lane the classifier actually emits, not against a
+   * handed-in `ORBIT_LANE: "full"` -- the gate tests below assume the lane is
+   * already full, which is precisely the assumption that was wrong.
+   */
+  it("collapses the lane to full on both promotions, even on a narrow diff", () => {
+    for (const target of ["preview", "main"]) {
+      const { variables } = runClassifyEnv({ CI_MERGE_REQUEST_TARGET_BRANCH_NAME: target });
+      expect(variables.ORBIT_LANE, `${target}: a promotion must not sit in a narrow lane`).toBe("full");
+    }
+  });
+
   it("leaves the classifier's verdict alone without the label", () => {
     for (const labels of [undefined, "", "bug,area: ci", "ci: acceptance-later", "ci"]) {
       const { variables, stdout } = runClassifyEnv(
@@ -255,10 +274,11 @@ describe("pipeline lanes", () => {
   it("hands the lane on from classify as a dotenv variable", () => {
     const classify = allBlocks.get("classify");
     expect(classify).toMatch(/printf 'ORBIT_LANE=%s\\n' "\$lane" >> classify\.env/u);
-    // A lane is a merge-request economy: every delivery push and the merge
-    // request into `main` collapse it to `full` and run everything.
+    // A lane is a merge-request economy: every delivery push and both
+    // promotions collapse it to `full` and run everything. `preview` joined
+    // `main` on #1092, because #1078 made that promotion the catch-all.
     expect(classify).toMatch(/dev \| preview \| main \| hotfix\/\*\) lane=full ;;/u);
-    expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" = "main" \]/u);
+    expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" in\n\s+preview \| main\) lane=full ;;/u);
   });
 });
 
