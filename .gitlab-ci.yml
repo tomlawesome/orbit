@@ -2934,9 +2934,9 @@ install_bootstrap:
 #   CI_JOB_TOKEN: its Merge Requests API access is read-only, and letting it
 #   push at all needs a separate, project-wide "allow push" setting this job
 #   does not ask for. That half needs one CI/CD variable the owner creates
-#   under Settings > CI/CD > Variables, masked, unprotected unless the
-#   schedule's branch is itself protected (same reasoning as RENOVATE_TOKEN
-#   above):
+#   under Settings > CI/CD > Variables, masked AND protected (#1084). The
+#   schedule runs on refs/heads/dev, which is protected, so the repin job
+#   still receives it, while no merge-request pipeline can read it:
 #
 #   BASE_REPIN_TOKEN   A project access token on ai/orbit ONLY -- never
 #                       ai/orbit-base-image, and never a group token -- with
@@ -2945,11 +2945,14 @@ install_bootstrap:
 #                       publishes an image, only proposes a pin. Never
 #                       printed; read by scripts/ci/repin-base-image.sh,
 #                       which fails clearly if it is unset.
-#                       `classify` reads it too, since #898: it is the only
-#                       token a merge-request pipeline can present to look up
-#                       what an earlier pipeline of the same merge request
-#                       already proved, and unset there simply means every
-#                       job runs.
+#                       `classify` reads it too, since #898, but only ever
+#                       sees it on a protected ref. Since #1084 a
+#                       merge-request pipeline presents no token at all, so
+#                       the reuse lookup finds nothing and every job runs --
+#                       a cost accepted deliberately to keep a push-capable
+#                       credential out of merge-request pipelines. The unset
+#                       path is covered by scripts/reuse-gate.test.mjs:175
+#                       and scripts/reuse-lookup.test.mjs:212.
 base_image_repin:
   stage: maintenance
   extends: .dind_service
