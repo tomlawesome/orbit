@@ -107,8 +107,12 @@ describe("countShortlistRecall over real corpus pages", () => {
   });
 
   it("adds to the tallies it is given rather than replacing them", () => {
+    // `two` is the describe block's own `tallies`, already the result of
+    // counting the whole SAMPLE once -- reusing it instead of running
+    // countAll(SAMPLE) a second time avoids sieving and tagging the corpus
+    // twice over for the same answer.
     const one = countAll(SAMPLE.slice(0, 3));
-    const two = countAll(SAMPLE);
+    const two = tallies;
     expect(two.dates.lists).toBe(SAMPLE.length);
     expect(two.dates.wanted).toBeGreaterThanOrEqual(one.dates.wanted);
   });
