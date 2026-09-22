@@ -716,15 +716,29 @@ classify:
       fi
 
       # The narrow lanes (#889) are a merge-request economy, never a
-      # relaxation of the delivery gate. A push to a delivery branch and the
-      # merge request into `main` both run everything, so the lane collapses
-      # to `full` there and no later job has to re-check the branch. The label
-      # collapses it the same way.
+      # relaxation of the delivery gate. The events that run everything
+      # collapse the lane to `full`, so no later job has to re-check the
+      # branch, and the label collapses it the same way.
+      #
+      # Both promotions must be here, not just `main` (#1092). A lane is
+      # consulted by `orbit_lane_admits` BEFORE `orbit_full_gate` is reached,
+      # so a dev -> preview promotion whose whole diff sits in the
+      # CI-definition or ignore-policy lane would skip the acceptance stage
+      # however emphatically the full gate said yes. Since #1078 moved the
+      # catch-all off the `dev` push and onto that promotion, a promotion that
+      # can still skip is the one thing that change cannot afford.
+      #
+      # A push to `dev` still collapses to `full` below, and that is not a
+      # contradiction: `full` means no narrow lane is excluding anything, and
+      # the per-axis verdicts then decide what actually runs.
       lane="$(classify_output lane)"
       case "${CI_COMMIT_BRANCH:-}" in
         dev | preview | main | hotfix/*) lane=full ;;
       esac
-      if [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ] || [ "$forced" = true ]; then
+      case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in
+        preview | main) lane=full ;;
+      esac
+      if [ "$forced" = true ]; then
         lane=full
       fi
 
