@@ -995,6 +995,116 @@
       "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
       "expiresOn": "2026-10-05",
       "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-41992",
+      "package": "gzip",
+      "installedVersion": "1.13-1",
+      "owner": "Orbit maintainers",
+      "rationale": "Present in clamav/clamav:1.5.4-debian only because gzip is Debian Essential. The flaw is in the standalone gzip binary's LZH decoder; libclamav inflates in process through zlib, a different package, and nothing in the image's entrypoint, clamd or freshclam invokes gzip. Verified by scanning a gzip-wrapped EICAR over INSTREAM with the gzip binaries disabled: still detected. Orbit also rejects anything that is not PDF, JPEG or PNG before the scanner sees it, so no gzip member reaches clamd. Upstream has not rebuilt the tag. See #1017.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 1017
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-11822",
+      "package": "libsqlite3-0",
+      "installedVersion": "3.46.1-7+deb13u1",
+      "owner": "Orbit maintainers",
+      "rationale": "Present in clamav/clamav:1.5.4-debian only via util-linux to liblastlog2-2 for PAM login records. The flaw is in SQLite's FTS5 extension, reached by querying a crafted database. clamd, clamdscan and freshclam do not link libsqlite3 and libclamav has no sqlite symbols linked, undefined or dlopen'd; ClamAV's own signature databases are its .cvd/.cld format. Verified by removing libsqlite3 from the library path: clamd still started, answered PONG and detected EICAR. See #1017.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 1017
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-11824",
+      "package": "libsqlite3-0",
+      "installedVersion": "3.46.1-7+deb13u1",
+      "owner": "Orbit maintainers",
+      "rationale": "Present in clamav/clamav:1.5.4-debian only via util-linux to liblastlog2-2 for PAM login records. The flaw is in SQLite's FTS5 extension, reached by querying a crafted database. clamd, clamdscan and freshclam do not link libsqlite3 and libclamav has no sqlite symbols linked, undefined or dlopen'd; ClamAV's own signature databases are its .cvd/.cld format. Verified by removing libsqlite3 from the library path: clamd still started, answered PONG and detected EICAR. See #1017.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 1017
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-13221",
+      "package": "perl-base",
+      "installedVersion": "5.40.1-6",
+      "owner": "Orbit maintainers",
+      "rationale": "Present in clamav/clamav:1.5.4-debian only because perl-base is Debian Essential; no installed package depends on it. Nothing in the image's entrypoint, clamd, freshclam or the healthcheck invokes perl, and the image's perl scripts are dpkg/debconf/PAM tooling that runs only at package-install time. Verified by disabling both perl binaries: clamd still started and detected EICAR. Upstream has not rebuilt the tag. See #1017.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 1017
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-42496",
+      "package": "perl-base",
+      "installedVersion": "5.40.1-6",
+      "owner": "Orbit maintainers",
+      "rationale": "Present in clamav/clamav:1.5.4-debian only because perl-base is Debian Essential; no installed package depends on it. Nothing in the image's entrypoint, clamd, freshclam or the healthcheck invokes perl, and the image's perl scripts are dpkg/debconf/PAM tooling that runs only at package-install time. Verified by disabling both perl binaries: clamd still started and detected EICAR. Upstream has not rebuilt the tag. See #1017.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 1017
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-8376",
+      "package": "perl-base",
+      "installedVersion": "5.40.1-6",
+      "owner": "Orbit maintainers",
+      "rationale": "Present in clamav/clamav:1.5.4-debian only because perl-base is Debian Essential; no installed package depends on it. Nothing in the image's entrypoint, clamd, freshclam or the healthcheck invokes perl, and the image's perl scripts are dpkg/debconf/PAM tooling that runs only at package-install time. Verified by disabling both perl binaries: clamd still started and detected EICAR. Upstream has not rebuilt the tag. See #1017. This one requires a 32-bit perl build; the pinned image is linux/amd64.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 1017
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-42497",
+      "package": "perl-base",
+      "installedVersion": "5.40.1-6",
+      "owner": "Orbit maintainers",
+      "rationale": "Present in clamav/clamav:1.5.4-debian only because perl-base is Debian Essential; no installed package depends on it. Nothing in the image's entrypoint, clamd, freshclam or the healthcheck invokes perl, and the image's perl scripts are dpkg/debconf/PAM tooling that runs only at package-install time. Verified by disabling both perl binaries: clamd still started and detected EICAR. Upstream has not rebuilt the tag. See #1017.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 1017
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-48962",
+      "package": "perl-base",
+      "installedVersion": "5.40.1-6",
+      "owner": "Orbit maintainers",
+      "rationale": "Present in clamav/clamav:1.5.4-debian only because perl-base is Debian Essential; no installed package depends on it. Nothing in the image's entrypoint, clamd, freshclam or the healthcheck invokes perl, and the image's perl scripts are dpkg/debconf/PAM tooling that runs only at package-install time. Verified by disabling both perl binaries: clamd still started and detected EICAR. Upstream has not rebuilt the tag. See #1017.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 1017
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-57432",
+      "package": "perl-base",
+      "installedVersion": "5.40.1-6",
+      "owner": "Orbit maintainers",
+      "rationale": "Present in clamav/clamav:1.5.4-debian only because perl-base is Debian Essential; no installed package depends on it. Nothing in the image's entrypoint, clamd, freshclam or the healthcheck invokes perl, and the image's perl scripts are dpkg/debconf/PAM tooling that runs only at package-install time. Verified by disabling both perl binaries: clamd still started and detected EICAR. Upstream has not rebuilt the tag. See #1017.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 1017
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-57433",
+      "package": "perl-base",
+      "installedVersion": "5.40.1-6",
+      "owner": "Orbit maintainers",
+      "rationale": "Present in clamav/clamav:1.5.4-debian only because perl-base is Debian Essential; no installed package depends on it. Nothing in the image's entrypoint, clamd, freshclam or the healthcheck invokes perl, and the image's perl scripts are dpkg/debconf/PAM tooling that runs only at package-install time. Verified by disabling both perl binaries: clamd still started and detected EICAR. Upstream has not rebuilt the tag. See #1017.",
+      "expiresOn": "2026-10-05",
+      "trackingIssue": 1017
     }
   ],
   "containerImages": [
