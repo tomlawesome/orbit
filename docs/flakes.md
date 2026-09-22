@@ -122,3 +122,15 @@ in, and the third was green, all on one commit. `dev` ran the same job for real
 at the parent commit `3b6ca05c` (pipeline 1369, job 18305, 241s, passed), so the
 branch cannot be the cause. Second sighting; the third gets an issue, per the
 testing-and-ci skill.
+
+## extraction-shortlist-recall.test.ts:108 "adds to the tallies it is given rather than replacing them"
+
+- 2026-09-22 · b7a5a883 (!964, which changes only the base-image digest in `Dockerfile` and `.github/supply-chain-policy.json`) · pipeline 1417 / fast (job 18983) · `Error: Test timed out in 5000ms`, 5535ms. Passed on the retried job 19206 on the same commit. `dev` ran the same test green at the same base on pipeline 1379.
+
+The failure is a timeout, not an assertion: the test is synchronous, so it
+exceeded the 5 s cap doing its own work. It is the only test in the file that
+runs `countAll` over the whole real corpus twice (`SAMPLE.slice(0, 3)` and then
+`SAMPLE`) instead of reading the `tallies` the describe block computes once, and
+the `fast` project's `testTimeout` is `5_000` (`vitest.config.ts:81`). A loaded
+runner is enough to push it over. If it recurs, the fix shape is a per-test
+timeout on this one case rather than a global raise.
