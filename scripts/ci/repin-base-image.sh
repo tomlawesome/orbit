@@ -585,6 +585,26 @@ git -C "$repo_dir" commit -m "$commit_message"
 # command it execs never contains it. `-c credential.helper=` first clears
 # any helper already configured (same defensive shape as AGENTS.md's
 # documented push pattern) so only the one named here is consulted.
+# GitLab Runner writes its own CI_JOB_TOKEN into this checkout's git config as
+# an `http.<url>.extraheader` AUTHORIZATION line, and that config persists --
+# runner 8's /builds survives between jobs (#811, #813). git sends a configured
+# extraheader on every request to that host, so the server authenticates the
+# push as the job token and answers 403 "You are not allowed to push code to
+# this project". The credential helper below is never reached: git only
+# consults it after a 401, and a 403 is not a 401.
+#
+# That is why this job had never pushed successfully since #708 built it, why
+# the refusal survived rotating the credential twice, and why it looked like a
+# permissions problem with a token that has the right role and scope all along
+# (#1081). Clear the headers first, by key, so only the credential below can
+# authenticate the push. The key names are logged; the values never are,
+# because each one contains a working job token.
+while IFS= read -r extraheader_key; do
+  [[ -n "$extraheader_key" ]] || continue
+  log "clearing an inherited git auth header before the push: ${extraheader_key}"
+  git -C "$repo_dir" config --unset-all "$extraheader_key"
+done < <(git -C "$repo_dir" config --name-only --get-regexp '^http\..*\.extraheader$' || true)
+
 credential_file="$(new_secret_file)"
 printf 'https://oauth2:%s@%s\n' "$BASE_REPIN_TOKEN" "$CI_SERVER_HOST" > "$credential_file"
 push_url="${BASE_REPIN_PUSH_URL:-https://${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git}"
