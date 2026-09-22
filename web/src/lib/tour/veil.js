@@ -49,10 +49,17 @@ const Z_INDEX = 2000;
 const OVERLAY_ID = "orbit-tour-veil";
 const DEFAULT_RADIUS = 14;
 
+/**
+ * @typedef {{ el: Element, round: boolean, pad: number, radius: number }} VeilTarget
+ *   A resolved target: the element to cut a hole for, and the hole's shape.
+ * @typedef {{ x: number, y: number, w: number, h: number, round: boolean, radius: number }} VeilRect
+ *   One measured hole in viewport coordinates, ready to paint into the mask.
+ */
+
 /** @type {HTMLDivElement | null} */
 let overlayEl = null;
 let visible = false;
-/** @type {{ el: Element, round: boolean, pad: number, radius: number }[]} */
+/** @type {VeilTarget[]} */
 let targets = [];
 /** @type {string | null} */
 let lastSig = null;
@@ -81,6 +88,10 @@ function normalize(entry, defaults) {
   return { el, round, pad, radius };
 }
 
+/**
+ * @param {VeilTarget} t
+ * @returns {VeilRect}
+ */
 function computeRect(t) {
   const box = t.el.getBoundingClientRect();
   const pad = t.pad;
@@ -95,7 +106,9 @@ function computeRect(t) {
 }
 
 /** A cheap fingerprint of the current geometry, so a frame that measured no
- *  movement can skip rebuilding and re-painting the mask entirely. */
+ *  movement can skip rebuilding and re-painting the mask entirely.
+ *  @param {VeilRect[]} rects
+ *  @returns {string} */
 function serialize(rects) {
   const body = rects
     .map((r) => `${r.round ? "o" : "r"}${r.x.toFixed(1)},${r.y.toFixed(1)},${r.w.toFixed(1)},${r.h.toFixed(1)},${r.radius}`)
@@ -103,6 +116,7 @@ function serialize(rects) {
   return `${body}@${window.innerWidth}x${window.innerHeight}`;
 }
 
+/** @param {VeilRect[]} rects */
 function applyMask(rects) {
   if (!overlayEl) return;
   if (rects.length === 0) {
