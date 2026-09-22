@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } f
 import { getDb } from "@/db";
 import {
   auditLog,
+  documents,
   dueEvents,
   households,
   items,
@@ -25,6 +26,7 @@ import {
   type WorkspaceCommand,
   type WorkspaceState,
 } from "@/lib/workspace";
+import { listableDocumentLifecycles } from "@/server/document-repository";
 import { planOwnershipTransfer } from "@/server/household-ownership";
 import { clearMetadataDamageForRow } from "@/server/metadata/damage-sightings";
 import { openMetadataReaders, requireMetadataWriter } from "@/server/metadata/fields";
@@ -108,7 +110,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     ? preferredHouseholdId
     : householdIds[0];
 
-  const [sectionRows, itemRows, eventRows, reminderRows, activityRows, memberRows, stateRows] = await Promise.all([
+  const [sectionRows, itemRows, eventRows, reminderRows, activityRows, memberRows, stateRows, documentCountRows] = await Promise.all([
     getDb().select().from(sections)
       .where(and(inArray(sections.householdId, householdIds), isNull(sections.archivedAt)))
       .orderBy(asc(sections.position)),
@@ -134,6 +136,17 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     getDb().select().from(notificationStates)
       .where(and(eq(notificationStates.userId, userId), inArray(notificationStates.householdId, householdIds)))
       .orderBy(desc(notificationStates.updatedAt)),
+    // One grouped count instead of a query per item (#1091): a removed or
+    // refused document must not inflate what the belt shows, so this scopes
+    // to the same lifecycles the item-document list itself shows.
+    getDb().select({ itemId: documents.itemId, count: sql<number>`count(*)::int` })
+      .from(documents)
+      .where(and(
+        inArray(documents.householdId, householdIds),
+        isNotNull(documents.itemId),
+        inArray(documents.lifecycle, [...listableDocumentLifecycles]),
+      ))
+      .groupBy(documents.itemId),
   ]);
 
   // One DEK unwrap per household, before any row is mapped (ADR-0024).
@@ -148,6 +161,10 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     const current = remindersByItem.get(reminder.itemId) ?? [];
     current.push(reminder.daysBefore);
     remindersByItem.set(reminder.itemId, current);
+  }
+  const documentCountByItem = new Map<string, number>();
+  for (const row of documentCountRows) {
+    if (row.itemId) documentCountByItem.set(row.itemId, row.count);
   }
 
   const activitiesByHousehold = new Map<string, ItemActivity[]>();
@@ -206,6 +223,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           snoozedUntil: item.snoozedUntil ?? undefined,
           notes: notes.value ?? undefined,
           metadataStatus: damaged ? metadataStatus : undefined,
+          documentCount: documentCountByItem.get(item.id) ?? 0,
           status: item.status,
           version: item.version,
           updatedAt: item.updatedAt.toISOString(),
