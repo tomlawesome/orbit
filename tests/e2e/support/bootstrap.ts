@@ -12,10 +12,15 @@ import { expect, type Browser, type Page } from "@playwright/test";
  * "Orbit Administrator" — deterministically, once per stack, through exactly
  * the path an operator walks. No test-only hook goes into the shipped image.
  *
- * Idempotent, because the database is not reset between specs
- * (v19-arrival.spec.ts) and CI retries whole files: an already-claimed
- * instance simply signs the administrator in, and a claimant that loses a
- * race is told `bootstrap_claimed` and does the same.
+ * Idempotent, because the database is not reset between the specs inside a
+ * file and CI retries whole files: an already-claimed instance simply signs
+ * the administrator in, and a claimant that loses a race is told
+ * `bootstrap_claimed` and does the same.
+ *
+ * Since #1077 the database DOES go back to its seed between spec files
+ * (support/database.ts) -- but the claim and this administrator are part of
+ * that seed, so what comes back is an instance this has already run against.
+ * Idempotence is what makes that safe, not something the reset replaces.
  */
 const ADMINISTRATOR = "Orbit Administrator";
 

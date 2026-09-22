@@ -155,6 +155,9 @@ describe("pipeline lanes", () => {
       "fast_docker",
       "fidelity",
       "integration",
+      // #1076: it consumes build_image's artifact, so it has to stop on a
+      // lane that skipped the build rather than load the placeholder.
+      "launcher_install_compat",
       "licence_policy",
       "repair_journeys",
       "smoke",
