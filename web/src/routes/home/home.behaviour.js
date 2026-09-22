@@ -330,19 +330,21 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
      +page.svelte's own `$effect`, reactive to the real `systemStatus` read
      (#863) -- set unconditionally here before, which is what made the
      handle always say "degraded" regardless of the instance's real state. */
-  /** @param {HTMLElement} button */
-  function toggleAccount(button){
-    const card = /** @type {HTMLElement} */ (document.getElementById("account"));
-    const open = card.classList.toggle("open");
-    button.setAttribute("aria-expanded", String(open));
-  }
-  /* packOf, setSwatch and syncSwatches moved to ./swatches.js (#852) so the
-     pocket dialect's own sheet could import the same wiring rather than
-     copy it. The desk's own follow-up — re-measuring the constellation
-     leaders, since the engraved packs size that label differently — is
-     passed in as setSwatch's onChange, which the pocket sheet has no
-     equivalent of and simply omits. */
-  syncSwatches();
+  /*
+   * The account panel used to be wired from here — the orb's own toggle and
+   * the THEME row's swatches. #1074 moved both to mountAccount() below,
+   * which +page.svelte binds on EVERY branch of its mount: the panel is
+   * chrome, not household data, and a reader with no household has one too.
+   *
+   * What stays is the desk's own follow-up to a theme change: the engraved
+   * packs size the constellation label differently, so the leaders have to
+   * be re-measured whenever the pack changes. It watches the theme itself
+   * rather than the click that wrote it, so it no longer has to be handed to
+   * the swatch row that moved away — and it now also fires for a pack
+   * restored before paint, which the old onChange never saw.
+   */
+  const themeWatch = new MutationObserver(() => { if (!flying) renderGalaxy(false); });
+  themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   /** @param {HTMLElement} button */
   function toggleCreate(button){
     const drawer = /** @type {HTMLElement} */ (document.getElementById("createdrawer"));
@@ -558,23 +560,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
      `on` comes from the screen scope at the top of this function. */
   const star = /** @type {HTMLElement} */ (document.getElementById("nstar"));
 
-  on(document.querySelector("button.orb"), "click", (/** @type {MouseEvent} */ event) =>
-    toggleAccount(/** @type {HTMLElement} */ (event.currentTarget)));
+  /* The orb and the THEME row are mountAccount()'s (#1074), bound by
+     +page.svelte on every branch of its mount rather than here. */
   on(star, "click", (/** @type {MouseEvent} */ event) => toggleCreate(/** @type {HTMLElement} */ (event.currentTarget)));
   on(document.querySelector(".scrim"), "click", () => toggleCreate(star));
-
-  /* title -> theme name: "star-chart" is the starchart pack, "after dark" afterdark */
-  for (const swatch of document.querySelectorAll(".swatches button")) {
-    on(swatch, "click", (/** @type {MouseEvent} */ event) =>
-      setSwatch(
-        packOf(/** @type {HTMLElement} */ (event.currentTarget)),
-        /** @type {HTMLElement} */ (event.currentTarget),
-        /* The constellation leaders are measured from the rendered label,
-           and the engraved packs size that label differently, so re-measure
-           on a theme change. */
-        () => { if (!flying) renderGalaxy(false); },
-      ));
-  }
 
   const explore = /** @type {HTMLElement} */ (document.getElementById("explore"));
   on(explore, "focus", () => openPalette(true));
@@ -603,6 +592,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
   return () => {
     teardown();
     observer.disconnect();
+    themeWatch.disconnect();
     callout.remove();
     /* the pack sky goes before the document is handed back, so its own teardown
        still has the layers it has to empty (§15, the sky wave) */
@@ -621,6 +611,73 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     for (const prop of ["--descent", "--depth", "--pass", "--below", "--deep", "--mist"])
       doc.style.removeProperty(prop);
   };
+}
+
+/**
+ * THE DESK ACCOUNT PANEL (#1074).
+ *
+ * The avatar, Inbox, Settings, the THEME row and sign-out are chrome: every
+ * reader on /home has them, household or no household. This used to be wired
+ * inside mountHome, which /home only runs for a reader who HAS a household —
+ * so on the empty sky the panel was drawn in full and answered nothing, and
+ * Settings, Inbox, the theme and sign-out were all unreachable from home for
+ * exactly the reader most likely to want them. It is its own mount now, and
+ * +page.svelte binds it on every branch, so no branch can forget it.
+ *
+ * The nav links are plain `<a href>`s and the sign-out button is Svelte's
+ * own `onclick`; what needs binding is the toggle, the light dismiss and the
+ * swatch row. mountHome's OVERLAY_HIT/OVERLAY_OPENER machinery still closes
+ * this panel when one of the desk's other overlays opens — that is about the
+ * drawers, which the empty sky does not have, and it only ever removes a
+ * class, so the two do not fight.
+ */
+export function mountAccount() {
+  const { on, teardown } = screenScope();
+  const orb = /** @type {HTMLElement | null} */ (document.querySelector("button.orb"));
+  const card = document.getElementById("account");
+  if (!orb || !card) return teardown;
+
+  const close = () => {
+    card.classList.remove("open");
+    orb.setAttribute("aria-expanded", "false");
+  };
+  on(orb, "click", () => orb.setAttribute("aria-expanded", String(card.classList.toggle("open"))));
+
+  /* The same light-dismiss rule every overlay in the product carries. The
+     orb's own handler has already run by the time this does, so a press on
+     the orb reads as "inside" and toggles rather than closing twice. */
+  on(window, "click", (/** @type {MouseEvent} */ event) => {
+    if (!card.classList.contains("open")) return;
+    const target = /** @type {Node | null} */ (event.target);
+    if (target && (card.contains(target) || orb.contains(target))) return;
+    close();
+  });
+
+  /* Escape closes, and hands focus back to the orb if it was inside — #853's
+     rule. Once the panel goes visibility:hidden (#847) a focus left in there
+     falls to <body> and a keyboard reader is stranded at the top of the page. */
+  on(window, "keydown", (/** @type {KeyboardEvent} */ event) => {
+    if (event.key !== "Escape" || !card.classList.contains("open")) return;
+    const focusWasInside = card.contains(document.activeElement);
+    close();
+    if (focusWasInside) orb.focus();
+  });
+
+  /* THEME: ./swatches.js, the same wiring the pocket sheet uses (#852). The
+     desk's own follow-up — re-measuring the constellation leaders, which the
+     engraved packs size differently — is mountHome's, which watches the live
+     theme rather than this click, because the chart only exists on the
+     branch mountHome runs on. */
+  for (const swatch of /** @type {NodeListOf<HTMLElement>} */ (card.querySelectorAll(".swatches button"))) {
+    on(swatch, "click", (/** @type {MouseEvent} */ event) =>
+      setSwatch(
+        packOf(/** @type {HTMLElement} */ (event.currentTarget)),
+        /** @type {HTMLElement} */ (event.currentTarget),
+      ));
+  }
+  syncSwatches(card);
+
+  return teardown;
 }
 
 /**

@@ -4,7 +4,7 @@
   import { afterNavigate, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { mountEmptySky, mountHome } from "./home.behaviour.js";
+  import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
   import Flight from "$lib/flight/Flight.svelte";
   import Dawn from "$lib/flight/Dawn.svelte";
   import Dusk from "$lib/flight/Dusk.svelte";
@@ -17,7 +17,7 @@
   import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
-  import { mountPocket } from "./pocket.behaviour.js";
+  import { mountPocket, mountPocketAccount } from "./pocket.behaviour.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "./bands.js";
   import CorridorRow from "./CorridorRow.svelte";
@@ -620,6 +620,22 @@
 
     const mountDialect = () => {
       teardown?.();
+      /* ---- #1074: THE ACCOUNT PANEL IS CHROME, NOT HOUSEHOLD DATA --------
+       * The avatar, Inbox, Settings, the THEME row and sign-out belong to
+       * every reader on /home, and the server renders all of it whether or
+       * not this reader is in a household. It used to be bound inside
+       * mountHome/mountPocket, which only the branch below them runs — so a
+       * reader on the empty sky was shown the whole menu and could not open
+       * it, and Settings, Inbox, the theme and sign-out were unreachable
+       * from home for exactly the reader most likely to want them.
+       *
+       * It binds here, above the branches, so no branch can forget it: this
+       * is the one line every path through the mount shares.
+       */
+      const pocketAccount = query.matches ? null : mountPocketAccount();
+      const stopAccount = pocketAccount ? pocketAccount.teardown : mountAccount();
+      /** @param {() => void} stopDialect */
+      const withAccount = (stopDialect) => () => { stopDialect(); stopAccount(); };
       /* §11 (#453): no household means the labelled sky in either dialect —
          same bearings, label only, click to ask. */
       if (view?.emptySky) {
@@ -633,7 +649,7 @@
           document.getElementById("nstar")?.addEventListener(
             "click", () => location.assign("/"), { signal: controller.signal });
           const stopSky = mountEmptySky({ galaxy: view.galaxy, onAsk: (id, name, requested) => { if (!requested) askTarget = { id, name }; } });
-          teardown = () => { controller.abort(); stopSky(); };
+          teardown = withAccount(() => { controller.abort(); stopSky(); });
         } else {
           /* The pocket's labelled sky is a list; asking rides data attributes
              because the hidden dialect must never bind listeners. */
@@ -643,12 +659,12 @@
               if (row.dataset.askRequested !== "true") askTarget = { id: /** @type {string} */ (row.dataset.ask), name: /** @type {string} */ (row.dataset.askName) };
             }, { signal: controller.signal });
           }
-          teardown = () => controller.abort();
+          teardown = withAccount(() => controller.abort());
         }
         return;
       }
       /* Tear the old dialect down before standing the new one up. */
-      teardown = query.matches
+      teardown = withAccount(query.matches
         /* §15, the sky wave: the pack skies are seeded streams, so the fixture
            switch travels with the mount — alive per load in the product, pinned
            to the workspace under ORBIT_FIXTURES, which is what lets the gate
@@ -666,7 +682,10 @@
               const suggestion = view?.suggestions.find((one) => one.receiptId === id);
               if (suggestion) { armed = { id: suggestion.id, act: "dismiss" }; tapReceipt(suggestion, "dismiss"); }
             },
-          });
+            /* #1074: the menu is mounted above; this hands the dialect the
+               half of the one-overlay rule that is the sheet's. */
+            account: pocketAccount ?? undefined,
+          }));
     };
     const sync = () => {
       delete document.body.dataset.homeReady;
