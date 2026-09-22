@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { NEWCOMER_FAR, NEWCOMER_NEAR } from "$lib/flight/starfields.js";
-  import { belongRowsOf, discoveredCountOf } from "./stage.js";
+  import { belongRowsOf, discoveredCountOf, WAITING_APPROVAL_NOTE } from "./stage.js";
   /*
    * #428's placement law, imported rather than copied: "bearings are sacred,
    * radii negotiate", and the whole thing is one pure function of (households,
@@ -224,6 +224,18 @@
             <span class="dot"></span><span class="nm">{row.name}</span>
             <span class="act">{row.requested ? "waiting" : "ask to join"}</span>
           </button>
+          <!-- #866 (owner-decisions §23): the "waiting" word alone is a
+               marker, not an explanation. `role="status"` (an implicit
+               `aria-live="polite"` region) is always mounted -- as
+               Dawn.svelte's own `.state` region (#788) has it, "a reader
+               using a screen reader needs the element to already exist for a
+               later text change to announce" -- so asking to join announces
+               this the moment the row goes optimistic, and it is here again,
+               plain and readable, on the next login. Not aria-hidden, not
+               colour-only, not a tooltip: real text a screen reader reaches
+               like any other. Empty and invisible (arrival.css collapses an
+               empty .note to nothing) until the row is waiting. -->
+          <p class="note" role="status">{row.requested ? WAITING_APPROVAL_NOTE : ""}</p>
         </li>
       {/each}
     </ul>
