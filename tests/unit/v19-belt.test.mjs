@@ -12,7 +12,7 @@ import {
   geometryOf, itemOffsetsOf, lehmer, matchesOf, nearestMatchOf, reachableAt,
   rollRangeOf, seatOf, shortName, stepFrom, warpOf, AMBIENT_SEED,
 } from "../../web/src/routes/item/[[id]]/band.js";
-import { beltManifestOf, sizeLabel } from "../../web/src/lib/data/belt.js";
+import { beltManifestOf, documentPreviewStateOf, sizeLabel } from "../../web/src/lib/data/belt.js";
 import { DOCUMENTS_FIXTURE, WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
 const TODAY = WORKSPACE_FIXTURE.fixtureToday; // 2026-08-13, the date every mockup was drawn against
@@ -65,11 +65,16 @@ describe("the belt's manifest", () => {
         id: "d-mot-cert", name: "MOT certificate 2025", size: "240 KB",
         added: "12 June 2026", type: "PDF (application/pdf)", plate: "PDF",
         clean: true, scan: "clean", href: "/api/documents/d-mot-cert/download",
+        // #1088: the reading card's own fields, added for the preview.
+        previewHref: "/api/documents/d-mot-cert/preview",
+        lifecycle: "stored", mediaType: "application/pdf", ready: true, deleteAfter: null,
       },
       {
         id: "d-mot-history", name: "Service history", size: "88 KB",
         added: "12 June 2026", type: "PDF (application/pdf)", plate: "PDF",
         clean: true, scan: "clean", href: "/api/documents/d-mot-history/download",
+        previewHref: "/api/documents/d-mot-history/preview",
+        lifecycle: "stored", mediaType: "application/pdf", ready: true, deleteAfter: null,
       },
     ]);
     expect(sizeLabel(2_400_000)).toBe("2.3 MB");
@@ -90,6 +95,48 @@ describe("the belt's manifest", () => {
     expect(manifestOf({ household: retired }).map((r) => r.id)).not.toContain("i-old");
     expect(manifestOf({ household: retired, keepId: "i-old" }).map((r) => r.id)).toContain("i-old");
   });
+});
+
+/*
+ * #1088: the reading card's own honest state (owner-decisions.md §18) — a
+ * pure read of the document's own lifecycle, never a guess and never
+ * anything the endpoint would have to be asked first. `ready` alone answers
+ * "still scanning"; the two server lifecycles that are neither reachable
+ * from `ready` nor from the media kind — removed and refused — take
+ * priority over everything else.
+ */
+describe("the reading card's honest state", () => {
+  const doc = (overrides) => ({
+    lifecycle: "available", mediaType: "application/pdf", ready: true, ...overrides,
+  });
+
+  it("shows the page when the file is ready and its kind is one Orbit can draw", () => {
+    expect(documentPreviewStateOf(doc())).toBe("available");
+    expect(documentPreviewStateOf(doc({ mediaType: "image/jpeg" }))).toBe("available");
+    expect(documentPreviewStateOf(doc({ mediaType: "image/png" }))).toBe("available");
+  });
+
+  it("is scanning whenever the content is not ready yet, whatever the lifecycle word", () => {
+    expect(documentPreviewStateOf(doc({ ready: false, lifecycle: "receiving" }))).toBe("scanning");
+    expect(documentPreviewStateOf(doc({ ready: false, lifecycle: "scanning" }))).toBe("scanning");
+    expect(documentPreviewStateOf(doc({ ready: false, lifecycle: "encrypting" }))).toBe("scanning");
+  });
+
+  it("is removed once the file is on its retention clock, even mid-scan", () => {
+    expect(documentPreviewStateOf(doc({ lifecycle: "pending_deletion" }))).toBe("removed");
+    expect(documentPreviewStateOf(doc({ lifecycle: "pending_deletion", ready: false }))).toBe("removed");
+  });
+
+  it("is refused for a rejected file, even one whose stored kind looks fine", () => {
+    expect(documentPreviewStateOf(doc({ lifecycle: "rejected" }))).toBe("refused");
+    expect(documentPreviewStateOf(doc({ lifecycle: "rejected", ready: true, mediaType: "application/pdf" }))).toBe("refused");
+  });
+
+  it("is a kind Orbit cannot draw once ready and clean but not one of the three it renders", () => {
+    expect(documentPreviewStateOf(doc({ mediaType: "application/msword" }))).toBe("undrawable");
+    expect(documentPreviewStateOf(doc({ mediaType: null }))).toBe("undrawable");
+  });
+
 });
 
 describe("the spacing law", () => {
