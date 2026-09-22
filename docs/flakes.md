@@ -149,3 +149,13 @@ and the file has no single slow case to blame. Treated as its own heading rather
 than a second sighting of the 2026-09-18 one, because a fix aimed at one test
 would not touch the other. First sighting of this test; an issue on the third,
 per the testing-and-ci skill.
+
+## v19-arrival.spec.ts:164 "the newcomer's arrival: the climb, the labelled sky, the real count, the question" — #1085
+
+- 2026-09-22 · 4fc18a27 (#1080, feature/1080-parallel-e2e-workers rebased onto dev's #1077 merge) · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=2`, desktop-chromium · `expect(locator('.nf .disc .big')).toHaveText("2")` received `"1"` at `tests/e2e/v19-arrival.spec.ts:229`, 5000ms timeout. Passed on the same code at `ORBIT_E2E_WORKERS=1` (full 198/198 green) immediately before this run. Under the CI cpu cap, `orbit-app` is shared across concurrently-running workers; this spec counts a discovered household population that another worker's fixtures may still be settling, so a worker-count-dependent race in the count (not the sharing #1080 already removed) is the first thing to check on the next sighting.
+- 2026-09-22 · 4fc18a27, same session · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=4`, desktop-chromium · different symptom, same spec: `signInThroughTheDoor` (`tests/e2e/v19-arrival.spec.ts:79`) timed out after 180000ms waiting for `getByRole('link', { name: 'Orbit W0 Newcomer' })` — the sign-in itself never completed, well before the count assertion the first sighting hit.
+- 2026-09-22 · 4fc18a27, same session · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=8`, desktop-chromium · same symptom as the second sighting: `signInThroughTheDoor` timed out after 180000ms waiting for `getByRole('link', { name: 'Orbit W4 Newcomer' })`. Third sighting; filed as #1085.
+
+## v19-create.spec.ts:50 "the create form saves a real item into the orbit"
+
+- 2026-09-22 · 4fc18a27, same session · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=8`, desktop-chromium · `expect(page).toHaveURL(/\/home$/)` at `tests/e2e/v19-create.spec.ts:69` stayed on `/create` after 5000ms instead of navigating to `/home`. Did not occur at 1, 2 or 4 workers on the same code, only at 8. First sighting; no issue yet (an issue on the third, per the testing-and-ci skill).
