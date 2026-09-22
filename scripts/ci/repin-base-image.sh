@@ -585,25 +585,53 @@ git -C "$repo_dir" commit -m "$commit_message"
 # command it execs never contains it. `-c credential.helper=` first clears
 # any helper already configured (same defensive shape as AGENTS.md's
 # documented push pattern) so only the one named here is consulted.
-# GitLab Runner writes its own CI_JOB_TOKEN into this checkout's git config as
-# an `http.<url>.extraheader` AUTHORIZATION line, and that config persists --
-# runner 8's /builds survives between jobs (#811, #813). git sends a configured
-# extraheader on every request to that host, so the server authenticates the
-# push as the job token and answers 403 "You are not allowed to push code to
-# this project". The credential helper below is never reached: git only
-# consults it after a 401, and a 403 is not a 401.
+# Defensive, and NOT the cause of #1081 -- recording that plainly because the
+# commit that added this said it was, and was wrong.
 #
-# That is why this job had never pushed successfully since #708 built it, why
-# the refusal survived rotating the credential twice, and why it looked like a
-# permissions problem with a token that has the right role and scope all along
-# (#1081). Clear the headers first, by key, so only the credential below can
-# authenticate the push. The key names are logged; the values never are,
-# because each one contains a working job token.
+# The theory was that GitLab Runner leaves its own CI_JOB_TOKEN in this
+# checkout's git config as an `http.<url>.extraheader` AUTHORIZATION line,
+# which git would send in place of the credential below. It would have
+# explained the 403 exactly. It is not what happens here: on the first run
+# after this landed (pipeline 1470) the loop found no such key, logged
+# nothing, and the push was refused identically.
+#
+# Kept because clearing an inherited credential before an authenticated push
+# is right whether or not one is present, and because its absence is now
+# itself evidence: if this line ever does appear in a log, the config did
+# carry one. The key names are logged; the values never are.
 while IFS= read -r extraheader_key; do
   [[ -n "$extraheader_key" ]] || continue
   log "clearing an inherited git auth header before the push: ${extraheader_key}"
   git -C "$repo_dir" config --unset-all "$extraheader_key"
 done < <(git -C "$repo_dir" config --name-only --get-regexp '^http\..*\.extraheader$' || true)
+
+# Which identity is this token, actually? (#1081)
+#
+# Two owner rotations and two wrong diagnoses have gone into a 403 that says
+# only "you are not allowed", without saying who "you" is. The push cannot be
+# made to name its identity, but the API can: this asks the token who it is
+# and logs the answer before the push that will be refused.
+#
+# A username is not a secret; the token stays in a mode-600 header file and
+# never reaches argv. If this prints an identity that is not the base-repin
+# bot, the stored value is wrong. If it prints the right one, the value is
+# right and the refusal is about what that identity may do, not who it is --
+# and the next question is the token's scopes, since `api` alone does not
+# necessarily carry git push.
+# Skipped when CI_API_V4_URL is unset, which is the case in this script's own
+# tests: they drive the commit-and-push half against a local bare repo with no
+# GitLab behind it. A diagnostic must never be able to fail the thing it is
+# diagnosing, so every step here is non-fatal.
+if [[ -n "${CI_API_V4_URL:-}" ]]; then
+  identity_header="$(new_secret_file)"
+  printf 'PRIVATE-TOKEN: %s\n' "$BASE_REPIN_TOKEN" > "$identity_header"
+  identity="$(
+    curl --silent --location --max-time 30 --header @"$identity_header" \
+      "${CI_API_V4_URL%/}/user" 2>/dev/null |
+      node -e 'let i="";process.stdin.on("data",c=>i+=c).on("end",()=>{try{const u=JSON.parse(i);process.stdout.write(`${u.username ?? "?"} (id ${u.id ?? "?"})`)}catch{process.stdout.write("unreadable -- the API refused this token")}})' 2>/dev/null || true
+  )"
+  log "the push credential authenticates as: ${identity:-unreadable}"
+fi
 
 credential_file="$(new_secret_file)"
 printf 'https://oauth2:%s@%s\n' "$BASE_REPIN_TOKEN" "$CI_SERVER_HOST" > "$credential_file"
