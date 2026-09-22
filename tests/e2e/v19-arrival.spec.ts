@@ -189,6 +189,20 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   expect(created.sections.map((section) => section.name))
     .toEqual(["Home", "Vehicles", "Devices", "Services"]);
 
+  /* Captured before the door is even pressed: Arrival.svelte's decide() makes
+     exactly one GET /api/workspace on mount (web/src/lib/arrival/Arrival.svelte),
+     and that single response is what THE COUNT below reads its number from
+     instead of a second, later fetch (#1085/#1080). Workers run in parallel
+     and the household list is instance-wide, budget-bounded rather than
+     isolated per worker (tests/e2e/support/reset-gate.ts's own account of
+     what a reset "still cannot do"), so a fresh fetch made minutes later in
+     the test would legitimately race another worker's fixtures. This is the
+     exact response the sky was drawn from, so it cannot disagree with what is
+     on screen. */
+  const ownWorkspaceRead = page.waitForResponse(
+    (response) => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/workspace",
+  );
+
   /* THE READER. Through the door, by its own button, so the launch is owed and
      the climb plays. */
   await signInThroughTheDoor(page, workerAccount("newcomer"));
@@ -215,10 +229,17 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
      It is the real list that is counted, not the sky: the sky draws at most
      twelve (#670), and on a shared instance (#730) more exist than it can
      draw, so the sky is a lower bound and `visibleHouseholds` is the number.
-     Specs run in parallel locally, and a system created by another one between
-     this read and the page's own would make a true count look wrong; CI runs
-     one worker, so there the two reads cannot disagree. */
-  const workspace = await workspaceOf(page);
+     Read from `ownWorkspaceRead` above, not a fresh fetch: a second,
+     independent read taken this many beats after the page's own would race
+     every other worker's fixtures under #1080 rather than only this file's. */
+  const ownResponse = await ownWorkspaceRead;
+  if (!ownResponse.ok()) throw new Error(`workspace read failed: ${ownResponse.status()}`);
+  const { workspace } = (await ownResponse.json()) as {
+    workspace: {
+      households: unknown[];
+      visibleHouseholds: { id: string; name: string; requested: boolean }[];
+    };
+  };
   expect(workspace.households).toEqual([]);
   const discovered = workspace.visibleHouseholds.length;
   expect(discovered).toBeGreaterThan(0);
