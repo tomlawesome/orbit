@@ -123,7 +123,7 @@ at the parent commit `3b6ca05c` (pipeline 1369, job 18305, 241s, passed), so the
 branch cannot be the cause. Second sighting; the third gets an issue, per the
 testing-and-ci skill.
 
-## extraction-shortlist-recall.test.ts:108 "adds to the tallies it is given rather than replacing them"
+## extraction-shortlist-recall.test.ts:108 "adds to the tallies it is given rather than replacing them" — #1087
 
 - 2026-09-22 · b7a5a883 (!964, which changes only the base-image digest in `Dockerfile` and `.github/supply-chain-policy.json`) · pipeline 1417 / fast (job 18983) · `Error: Test timed out in 5000ms`, 5535ms. Passed on the retried job 19206 on the same commit. `dev` ran the same test green at the same base on pipeline 1379.
 
@@ -134,3 +134,16 @@ runs `countAll` over the whole real corpus twice (`SAMPLE.slice(0, 3)` and then
 the `fast` project's `testTimeout` is `5_000` (`vitest.config.ts:81`). A loaded
 runner is enough to push it over. If it recurs, the fix shape is a per-test
 timeout on this one case rather than a global raise.
+
+- 2026-09-22 · 25b3c913 (the `dev` merge of !966, which touches only `web/src` and one e2e spec) · pipeline 1454 / fast (job 19676) · `Error: Test timed out in 5000ms`, alongside a timeout in `password.test.ts`. Retried as job 19693 on the same commit: green, 273 of 273 files and 4338 tests. The diff cannot reach either file, and both failures were timeouts rather than assertions, which is why the job was re-run rather than investigated as a regression. Two pipelines were executing on the same host at the time — 1455 was started manually two minutes into 1454 — so the contention was partly self-inflicted. **Third sighting: #1087 filed.**
+
+## password.test.ts "round-trips a password and refuses a wrong one"
+
+- 2026-09-22 · 25b3c913 · pipeline 1454 / fast (job 19676) · `Error: Test timed out in 5000ms`, in the same run as the extraction-shortlist-recall timeout above, under the same two-pipeline contention. Passed on the retry, job 19693.
+
+A different test from the one recorded on 2026-09-18, in the same file: Argon2id
+is deliberately expensive, so every test in this file sits close to the 5 s cap
+and the file has no single slow case to blame. Treated as its own heading rather
+than a second sighting of the 2026-09-18 one, because a fix aimed at one test
+would not touch the other. First sighting of this test; an issue on the third,
+per the testing-and-ci skill.
