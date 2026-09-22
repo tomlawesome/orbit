@@ -262,6 +262,84 @@ describe("pipeline lanes", () => {
   });
 });
 
+// #1078 (owner ruling 2026-09-21): a push to `dev` now tests what the push
+// changed, and the full gate -- the catch-all sanity check against accidental
+// drift -- moves to the dev -> preview merge request. These run the real
+// `.reach_helpers` and `.system_lane_gate` shell against a synthetic event,
+// the same way `runClassifyEnv` above runs `classify`'s own shell: read, not
+// re-implemented, so a change to the real gate is what these see.
+function hiddenBlockScript(name) {
+  return allBlocks
+    .get(name)
+    .split("\n")
+    .slice(1) // drop the "<name>: &<anchor> |" header line
+    .map((line) => line.replace(/^ {2}/u, ""))
+    .join("\n");
+}
+
+// Ends with a marker so a run that falls through the gate (rather than
+// hitting its own `exit 0`) is distinguishable from one that never reached
+// the marker for some unrelated reason.
+function runSystemLaneGate(environment = {}) {
+  const script = `${hiddenBlockScript(".reach_helpers")}\n${hiddenBlockScript(".system_lane_gate")}\necho REACHED_AFTER_GATE`;
+  return execFileSync("sh", ["-c", script], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, ...environment },
+  });
+}
+
+describe("orbit_on_delivery_branch / orbit_full_gate / .system_lane_gate (#1078)", () => {
+  it("no longer treats a push to dev as the full gate", () => {
+    const stdout = runSystemLaneGate({ CI_COMMIT_BRANCH: "dev", ORBIT_LANE: "full", ORBIT_SYSTEM: "false" });
+    expect(stdout).toContain("skipped: no system-risk change");
+    expect(stdout).not.toContain("REACHED_AFTER_GATE");
+  });
+
+  it("still runs the system lane on a dev push that carries system risk", () => {
+    const stdout = runSystemLaneGate({ CI_COMMIT_BRANCH: "dev", ORBIT_LANE: "full", ORBIT_SYSTEM: "true" });
+    expect(stdout).not.toContain("skipped");
+    expect(stdout).toContain("REACHED_AFTER_GATE");
+  });
+
+  it("still runs the system lane unconditionally on preview, main and hotfix pushes", () => {
+    for (const branch of ["preview", "main", "hotfix/x"]) {
+      const stdout = runSystemLaneGate({ CI_COMMIT_BRANCH: branch, ORBIT_LANE: "full", ORBIT_SYSTEM: "false" });
+      expect(stdout, branch).not.toContain("skipped");
+      expect(stdout, branch).toContain("REACHED_AFTER_GATE");
+    }
+  });
+
+  it("runs the full gate on the dev -> preview merge request, whatever the diff holds", () => {
+    const stdout = runSystemLaneGate({
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview",
+      ORBIT_LANE: "full",
+      ORBIT_SYSTEM: "false",
+    });
+    expect(stdout).not.toContain("skipped");
+    expect(stdout).toContain("REACHED_AFTER_GATE");
+  });
+
+  it("still runs the full gate on the preview -> main merge request", () => {
+    const stdout = runSystemLaneGate({
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main",
+      ORBIT_LANE: "full",
+      ORBIT_SYSTEM: "false",
+    });
+    expect(stdout).not.toContain("skipped");
+    expect(stdout).toContain("REACHED_AFTER_GATE");
+  });
+
+  it("skips an ordinary merge request with no system risk, same as before", () => {
+    const stdout = runSystemLaneGate({
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "dev",
+      ORBIT_LANE: "full",
+      ORBIT_SYSTEM: "false",
+    });
+    expect(stdout).toContain("skipped: no system-risk change");
+    expect(stdout).not.toContain("REACHED_AFTER_GATE");
+  });
+});
+
 // A `dir/**/*` pattern or an exact path, which is all sidecar_images' list
 // (below) uses -- enough to check the list against the classifier's own
 // verdict without a real glob library.
