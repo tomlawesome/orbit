@@ -110,3 +110,27 @@ skill).
 ## v19-keyboard.spec.ts:568 "administration: the local-user controls are reachable and announced"
 
 - 2026-09-19 · d0d5b47 (+ #1062's uncommitted end-cap focus-ring work, none of it near administration) · local `scripts/test-e2e-local.sh --spec tests/e2e/v19-keyboard.spec.ts --project desktop-chromium` · the "send a new setup link" button was not found at all: `expect(locator).toHaveAttribute` on `.person` filtered to the row that is not "· you", timing out at 5s with "element(s) not found". The other 22 tests in the run passed. The same test passed on the same code in CI — pipeline 1281 / smoke (job 16738), `✓ 111 [desktop-chromium] ... (3.1s)` — where the run's only two failures were the belt end-caps #1062 was fixing. So the row either had no second person or had not rendered when the assertion looked, rather than the control being missing. First sighting; no issue yet (an issue on the third, per the testing-and-ci skill).
+
+## repair_journeys: a different journey fails on each run of the same commit
+
+- 2026-09-20 · f5349ffa (!962, `design/866-tour-round-5` — tour mockups and `design/owner-decisions.md` only, nothing the harness reads) · pipeline 1373 / `repair_journeys` job 18392 · `FAIL: rotate-database-credential did not report result=done`, after `diagnosis result=failed checked=18 skipped=0`. The `cancelled-repair` journey passed on this run.
+- 2026-09-20 · f5349ffa · pipeline 1373 / `repair_journeys` job 18463 (retry of the above, same commit) · `FAIL: a refused dangerous batch exited 0, expected 6` — in `cancelled-repair`, the journey that had just passed, and `rotate-database-credential` was never reached. A third retry of the same pipeline, job 18499, passed the whole suite.
+
+The signature is the moving failure point, not either symptom: two real runs
+(278s and 241s, so neither was lane-skipped) picked a different journey to fail
+in, and the third was green, all on one commit. `dev` ran the same job for real
+at the parent commit `3b6ca05c` (pipeline 1369, job 18305, 241s, passed), so the
+branch cannot be the cause. Second sighting; the third gets an issue, per the
+testing-and-ci skill.
+
+## extraction-shortlist-recall.test.ts:108 "adds to the tallies it is given rather than replacing them"
+
+- 2026-09-22 · b7a5a883 (!964, which changes only the base-image digest in `Dockerfile` and `.github/supply-chain-policy.json`) · pipeline 1417 / fast (job 18983) · `Error: Test timed out in 5000ms`, 5535ms. Passed on the retried job 19206 on the same commit. `dev` ran the same test green at the same base on pipeline 1379.
+
+The failure is a timeout, not an assertion: the test is synchronous, so it
+exceeded the 5 s cap doing its own work. It is the only test in the file that
+runs `countAll` over the whole real corpus twice (`SAMPLE.slice(0, 3)` and then
+`SAMPLE`) instead of reading the `tallies` the describe block computes once, and
+the `fast` project's `testTimeout` is `5_000` (`vitest.config.ts:81`). A loaded
+runner is enough to push it over. If it recurs, the fix shape is a per-test
+timeout on this one case rather than a global raise.

@@ -60,9 +60,10 @@ workflow:
     - if: $CI_COMMIT_TAG
       when: never
     # A scheduled pipeline is the Renovate lane, the sidecar-pin-freshness
-    # lane, the install-bootstrap lane, the base-image-repin lane, or nothing
-    # (#801 step 6, #820, #724, #708). `renovate`, `sidecar_pin_freshness`,
-    # `install_bootstrap` and `base_image_repin` are the only jobs that opt
+    # lane, the install-bootstrap lane, the base-image-repin lane, the
+    # tidy-freshness lane, or nothing (#801 step 6, #820, #724, #708, #1023).
+    # `renovate`, `sidecar_pin_freshness`, `install_bootstrap`,
+    # `base_image_repin` and `tidy_freshness` are the only jobs that opt
     # in, so a schedule that forgot its variable would produce a pipeline
     # with no jobs, which GitLab rejects with a message that names neither
     # the schedule nor the variable. Refusing it here says why.
@@ -70,6 +71,7 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule" && $BASE_IMAGE_REPIN == "true"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $TIDY_FRESHNESS == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -2162,6 +2164,19 @@ launcher_install_compat:
       allow_failure: true
   allow_failure: false
   script:
+    # #1076: the `rules:` above and `build_image`'s lane gate used to
+    # disagree. `.gitlab-ci.yml` is in the `changes:` list, so a
+    # pipeline-definition change starts this job; the same change puts the
+    # pipeline in the `ci` lane, which does not admit `build_image`. That
+    # job then exits 0 and its after_script leaves an empty `image.tar`
+    # placeholder so its `artifacts:` declaration still resolves -- and this
+    # job downloaded the placeholder and died on `docker load: unrecognized
+    # image format`. Every other consumer of *needs_gated_image already
+    # carries its own lane gate; this one did not. (Naming the helper in
+    # this comment would trip gitlab-ci-lanes.test.mjs, which finds the call
+    # by position.)
+    - *reach_helpers
+    - orbit_lane_admits launcher_install_compat || exit 0
     - *reuse_gate
     - *docker_in_job
     - *step_outputs
@@ -2956,6 +2971,78 @@ base_image_repin:
       bash scripts/ci/repin-base-image.sh --red
       echo "base_image_repin: real run — compares the artifact digest to the pin"
       bash scripts/ci/repin-base-image.sh
+
+# The runner host's nightly Docker tidy, made visible (#1023).
+#
+# `/usr/local/sbin/runner-docker-tidy.sh` failed every night from 2026-09-06
+# to 2026-09-15 and nobody noticed until CI stopped with a full disk (#823).
+# Ten nights of a one-line error in a log file nothing reads. This job is the
+# half of #1023 that lives in the repository: it reads a marker the tidy's
+# cron line writes ONLY after a zero exit, and fails when the last success is
+# over 36 hours old. `scripts/ci/check-tidy-freshness.sh` is the check, and
+# its header holds the two host-side changes the owner must make -- the cron
+# line and the read-only mount. The host-side alerting #1023 also offers is
+# the owner's half and is tracked cross-project as ai/agent-infra#15.
+#
+# Keyed on a success marker, not on the log's timestamps, because the broken
+# run still wrote its date line every night: "the log is recent" was true
+# throughout the outage. The marker ages out instead.
+#
+# Schedule-gated, like `renovate`, `sidecar_pin_freshness`,
+# `install_bootstrap` and `base_image_repin`, and for a reason stronger than
+# consistency: this proves something about the host, not about a commit. In an
+# ordinary pipeline a stale tidy would turn an unrelated merge request red,
+# and `workflow: auto_cancel: on_job_failure: all` would cancel that pipeline's
+# remaining jobs over a fact none of them can do anything about. Its own daily
+# schedule fails loudly, on its own, and blocks nobody's merge.
+#
+# 36 hours, so one missed or late nightly run does not cry wolf while the run
+# after it still does. That is the window #1023 asked for; #823 needed ten
+# nights to surface.
+#
+# `orbit-build` for the mount, not for privilege -- exactly as `classify` and
+# `launch_timing` take that runner for reasons other than the Docker socket.
+# The marker directory is bind-mounted into this project's own runner only, so
+# the shared group runner's `big` and `light` lanes cannot see it; a job that
+# landed there would report a missing marker and be right to. Nothing else of
+# Orbit's runs in a schedule pipeline, so the privileged slot is free.
+#
+# $NODE_IMAGE rather than a new pin: the check is plain bash, and this image is
+# already on the host and survives the very tidy being checked (pinned job
+# images do). A new image pin would be one more thing to keep current for a
+# job that runs a `date` comparison.
+#
+# `--red` first, the same order `sidecar_pin_freshness` and `base_image_repin`
+# use: the check proves it can fail -- missing, malformed and stale markers --
+# before its pass on the real one is believed. Neither invocation's status is
+# caught, so either failing fails the job, which is the entire point of #1023.
+#
+# No reuse gate (#898) and so no entry in scripts/ci/job-inputs.json, which
+# scripts/job-inputs.test.mjs holds to be a matched pair: the answer depends on
+# the host's clock at the moment it is asked, so standing on an earlier run's
+# verdict would report a tidy that has since stopped.
+tidy_freshness:
+  stage: maintenance
+  extends: .privileged_runner
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  # A file read and a subtraction. The clone is the slow part.
+  timeout: 10m
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $TIDY_FRESHNESS == "true"
+  variables:
+    # The window, here rather than only in the script's default, so changing
+    # it is a pipeline change and shows up in this file's history.
+    ORBIT_TIDY_MAX_AGE_HOURS: "36"
+  script:
+    - |
+      set -eu
+      echo "tidy_freshness: red self-test — the freshness check must fire"
+      bash scripts/ci/check-tidy-freshness.sh --red
+      echo "tidy_freshness: real run — how long since the tidy last succeeded"
+      bash scripts/ci/check-tidy-freshness.sh
 
 # --- the promotion gate's own measurement ------------------------------------
 
