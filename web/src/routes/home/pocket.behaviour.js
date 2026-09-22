@@ -16,19 +16,19 @@ import { packOf, setSwatch, syncSwatches } from "./swatches.js";
  * element as data, and is written with `textContent` rather than the mockup's
  * `innerHTML` — the attribute is already entity-decoded by the parser, so the
  * result is identical and nothing here can inject markup.
- * #852 added the account menu: `#morb` toggles the `#maccount` sheet, its
- * nav links are plain `<a href>`s (no JS needed), its THEME row imports the
- * same setSwatch/packOf home.behaviour.js's swatches use (moved to
- * ./swatches.js so neither file copies the other), and its sign-out button
- * drives `signOut()` the way Chrome.svelte's sub-screen orb already does —
- * two taps, the second one revoking the session before it navigates. Only
- * one of `#sheet`/`#maccount` is ever open, and Escape/outside-tap close
- * whichever is open, returning focus to `#morb` if it took focus from there
- * (#853's own rule, rebuilt here rather than imported because pocket's
- * overlay set is its own).
- * @param {{ approve?: (id: string) => void, dismiss?: (id: string) => void }} [handlers]
+ * #852 added the account menu; #1074 moved it out into mountPocketAccount()
+ * below, because it is chrome rather than household data and has to be bound
+ * on the empty sky too, where this function never runs. This one still
+ * enforces the half of the rule that is its own: only one of
+ * `#sheet`/`#maccount` is ever open, so raising a sheet closes the menu and
+ * opening the menu closes the sheet.
+ * @param {{
+ *   approve?: (id: string) => void,
+ *   dismiss?: (id: string) => void,
+ *   account?: ReturnType<typeof mountPocketAccount>,
+ * }} [handlers]
  */
-export function mountPocket({ approve, dismiss } = {}) {
+export function mountPocket({ approve, dismiss, account } = {}) {
   const { on, teardown } = screenScope();
 
   /* #851: the dial bodies and suggestion markers are SVG <circle>/<g>
@@ -56,16 +56,13 @@ export function mountPocket({ approve, dismiss } = {}) {
   const actsSugg = document.getElementById("sh-acts-sugg");
   const amend = document.getElementById("sh-amend");
 
-  /* #852: the account menu. Declared up here, ahead of the item/suggestion
-     sheet triggers below, because they close the menu when they open (only
-     one sheet is ever open at a time) — the rest of the menu's own wiring
-     (open, outside-tap, Escape, THEME, sign-out) is set up further down. */
-  const morb = document.getElementById("morb");
-  const maccount = document.getElementById("maccount");
-  const closeMenu = () => {
-    maccount?.classList.remove("open");
-    morb?.setAttribute("aria-expanded", "false");
-  };
+  /* #852: the account menu, #1074: no longer mounted here — the caller owns
+     it, because it has to exist on the empty sky too, where this function
+     never runs. All that is left is the one-overlay-at-a-time rule, which
+     needs both directions: `closeMenu` shuts the menu when a sheet opens,
+     and `account.onOpen` below shuts the sheet when the menu opens. Absent
+     only in a test that mounts this dialect on its own. */
+  const closeMenu = account?.close ?? (() => {});
 
   const resetSuggestionActs = () => {
     for (const button of /** @type {HTMLElement[]} */ (actsSugg?.querySelectorAll("[data-sugg-act]") ?? [])) {
@@ -129,6 +126,10 @@ export function mountPocket({ approve, dismiss } = {}) {
     sheet.classList.remove("open");
     resetSuggestionActs();
   };
+  /* The other half of the one-overlay rule (#1074): opening the account menu
+     puts this sheet away. Registered rather than passed in, because the menu
+     is mounted before this dialect is and outlives a dialect switch. */
+  if (account) account.onOpen = close;
   for (const button of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-sheet-close]"))) {
     on(button, "click", close);
   }
@@ -139,81 +140,111 @@ export function mountPocket({ approve, dismiss } = {}) {
     if (/** @type {KeyboardEvent} */ (event).key === "Escape") close();
   });
 
-  /* #852: `#morb` opens `#maccount` — the rest of the account menu. */
-  if (morb && maccount) {
-    const openMenu = () => {
-      close(); // #852: only one sheet open at a time
-      maccount.classList.add("open");
-      morb.setAttribute("aria-expanded", "true");
-    };
-    on(morb, "click", () => (maccount.classList.contains("open") ? closeMenu() : openMenu()));
+  return () => {
+    /* Hand the menu's hook back: the menu outlives this dialect, and a stale
+       `close` would reach into a sheet that is no longer mounted (#1074). */
+    if (account) account.onOpen = null;
+    teardown();
+  };
+}
 
-    /* Tapping outside the open menu closes it — the same light-dismiss rule
-       every other overlay in the product carries (home.behaviour.js's
-       OVERLAY_HIT, Chrome.svelte's own account-close handler). */
-    on(window, "click", (event) => {
-      if (!maccount.classList.contains("open")) return;
-      const target = /** @type {Node | null} */ (event.target);
-      if (target && (maccount.contains(target) || morb.contains(target))) return;
-      closeMenu();
-    });
+/**
+ * THE POCKET ACCOUNT MENU (#852, and #1074 for where it lives).
+ *
+ * `#morb` toggles the `#maccount` bottom sheet; its nav links are plain
+ * `<a href>`s, its THEME row imports the same setSwatch/packOf the desk
+ * swatches use (./swatches.js), and its sign-out drives `signOut()` the way
+ * Chrome.svelte's sub-screen orb does — two taps, the second one revoking
+ * the session before it navigates. Home's own desk orb hands sign-out to the
+ * ratified descent flight instead, but that flight belongs to +page.svelte's
+ * state and this dialect has nothing to withdraw from the pocket sky, so —
+ * like Chrome.svelte's sub-screens — it goes straight to the door.
+ *
+ * It used to live inside mountPocket, which /home only runs for a reader who
+ * HAS a household; on the empty sky the sheet was drawn in full and answered
+ * nothing. Its own mount now, bound by +page.svelte on every branch. The
+ * only thing it still shares with mountPocket is the one-overlay-at-a-time
+ * rule, and the handle carries both directions of it: `close` so the dialect
+ * can shut the menu when its own sheet opens, and `onOpen` — which a dialect
+ * sets and clears — so opening the menu shuts that sheet. On the empty sky
+ * nothing sets `onOpen`, because there is no sheet to put away.
+ *
+ * @returns {{ close: () => void, teardown: () => void, onOpen: (() => void) | null }}
+ */
+export function mountPocketAccount() {
+  const { on, teardown } = screenScope();
+  const morb = document.getElementById("morb");
+  const maccount = document.getElementById("maccount");
+  const close = () => {
+    maccount?.classList.remove("open");
+    morb?.setAttribute("aria-expanded", "false");
+  };
+  const handle = { close, teardown, onOpen: /** @type {(() => void) | null} */ (null) };
+  if (!morb || !maccount) return handle;
 
-    /* Escape closes the menu and, if focus was inside it, returns focus to
-       `#morb` — #853's rule (home.behaviour.js's OVERLAY_OPENER), rebuilt
-       here rather than imported because pocket's own overlay set (`#sheet`,
-       `#maccount`) is not shared code. */
-    on(window, "keydown", (event) => {
-      if (/** @type {KeyboardEvent} */ (event).key !== "Escape") return;
-      if (!maccount.classList.contains("open")) return;
-      const focusWasInside = maccount.contains(document.activeElement);
-      closeMenu();
-      if (focusWasInside) morb.focus();
-    });
+  const openMenu = () => {
+    handle.onOpen?.(); // #852: only one sheet open at a time
+    maccount.classList.add("open");
+    morb.setAttribute("aria-expanded", "true");
+  };
+  on(morb, "click", () => (maccount.classList.contains("open") ? close() : openMenu()));
 
-    /* THEME: the same setSwatch/packOf home.behaviour.js's desk swatches use
-       (./swatches.js, moved there rather than copied). */
-    for (const swatch of /** @type {NodeListOf<HTMLElement>} */ (maccount.querySelectorAll(".mswatches button"))) {
-      on(swatch, "click", (event) =>
-        setSwatch(
-          packOf(/** @type {HTMLElement} */ (event.currentTarget)),
-          /** @type {HTMLElement} */ (event.currentTarget),
-        ));
-    }
-    syncSwatches(maccount);
+  /* Tapping outside the open menu closes it — the same light-dismiss rule
+     every other overlay in the product carries (home.behaviour.js's
+     OVERLAY_HIT, Chrome.svelte's own account-close handler). */
+  on(window, "click", (event) => {
+    if (!maccount.classList.contains("open")) return;
+    const target = /** @type {Node | null} */ (event.target);
+    if (target && (maccount.contains(target) || morb.contains(target))) return;
+    close();
+  });
 
-    /*
-     * Sign-out: the same two-tap arm-then-revoke Chrome.svelte's sub-screen
-     * orb already does for every other screen (`await signOut(); location.href
-     * = "/logout"`) — the session ends before the reader leaves the page.
-     * Home's own desk orb hands this off to the ratified descent flight
-     * instead, but that flight belongs to +page.svelte's own state and this
-     * dialect has nothing to withdraw from the pocket sky, so — like
-     * Chrome.svelte's sub-screens — it goes straight to the door.
-     */
-    const signoutButton = document.getElementById("msignout");
-    const signoutProblem = /** @type {HTMLElement | null} */ (document.getElementById("msignout-problem"));
-    let armedOut = false;
-    on(signoutButton, "click", async () => {
-      if (!armedOut) {
-        armedOut = true;
-        if (signoutButton) signoutButton.textContent = "tap again to sign out";
-        return;
-      }
-      if (signoutProblem) { signoutProblem.hidden = true; signoutProblem.textContent = ""; }
-      try {
-        await signOut();
-      } catch (error) {
-        armedOut = false;
-        if (signoutButton) signoutButton.textContent = "sign out →";
-        if (signoutProblem) {
-          signoutProblem.textContent = /** @type {any} */ (error)?.message ?? "still signed in — try again";
-          signoutProblem.hidden = false;
-        }
-        return;
-      }
-      location.href = "/logout";
-    });
+  /* Escape closes the menu and, if focus was inside it, returns focus to
+     `#morb` — #853's rule (home.behaviour.js's OVERLAY_OPENER), rebuilt
+     here rather than imported because pocket's own overlay set (`#sheet`,
+     `#maccount`) is not shared code. */
+  on(window, "keydown", (event) => {
+    if (/** @type {KeyboardEvent} */ (event).key !== "Escape") return;
+    if (!maccount.classList.contains("open")) return;
+    const focusWasInside = maccount.contains(document.activeElement);
+    close();
+    if (focusWasInside) morb.focus();
+  });
+
+  /* THEME: the same setSwatch/packOf home.behaviour.js's desk swatches use
+     (./swatches.js, moved there rather than copied). */
+  for (const swatch of /** @type {NodeListOf<HTMLElement>} */ (maccount.querySelectorAll(".mswatches button"))) {
+    on(swatch, "click", (event) =>
+      setSwatch(
+        packOf(/** @type {HTMLElement} */ (event.currentTarget)),
+        /** @type {HTMLElement} */ (event.currentTarget),
+      ));
   }
+  syncSwatches(maccount);
 
-  return teardown;
+  const signoutButton = document.getElementById("msignout");
+  const signoutProblem = /** @type {HTMLElement | null} */ (document.getElementById("msignout-problem"));
+  let armedOut = false;
+  on(signoutButton, "click", async () => {
+    if (!armedOut) {
+      armedOut = true;
+      if (signoutButton) signoutButton.textContent = "tap again to sign out";
+      return;
+    }
+    if (signoutProblem) { signoutProblem.hidden = true; signoutProblem.textContent = ""; }
+    try {
+      await signOut();
+    } catch (error) {
+      armedOut = false;
+      if (signoutButton) signoutButton.textContent = "sign out →";
+      if (signoutProblem) {
+        signoutProblem.textContent = /** @type {any} */ (error)?.message ?? "still signed in — try again";
+        signoutProblem.hidden = false;
+      }
+      return;
+    }
+    location.href = "/logout";
+  });
+
+  return handle;
 }
