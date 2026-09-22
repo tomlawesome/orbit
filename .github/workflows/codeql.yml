@@ -16,6 +16,12 @@ name: CodeQL
 #
 # Deciding which of the two to keep is the owner's, and it is a repository
 # setting rather than a change to this file, so nothing here can fix it.
+#
+# Resolved 2026-09-20: the owner re-enabled this workflow (state went back to
+# `active`; API `updated_at` 2026-09-20T21:06:41+01:00). Confirmed running:
+# four pushes to `dev` on 2026-09-22 each triggered both matrix jobs and both
+# completed successfully (#1037). Leave the trigger list alone -- `dev` was
+# already correct, the workflow just needed the owner's switch flipped.
 
 on:
   push:
