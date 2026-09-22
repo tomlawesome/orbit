@@ -470,3 +470,150 @@
   background:color-mix(in srgb, var(--act,var(--accent)) 14%, transparent)}
 .belt-page .acts button:disabled{opacity:.5;cursor:default}
 .belt-page .btn-primary:disabled{opacity:.5;cursor:default}
+
+/* ==========================================================================
+ * #1088: THE DOCUMENT PREVIEW (owner-decisions.md §18)
+ *
+ * design/v19/create-v3.html's reading card — .readcard, .topsheet, .focus,
+ * .sheet, landed, breathe — reused in the idiom that document-card/round-6
+ * grew it into: pressing a paper widens the belt's own grid on THE PAPER'S
+ * OWN SIDE, sliding the item card off centre and growing the reading card
+ * beside it, the pair centred together. A document is never the centred
+ * body — this rides beside `.cardwrap` entirely, opened and closed by
+ * belt.behaviour.js's own openDoc/closeDoc rather than by centring anything.
+ *
+ * ROUND 6's OWN CUT (owner: "extremely basic"): the page nearly edge to
+ * edge, whole, in its own proportions, on the cream sheet with the tilted
+ * second sheet under it. No head, no file row, no zoom, no close control —
+ * Esc or dead space on the belt closes it.
+ *
+ * #1088 CUTS THE PAGE COUNTER AND ITS ARROWS the mockup drew beneath the
+ * page: Orbit records no page count and the preview endpoint always serves
+ * page one, and "an arrow only where there is a page that way" (the round's
+ * own rule) means no arrows at all with a single page — an owner decision of
+ * 2026-09-22, not a variation on the mockup. The foot below holds only the
+ * honest states' one word instead: restore, or download.
+ *
+ * The reader over the belt — the page as a button, dimmed belt beneath,
+ * `fit − % +`, round arrows, download/remove pills, zoom — is #1059 and is
+ * NOT built here; the page below is inert. */
+
+.belt-page .lanes{position:fixed;left:0;right:0;top:0;bottom:0;z-index:4;pointer-events:none;
+       display:grid;justify-content:center;align-items:start;grid-template-rows:100%;
+       --cardw:480px;--readw:min(480px,calc(100vw - var(--cardw) - 28px - 48px));
+       --rc-top:84px;--rc-bottom:16px;
+       grid-template-columns:minmax(0,var(--cardw)) minmax(0,0px);
+       transition:grid-template-columns .75s cubic-bezier(.4,.5,.15,1),gap .75s cubic-bezier(.4,.5,.15,1)}
+.belt-page .lanes.left{grid-template-columns:minmax(0,0px) minmax(0,var(--cardw))}
+.belt-page .lanes.left.open{grid-template-columns:minmax(0,var(--readw)) minmax(0,var(--cardw));gap:28px}
+.belt-page .lanes.right.open{grid-template-columns:minmax(0,var(--cardw)) minmax(0,var(--readw));gap:28px}
+.belt-page .lanes>*{pointer-events:auto}
+/* the card keeps its own top (the apex, set inline by belt.behaviour.js's
+   layout()) and its roll transform (--cdx/--cdy/--csc) — only the belt's
+   OWN -50% centring is handed to the grid, which centres the track itself
+   now that the track's own width is the card's width (--cardw). */
+.belt-page .lanes .cardwrap{position:relative;left:auto;grid-row:1;grid-column:1;
+      transform:translate(var(--cdx),calc(-34% + var(--cdy))) scale(var(--csc))}
+.belt-page .lanes.left .cardwrap{grid-column:2}
+
+/* the open paper keeps its rim lit while its reading card is out */
+.belt-page .hit.open .rim{opacity:.9}
+
+.belt-page .readcard{width:var(--readw);min-width:0;overflow:hidden;padding:22px 22px 18px;
+          opacity:0;transform:translateX(-16px);pointer-events:none;
+          transition:opacity .55s ease .18s,transform .65s cubic-bezier(.4,.5,.15,1) .18s;
+          grid-row:1;grid-column:2;justify-self:start;align-self:start;
+          margin-top:var(--rc-top);max-height:calc(100% - var(--rc-top) - var(--rc-bottom));
+          display:grid;grid-template-rows:minmax(0,1fr) auto;grid-template-columns:minmax(0,1fr);gap:6px}
+.belt-page .lanes.left .readcard{grid-column:1;justify-self:end;transform:translateX(16px)}
+.belt-page .readcard.open,.belt-page .lanes.left .readcard.open{opacity:1;transform:none;pointer-events:auto}
+.belt-page .readcard:focus{outline:none}
+
+.belt-page .pagebox{position:relative;min-height:0;min-width:0;overflow:visible;
+         display:grid;place-items:center}
+.belt-page .readcard.snap .pagebox{display:block;overflow:auto}
+
+/* create-v3, verbatim: the focus — the reticle, the owner's line breathing */
+.belt-page .focus{display:flex;flex-direction:column;align-items:center;text-align:center;
+       padding:16px 0 6px;max-width:360px;margin:0 auto}
+.belt-page .reticle{width:96px;height:96px;margin-bottom:20px}
+.belt-page .reticle .sweep{transform-origin:48px 48px;animation:belt-sweep 9s linear infinite}
+.belt-page .reticle .pull{transform-origin:48px 48px;animation:belt-pull 3.6s ease-in-out infinite}
+@keyframes belt-sweep{to{transform:rotate(360deg)}}
+@keyframes belt-pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
+.belt-page .focusline{font:600 15.5px var(--display);letter-spacing:.01em;color:var(--ink);
+           animation:belt-breathe 4.2s ease-in-out infinite}
+@keyframes belt-breathe{0%,100%{opacity:.96}50%{opacity:.42}}
+.belt-page .focus .why{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.9;margin-top:12px}
+/* the honest states wear the focus block still, not breathing: the line is
+   said once and the reticle is never drawn at all — only the plate below. */
+.belt-page .readcard.still .focusline{animation:none}
+.belt-page .readcard.rc-refused .focusline{color:var(--degraded)}
+
+/* the still states' own plate — v2's honest display, borrowed: no
+   fabricated page, only what Orbit knows the file to be doing right now */
+.belt-page .readcard .focus .plate{margin:0 auto 18px;cursor:default}
+.belt-page .plate.scanning{position:relative;overflow:hidden;letter-spacing:.06em;
+                 animation:belt-platebreath 2.6s ease-in-out infinite alternate}
+.belt-page .plate.scanning::before{opacity:.45}
+@keyframes belt-platebreath{from{border-color:color-mix(in srgb,var(--paper) 30%,transparent)}
+                       to{border-color:var(--paper)}}
+/* STILL SCANNING: a line in the plate's own outline colour sweeps it top to
+   bottom and back with a glow — the scanner at work (owner-decisions.md §18) */
+.belt-page .plate.scanning::after{content:"";position:absolute;left:5px;right:5px;top:6px;
+   height:2px;border-radius:1px;background:var(--paper);opacity:.95;
+   box-shadow:0 0 5px 1px var(--paper),0 0 16px 2px color-mix(in srgb,var(--paper) 45%,transparent);
+   animation:belt-scanline 2.2s ease-in-out infinite alternate}
+@keyframes belt-scanline{from{top:6px}to{top:calc(100% - 8px)}}
+.belt-page .plate.removed{border-style:dashed;opacity:.55;letter-spacing:.06em}
+.belt-page .plate.removed::before{opacity:.5}
+
+/* create-v3's topsheet, verbatim: page one, whole, on the cream sheet with
+   the tilted second sheet under it, always drawn for every showable file. */
+.belt-page .readcard .topsheet{display:none}
+.belt-page .readcard.snap .topsheet{display:flex;justify-content:center;
+                animation:belt-landed .6s cubic-bezier(.3,.7,.2,1) backwards}
+@keyframes belt-landed{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+.belt-page .sheet{position:relative;background:#f6f4ee;border-radius:5px;padding:9px;
+       width:max-content;max-width:100%;
+       box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset}
+/* the sheet under it — ALWAYS there, whatever the file (round 5): it is
+   what makes the page read as a document rather than a loose picture. */
+.belt-page .sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
+               transform:rotate(-1.1deg) translate(-4px,3px);z-index:-1}
+.belt-page .sheet img{display:block;border-radius:2px;background:#fff;width:auto;
+             max-width:100%;height:auto;max-height:min(60vh,520px)}
+
+/* THE FOOT. Nothing else lives here — no page counter, no arrows (#1088):
+   the honest states' one word instead, restore or download, nothing while
+   scanning or refused. */
+.belt-page .rcfoot{display:flex;justify-content:center;align-items:center;min-height:38px;
+        font:11px var(--mono);color:var(--ink-mid)}
+.belt-page .rcfoot .quiet{display:inline-flex;align-items:center;font:11px var(--mono);
+      color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:0 8px;
+      height:34px;text-decoration:none;letter-spacing:.02em}
+.belt-page .rcfoot .quiet:hover{color:var(--ink)}
+.belt-page .rcfoot .quiet:disabled{opacity:.4;cursor:default;color:var(--ink-quiet)}
+
+/* ---- ON A PHONE, CON-10's bottom sheet (round 6) ------------------------
+   No second lane: the grid stays one column and the card stays put. The
+   reading card is fixed to the foot, 18px shoulders, the grab, panel-raised
+   glass, up from 105% below. The page fills it; --rc-y (desk-only levelling)
+   is simply never read here. */
+@media (max-width:680px){
+  .belt-page .lanes,.belt-page .lanes.left,.belt-page .lanes.left.open,.belt-page .lanes.right.open{
+     grid-template-columns:minmax(0,var(--cardw));gap:0}
+  .belt-page .lanes .cardwrap,.belt-page .lanes.left .cardwrap{grid-column:1}
+  .belt-page .readcard,.belt-page .lanes.left .readcard{position:fixed;left:0;right:0;bottom:0;top:auto;
+     width:auto;min-width:0;z-index:10;border-radius:18px 18px 0 0;height:auto;max-height:80vh;margin:0;
+     grid-column:auto;grid-row:auto;justify-self:auto;align-self:auto;
+     background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
+     border-left:0;border-right:0;border-bottom:0;padding:14px 16px 10px;gap:6px;
+     opacity:1;transform:translateY(105%);visibility:hidden;
+     transition:transform .3s cubic-bezier(.3,.7,.3,1),visibility 0s .3s}
+  .belt-page .readcard.open,.belt-page .lanes.left .readcard.open{
+     transform:none;visibility:visible;transition-delay:0s}
+  .belt-page .readcard::before{content:"";display:block;width:36px;height:4px;border-radius:2px;
+                    background:var(--line);margin:0 auto 8px}
+  .belt-page .sheet img{max-height:60vh}
+}

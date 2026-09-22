@@ -90,6 +90,11 @@ import { seededRng } from "$lib/sky.js";
  * @property {boolean} clean     scanned clean
  * @property {?string} scan      the scan's own word, when there is one
  * @property {string}  href      the download the card hands over
+ * @property {string}  previewHref  GET /api/documents/{id}/preview — page one
+ * @property {?string} lifecycle  the server's own state (#1088's reading card)
+ * @property {?string} mediaType  the raw stored kind, e.g. "application/pdf"
+ * @property {boolean} ready      whether the content can be read at all yet
+ * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
  */
 
 /**
