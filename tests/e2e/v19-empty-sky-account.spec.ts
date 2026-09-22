@@ -3,6 +3,11 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { homeIsLive } from "./support/keyboard";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #1074: the account panel on an empty sky.
