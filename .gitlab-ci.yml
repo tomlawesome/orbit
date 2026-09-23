@@ -247,22 +247,31 @@ variables:
 # reach test lives in the job body and a job that is out of reach reports
 # itself skipped instead of failing or vanishing.
 .reach_helpers: &reach_helpers |
+  # `dev` is deliberately not here (#1078, owner ruling 2026-09-21): a push to
+  # `dev` now tests what the push changed, same as a merge request, and the
+  # dev -> preview merge request is where the full gate -- the catch-all
+  # sanity check against accidental drift -- runs instead. `preview`, `main`
+  # and `hotfix/*` are unaffected: pushing there still runs everything.
   orbit_on_delivery_branch() {
     case "${CI_COMMIT_BRANCH:-}" in
-      dev | preview | main | hotfix/*) return 0 ;;
+      preview | main | hotfix/*) return 0 ;;
     esac
     return 1
   }
-  # The two events that run everything whatever the diff holds: a push to a
-  # delivery branch, and the merge request into `main`, which is the
-  # preview -> main promotion gate. Everywhere else -- every ordinary merge
-  # request included -- the classifier's verdict decides (#883). A merge
-  # request is not itself a reason to pay for the whole gate: it is the
-  # ordinary way work arrives here, so paying full price for one meant the
-  # classifier never saved anything where it mattered most.
+  # The events that run everything whatever the diff holds: a push to a
+  # delivery branch, and the merge request into `preview` or `main`, which
+  # are the dev -> preview and preview -> main promotion gates (#1078).
+  # Everywhere else -- every ordinary merge request included -- the
+  # classifier's verdict decides (#883). A merge request is not itself a
+  # reason to pay for the whole gate: it is the ordinary way work arrives
+  # here, so paying full price for one meant the classifier never saved
+  # anything where it mattered most.
   orbit_full_gate() {
     orbit_on_delivery_branch && return 0
-    [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ]
+    case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in
+      preview | main) return 0 ;;
+    esac
+    return 1
   }
   # The narrow lanes (#889). A change confined to the ignore/policy files, or
   # to the pipeline's own definition, runs a named handful of jobs and nothing
@@ -716,15 +725,29 @@ classify:
       fi
 
       # The narrow lanes (#889) are a merge-request economy, never a
-      # relaxation of the delivery gate. A push to a delivery branch and the
-      # merge request into `main` both run everything, so the lane collapses
-      # to `full` there and no later job has to re-check the branch. The label
-      # collapses it the same way.
+      # relaxation of the delivery gate. The events that run everything
+      # collapse the lane to `full`, so no later job has to re-check the
+      # branch, and the label collapses it the same way.
+      #
+      # Both promotions must be here, not just `main` (#1092). A lane is
+      # consulted by `orbit_lane_admits` BEFORE `orbit_full_gate` is reached,
+      # so a dev -> preview promotion whose whole diff sits in the
+      # CI-definition or ignore-policy lane would skip the acceptance stage
+      # however emphatically the full gate said yes. Since #1078 moved the
+      # catch-all off the `dev` push and onto that promotion, a promotion that
+      # can still skip is the one thing that change cannot afford.
+      #
+      # A push to `dev` still collapses to `full` below, and that is not a
+      # contradiction: `full` means no narrow lane is excluding anything, and
+      # the per-axis verdicts then decide what actually runs.
       lane="$(classify_output lane)"
       case "${CI_COMMIT_BRANCH:-}" in
         dev | preview | main | hotfix/*) lane=full ;;
       esac
-      if [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "main" ] || [ "$forced" = true ]; then
+      case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in
+        preview | main) lane=full ;;
+      esac
+      if [ "$forced" = true ]; then
         lane=full
       fi
 
@@ -1843,8 +1866,16 @@ smoke:
     - bash scripts/ci/verify-nonroot-runtime.sh
     - bash scripts/ci/verify-privacy-boundary.sh
     # The image ships the browser build that matches its Playwright version, so
-    # nothing is downloaded here.
-    - bash scripts/test-frontend.sh
+    # nothing is downloaded here. Gated on ORBIT_WEB alone (#1078), same axis
+    # `fidelity` already gates on: the four verify-*.sh calls above prove
+    # runtime properties of the image that any change can break and stay
+    # unconditional, but the click-through suite is what this axis answers for.
+    - |
+      if [ "${ORBIT_WEB:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end"
+      else
+        bash scripts/test-frontend.sh
+      fi
     - *reuse_evidence
   after_script:
     # Both scripts read COMPOSE_FILES and ORBIT_IMAGE, which are job variables
@@ -3147,16 +3178,17 @@ tidy_freshness:
 # regression and a bad one as a win. The spec now sits in its own Playwright
 # project and is run here instead.
 #
-# `rules:` rather than `orbit_full_gate`. That helper's first arm is
-# `orbit_on_delivery_branch`, which matches a push to `dev` -- every merge
-# into `dev`, which is the merge frequency this job exists to escape -- and
-# its second arm targets `main`, which is the later preview -> main gate.
-# Neither is the dev -> preview promotion. The two events below are: the merge
-# request whose target branch is `preview`, and the push to `preview` that
-# lands it. Everything else is `never`, including a branch pipeline started by
-# hand, so nothing can reach this job by accident. These are all predefined
-# variables, so the decision is taken before a runner slot is claimed and the
-# job needs no classifier dotenv and no `orbit_lane_admits` call.
+# `rules:` rather than `orbit_full_gate`. That helper now says yes to the
+# dev -> preview promotion too (#1078), but it also says yes to a push to
+# `main` or `hotfix/*` and to the preview -> main merge request, none of
+# which is the frequency this job measures: once per dev -> preview
+# promotion, not every promotion. The two events below are only that one:
+# the merge request whose target branch is `preview`, and the push to
+# `preview` that lands it. Everything else is `never`, including a branch
+# pipeline started by hand, so nothing can reach this job by accident. These
+# are all predefined variables, so the decision is taken before a runner slot
+# is claimed and the job needs no classifier dotenv and no
+# `orbit_lane_admits` call.
 #
 # No reuse gate (#898), deliberately. A promotion measures the candidate it is
 # promoting; standing on a run from an earlier pipeline would hand the next

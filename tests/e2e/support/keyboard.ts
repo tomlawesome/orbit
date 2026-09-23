@@ -277,17 +277,38 @@ export async function gotoCreate(p: Page) {
 }
 
 export async function dismissTourIfShown(p: Page) {
-  /* Ask the record, not the screen: the card is drawn only after /home has
-     fetched /api/settings/tour, so an instant "is it visible?" right after
+  /* Ask the record, not the screen: the film is drawn only after /home has
+     fetched /api/settings/tour, so an instant "is it up?" right after
      navigation says no on a fresh account and the walk then runs under the
-     tour. A reader who has never taken it is about to see it — wait for
-     the card; one who has is not — move on. */
+     spec. A reader who has never taken it is about to see it — wait for
+     the film; one who has is not — move on. */
   const record = await p.request.get("/api/settings/tour").then((r) => r.json() as Promise<{ tour?: { tourSeenAt: string | null } }>).catch(() => null);
   if (!record || record.tour?.tourSeenAt) return;
-  const tour = p.locator(".tourcard");
-  await expect(tour).toBeVisible({ timeout: SETTLE_TIMEOUT });
+
+  /* §24 of design/owner-decisions.md: the film has no pocket cut, so
+     trigger.js's own DESK query (matched here) gates it before anything is
+     mounted — a pocket viewport gets nothing at all, and waiting for a
+     transport pill that will never appear would just hang the spec. */
+  const desk = await p.evaluate(() => matchMedia("(min-width: 901px)").matches);
+  if (!desk) return;
+
+  /* transport.js's pill (`#orbit-tour-transport`), the film's one durable
+     handle — unlike the old card it never carries a stop/step number, so
+     presence is all a spec can ask of it. */
+  const transport = p.locator("#orbit-tour-transport");
+  await expect(transport).toBeVisible({ timeout: SETTLE_TIMEOUT });
   await p.keyboard.press("Escape");
-  await expect(tour).toBeHidden();
+  /* Esc reaches transport.js's own listener, which calls player.stop() —
+     the same path the pill's Stop button takes, and it is what turns the
+     write in trigger.js's `beginFilm` (tourSeenAt) into a fact. Stop clears
+     the veil (`ctx.veil(false)` in player.js) synchronously, which is what
+     actually frees the underlying screen for the rest of the spec — the
+     pill itself is NOT removed by stop, only by the film's own destroy()
+     on unmount, so it lingers as a 16%-opacity ghost rather than
+     disappearing. Waiting for the pill to hide would therefore hang; the
+     veil (`#orbit-tour-veil`, veil.js's `hideVeil`) is the element that is
+     actually torn down, and `toBeHidden` is satisfied by "not attached". */
+  await expect(p.locator("#orbit-tour-veil")).toBeHidden();
 }
 
 
