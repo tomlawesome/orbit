@@ -16,7 +16,9 @@
  */
 import arrive from "./01-arrive.js";
 import add from "./02-add.js";
+import lands from "./03-lands.js";
 import timeRuns from "./05-time-runs.js";
+import paperByPost from "./06-paper-by-post.js";
 import yourSky from "./11-your-sky.js";
 
 /**
@@ -41,7 +43,9 @@ import yourSky from "./11-your-sky.js";
 export const CHAPTERS = [
   arrive,
   add,
+  lands,
   timeRuns,
+  paperByPost,
   yourSky,
 ];
 
