@@ -2185,3 +2185,17 @@ export async function readBelt(id) {
     documentsByItem,
   };
 }
+
+/**
+ * Undoes a document's soft delete (#1054/#1088): `POST
+ * /api/documents/{id}/restore`, the belt's own honest-state foot action for a
+ * removed file. The caller re-reads the belt afterwards, same as every other
+ * command here — a restored document's lifecycle has moved, so the card it
+ * rides in has to be drawn again.
+ *
+ * @param {string} documentId
+ * @returns {Promise<{ document: import('./workspace.js').DocumentSummary }>}
+ */
+export async function restoreDocument(documentId) {
+  return json(await csrfFetch(`/api/documents/${encodeURIComponent(documentId)}/restore`));
+}

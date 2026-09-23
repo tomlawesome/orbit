@@ -12,7 +12,7 @@ import {
   geometryOf, itemOffsetsOf, lehmer, matchesOf, nearestMatchOf, reachableAt,
   rollRangeOf, seatOf, shortName, stepFrom, warpOf, AMBIENT_SEED,
 } from "../../web/src/routes/item/[[id]]/band.js";
-import { beltManifestOf, sizeLabel } from "../../web/src/lib/data/belt.js";
+import { beltManifestOf, documentPreviewStateOf, sizeLabel } from "../../web/src/lib/data/belt.js";
 import { DOCUMENTS_FIXTURE, WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
 const TODAY = WORKSPACE_FIXTURE.fixtureToday; // 2026-08-13, the date every mockup was drawn against
@@ -65,11 +65,16 @@ describe("the belt's manifest", () => {
         id: "d-mot-cert", name: "MOT certificate 2025", size: "240 KB",
         added: "12 June 2026", type: "PDF (application/pdf)", plate: "PDF",
         clean: true, scan: "clean", href: "/api/documents/d-mot-cert/download",
+        // #1088: the reading card's own fields, added for the preview.
+        previewHref: "/api/documents/d-mot-cert/preview",
+        lifecycle: "stored", mediaType: "application/pdf", ready: true, deleteAfter: null,
       },
       {
         id: "d-mot-history", name: "Service history", size: "88 KB",
         added: "12 June 2026", type: "PDF (application/pdf)", plate: "PDF",
         clean: true, scan: "clean", href: "/api/documents/d-mot-history/download",
+        previewHref: "/api/documents/d-mot-history/preview",
+        lifecycle: "stored", mediaType: "application/pdf", ready: true, deleteAfter: null,
       },
     ]);
     expect(sizeLabel(2_400_000)).toBe("2.3 MB");
@@ -90,6 +95,48 @@ describe("the belt's manifest", () => {
     expect(manifestOf({ household: retired }).map((r) => r.id)).not.toContain("i-old");
     expect(manifestOf({ household: retired, keepId: "i-old" }).map((r) => r.id)).toContain("i-old");
   });
+});
+
+/*
+ * #1088: the reading card's own honest state (owner-decisions.md §18) — a
+ * pure read of the document's own lifecycle, never a guess and never
+ * anything the endpoint would have to be asked first. `ready` alone answers
+ * "still scanning"; the two server lifecycles that are neither reachable
+ * from `ready` nor from the media kind — removed and refused — take
+ * priority over everything else.
+ */
+describe("the reading card's honest state", () => {
+  const doc = (overrides) => ({
+    lifecycle: "available", mediaType: "application/pdf", ready: true, ...overrides,
+  });
+
+  it("shows the page when the file is ready and its kind is one Orbit can draw", () => {
+    expect(documentPreviewStateOf(doc())).toBe("available");
+    expect(documentPreviewStateOf(doc({ mediaType: "image/jpeg" }))).toBe("available");
+    expect(documentPreviewStateOf(doc({ mediaType: "image/png" }))).toBe("available");
+  });
+
+  it("is scanning whenever the content is not ready yet, whatever the lifecycle word", () => {
+    expect(documentPreviewStateOf(doc({ ready: false, lifecycle: "receiving" }))).toBe("scanning");
+    expect(documentPreviewStateOf(doc({ ready: false, lifecycle: "scanning" }))).toBe("scanning");
+    expect(documentPreviewStateOf(doc({ ready: false, lifecycle: "encrypting" }))).toBe("scanning");
+  });
+
+  it("is removed once the file is on its retention clock, even mid-scan", () => {
+    expect(documentPreviewStateOf(doc({ lifecycle: "pending_deletion" }))).toBe("removed");
+    expect(documentPreviewStateOf(doc({ lifecycle: "pending_deletion", ready: false }))).toBe("removed");
+  });
+
+  it("is refused for a rejected file, even one whose stored kind looks fine", () => {
+    expect(documentPreviewStateOf(doc({ lifecycle: "rejected" }))).toBe("refused");
+    expect(documentPreviewStateOf(doc({ lifecycle: "rejected", ready: true, mediaType: "application/pdf" }))).toBe("refused");
+  });
+
+  it("is a kind Orbit cannot draw once ready and clean but not one of the three it renders", () => {
+    expect(documentPreviewStateOf(doc({ mediaType: "application/msword" }))).toBe("undrawable");
+    expect(documentPreviewStateOf(doc({ mediaType: null }))).toBe("undrawable");
+  });
+
 });
 
 describe("the spacing law", () => {
@@ -336,14 +383,38 @@ describe("stepping and arriving", () => {
   const sel = at("i-mot");
   const bloom = bloomTargetsOf(BODIES, sel, MANIFEST.length);
 
-  it("steps in date order, over the papers that are out", () => {
-    expect(BODIES[stepFrom(BODIES, sel, bloom, -1)].id).toBe("d-mot-cert");
-    expect(BODIES[stepFrom(BODIES, sel, bloom, 1)].id).toBe("d-mot-history");
-    // The far end's papers are folded away, so the step passes over them.
+  /* #1094, owner 2026-09-23: a step moves ITEM to ITEM and never lands on a
+     paper. It used to step over the papers that were out, which meant `later
+     ->` moved the belt when the next body was an item and opened a reading
+     card when it was a paper (#1088 routes a doc to `openDoc`, because §18
+     says a document is never the centred body) -- one control doing two jobs,
+     with nothing on screen to say which you would get. */
+  it("steps item to item in date order, never onto a paper", () => {
+    // i-mot's own papers ARE out either side of it, and are still skipped.
+    expect(bloom[1]).toBe(1);
+    expect(BODIES[stepFrom(BODIES, sel, bloom, -1)].id).toBe("i-gutter");
+    expect(BODIES[stepFrom(BODIES, sel, bloom, 1)].id).toBe("i-boiler");
+    // Every landing is an item, from every seat, in both directions.
+    for (const from of MANIFEST.map((row) => at(row.id))) {
+      for (const d of [-1, 1]) {
+        const next = stepFrom(BODIES, from, bloom, d);
+        if (next >= 0) expect(BODIES[next].kind).toBe("item");
+      }
+    }
+    // The far end's papers are folded away, and are skipped for that reason
+    // as well as this one.
     expect(BODIES[stepFrom(BODIES, at("i-smoke"), bloom, 1)].id).toBe("i-svc");
     // And the ends of the belt are ends: there is nowhere further to go.
     expect(stepFrom(BODIES, 0, bloom, -1)).toBe(-1);
     expect(stepFrom(BODIES, at("i-svc"), bloom, 1)).toBe(-1);
+  });
+
+  /* A paper is still reached -- by pressing it, or by Tab and Enter, since
+     every seat is a role="button" tabindex="0" with its own accessible name.
+     Skipping them in the step costs a keyboard reader nothing. */
+  it("leaves a bloomed paper reachable, just not by stepping", () => {
+    expect(reachableAt(BODIES, at("d-mot-cert"), bloom)).toBe(true);
+    expect(BODIES[at("d-mot-cert")].kind).toBe("doc");
   });
 
   it("lands a deep arrival on its item, papers out, berth wide", () => {
