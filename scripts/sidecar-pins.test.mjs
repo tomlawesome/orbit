@@ -1101,9 +1101,20 @@ describe("sidecar pins: every pinned .gitlab-ci.yml image is a tracked location 
     // pass vacuously and prove nothing.
     expect(pinnedImages.length).toBeGreaterThan(0);
 
+    // The policy tracks the vendor tag; a pin routed through the group
+    // dependency proxy (ai/orbit#1022) carries the same tag and digest with
+    // `${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/` and, for an official
+    // unnamespaced image, `library/` ahead of it. Strip both before compare.
+    const vendorTagOf = (pinned) => {
+      const vendor = pinned
+        .replace(/^\$\{CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\//u, "")
+        .replace(/^library\//u, "");
+      return vendor.slice(0, vendor.indexOf("@"));
+    };
+
     const matchedEntries = new Set();
     for (const pinned of pinnedImages) {
-      const tag = pinned.slice(0, pinned.indexOf("@"));
+      const tag = vendorTagOf(pinned);
       const entry = realPolicy.containerImages.find((candidate) => candidate.tag === tag);
       if (entry) matchedEntries.add(entry.name);
     }
@@ -1112,7 +1123,7 @@ describe("sidecar pins: every pinned .gitlab-ci.yml image is a tracked location 
     expect(matchedEntries.size).toBeGreaterThan(0);
 
     for (const pinned of pinnedImages) {
-      const tag = pinned.slice(0, pinned.indexOf("@"));
+      const tag = vendorTagOf(pinned);
       const entry = realPolicy.containerImages.find((candidate) => candidate.tag === tag);
       if (!entry) continue; // not every .gitlab-ci.yml pin is policy-tracked (e.g. the scanner image)
       expect(entry.locations, `${entry.name} (${tag}) should list .gitlab-ci.yml`).toContain(

@@ -103,11 +103,17 @@ describe("supply-chain policy", () => {
         const integration = line.match(/^\s+"(postgres:[^"]+)",?$/u)?.[1];
         // The pipeline pins the same PostgreSQL sidecar for its integration
         // job; other `*_IMAGE:` pins here (node, playwright) are unrelated
-        // images with no policy entry, so this only picks out postgres.
-        const pipelinePostgres =
+        // images with no policy entry, so this only picks out postgres. The
+        // optional prefix strips the group dependency proxy path
+        // (ai/orbit#1022): the policy tracks the vendor reference, and the
+        // digest after it is unchanged either way.
+        const pipelinePostgres = (
           file === ".gitlab-ci.yml"
-            ? line.match(/^\s*POSTGRES_IMAGE:\s+(postgres:\S+)\s*$/u)?.[1]
-            : undefined;
+            ? line.match(
+                /^\s*POSTGRES_IMAGE:\s+(?:\$\{CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\/library\/)?(postgres:\S+)\s*$/u,
+              )?.[1]
+            : undefined
+        );
         const reference = from ?? compose ?? integration ?? pipelinePostgres;
         if (!reference || reference === "base") continue;
         if (reference.startsWith("${ORBIT_IMAGE:")) {
