@@ -66,7 +66,10 @@ concatenation):
   `ORBIT_IMAGE_CONTENT_ID`. For `fidelity` the artefact is the built site:
   the hash of the `web/build` artefact `fast` produces. For `fast`,
   `fast_docker` and `integration` the source is the thing under test and
-  there is no separate artefact axis.
+  there is no separate artefact axis. (Decided 2026-09-23 on #1060, note
+  22560: implemented as no artefact axis for `fidelity` either -- it keys on
+  the whole checkout, like `fast`, `fast_docker` and `integration`, rather
+  than hashing `web/build`. A deliberate simplification, not an oversight.)
 - **Checkout axis.** The hash of the whole checkout minus that job's
   deny-list. `job-inputs.json` inverts: from "what the job reads" (an
   allow-list) to "what the job provably does not read from the checkout" (a
@@ -74,8 +77,16 @@ concatenation):
   its artefact or not at all. For the image-running jobs that is `src/**`,
   `web/**` less `web/tests/**`, `drizzle/**`, `docs/**` and `*.md`. Scripts,
   compose files, config and `tests/**` stay in: the jobs run them from the
-  checkout. For `fast` the deny-list is `docs/**`, `*.md`, `tests/e2e/**`,
-  `web/tests/**`, `supply-chain/**`, `.gitleaksignore` and `.github/**`.
+  checkout. For `fast` the deny-list is `docs/**` less
+  `docs/engine-events.md` and `docs/installer-guarantees.md`, `*.md`,
+  `tests/e2e/**` less `tests/e2e/local-only-specs.txt`, `web/tests/**`,
+  `supply-chain/**` and `.gitleaksignore` (corrected per slice 3 commit
+  `c976efc7`: the ADR's original seven-entry list included three
+  inadmissible entries -- `.github/**` is not denied at all, since eight
+  `fast` suites read a file under it, and `docs/engine-events.md` and
+  `tests/e2e/local-only-specs.txt` are each read by a named suite, so each
+  is carved back out of its tree's denial. The admissibility rule in section
+  6 outranks this example list).
 - **Definition axis.** `.gitlab-ci.yml` and `scripts/ci/**`, as today, so a
   pipeline change (a pinned runner-image bump included) reruns everything.
 

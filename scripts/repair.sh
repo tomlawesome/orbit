@@ -2617,13 +2617,55 @@ check_database_reachability() {
   # No host process holds it: not argv, not an environment variable, not a
   # shell variable (#610's property, kept). The pipeline's exit status is
   # psql's, which is the one being classified below.
-  psql_output="$( { timeout "$docker_probe_timeout" docker exec "$reader_id" \
-      sh -c "$reader_script" sh \
-    | timeout "$docker_probe_timeout" docker exec -i "$db_id" \
-      sh -c "$authenticated_probe" sh "$db_service_host" "$pg_user" "$pg_db"; } 2>&1)" || psql_status=$?
-  # The container could not tell us which file holds the password, so there
-  # is nothing to authenticate with and nothing to report: no finding, rather
-  # than a guess dressed up as one.
+  #
+  # Retried, on the same deadline as the readability loop above, for one case
+  # only: $PROBE_NO_SECRET_STATUS from an APPLICATION reader (#1089). The loop
+  # above guarded the question "can this container read its secret file"; the
+  # read that answers it was left with a single attempt, against the one
+  # container that is crash-looping by definition whenever the credential it
+  # holds is the wrong one. `docker exec` into a container that is between
+  # `restart: unless-stopped` restarts fails with "Container ... is
+  # restarting, wait until the container is running" -- exit 1, nothing on
+  # stdout (measured on docker-ce 29.7.2) -- so the probe downstream received
+  # an empty password and exited 97, and 97 was read as "this container names
+  # no secret file": no finding at all, the credential mismatch gone from the
+  # diagnosis, and nothing left to plan rotate-database-credential from. That
+  # is the same conflation #822 and #1026 each fixed one layer earlier.
+  # An application reader cannot legitimately answer 97 here: the loop above
+  # has just watched that same container read that same file.
+  #
+  # Four repair-journeys failures printed exactly that (jobs 18392, 18463,
+  # 19795, 20612): `execution result=unactionable`, `dangerous result=empty
+  # reason=none`, then `finding class=database-credential-mismatch` from the
+  # re-diagnosis afterwards -- the mismatch was findable, just not on the pass
+  # that had to plan from it. Each reached that point 6-9s into the journey,
+  # far inside the 75s budget, so `database-credential-unverifiable` cannot
+  # account for them; silence is what is left. Which journey noticed first
+  # depended only on which assertion the empty batch tripped, which is why the
+  # failure looked like it moved. (The other two sightings, jobs 20104 and
+  # 20663, were a second and unrelated fault in the harness's own diagnostic:
+  # scripts/test-repair-journeys.sh, app_secret_probe.)
+  while :; do
+    psql_status=0
+    psql_output="$( { timeout "$docker_probe_timeout" docker exec "$reader_id" \
+        sh -c "$reader_script" sh \
+      | timeout "$docker_probe_timeout" docker exec -i "$db_id" \
+        sh -c "$authenticated_probe" sh "$db_service_host" "$pg_user" "$pg_db"; } 2>&1)" || psql_status=$?
+    [[ "$psql_status" == "$PROBE_NO_SECRET_STATUS" && "$classify_credentials" == 1 ]] || break
+    if ((SECONDS >= app_secret_deadline)); then
+      # Budget gone with the read never landing: report the uncertainty, in
+      # the same terms the readability loop reports its own, rather than
+      # letting "could not determine" look like "no fault found".
+      psql_output=""
+      add_finding database-credential-unverifiable database fail
+      return 0
+    fi
+    sleep 0.25
+  done
+  # The DATABASE container could not tell us which file holds the password
+  # (the no-application-container path above), so there is nothing to
+  # authenticate with and nothing to report: no finding, rather than a guess
+  # dressed up as one.
   [[ "$psql_status" != "$PROBE_NO_SECRET_STATUS" ]] || { psql_output=""; return 0; }
   # A probe that borrowed the database's own copy proves nothing about the
   # application's credential, so it may record coordinates but never a finding.
