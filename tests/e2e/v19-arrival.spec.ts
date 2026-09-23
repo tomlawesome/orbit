@@ -239,6 +239,18 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   await expect(row.locator(".act")).toHaveText("waiting", { timeout: 15_000 });
   await expect(target).toContainText("ASKED TO JOIN · WAITING");
 
+  /* #866 (owner-decisions §23): the "waiting" word is a marker, not an
+     explanation. The row now carries a real sentence saying both that the
+     request is waiting and who has to approve it -- not aria-hidden, not
+     colour-only, reachable the same way any other text in the row is. */
+  const note = row.locator(".note");
+  await expect(note).toBeVisible();
+  await expect(note).toHaveAttribute("role", "status");
+  await expect(note).toContainText("waiting");
+  await expect(note).toContainText("owner");
+  await expect(note).toContainText("administrator");
+  await expect(note).toContainText("approve");
+
   const requests = await pendingRequests(ownerPage);
   expect(requests.map((one) => `${one.householdName}/${one.displayName}`))
     .toContain(`${HOUSEHOLD}/Orbit Newcomer`);
