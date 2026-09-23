@@ -166,7 +166,13 @@ rollback
 repair
 continue
 display
+abort
 ```
+
+`abort` marks a failure that no retry can clear (#1038): the installer
+emits it in place of the phase's usual `retry`, and a consumer should stop
+the run rather than loop. It first appears on the ADR-0019 refusal of an
+image published without bundled deployment assets.
 
 ## Consumer guidance
 
