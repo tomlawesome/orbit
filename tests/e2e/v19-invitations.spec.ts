@@ -228,14 +228,24 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
     // read for the chapter index rather than clicked through, matching the
     // headless check the mockup ships: chapter 0 is where a fresh film
     // always opens.
-    await expect(newcomerPage.locator("#orbit-tour-transport")).toBeVisible({ timeout: 30_000 });
-    await expect
-      .poll(() =>
-        newcomerPage.evaluate(
-          () => (window as unknown as { __reading?: () => { chapter: number } }).__reading?.().chapter,
-        ),
-      )
-      .toBe(0);
+    //
+    // On the mobile project the newcomer context is a phone too (the runner
+    // hands `browser.newContext` the project's device), and a phone gets no
+    // film at all until its own cut lands (owner-decisions.md §24, #1083):
+    // there the assertion is that nothing mounts, not that the film opens.
+    const transport = newcomerPage.locator("#orbit-tour-transport");
+    if (test.info().project.name.startsWith("mobile")) {
+      await expect(transport).toHaveCount(0);
+    } else {
+      await expect(transport).toBeVisible({ timeout: 30_000 });
+      await expect
+        .poll(() =>
+          newcomerPage.evaluate(
+            () => (window as unknown as { __reading?: () => { chapter: number } }).__reading?.().chapter,
+          ),
+        )
+        .toBe(0);
+    }
   } finally {
     await newcomerContext.close();
   }
