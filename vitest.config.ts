@@ -115,8 +115,10 @@ const test: TestUserConfig = {
           // Same reason (#995): uses node:test. Run standalone with
           // `node --test scripts/scratch-dir-ignored.test.mjs`.
           "scripts/scratch-dir-ignored.test.mjs",
-          // Same reason (#1020): uses node:test. Run standalone with
-          // `node --test scripts/ci/repin-base-image.test.mjs`.
+          // Same reason (#1020): uses node:test. Run by
+          // scripts/test-backend.sh alongside the three above -- it was the
+          // only one of the four that nothing invoked, so it ran nowhere
+          // between #1020 and #1090.
           "scripts/ci/repin-base-image.test.mjs",
           // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
           // unprivileged `big` lane, which has no `docker` binary on PATH.
