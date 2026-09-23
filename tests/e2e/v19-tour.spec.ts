@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { dismissTourIfShown, homeIsLive } from "./support/keyboard";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -57,7 +58,8 @@ resetDatabaseBetweenSpecFiles();
 
 test.use({ reducedMotion: "reduce" });
 
-const READER = "Orbit Administrator";
+/* #1080: this worker's own administrator, resolved lazily (worker env only). */
+const READER = () => workerAccount("administrator");
 const households = householdRegister();
 
 /** The Origin and CSRF pair every mutating request in this file needs. */
@@ -74,7 +76,10 @@ async function sessionHeaders(page: Page) {
  */
 async function signInAwayFromHome(page: Page) {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent("/inbox")}`);
-  await page.getByRole("link", { name: READER }).click();
+  await page.getByRole("link", { name: READER() }).click();
+  /* #1080: waits for the session, then holds administrator access — the
+     sweep's hard delete is an instance-admin power. */
+  await ensureWorkerAdministrator(page);
   /* Not always /inbox: an administrator with no household of their own may
      land on the arrival's newcomer screen instead (#840). Either is fine —
      what matters is that it is not /home, where the film's own trigger

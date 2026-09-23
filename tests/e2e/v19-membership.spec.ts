@@ -2,6 +2,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -90,7 +91,9 @@ async function arriveAdrift(page: Page, browser: Browser, account: string) {
   const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const adminPage = await adminContext.newPage();
   try {
-    await signInAs(adminPage, "Orbit Administrator");
+    await signInAs(adminPage, workerAccount("administrator"));
+    /* #1080: the hard delete below is an instance-admin power. */
+    await ensureWorkerAdministrator(adminPage);
     await cleanupHousehold(adminPage, await sessionHeaders(adminPage), household.id, household.name);
   } finally {
     await adminContext.close();
@@ -132,7 +135,9 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await signInAs(page, "Orbit Administrator");
+    await signInAs(page, workerAccount("administrator"));
+    /* #1080: the sweep's hard delete is an instance-admin power. */
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -152,11 +157,11 @@ test("a newcomer sees the labelled sky, asks, is approved, and enters the system
   /* The member owns a household for the newcomer to ask into. */
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
-  await signInAs(ownerPage, "Orbit Member");
+  await signInAs(ownerPage, workerAccount("member"));
   await createHousehold(ownerPage, HOUSEHOLD);
 
   /* The newcomer: no membership, so the sky is labels — no dial, no manifest. */
-  await arriveAdrift(page, browser, "Orbit Outsider");
+  await arriveAdrift(page, browser, workerAccount("outsider"));
   await expect(page.getByRole("heading", { name: "you’re adrift" })).toBeVisible();
   await expect(page.locator(".dialwrap")).toHaveCount(0);
   const target = page.locator(".minisys", { hasText: HOUSEHOLD.toUpperCase() });
@@ -177,7 +182,7 @@ test("a newcomer sees the labelled sky, asks, is approved, and enters the system
      the one place the decision now lives, is not built yet. Until it is, the
      journey exercises the same routes the screen will call, from the owner's
      signed-in session. */
-  const decided = await approveJoinRequest(ownerPage, HOUSEHOLD, "Orbit Outsider");
+  const decided = await approveJoinRequest(ownerPage, HOUSEHOLD, workerAccount("outsider"));
   expect(decided.request.status).toBe("approved");
 
   /* And administration honours the ruling: no join-request UI on it at all. */
