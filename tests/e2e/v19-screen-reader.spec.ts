@@ -328,22 +328,29 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     expect(forgotten).toBe(true);
 
     await page.goto("/home");
-    const card = page.locator(".tourcard");
-    await expect(card).toBeVisible({ timeout: 30_000 });
+    // #866 retired the dialog-shaped card for the one-take film: no
+    // `role="dialog"` and, per transport.js, no focus management at all --
+    // the pill is a `role="group"` landmark a reader tabs to like any other
+    // toolbar, not something that grabs focus on arrival. That is a real
+    // difference from the old card's behaviour, not an oversight here.
+    const transport = page.locator("#orbit-tour-transport");
+    await expect(transport).toBeVisible({ timeout: 30_000 });
 
-    await expect(card).toHaveAttribute("role", "dialog");
-    await expect(card).toHaveAccessibleName(/\S/);
-    await expect(card, "the tour card takes focus so keys land on it without the reader hunting for it").toBeFocused();
+    await expect(transport).toHaveAttribute("role", "group");
+    await expect(transport).toHaveAccessibleName(/\S/);
 
-    await expect(page.getByRole("button", { name: "Skip" })).toHaveAccessibleName(/\S/);
-    await expect(page.getByRole("button", { name: "Back" })).toHaveAccessibleName(/\S/);
-    await expect(page.getByRole("button", { name: "Next" })).toHaveAccessibleName(/\S/);
+    await expect(page.getByRole("button", { name: /Play|Pause/ })).toHaveAccessibleName(/\S/);
+    await expect(page.getByRole("button", { name: "Stop" })).toHaveAccessibleName(/\S/);
 
     await writeSnapshot(page, testInfo, "tour-overlay");
 
     // Ends the walk so the record is left taken, as every other spec expects.
-    await page.locator("#tour-skip").click();
-    await expect(card).toHaveCount(0);
+    // Esc reaches transport.js's own listener -> player.stop(), which clears
+    // the veil synchronously; the pill itself lingers as a low-opacity ghost
+    // until the film unmounts (see keyboard.ts's `dismissTourIfShown`), so
+    // the veil -- not the pill -- is what this waits on.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   });
 
   /**
