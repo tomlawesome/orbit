@@ -1927,6 +1927,22 @@ describe("install.sh", () => {
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
+  it("reports a terminal action, not retry, for a pre-bundle image (#1038)", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_DOCKER_NO_DEPLOY_LABEL: "1" });
+
+    expect(result.status).not.toBe(0);
+    // Retrying can never succeed here: the image predates ADR-0019 and no
+    // later attempt against the same tag changes that. action=retry would
+    // send a consumer round a loop with no exit.
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      "reason=image-registry action=abort",
+    );
+    expect(`${result.stdout}${result.stderr}`).not.toContain("action=retry");
+  });
+
   it("refuses a pre-bundle image on its label without asking it for a banner", () => {
     const targetDir = makeTarget();
     makeFullExistingDeployment(targetDir);
