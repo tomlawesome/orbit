@@ -57,8 +57,16 @@ import { hideVeil, showVeil, veilTargets } from "./veil.js";
  */
 export const T = {
   cross: 350,          /* screen change */
+  /* ONE MOVE, ONE BEAT. The mockup prices a move by its length
+     (`travelBase + 0.6 * distance`) because its coordinates are constants it
+     can measure in the dry run. The product cannot: a distance is not known
+     until the screen is in front of the reader, and every chapter's tick has
+     to be placed BEFORE a frame plays. Pricing a move by a length the
+     measurement could not see would drift the played film away from the
+     ticks by seconds over twelve chapters -- so a move takes one beat
+     whatever it covers, and the dot simply flies faster across a longer gap.
+     There is deliberately no per-pixel term to reach for. */
   travelBase: 500,
-  travelPx: 0.6,       /* + 0.6ms per pixel travelled */
   ease: "cubic-bezier(.25,.1,.25,1)",
   hover: 350,          /* a human hovers before clicking */
   press: 120,          /* pressed control to .96 and back */
@@ -131,6 +139,17 @@ export class TourControlMissing extends Error {
  */
 
 /** @typedef {[number, number]} Point */
+
+/** Cancels an element's running animations, where the engine has the Web
+ *  Animations API to ask. Guarded because the film's movement is decoration
+ *  over state that is always set directly as well: an engine without WAAPI
+ *  should show the film arriving at each state without the move between,
+ *  which is what reduced motion shows too — never an exception.
+ *  @param {Element} el */
+function cancelAnimations(el) {
+  if (typeof el.getAnimations !== "function") return;
+  for (const animation of el.getAnimations()) animation.cancel();
+}
 
 /** `style` for the elements that have one, which is both of the kinds the
  *  film ever lifts: HTML controls and the sky's SVG.
@@ -216,7 +235,8 @@ export function createFilmContext({
   let litControls = [];
   /** @type {Set<Animation>} */
   const filmAnims = new Set();
-  /** Where the dot is now, in viewport coordinates. @type {Point} */
+  /** Where the dot is now, in viewport coordinates. It rests in the middle
+   *  of the screen until a chapter's `enter` puts it somewhere. @type {Point} */
   let at = [0, 0];
   let veiled = false;
   let unsubscribe = () => {};
@@ -227,6 +247,7 @@ export function createFilmContext({
   function centreOfViewport() {
     return /** @type {Point} */ ([window.innerWidth / 2, window.innerHeight / 2]);
   }
+  at = centreOfViewport();
 
   /* ---- the chrome layer: ring, dot and callout all live here ------------
      Built imperatively and styled inline, exactly as veil.js builds its
@@ -270,7 +291,7 @@ export function createFilmContext({
   /** @param {Point} p */
   function placeDot(p) {
     if (!dot) return;
-    for (const animation of dot.getAnimations()) animation.cancel();
+    cancelAnimations(dot);
     dot.style.transform = `translate(${p[0]}px,${p[1]}px)`;
   }
 
@@ -287,6 +308,7 @@ export function createFilmContext({
    */
   function anim(node, frames, opts) {
     if (dry() || still()) return Promise.resolve();
+    if (typeof node.animate !== "function") return Promise.resolve();
     const animation = node.animate(frames, opts);
     filmAnims.add(animation);
     if (!clock.playing()) animation.pause();
@@ -512,7 +534,7 @@ export function createFilmContext({
     const target = Array.isArray(to) ? to : /** @type {Point} */ ([boxOf(to.ringEls, to.pad).cx, boxOf(to.ringEls, to.pad).cy]);
     const from = /** @type {Point} */ ([at[0], at[1]]);
     const distance = Math.hypot(target[0] - from[0], target[1] - from[1]);
-    const ms = dur === undefined ? T.travelBase + T.travelPx * distance : dur;
+    const ms = dur ?? T.travelBase;
     at = [target[0], target[1]];
     if (dry()) return clock.w(ms);
     ensureChrome();
@@ -536,7 +558,7 @@ export function createFilmContext({
       frames.push({ transform: `translate(${p[0]}px,${p[1]}px)` });
     }
     if (dot) {
-      for (const animation of dot.getAnimations()) animation.cancel();
+      cancelAnimations(dot);
       void anim(dot, frames, { duration: ms, easing: T.ease, fill: "forwards" });
     }
     return clock.w(ms);
