@@ -191,6 +191,7 @@ describe("the beats, in the mockup's order", () => {
         },
         goto: async (c) => log.push(["goto", c.sel]),
         press: async (c) => log.push(["press", c.sel]),
+        wear: (pack) => log.push(["wear", pack]),
         unlight: (c) => log.push(["unlight", c.sel]),
         callout: async (text, anchor, side, o = {}) => {
           log.push(["callout", text, anchor.sel]);
@@ -235,7 +236,18 @@ describe("the beats, in the mockup's order", () => {
     expect(marks).toEqual(["sky-orb", "sky-settings", "sky-swatches", "sky-dawn", "sky-back"]);
   });
 
-  it("never touches document.documentElement or localStorage itself — the real click, if any, is the product's", async () => {
+  it("wears dawn after pressing dawn, and takes it off again at the end", async () => {
+    const { log, ctx } = recorder();
+    await sky.play(ctx);
+    const worn = log.filter(([word]) => word === "wear").map(([, pack]) => pack);
+    /* `null`, not "after dark": the sky goes back to the reader's own. */
+    expect(worn).toEqual(["dawn", null]);
+    const pressedDawn = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.dawn);
+    const woreDawn = log.findIndex(([word, pack]) => word === "wear" && pack === "dawn");
+    expect(woreDawn).toBe(pressedDawn + 1);
+  });
+
+  it("never touches document.documentElement or localStorage itself — the pack is worn by the vocabulary's own word", async () => {
     const { ctx } = recorder();
     const before = document.documentElement.dataset.theme;
     await sky.play(ctx);
@@ -277,6 +289,37 @@ describe("the chapter played for real", () => {
       "star chart · after dark · clouds · dawn · retrograde",
     ]);
     ctx.destroy();
+  });
+
+  it("wears dawn while it plays, and a skip mid-chapter puts the reader's own sky back", async () => {
+    drawHome();
+    document.documentElement.dataset.theme = "clouds";
+    const clock = createClock({ reducedMotion: () => false });
+    const ctx = createFilmContext({ clock, doc: document });
+    clock.setPlaying(true);
+
+    let done = false;
+    const playing = sky.play(ctx).then(() => { done = true; }, () => { done = true; });
+    let wore = false;
+    let spent = 0;
+    while (!done && spent < 400000) {
+      clock.advance(100);
+      spent += 100;
+      await settle();
+      if (document.documentElement.dataset.theme === "dawn") {
+        /* The reader presses stop while the sky is still dawn: what
+           player.js's own `stop()` does, in the order it does it. */
+        wore = true;
+        clock.cancel();
+        ctx.clear();
+        break;
+      }
+    }
+    expect(wore).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe("clouds");
+    ctx.destroy();
+    await playing.catch(() => {});
+    delete document.documentElement.dataset.theme;
   });
 
   it("leaves home's own DOM exactly as it found it", async () => {
