@@ -160,8 +160,10 @@ To run it:
    pipeline.
 4. Find the `promote_stable` job in the pipeline and click Run.
 
-The job (`scripts/ci/promote-stable.sh`) then, in order, exactly as the
-retired `promote-container.yml` GitHub workflow did:
+The job (`scripts/ci/promote-stable.sh`) then does the following, in order.
+Steps 1-8 and 10 are what the retired `promote-container.yml` GitHub workflow
+did; step 9's `vX.Y.Z` tag is what that workflow stopped doing between v1.0.0
+and v1.1.0 (see "Version tags in GHCR start at v1.3.0" below):
 
 1. Validates `PREVIEW_DIGEST` is `sha256:<64 hex>`.
 2. Confirms `main` and `preview` point at the exact same commit.
@@ -193,6 +195,34 @@ GitLab's push mirror carries the new tag to GitHub within minutes.
 keeps working for the public. GitHub makes no decision of its own: if a
 release for that tag already exists, it does nothing.
 
+### Version tags in GHCR start at v1.3.0
+
+`ghcr.io/tomlawesome/orbit` has no `v1.1.0` or `v1.2.0` tag, and never had one
+(#1019). The GitHub promotion workflow originally tagged the promoted digest
+`vX.Y.Z` and `latest`, which is why `v1.0.0` still resolves. Commit 6952f35
+(2026-08-08, "feat(release): automate preview versions and lanes") rewrote the
+promote step to `--tag "${image}:latest"` alone and dropped the version tag; it
+was not noticed because the release notes still recorded the digest. v1.1.0
+(2026-08-08) and v1.2.0 (2026-08-10) were both promoted after that change, so
+each moved `latest` and nothing else. ADR-0016 had already found the same gap
+from the other side in August: `v1.0.0` was "the only version tag an operator
+could pin".
+
+Nothing was removed and nothing needs repairing in the pipeline: the GitLab
+`promote_stable` job tags both names (step 9 above), and
+`scripts/promote-stable.test.mjs` asserts both, so v1.3.0 onward is tagged
+correctly.
+
+The two missing releases are deliberately left missing. ADR-0016 makes v1.3.0
+the supported-install floor, so a `v1.1.0` or `v1.2.0` tag would be a pinnable
+name for an image `install.sh` refuses to install. Their digests stay on the
+record here and in their GitHub release notes:
+
+| Release | Digest | In GHCR today |
+| --- | --- | --- |
+| v1.1.0 | `sha256:92fb79336d997139002f94c52fd4767787767cc293147c12bbcfc25362a9237d` | untagged, still pullable by digest |
+| v1.2.0 | `sha256:35ad7cea14f835b8e5b350faa0fcf711cbf95c517a2bad26f5fe72795a8aeb12` | carried by `latest` |
+
 ## Required CI/CD variables
 
 The owner creates both under GitLab Settings > CI/CD > Variables, masked,
@@ -220,7 +250,8 @@ above.
 
 The operator tooling supports installing v1.3.0 and later; earlier published
 releases are not supported install targets
-([ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md)). Pinning
+([ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md)), and
+GHCR carries no version tag for them either. Pinning
 a version tag requires the image's own embedded version to name that release,
 so a moved tag cannot pass an image off as a version it is not. Moving tags
 such as `preview` make no version claim and are unaffected; `latest` always
