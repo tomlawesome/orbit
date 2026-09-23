@@ -146,6 +146,16 @@ variables:
   # rasteriser, and then the comparison measures the runner, not the design.
   # mcr.microsoft.com, not Docker Hub: stays direct.
   PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+  # The same Playwright build with docker.io, docker-compose-v2, jq, curl,
+  # openssl and pnpm already in it (#951), built and scanned by
+  # ai/orbit-base-image's `build_ci`/`scan_ci`/`publish_ci` from its
+  # Dockerfile.ci and published only to that project's registry. The five
+  # acceptance-stage jobs run on it; `fidelity` never does, because a layer
+  # on top of upstream Playwright would turn its comparison into a
+  # measurement of this image. Two pins move together: bumping
+  # PLAYWRIGHT_IMAGE means rebuilding there first and re-pinning here.
+  # Not ORBIT_CI_IMAGE, which is the tag `build_image` builds under.
+  ORBIT_ACCEPTANCE_IMAGE: registry.tomlawson.io/ai/orbit-base-image/ci@sha256:19409de802ca170bc69b02e3cfc0c46850819cfb71407799455174957255b117
   # Same scanner build as the workflow, so a finding here and a finding there
   # mean the same thing.
   TRIVY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
@@ -552,9 +562,13 @@ variables:
 # them exactly where GitHub's runner does. It needs the same privileged runner
 # the service does, so this costs no additional permission.
 .docker_in_job: &docker_in_job |
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq
-  apt-get install -y -qq --no-install-recommends docker.io docker-compose-v2 jq curl openssl
+  # Skipped on $ORBIT_ACCEPTANCE_IMAGE, which bakes all five in (#951); the
+  # jobs still on plain $PLAYWRIGHT_IMAGE install them here as before.
+  if ! { command -v dockerd && command -v jq && command -v curl && command -v openssl && docker compose version; } > /dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends docker.io docker-compose-v2 jq curl openssl
+  fi
   # /builds is a real volume; the rest of the container is overlayfs, which
   # overlay2 cannot stack on.
   # /builds outlives the job on this runner, so a stack a killed job left in
@@ -1928,7 +1942,7 @@ smoke:
   stage: acceptance
   extends: .privileged_runner
   image:
-    name: $PLAYWRIGHT_IMAGE
+    name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 30m
   needs: *needs_gated_image
@@ -1949,7 +1963,6 @@ smoke:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
-    - npm install --global "$(node -p "require('./package.json').packageManager")"
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
@@ -2030,7 +2043,7 @@ smoke_local_only:
   stage: acceptance
   extends: .privileged_runner
   image:
-    name: $PLAYWRIGHT_IMAGE
+    name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 30m
   needs: *needs_gated_image
@@ -2050,7 +2063,6 @@ smoke_local_only:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
-    - npm install --global "$(node -p "require('./package.json').packageManager")"
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # Same reason as `smoke`: configure.sh persists ORBIT_IMAGE when it sees
@@ -2109,7 +2121,7 @@ acceptance:
   # For its Ubuntu Noble base, which packages the Compose v2 plugin that every
   # script below needs, and its Node, which the processor corpus runs under.
   image:
-    name: $PLAYWRIGHT_IMAGE
+    name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 45m
   needs: *needs_gated_image
@@ -2263,7 +2275,7 @@ repair_journeys:
   # (docker-compose-v2) where Debian Bookworm, which $NODE_IMAGE is built on,
   # still ships only the retired v1.
   image:
-    name: $PLAYWRIGHT_IMAGE
+    name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 30m
   needs: *needs_gated_image
@@ -2327,7 +2339,7 @@ repair_journeys:
 launcher_install_compat:
   stage: acceptance
   extends: .privileged_runner
-  image: $PLAYWRIGHT_IMAGE
+  image: $ORBIT_ACCEPTANCE_IMAGE
   # The live suite's own -timeout is 30m; the job must outlive it so a slow
   # run fails with the suite's report rather than GitLab's.
   timeout: 35m
