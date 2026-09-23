@@ -305,19 +305,25 @@ variables:
     exit 0
   fi
 
-# Standing on an earlier run instead of repeating it (#898).
+# Standing on an earlier run instead of repeating it (#898, rekeyed by
+# ADR-0028 in #1060 slice 3).
 #
 # A fix pushed after one red job used to rerun every job that had already
-# passed. `classify` now hashes what each candidate job reads
-# (scripts/ci/job-inputs.json), looks through this merge request's earlier
-# pipelines for a successful run of the same job on the same hash, and hands
-# the verdict on. This gate goes at the top of that job's `script:` and stops
-# the job when there is one.
+# passed. Each candidate job now has a key over the thing it tests: the image
+# content ID for the six that run the image, the whole checkout minus that
+# job's deny-list in scripts/ci/job-inputs.json, and this file plus
+# scripts/ci/** on top. `classify` takes the verdict for the source-keyed jobs
+# and `build_image` for the image ones, each by walking the project's twenty
+# most recent pipelines on any ref for a successful run of that same job on
+# that same key. This gate goes at the top of a job's `script:` and stops the
+# job when there is a verdict.
 #
-# Merge requests only, and .gitlab-ci.yml is in every job's input set, so a
-# pipeline on a delivery branch and any change to this file both rerun
-# everything. The proof is the evidence file the job wrote as its own last act;
-# a job that gated itself out wrote none and is never reused.
+# Merge requests only, and this file is in every key, so a pipeline on a
+# delivery branch and any change to this file both rerun everything. The proof
+# is the evidence file the job wrote as its own last act; a job that gated
+# itself out wrote none and is never reused, and one that finished more than
+# seven days ago is not believed. To force a rerun anyway: label the merge
+# request `ci: rerun`, or start a pipeline by hand with ORBIT_REUSE=off.
 #
 # Nothing here can fail a job: the script exits non-zero for every fault it
 # meets, and a non-zero status here simply means the job does the work.
@@ -749,13 +755,18 @@ classify:
       printf 'ORBIT_LAUNCHER_COMPAT=%s\n' "$launcher_compat" >> classify.env
       printf 'ORBIT_LANE=%s\n' "$lane" >> classify.env
       cat classify.env
-    # The reuse verdict (#898): one input hash per candidate job, then the
-    # lookup that says which of them can stand on an earlier run of this same
-    # merge request. A plain file artefact rather than more dotenv variables:
-    # GitLab caps a dotenv report at twenty variables, eight are already spent
-    # above, and ten candidate jobs need a hash each plus up to two verdict
-    # lines each. Every candidate job takes the file through its own
-    # `needs: classify` and reads it with scripts/ci/reuse-gate.sh.
+    # The reuse keys and, for the jobs whose keys are complete here, the
+    # verdict (#898, rekeyed by ADR-0028). A source key per candidate job --
+    # the checkout minus that job's deny-list, plus this file and
+    # scripts/ci/** -- and a finished key for the five that are not keyed on a
+    # built artefact. The six that test the image have their keys finished in
+    # `build_image`, which is the first place the image content ID exists.
+    #
+    # A plain file artefact rather than more dotenv variables: GitLab caps a
+    # dotenv report at twenty variables, eight are already spent above, and
+    # eleven candidate jobs need a key or two each plus up to two verdict lines.
+    # Every candidate job takes the file through its own `needs: classify` and
+    # reads it with scripts/ci/reuse-gate.sh.
     #
     # Both halves are fail-safe and neither may fail this job: no verdict means
     # every job runs, which is the only direction that cannot be wrong.
@@ -1620,12 +1631,45 @@ build_image:
       # `launcher_install_compat`, `supply_chain_image`) this is the *image
       # content ID* ... `build_image` computes it after the build and hands it
       # on in `build.env` as `ORBIT_IMAGE_CONTENT_ID`." The derivation itself
-      # is in the script; slice 3 (#1060) is what reads this.
+      # is in the script; the block below is what reads it.
       content_id="$(ORBIT_IMAGE_REF="$ORBIT_CI_IMAGE" bash scripts/ci/image-content-id.sh)"
       printf 'ORBIT_IMAGE_CONTENT_ID=%s\n' "$content_id" >> build.env
       cat build.env
       docker save "$ORBIT_CI_IMAGE" -o image.tar
-    - *reuse_evidence
+    # The reuse verdict for the six jobs that test this image (#1060 slice 3).
+    #
+    # ADR-0028 section 2 puts it here rather than in `classify`: "The lookup
+    # moves to where the fact is known. `build_image`, once it has the content
+    # ID, runs the same lookup for the image-running jobs." This job is the
+    # only place in the pipeline where the artefact axis exists, so it is the
+    # only place those six keys can be finished -- classify published their
+    # source keys before anything was built.
+    #
+    # The file is written whatever the lookup decides, and on a delivery branch
+    # where there is no lookup at all, because scripts/ci/reuse-evidence.sh
+    # reads the key back to label each job's own evidence. A delivery pipeline
+    # that recorded no key is a merge request with nothing to stand on.
+    #
+    # Its own artefact rather than more lines in build.env: that file is a
+    # dotenv report, GitLab caps one at twenty variables, six are spent, and
+    # six jobs need three lines each.
+    #
+    # Never fails this job. The build is what the pipeline came for, and a
+    # lookup that answers nothing means the six jobs run, which is right.
+    - |
+      set -eu
+      mkdir -p .orbit-reuse
+      : > .orbit-reuse/image.env
+      # Read back from build.env rather than taken from the block above, so
+      # this does not depend on the runner keeping one shell across script
+      # entries: under `set -u` an unset variable would end the job, and this
+      # step is never allowed to be the reason a built image is thrown away.
+      image_content_id="$(sed -n 's/^ORBIT_IMAGE_CONTENT_ID=//p' build.env | tail -1)"
+      ORBIT_IMAGE_CONTENT_ID="$image_content_id" \
+        node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
+          --artefact image --out .orbit-reuse/image.env \
+        || echo "the image reuse lookup failed: every image job will run"
+      cat .orbit-reuse/image.env
   after_script:
     # This job's declared artifacts are what `smoke`, `acceptance`,
     # `repair_journeys` and `supply_chain_image` read, and the runner reports
@@ -1635,16 +1679,22 @@ build_image:
     # exist so the skip is quiet. A failed build uploads nothing at all, since
     # the artifacts are `on_success`.
     - |
+      mkdir -p .orbit-reuse
       [ -f image.tar ] || : > image.tar
       [ -f build.env ] || printf 'ORBIT_IMAGE_BUILT=false\n' > build.env
+      [ -f .orbit-reuse/image.env ] || : > .orbit-reuse/image.env
   artifacts:
     paths:
       - image.tar
-      # A path as well as the dotenv report below, because a dotenv report is
-      # not in the downloadable archive: the reuse gate fetches this file back
-      # so a job standing on this one hands the same identity on (#898).
+      # A path as well as the dotenv report below. The reuse gate used to fetch
+      # this file back for a build that skipped (#898); ADR-0028 ends that, so
+      # what is left is that a dotenv report is not in the downloadable
+      # archive, and this is the only way to read a build's identity back
+      # afterwards without rerunning it.
       - build.env
-      - ci-evidence/
+      # The six image jobs' finished keys and verdicts (ADR-0028 section 2).
+      # scripts/ci/reuse-env.sh reads this beside classify's own file.
+      - .orbit-reuse/image.env
     reports:
       dotenv: build.env
     # Only the later stages of this same pipeline `docker load` it, so it need
