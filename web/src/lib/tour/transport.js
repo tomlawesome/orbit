@@ -23,6 +23,12 @@
  * one stylesheet it injects covers what inline style cannot say — `:hover`,
  * `:focus-visible`, the tick's painted `::after` mark, and the label
  * yielding to a tip.
+ *
+ * ROUND 7 (#1097): a reader who cannot see the film gets its script instead
+ * — every chapter's lines, as ordinary readable text, after the controls —
+ * and one announcement when the film starts, saying what is happening, how
+ * to stop it, and that the script is there. See
+ * design/v19/tour/round-7/README.md for the ruling this draws.
  */
 import { startFilmLoop } from "./clock.js";
 
@@ -30,6 +36,14 @@ const BAR_ID = "orbit-tour-transport";
 const STYLE_ID = "orbit-tour-transport-styles";
 /** Above veil.js's sheet (2000) and the film's own chrome (2100). */
 const Z_INDEX = 2200;
+
+/** Round 7 (#1097): the script and its announcement. */
+const SCRIPT_ID = `${BAR_ID}-script`;
+const START_COPY = "Orbit's tour is playing on screen: a short film over "
+  + "your own sky, with a transport at the bottom. Press Escape to stop "
+  + 'it. The full script is in the tour transport, under "Tour script".';
+const STOPPED_COPY = "Tour stopped. Your sky is back.";
+const FINISHED_COPY = "Tour finished. Your sky is back.";
 
 /** m:ss, as the mockup prints it. @param {number} ms */
 export function mmss(ms) {
@@ -80,6 +94,20 @@ const STYLES = `
 @media (prefers-reduced-motion: reduce){
   #${BAR_ID},#${BAR_ID} .tip{transition-duration:0s}
 }
+/* Round 7 (#1097): app.css's own .sr-only rule, verbatim, repeated here
+   because this module injects its own stylesheet and must not depend on
+   one it did not bring -- the script and its announcement stay clipped to
+   nothing, always. */
+#${BAR_ID} .vh{position:absolute;width:1px;height:1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap}
+/* The Script button is drawn the way a skip link is: the .vh clip above
+   until it has focus, then shown in the pill's own type beside Stop -- so
+   the picture the fidelity frames photograph does not change for anyone
+   who has not tabbed to it. */
+#${BAR_ID} .scr{font:9.5px var(--mono);letter-spacing:.16em;text-transform:uppercase}
+#${BAR_ID} .scr:focus{position:static;width:auto;height:auto;overflow:visible;
+  clip:auto;padding:0 6px}
+#${BAR_ID} .scr:focus-visible{outline:1.5px solid var(--accent);outline-offset:1px;border-radius:4px}
 `;
 
 /**
@@ -116,6 +144,15 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
   stop.setAttribute("title", "Stop · esc");
   stop.innerHTML = '<svg viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" rx="1"/></svg>';
 
+  /* Round 7 (#1097): the Script button, after Stop -- the keyboard route to
+     the script for a reader already on the pill. */
+  const scriptBtn = doc.createElement("button");
+  scriptBtn.type = "button";
+  scriptBtn.className = "vh scr";
+  scriptBtn.textContent = "Script";
+  scriptBtn.setAttribute("aria-label", "Script");
+  scriptBtn.setAttribute("aria-controls", SCRIPT_ID);
+
   const track = doc.createElement("div");
   track.className = "track";
   const rail = doc.createElement("div");
@@ -134,7 +171,31 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
   readout.className = "clock";
   readout.textContent = "0:00 / 0:00";
 
-  bar.append(pp, stop, track, readout);
+  /* Round 7 (#1097): the script itself, after the controls -- one thing to
+     a reader, the transport then its script (design/v19/tour/round-7's own
+     rule). Visually hidden, never `display:none`, never `aria-hidden`: a
+     reader reaches it by heading navigation or the Script button above. */
+  const scriptRegion = doc.createElement("div");
+  scriptRegion.id = SCRIPT_ID;
+  scriptRegion.className = "vh";
+  scriptRegion.setAttribute("role", "region");
+  scriptRegion.setAttribute("aria-label", "Tour script");
+  const scriptHeading = doc.createElement("h2");
+  scriptHeading.textContent = "Tour script";
+  /* Focusable only by script -- the Script button's whole job. */
+  scriptHeading.tabIndex = -1;
+  scriptRegion.appendChild(scriptHeading);
+  scriptBtn.addEventListener("click", () => scriptHeading.focus());
+
+  /* The announcement (round 7): mounted empty with the pill so the element
+     exists before its text ever changes -- Dawn.svelte's `.state` and
+     Newcomer's `.note` follow the same rule (#788, §23). Filled once the
+     film actually starts, never on the clock's own timer. */
+  const status = doc.createElement("div");
+  status.className = "vh";
+  status.setAttribute("role", "status");
+
+  bar.append(pp, stop, scriptBtn, track, readout, scriptRegion, status);
   doc.body.appendChild(bar);
 
   /** @type {HTMLButtonElement[]} */
@@ -210,6 +271,29 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
     });
   }
 
+  /**
+   * The script (round 7, #1097): a heading and a paragraph per line, per
+   * chapter, drawn from `player.script()` -- never a second copy of the
+   * words a chapter plays. Rebuilt whole rather than patched, the same as
+   * `buildTicks()`, because there is nothing here worth diffing.
+   */
+  function buildScript() {
+    while (scriptRegion.lastChild && scriptRegion.lastChild !== scriptHeading) {
+      scriptRegion.lastChild.remove();
+    }
+    const script = player.script();
+    player.chapters().forEach((one, k) => {
+      const heading = doc.createElement("h3");
+      heading.textContent = `Chapter ${k + 1}: ${one.name}`;
+      scriptRegion.appendChild(heading);
+      for (const line of script[k] ?? []) {
+        const p = doc.createElement("p");
+        p.textContent = line;
+        scriptRegion.appendChild(p);
+      }
+    });
+  }
+
   /** @param {number} index */
   function markChapter(index) {
     const one = player.chapters()[index];
@@ -218,6 +302,11 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
     setRecede();
   }
 
+  /** Round 7 (#1097): whether the reader pressed stop (the pill's own
+   *  button, or Escape) -- the announcement's only way to tell a stop from
+   *  a natural finish, since the player exposes `ended()` but not which. */
+  let stoppedByUser = false;
+
   /** @param {KeyboardEvent} event */
   function onKeydown(event) {
     if (event.key === " " || event.key === "Spacebar") {
@@ -225,12 +314,16 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
       player.toggle();
     } else if (event.key === "Escape") {
       event.preventDefault();
+      stoppedByUser = true;
       player.stop();
     }
   }
 
   pp.addEventListener("click", () => player.toggle());
-  stop.addEventListener("click", () => player.stop());
+  stop.addEventListener("click", () => {
+    stoppedByUser = true;
+    player.stop();
+  });
   doc.addEventListener("keydown", onKeydown);
 
   /* The transport follows the player directly rather than waiting to be
@@ -244,16 +337,37 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
   });
   const stopLoop = loop ? startFilmLoop(clock) : () => {};
 
+  /* The announcement (round 7): the start copy fires once, on the film's
+     first chapter; the stop/finish copy fires every time the film ends,
+     reading `stoppedByUser` and then clearing it, so a later natural finish
+     after a restart is never blamed on an earlier stop. Never the film's
+     own clock-driven words -- that is the ruling: nothing read at the
+     reader on a timer. */
+  let announcedStart = false;
+  const offAnnounceStart = player.onChapter(() => {
+    if (announcedStart) return;
+    announcedStart = true;
+    status.textContent = START_COPY;
+  });
+  const offAnnounceEnd = player.onEnd((ended) => {
+    if (!ended) return;
+    status.textContent = stoppedByUser ? STOPPED_COPY : FINISHED_COPY;
+    stoppedByUser = false;
+  });
+
   setIcon();
   buildTicks();
+  buildScript();
   markChapter(player.chapter());
   paint();
 
   return {
     bar,
-    /** Called once the film has been measured, so the ticks can be placed. */
+    /** Called once the film has been measured, so the ticks and the
+     *  script can be placed. */
     refresh() {
       placeTicks();
+      buildScript();
       markChapter(player.chapter());
       paint();
     },
@@ -263,6 +377,8 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
     destroy() {
       offChapter();
       offEnd();
+      offAnnounceStart();
+      offAnnounceEnd();
       offFrame();
       offPlaying();
       stopLoop();

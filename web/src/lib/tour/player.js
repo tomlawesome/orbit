@@ -33,7 +33,7 @@ import { CANCEL } from "./clock.js";
 
 /**
  * @typedef {object} FilmPlayer
- * @property {() => Promise<{ offsets: number[], total: number }>} measure
+ * @property {() => Promise<{ offsets: number[], total: number, script: string[][] }>} measure
  * @property {(cb: (index: number) => void) => (() => boolean)} onChapter
  * @property {(cb: (ended: boolean) => void) => (() => boolean)} onEnd
  * @property {(index?: number) => void} jump
@@ -42,6 +42,7 @@ import { CANCEL } from "./clock.js";
  * @property {(on: boolean) => void} setPlaying
  * @property {() => number} total
  * @property {() => number[]} offsets
+ * @property {() => string[][]} script
  * @property {() => number} chapter
  * @property {() => boolean} ended
  * @property {() => boolean} playing
@@ -80,6 +81,8 @@ export function createFilmPlayer({
   /** @type {number[]} */
   let offsets = chapters.map(() => 0);
   let total = 0;
+  /** One transcript per chapter, round 7 (#1097). @type {string[][]} */
+  let script = chapters.map(() => []);
   let chapter = 0;
   let ended = false;
   let generation = 0;
@@ -89,13 +92,21 @@ export function createFilmPlayer({
    * playing it with the clock stopped. Nothing is drawn and nothing is
    * navigated to: the vocabulary stubs itself out in dry mode, so this costs
    * a few microtasks rather than 3:41.
+   *
+   * The same pass collects each chapter's script (round 7): the vocabulary
+   * records every non-label `callout` text while dry, reset here before
+   * each chapter and read back after, so the transport's script is never a
+   * second copy of the words a chapter plays.
    */
   async function measure() {
     /** @type {number[]} */
     const measured = [];
+    /** @type {string[][]} */
+    const collected = [];
     let running = 0;
     for (const one of chapters) {
       measured.push(running);
+      ctx.resetTranscript();
       clock.dryStart();
       try {
         await one.play(ctx);
@@ -106,10 +117,12 @@ export function createFilmPlayer({
         }
       }
       running += clock.dryEnd();
+      collected.push(ctx.transcript());
     }
     offsets = measured;
     total = running;
-    return { offsets: offsets.slice(), total };
+    script = collected;
+    return { offsets: offsets.slice(), total, script: script.map((lines) => lines.slice()) };
   }
 
   /** @param {number} index */
@@ -219,6 +232,7 @@ export function createFilmPlayer({
     setPlaying: (on) => clock.setPlaying(on),
     total: () => total,
     offsets: () => offsets.slice(),
+    script: () => script.map((lines) => lines.slice()),
     chapter: () => chapter,
     ended: () => ended,
     playing: () => clock.playing(),
