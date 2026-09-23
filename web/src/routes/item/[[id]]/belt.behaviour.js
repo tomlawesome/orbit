@@ -49,6 +49,8 @@ import {
  * @property {(id: string) => void} centreById  ...or to this body
  * @property {(id: string) => void} arriveAt    seat it there with no roll at all
  * @property {(next: string, found: Set<number>) => void} setQuery
+ * @property {(i: number) => void} openDoc  open a paper's reading card, at this seat
+ * @property {() => void} closeDoc    close the open preview, if one is open
  * @property {() => void} remeasure  take the card's footprint again
  * @property {() => void} destroy
  */
@@ -84,6 +86,11 @@ import {
  * @property {(d: number) => void} [onStep]  one step along the belt: -1 sooner,
  *   +1 later. The end-caps call it, and the screen hands in the same function
  *   its ← and → keys call, so there is one step and not two (#1062).
+ * @property {(doc: import("./band.js").BeltDoc, side: "left" | "right", band: BeltApi) => void} [onOpenPreview]
+ *   a paper was pressed: #1088's reading card opens on the paper's own side.
+ *   A document is never the centred body (owner-decisions.md §18), so this is
+ *   never routed through onSwap/onSelect — the item at the apex is untouched.
+ * @property {(band: BeltApi) => void} [onClosePreview]  the reading card closes
  */
 
 const NS = "http://www.w3.org/2000/svg";
@@ -250,6 +257,8 @@ export function mountBelt(root, options) {
     onSwap = () => {},
     onSettle = () => {},
     onStep,
+    onOpenPreview = () => {},
+    onClosePreview = () => {},
   } = options;
 
   const bandC = /** @type {HTMLCanvasElement} */ (root.querySelector("#band"));
@@ -259,6 +268,11 @@ export function mountBelt(root, options) {
   const capsG = /** @type {SVGGElement} */ (root.querySelector("#caps"));
   const endsG = /** @type {SVGGElement} */ (root.querySelector("#ends"));
   const wrap = /** @type {HTMLElement} */ (root.querySelector("#cardwrap"));
+  /* #1088: the grid the reading card grows beside — create-v3's lanes,
+     ported (design/v19/create-v3.html's own mechanism, carried into
+     document-card/round-6's belt). Its --cardw is read from the belt's own
+     layout below, exactly as the mockup's own does. */
+  const lanesEl = /** @type {HTMLElement} */ (root.querySelector("#lanes"));
   /* A canvas in a browser always has a 2d context; the null is for hosts
      that have no canvas at all, which is not one the belt can run in. */
   const bctx = /** @type {CanvasRenderingContext2D} */ (bandC.getContext("2d"));
@@ -291,6 +305,10 @@ export function mountBelt(root, options) {
   let query = "";
   /** @type {Set<number>} */
   let matches = new Set();
+  /* #1088: which paper's reading card is out, or -1. A document is never the
+     centred body, so this rides beside `selected` rather than inside it —
+     opening one never touches roll, bloom or the card. */
+  let previewIdx = -1;
   let base = 0, reach = 0;
   let TONE = ["#737e9e", "#d8b45a", "#243259"], GAIN = 1;
   let raf = 0, last = 0, lastPaint = 0, alive = true;
@@ -342,9 +360,13 @@ export function mountBelt(root, options) {
       drawRock(hit, b.seed, b.r, b.tone, b.kind === "item");
       hit.appendChild(el("circle", { class: "rim", r: b.r + 10, fill: "none",
         stroke: "var(--accent)", "stroke-width": "1", opacity: "0" }));
-      hit.addEventListener("click", () => centre(i));
+      /* #1088: a rock rolls to the apex; a paper opens the reading card in
+         place. A document is never the centred body (owner-decisions.md
+         §18), so its press never reaches `centre`. */
+      const press = () => { (bodies[i].kind === "doc" ? openDoc : centre)(i); };
+      hit.addEventListener("click", press);
       hit.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); centre(i); }
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); press(); }
       });
       seat.appendChild(hit); seatsG.appendChild(seat);
 
@@ -751,6 +773,78 @@ export function mountBelt(root, options) {
   function measureCard() {
     const r = wrap.getBoundingClientRect();
     cardRect = { l: r.left, r: r.right, t: r.top, b: r.bottom };
+    levelReadcard();
+  }
+
+  /* ==================================================================== *
+   * #1088: THE READING CARD'S SIDE AND LEVEL. Everything else about the
+   * card's content is the screen's (Svelte, same law as the item card) —
+   * this module only answers "which side" and "how high", because both are
+   * questions about where bodies sit in the belt's own geometry.
+   * ==================================================================== */
+
+  /**
+   * Which half of the sky a seat is on right now — the reading card grows on
+   * the SAME side, so opening a paper never has the card jump across the
+   * apex to reach it.
+   *
+   * @param   {number} i
+   * @returns {"left" | "right"}
+   */
+  function sideOf(i) {
+    const seat = seatsG.children[i];
+    const r = seat.getBoundingClientRect();
+    return r.left + r.width / 2 < geom.W / 2 ? "left" : "right";
+  }
+
+  /* create-v3's levelWithCard, verbatim in its arithmetic: whatever the
+     reading card's height turns out to be, it sits level with the item
+     card's own middle, held inside the screen's margins. Run every time the
+     card's footprint is taken again — a resize, a settle, or the screen
+     telling us the page it drew has changed the reading card's height. */
+  function levelReadcard() {
+    const rc = /** @type {?HTMLElement} */ (root.querySelector("#readcard"));
+    if (!rc || !cardRect || previewIdx < 0) return;
+    const mid = (cardRect.t + cardRect.b) / 2;
+    const cs = getComputedStyle(lanesEl);
+    const top = parseFloat(cs.getPropertyValue("--rc-top")) || 84;
+    const bottom = parseFloat(cs.getPropertyValue("--rc-bottom")) || 16;
+    const avail = lanesEl.clientHeight - top - bottom;
+    const h = Math.min(rc.offsetHeight, avail);
+    const y = Math.max(top, Math.min(Math.round(mid - h / 2), top + avail - h));
+    rc.style.setProperty("--rc-y", y + "px");
+  }
+
+  /** The seat's own hit — buildSeats's only child of #seats > g.seat — or
+   *  null once it has left the manifest (paintMembers's precedent). */
+  /** @param {number} i @returns {?SVGGElement} */
+  const hitAt = (i) => /** @type {?SVGGElement} */ (seatsG.children[i]?.firstChild ?? null);
+
+  /**
+   * A paper pressed. The item at the apex does not move — only the reading
+   * lane opens, on the paper's own side (owner-decisions.md §18: "a document
+   * is never the centred body").
+   *
+   * @param {number} i
+   */
+  function openDoc(i) {
+    const b = bodies[i];
+    if (b.kind !== "doc" || previewIdx === i) return;
+    if (previewIdx >= 0) hitAt(previewIdx)?.classList.remove("open");
+    previewIdx = i;
+    hitAt(i)?.classList.add("open");
+    onOpenPreview(b.doc, sideOf(i), api);
+  }
+
+  /** Closes the reading card, if one is open. Esc and dead space both call
+   *  this from the screen; so does the belt itself the moment the apex it
+   *  belonged to leaves — a paper still folded inside its item cannot be
+   *  the thing a reading card is open on. */
+  function closeDoc() {
+    if (previewIdx < 0) return;
+    hitAt(previewIdx)?.classList.remove("open");
+    previewIdx = -1;
+    onClosePreview(api);
   }
 
   /* ==================================================================== *
@@ -778,6 +872,10 @@ export function mountBelt(root, options) {
   /** @param {number} i the seat to roll to */
   function centre(i) {
     if (i === selected || i < 0 || i >= bodies.length) return;
+    /* #1088: the apex is leaving the item any open paper belongs to, so its
+       reading card cannot stay out — a paper still folded inside its item
+       is not somewhere a reading card can be open on. */
+    closeDoc();
     const dir = Math.sign(bodies[i].off - bodies[selected].off) || 1;
     prevSel = selected; selected = i;
     rollFrom = roll; rollTo = bodies[selected].off; rollT0 = performance.now();
@@ -828,6 +926,7 @@ export function mountBelt(root, options) {
   function arriveAt(id) {
     const i = bodies.findIndex((b) => b.id === id);
     if (i < 0) return;
+    closeDoc();
     clearTimeout(swapTimer);
     selected = prevSel = i; rollT0 = -1;
     roll = rollFrom = rollTo = bodies[i].off;
@@ -874,6 +973,11 @@ export function mountBelt(root, options) {
   }
 
   function layout() {
+    /* #1088: a resize rebuilds the seat list below (GAP_SCALE can move with
+       width), which invalidates `previewIdx` as an index — simplest and
+       safest is to close the reading card rather than risk it reopened on
+       the wrong paper. Rare in practice (rotating a phone mid-preview). */
+    closeDoc();
     const wasSel = bodies[selected]?.id ?? selectedId;
     geom = geometryOf(window.innerWidth, window.innerHeight);
     buildBodies();                    /* GAP_SCALE may have moved with W */
@@ -890,7 +994,12 @@ export function mountBelt(root, options) {
     membersSvg.setAttribute("viewBox", `0 0 ${geom.W} ${geom.H}`);
     buildEnds();
     wrap.style.top = geom.APEX_Y + "px";
-    wrap.style.width = cardWidthOf(geom) + "px";
+    const cardw = cardWidthOf(geom);
+    wrap.style.width = cardw + "px";
+    /* #1088: the reading lane's own width is a CSS calc off this — the
+       mockup's --readw, unchanged — so only the card's own width has to be
+       handed over. */
+    lanesEl.style.setProperty("--cardw", cardw + "px");
     onSelect(selected, api); onSwap(selected, api);
     paintMembers(rollT0 < 0 ? 1 : 0);
     measureCard(); paintBand();
@@ -925,6 +1034,8 @@ export function mountBelt(root, options) {
       matches = found;
       paintMembers(rollT0 < 0 ? 1 : 0);
     },
+    openDoc,
+    closeDoc,
     /* The card is the screen's to render, so the band cannot measure its
        footprint until the screen says it is there. One call: take the
        rectangle, then lay the rubble down around it. */
