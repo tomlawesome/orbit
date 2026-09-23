@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createClock } from "../../web/src/lib/tour/clock.js";
+import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
 import {
   T,
   TourControlMissing,
@@ -308,5 +309,266 @@ describe("dry mode", () => {
     expect(still).toBeLessThan(full);
     /* what is left under reduced motion is exactly the reading */
     expect(still).toBe(holdFor("This is your star chart."));
+  });
+});
+
+describe("typing into a field", () => {
+  /** A field with something already in it, boxed where the film can find it. */
+  function drawField() {
+    document.body.innerHTML = '<input id="f-name" value="New Entry">';
+    const field = document.getElementById("f-name");
+    box(field, { x: 373, y: 259, w: 218, h: 38 });
+    return field;
+  }
+
+  const ghostText = () => document.querySelector(".tourfilm-typed")?.textContent ?? null;
+
+  it("shows the string appearing one character at a time", async () => {
+    drawField();
+    const { clock, ctx } = stage();
+    const name = ctx.ctl({ sel: "#f-name" });
+    const seen = [];
+    const playing = ctx.typeInto(name, "Car MOT");
+    let done = false;
+    playing.then(() => { done = true; }, () => { done = true; });
+    let spent = 0;
+    while (!done && spent < 20000) {
+      clock.advance(10);
+      spent += 10;
+      await settle();
+      const now = ghostText();
+      if (now && now !== seen.at(-1)) seen.push(now);
+    }
+    await playing;
+    expect(seen.at(-1)).toBe("Car MOT");
+    /* every prefix, in order -- not one jump to the finished string */
+    expect(seen).toEqual(["C", "Ca", "Car", "Car ", "Car M", "Car MO", "Car MOT"]);
+  });
+
+  it("never writes into the real field and never fires its handlers", async () => {
+    const field = drawField();
+    let handled = 0;
+    field.addEventListener("input", () => { handled++; });
+    field.addEventListener("change", () => { handled++; });
+    field.addEventListener("keydown", () => { handled++; });
+
+    const { clock, ctx } = stage();
+    await playOut(clock, ctx.typeInto(ctx.ctl({ sel: "#f-name" }), "54.85"));
+
+    expect(field.value).toBe("New Entry");
+    expect(handled).toBe(0);
+    expect(ghostText()).toBe("54.85");
+  });
+
+  it("leaves nothing behind when the film ends", async () => {
+    const field = drawField();
+    const before = field.outerHTML;
+    const { clock, ctx } = stage();
+    await playOut(clock, ctx.typeInto(ctx.ctl({ sel: "#f-name" }), "54.85"));
+    expect(document.querySelector(".tourfilm-typed")).not.toBeNull();
+
+    ctx.clear();
+    expect(document.querySelector(".tourfilm-typed")).toBeNull();
+    expect(field.outerHTML).toBe(before);
+    ctx.destroy();
+  });
+
+  it("drops the typed text when the screen changes under it", async () => {
+    drawField();
+    let route = "/create";
+    const clock = createClock({ reducedMotion: () => false });
+    const ctx = createFilmContext({
+      clock,
+      doc: document,
+      routeOf: () => route,
+      navigate: async (to) => { route = to; },
+    });
+    clock.setPlaying(true);
+    await playOut(clock, ctx.typeInto(ctx.ctl({ sel: "#f-name" }), "54.85"));
+    expect(ghostText()).toBe("54.85");
+
+    await playOut(clock, ctx.setScreen("/home"));
+    expect(document.querySelector(".tourfilm-typed")).toBeNull();
+    ctx.destroy();
+  });
+
+  it("fires its mark MID-STRING, so the held frame is a half-typed field", async () => {
+    drawField();
+    const { clock, ctx } = stage();
+    delete window.__mark;
+    let whenMarked = null;
+    const playing = ctx.typeInto(ctx.ctl({ sel: "#f-name" }), "Car MOT", { mark: "add-typing" });
+    let done = false;
+    playing.then(() => { done = true; }, () => { done = true; });
+    let spent = 0;
+    while (!done && spent < 20000) {
+      clock.advance(10);
+      spent += 10;
+      await settle();
+      if (whenMarked === null && window.__mark === "add-typing") whenMarked = ghostText();
+    }
+    await playing;
+    expect(whenMarked).not.toBeNull();
+    expect(whenMarked.length).toBeGreaterThan(0);
+    expect(whenMarked.length).toBeLessThan("Car MOT".length);
+  });
+
+  it("costs the lead plus one beat per character, dry and played alike", async () => {
+    const text = "29 Aug 2027";
+    const beats = (ctx) => ctx.typeInto(ctx.ctl({ sel: "#f-name" }), text);
+
+    drawField();
+    const dryRun = stage();
+    dryRun.clock.dryStart();
+    await beats(dryRun.ctx);
+    const measured = dryRun.clock.dryEnd();
+    expect(measured).toBe(T.typeLead + T.typeChar * text.length);
+    expect(document.querySelector(".tourfilm-typed")).toBeNull(); /* dry draws nothing */
+
+    const played = stage();
+    await playOut(played.clock, beats(played.ctx));
+    expect(played.clock.sched()).toBe(measured);
+    played.ctx.destroy();
+  });
+
+  it("under reduced motion the whole string simply arrives, and costs nothing", async () => {
+    drawField();
+    const { clock, ctx } = stage({ reduced: true });
+    clock.dryStart();
+    await ctx.typeInto(ctx.ctl({ sel: "#f-name" }), "Car MOT — Volvo V60");
+    expect(clock.dryEnd()).toBe(0);
+
+    const live = stage({ reduced: true });
+    await playOut(live.clock, live.ctx.typeInto(live.ctx.ctl({ sel: "#f-name" }), "Car MOT — Volvo V60"));
+    expect(ghostText()).toBe("Car MOT — Volvo V60");
+    live.ctx.destroy();
+  });
+});
+
+describe("wearing a pack", () => {
+  /** A reader who is sitting in "clouds" when the film starts. */
+  function arriveIn(pack) {
+    if (pack === null) delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = pack;
+    localStorage.removeItem("orbit-theme");
+  }
+
+  afterEach(() => {
+    delete document.documentElement.dataset.theme;
+    localStorage.removeItem("orbit-theme");
+  });
+
+  it("re-skins every screen at once, on documentElement", () => {
+    arriveIn("clouds");
+    const { ctx } = stage();
+    ctx.wear("dawn");
+    expect(document.documentElement.dataset.theme).toBe("dawn");
+  });
+
+  it("writes no preference anywhere — not localStorage, not the swatches", () => {
+    arriveIn("clouds");
+    document.body.innerHTML = '<div class="swatches"><button title="dawn" aria-pressed="false"></button></div>';
+    const swatch = document.querySelector('button[title="dawn"]');
+    const { ctx } = stage();
+    ctx.wear("dawn");
+    expect(localStorage.getItem("orbit-theme")).toBeNull();
+    expect(swatch.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("takes a swatch's title the way the product's own packOf does", () => {
+    arriveIn("clouds");
+    const { ctx } = stage();
+    ctx.wear("after dark");
+    expect(document.documentElement.dataset.theme).toBe("afterdark");
+    ctx.wear("star-chart");
+    expect(document.documentElement.dataset.theme).toBe("starchart");
+    ctx.wear(null);
+  });
+
+  it("puts the reader's own pack back when the film takes it off", () => {
+    arriveIn("clouds");
+    const { ctx } = stage();
+    ctx.wear("dawn");
+    ctx.wear(null);
+    expect(document.documentElement.dataset.theme).toBe("clouds");
+  });
+
+  it("puts back no attribute at all when they arrived without one", () => {
+    arriveIn(null);
+    const { ctx } = stage();
+    ctx.wear("dawn");
+    ctx.wear(null);
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+  });
+
+  it("is undone by clear(), however the film stops", () => {
+    arriveIn("clouds");
+    const { ctx } = stage();
+    ctx.wear("dawn");
+    ctx.clear();
+    expect(document.documentElement.dataset.theme).toBe("clouds");
+    ctx.destroy();
+  });
+
+  it("touches nothing in dry mode", async () => {
+    arriveIn("clouds");
+    const { clock, ctx } = stage();
+    clock.dryStart();
+    ctx.wear("dawn");
+    clock.dryEnd();
+    expect(document.documentElement.dataset.theme).toBe("clouds");
+  });
+
+  it("A SKIP MID-CHAPTER STILL RETURNS THE READER'S SKY", async () => {
+    /* The case that would otherwise leave a reader in the film's theme for
+       good: the pack goes on, and they press stop before it comes off. */
+    arriveIn("clouds");
+    const { clock, ctx } = stage();
+    const chapters = [{
+      id: "sky",
+      name: "Your sky",
+      async play(c) {
+        c.wear("dawn");
+        await c.hold(60000);
+        c.wear(null);
+      },
+    }];
+    const player = createFilmPlayer({ clock, ctx, chapters });
+    await player.measure();
+    player.jump(0);
+    await settle();
+    clock.advance(1000);
+    await settle();
+    expect(document.documentElement.dataset.theme).toBe("dawn"); /* mid-chapter */
+
+    player.stop();
+    expect(document.documentElement.dataset.theme).toBe("clouds");
+    player.destroy();
+  });
+
+  it("returns it on a jump to another chapter too, and at the end of the film", async () => {
+    arriveIn("clouds");
+    const { clock, ctx } = stage();
+    const chapters = [
+      { id: "sky", name: "Your sky", async play(c) { c.wear("dawn"); await c.hold(60000); } },
+      { id: "after", name: "After", async play(c) { await c.hold(100); } },
+    ];
+    const player = createFilmPlayer({ clock, ctx, chapters });
+    await player.measure();
+    player.jump(0);
+    await settle();
+    clock.advance(1000);
+    await settle();
+    expect(document.documentElement.dataset.theme).toBe("dawn");
+
+    player.jump(1);
+    await settle();
+    expect(document.documentElement.dataset.theme).toBe("clouds");
+
+    clock.advance(1000);
+    await settle();
+    expect(player.ended()).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe("clouds");
+    player.destroy();
   });
 });
