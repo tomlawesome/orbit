@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
 import { sessionHeaders } from "./support/households";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -61,7 +62,9 @@ let adminPage: Page;
 async function openWindow(browser: Browser) {
   admin = await browser.newContext({ ignoreHTTPSErrors: true });
   adminPage = await admin.newPage();
-  await signInAs(adminPage, "Orbit Administrator");
+  await signInAs(adminPage, workerAccount("administrator"));
+  /* #1080: the maintenance commands are an instance-admin power. */
+  await ensureWorkerAdministrator(adminPage);
   if ((await readState(adminPage)).effectivelyActive) {
     await command(adminPage, { action: "end" });
   }
@@ -140,7 +143,7 @@ test("the administrator passes; an ordinary member is shown the screen", async (
   try {
     const page = await context.newPage();
     // The sign-in itself is exempt; what it lands on afterwards is not.
-    await signInAs(page, "Orbit Member");
+    await signInAs(page, workerAccount("member"));
     await expect(page.getByRole("heading", { name: "maintenance — back soon" })).toBeVisible();
     const response = await page.request.get("/home", { maxRedirects: 0 });
     expect(response.status()).toBe(503);

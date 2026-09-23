@@ -4,6 +4,7 @@ import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { waitForSenderVerificationToken } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -49,7 +50,10 @@ const SMTP_PORT = Number(process.env.TEST_SMTP_PORT ?? 3025);
    works with GreenMail's auth disabled -- see support/mail.ts -- so this one
    only has to be distinct from MAILBOX_ACCOUNT, which is the intake box, not
    a sender's own mailbox. */
-const SENDER_ADDRESS = "member-forwarding@out.orbit.test";
+/* #1080: per worker, because the address is claimed and verified as ONE
+   member's own — two workers claiming the same address would race the
+   claim and cross-read the verification mailbox. Lazy: worker env only. */
+const SENDER_ADDRESS = () => `forwarding-${workerEmail("member").split("@")[0]}@out.orbit.test`;
 /* The authserv-id this spec's mailbox configuration says it trusts, and the
    one it then writes into the `Authentication-Results` header it prepares --
    standing in for the real receiving provider GreenMail does not have. */
@@ -88,7 +92,7 @@ const TINY_PDF = Buffer.from(
 
 async function signInAsMember(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Member" }).click();
+  await page.getByRole("link", { name: workerAccount("member") }).click();
   await settleArrival(page);
 }
 
@@ -179,10 +183,10 @@ async function verifySenderAddress(page: Page) {
     if (row.verified) return "already-verified";
     await request({ action: "verify", id: row.id });
     return "verification-sent";
-  }, SENDER_ADDRESS);
+  }, SENDER_ADDRESS());
   if (outcome === "already-verified") return;
 
-  const token = await waitForSenderVerificationToken(SENDER_ADDRESS);
+  const token = await waitForSenderVerificationToken(SENDER_ADDRESS());
   const verified = await page.request.get(`/api/settings/mail-relay/verify?token=${encodeURIComponent(token)}`);
   if (!verified.ok() || !verified.url().includes("sender=verified")) {
     throw new Error(`sender verification link did not confirm: ${verified.status()} ${verified.url()}`);
@@ -223,8 +227,8 @@ async function seedHousehold(page: Page) {
 async function sendMail(alias: string, subject: string, attachment: { filename: string; content: Buffer; contentType: string } | null) {
   const transport = createTransport({ host: "127.0.0.1", port: SMTP_PORT, secure: false, tls: { rejectUnauthorized: false } });
   await transport.sendMail({
-    envelope: { from: SENDER_ADDRESS, to: MAILBOX_ACCOUNT },
-    from: `Forwarding Member <${SENDER_ADDRESS}>`,
+    envelope: { from: SENDER_ADDRESS(), to: MAILBOX_ACCOUNT },
+    from: `Forwarding Member <${SENDER_ADDRESS()}>`,
     to: alias,
     subject,
     text: "A forwarded document for the proving ground.",
@@ -235,7 +239,7 @@ async function sendMail(alias: string, subject: string, attachment: { filename: 
     // test writes them, exactly as it always has for the recipient header.
     headers: {
       "X-Orbit-Delivered-To": { prepared: true, value: alias },
-      "Authentication-Results": { prepared: true, value: `${TRUSTED_AUTHSERV_ID}; dmarc=pass header.from=${SENDER_ADDRESS.slice(SENDER_ADDRESS.indexOf("@") + 1)}` },
+      "Authentication-Results": { prepared: true, value: `${TRUSTED_AUTHSERV_ID}; dmarc=pass header.from=${SENDER_ADDRESS().slice(SENDER_ADDRESS().indexOf("@") + 1)}` },
     },
     attachments: attachment ? [attachment] : [],
   });
@@ -265,8 +269,13 @@ test.afterAll(async ({ browser }) => {
   const page = await context.newPage();
   try {
     await page.goto("/api/auth/login?returnTo=/home");
-    await page.getByRole("link", { name: "Orbit Administrator" }).click();
-    await expect(page).toHaveURL(/\/home$/);
+    await page.getByRole("link", { name: workerAccount("administrator") }).click();
+    /* #1080: no URL wait — until the promotion inside
+       ensureWorkerAdministrator lands, a fresh worker administrator belongs
+       to nothing and is parked on the arrival at `/`, not /home. The
+       helper's session poll is the synchronisation, and the sweep's hard
+       delete is an instance-admin power. */
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();

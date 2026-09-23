@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -144,12 +145,16 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    /* #665: ask for /home and assert we are ON it. `/\/(home)?$/` matches "/"
-       as well, so it resolves while the app is still navigating -- the race
-       this spec was fixed for. The sweep talks to the API, not the page, but
-       the loose wait is not to be reintroduced anywhere in this file. */
-    await signInAs(page, "Orbit Administrator", "/home");
-    await expect(page).toHaveURL(/\/home$/);
+    /* #665 forbade the loose `/\/(home)?$/` wait that resolved mid-
+       navigation; the strict wait here is now inside
+       ensureWorkerAdministrator (#1080), which polls the session itself
+       until it is authenticated — no URL involved. A URL assertion cannot
+       stand in this hook any more: until the promotion lands, a fresh
+       worker administrator belongs to nothing and is parked on the arrival
+       at `/`, not /home. The sweep talks to the API, and the hard delete it
+       ends with is an instance-admin power. */
+    await signInAs(page, workerAccount("administrator"), "/home");
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -171,7 +176,7 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
      owns the default sections and the owner membership. */
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
-  await signInAs(ownerPage, "Orbit Member", "/home");
+  await signInAs(ownerPage, workerAccount("member"), "/home");
   /* Not a fixed destination: this is "Orbit Member"'s own first sign-in with
      no household yet, exactly the reader #840 sends to the arrival instead
      -- createSystem below talks to the API from whatever page that landed
@@ -184,9 +189,23 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   expect(created.sections.map((section) => section.name))
     .toEqual(["Home", "Vehicles", "Devices", "Services"]);
 
+  /* Captured before the door is even pressed: Arrival.svelte's decide() makes
+     exactly one GET /api/workspace on mount (web/src/lib/arrival/Arrival.svelte),
+     and that single response is what THE COUNT below reads its number from
+     instead of a second, later fetch (#1085/#1080). Workers run in parallel
+     and the household list is instance-wide, budget-bounded rather than
+     isolated per worker (tests/e2e/support/reset-gate.ts's own account of
+     what a reset "still cannot do"), so a fresh fetch made minutes later in
+     the test would legitimately race another worker's fixtures. This is the
+     exact response the sky was drawn from, so it cannot disagree with what is
+     on screen. */
+  const ownWorkspaceRead = page.waitForResponse(
+    (response) => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/workspace",
+  );
+
   /* THE READER. Through the door, by its own button, so the launch is owed and
      the climb plays. */
-  await signInThroughTheDoor(page, "Orbit Newcomer");
+  await signInThroughTheDoor(page, workerAccount("newcomer"));
 
   /* The door KEEPS them: first-run sits on top of the login screen, and a
      reader with no household is not handed on to a home they do not have. */
@@ -210,10 +229,17 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
      It is the real list that is counted, not the sky: the sky draws at most
      twelve (#670), and on a shared instance (#730) more exist than it can
      draw, so the sky is a lower bound and `visibleHouseholds` is the number.
-     Specs run in parallel locally, and a system created by another one between
-     this read and the page's own would make a true count look wrong; CI runs
-     one worker, so there the two reads cannot disagree. */
-  const workspace = await workspaceOf(page);
+     Read from `ownWorkspaceRead` above, not a fresh fetch: a second,
+     independent read taken this many beats after the page's own would race
+     every other worker's fixtures under #1080 rather than only this file's. */
+  const ownResponse = await ownWorkspaceRead;
+  if (!ownResponse.ok()) throw new Error(`workspace read failed: ${ownResponse.status()}`);
+  const { workspace } = (await ownResponse.json()) as {
+    workspace: {
+      households: unknown[];
+      visibleHouseholds: { id: string; name: string; requested: boolean }[];
+    };
+  };
   expect(workspace.households).toEqual([]);
   const discovered = workspace.visibleHouseholds.length;
   expect(discovered).toBeGreaterThan(0);
@@ -253,7 +279,7 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
 
   const requests = await pendingRequests(ownerPage);
   expect(requests.map((one) => `${one.householdName}/${one.displayName}`))
-    .toContain(`${HOUSEHOLD}/Orbit Newcomer`);
+    .toContain(`${HOUSEHOLD}/${workerAccount("newcomer")}`);
 
   /* Asking twice cannot file twice: the row has nothing left to press. */
   await expect(row.getByRole("button")).toBeDisabled();
@@ -269,7 +295,7 @@ test("naming your own system: the sealed refusal, then the create, then the laun
      membership. Straight at the login route this time — no marker, so no climb;
      the question is served already arrived at, the way /logout serves the
      goodbye already arrived at. */
-  await signInAs(page, "Orbit Newcomer");
+  await signInAs(page, workerAccount("newcomer"));
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
   expect((await workspaceOf(page)).households).toEqual([]);
