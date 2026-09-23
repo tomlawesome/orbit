@@ -1487,11 +1487,15 @@ build_image:
     - orbit_lane_admits build_image || exit 0
     - *system_lane_gate
     - *apk_retry
-    # curl as well, for the reuse gate: this is the one job whose gate fetches
-    # something -- the image.tar and build.env the jobs after it need, from the
-    # run it is standing on. bash for the gate itself; this image is Alpine.
-    - apk_add bash git nodejs curl
-    - *reuse_gate
+    # bash for the scripts below; this image is Alpine.
+    #
+    # No *reuse_gate here, unlike every other candidate job. ADR-0028: "`build_
+    # image` always builds; it no longer skips" -- the registry cache above is
+    # what makes an unchanged tree cheap, and the content ID below is what the
+    # jobs after it will stand on instead (slice 3). Skipping the build would
+    # also leave nothing to compute that ID from. curl went with the gate: this
+    # was the one job whose gate fetched an artefact back.
+    - apk_add bash git nodejs
     - |
       set -eu
       # Read access to the cache is attempted below on every build; write
@@ -1525,6 +1529,18 @@ build_image:
           preview | hotfix/*) publication_channel=preview ;;
         esac
       fi
+      # Before Docker is invoked at all, as scripts/build-container.sh does it
+      # (#435): the Dockerfile's own check moved down to the stamp with the
+      # ARGs it reads (ADR-0028), so a malformed version would otherwise fail
+      # only after the whole application build had been done and thrown away.
+      # The same shared patterns, not a third copy of them.
+      . scripts/release-metadata-patterns.sh
+      printf '%s\n' "$version" | grep -Eq "$ORBIT_VERSION_PATTERN" \
+        || { echo "calculated version ${version} is not a release version" >&2; exit 1; }
+      printf '%s\n' "$CI_COMMIT_SHA" | grep -Eq "$ORBIT_REVISION_PATTERN" \
+        || { echo "revision ${CI_COMMIT_SHA} is not a full commit id" >&2; exit 1; }
+      printf '%s\n' "$publication_channel" | grep -Eq "$ORBIT_CHANNEL_PATTERN" \
+        || { echo "channel ${publication_channel} is not a release stage" >&2; exit 1; }
       echo "building ${ORBIT_CI_IMAGE} version=${version} channel=${publication_channel}"
       # buildx rather than plain `docker build`: classic build has no
       # registry cache exporter at all, and --cache-from there only accepts
@@ -1621,6 +1637,15 @@ build_image:
       # against the image in front of them, not against a commit it was never
       # built from.
       printf 'ORBIT_IMAGE_REVISION=%s\n' "$CI_COMMIT_SHA" >> build.env
+      # What identifies the thing under test, as opposed to the commit that
+      # stamped it. ADR-0028 section 1: "For the six image-running jobs
+      # (`smoke`, `smoke_local_only`, `acceptance`, `repair_journeys`,
+      # `launcher_install_compat`, `supply_chain_image`) this is the *image
+      # content ID* ... `build_image` computes it after the build and hands it
+      # on in `build.env` as `ORBIT_IMAGE_CONTENT_ID`." The derivation itself
+      # is in the script; slice 3 (#1060) is what reads this.
+      content_id="$(ORBIT_IMAGE_REF="$ORBIT_CI_IMAGE" bash scripts/ci/image-content-id.sh)"
+      printf 'ORBIT_IMAGE_CONTENT_ID=%s\n' "$content_id" >> build.env
       cat build.env
       docker save "$ORBIT_CI_IMAGE" -o image.tar
     - *reuse_evidence
