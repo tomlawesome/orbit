@@ -194,6 +194,7 @@ describe("the beats, in the mockup's order", () => {
         },
         goto: async (c, o) => log.push(["goto", c.sel, o?.willPress ?? true]),
         press: async (c) => log.push(["press", c.sel]),
+        typeInto: async (c, text, o) => log.push(["typeInto", c.sel, text, o?.mark]),
         quiet: (c) => log.push(["quiet", c.sel]),
         light: (...cs) => log.push(["light", cs.map((c) => c.sel)]),
         unlight: (...cs) => log.push(["unlight", cs.map((c) => c.sel)]),
@@ -251,12 +252,38 @@ describe("the beats, in the mockup's order", () => {
       SELECTORS.recurrence,
       SELECTORS.add,
     ]);
-    /* "add-drawer" is not here: it travels as the drawer callout's own
-       `mark` option (checked above), which only the real film context
-       turns into a `mark()` call -- this recorder logs `callout` itself,
-       not what it triggers internally. */
+    /* Neither "add-drawer" nor "add-typing" is here: each travels as its
+       own word's `mark` option (the drawer callout's, and the name field's
+       typing -- both checked below), which only the real film context turns
+       into a `mark()` call. This recorder logs the word itself, not what it
+       triggers internally. */
     const marks = log.filter(([word]) => word === "mark").map(([, name]) => name);
-    expect(marks).toEqual(["add-star", "add-typing", "add-yearly", "add-add"]);
+    expect(marks).toEqual(["add-star", "add-yearly", "add-add"]);
+  });
+
+  it("types the mockup's own three strings, into the three fields it types into", async () => {
+    const { log, ctx } = recorder();
+    await add.play(ctx);
+    const typed = log.filter(([word]) => word === "typeInto").map(([, sel, text]) => [sel, text]);
+    expect(typed).toEqual([
+      [SELECTORS.name, "Car MOT \u2014 Volvo V60"],
+      [SELECTORS.due, "29 Aug 2027"],
+      [SELECTORS.cost, "54.85"],
+    ]);
+    /* Each one is typed into a field the chapter has just pressed. */
+    for (const [sel] of typed) {
+      const pressed = log.findIndex(([word, s]) => word === "press" && s === sel);
+      const typedAt = log.findIndex(([word, s]) => word === "typeInto" && s === sel);
+      expect(pressed).toBeGreaterThan(-1);
+      expect(typedAt).toBeGreaterThan(pressed);
+    }
+  });
+
+  it("hands add-typing to the typing itself, so the mark lands on a half-typed name", async () => {
+    const { log, ctx } = recorder();
+    await add.play(ctx);
+    const name = log.find(([word, sel]) => word === "typeInto" && sel === SELECTORS.name);
+    expect(name[3]).toBe("add-typing");
   });
 
   it("leaves the add button lit at the end, for the next chapter to inherit", async () => {
