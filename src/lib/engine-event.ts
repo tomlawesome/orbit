@@ -117,6 +117,7 @@ export const ACTION_VOCABULARY = [
   "repair",
   "continue",
   "display",
+  "abort",
 ] as const;
 
 function normalize(value: string, vocabulary: readonly string[]): string {
