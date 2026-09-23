@@ -45,8 +45,19 @@
 export const CANCEL = Symbol("orbit-tour-film-cancel");
 
 /** Longest frame the clock will believe. A backgrounded tab hands back a gap
- *  of seconds; charging the film for it would skip a chapter. */
+ *  of seconds; charging the film for it would skip a chapter. The clamp lives
+ *  where real frames are measured -- `startFilmLoop` below -- and NOT inside
+ *  `advance`, which means what it says: move film time by exactly this much.
+ *  A test drives the film in whatever steps it likes without being silently
+ *  rationed. */
 const MAX_FRAME_MS = 120;
+
+/** The film time one real frame is worth, given the last timestamp seen.
+ *  @param {number} ts @param {number} last */
+export function frameDelta(ts, last) {
+  if (!last) return 0;
+  return Math.max(0, Math.min(ts - last, MAX_FRAME_MS));
+}
 
 /** Read live, never cached — the idiom veil.js, skies.js and satellites.js
  *  already use, so an OS-level change mid-film is honoured without a remount.
@@ -159,7 +170,7 @@ export function createClock({ reducedMotion = stillMotion } = {}) {
    */
   function advance(dt) {
     if (playing && stalls === 0) {
-      cursor += Math.max(0, Math.min(dt, MAX_FRAME_MS));
+      cursor += Math.max(0, dt);
       for (const cb of Array.from(frameCbs)) cb();
       /* Backwards, because firing a waiter can push another one. */
       for (let k = waiters.length - 1; k >= 0; k--) {
@@ -193,11 +204,19 @@ export function createClock({ reducedMotion = stillMotion } = {}) {
       sched = ms;
     },
     /** Abandons every suspended chapter: the token moves, so each outstanding
-     *  waiter settles as a CANCEL rejection rather than a resolution. */
+     *  waiter settles as a CANCEL rejection rather than a resolution.
+     *
+     *  The schedule is rewound to where the film actually is. A cancelled
+     *  chapter had already booked its waits minutes ahead, and leaving
+     *  `sched` out there would mean the NEXT chapter's first wait could never
+     *  fire -- it would be scheduled past a cursor nothing will ever advance
+     *  that far. The player seeks straight afterwards on a jump; this makes a
+     *  bare cancel safe too. */
     cancel() {
       token++;
       frameCbs.clear();
       for (const waiter of waiters.splice(0)) fire(waiter);
+      sched = cursor;
     },
     dryStart() {
       dry = true;
@@ -257,7 +276,7 @@ export function startFilmLoop(clock) {
   const frame = (ts) => {
     if (!live) return;
     id = requestAnimationFrame(frame);
-    const dt = last ? ts - last : 0;
+    const dt = frameDelta(ts, last);
     last = ts;
     clock.advance(dt);
   };
