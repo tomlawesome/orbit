@@ -213,11 +213,13 @@ other two: it shortens the pipeline by axis, so a job still runs when its own
 axis asks for it. The two lanes below it are lists, and a job the list does not
 name does not run whatever its axis says.
 
-A lane is a merge-request economy and never a relaxation of the delivery gate.
-The `classify` job forces `full` on a push to `dev`, `preview`, `main` or
-`hotfix/*` and on the merge request into `main`, so everything that promotes
-still runs the whole pipeline. Everywhere else — every ordinary merge request
-included — the classifier decides, which is what #883 restored.
+A lane is a merge-request economy, whether or not the diff runs against the
+full gate. The `classify` job forces the *lane* to `full` on a push to `dev`,
+`preview`, `main` or `hotfix/*` and on the merge request into `main`, so a
+delivery push and a promotion always see every axis a job might ask for,
+never the narrow ignore/policy or CI-definition lists. Which jobs actually
+*run* is a separate question, decided per job by its own axis and, for the
+system-risk lane, by `orbit_full_gate` below.
 
 Nothing above can make a merge request run *more* than its diff asks for, and
 sometimes a change deserves the whole gate before it merges. The label
@@ -228,8 +230,61 @@ run on a small diff is never a mystery. Remove the label and the next pipeline
 is classified again.
 
 `scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
-those scripts are the acceptance stage's own checks, so a change to one is not
-exercised until it merges to `dev`, where every pipeline runs everything again.
+those scripts are the acceptance stage's own checks, so a change confined to
+the CI-definition lane's own merge request does not exercise them: that lane
+runs `fast`, `fast_docker`, `gitleaks` and `supply_chain_source` only, and
+skips the acceptance stage entirely. `scripts/ci/` matches no path in
+`classifyCiRisk`'s `fastPatterns`, `systemPatterns` or `integrationPatterns`,
+so it falls through to the function's catch-all default, `CI_RISK.SYSTEM`
+(`scripts/classify-changed-paths.mjs`) — the same default `.gitleaksignore`
+gets. That means a push to `dev` that changes a `scripts/ci/` file still
+carries `ORBIT_SYSTEM=true` and still reaches the jobs `.system_lane_gate`
+protects (`smoke` among them), even though `dev` no longer forces the full
+gate. A changed CI script is exercised on the push that changes it, not
+deferred to the next promotion.
+
+### Testing what changed on `dev`, and the full gate at promotion (#1078)
+
+Owner ruling, 2026-09-21: a push to `dev` tests what the push changed, the
+same as a merge request; the full suite — the catch-all sanity check against
+accidental drift — runs again in full only at the `dev -> preview` promotion.
+
+`.gitlab-ci.yml`'s `orbit_full_gate` names the events that run every
+`.system_lane_gate`-gated job (`smoke`, `smoke_local_only`, `acceptance`,
+`integration`, `build_image`, `repair_journeys`, `supply_chain_image`,
+`supply_chain_source`) whatever the diff holds: a push to `preview`, `main`
+or `hotfix/*` (`orbit_on_delivery_branch`), and the merge request into
+`preview` or `main` — the two promotion gates. A push to `dev` is no longer
+one of them, so these jobs now run on `dev` only when the pushed diff itself
+carries the relevant risk, exactly as they already did on an ordinary merge
+request. `fidelity` gates on `ORBIT_WEB` directly and never called
+`orbit_full_gate` even before #1078, so it is unaffected by this section;
+#1078 brought `smoke`'s click-through suite into the same shape by wrapping
+only its `scripts/test-frontend.sh` call in an `ORBIT_WEB` check — `smoke`'s
+runtime-property checks (`verify-health-endpoint.sh`,
+`verify-startup-banner.sh`, `verify-nonroot-runtime.sh`,
+`verify-privacy-boundary.sh`) stay unconditional, because they prove the
+image runs at all and every change can break that.
+
+The trade-off is accepted knowingly, not a side effect: a change that carries
+no web risk and no system risk by `classifyCiRisk`'s reckoning — for example a
+server route, a schema change, or a dependency bump that moves a rendered
+value without touching `web/` — is not caught on the `dev` push that
+introduces it. It is caught at the `dev -> preview` promotion, where
+`orbit_full_gate` now includes `preview` as a merge-request target, so every
+`.system_lane_gate`-gated job that the diff's own `ORBIT_LANE` reaches runs
+for real. That is later, and against whatever else has landed on `dev`
+since, so unpicking it costs more than it would have on the merge request. A
+reader meeting a red `dev -> preview` promotion should expect this, not
+treat it as a surprise.
+
+`orbit_full_gate` answering yes does not by itself widen `ORBIT_LANE`: that
+is `classify`'s own decision, forced to `full` for a push to any delivery
+branch or a merge request into `main`, but — as of this writing — not yet
+for a merge request into `preview`. A `dev -> preview` promotion whose entire
+diff happens to fall inside the CI-definition or ignore/policy lane's narrow
+file set would still have those jobs skipped by `orbit_lane_admits` before
+`orbit_full_gate` is ever consulted. Tracked as #1092.
 
 ### Standing on an earlier run (#898)
 
@@ -245,10 +300,15 @@ identity file back, so the jobs after it get the bytes a real build would
 have given them.
 
 Three limits keep it from weakening the gate. Merge requests only — a pipeline
-on `dev`, `preview`, `main` or `hotfix/*` runs everything, every time.
-`.gitlab-ci.yml` is in every input set, so a change to the pipeline reruns the
-lot. And the proof is `ci-evidence/<job>.json`, written as the job's own last
-act and naming both its inputs and any older run it stood on, so a job that
+on `dev`, `preview`, `main` or `hotfix/*` never stands on an earlier run, so
+whatever a job's own gate admits it runs for real rather than reusing a
+possibly-stale verdict (#1078 changed what `dev` admits, not this). This is
+separate from `orbit_on_delivery_branch` above: `classify` decides reuse
+eligibility from `CI_PIPELINE_SOURCE` directly, without sourcing
+`.reach_helpers`. `.gitlab-ci.yml` is in every input set, so a change to the
+pipeline reruns the lot. And the proof is `ci-evidence/<job>.json`, written as
+the job's own last act and naming both its inputs and any older run it stood
+on, so a job that
 skipped itself leaves nothing and is never reused. The lookup reads the API
 with `BASE_REPIN_TOKEN`; an unset token, an unreachable API or an expired
 artefact is logged and read as "no reuse", which reruns the job.

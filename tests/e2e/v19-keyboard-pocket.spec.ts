@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import {
   auditLightDismiss,
@@ -86,6 +87,23 @@ async function signIn(page: Page, returnTo: string) {
   await page.getByRole("link", { name: READER() }).click();
   /* #1080: waits for the session, then holds administrator access. */
   await ensureWorkerAdministrator(page);
+    /* #1096: every test in this file signs in when the instance holds no
+     household at all -- the #1077 reset above puts the database back to a
+     seed that has none, and each test cleans its own away -- so
+     hooks.server.js sends the returnTo to `/` instead of to `/home`
+     (web/src/hooks.server.js, the `!session.activeHouseholdId` branch). `/`
+     is the arrival, and Arrival.svelte's `decide()` reads the workspace and
+     hands a reader with somewhere onward to /home with `location.replace`.
+     `seedHousehold` below turns that decision ONWARD while the read is still
+     in flight, so the replace cancels the `page.goto("/home")` the caller
+     makes a beat later: Chromium reports the cancelled one as
+     `net::ERR_ABORTED`, naming the navigation rather than the redirect that
+     killed it. Three CI sightings (pipelines 907, 1275 and 1491) all show the
+     same two /home document requests milliseconds apart, the aborted one
+     Playwright's and the survivor carrying `Referer: /`. `settleArrival`
+     waits for the arrival's decision to land first, which is the fix 72d8efd0
+     made for #840 everywhere else and missed here and in the desktop twin. */
+  await settleArrival(page);
 }
 
 /**

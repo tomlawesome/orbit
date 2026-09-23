@@ -315,13 +315,17 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
 
   // The suggestion is on home, from the real pipe.
   await page.goto("/home");
-  /* The member's first landing on a fresh stack gets the first-run tour,
-     and the dimmed page behind it is inert (#844) — a reader has to skip
-     the walk before tapping anything, so this test does too. */
-  const tour = page.locator(".tourcard");
-  if (await tour.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) {
-    await page.locator("#tour-skip").click();
-    await expect(tour).toHaveCount(0);
+  /* The member's first landing on a fresh stack gets the first-run film,
+     and the veiled page behind it is inert (#844) — a reader has to stop
+     the film before tapping anything, so this test does too. */
+  const transport = page.locator("#orbit-tour-transport");
+  if (await transport.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) {
+    await page.keyboard.press("Escape");
+    /* Esc -> player.stop() clears the veil synchronously; the pill itself
+       lingers as a low-opacity ghost until the film unmounts, so the veil
+       is what actually says the screen underneath is free (see
+       keyboard.ts's `dismissTourIfShown`). */
+    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   }
   const row = page.locator(".item.suggest").first();
   await expect(row).toBeVisible({ timeout: 30_000 });
