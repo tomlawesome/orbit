@@ -76,7 +76,7 @@ const logged = [];
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "orbit-reuse-"));
   envFile = join(directory, "reuse.env");
-  writeFileSync(envFile, `ORBIT_INPUTS_SMOKE=${HASH}\nORBIT_INPUTS_BUILD_IMAGE=${HASH}\n`);
+  writeFileSync(envFile, `ORBIT_INPUTS_SMOKE=${HASH}\nORBIT_INPUTS_FIDELITY=${HASH}\n`);
   logged.length = 0;
 });
 
@@ -158,12 +158,12 @@ describe("reuse lookup", () => {
   it("follows a reused run back to the job that really did the work", async () => {
     await start({
       pipelines: [
-        { id: 299, jobs: [{ id: 9100, name: "build_image", status: "success" }] },
-        { id: 250, jobs: [{ id: 8000, name: "build_image", status: "success" }] },
+        { id: 299, jobs: [{ id: 9100, name: "fidelity", status: "success" }] },
+        { id: 250, jobs: [{ id: 8000, name: "fidelity", status: "success" }] },
       ],
       evidence: {
         9100: {
-          build_image: {
+          fidelity: {
             inputs: HASH, pipeline: 299, job_id: 9100, stands_on: 8000, stands_on_pipeline: 250,
           },
         },
@@ -172,9 +172,9 @@ describe("reuse lookup", () => {
 
     await run({ env: environment(), envFile, log });
 
-    // 8000, not 9100: 9100 stood on it, and it is 8000 that holds the image.
-    expect(emitted()).toContain("ORBIT_REUSE_BUILD_IMAGE=8000");
-    expect(emitted()).toContain("ORBIT_REUSE_BUILD_IMAGE_PIPELINE=250");
+    // 8000, not 9100: 9100 stood on it, and 8000 is the run that did the work.
+    expect(emitted()).toContain("ORBIT_REUSE_FIDELITY=8000");
+    expect(emitted()).toContain("ORBIT_REUSE_FIDELITY_PIPELINE=250");
   });
 
   it("keeps looking through older pipelines for a job the newest one did not run", async () => {
