@@ -231,27 +231,49 @@ is classified again.
 those scripts are the acceptance stage's own checks, so a change to one is not
 exercised until it merges to `dev`, where every pipeline runs everything again.
 
-### Standing on an earlier run (#898)
+### Standing on an earlier run (#898, ADR-0028)
 
-A fix pushed after one red job used to rerun every job that had already passed.
-Now `classify` hashes what each job reads (`scripts/ci/job-inputs.json`) and
-looks through the same merge request's earlier pipelines for a run of that job
-that passed on the same hash. Where it finds one the job says which run it
-stands on and stops; where it does not, it runs. Eleven jobs can do this:
-`fast`, `fast_docker`, `integration`, `fidelity`, `build_image`, `smoke`,
-`acceptance`, `repair_journeys`, `supply_chain_image`, `sidecar_images` and
-`launcher_install_compat`. A reused `build_image` fetches the image and its
-identity file back, so the jobs after it get the bytes a real build would
-have given them.
+A fix pushed after one red job used to rerun every job that had already
+passed. Now each job's reuse key is one SHA-256 over three axes: the checkout
+minus that job's deny-list (`scripts/ci/job-inputs.json` — what the job
+provably does not read, not what it is guessed to read), the CI definition
+(`.gitlab-ci.yml` and `scripts/ci/**`, so a pipeline change reruns
+everything), and, for the six jobs that test the image (`smoke`,
+`smoke_local_only`, `acceptance`, `repair_journeys`,
+`launcher_install_compat`, `supply_chain_image`), the image's content ID.
+`fidelity` has no artefact axis — it is keyed on the whole checkout, a
+deliberate simplification rather than hashing the built `web/build` site.
 
-Three limits keep it from weakening the gate. Merge requests only — a pipeline
-on `dev`, `preview`, `main` or `hotfix/*` runs everything, every time.
-`.gitlab-ci.yml` is in every input set, so a change to the pipeline reruns the
-lot. And the proof is `ci-evidence/<job>.json`, written as the job's own last
-act and naming both its inputs and any older run it stood on, so a job that
-skipped itself leaves nothing and is never reused. The lookup reads the API
-with `BASE_REPIN_TOKEN`; an unset token, an unreachable API or an expired
-artefact is logged and read as "no reuse", which reruns the job.
+`build_image` always builds — it no longer skips — and, once the build
+finishes, always computes the content ID: a SHA-256 over the runner image's
+ordered layer content hashes, excluding the final per-commit stamp layer
+(`scripts/ci/image-content-id.sh`). `classify` computes and looks up the
+evidence for the five source-keyed jobs (`fast`, `fast_docker`, `integration`,
+`fidelity`, `sidecar_images`) before anything is built; `build_image`
+finishes the six image jobs' keys once it has the content ID and looks those
+up too (`scripts/ci/reuse-lookup.mjs`). Where a lookup finds a passing run on
+the same key, the job stands on it and stops; where it does not, it runs.
+`build_image` itself is not a reuse candidate — it is not in
+`job-inputs.json`, and it always builds.
+
+The lookup walks the project's 20 most recent pipelines on any ref, newest
+first, not only this merge request's own — a pass on `dev` or another branch
+against the same content counts. It believes evidence up to seven days old,
+from the job's `finished_at`, matching ADR-0020's publication rule. Delivery
+pipelines (`dev`, `preview`, `main`, `hotfix/*`) never consume evidence, only
+record it, so a flaky pass can carry a merge request no further than the next
+full run. The proof is `ci-evidence/<job>.json`, written as the job's own
+last script line and naming the key and any older run it stood on, so a job
+that skipped itself leaves nothing and is never reused; a missing or
+malformed artefact, or any lookup failure, reads as "no reuse".
+
+Two ways to force a rerun regardless: the merge-request label `ci: rerun`,
+and `ORBIT_REUSE=off` on a pipeline started by hand. The lookup reads the
+API with `ORBIT_REUSE_TOKEN`, a read-only, unprotected credential the owner
+created on 2026-09-23 for exactly this; `BASE_REPIN_TOKEN` is a fallback but
+has been protected since #1084, so it is absent from merge-request
+pipelines. Without a usable token every merge-request verdict is "runs" —
+the safe direction.
 
 `fast` (#950, owner ruling on #923 rec 15a, 2026-09-09) is the docker-free
 part of what used to be one job: type-check, lint, the coverage-bearing
