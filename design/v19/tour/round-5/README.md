@@ -156,3 +156,25 @@ belt, and no such control exists — the real screen steps on `ArrowLeft` /
 `ArrowRight` only, and `← sooner` / `later →` are inert SVG labels. Filed as
 **#1062**. Round 6 removes the invented control; what replaces it depends on
 that issue's answer.
+
+## Third correction, 2026-09-22 (owner)
+
+Chapter 5 said **"At a month out it warms, and Orbit reminds you — 21 and 7
+days before."** No such schedule exists. The product's defaults are 14 and 3
+(`DEFAULT_FIRST_WARNING_DAYS` / `DEFAULT_FINAL_WARNING_DAYS`,
+`src/lib/preferences.ts:101-102`), and the create form offers 1 week, 2 weeks
+or 1 month — so the line promised a cadence the reader would never see, and
+naming any pair would go stale the moment a default moved or the reader
+changed theirs.
+
+Asked to choose between correcting the line and changing the defaults, the
+owner chose neither number: *"Just skip the numbers and say it reminds you"*.
+The line is now **"At a month out it warms, and Orbit reminds you."**
+
+The toast beneath it carried the same claim and loses it the same way:
+`T−16D · 29 AUG · REMINDER SENT 21 DAYS BEFORE` becomes
+`T−16D · 29 AUG · REMINDER SENT`.
+
+Found while mapping the twelve chapters onto the real UI for the build
+(#866). Round 4's copy still carries the old line; it is the previous round's
+record and is left as it was, as the earlier corrections left it.

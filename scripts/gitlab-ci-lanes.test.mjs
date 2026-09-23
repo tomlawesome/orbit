@@ -206,6 +206,25 @@ describe("pipeline lanes", () => {
    * request could only ever be made cheaper; `ci: acceptance` is how one asks
    * for the whole pipeline back.
    */
+  /**
+   * #1092, found while building #1078: `orbit_lane_admits` is consulted before
+   * `orbit_full_gate` is ever reached, so a promotion sitting in a narrow lane
+   * would skip the acceptance stage however emphatically the full gate said
+   * yes. That was survivable while a `dev` push ran everything. #1078 moved
+   * that catch-all onto this promotion, so a promotion that can still skip is
+   * the one thing it cannot afford.
+   *
+   * Asserted against the lane the classifier actually emits, not against a
+   * handed-in `ORBIT_LANE: "full"` -- the gate tests below assume the lane is
+   * already full, which is precisely the assumption that was wrong.
+   */
+  it("collapses the lane to full on both promotions, even on a narrow diff", () => {
+    for (const target of ["preview", "main"]) {
+      const { variables } = runClassifyEnv({ CI_MERGE_REQUEST_TARGET_BRANCH_NAME: target });
+      expect(variables.ORBIT_LANE, `${target}: a promotion must not sit in a narrow lane`).toBe("full");
+    }
+  });
+
   it("leaves the classifier's verdict alone without the label", () => {
     for (const labels of [undefined, "", "bug,area: ci", "ci: acceptance-later", "ci"]) {
       const { variables, stdout } = runClassifyEnv(
@@ -255,10 +274,89 @@ describe("pipeline lanes", () => {
   it("hands the lane on from classify as a dotenv variable", () => {
     const classify = allBlocks.get("classify");
     expect(classify).toMatch(/printf 'ORBIT_LANE=%s\\n' "\$lane" >> classify\.env/u);
-    // A lane is a merge-request economy: every delivery push and the merge
-    // request into `main` collapse it to `full` and run everything.
+    // A lane is a merge-request economy: every delivery push and both
+    // promotions collapse it to `full` and run everything. `preview` joined
+    // `main` on #1092, because #1078 made that promotion the catch-all.
     expect(classify).toMatch(/dev \| preview \| main \| hotfix\/\*\) lane=full ;;/u);
-    expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" = "main" \]/u);
+    expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" in\n\s+preview \| main\) lane=full ;;/u);
+  });
+});
+
+// #1078 (owner ruling 2026-09-21): a push to `dev` now tests what the push
+// changed, and the full gate -- the catch-all sanity check against accidental
+// drift -- moves to the dev -> preview merge request. These run the real
+// `.reach_helpers` and `.system_lane_gate` shell against a synthetic event,
+// the same way `runClassifyEnv` above runs `classify`'s own shell: read, not
+// re-implemented, so a change to the real gate is what these see.
+function hiddenBlockScript(name) {
+  return allBlocks
+    .get(name)
+    .split("\n")
+    .slice(1) // drop the "<name>: &<anchor> |" header line
+    .map((line) => line.replace(/^ {2}/u, ""))
+    .join("\n");
+}
+
+// Ends with a marker so a run that falls through the gate (rather than
+// hitting its own `exit 0`) is distinguishable from one that never reached
+// the marker for some unrelated reason.
+function runSystemLaneGate(environment = {}) {
+  const script = `${hiddenBlockScript(".reach_helpers")}\n${hiddenBlockScript(".system_lane_gate")}\necho REACHED_AFTER_GATE`;
+  return execFileSync("sh", ["-c", script], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, ...environment },
+  });
+}
+
+describe("orbit_on_delivery_branch / orbit_full_gate / .system_lane_gate (#1078)", () => {
+  it("no longer treats a push to dev as the full gate", () => {
+    const stdout = runSystemLaneGate({ CI_COMMIT_BRANCH: "dev", ORBIT_LANE: "full", ORBIT_SYSTEM: "false" });
+    expect(stdout).toContain("skipped: no system-risk change");
+    expect(stdout).not.toContain("REACHED_AFTER_GATE");
+  });
+
+  it("still runs the system lane on a dev push that carries system risk", () => {
+    const stdout = runSystemLaneGate({ CI_COMMIT_BRANCH: "dev", ORBIT_LANE: "full", ORBIT_SYSTEM: "true" });
+    expect(stdout).not.toContain("skipped");
+    expect(stdout).toContain("REACHED_AFTER_GATE");
+  });
+
+  it("still runs the system lane unconditionally on preview, main and hotfix pushes", () => {
+    for (const branch of ["preview", "main", "hotfix/x"]) {
+      const stdout = runSystemLaneGate({ CI_COMMIT_BRANCH: branch, ORBIT_LANE: "full", ORBIT_SYSTEM: "false" });
+      expect(stdout, branch).not.toContain("skipped");
+      expect(stdout, branch).toContain("REACHED_AFTER_GATE");
+    }
+  });
+
+  it("runs the full gate on the dev -> preview merge request, whatever the diff holds", () => {
+    const stdout = runSystemLaneGate({
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview",
+      ORBIT_LANE: "full",
+      ORBIT_SYSTEM: "false",
+    });
+    expect(stdout).not.toContain("skipped");
+    expect(stdout).toContain("REACHED_AFTER_GATE");
+  });
+
+  it("still runs the full gate on the preview -> main merge request", () => {
+    const stdout = runSystemLaneGate({
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main",
+      ORBIT_LANE: "full",
+      ORBIT_SYSTEM: "false",
+    });
+    expect(stdout).not.toContain("skipped");
+    expect(stdout).toContain("REACHED_AFTER_GATE");
+  });
+
+  it("skips an ordinary merge request with no system risk, same as before", () => {
+    const stdout = runSystemLaneGate({
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "dev",
+      ORBIT_LANE: "full",
+      ORBIT_SYSTEM: "false",
+    });
+    expect(stdout).toContain("skipped: no system-risk change");
+    expect(stdout).not.toContain("REACHED_AFTER_GATE");
   });
 });
 

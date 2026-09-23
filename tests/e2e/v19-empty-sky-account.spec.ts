@@ -79,20 +79,23 @@ async function arriveAdrift(page: Page, browser: Browser, account: string) {
 /**
  * The launch flight, then the moment home can answer.
  *
- * Not support/keyboard.ts's `dismissTourIfShown`: that one WAITS for the tour
- * card whenever the reader's record says they have never taken the tour, and
- * the empty sky never draws it — the tour walks the dial, and an adrift
- * reader has no dial. Waiting for it here timed out at 60s on both dialects
- * before the sky's own screen was ever touched. Escape it if it is there and
- * carry on if it is not.
+ * Not support/keyboard.ts's `dismissTourIfShown`: that one WAITS for the
+ * film's transport whenever the reader's record says they have never taken
+ * the tour, and the empty sky never draws it — the tour walks the dial, and
+ * an adrift reader has no dial (trigger.js's `hasHousehold` gate). Waiting
+ * for it here timed out at 60s on both dialects before the sky's own screen
+ * was ever touched. Escape it if it is there and carry on if it is not.
  */
 async function settleEmptySky(page: Page) {
   await page.waitForFunction(() => !document.body.classList.contains("launching"), null, { timeout: 60_000 });
   await homeIsLive(page);
-  const tour = page.locator(".tourcard");
-  if (await tour.isVisible()) {
+  const transport = page.locator("#orbit-tour-transport");
+  if (await transport.isVisible()) {
     await page.keyboard.press("Escape");
-    await expect(tour).toBeHidden();
+    /* Esc -> player.stop() clears the veil synchronously; the pill lingers
+       as a low-opacity ghost until the film unmounts, so the veil is what
+       actually says the screen underneath is free (see keyboard.ts). */
+    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   }
 }
 
