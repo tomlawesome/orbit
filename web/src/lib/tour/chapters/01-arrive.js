@@ -38,8 +38,12 @@ export const SELECTORS = Object.freeze({
   dial: ".dial",
   /** This household's own sun, at the centre of the chart. */
   sun: ".sun-link",
-  /** The other households' suns, out in the rest of the sky. */
-  others: ".minisys",
+  /** The other households' systems, out in the rest of the sky: each
+   *  one's own 40px ring (`.msring`, home.behaviour.js), not the whole
+   *  `.minisys` group, whose box takes in the label and its leader above
+   *  the ring and so rings as a wide ellipse (#866, seen in the #1098
+   *  frames). The mockup rings the system. */
+  others: ".minisys .msring",
 });
 
 /** @type {import("./index.js").Chapter} */

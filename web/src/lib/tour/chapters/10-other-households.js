@@ -51,9 +51,10 @@
  * home's real markup.
  */
 export const SELECTORS = Object.freeze({
-  /** The nearest other household's own sun — the same real element chapter
-   *  1 calls `others`, matched singly and optionally. */
-  other: ".minisys",
+  /** The nearest other household's own system ring — the same real element
+   *  chapter 1 calls `others`, matched singly and optionally. The ring, not
+   *  the `.minisys` group: see chapter 1's note on the label in the box. */
+  other: ".minisys .msring",
 });
 
 /** @type {import("./index.js").Chapter} */
