@@ -78,6 +78,13 @@ pipeline and playing a manual job are refused by the safety hook here, on top
 of the refusals the gitlab-first-migration skill lists.
 `dev`, `preview` and `main` all take push "No one", merge "Maintainers".
 
+A job whose composite key already passed elsewhere stands on that run
+instead of repeating it (ADR-0028; `docs/quality-strategy.md`'s "Standing on
+an earlier run" has the mechanism, `scripts/ci/job-inputs.json` and
+`scripts/ci/reuse-lookup.mjs` the detail). Label the merge request
+`ci: rerun`, or start the pipeline with `ORBIT_REUSE=off`, to force
+everything to run regardless.
+
 Two runners serve this project, both on the host `gitlab-runners` (32 cores,
 48 GB): the shared group runner, and runner 8, a privileged project runner
 owned by `ai/orbit` and tagged `orbit-build`, that everything needing a
@@ -203,6 +210,10 @@ Check the list before building a test rig or handing a check to the owner.
   crash on the production build (#782); `pnpm --filter orbit-web
   repro:782` drives the real crash against throwaway fixtures in
   `web/tests/rolldown-repro/` (slow, not wired into the fast suite)
+- `scripts/ci/prove-content-id.sh` — ADR-0028 section 6's proof (#1060 slice
+  2): three image builds showing that the same tree on two commits gives one
+  image content ID and that a changed `src/` file gives another. By hand or as
+  a manual job, never in an ordinary pipeline — it builds the image three times
 - `scripts/ci/repin-base-image.sh` — base image freshness (#708): compares
   the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact
   and, on a mismatch, re-pins every location and opens a merge request;
