@@ -303,6 +303,10 @@ test.describe("the signed-in v19 sweep", () => {
   // arrival on this reader, in this file or another, does not meet an
   // unexpected walk.
   test("/home first-run tour overlay has no automated WCAG A/AA violations", async ({ page }) => {
+    /* The film has no pocket cut (§24): a phone mounts no transport at all,
+       so there is nothing for this sweep to visit there (v19-tour.spec.ts
+       skips the same way). */
+    test.skip(test.info().project.name.startsWith("mobile"), "the film is desk-only (owner-decisions.md §24)");
     await signIn(page, "/home");
     await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
     const headers = { ...(await sessionHeaders(page)), "content-type": "application/json" };
