@@ -511,6 +511,10 @@ variables:
     # are listed in renovate.json's docker rule; Renovate offers the next
     # release as usual, and record_image on that bump is the proof.
     - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659
+      # GitLab derives a service's hostname from its image name; through the
+      # proxy that name is the whole prefix path, not "docker", and every
+      # `tcp://docker:2375` below stops resolving (pipeline 1512, #1022).
+      alias: docker
       pull_policy: if-not-present
   variables:
     DOCKER_HOST: tcp://docker:2375
