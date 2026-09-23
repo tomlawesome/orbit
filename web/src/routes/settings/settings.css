@@ -102,6 +102,11 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
       color:var(--accent-text);background:none;border:0;padding:0;cursor:pointer;
       text-align:left}
 .helm-page .relaunch:hover{text-decoration:underline}
+/* The film (#866) has no pocket cut yet (#1083, deferred to M14), so on a
+ * phone this button would appear to do nothing. Hidden below the same
+ * 901px cut home uses (CON-10) until #1083 ships; flip this rule to bring
+ * it back. */
+@media (max-width:900px){.helm-page .relaunch{display:none}}
 
 .helm-page .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
     font:11.5px var(--mono);color:var(--ink-mid);padding:9px 2px;
