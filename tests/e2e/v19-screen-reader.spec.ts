@@ -342,6 +342,22 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await expect(page.getByRole("button", { name: /Play|Pause/ })).toHaveAccessibleName(/\S/);
     await expect(page.getByRole("button", { name: "Stop" })).toHaveAccessibleName(/\S/);
 
+    // #1097 (round 7): the film is not narrated -- a screen reader gets its
+    // script instead, twelve headings deep, plus one announcement when the
+    // film starts. Both live inside the transport, visually hidden, never
+    // `aria-hidden` (design/v19/tour/round-7/README.md).
+    const script = transport.getByRole("region", { name: "Tour script" });
+    await expect(script).toHaveCount(1);
+    await expect(script.locator("h3")).toHaveCount(12);
+
+    const status = transport.getByRole("status");
+    await expect(status).toHaveCount(1);
+    await expect(status).toHaveText(
+      "Orbit's tour is playing on screen: a short film over your own sky, "
+      + "with a transport at the bottom. Press Escape to stop it. The full "
+      + 'script is in the tour transport, under "Tour script".',
+    );
+
     await writeSnapshot(page, testInfo, "tour-overlay");
 
     // Ends the walk so the record is left taken, as every other spec expects.

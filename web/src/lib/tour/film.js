@@ -17,7 +17,9 @@
  * chapter starts, `window.__reading` for what the clock and the label say,
  * and `__jump` / `__stop` / `__pause` / `__play` to work the transport
  * without a mouse. They are the same names the mockup exposes, so the same
- * check can be pointed at the product.
+ * check can be pointed at the product. `window.__script` is round 7's own
+ * addition, the mockup having no script to expose: every chapter's
+ * transcript, so the same check can read what a screen reader gets.
  */
 import { createClock } from "./clock.js";
 import { CHAPTERS } from "./chapters/index.js";
@@ -70,6 +72,9 @@ export function createFilm({
     hooks.__total = total;
     hooks.__offsets = offsets.slice();
     hooks.__chapters = chapters.map((one, k) => ({ id: one.id, name: one.name, at: offsets[k] }));
+    /* Round 7 (#1097): the script every chapter plays, so the design host's
+       own headless check can read it the same way it reads __chapters. */
+    hooks.__script = player.script();
     hooks.__jump = player.jump;
     hooks.__stop = player.stop;
     hooks.__pause = () => player.setPlaying(false);

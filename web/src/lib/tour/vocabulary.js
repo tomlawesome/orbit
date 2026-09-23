@@ -245,6 +245,14 @@ export function createFilmContext({
   let veiled = false;
   let unsubscribe = () => {};
 
+  /** The current run's transcript (round 7, #1097): every non-label
+   *  `callout` text, in the order it was spoken, collected while the clock
+   *  is dry. The player resets this before each chapter's measuring pass
+   *  and reads it back after, so the script the transport draws is the
+   *  same words the chapter itself plays — never a second copy to forget.
+   *  @type {string[]} */
+  let transcriptLines = [];
+
   const dry = () => clock.dry();
   const still = () => clock.reduced();
 
@@ -262,6 +270,12 @@ export function createFilmContext({
     if (layer && layer.isConnected) return layer;
     layer = doc.createElement("div");
     layer.id = CHROME_ID;
+    /* The words this layer carries live in the script region instead
+       (round 7, design/v19/tour/round-7/README.md): a callout is a picture
+       that changes on a clock, and a virtual cursor that finds one mid-fade
+       has no way to get it back. The script gives a reader every line at
+       their own pace, so the layer stays out of the tree rather than
+       becoming a trap. */
     layer.setAttribute("aria-hidden", "true");
     layer.style.cssText = [
       "position:fixed",
@@ -983,6 +997,12 @@ export function createFilmContext({
    */
   async function callout(text, anchor, side, o = {}) {
     dropCallout();
+    /* Round 7: a line is a callout without `label: true` -- the small
+       uppercase tags the film pins on lanes and papers are the picture
+       naming a part, which a sentence beside it already says, so they are
+       not read into the script. Recorded only while dry: this is the
+       player's measuring pass, run once per chapter before a frame plays. */
+    if (dry() && !o.label) transcriptLines.push(text);
     await clock.w(T.calloutIn);
     if (!dry()) {
       const pt = Array.isArray(anchor)
@@ -1121,6 +1141,9 @@ export function createFilmContext({
     /* measurement, exposed for the chapters that need to place something */
     boxOf,
     lit: () => litControls.slice(),
+    /* the script (round 7, #1097): read by player.js's measure() */
+    transcript: () => transcriptLines.slice(),
+    resetTranscript: () => { transcriptLines = []; },
   };
 }
 
