@@ -203,6 +203,10 @@ Check the list before building a test rig or handing a check to the owner.
   crash on the production build (#782); `pnpm --filter orbit-web
   repro:782` drives the real crash against throwaway fixtures in
   `web/tests/rolldown-repro/` (slow, not wired into the fast suite)
+- `scripts/ci/prove-content-id.sh` — ADR-0028 section 6's proof (#1060 slice
+  2): three image builds showing that the same tree on two commits gives one
+  image content ID and that a changed `src/` file gives another. By hand or as
+  a manual job, never in an ordinary pipeline — it builds the image three times
 - `scripts/ci/repin-base-image.sh` — base image freshness (#708): compares
   the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact
   and, on a mismatch, re-pins every location and opens a merge request;
