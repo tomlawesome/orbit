@@ -660,6 +660,11 @@ push_repo="$(mktemp -d)"
 push_home="$(mktemp -d)"
 _scratch_dirs+=("$push_repo" "$push_home")
 git init -q "$push_repo"
+# The checkout is a shallow clone (GIT_DEPTH), and a push out of one is a
+# "shallow update" the receiving side refuses by default -- pipeline 1553.
+# Allowing it makes the scratch repository shallow at the same boundary,
+# which the onward push does not mind: GitLab already holds that history.
+git -C "$push_repo" config receive.shallowUpdate true
 # Pushed from the checkout into the scratch repository, not fetched out of
 # it: a fetch runs upload-pack inside "$repo_dir/.git", and git's ownership
 # check matches that path against the `safe.directory` the pipeline sets
