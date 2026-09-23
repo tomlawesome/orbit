@@ -49,7 +49,7 @@
  * this layer's z-index, not through a hole in it.
  */
 
-const OPACITY = 0.62;
+export const OPACITY = 0.62;
 const FADE_MS = 450;
 /** Above every routed page's own chrome (the highest z-index any route.css
  *  declares is 12, `home.css`'s `.askveil`); tour chrome built on top of the
