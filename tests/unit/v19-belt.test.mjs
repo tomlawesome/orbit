@@ -383,14 +383,38 @@ describe("stepping and arriving", () => {
   const sel = at("i-mot");
   const bloom = bloomTargetsOf(BODIES, sel, MANIFEST.length);
 
-  it("steps in date order, over the papers that are out", () => {
-    expect(BODIES[stepFrom(BODIES, sel, bloom, -1)].id).toBe("d-mot-cert");
-    expect(BODIES[stepFrom(BODIES, sel, bloom, 1)].id).toBe("d-mot-history");
-    // The far end's papers are folded away, so the step passes over them.
+  /* #1094, owner 2026-09-23: a step moves ITEM to ITEM and never lands on a
+     paper. It used to step over the papers that were out, which meant `later
+     ->` moved the belt when the next body was an item and opened a reading
+     card when it was a paper (#1088 routes a doc to `openDoc`, because §18
+     says a document is never the centred body) -- one control doing two jobs,
+     with nothing on screen to say which you would get. */
+  it("steps item to item in date order, never onto a paper", () => {
+    // i-mot's own papers ARE out either side of it, and are still skipped.
+    expect(bloom[1]).toBe(1);
+    expect(BODIES[stepFrom(BODIES, sel, bloom, -1)].id).toBe("i-gutter");
+    expect(BODIES[stepFrom(BODIES, sel, bloom, 1)].id).toBe("i-boiler");
+    // Every landing is an item, from every seat, in both directions.
+    for (const from of MANIFEST.map((row) => at(row.id))) {
+      for (const d of [-1, 1]) {
+        const next = stepFrom(BODIES, from, bloom, d);
+        if (next >= 0) expect(BODIES[next].kind).toBe("item");
+      }
+    }
+    // The far end's papers are folded away, and are skipped for that reason
+    // as well as this one.
     expect(BODIES[stepFrom(BODIES, at("i-smoke"), bloom, 1)].id).toBe("i-svc");
     // And the ends of the belt are ends: there is nowhere further to go.
     expect(stepFrom(BODIES, 0, bloom, -1)).toBe(-1);
     expect(stepFrom(BODIES, at("i-svc"), bloom, 1)).toBe(-1);
+  });
+
+  /* A paper is still reached -- by pressing it, or by Tab and Enter, since
+     every seat is a role="button" tabindex="0" with its own accessible name.
+     Skipping them in the step costs a keyboard reader nothing. */
+  it("leaves a bloomed paper reachable, just not by stepping", () => {
+    expect(reachableAt(BODIES, at("d-mot-cert"), bloom)).toBe(true);
+    expect(BODIES[at("d-mot-cert")].kind).toBe("doc");
   });
 
   it("lands a deep arrival on its item, papers out, berth wide", () => {

@@ -771,15 +771,32 @@ export function nearestMatchOf(bodies, matches, selected, bloom) {
 }
 
 /** ← and → step through the belt in date order, which is its whole grammar —
- *  over the papers too, when they are out.
+ *  **over items only, never onto a paper** (#1094, owner 2026-09-23).
+ *
+ * A step has to land on something that can be centred, and a document never
+ * is (`design/owner-decisions.md` §18). Stepping over the papers as well, as
+ * this used to, left one control doing two unrelated jobs: `later →` moved
+ * the belt when the next body was an item and opened a reading card when it
+ * was a paper, with nothing on screen to say which you would get. #1062's
+ * whole point is that the end-caps say what they do, so a button labelled
+ * "later" always moves you later.
+ *
+ * A paper is still reached by pressing it — by pointer, or by Tab and Enter,
+ * since every seat is a `role="button" tabindex="0"` with its own accessible
+ * name. Skipping them here costs a keyboard reader nothing.
+ *
+ * `bloom` is no longer read: it only ever gated papers, and papers are now
+ * excluded outright. It stays in the signature because the end-cap's
+ * disabled state calls this with `bloomTo` mid-roll (belt.behaviour.js), and
+ * a caller that must pass one is a caller that cannot silently drift.
  *
  * @param   {Body[]}   bodies
  * @param   {number}   selected
- * @param   {number[]} bloom
+ * @param   {number[]} _bloom  unused; see above
  * @param   {number}   d       -1 for ←, +1 for →
  * @returns {number}   the seat to centre, or -1 at the end of the belt */
-export function stepFrom(bodies, selected, bloom, d) {
-  const order = bodies.map((_, i) => i).filter((i) => reachableAt(bodies, i, bloom));
+export function stepFrom(bodies, selected, _bloom, d) {
+  const order = bodies.map((_, i) => i).filter((i) => bodies[i].kind !== "doc");
   const at = order.indexOf(selected);
   return order[at + d] ?? -1;
 }
