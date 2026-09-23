@@ -3,9 +3,13 @@
  *
  * The ratified mockup (design/v19/tour/round-5/f-one-take.html) writes its
  * twelve chapters in a small, fixed set of words: `setBg`, `veil`, `ctl`,
- * `mkHl`, `mkCut`, `goto`, `press`, `tap`, `unlight`, `callout`, `travel`.
- * This module is those words again, against the real product. A reader can
- * hold the mockup beside a chapter file here and follow both.
+ * `mkHl`, `mkCut`, `goto`, `press`, `tap`, `typeInto`, `unlight`, `callout`,
+ * `travel`. This module is those words again, against the real product. A
+ * reader can hold the mockup beside a chapter file here and follow both.
+ *
+ * `wear` is the one word here the mockup has no name for: it drove its dawn
+ * chapter off a `dawnPack` flag that picked a different screenshot. The
+ * product has real packs, so the film wears one — and takes it off again.
  *
  * THE WHOLE TRANSLATION, in one line: the mockup drives background PNGs at
  * hard-coded pixel coordinates; the product drives real routes and real DOM
@@ -423,6 +427,8 @@ export function createFilmContext({
   async function setScreen(route) {
     if (dry()) return;
     if (routeOf() === route) return;
+    /* The fields the film typed over are about to leave with the screen. */
+    dropTyped();
     const release = clock.stall();
     try {
       await navigate(route);
@@ -657,6 +663,182 @@ export function createFilmContext({
     if (o.keep !== true) unlight(c);
   }
 
+  /* ---- typing (the mockup's typeInto) ----------------------------------- */
+
+  /** An opaque background to paint the typed line on: the field's own, or
+   *  the first ancestor that has one, so the ghost hides whatever the real
+   *  field is showing underneath (`#f-name` ships with "New Entry" in it, a
+   *  date input shows its own placeholder).
+   *  @param {Element} el */
+  function backdropOf(el) {
+    if (typeof window.getComputedStyle !== "function") return "var(--panel)";
+    /** @type {Element | null} */
+    let node = el;
+    while (node) {
+      const bg = window.getComputedStyle(node).backgroundColor;
+      if (bg && bg !== "transparent" && !/rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/u.test(bg)) return bg;
+      node = node.parentElement;
+    }
+    return "var(--panel)";
+  }
+
+  /** The film's own text, laid over one field and wearing that field's font.
+   *  @param {Element} el
+   *  @returns {{ line: HTMLSpanElement, caret: HTMLElement }} */
+  function ghostOver(el) {
+    const root = ensureChrome();
+    const box = boxOf([el]);
+    const style = typeof window.getComputedStyle === "function" ? window.getComputedStyle(el) : null;
+    const ghost = doc.createElement("div");
+    ghost.className = "tourfilm-typed";
+    ghost.style.cssText = [
+      "position:fixed",
+      `left:${box.x}px`,
+      `top:${box.y}px`,
+      `width:${box.w}px`,
+      `height:${box.h}px`,
+      "display:flex",
+      "align-items:center",
+      "box-sizing:border-box",
+      "overflow:hidden",
+      "white-space:pre",
+      "pointer-events:none",
+      `background:${backdropOf(el)}`,
+      `padding-left:${style?.paddingLeft || "0px"}`,
+      `padding-right:${style?.paddingRight || "0px"}`,
+      `font:${style?.font || "13.5px/1.45 var(--ui)"}`,
+      `color:${style?.color || "var(--ink)"}`,
+      `border-radius:${style?.borderRadius || "0px"}`,
+      `z-index:${Z_CHROME + 5}`,
+    ].join(";");
+    const line = doc.createElement("span");
+    const caret = doc.createElement("i");
+    caret.style.cssText = [
+      "display:inline-block",
+      "width:1.5px",
+      "height:1.05em",
+      "margin-left:1px",
+      "background:var(--accent)",
+      "vertical-align:text-bottom",
+    ].join(";");
+    ghost.append(line, caret);
+    root.appendChild(ghost);
+    return { line, caret };
+  }
+
+  /** Every ghost currently on the screen, so the film can take them off.
+   *  @type {HTMLElement[]} */
+  let ghosts = [];
+
+  /** Takes the typed text off the screen. The product never had it, so there
+   *  is nothing to put back — the ghosts simply go. */
+  function dropTyped() {
+    for (const ghost of ghosts) ghost.remove();
+    ghosts = [];
+  }
+
+  /**
+   * The mockup's `typeInto`: a string appears in a field one character per
+   * wait, so a pause stops it mid-word and playing on picks the word up
+   * where it was left. `T.typeLead` before the first character, `T.typeChar`
+   * between them — the two timings this module has always listed and nothing
+   * had spent.
+   *
+   * IT NEVER TOUCHES THE FIELD. The mockup types into a span it made up,
+   * because it has no product underneath. Here there IS a real input, and
+   * writing into it would be the one destructive thing the film does:
+   * `value` set behind Svelte's back, the app's own input handlers either
+   * fired or (worse) left out of step, and an entry half-filled for the
+   * reader when the credits roll. So the text is the film's own, painted on
+   * the chrome layer over the field's measured box in the field's own font —
+   * the same trick as the ring, which draws around an element rather than
+   * classing it. `clear()` takes the ghosts off with everything else, and a
+   * screen change drops them, because the fields they sat over are gone.
+   *
+   * @param {Control} c
+   * @param {string} text
+   * @param {{ mark?: string }} [o] a review mark, fired MID-STRING as the
+   *   mockup fires its own, so the held frame is a half-typed field
+   */
+  async function typeInto(c, text, o = {}) {
+    await clock.w(T.typeLead);
+    /* 55% in, verbatim from the mockup's `Math.floor(text.length * 0.55)`. */
+    const half = Math.floor(text.length * 0.55);
+    /** @type {{ line: HTMLSpanElement, caret: HTMLElement }[]} */
+    const written = [];
+    if (!dry() && c.els.length > 0) {
+      for (const el of c.els) {
+        const ghost = ghostOver(el);
+        ghosts.push(/** @type {HTMLElement} */ (ghost.line.parentElement));
+        written.push(ghost);
+      }
+      /* Reduced motion: the state arrives, it does not animate. The waits
+         below still run and still cost nothing, exactly as `w()` promises. */
+      if (still()) for (const { line } of written) line.textContent = text;
+    }
+    for (let k = 0; k < text.length; k++) {
+      if (!still()) for (const { line } of written) line.textContent = text.slice(0, k + 1);
+      if (o.mark && k === half) await mark(o.mark);
+      await clock.w(T.typeChar);
+    }
+    for (const { caret } of written) caret.remove();
+  }
+
+  /* ---- wearing a pack --------------------------------------------------- */
+
+  /** The theme the reader arrived in, remembered the first time the film
+   *  wears another one over it. `undefined` means the film is not wearing
+   *  anything; `null` means they arrived with no `data-theme` at all.
+   *  @type {string | null | undefined} */
+  let wornOver;
+
+  /** A swatch's title is the product's pack name with its spaces and hyphens
+   *  dropped — `packOf` in web/src/routes/home/swatches.js, the one line the
+   *  product's own click handler uses. Repeated rather than imported: the
+   *  tour is a lib and does not reach into a route's module.
+   *  @param {string} pack */
+  const packName = (pack) => pack.replace(/[\s-]/gu, "");
+
+  /**
+   * Wears a theme pack FOR THE FILM, and only for the film.
+   *
+   * The mockup had a `dawnPack` flag its slideshow read, because it was
+   * painting screenshots. The product wears a pack the way the product does:
+   * `document.documentElement.dataset.theme`, which re-skins every screen at
+   * once. What this word deliberately does NOT do is the rest of
+   * `setSwatch` (swatches.js) — no `localStorage["orbit-theme"]`, no server
+   * preference, no pressed-state rewrite on the swatches. Those are the
+   * reader's settings, and a film that changed them would leave the tour's
+   * one promise broken: the reader's own sky is untouched.
+   *
+   * So the pack they arrived in is remembered here and put back by `clear()`
+   * — which the player calls when the film ends, when the reader jumps, and
+   * when they press stop. A skip halfway through the dawn chapter therefore
+   * lands them back in their own sky, not in the film's.
+   *
+   * @param {string | null} pack a pack name or a swatch title; `null` puts
+   *   the reader's own back
+   */
+  function wear(pack) {
+    if (dry()) return;
+    const root = doc.documentElement;
+    if (wornOver === undefined) wornOver = root.dataset.theme ?? null;
+    if (pack === null) {
+      unwear();
+      return;
+    }
+    root.dataset.theme = packName(pack);
+  }
+
+  /** Puts the reader's own pack back, exactly as they arrived in it. */
+  function unwear() {
+    if (wornOver === undefined) return;
+    const root = doc.documentElement;
+    if (wornOver === null) delete root.dataset.theme;
+    else root.dataset.theme = wornOver;
+    wornOver = undefined;
+  }
+
   /* ---- the callout ------------------------------------------------------ */
 
   /**
@@ -821,8 +1003,11 @@ export function createFilmContext({
     }
     filmAnims.clear();
     if (live) { live.remove(); live = null; }
+    dropTyped();
+    /* The reader's own sky, back — before anything else can be jumped to. */
+    unwear();
     if (layer) {
-      for (const stale of Array.from(layer.querySelectorAll(".tourfilm-ring,.tourfilm-callout"))) {
+      for (const stale of Array.from(layer.querySelectorAll(".tourfilm-ring,.tourfilm-callout,.tourfilm-typed"))) {
         stale.remove();
       }
     }
@@ -866,6 +1051,8 @@ export function createFilmContext({
     goto,
     press,
     tap,
+    typeInto,
+    wear,
     travel,
     growInto,
     callout,
