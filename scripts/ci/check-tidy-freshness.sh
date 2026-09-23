@@ -44,8 +44,16 @@
 #
 #      volumes = ["/var/lib/orbit-runner-health:/var/lib/orbit-runner-health:ro", ...]
 #
-#    then `sudo gitlab-runner restart`. Read-only because a job has no reason
-#    to write here and every reason not to be able to forge a pass.
+#    then reload the runner so it picks the volume up:
+#
+#      sudo systemctl kill -s HUP gitlab-runner
+#
+#    Not `restart`: that kills whatever jobs are mid-flight, and this change
+#    does not need it -- the volume is read when a job's container is created,
+#    so a reload covers every job that starts after it. Not `systemctl reload`
+#    either: the unit defines no reload action, so it fails (owner, verified
+#    on the host, 2026-09-22). Read-only because a job has no reason to write
+#    here and every reason not to be able to forge a pass.
 #
 #    /var/lib, not /etc: rootless Docker snapshots /etc when its daemon
 #    starts, so a directory created under /etc afterwards is invisible to it
