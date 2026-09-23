@@ -19,6 +19,19 @@ resetDatabaseBetweenSpecFiles();
  * output, not something a stub could echo back), Esc closes the card, and a
  * removed file shows its own honest line with no page at all.
  */
+/* This file runs with reduced motion, and must: a paper's mark breathes on an
+   infinite `belt-halobreath` alternate (belt.css:257, scale .9 -> 1.14), so the
+   seat's bounding box never settles and Playwright's actionability wait never
+   returns -- `locator.click` hangs until the test's own timeout kills it, and
+   the error then surfaces on whatever ran next, which is the cleanup. Nothing
+   about the product is wrong: a real pointer clicks a moving target fine.
+   Reduced motion is the belt's own first-class mode (`.belt-page *{animation:
+   none!important}`, belt.css:432) and stops every breath without changing what
+   the preview draws, so the assertions below are the same in either mode. The
+   one real difference is #1088's 900ms focus beat, which reduced motion makes
+   instant by design (+page.svelte's `reducedMotion() ? 0 : 900`). */
+test.use({ reducedMotion: "reduce" });
+
 const HOUSEHOLD_PREFIX = "Preview Proving Ground";
 const FIXTURE_PATH = resolve(__dirname, "../support/fixtures/chromium-synthetic.pdf");
 const households = householdRegister();
