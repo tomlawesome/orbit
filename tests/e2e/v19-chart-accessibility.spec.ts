@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -20,8 +21,10 @@ resetDatabaseBetweenSpecFiles();
 
 async function signIn(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Administrator" }).click();
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
   await settleArrival(page);
+  /* #1080: the sweep's hard delete is an instance-admin power. */
+  await ensureWorkerAdministrator(page);
 }
 
 async function sessionHeaders(page: Page) {

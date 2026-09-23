@@ -12,6 +12,7 @@ import {
   installKeyboardAudit,
   tabTo,
 } from "./support/keyboard";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -74,7 +75,8 @@ resetDatabaseBetweenSpecFiles();
  * unchanged — see its own comment.
  */
 
-const READER = "Orbit Administrator";
+/* #1080: this worker's own administrator, resolved lazily (worker env only). */
+const READER = () => workerAccount("administrator");
 
 test.beforeEach(({ isMobile }) => {
   test.skip(!isMobile, "pocket screens only; the desktop walk is v19-keyboard.spec.ts");
@@ -82,8 +84,10 @@ test.beforeEach(({ isMobile }) => {
 
 async function signIn(page: Page, returnTo: string) {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: READER }).click();
-  /* #1096: every test in this file signs in when the instance holds no
+  await page.getByRole("link", { name: READER() }).click();
+  /* #1080: waits for the session, then holds administrator access. */
+  await ensureWorkerAdministrator(page);
+    /* #1096: every test in this file signs in when the instance holds no
      household at all -- the #1077 reset above puts the database back to a
      seed that has none, and each test cleans its own away -- so
      hooks.server.js sends the returnTo to `/` instead of to `/home`

@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { gotoCreate } from "./support/keyboard";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -48,8 +49,10 @@ async function seedHousehold(page: Page): Promise<{ id: string; name: string }> 
 
 test("the create form saves a real item into the orbit", async ({ page }) => {
   await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Administrator" }).click();
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
   await settleArrival(page);
+  /* #1080: the sweep's hard delete is an instance-admin power. */
+  await ensureWorkerAdministrator(page);
   households.track(await seedHousehold(page));
 
   try {

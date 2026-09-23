@@ -2,7 +2,8 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { householdRegister } from "./support/households";
-import { FIXTURE_PASSWORD, ensureLocalPassword } from "./support/local-credentials";
+import { ensureLocalPassword } from "./support/local-credentials";
+import { workerAccount, workerEmail, workerFixturePassword } from "./support/worker-identity";
 import { newestApprovalUid, waitForApprovalLink } from "./support/mail";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
@@ -51,8 +52,15 @@ resetDatabaseBetweenSpecFiles();
 
 const DESKTOP_PROJECT = "desktop-chromium";
 
-const OUTSIDER = { name: "Orbit Outsider", email: "outsider@example.test", password: FIXTURE_PASSWORD["Orbit Outsider"] };
-const MEMBER = { name: "Orbit Member", email: "member@example.test" };
+/* #1080: this worker's own identities, resolved lazily (worker env only) —
+   the approval-mail mailbox is the identity's own address, and ADR-0027 §8's
+   five-sends-per-account-per-hour budget is spent per worker identity. */
+const OUTSIDER = () => ({
+  name: workerAccount("outsider"),
+  email: workerEmail("outsider"),
+  password: workerFixturePassword(workerAccount("outsider")),
+});
+const MEMBER = () => ({ name: workerAccount("member"), email: workerEmail("member") });
 
 const households = householdRegister();
 /** Whether this run made a household, so a skipped project sweeps nothing. */
@@ -160,7 +168,7 @@ async function signOut(page: Page): Promise<void> {
  * outsider's inbox -- see `waitForApprovalLink`.
  */
 async function typeThePassword(page: Page): Promise<number> {
-  const mark = await newestApprovalUid(OUTSIDER.email);
+  const mark = await newestApprovalUid(OUTSIDER().email);
   await page.goto("/login");
   /* THE DOOR DECIDES ITS OWN FACE, and it does it client-side: /login is
      prerendered and asks /api/auth/availability in onMount (SignIn.svelte's
@@ -176,8 +184,8 @@ async function typeThePassword(page: Page): Promise<number> {
   await expect(localLine.or(email).first()).toBeVisible({ timeout: 30_000 });
   if (await localLine.isVisible()) await localLine.click();
   await expect(email).toBeVisible({ timeout: 30_000 });
-  await page.fill("#idemail", OUTSIDER.email);
-  await page.fill("#idpassword", OUTSIDER.password);
+  await page.fill("#idemail", OUTSIDER().email);
+  await page.fill("#idpassword", OUTSIDER().password);
   await page.locator("#idbtn").click();
   return mark;
 }
@@ -216,12 +224,12 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
   test.setTimeout(240_000);
 
   await claimInstanceAsAdministrator(browser);
-  await signInWithProvider(page, OUTSIDER.name);
+  await signInWithProvider(page, OUTSIDER().name);
   /* Before any gated screen is asked for -- see ensureHousehold. */
   await ensureHousehold(page);
   await page.goto("/settings");
   /* The one thing the product cannot do for itself yet -- see the helper. */
-  await ensureLocalPassword(page, OUTSIDER.name, OUTSIDER.password);
+  await ensureLocalPassword(page, OUTSIDER().name, OUTSIDER().password);
   await signOut(page);
 
   const knocked = await typeThePassword(page);
@@ -234,7 +242,7 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
   await expect(page).toHaveURL(/\/login$/);
   expect((await page.request.get("/api/auth/session")).status()).toBe(401);
 
-  const link = await waitForApprovalLink(OUTSIDER.email, 60_000, knocked);
+  const link = await waitForApprovalLink(OUTSIDER().email, 60_000, knocked);
   await decideOnAnotherDevice(browser, link, "#approveyes");
 
   /* The waiting tab lets itself in, on its own, with no further typing. */
@@ -242,7 +250,7 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
   const session = await page.request.get("/api/auth/session");
   expect(session.ok(), "the approved tab was not let in").toBe(true);
   expect((await session.json()) as { user: { displayName: string } })
-    .toMatchObject({ user: { displayName: OUTSIDER.name } });
+    .toMatchObject({ user: { displayName: OUTSIDER().name } });
 });
 
 test("\"this wasn't me\" turns the sign-in away, and the account holder is told next time", async ({ page, browser }) => {
@@ -251,7 +259,7 @@ test("\"this wasn't me\" turns the sign-in away, and the account holder is told 
   const knocked = await typeThePassword(page);
   await expect(page.locator(".card.waiting")).toBeVisible({ timeout: 30_000 });
 
-  const refused = await waitForApprovalLink(OUTSIDER.email, 60_000, knocked);
+  const refused = await waitForApprovalLink(OUTSIDER().email, 60_000, knocked);
   await decideOnAnotherDevice(browser, refused, "#approveno");
 
   /* The tab is told, and stays out. */
@@ -263,7 +271,7 @@ test("\"this wasn't me\" turns the sign-in away, and the account holder is told 
      sign-in that DOES work carries one line about it. */
   const knockedAgain = await typeThePassword(page);
   await expect(page.locator(".card.waiting")).toBeVisible({ timeout: 30_000 });
-  const approved = await waitForApprovalLink(OUTSIDER.email, 60_000, knockedAgain);
+  const approved = await waitForApprovalLink(OUTSIDER().email, 60_000, knockedAgain);
   await decideOnAnotherDevice(browser, approved, "#approveyes");
 
   /* THE SKY THEY LAND ON, and not a second visit to it. Asking for the notice
@@ -287,7 +295,7 @@ test("\"this wasn't me\" turns the sign-in away, and the account holder is told 
 test("an identity-provider sign-in is never challenged (ADR-0027 §3)", async ({ page }) => {
   test.setTimeout(120_000);
 
-  await signInWithProvider(page, MEMBER.name);
+  await signInWithProvider(page, MEMBER().name);
 
   /* Straight in, with no waiting card anywhere in the journey. */
   expect((await page.request.get("/api/auth/session")).ok()).toBe(true);
@@ -298,6 +306,6 @@ test("an identity-provider sign-in is never challenged (ADR-0027 §3)", async ({
      racing another file's approval mail. A short wait on purpose: the
      assertion is "nothing arrives", and a long one only makes the suite slow
      to say so. */
-  await expect(waitForApprovalLink(MEMBER.email, 8_000))
+  await expect(waitForApprovalLink(MEMBER().email, 8_000))
     .rejects.toThrow(/no sign-in approval mail/u);
 });
