@@ -3018,6 +3018,14 @@ install_bootstrap:
   # A weekly maintenance run has nothing that could supersede it, same as
   # `renovate` and `sidecar_pin_freshness`.
   interruptible: false
+  # Shared with install_bootstrap_latest below: .docker_in_job starts its
+  # daemon at a fixed path under $CI_BUILDS_DIR, not a per-job one (see that
+  # macro's own comment on why /builds outlives the job here), and both jobs
+  # run on the same dedicated orbit-build runner. Two of these live at once
+  # would race that daemon's data directory. The resource group only orders
+  # this pair against each other; it is not a promotion-measurement guard
+  # like launch_timing's.
+  resource_group: install_bootstrap_docker_data
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
   allow_failure: false
@@ -3029,6 +3037,51 @@ install_bootstrap:
       bash scripts/test-install-bootstrap.sh --red
       echo "install_bootstrap: green run — the published bootstrap against the live registry"
       bash scripts/test-install-bootstrap.sh
+  after_script:
+    - *docker_in_job_teardown
+
+# Companion to install_bootstrap above, for #1016: that job only ever passes
+# --channel preview, so nothing has exercised what an operator actually gets
+# from the documented bootstrap with no channel named at all. install.sh's
+# own default when ORBIT_CHANNEL is unset is the `latest` tag (scripts/
+# install.sh:15), not `preview` -- the harness's --channel default of
+# `preview` is a choice of that script alone. Passing --channel latest here
+# makes the harness set ORBIT_CHANNEL=latest for the piped install, which is
+# exactly what a truly default, no-flags install receives.
+#
+# Expected RED until the v1.3.0 promotion: today `latest` on GHCR is still
+# the v1.2.0 image, built before ADR-0019's asset bundling, so install.sh
+# refuses it (see the io.orbit.deployment-assets label check and #1038). A
+# red run here before that promotion is the known, accepted state -- do not
+# silence it with allow_failure, which would hide the one thing this job
+# exists to catch: a red run *after* v1.3.0 promotes is a release defect,
+# not an expected gap, and must fail the schedule loudly.
+#
+# Same shape and rules as install_bootstrap otherwise -- same runner, image,
+# timeout, interruptible setting and schedule gate -- so the two are easy to
+# read as a pair and both stop firing together if INSTALL_BOOTSTRAP is ever
+# turned off. No --red self-test of its own: that self-test proves the
+# harness's digest comparison fires, which install_bootstrap already proves
+# every run; running it twice on every schedule would only double the cost
+# for the same evidence.
+install_bootstrap_latest:
+  stage: maintenance
+  extends: .privileged_runner
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  timeout: 45m
+  interruptible: false
+  resource_group: install_bootstrap_docker_data
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
+  allow_failure: false
+  script:
+    - *docker_in_job
+    - |
+      set -eu
+      echo "install_bootstrap_latest: default-channel run — the published bootstrap against the live registry's latest tag"
+      bash scripts/test-install-bootstrap.sh --channel latest
   after_script:
     - *docker_in_job_teardown
 
