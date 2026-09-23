@@ -4,6 +4,11 @@ import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { waitForSenderVerificationToken } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #459: the mail proving ground — no interception anywhere. A real message

@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #410/§15: THE ARRIVAL. The newcomer's journey and the create-system card,
@@ -19,14 +24,18 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
  * owning or joining something during an acceptance run — the administrator
  * creates proving grounds, the member owns a household, the outsider is
  * approved into one by v19-membership — and this journey's whole precondition
- * is a reader who belongs to NOTHING. The database is not reset between specs,
- * so a dedicated identity (`Orbit Newcomer`, tests/oidc/server.mjs) is the only
- * way to have one. It is signed in nowhere else.
+ * is a reader who belongs to NOTHING. The specs inside a file run against one
+ * another's leavings, so a dedicated identity (`Orbit Newcomer`,
+ * tests/oidc/server.mjs) is the only way to have one. It is signed in nowhere
+ * else, and #1077's reset between spec files does not change that: it puts
+ * this FILE back to the seed, not each test within it.
  *
  * THE GAP, stated rather than papered over. The FIRST ADMIN's automatic route
- * to the create card needs an instance with ZERO households, and this harness
- * cannot offer one: the database survives every spec in the run and several of
- * them create households before this file is reached. What is proved here is
+ * to the create card needs an instance with ZERO households. Since #1077 this
+ * file does now begin on one -- the reset is what makes that true -- but the
+ * journeys below run one after another and the first of them makes a
+ * household, so the second still cannot see an empty instance. What is proved
+ * here is
  * the create card's own journey by the road a reader can always reach it on —
  * the newcomer's "or name your own system" — which is the SAME card, the same
  * command, the same hand-over and the same landing; the only unproved step is
