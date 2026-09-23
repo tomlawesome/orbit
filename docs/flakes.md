@@ -60,16 +60,43 @@ server already sent. Reproduced on demand before the fix by delaying
 `/api/workspace`. Left here rather than deleted: a fourth sighting after this
 means the fix is wrong, not that the flake is back.
 
-## v19-first-run-door.spec.ts:250, and `net::ERR_ABORTED` on a /home navigation — mobile-chromium
+## v19-first-run-door.spec.ts:250, and `net::ERR_ABORTED` on a /home navigation — #1096
 
 - 2026-09-10 · cb9cbfd · pipeline 907 / smoke (job 10645, !911) · `v19-first-run-door.spec.ts:250` "a claimed local-only instance shows the sign-in card in the ring" — `expect(locator).toBeVisible()` failed, element not found. Passed on the retried job 10651 on the same commit.
 - 2026-09-19 · 977a74d · pipeline 1275 / smoke (job 16651, !946) · `v19-keyboard.spec.ts:568` "administration: the local-user controls are reachable and announced" (desktop-chromium), retry #1 — `page.goto: net::ERR_ABORTED at http://127.0.0.1:3000/home`. Its first attempt was the account-panel flake above; the retry died before reaching the screen at all, so this test has never yet reported on its own subject in CI.
+- 2026-09-23 · 68e3d66f · pipeline 1491 / smoke (job 20319, !971) · `v19-keyboard.spec.ts:296` "home: every control is reachable, focus is visible, and Tab is not trapped" (desktop-chromium) — the same abort on the first attempt AND on retry #1, so the job failed outright at 834s. **Third sighting: #1096 filed.**
 
-`net::ERR_ABORTED` on a navigation points at specs sharing one Orbit instance,
-which is #949 — a sibling spec's teardown or sign-out landing on top of this
-one. The door card not being found may be the same thing wearing a different
-hat, or may be its own timing; two sightings do not say. The third gets an
-issue.
+**Fixed, 2026-09-23 (#1096).** Not #949, and nothing to do with a sibling
+spec: `playwright.config.ts` pins `workers: 1`, so no other spec was running,
+and the app answered `/api/auth/session`, `/api/auth/availability` and
+`/api/health` with 200 in the same second. All three sightings are one race
+inside the failing test, and all three traces show it the same way. The
+account signs in with no household anywhere (each test cleans its own away,
+and since #1077 the database is back to a seed that holds none), so
+`hooks.server.js` sends the returnTo to `/` — 303, in the trace — and `/` is
+the arrival, which reads the workspace and hands a reader with somewhere
+onward to /home with `location.replace`. The helper then seeds a household and
+calls `page.goto("/home")`, and the seed has turned that decision ONWARD while
+the read is still in flight: two /home document requests leave milliseconds
+apart (09:07:38.328 and 09:07:38.330 in job 20319), the survivor carrying
+`Referer: http://127.0.0.1:3000/` — the arrival's own — and Playwright's,
+which has no referer, reported as `net::ERR_ABORTED`. In job 10645's trace the
+survivor came back 200, so nothing was wrong with the server or the address.
+Pipeline 1500's smoke (job 20514) ran the identical predecessor —
+`v19-keyboard.spec.ts:252`, same file, same worker — and the test passed in
+2.4s, so the ordering is not what differs; the width of the arrival's read is.
+
+`support/arrival.ts`'s `settleArrival` already waits for that decision to
+land, and commit 72d8efd0 put it everywhere for #840 in September — but the
+sweep missed `v19-keyboard.spec.ts` and `v19-keyboard-pocket.spec.ts`, which
+are exactly the two files every `net::ERR_ABORTED` sighting came from. Both
+now wait there. The 2026-09-10 door card is left unexplained: it is a
+different symptom in a different file and one sighting says nothing.
+
+The app container logged nothing about any of this because it could not: the
+`smoke` job's `after_script` diagnostics print "Cannot connect to the Docker
+daemon" on all three runs, so `show-stack-diagnostics.sh` produces nothing on
+the job it exists for. That is its own defect, not this one.
 
 ## v19-tour.spec.ts:354 "journey 1: the first landing on home gets the walk, and skipping ends it"
 
