@@ -78,6 +78,13 @@ pipeline and playing a manual job are refused by the safety hook here, on top
 of the refusals the gitlab-first-migration skill lists.
 `dev`, `preview` and `main` all take push "No one", merge "Maintainers".
 
+A job whose composite key already passed elsewhere stands on that run
+instead of repeating it (ADR-0028; `docs/quality-strategy.md`'s "Standing on
+an earlier run" has the mechanism, `scripts/ci/job-inputs.json` and
+`scripts/ci/reuse-lookup.mjs` the detail). Label the merge request
+`ci: rerun`, or start the pipeline with `ORBIT_REUSE=off`, to force
+everything to run regardless.
+
 Two runners serve this project, both on the host `gitlab-runners` (32 cores,
 48 GB): the shared group runner, and runner 8, a privileged project runner
 owned by `ai/orbit` and tagged `orbit-build`, that everything needing a
