@@ -357,19 +357,33 @@ wait_for_unhealthy() {
 
 # --- execution-phase diagnostics (#1089) ------------------------------------
 #
-# #1089: repair_journeys fails in a different journey on each run of the same
-# commit, and passes again on a retry with nothing changed. The standing
-# theory (unproven) is that the state a journey sets up -- the database
-# volume keeping password A while the Orbit side holds password B -- is not
-# settled by the time repair's execution phase looks at it, so readiness is
-# the hidden variable, and that would also explain why the journey that
-# fails moves from run to run rather than always being the same one.
+# #1089: repair_journeys failed in a different journey on each run of the same
+# commit, and passed again on a retry with nothing changed. These snapshots
+# were added to make the next failure say what the world looked like at the
+# moment it mattered, and they did their job: every `repair --execute ...`
+# call below prints, right before invoking repair.sh, what repair.sh's own
+# execution phase is about to see.
 #
-# This does not chase that theory to a fix -- that is out of scope here. It
-# makes the next failure say what the world looked like at the moment it
-# mattered: every `repair --execute ...` call below now prints, right before
-# invoking repair.sh, a snapshot of exactly what repair.sh's own execution
-# phase is about to see.
+# What they found was two separate faults wearing one signature.
+#
+# 1. The mismatch going missing from the diagnosis (jobs 18392, 18463, 19795,
+#    20612, all before these snapshots existed). All four printed the same
+#    five lines -- `execution result=unactionable`, `dangerous result=empty
+#    reason=none`, and then `finding class=database-credential-mismatch` from
+#    the FINAL re-diagnosis, the one after execution. So the execution-phase
+#    diagnosis had no credential finding to plan from, and a later pass found
+#    it perfectly well. All four reached that state within 6-9s of the journey
+#    starting, far inside the 75s budget, which rules out
+#    `database-credential-unverifiable` (#1026) as the explanation and leaves
+#    the silent one: see the retry loop in `check_database_reachability`
+#    (scripts/repair.sh).
+#
+# 2. This diagnostic eating the answer of the run it was describing (jobs
+#    20104 and 20663, the only two sightings after `execution_snapshot`
+#    landed in 40d0cfc8). Both ended in `prompt-abort` -- `field=safe-batch`
+#    for `printf 'y\n' | repair --execute --safe-only`, `field=action-word`
+#    for credential-drift's three-line `--dangerous` pipe -- which is what
+#    stdin at EOF looks like from inside repair.sh. See `app_secret_probe`.
 #
 # app_secret_probe mirrors an existing repair.sh signal rather than
 # inventing a new one: it is the same read-only check
@@ -379,12 +393,7 @@ wait_for_unhealthy() {
 # rotate-database-credential) and `database-credential-unverifiable`
 # (scripts/repair.sh:2608, #1026 -- "the application restarts too fast for
 # repair to read the credential it presents", routed to `manual`, never
-# rotate). If that probe is flapping between readable and unreadable across
-# a single journey's run, it would explain both why rotate-database-
-# credential sometimes never reaches the plan at all (so there is nothing
-# for the dangerous batch to execute, and restart-services -- the one action
-# that IS planned -- reports result=skipped because --safe-only was not the
-# flag in play) and why the journey that first notices moves between runs.
+# rotate).
 last_setup_label="" last_setup_at=0
 
 # Call at the point each journey considers its own fixture/fault fully in
@@ -408,11 +417,27 @@ container_snapshot() {
 # anything here -- printed only, so it can never mask a journey's own
 # assertions.
 app_secret_probe() {
+  # </dev/null is load-bearing, not tidiness (#1089). `docker compose exec -T`
+  # keeps stdin attached and streams it to the container: against a running
+  # container it consumes everything the caller's stdin holds (measured on
+  # docker-ce 29.7.2 / compose v5.5.0: 10 runs out of 10), and against a
+  # stopped one it fails before reading anything. Every journey that answers a
+  # machine prompt does it by piping the answer into `repair`, and `repair`
+  # calls execution_snapshot on the way -- so without this the diagnostic
+  # swallowed the very answer the run under test was waiting for, repair.sh
+  # read EOF, and the journey failed on a prompt nobody declined: job 20104
+  # (`prompt-abort field=safe-batch`, unsafe-permissions, exit 1) and job
+  # 20663 (`prompt-abort field=action-word`, credential-drift, exit 6) are
+  # the two sightings of it, and the only two after this file grew an
+  # execution_snapshot in 40d0cfc8. Whether it swallowed the answer depended
+  # on whether orbit-app happened to be up at that moment -- up, it ate the
+  # lot; restarting, it failed before reading anything -- which is why the
+  # journey it broke moved between runs.
   compose exec -T orbit-app sh -c '
     f="${POSTGRES_PASSWORD_FILE:-}"
     if [ -z "$f" ]; then printf "no-POSTGRES_PASSWORD_FILE-set\n"; exit 1; fi
     if [ -r "$f" ]; then printf "readable:%s\n" "$f"; else printf "unreadable:%s\n" "$f"; fi
-  ' 2>&1 || true
+  ' </dev/null 2>&1 || true
 }
 
 # Printed to stderr, which every journey already folds into its own
@@ -431,7 +456,10 @@ execution_snapshot() {
       "$(app_secret_probe)"
     container_snapshot orbit
     container_snapshot orbit-postgres
-  } >&2
+    # The structural half of the same rule: nothing this diagnostic runs may
+    # read the stdin of the run it is describing, so the whole group is given
+    # /dev/null rather than trusting each probe added here to remember.
+  } >&2 </dev/null
 }
 
 # The copy install.sh placed in the deployment, never the one in this
