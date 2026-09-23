@@ -4,56 +4,61 @@
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { readTour, writeTourSeen } from "$lib/data/workspace.js";
-  import { createTour } from "./engine.js";
+  import { createFilm } from "./film.js";
   import { tourHasSomethingToShow } from "./offer.js";
   import { tourMayBegin } from "./relaunch.js";
-  import { TOUR_REGIONS, stopsFor } from "./stops.js";
-  import "./tour.css";
+  import { beginFilm } from "./trigger.js";
 
   /**
-   * THE FIRST-RUN WALK (#752, slice 2 of #477) — the card, and the decision to
-   * put it up.
+   * THE FIRST-RUN FILM (#866) — the trigger, and the decision to put it up.
    *
-   * The card is design/v19/tour.html's own: two lines in Orbit's voice, the
-   * stop counter, the dots, and *Back*, *Next* and *Skip* always visible. It
-   * is a dialog that does NOT trap the page (`aria-modal="false"`), because
-   * the walk is a walk: the reader is looking at the real screen behind it,
-   * and the thing being explained is described BY these two lines, through the
-   * `aria-describedby` the engine puts on it.
+   * §23 of design/owner-decisions.md retired the old eight-stop card walk
+   * outright ("The only tour is the one with the play and pause buttons.
+   * Anything else is old and superseded.") in favour of film.js's one-take
+   * film. film.js says plainly it holds no opinion about when it plays, who
+   * skips it, or "take it again" — that is this file's job (via trigger.js),
+   * same as it was the old engine's.
    *
-   * WHY THIS LIVES IN THE LAYOUT. Stops 6 and 7 are on other screens, so the
-   * walk outlives any one page component: mounted here it survives the
-   * navigation between /home, /inbox and /settings/mail instead of being
-   * unmounted mid-sentence. It stays inert everywhere else — the walk only
-   * ever STARTS on the reader's first landing on /home, and only when the
-   * server says they have never taken it (#751's `tourSeenAt`).
+   * WHY THIS LIVES IN THE LAYOUT. The film crosses /home, /inbox, /create,
+   * /item and /settings/mail (chapters/index.js), so it outlives any one page
+   * component: mounted here it survives the navigation between them instead
+   * of being unmounted mid-chapter. It stays inert everywhere else — the film
+   * only ever STARTS on the reader's first landing on /home, and only when
+   * the server says they have never taken it (#751's `tourSeenAt`).
+   *
+   * The gate itself — desk-only (§24), never a phone write, give up quietly
+   * if `readTour` throws, nothing for a household-less reader — lives in
+   * trigger.js's `beginFilm`, framework-free so it is unit-testable without a
+   * mounted component. This file is the wiring: it decides "phone" from the
+   * real viewport, and hands `beginFilm` the real `readTour`, the real
+   * household check and a function that builds the real film.
    */
   const HOME = "/home";
   /* The same cut home uses to choose between its two dialects (CON-10). */
   const DESK = "(min-width: 901px)";
   /**
-   * Walking onto the screen a stop names. Written as three literal
-   * navigations rather than one built from the stop's string, so the router
-   * — and the lint rule that guards it — can see every address the walk is
-   * able to reach. A stop naming anywhere else lands on the sky.
+   * Walking onto the screen a chapter names. Written as literal navigations
+   * rather than one built from the route string, so the router — and the
+   * lint rule that guards it — can see every address the film is able to
+   * reach. A route naming anywhere else lands on the sky.
    *
    * @param {string} route
    */
   function walkTo(route) {
     if (route === "/inbox") return goto(resolve("/inbox"));
+    if (route === "/create") return goto(resolve("/create"));
+    if (route === "/item") return goto(resolve("/item"));
     if (route === "/settings/mail") return goto(resolve("/settings/mail"));
     return goto(resolve("/home"));
   }
 
-  /** @type {import("./engine.js").TourView | null} */
-  let view = $state(null);
-  /** @type {ReturnType<typeof createTour> | null} */
-  let tour = null;
+  /** @type {ReturnType<typeof createFilm> | null} */
+  let film = null;
   let started = false;
 
   /**
    * The ratified login flight owns the arrival, whole and unaltered — the
-   * tour waits at the gate until it has landed rather than opening over it.
+   * film waits at the gate until it has landed rather than opening over it.
    */
   function landed() {
     if (!document.body.classList.contains("launching")) return Promise.resolve();
@@ -63,48 +68,35 @@
         if (!document.body.classList.contains("launching")) finish();
       });
       observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
-      /* A flight that never lands must not silently swallow the walk. */
+      /* A flight that never lands must not silently swallow the film. */
       const patience = setTimeout(finish, 12_000);
     });
   }
 
   async function begin() {
     await landed();
-    /** @type {{ tourSeenAt: string | null }} */
-    let record;
-    try {
-      record = await readTour();
-    } catch {
-      /* Orbit not being able to say whether the walk has been taken is not a
-         reason to interrupt someone's sky. Silence, and again next time. */
-      return;
-    }
-    if (record.tourSeenAt !== null) return;
-    /* #864: a reader with no household yet gets the labelled sky, not the
-       dial the walk's first three stops all point at — offer nothing rather
-       than a card claiming to explain a screen that isn't there. */
-    if (!tourHasSomethingToShow(document)) return;
-    const phone = !matchMedia(DESK).matches;
-    tour = createTour({
-      doc: document,
-      stops: stopsFor({ phone }),
-      regions: TOUR_REGIONS,
-      phone,
-      routeOf: () => page.url.pathname,
-      navigate: walkTo,
-      /* The one and only write the walk makes, on skip or on finish. */
+    await beginFilm({
+      phone: !matchMedia(DESK).matches,
+      readTour,
+      hasHousehold: () => tourHasSomethingToShow(document),
+      createFilmRun: () => {
+        film = createFilm({
+          doc: document,
+          routeOf: () => page.url.pathname,
+          navigate: walkTo,
+          settle: tick,
+        });
+        return film;
+      },
       writeSeen: () => writeTourSeen().catch(() => {}),
-      onChange: (next) => { view = next; },
-      settle: tick,
     });
-    await tour.start();
   }
 
   /*
-   * `started` alone would make the walk a true one-shot for the rest of this
+   * `started` alone would make the film a true one-shot for the rest of this
    * page load — right for ordinary navigation, wrong for "take the walk
    * again" (#753): a reader who clears `tourSeenAt` from settings and lands
-   * back on /home in the SAME session must still get the walk. `tourMayBegin`
+   * back on /home in the SAME session must still get the film. `tourMayBegin`
    * lets exactly that one arrival through; see relaunch.js.
    */
   $effect(() => {
@@ -113,27 +105,5 @@
     void begin();
   });
 
-  onMount(() => () => tour?.destroy());
+  onMount(() => () => film?.destroy());
 </script>
-
-{#if view}
-  <div class="tourcard" role="dialog" aria-modal="false" aria-labelledby="tour-progress"
-       tabindex="-1" data-tour-stop={view.number}>
-    <p class="progress" id="tour-progress">Stop {view.number} of {view.total}</p>
-    <p class="copy" id="tour-copy-1">{view.copy[0]}</p>
-    <p class="copy second" id="tour-copy-2">{view.copy[1]}</p>
-    <div class="dots" aria-hidden="true">
-      <!-- one dot per stop, the current one filled -->
-      {#each [...Array(view.total).keys()] as dot (dot)}<i class:on={dot === view.index}></i>{/each}
-    </div>
-    <!-- All three doors are always visible: the walk is skippable at any
-         point, and saying so quietly in a corner is not saying so. -->
-    <div class="tourbtns">
-      <div class="side">
-        <button id="tour-back" disabled={view.first} onclick={() => tour?.go(-1)}>Back</button>
-        <button id="tour-next" onclick={() => tour?.go(1)}>{view.last ? "Finish" : "Next"}</button>
-      </div>
-      <button class="skip" id="tour-skip" onclick={() => tour?.skip()}>Skip</button>
-    </div>
-  </div>
-{/if}

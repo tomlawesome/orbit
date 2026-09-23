@@ -239,3 +239,20 @@ export function belongRowsOf(galaxy) {
     .sort()
     .map((id) => ({ id, name: systems[id].name, requested: Boolean(systems[id].requested) }));
 }
+
+/**
+ * THE WAITING NOTE (owner-decisions §23, 2026-09-20): the "waiting" word on a
+ * row a reader has already asked to join is a marker, not an explanation --
+ * "that is not the same as telling them what is happening". This is the
+ * sentence that is: it says the request is waiting AND names who acts on it,
+ * in the owner's own words ("the owner or an administrator has to approve it
+ * first"). It promises nothing else -- no notification, no email, no ETA,
+ * because none of those exist.
+ *
+ * Plain text rather than a name-bearing template: a household's own name can
+ * already end in a possessive ("Mum & Dad’s"), so appending another "'s"
+ * would read as broken grammar. The row it sits in already names the
+ * household (`.nm`), so the generic "the household's" loses nothing.
+ */
+export const WAITING_APPROVAL_NOTE =
+  "waiting — the household's owner or an administrator has to approve it first";

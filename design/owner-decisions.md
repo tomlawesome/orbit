@@ -1158,3 +1158,27 @@ take.
   a "waiting" word on the row they asked for, and that is not the same as
   telling them what is happening.
 - **Once approved**, their next login plays the full film.
+
+## 24. A phone waits for the film rather than seeing an old one (owner, 2026-09-23)
+
+The one-take film is drawn for the desk only. Its pocket cut was never
+drawn and is #1083, deferred to M14. So #866 lands a film a phone cannot
+play, and the question was what a phone reader gets on their first login
+in the meantime. Asked as three options; answered **"3c"**.
+
+- **Nothing plays on a phone.** The superseded eight-stop card walk is not
+  kept alive as a stand-in; §23 already retired it, and running it on
+  phones would put the old design back in front of readers on the one
+  surface where it is hardest to correct later.
+- **`tourSeenAt` is not spent by a phone login.** The flag is written only
+  when the film itself is skipped or finished. A reader who signs in on
+  their phone first still gets the whole film the first time they sit at a
+  desk — otherwise their one chance at it would be consumed by a screen
+  that showed them nothing.
+- **What this costs.** A phone-only reader sees no first-run welcome at all
+  until #1083 ships. That is the accepted price of not shipping a design
+  that has been superseded.
+
+The cut is the desk dialect's own, `(min-width: 901px)` — the same one home
+uses to choose between its two dialects (CON-10) — so "desk" means exactly
+what it already means everywhere else in v19.
