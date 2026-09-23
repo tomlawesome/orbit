@@ -81,33 +81,15 @@ RUN pnpm run build:cli
 # so it pins the same digest for the same reasons (see the base stage).
 FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:a825322947cfdecbd499a71ca3d4bc00fa7da24e074199c0169de0581ba6953a AS runner
 
-ARG ORBIT_VERSION
-ARG ORBIT_REVISION
-ARG ORBIT_CHANNEL
-
-# Release metadata is validated here, immediately after the ARGs, rather than
-# beside the files it writes 50 steps later (#435). Nothing between depends on
-# these values, so validating late meant a malformed version failed only after
-# the whole application build had been done and thrown away. Only this one
-# small file is copied to check it — the rest of the source tree (COPY . .,
-# below in the other build stages) is untouched until this passes.
+# The three release-metadata patterns, copied in early because this layer's
+# content never varies between builds; the values themselves are declared,
+# validated and written right at the bottom of this stage (see "the stamp").
 #
-# The three patterns are the same ones scripts/build-container.sh checks
-# before invoking Docker at all; both source scripts/release-metadata-
-# patterns.sh rather than each holding its own copy, so a builder that
-# bypasses the script still gets an identical guarantee, and the two checks
-# cannot drift apart (#435).
+# They are the same ones scripts/build-container.sh checks before invoking
+# Docker at all; both source scripts/release-metadata-patterns.sh rather than
+# each holding its own copy, so a builder that bypasses the script still gets
+# an identical guarantee, and the two checks cannot drift apart (#435).
 COPY scripts/release-metadata-patterns.sh /opt/orbit/scripts/release-metadata-patterns.sh
-RUN . /opt/orbit/scripts/release-metadata-patterns.sh \
-  && printf '%s\n' "${ORBIT_VERSION}" | grep -Eq "$ORBIT_VERSION_PATTERN" \
-  && printf '%s\n' "${ORBIT_REVISION}" | grep -Eq "$ORBIT_REVISION_PATTERN" \
-  && printf '%s\n' "${ORBIT_CHANNEL}" | grep -Eq "$ORBIT_CHANNEL_PATTERN"
-# Carried from build ARG to runtime ENV so the running server can read its own
-# release metadata (#1000, GET /api/admin/health) — an ARG is a build-time-only
-# value and is invisible to `process.env` once the container is running.
-ENV ORBIT_VERSION=${ORBIT_VERSION}
-ENV ORBIT_REVISION=${ORBIT_REVISION}
-ENV ORBIT_CHANNEL=${ORBIT_CHANNEL}
 ENV NODE_ENV=production
 ENV PORT=3000
 # adapter-node's own variables (#735). It reads HOST, not Next's HOSTNAME;
@@ -127,9 +109,6 @@ ENV ORBIT_ENGINE_CONTEXT=container
 LABEL org.opencontainers.image.title="Orbit"
 LABEL org.opencontainers.image.description="Everything in your orbit, on track."
 LABEL org.opencontainers.image.source="https://github.com/tomlawesome/orbit"
-LABEL org.opencontainers.image.version="${ORBIT_VERSION}"
-LABEL org.opencontainers.image.revision="${ORBIT_REVISION}"
-LABEL io.github.tomlawesome.orbit.release-stage="${ORBIT_CHANNEL}"
 # Where this image keeps the deployment assets it was built from (ADR-0019).
 # scripts/install.sh reads this label and extracts that directory from the
 # image it just resolved, instead of downloading the same files from the
@@ -214,10 +193,27 @@ COPY --chown=root:root \
 # engine-events.md's "In-container engine invocation" contract), so it
 # gets a data-file mode (0444) rather than an executable one.
 COPY --from=cli-builder --chown=root:root /opt/orbit/dist/cli/orbit.js ./cli/orbit.js
-# Re-validated here (belt-and-suspenders) immediately before the values are
-# written to disk, using the same shared patterns sourced above (#435) — not
-# a second hardcoded copy, so this cannot silently diverge from the early
-# check's idea of what counts as valid.
+# ---------------------------------------------------------------------------
+# The stamp, and nothing after it that writes a layer (ADR-0028).
+#
+# Everything that varies per commit lives here, at the bottom: the three build
+# arguments are declared, validated, written to disk and carried into the image
+# configuration, and no layer follows. ADR-0028 §1 needs it that way — the
+# image content ID is the hash of the layers *before* this one, so two builds
+# of the same tree on different commits must differ in this layer alone.
+# Declared earlier (as they were until then) the arguments reached every later
+# RUN's environment and every later layer's cache key, so a new commit rebuilt
+# the whole stage with fresh timestamps and no two builds ever agreed.
+#
+# Validation moved down with them. It used to sit immediately after the ARGs so
+# a malformed version failed before the application build rather than after it
+# (#435); that early failure is now bought in .gitlab-ci.yml's `build_image`
+# and scripts/build-container.sh, both of which check the same three patterns
+# before Docker is invoked at all. The check below is the backstop for a
+# builder that uses neither.
+ARG ORBIT_VERSION
+ARG ORBIT_REVISION
+ARG ORBIT_CHANNEL
 RUN . /opt/orbit/scripts/release-metadata-patterns.sh \
   && printf '%s\n' "${ORBIT_VERSION}" | grep -Eq "$ORBIT_VERSION_PATTERN" \
   && printf '%s\n' "${ORBIT_REVISION}" | grep -Eq "$ORBIT_REVISION_PATTERN" \
@@ -230,6 +226,21 @@ RUN . /opt/orbit/scripts/release-metadata-patterns.sh \
   && chmod 0755 ./scripts/container-entrypoint.sh \
   && chmod 0444 ./cli/orbit.js \
   && rm -f /opt/orbit/scripts/release-metadata-patterns.sh
+# Carried from build ARG to runtime ENV so the running server can read its own
+# release metadata (#1000, GET /api/admin/health) — an ARG is a build-time-only
+# value and is invisible to `process.env` once the container is running. Below
+# the RUN above, not above it: an ENV is read by every later RUN, so setting
+# these any earlier would put a per-commit value in the cache key of every
+# layer that followed.
+ENV ORBIT_VERSION=${ORBIT_VERSION}
+ENV ORBIT_REVISION=${ORBIT_REVISION}
+ENV ORBIT_CHANNEL=${ORBIT_CHANNEL}
+# Labels live in the image configuration, not in a layer (ADR-0028 §1), so
+# these three cost nothing in content terms wherever they sit; they are here
+# because they read the arguments declared above.
+LABEL org.opencontainers.image.version="${ORBIT_VERSION}"
+LABEL org.opencontainers.image.revision="${ORBIT_REVISION}"
+LABEL io.github.tomlawesome.orbit.release-stage="${ORBIT_CHANNEL}"
 USER root
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=10 CMD su-exec orbit:orbit node -e "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch((error) => { console.error(error); process.exit(1); })"

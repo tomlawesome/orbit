@@ -330,7 +330,13 @@ health_check() {
 wait_for_health() {
   local deadline=$((SECONDS + 90))
   until health_check; do
-    ((SECONDS < deadline)) || fail 'the deployment did not become healthy within 90s'
+    if ((SECONDS >= deadline)); then
+      printf '[repair-journeys] wait_for_health: timed out after 90s polling http://127.0.0.1:%s/api/health\n' \
+        "$orbit_port" >&2
+      container_snapshot orbit >&2
+      container_snapshot orbit-postgres >&2
+      fail 'the deployment did not become healthy within 90s'
+    fi
     sleep 2
   done
 }
@@ -338,9 +344,122 @@ wait_for_health() {
 wait_for_unhealthy() {
   local deadline=$((SECONDS + 90))
   while health_check; do
-    ((SECONDS < deadline)) || fail 'the deployment stayed healthy after its credential drifted'
+    if ((SECONDS >= deadline)); then
+      printf '[repair-journeys] wait_for_unhealthy: timed out after 90s, still polling ready at http://127.0.0.1:%s/api/health\n' \
+        "$orbit_port" >&2
+      container_snapshot orbit >&2
+      container_snapshot orbit-postgres >&2
+      fail 'the deployment stayed healthy after its credential drifted'
+    fi
     sleep 2
   done
+}
+
+# --- execution-phase diagnostics (#1089) ------------------------------------
+#
+# #1089: repair_journeys failed in a different journey on each run of the same
+# commit, and passed again on a retry with nothing changed. These snapshots
+# were added to make the next failure say what the world looked like at the
+# moment it mattered, and they did their job: every `repair --execute ...`
+# call below prints, right before invoking repair.sh, what repair.sh's own
+# execution phase is about to see.
+#
+# What they found was two separate faults wearing one signature.
+#
+# 1. The mismatch going missing from the diagnosis (jobs 18392, 18463, 19795,
+#    20612, all before these snapshots existed). All four printed the same
+#    five lines -- `execution result=unactionable`, `dangerous result=empty
+#    reason=none`, and then `finding class=database-credential-mismatch` from
+#    the FINAL re-diagnosis, the one after execution. So the execution-phase
+#    diagnosis had no credential finding to plan from, and a later pass found
+#    it perfectly well. All four reached that state within 6-9s of the journey
+#    starting, far inside the 75s budget, which rules out
+#    `database-credential-unverifiable` (#1026) as the explanation and leaves
+#    the silent one: see the retry loop in `check_database_reachability`
+#    (scripts/repair.sh).
+#
+# 2. This diagnostic eating the answer of the run it was describing (jobs
+#    20104 and 20663, the only two sightings after `execution_snapshot`
+#    landed in 40d0cfc8). Both ended in `prompt-abort` -- `field=safe-batch`
+#    for `printf 'y\n' | repair --execute --safe-only`, `field=action-word`
+#    for credential-drift's three-line `--dangerous` pipe -- which is what
+#    stdin at EOF looks like from inside repair.sh. See `app_secret_probe`.
+#
+# app_secret_probe mirrors an existing repair.sh signal rather than
+# inventing a new one: it is the same read-only check
+# check_database_reachability (scripts/repair.sh:2487) runs at :2579-2580
+# before deciding
+# between `database-credential-mismatch` (safe to plan
+# rotate-database-credential) and `database-credential-unverifiable`
+# (scripts/repair.sh:2608, #1026 -- "the application restarts too fast for
+# repair to read the credential it presents", routed to `manual`, never
+# rotate).
+last_setup_label="" last_setup_at=0
+
+# Call at the point each journey considers its own fixture/fault fully in
+# place, right before it starts asking repair.sh to diagnose or fix it.
+mark_setup_done() {
+  last_setup_label="$1"
+  last_setup_at=$SECONDS
+}
+
+container_snapshot() {
+  local name="$1" out
+  out="$(docker inspect "$name" \
+    --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarting={{.State.Restarting}} startedAt={{.State.StartedAt}}' \
+    2>&1)" || out="inspect failed: $out"
+  printf 'container=%s %s\n' "$name" "$out"
+}
+
+# Read-only, mirrors repair.sh's own check_database_reachability probe
+# exactly (scripts/repair.sh:2579-2580): can the app container currently read its
+# own copy of the database credential. Never used to gate, skip or retry
+# anything here -- printed only, so it can never mask a journey's own
+# assertions.
+app_secret_probe() {
+  # </dev/null is load-bearing, not tidiness (#1089). `docker compose exec -T`
+  # keeps stdin attached and streams it to the container: against a running
+  # container it consumes everything the caller's stdin holds (measured on
+  # docker-ce 29.7.2 / compose v5.5.0: 10 runs out of 10), and against a
+  # stopped one it fails before reading anything. Every journey that answers a
+  # machine prompt does it by piping the answer into `repair`, and `repair`
+  # calls execution_snapshot on the way -- so without this the diagnostic
+  # swallowed the very answer the run under test was waiting for, repair.sh
+  # read EOF, and the journey failed on a prompt nobody declined: job 20104
+  # (`prompt-abort field=safe-batch`, unsafe-permissions, exit 1) and job
+  # 20663 (`prompt-abort field=action-word`, credential-drift, exit 6) are
+  # the two sightings of it, and the only two after this file grew an
+  # execution_snapshot in 40d0cfc8. Whether it swallowed the answer depended
+  # on whether orbit-app happened to be up at that moment -- up, it ate the
+  # lot; restarting, it failed before reading anything -- which is why the
+  # journey it broke moved between runs.
+  compose exec -T orbit-app sh -c '
+    f="${POSTGRES_PASSWORD_FILE:-}"
+    if [ -z "$f" ]; then printf "no-POSTGRES_PASSWORD_FILE-set\n"; exit 1; fi
+    if [ -r "$f" ]; then printf "readable:%s\n" "$f"; else printf "unreadable:%s\n" "$f"; fi
+  ' </dev/null 2>&1 || true
+}
+
+# Printed to stderr, which every journey already folds into its own
+# `output="$(... 2>&1)"` capture -- so this shows up on a failing journey's
+# own printed output with no change to what any assertion greps for.
+execution_snapshot() {
+  local label="$1" age='no setup step marked yet'
+  if [[ "$last_setup_at" -gt 0 ]]; then
+    age="${last_setup_label:-unlabelled}, $((SECONDS - last_setup_at))s ago"
+  fi
+  {
+    printf '[repair-journeys] execution-snapshot before: %s\n' "$label"
+    printf '[repair-journeys]   setup completed: %s\n' "$age"
+    printf '[repair-journeys]   deployment health-check ready: %s\n' "$(health_check && echo yes || echo no)"
+    printf '[repair-journeys]   app-secret-probe (mirrors repair.sh check_database_reachability): %s\n' \
+      "$(app_secret_probe)"
+    container_snapshot orbit
+    container_snapshot orbit-postgres
+    # The structural half of the same rule: nothing this diagnostic runs may
+    # read the stdin of the run it is describing, so the whole group is given
+    # /dev/null rather than trusting each probe added here to remember.
+  } >&2 </dev/null
 }
 
 # The copy install.sh placed in the deployment, never the one in this
@@ -350,7 +469,13 @@ wait_for_unhealthy() {
 # that have nothing to do with the target. It is the same code either way --
 # the image under test is built from this working tree and carries these
 # assets (ADR-0019).
-repair() { (cd "$target" && env ORBIT_REPAIR_PROMPTS=machine bash "$target/scripts/repair.sh" "$@"); }
+repair() {
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" != --execute ]] || { execution_snapshot "repair $*"; break; }
+  done
+  (cd "$target" && env ORBIT_REPAIR_PROMPTS=machine bash "$target/scripts/repair.sh" "$@")
+}
 
 # A freshly installed deployment must be healthy by repair's own diagnosis
 # before anything is broken on purpose. Without this, a harness failure two
@@ -420,6 +545,7 @@ drift_the_credential() {
   sha256sum "$target/.orbit-secrets/postgres-password" | awk '{print $1}' > "$workdir/drift.sha256"
   compose restart orbit-app >/dev/null 2>&1 || true
   wait_for_unhealthy
+  mark_setup_done credential-drift-established
 }
 
 # The drift is a fact about the secrets file, and this is how to ask.
@@ -595,6 +721,9 @@ exit "$rc"
 SHIM
   chmod 755 -- "$shimdir/mktemp" "$shimdir/mkdir"
 
+  mark_setup_done signal-cleanup-staging-fixture-ready
+  execution_snapshot 'repair.sh --execute --safe-only (backgrounded, signal-cleanup)'
+
   # Job control on for exactly this fork: without it bash puts a background
   # job in the harness's own process group, and a group signal later would
   # reach everything the harness itself has started, not just this job. With
@@ -609,11 +738,11 @@ SHIM
   pid=$!
   set +m
 
-  local deadline=$((SECONDS + 60))
+  local deadline=$((SECONDS + 60)) stop_reason=timed-out
   while :; do
     if compgen -G "$target/.orbit-repair-recovery.*" >/dev/null 2>&1; then found=1; break; fi
-    kill -0 "$pid" 2>/dev/null || break
-    ((SECONDS < deadline)) || break
+    kill -0 "$pid" 2>/dev/null || { stop_reason=child-exited-first; break; }
+    ((SECONDS < deadline)) || { stop_reason=timed-out; break; }
     sleep 0.005
   done
 
@@ -621,7 +750,11 @@ SHIM
     terminate_process_group "$pid" || true
     rm -rf -- "$staging"
     cat "$out" >&2
-    fail 'signal-cleanup: never observed a private recovery directory to interrupt'
+    # Name which of the two ways this can fail actually happened (rule:
+    # "a step that prints nothing cannot be diagnosed"): a background repair
+    # that exited before ever creating a recovery directory is a different
+    # fault from a poll that genuinely ran out its 60s budget waiting.
+    fail "signal-cleanup: never observed a private recovery directory to interrupt (reason=$stop_reason)"
   fi
 
   status=0
@@ -1064,6 +1197,7 @@ journey_unsafe_permissions() {
 
   chmod 644 -- "$target/.env-orbit"
   chmod 644 -- "$target/.orbit-secrets/postgres-password"
+  mark_setup_done unsafe-permissions-applied
 
   output="$(repair --check 2>&1)" || status=$?
   [[ "$status" == 4 ]] || { printf '%s\n' "$output" >&2; fail "unsafe-permissions: --check exited $status, expected 4"; }
@@ -1203,6 +1337,7 @@ journey_unhealthy_app() {
       fail 'unhealthy-app: the frozen app never reached docker health status unhealthy'; }
     sleep 2
   done
+  mark_setup_done application-frozen-unhealthy
 
   # On failure, print the window repair.sh step 12 reads. Which run of the
   # container a sentinel came from is the whole question this journey got
@@ -1291,6 +1426,7 @@ journey_successful_rollback() {
   sed -i 's|^ORBIT_PORT=.*|ORBIT_PORT=3212|' "$live"
   [[ "$(sha256sum "$live" | awk '{print $1}')" != "$expected" ]] ||
     fail 'successful-rollback: the drifted live file still matches the backup, so the fixture proves nothing'
+  mark_setup_done successful-rollback-fixture-staged
 
   status=0
   output="$(repair --check 2>&1)" || status=$?

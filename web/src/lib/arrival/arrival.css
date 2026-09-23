@@ -182,8 +182,20 @@ body.belong .nf .belong{opacity:1}
 .nf .belong li .act{flex:none;font:10px var(--mono);letter-spacing:.13em;
      color:var(--ink-quiet);text-transform:uppercase}
 .nf .belong li button:hover .act{color:var(--accent-text)}
-.nf .belong li.waiting .act{color:var(--warm)}
+/* #854's graded companion, not raw --warm: raw fails 4.5:1 on the daylight
+   packs (dawn/clouds), and this word sits exactly where that measurement was
+   taken (packs.css / v19-pack-text-contrast.test.mjs). */
+.nf .belong li.waiting .act{color:var(--warm-text)}
 .nf .belong li.waiting button{cursor:default}
+/* #866: the explanation under a waiting row. Always in the DOM (never
+   `{#if}`'d out) so its `role="status"` region can announce a later text
+   change -- see Newcomer.svelte. Truly empty when not waiting, so it takes no
+   space rather than being hidden with `display`, which some screen readers
+   do not treat as a live-region update when text and visibility change in
+   the same tick. */
+.nf .belong li .note{margin:0 0 0 32px;font:10px var(--mono);color:var(--warm-text);
+     line-height:1.6;letter-spacing:.02em}
+.nf .belong li .note:not(:empty){margin-top:2px;padding-bottom:6px}
 .nf .belong .own{border-top:1px solid var(--line-soft);padding:13px 24px 16px;text-align:center}
 .nf .belong .own button{font:11.5px var(--mono);color:var(--accent-text);letter-spacing:.04em;
      background:none;border:0;padding:0;cursor:pointer}
