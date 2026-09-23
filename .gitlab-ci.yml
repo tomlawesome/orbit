@@ -136,6 +136,10 @@ variables:
   # has no availability commitment to us and 403'd this gate once already
   # (#673). Deliberately one repository: Trivy does not fall back.
   TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
+  # The Java database the same way, for the same reason: `sidecar_images`
+  # needs it for the tika image, and trivy's default for it is the same
+  # mirror.gcr.io that 403'd above.
+  TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1
   # The digest scripts/test-integration.mjs pins for its disposable database.
   POSTGRES_IMAGE: postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
   # The tag `build_image` builds under, and nothing else: it names this commit,
@@ -1232,6 +1236,18 @@ sidecar_images:
     - *trivy_db_dir
     - *trivy_db_warm
     - |
+      # The Java database too, and only here: tika is a Java image, and a
+      # scan that finds no Java database in its cache downloads one (923 MiB
+      # on 2026-09-23) into the worker's private copy below, which is then
+      # thrown away -- so every run paid for it, inside the scan's own
+      # timeout, alongside three other workers' pulls. Pipeline 1534 lost
+      # the ollama scan to that 5-minute default; the dev run the same
+      # afternoon came in at 145 s. Warmed into the shared cache once, it
+      # costs the same as the vulnerability database: nothing on a warm day.
+      if [ ! -e "$TRIVY_CACHE_DIR/java-db/trivy-java.db" ]; then
+        trivy image --download-java-db-only
+      fi
+    - |
       # Fan the scans out, four at a time: this loop is almost all network
       # wait, not CPU, because it pulls each image before scanning it. The lane
       # is capped at 8 CPUs, so four concurrent pulls cannot swamp it (#879).
@@ -1247,6 +1263,8 @@ sidecar_images:
       # non-zero if any scan fails, so the job fails the way it did before.
       # --ignore-unfixed because these are images Orbit pulls rather than
       # builds: a fixable HIGH is actionable (re-pin), an unfixable one is not.
+      # --timeout 10m: trivy's default is 5, and a cold-cache pull of a large
+      # image on a busy runner has already reached it (pipeline 1534).
       node scripts/sidecar-image-evidence.mjs --list-references \
         --policy .github/supply-chain-policy.json \
         | xargs -P 4 -n 2 sh -c '
@@ -1258,6 +1276,8 @@ sidecar_images:
             trivy image \
               --cache-dir "$cache" \
               --skip-db-update \
+              --skip-java-db-update \
+              --timeout 10m \
               --scanners vuln \
               --ignore-unfixed \
               --format json \
