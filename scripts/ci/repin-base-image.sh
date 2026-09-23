@@ -660,7 +660,13 @@ push_repo="$(mktemp -d)"
 push_home="$(mktemp -d)"
 _scratch_dirs+=("$push_repo" "$push_home")
 git init -q "$push_repo"
-git -C "$push_repo" fetch -q "$repo_dir" "refs/heads/${branch_name}"
+# Pushed from the checkout into the scratch repository, not fetched out of
+# it: a fetch runs upload-pack inside "$repo_dir/.git", and git's ownership
+# check matches that path against the `safe.directory` the pipeline sets
+# for "$repo_dir" alone, so it refused with "dubious ownership" on
+# pipeline 1547. A push runs receive-pack in the scratch repository, which
+# this job created and owns.
+git -C "$repo_dir" push -q "$push_repo" "refs/heads/${branch_name}:refs/heads/${branch_name}"
 push_trace="$(new_secret_file)"
 push_status=0
 GIT_TRACE_CURL="$push_trace" GIT_TRACE_CURL_NO_DATA=1 GIT_TRACE_REDACT=1 \
@@ -668,7 +674,7 @@ GIT_TERMINAL_PROMPT=0 HOME="$push_home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=
 git -C "$push_repo" \
   -c credential.helper= \
   -c "credential.helper=store --file=${credential_file}" \
-  push --force "$push_url" "FETCH_HEAD:refs/heads/${branch_name}" || push_status=$?
+  push --force "$push_url" "refs/heads/${branch_name}:refs/heads/${branch_name}" || push_status=$?
 if [[ "$push_status" -ne 0 ]]; then
   log "push refused (exit ${push_status}); the HTTP exchange, status lines and header names only:"
   grep -E 'Send header: (POST|GET|Authorization)|Recv header: HTTP/' "$push_trace" |
