@@ -281,8 +281,9 @@ longer also waits for
 `light` lane for about 68 s of actual policy work, holding the stage back by
 over five minutes. A red one of the three still fails the pipeline overall —
 none is `allow_failure: true` — it just no longer blocks a job that never
-reads its result; auto_cancel (#923 rec 13) cancels an acceptance run already
-under way when that happens. `fidelity` and `integration` still wait for all
+reads its result; the acceptance stage keeps running rather than being
+cancelled (ADR-0028 §5 removed the project's `auto_cancel` on job failure).
+`fidelity` and `integration` still wait for all
 five: `fast`, `fast_docker`, `gitleaks`, `licence_policy` and
 `supply_chain_source`.
 
