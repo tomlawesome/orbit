@@ -1,5 +1,5 @@
 import { hash } from "@node-rs/argon2";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   MAX_PASSWORD_LENGTH,
   MIN_PASSWORD_LENGTH,
@@ -13,6 +13,13 @@ import {
   verifyAgainstDecoy,
   verifyPassword,
 } from "./password";
+
+// Every hashing test here runs Argon2id at the real policy (64 MiB, t=3),
+// a second or more each on an idle runner and several on a shared one, so
+// the suite's 5 s cap measured the runner, not the code: three timeouts on
+// unrelated commits (#1104). Nothing in this file asserts speed; the cap
+// only has to catch a hang.
+vi.setConfig({ testTimeout: 30_000 });
 
 const password = "correct horse battery staple";
 

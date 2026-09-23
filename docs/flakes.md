@@ -126,7 +126,7 @@ skill).
 
 - 2026-09-16 · 55f8e36 · pipeline 1159 / fidelity (job 14458) · 5458 of 1,600,000 pixels differ (0.3411%) against a 0.1000% budget, the other 44 tests green and the job healthy at 2.5 minutes. The diff is confined to the card's text block (x 650-948, y 330-672): the app draws "already exists here—" and the mockup "already exists here —", about a pixel apart vertically. The same screen's baseline test passed at 0 pixels in the same run, so the app render is byte-identical to what is committed and only the freshly-captured mockup moved. Job 14352 ran the full gate on this merge's own parent 1dfdee1 two hours earlier and got 13 pixels on this same test, with every other screen's count identical across the two runs — so the merge (`feature/m8-addresses`, whose only web file is a new refusal in `login/+server.js`) cannot have caused it. 13 to 5458 pixels on an unchanged app render points at text shaping in the mockup capture; the host has only ten fonts and substitutes silently, which is the first thing to check on the next sighting.
 
-## password.test.ts "matches the same password however the client composed its accents" and extraction-shortlist-recall.test.ts "adds to the tallies it is given rather than replacing them"
+## extraction-shortlist-recall.test.ts "adds to the tallies it is given rather than replacing them" (first seen alongside a password.test.ts timeout, since fixed under #1104)
 
 - 2026-09-18 · `fix/m9-surface-bugs` · local `pnpm run test` (whole unit suite, 270 files in parallel) · both timed out at 5000 ms in the full run, then passed together in isolation (32/32, ~4.5 s for both files) on unchanged code. The full run was under heavy load (import phase 239 s, tests 833 s), so this reads as scheduler starvation rather than anything in either test — neither file changed on this branch. First sighting of each; no issue yet (an issue on the third, per the testing-and-ci skill).
 
@@ -165,17 +165,6 @@ runner is enough to push it over. If it recurs, the fix shape is a per-test
 timeout on this one case rather than a global raise.
 
 - 2026-09-22 · 25b3c913 (the `dev` merge of !966, which touches only `web/src` and one e2e spec) · pipeline 1454 / fast (job 19676) · `Error: Test timed out in 5000ms`, alongside a timeout in `password.test.ts`. Retried as job 19693 on the same commit: green, 273 of 273 files and 4338 tests. The diff cannot reach either file, and both failures were timeouts rather than assertions, which is why the job was re-run rather than investigated as a regression. Two pipelines were executing on the same host at the time — 1455 was started manually two minutes into 1454 — so the contention was partly self-inflicted. **Third sighting: #1087 filed.**
-
-## password.test.ts "round-trips a password and refuses a wrong one"
-
-- 2026-09-22 · 25b3c913 · pipeline 1454 / fast (job 19676) · `Error: Test timed out in 5000ms`, in the same run as the extraction-shortlist-recall timeout above, under the same two-pipeline contention. Passed on the retry, job 19693.
-
-A different test from the one recorded on 2026-09-18, in the same file: Argon2id
-is deliberately expensive, so every test in this file sits close to the 5 s cap
-and the file has no single slow case to blame. Treated as its own heading rather
-than a second sighting of the 2026-09-18 one, because a fix aimed at one test
-would not touch the other. First sighting of this test; an issue on the third,
-per the testing-and-ci skill.
 
 ## v19-arrival.spec.ts:164 "the newcomer's arrival: the climb, the labelled sky, the real count, the question" — #1085
 
