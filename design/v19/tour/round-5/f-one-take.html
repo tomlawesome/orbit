@@ -205,7 +205,7 @@
     <g id="extra"></g>
   </svg>
   <div id="layer"></div>
-  <div class="toast" id="toast" role="status"><b>Car MOT — Volvo V60 is coming up</b><small>T−16D · 29 AUG · REMINDER SENT 21 DAYS BEFORE</small></div>
+  <div class="toast" id="toast" role="status"><b>Car MOT — Volvo V60 is coming up</b><small>T−16D · 29 AUG · REMINDER SENT</small></div>
   <div class="dot6" id="dot6"><i></i></div>
 
   <div class="bar" id="bar" role="group" aria-label="Tour transport">
@@ -779,7 +779,7 @@ const CH = [
 
   document.getElementById("toast").classList.add("on");
   await w(500);
-  await callout("At a month out it warms, and Orbit reminds you — 21 and 7 days before.",
+  await callout("At a month out it warms, and Orbit reminds you.",
     [640, 160], "bottom", { mark: "time-toast" });
   dropCallout();
   document.getElementById("toast").classList.remove("on");
