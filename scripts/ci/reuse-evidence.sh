@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 #
-# The proof that a job really ran, and on which inputs (#898).
+# The proof that a job really ran, and on which key (#898; ADR-0028 rekeyed it,
+# #1060 slice 3).
 #
 # Written as the last line of a candidate job's `script:`, so it exists only
 # when everything before it passed -- never in `after_script`, which runs
-# whatever the job did. `classify` in the next pipeline reads it back through
-# the artefacts API: evidence naming the same input hash is what lets that
-# pipeline stand on this run instead of repeating it.
+# whatever the job did. A later pipeline reads it back through the artefacts
+# API: evidence naming the same key is what lets that pipeline stand on this
+# run instead of repeating it. The key is ADR-0028's composite one -- the
+# artefact under test, the checkout minus the job's deny-list, and the pipeline
+# definition -- so evidence recorded on any ref, by any branch, is comparable.
 #
 # A job that gated itself out leaves no evidence, which is the answer wanted:
 # "did not really run" must not read as "ran and passed".
@@ -17,36 +20,32 @@
 #
 # Inputs (environment):
 #   CI_PIPELINE_ID, CI_JOB_ID   this run's identity
-#   ORBIT_REUSE_ENV_FILE        where classify left the input hashes
+#   ORBIT_REUSE_ENV_FILE        classify's keys and verdicts
+#   ORBIT_REUSE_IMAGE_ENV_FILE  build_image's, for the six image-running jobs
 #
-# Never fails the job: a missing hash means the next pipeline reruns, which is
+# Never fails the job: a missing key means the next pipeline reruns, which is
 # the safe direction, and no evidence file is worth a red pipeline.
 set -Eeuo pipefail
 
-repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-readonly repo_root
+script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+repo_root="$(CDPATH= cd -- "${script_dir}/../.." && pwd -P)"
+readonly script_dir repo_root
 cd "${repo_root}"
+
+# shellcheck source=scripts/ci/reuse-env.sh
+. "${script_dir}/reuse-env.sh"
 
 job="${1:?the job name is required}"
 stands_on="${2:-}"
 stands_on_pipeline="${3:-}"
 
-reuse_env="${ORBIT_REUSE_ENV_FILE:-.orbit-reuse/reuse.env}"
 evidence_dir="${ORBIT_REUSE_EVIDENCE_DIR:-ci-evidence}"
 
 suffix="$(printf '%s' "${job}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')"
-inputs=""
-if [[ -f "${reuse_env}" ]]; then
-  inputs="$(sed -n "s/^ORBIT_INPUTS_${suffix}=//p" "${reuse_env}" | tail -1)"
-fi
-if [[ -z "${inputs}" ]]; then
-  # The variable itself, for a job reading it from the environment rather than
-  # from classify's artefact.
-  inputs="$(printenv "ORBIT_INPUTS_${suffix}" || true)"
-fi
+inputs="$(orbit_reuse_value "ORBIT_INPUTS_${suffix}")"
 
 if [[ -z "${inputs}" ]]; then
-  printf 'no input hash for %s, so this run records no reuse evidence and the next pipeline repeats it\n' "${job}"
+  printf 'no reuse key for %s, so this run records no reuse evidence and the next pipeline repeats it\n' "${job}"
   exit 0
 fi
 
@@ -62,4 +61,4 @@ mkdir -p "${evidence_dir}"
   printf '}\n'
 } > "${evidence_dir}/${job}.json"
 
-printf 'recorded %s/%s.json: inputs %s\n' "${evidence_dir}" "${job}" "${inputs}"
+printf 'recorded %s/%s.json: key %s\n' "${evidence_dir}" "${job}" "${inputs}"
