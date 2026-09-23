@@ -220,11 +220,22 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
 
     // AND THE TOUR STILL RUNS (#871 criterion 3). The invited landing skips
     // the chooser, not the welcome: this reader has never seen /home before,
-    // so the first-run tour is exactly as due to them as to any newcomer.
+    // so the first-run film is exactly as due to them as to any newcomer.
     // #864 is why this is asserted rather than assumed -- the tour was
     // offered to a reader it could light nothing for, and nothing caught it.
-    await expect(newcomerPage.locator(".tourcard")).toBeVisible({ timeout: 30_000 });
-    await expect(newcomerPage.locator(".tourcard")).toHaveAttribute("data-tour-stop", "1");
+    // The transport pill (transport.js's `#orbit-tour-transport`) is the
+    // film's own handle, and `window.__reading()` (film.js's review hook) is
+    // read for the chapter index rather than clicked through, matching the
+    // headless check the mockup ships: chapter 0 is where a fresh film
+    // always opens.
+    await expect(newcomerPage.locator("#orbit-tour-transport")).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(() =>
+        newcomerPage.evaluate(
+          () => (window as unknown as { __reading?: () => { chapter: number } }).__reading?.().chapter,
+        ),
+      )
+      .toBe(0);
   } finally {
     await newcomerContext.close();
   }
