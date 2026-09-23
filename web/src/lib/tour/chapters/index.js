@@ -17,9 +17,15 @@
 import arrive from "./01-arrive.js";
 import add from "./02-add.js";
 import lands from "./03-lands.js";
+import belowTheDial from "./04-below-the-dial.js";
 import timeRuns from "./05-time-runs.js";
 import paperByPost from "./06-paper-by-post.js";
+import inbox from "./07-inbox.js";
+import theBelt from "./08-the-belt.js";
+import done from "./09-done.js";
+import otherHouseholds from "./10-other-households.js";
 import yourSky from "./11-your-sky.js";
+import yours from "./12-yours.js";
 
 /**
  * @typedef {object} Chapter
@@ -44,9 +50,15 @@ export const CHAPTERS = [
   arrive,
   add,
   lands,
+  belowTheDial,
   timeRuns,
   paperByPost,
+  inbox,
+  theBelt,
+  done,
+  otherHouseholds,
   yourSky,
+  yours,
 ];
 
 /** @param {string} id */
