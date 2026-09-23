@@ -1,0 +1,22 @@
+# CI-only overlay (ai/orbit#1022, design ai/agent-infra#14): repoints the
+# Docker Hub sidecars at the group dependency proxy so the pipeline's own
+# Docker daemon pulls them from GitLab's cache instead of the internet on
+# every run. Same digest, same bytes -- only the registry host changes.
+#
+# Never used outside CI: `${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}` is a
+# GitLab CI/CD predefined variable, empty everywhere else, so this file is
+# only ever added to a job's own $COMPOSE_FILES (smoke, smoke_local_only),
+# never to a local developer's compose invocation and never to the
+# user-facing docker-compose.yml those images are pinned in.
+#
+# The jobs that deploy through install.sh instead (acceptance's installer
+# half, repair_journeys, launcher_install_compat) are deliberately not
+# pointed at this file: they test the real operator install experience
+# against docker-compose.yml exactly as shipped, vendor references included.
+services:
+  orbit-db:
+    image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+  orbit-clamav:
+    image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clamav/clamav:1.5.4-debian@sha256:51e8a6c78895b68bfbbadf8030cc10b4a992d85738f0af9c8f1050b2a176f786
+  orbit-tika:
+    image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb

@@ -27,6 +27,12 @@
 #
 # Usage: scripts/test-repair-journeys.sh [--keep] [--journey <name>] [--list]
 #   ORBIT_REPAIR_JOURNEYS_IMAGE=<ref>  use this image instead of building one
+#   ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE=<ref>  image for the throwaway local
+#                                        registry (default registry:2). CI
+#                                        sets this to the group dependency
+#                                        proxy path (ai/orbit#1022); a local
+#                                        run has no proxy credential, so it
+#                                        keeps pulling the vendor tag direct.
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -227,7 +233,8 @@ install_deployment() {
   fi
 
   docker rm -f "$registry_name" >/dev/null 2>&1 || true
-  docker run -d --name "$registry_name" -p "127.0.0.1:$registry_port:5000" registry:2 >/dev/null ||
+  docker run -d --name "$registry_name" -p "127.0.0.1:$registry_port:5000" \
+      "${ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE:-registry:2}" >/dev/null ||
     fail 'local registry did not start'
   docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
