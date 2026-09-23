@@ -211,3 +211,7 @@ waiting for `body[data-home-ready]`; `/settings` has no such marker, so the
 first thing to check on the next sighting is whether the press landed before
 that screen bound its own chrome. The next sighting should also record the
 page's URL at failure, which this one has to infer.
+
+## fast: `ReferenceError: window is not defined` from veil.js's hide timer, attributed to v19-tour-chapter-time-runs.test.mjs
+
+- 2026-09-23 · 0793e625 (!978, `scripts/ci/repin-base-image.sh` only — nothing under `web/` or `tests/unit/`) · pipeline 1529 / `fast` job 20979 · every test passed (4630, 292 files) and the job still exited 1 on one unhandled error: `removeListeners web/src/lib/tour/veil.js:211` via `teardownOverlay` from the `setTimeout(…, FADE_MS)` in `hideVeil`, i.e. the fade timer fired after Vitest had torn down the jsdom `window`. The same test file passed on `dev` at 44958868 (pipeline 1523, job 20896) minutes earlier. Likely fix shape: clear `hideTimer` in the test's teardown, or run it under fake timers.
