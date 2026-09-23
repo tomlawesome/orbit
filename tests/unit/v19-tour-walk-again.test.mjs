@@ -4,40 +4,30 @@ import { resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createTour } from "../../web/src/lib/tour/engine.js";
-import { stopsFor } from "../../web/src/lib/tour/stops.js";
 import {
   _resetTourRestartForTests,
   relaunchTour,
   requestTourRestart,
   tourMayBegin,
 } from "../../web/src/lib/tour/relaunch.js";
+import { beginFilm } from "../../web/src/lib/tour/trigger.js";
 
 /*
- * #753 (slice 3 of #477): "take the walk again" from settings.
+ * #753 (slice 3 of #477): "take the walk again" from settings — now
+ * relaunching the one-take film (#866) rather than the superseded eight-stop
+ * card walk (owner-decisions.md §23).
  *
  * Tour.svelte's `started` flag is a one-shot per page load — right for
  * ordinary navigation, wrong here: a reader who clears `tourSeenAt` from
  * settings and lands back on /home in the SAME session must still get the
- * walk. relaunch.js is the seam that makes that ONE later arrival possible;
+ * film. relaunch.js is the seam that makes that ONE later arrival possible;
  * these tests drive it exactly the way the settings control and Tour.svelte's
  * arrival effect do, without mounting either component.
  */
 
-const HOME = `
-  <svg class="dial"><g class="chrome"></g><a class="sun-link"></a></svg>
-  <div class="minisys"></div>
-  <div class="hero-foot"></div>
-  <div id="manifest-top"><div class="corridor"><div class="today"></div></div></div>
-  <button id="nstar"></button>
-  <button class="orb"></button>
-  <div class="tourcard" tabindex="-1"><p id="tour-copy-1"></p><p id="tour-copy-2"></p></div>
-`;
-
 let fetched;
 
 beforeEach(() => {
-  document.body.innerHTML = HOME;
   fetched = vi.fn();
   vi.stubGlobal("fetch", fetched);
   _resetTourRestartForTests();
@@ -45,7 +35,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  document.body.innerHTML = "";
   _resetTourRestartForTests();
 });
 
@@ -91,27 +80,9 @@ describe("tourMayBegin — the guard Tour.svelte's arrival effect asks", () => {
 });
 
 describe("the clear-and-launch path, end to end", () => {
-  /** Mirrors v19-tour-walk.test.mjs's own walk() helper. */
-  function walk() {
-    let route = "/settings";
-    const navigated = [];
-    const writes = [];
-    const views = [];
-    const tour = createTour({
-      doc: document,
-      stops: stopsFor(),
-      routeOf: () => route,
-      navigate: async (next) => { route = next; navigated.push(next); },
-      writeSeen: async () => { writes.push(Date.now()); },
-      onChange: (view) => views.push(view),
-      patience: 20,
-    });
-    return { tour, navigated, writes, views, route: () => route };
-  }
-
-  it("starts the walk at stop 1 on the arrival that follows a relaunch", async () => {
+  it("starts the film on the arrival that follows a relaunch, on a desk", async () => {
     /* This is the guard a plain arrival hits: the reader already took (or
-       skipped) the walk earlier this load, so `started` is already true. */
+       skipped) the film earlier this load, so `started` is already true. */
     const started = true;
     expect(tourMayBegin(started)).toBe(false);
 
@@ -124,13 +95,19 @@ describe("the clear-and-launch path, end to end", () => {
 
     /* Tour.svelte's arrival effect, on landing back on /home. */
     expect(tourMayBegin(started)).toBe(true);
-    const { tour, views, navigated } = walk();
-    await tour.start();
-    expect(navigated).toEqual(["/home"]);
-    expect(views.at(-1)).toMatchObject({ id: "chart", number: 1, total: 8, first: true });
+    const start = vi.fn(async () => {});
+    const outcome = await beginFilm({
+      phone: false,
+      readTour: async () => ({ tourSeenAt: null }),
+      hasHousehold: () => true,
+      createFilmRun: () => ({ player: { onEnd: () => () => {} }, start }),
+      writeSeen: () => {},
+    });
+    expect(outcome).toBe("started");
+    expect(start).toHaveBeenCalledTimes(1);
 
     /* And it is a one-shot: a THIRD arrival this load, with nothing new
-       requested, does not get to start the walk again. */
+       requested, does not get to start the film again. */
     expect(tourMayBegin(started)).toBe(false);
   });
 
