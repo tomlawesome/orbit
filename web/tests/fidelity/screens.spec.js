@@ -49,34 +49,50 @@ const PIXEL_THRESHOLD = 0.1;
 const MAX_DIFF_RATIO = 0.001;
 
 /**
- * Walks the tour to stop 3 and settles there (#752).
+ * Holds the one-take film at one of its own marks and settles there (#1098).
  *
  * Runs in the page, polled by waitForFunction, so it has to be safe to
- * evaluate over and over: it presses *Next* at most once per stop — the card
- * publishes which stop it is on, and the marker below only lets a given
- * number be pressed once — so the walk cannot be run past the stop being
- * photographed. Settled means the galaxy has been placed, the card says stop
- * 3, the emphasis has actually been applied to something — `.lit` is the
- * mark the whole screen exists to guard, in both modes — and the fade that
- * carries it (tour.css, .45s on opacity and filter) has finished everywhere:
- * photographed mid-fade, the same stop measures differently on every run.
+ * evaluate over and over. The film is not a walk that stops and waits: it is
+ * twelve chapters on a clock (web/src/lib/tour/film.js). What makes a frame
+ * of it photographable is the film's own review hook, `window.__hold`: the
+ * next time the film reaches the mark of that name it parks its clock and
+ * holds the coroutine there (vocabulary.js, `mark`), with the veil, the
+ * ring, the callout and the pill all left standing. `__held` says the hold
+ * has happened.
+ *
+ * The chapter is asked for by id, never by index, and asked for exactly once
+ * (the marker below): `__jump` restarts a chapter from its first line, so
+ * pressing it on every poll would never let the film reach the mark.
+ *
+ * Settled means the galaxy has been placed, the film is held at the mark,
+ * the veil is up over the sky with something actually lit through it — the
+ * ring is the mark the whole screen exists to guard — the callout is on the
+ * screen, and nothing on the film's own chrome is still in a transition
+ * (the callout's .24s slide-in, the veil's fade): photographed mid-fade, the
+ * same mark measures differently on every run.
  */
-function tourAtStopThree() {
+function tourHeldAtOthers() {
+  const w = /** @type {any} */ (window);
+  w.__hold = "others-gran";
   if (document.querySelectorAll(".minisys").length === 0) return false;
-  const card = document.querySelector(".tourcard");
-  if (!card) return false;
-  const at = Number(card.getAttribute("data-tour-stop") ?? 0);
-  if (at === 0) return false;
-  if (at < 3) {
-    if (card.getAttribute("data-pressed") !== String(at)) {
-      card.setAttribute("data-pressed", String(at));
-      document.getElementById("tour-next")?.click();
-    }
+  if (typeof w.__jump !== "function" || !Array.isArray(w.__chapters)) return false;
+  if (!w.__fidelityJumped) {
+    const k = w.__chapters.findIndex((/** @type {{ id: string }} */ c) => c.id === "others");
+    if (k < 0) return false;
+    w.__fidelityJumped = true;
+    w.__jump(k);
     return false;
   }
-  if (at !== 3 || document.querySelectorAll("[data-tour-dim].lit").length === 0) return false;
-  return [...document.querySelectorAll("[data-tour-dim]")].every(
-    (el) => !el.getAnimations().some((a) => a instanceof CSSTransition),
+  if (w.__held !== "others-gran") return false;
+  const veil = document.getElementById("orbit-tour-veil");
+  const chrome = document.getElementById("orbit-tour-film");
+  const pill = document.getElementById("orbit-tour-transport");
+  if (!veil || !chrome || !pill) return false;
+  if (getComputedStyle(veil).opacity === "0") return false;
+  if (!chrome.querySelector(".tourfilm-ring")) return false;
+  if (!chrome.querySelector(".tourfilm-callout")) return false;
+  return [veil, chrome, pill].every(
+    (el) => !el.getAnimations({ subtree: true }).some((a) => a instanceof CSSTransition),
   );
 }
 
@@ -644,48 +660,61 @@ const SCREENS = [
     mockupOnly: [".demos", "footer"],
   },
   /*
-   * THE FIRST-RUN WALK, ONE SCREEN PER EMPHASIS MODE (#752, acceptance
-   * criterion 4). Both photograph the SAME stop — stop 3, the dial, which is
-   * the one every pack has to carry — and differ only in the pack in force:
+   * THE ONE-TAKE FILM, ONE FRAME PER GROUND (#1098; the walk these replaced
+   * was #752's). Both photograph the SAME held mark — chapter 10's
+   * `others-gran`, on /home: the veil up over the whole sky with one hole
+   * cut round a real neighbouring sun, that sun lifted and ringed, its
+   * callout beside it, and the transport pill parked — and differ only in
+   * the pack in force:
    *
-   *   tour-dim      star-chart, where everything but the dial drops to the
-   *                 pack's faint tier;
-   *   tour-forward  dawn, where nothing dims and the dial is pushed forward
-   *                 by colour instead (owner, 2026-09-03).
+   *   tour-dark     star-chart, the veil graded against a dark ground;
+   *   tour-light    dawn, against a light one, and the tight case: the ring
+   *                 measures 3.03:1 against dawn's --bg where the floor is 3
+   *                 (#866). A pack that moves the ring under that floor
+   *                 moves this frame.
    *
-   * OWNED, not porting, and the reason is not a shortcut: design/v19/tour.html
-   * is a reduced stage — a dial, a one-row manifest and three lane cards drawn
-   * to show the TREATMENT — not a second drawing of home. Photographing the
-   * real /home under the tour against that sheet would measure the difference
-   * between two screens, not drift in the walk. What these two guard is the
-   * emphasis itself, on the real screen, in both modes.
+   * Why this mark and not the dial's. The film has no dim and no forward
+   * mode any more: one veil, the pack's own --bg at veil.js's OPACITY, with
+   * holes, is the whole emphasis in every pack (veil.js). So the
+   * frame worth guarding is the one where that veil is UP over the reader's
+   * real sky with a real hole in it. Chapter 1 rings the dial on an unveiled
+   * sky and chapters 3 and 5 are the same; the only unscrolled /home moment
+   * with the veil up is chapter 10 — chapter 4 has it up too, but over a
+   * page it has scrolled, which is a frame about scroll position, not the
+   * veil. The pill is in every frame; held, it shows its paused face.
+   *
+   * OWNED, not porting, for the reason the walk's pair gave: the ratified
+   * sheets (design/v19/tour/round-5/) are drawn over a synthetic sky to show
+   * the TREATMENT, not a second drawing of home. Photographing the real
+   * /home under the film against them would measure the difference between
+   * two skies, not drift in the film.
    *
    * Both are photographed in the design's reduced-motion state, for the
    * belt's reason (above): home's sky drifts and its rotor turns on clocks
-   * the walk cannot pin, and the walk itself takes seconds to reach stop 3,
-   * so two captures of the same stop otherwise land on different frames of
-   * the drift — measured at 0.8%, eight times the budget. In that state the
-   * sky holds still, the rotor stands, and the emphasis is applied without
-   * its fade, which is exactly the design's own reduced-motion rule
-   * (tour.css: `transition: none`).
+   * the film cannot pin, and the film takes seconds to reach a mark, so two
+   * captures of the same mark otherwise land on different frames of the
+   * drift — measured at 0.8%, eight times the budget. In that state the sky
+   * holds still, the rotor stands, and the film's own motion (the dot's
+   * travel, the lift, the veil's fade) arrives instead of playing, which is
+   * the film's own reduced-motion rule (clock.js: `w()` waits nothing).
    */
   {
-    name: "tour-dim",
+    name: "tour-dark",
     path: "/home",
     stage: "owned",
     pack: "starchart",
     tourDue: true,
     reducedMotion: "reduce",
-    settle: tourAtStopThree,
+    settle: tourHeldAtOthers,
   },
   {
-    name: "tour-forward",
+    name: "tour-light",
     path: "/home",
     stage: "owned",
     pack: "dawn",
     tourDue: true,
     reducedMotion: "reduce",
-    settle: tourAtStopThree,
+    settle: tourHeldAtOthers,
   },
 ];
 
