@@ -763,12 +763,12 @@ classify:
       set -eu
       mkdir -p .orbit-reuse
       : > .orbit-reuse/reuse.env
-      if node scripts/ci/job-inputs.mjs hashes > .orbit-reuse/hashes.env; then
-        cat .orbit-reuse/hashes.env > .orbit-reuse/reuse.env
+      if node scripts/ci/job-inputs.mjs keys > .orbit-reuse/keys.env; then
+        cat .orbit-reuse/keys.env > .orbit-reuse/reuse.env
       else
-        echo "the job input hashes could not be computed: every job will run"
+        echo "the job reuse keys could not be computed: every job will run"
       fi
-      rm -f .orbit-reuse/hashes.env
+      rm -f .orbit-reuse/keys.env
       node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
         || echo "the reuse lookup failed: every job will run"
   artifacts:
@@ -3046,7 +3046,7 @@ base_image_repin:
 # caught, so either failing fails the job, which is the entire point of #1023.
 #
 # No reuse gate (#898) and so no entry in scripts/ci/job-inputs.json, which
-# scripts/job-inputs.test.mjs holds to be a matched pair: the answer depends on
+# scripts/ci/job-inputs.test.mjs holds to be a matched pair: the answer depends on
 # the host's clock at the moment it is asked, so standing on an earlier run's
 # verdict would report a tidy that has since stopped.
 tidy_freshness:
@@ -3104,7 +3104,7 @@ tidy_freshness:
 # thing the comparison must not do. It runs at most twice per promotion, so
 # there is nothing worth saving. That is also why it has no entry in
 # scripts/ci/job-inputs.json: that file and the reuse gate are a matched pair,
-# and scripts/job-inputs.test.mjs holds them to it -- an entry without the gate
+# and scripts/ci/job-inputs.test.mjs holds them to it -- an entry without the gate
 # fails as loudly as a gate without an entry.
 #
 # The quiet machine, as far as the runner lanes allow. `orbit-build` is the
