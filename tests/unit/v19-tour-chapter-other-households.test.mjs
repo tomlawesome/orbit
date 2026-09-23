@@ -72,12 +72,13 @@ function drawHome({ others = 2 } = {}) {
   document.body.innerHTML = `
     <div class="hero" id="hero">
       <svg class="dial"><g class="chrome"></g><a class="sun-link"></a></svg>
-      ${Array.from({ length: others }, () => '<div class="minisys"></div>').join("")}
+      ${Array.from({ length: others }, () => '<div class="minisys"><svg><circle class="msring"/></svg></div>').join("")}
     </div>`;
   box(document.querySelector(".dial"), { x: 390, y: 150, w: 500, h: 500 });
   box(document.querySelector(".sun-link"), { x: 616, y: 376, w: 48, h: 48 });
   [...document.querySelectorAll(".minisys")].forEach((sun, k) => {
-    box(sun, { x: 1053 - k * 700, y: 235 + k * 300, w: 96, h: 96 });
+    box(sun, { x: 1053 - k * 700, y: 235 + k * 300, w: 210, h: 160 });
+    box(sun.querySelector(".msring"), { x: 1131 - k * 700, y: 290 + k * 300, w: 80, h: 80 });
   });
 }
 
@@ -120,7 +121,9 @@ describe("the selectors chapter 10 names", () => {
        idea of where another household's sun is. */
     const sun = TOUR_STOPS.find((stop) => stop.id === "sun");
     expect(sun.target).toContain(".minisys");
-    expect(SELECTORS.other).toBe(".minisys");
+    /* The film rings the system's own 40px ring inside that group, not the
+       group: the group's box takes in the label above (#866, #1098 frames). */
+    expect(SELECTORS.other).toBe(".minisys .msring");
   });
 });
 
@@ -171,8 +174,8 @@ describe("the beats, in the mockup's order", () => {
     await chapter.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["The rest of the sky holds households you don't belong to.", ".minisys"],
-      ["Tap one to ask to join — Gran's flat, the narrowboat.", ".minisys"],
+      ["The rest of the sky holds households you don't belong to.", ".minisys .msring"],
+      ["Tap one to ask to join — Gran's flat, the narrowboat.", ".minisys .msring"],
     ]);
   });
 
@@ -190,7 +193,7 @@ describe("the beats, in the mockup's order", () => {
   it("ends with the sun unlit and the veil back down", async () => {
     const { log, ctx } = recorder();
     await chapter.play(ctx);
-    expect(log.some(([word, a]) => word === "unlight" && a === ".minisys")).toBe(true);
+    expect(log.some(([word, a]) => word === "unlight" && a === ".minisys .msring")).toBe(true);
     expect(log.at(-1)).toEqual(["veil", false]);
   });
 });

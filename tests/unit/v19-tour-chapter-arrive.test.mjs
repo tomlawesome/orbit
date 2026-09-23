@@ -81,12 +81,13 @@ function drawHome({ others = 2 } = {}) {
   document.body.innerHTML = `
     <div class="hero" id="hero">
       <svg class="dial"><g class="chrome"></g><a class="sun-link"></a></svg>
-      ${Array.from({ length: others }, () => '<div class="minisys"></div>').join("")}
+      ${Array.from({ length: others }, () => '<div class="minisys"><svg><circle class="msring"/></svg></div>').join("")}
     </div>`;
   box(document.querySelector(".dial"), { x: 390, y: 150, w: 500, h: 500 });
   box(document.querySelector(".sun-link"), { x: 616, y: 376, w: 48, h: 48 });
   [...document.querySelectorAll(".minisys")].forEach((sun, k) => {
-    box(sun, { x: 1053 - k * 700, y: 235 + k * 300, w: 96, h: 96 });
+    box(sun, { x: 1053 - k * 700, y: 235 + k * 300, w: 210, h: 160 });
+    box(sun.querySelector(".msring"), { x: 1131 - k * 700, y: 290 + k * 300, w: 80, h: 80 });
   });
 }
 
@@ -182,7 +183,7 @@ describe("the beats, in the mockup's order", () => {
       ["This is your star chart.", ".dial"],
       ["Every sun is a household you belong to.", ".sun-link"],
       ["That's your sun, at centre — your household, always here.", ".sun-link"],
-      ["The rest of the sky holds systems you don't belong to — tap one to ask to join.", ".minisys"],
+      ["The rest of the sky holds systems you don't belong to — tap one to ask to join.", ".minisys .msring"],
     ]);
   });
 
@@ -190,13 +191,13 @@ describe("the beats, in the mockup's order", () => {
     const { log, ctx } = recorder();
     await arrive.play(ctx);
     const order = log
-      .filter(([word, a]) => (word === "light" || word === "unlight" || word === "callout") && (a === ".minisys" || word === "callout"))
+      .filter(([word, a]) => (word === "light" || word === "unlight" || word === "callout") && (a === ".minisys .msring" || word === "callout"))
       .map(([word, a, sel]) => (word === "callout" ? `say:${sel}` : `${word}:${a}`));
     /* the outer suns come up for "every sun", and are gone before the line
        about the centre one is read */
-    expect(order).toContain("light:.minisys");
-    const lit = order.indexOf("light:.minisys");
-    const unlit = order.indexOf("unlight:.minisys");
+    expect(order).toContain("light:.minisys .msring");
+    const lit = order.indexOf("light:.minisys .msring");
+    const unlit = order.indexOf("unlight:.minisys .msring");
     const centreLine = order.lastIndexOf("say:.sun-link");
     expect(lit).toBeLessThan(unlit);
     expect(unlit).toBeLessThan(centreLine);
