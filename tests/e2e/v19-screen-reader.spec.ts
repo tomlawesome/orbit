@@ -314,6 +314,10 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
    * other spec expects to find it: taken.
    */
   test("first-run tour overlay", async ({ page }, testInfo) => {
+    /* The film has no pocket cut (§24): a phone mounts no transport, so the
+       pill this walkthrough reads is never there (v19-tour.spec.ts skips the
+       same way). */
+    test.skip(test.info().project.name.startsWith("mobile"), "the film is desk-only (owner-decisions.md §24)");
     await signIn(page);
     const forgotten = await page.evaluate(async () => {
       const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
