@@ -166,19 +166,32 @@ describe("the beats, against a recorder", () => {
     ]);
   });
 
-  it("lights the demo body, veils the sky, and drops both before the reminder line", async () => {
+  /* Chapter 5 NEVER raises the veil. It is one of only two chapters in the
+     ratified film that does not (the other is 12): the mockup opens it
+     `veil(false)` and never calls `veil(true)` again
+     (design/v19/tour/round-5/f-one-take.html:770). The whole sky stays lit
+     while time runs across it — you are watching the year move, not one
+     control in a spotlight.
+
+     This test previously asserted the opposite, because the chapter was
+     built raising the veil, because veil.js's comment named "chapters
+     5/9/12's travelling hole" and that reads as an instruction. It is not:
+     it describes the mask being able to follow a moving hole. What travels
+     here is the RING, not a hole. Chapter 12 made the same mistake from the
+     same line. */
+  it("lights the demo body and drops it before the reminder line, without ever veiling", async () => {
     const { log, ctx } = recorder();
     await timeRuns.play(ctx);
-    const veilOn = log.findIndex(([w, on]) => w === "veil" && on === true);
     const lit = log.findIndex(([w, sel]) => w === "light" && sel === ".tourfilm-time-body");
     const unlit = log.findIndex(([w, sel]) => w === "unlight" && sel === ".tourfilm-time-body");
-    const veilOff = log.findLastIndex(([w, on]) => w === "veil" && on === false);
     const reminder = log.findIndex(([w, text]) => w === "callout" && text?.startsWith("At a month out"));
     expect(lit).toBeGreaterThanOrEqual(0);
-    expect(lit).toBeLessThan(veilOn);
-    expect(unlit).toBeGreaterThan(veilOn);
-    expect(unlit).toBeLessThan(veilOff);
-    expect(veilOff).toBeLessThan(reminder);
+    expect(unlit).toBeGreaterThan(lit);
+    expect(unlit).toBeLessThan(reminder);
+    /* The sky is never dimmed: the only veil call is the chapter's own
+       opening `veil(false)`, which clears whatever chapter 4 left up. */
+    expect(log.filter(([w, on]) => w === "veil" && on === true)).toEqual([]);
+    expect(log.filter(([w]) => w === "veil").map(([, on]) => on)).toEqual([false]);
   });
 
   it("marks time-warmed after the walk and time-toast on the reminder line", async () => {

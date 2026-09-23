@@ -122,13 +122,20 @@ export default {
     if (!dry() && dial.els[0]) bodyEl = drawTimeBody(doc, dial.els[0], DAYS_FAR);
     await w(LEAD_MS);
 
-    /* The walk: the veil comes up and the body is lit before it moves, so
-       the hole is already cut where the body already is. `light(body)`
-       inside the tween is what keeps the RING with it; the veil's own loop
-       keeps the HOLE with it on its own. */
+    /* The walk. The body is lit before it moves, so the ring is already on
+       it, and `light(body)` inside the tween is what keeps the ring WITH it.
+
+       NO VEIL. Chapter 5 is one of only two chapters in the ratified film
+       that never raises it (the other is 12): the mockup opens this chapter
+       `veil(false)` and never calls `veil(true)` again
+       (design/v19/tour/round-5/f-one-take.html:770). The whole sky stays lit
+       while time runs across it, which is the point of the beat — you are
+       watching the year move, not one control in a spotlight. veil.js's own
+       comment names "chapters 5/9/12's travelling hole", which is about the
+       mask being able to FOLLOW a moving hole, not an instruction to raise
+       one here; it misled this chapter and chapter 12 once already. */
     const body = ctl({ sel: SELECTORS.body, round: true, optional: true });
     light(body);
-    veil(true);
     await tween(WALK_MS, (t) => {
       if (dry() || !bodyEl) return;
       const days = Math.round(DAYS_FAR + (DAYS_NEAR - DAYS_FAR) * ease(t));
@@ -141,7 +148,6 @@ export default {
     await goto(body, { willPress: false });
     await callout("Time runs. The nearer the sun, the sooner.", body, "bottom");
     unlight(body);
-    veil(false);
 
     /* The reminder line: no toast exists to carry it, so the chart does. */
     await callout("At a month out it warms, and Orbit reminds you.", dial, "top", { mark: "time-toast" });

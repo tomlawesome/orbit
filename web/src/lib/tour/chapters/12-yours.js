@@ -147,12 +147,20 @@ export default {
     await w(LEAD_MS);
 
     /* The year, once more, in one turn of the ring: in to 20 days, then back
-       out to 381. The veil comes up and the body is lit before it moves, so
-       the hole is already cut where the body already is — chapter 5's own
-       pattern for the same travelling spotlight. */
+       out to 381. The body is lit before it moves, so the ring is already on
+       it, and `light(body)` inside each tween keeps the ring WITH it.
+
+       NO VEIL, and this is the closing chapter's whole point. Chapter 12 is
+       one of only two in the ratified film that never raises it (the other
+       is 5): the mockup opens `veil(false)` and never calls `veil(true)`
+       again (design/v19/tour/round-5/f-one-take.html:1104). "Now it's
+       yours." is said over the reader's whole sky, undimmed — dimming it to
+       spotlight one control would be the opposite of handing it over.
+       veil.js's comment about "chapters 5/9/12's travelling hole" describes
+       the mask being able to FOLLOW a moving hole, not an instruction to
+       raise one; it misled this chapter and chapter 5 once already. */
     const body = ctl({ sel: SELECTORS.body, round: true, optional: true });
     light(body);
-    veil(true);
     await tween(WALK_MS, (t) => {
       if (dry() || !bodyEl) return;
       const days = Math.round(DAYS_FAR + (DAYS_NEAR - DAYS_FAR) * ease(t));
@@ -167,7 +175,6 @@ export default {
     });
     await mark("yours-year");
     unlight(body);
-    veil(false);
 
     /* The household's own sun, visited plainly, and the film's last two
        lines read over it. */

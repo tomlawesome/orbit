@@ -29,8 +29,17 @@
  * a gradient stack can fake a circle cheaply, faking a soft-cornered rect
  * needs several gradients composited just right per corner. An SVG `<rect
  * rx>` and `<circle>` say exactly what is wanted — one hole, one shape — and
- * cover chapters 5/9/12's travelling hole the same way they cover a still
- * one, with no separate code path.
+ * cover a TRAVELLING hole the same way they cover a still one, with no
+ * separate code path -- chapter 9 is the film's one travelling-hole chapter,
+ * where the veil is up while the thing it is cut around moves.
+ *
+ * This sentence used to name "chapters 5/9/12", and that was wrong twice
+ * over: it reads as an instruction to raise the veil in all three, and 5 and
+ * 12 are precisely the two chapters of the twelve that never raise it at all
+ * (round-5/f-one-take.html:770 and :1104 open `veil(false)` and never call
+ * `veil(true)` again). Both chapters were built veiling because of this line
+ * and both had to be corrected. What travels in 5 and 12 is the RING, not a
+ * hole; there is no hole, because there is no veil.
  *
  * CONTRAST: the veil never sits over readable text it did not already sit
  * over unlit — it darkens exactly what the mockup darkens, using the pack's
