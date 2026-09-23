@@ -57,6 +57,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Tear the overlay down instantly. With motion on, hideVeil() only starts
+  // its 450ms fade timer, which can fire after Vitest has torn this file's
+  // window down and surface as an uncaught ReferenceError in whichever file
+  // the worker is running by then (fast, pipelines 1529 and 1535).
+  setReducedMotion(true);
   hideVeil();
   setReducedMotion(false);
 });

@@ -164,7 +164,11 @@ fail() { printf 'repin-base-image: %s\n' "$1" >&2; exit 2; }
 # covers every exit this script can take -- success, `fail`'s exit 2, an
 # unhandled error under `set -e`, or a signal -- not just the tidy one.
 _secret_files=()
-_cleanup_secret_files() { [[ ${#_secret_files[@]} -eq 0 ]] || rm -f "${_secret_files[@]}"; }
+_scratch_dirs=()
+_cleanup_secret_files() {
+  [[ ${#_secret_files[@]} -eq 0 ]] || rm -f "${_secret_files[@]}"
+  [[ ${#_scratch_dirs[@]} -eq 0 ]] || rm -rf "${_scratch_dirs[@]}"
+}
 trap _cleanup_secret_files EXIT INT TERM
 
 # A mode-600 temp file, tracked for cleanup. Never the token itself: callers
@@ -636,10 +640,41 @@ fi
 credential_file="$(new_secret_file)"
 printf 'https://oauth2:%s@%s\n' "$BASE_REPIN_TOKEN" "$CI_SERVER_HOST" > "$credential_file"
 push_url="${BASE_REPIN_PUSH_URL:-https://${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git}"
-git -C "$repo_dir" \
+
+# The push, from a scratch repository rather than the runner's checkout
+# (#1081, 2026-09-23). Pipeline 1527 showed the stored token is the right
+# identity (the probe above named the base-repin bot, a Developer) and the
+# push was still refused with the wording GitLab uses for a *job token*,
+# which may read this project but never write it. Nothing in the checkout's
+# config explained it (no extraheader key, no helper), so the checkout is
+# not trusted for the push at all: the commit is fetched into a fresh
+# `git init` with no config of its own, no global or system gitconfig, and a
+# HOME nothing else has written to. The only credential that can reach this
+# push is the store file above.
+#
+# `push_trace` records the HTTP exchange so a refusal can finally say what
+# was sent. Git redacts every Authorization value in that trace by default
+# (GIT_TRACE_REDACT) and the printout below keeps only status lines and
+# header names, never values; each line is scrubbed again before printing.
+push_repo="$(mktemp -d)"
+push_home="$(mktemp -d)"
+_scratch_dirs+=("$push_repo" "$push_home")
+git init -q "$push_repo"
+git -C "$push_repo" fetch -q "$repo_dir" "refs/heads/${branch_name}"
+push_trace="$(new_secret_file)"
+push_status=0
+GIT_TRACE_CURL="$push_trace" GIT_TRACE_CURL_NO_DATA=1 GIT_TRACE_REDACT=1 \
+GIT_TERMINAL_PROMPT=0 HOME="$push_home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+git -C "$push_repo" \
   -c credential.helper= \
   -c "credential.helper=store --file=${credential_file}" \
-  push --force "$push_url" "HEAD:refs/heads/${branch_name}"
+  push --force "$push_url" "FETCH_HEAD:refs/heads/${branch_name}" || push_status=$?
+if [[ "$push_status" -ne 0 ]]; then
+  log "push refused (exit ${push_status}); the HTTP exchange, status lines and header names only:"
+  grep -E 'Send header: (POST|GET|Authorization)|Recv header: HTTP/' "$push_trace" |
+    sed -E 's/^[^=<]*//; s/(Authorization:).*/\1 [value withheld]/; s/[?].*//; s/^/repin-base-image:   /'
+  exit "$push_status"
+fi
 
 if [[ -n "${BASE_REPIN_STOP_AFTER_PUSH:-}" ]]; then
   log "BASE_REPIN_STOP_AFTER_PUSH set: stopping after the push (testing seam); not checking for or opening a merge request."
