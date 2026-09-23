@@ -176,3 +176,17 @@ and the file has no single slow case to blame. Treated as its own heading rather
 than a second sighting of the 2026-09-18 one, because a fix aimed at one test
 would not touch the other. First sighting of this test; an issue on the third,
 per the testing-and-ci skill.
+
+## v19-screen-reader.spec.ts:356 "sign-out screen" — mobile-chromium
+
+- 2026-09-23 · 1e2883ae (the `dev` merge of !971, #1088's document preview and #1094's belt stepping) · pipeline 1496 / smoke (job 20420) · `locator.click` on `.account .signout` exceeded the file's own 90s budget, on the first attempt AND on retry #1, so the job failed outright at 938s. The button was found every time and never became visible: "locator resolved to `<button class="signout svelte-1we9htl">sign out →</button>`" followed by 170-odd "element is not visible" retries across 90 seconds. The test reached the screen it asked for — the trace has `GET /settings` at 200 and every settings API read behind it — and `page.locator("button.orb").click()` returned without error, so what failed is the desk account panel opening, not the navigation. The two error contexts were captured on `/home`, not `/settings`: the first shows the dial with this file's own seeded item, the second home's adrift surface, because the #1077 reset runs again between the attempts and takes the household `beforeAll` seeded with it. `.account` is desk chrome (home.css scopes it under `.desk`) and both dialects are server-rendered with CSS choosing (CON-10), which is why the button exists in a pocket run at all.
+
+The same test was green on the same code two hours earlier — pipeline 1491's
+smoke, both the failed job 20319 (`✓ 278 ... (2.0s)`) and the retried job
+20407 (`✓ 277 ... (1.9s)`), on `68e3d66f`, which is the merge's own head — and
+no other pipeline ran `1e2883ae`. An account panel that does not register as
+open when armed is the #1064 family, fixed on 2026-09-20 for `/home` by
+waiting for `body[data-home-ready]`; `/settings` has no such marker, so the
+first thing to check on the next sighting is whether the press landed before
+that screen bound its own chrome. The next sighting should also record the
+page's URL at failure, which this one has to infer.
