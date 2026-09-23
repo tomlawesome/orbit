@@ -46,15 +46,15 @@ stages:
   - maintenance
 
 workflow:
-  # Stop the rest of the pipeline the moment a job fails (#923 finding 4,
-  # owner ruling 2026-09-09). interruptible and the project's auto-cancel only
-  # act when a NEW pipeline starts, so a red pipeline used to keep both
-  # orbit-build slots busy for another 25 minutes -- in 822, everything after
-  # fidelity went red at 12.5 minutes. Losing the siblings' evidence is
-  # accepted: a retry or a fix reruns them. Publish-lane jobs are
-  # interruptible: false and are left alone.
-  auto_cancel:
-    on_job_failure: all
+  # auto_cancel: on_job_failure: all (#923 finding 4, owner ruling
+  # 2026-09-09) is gone (ADR-0028 section 5). A red `fast` already stops the
+  # acceptance stage through `.needs_gated`, so auto-cancel bought nothing
+  # there; the case it did fire on was an acceptance-stage job failing
+  # mid-stage, and it then cancelled the sibling jobs whose passes are
+  # exactly the reuse evidence a fix push needs to stand on -- so the fix
+  # paid to rebuild them. interruptible (below and per-job) is unchanged: it
+  # still cancels a ref's superseded pipeline when a new one starts; publish
+  # lane jobs stay interruptible: false.
   rules:
     # Tags publish nothing here; the release lane is GitHub's.
     - if: $CI_COMMIT_TAG
@@ -314,19 +314,25 @@ variables:
     exit 0
   fi
 
-# Standing on an earlier run instead of repeating it (#898).
+# Standing on an earlier run instead of repeating it (#898, rekeyed by
+# ADR-0028 in #1060 slice 3).
 #
 # A fix pushed after one red job used to rerun every job that had already
-# passed. `classify` now hashes what each candidate job reads
-# (scripts/ci/job-inputs.json), looks through this merge request's earlier
-# pipelines for a successful run of the same job on the same hash, and hands
-# the verdict on. This gate goes at the top of that job's `script:` and stops
-# the job when there is one.
+# passed. Each candidate job now has a key over the thing it tests: the image
+# content ID for the six that run the image, the whole checkout minus that
+# job's deny-list in scripts/ci/job-inputs.json, and this file plus
+# scripts/ci/** on top. `classify` takes the verdict for the source-keyed jobs
+# and `build_image` for the image ones, each by walking the project's twenty
+# most recent pipelines on any ref for a successful run of that same job on
+# that same key. This gate goes at the top of a job's `script:` and stops the
+# job when there is a verdict.
 #
-# Merge requests only, and .gitlab-ci.yml is in every job's input set, so a
-# pipeline on a delivery branch and any change to this file both rerun
-# everything. The proof is the evidence file the job wrote as its own last act;
-# a job that gated itself out wrote none and is never reused.
+# Merge requests only, and this file is in every key, so a pipeline on a
+# delivery branch and any change to this file both rerun everything. The proof
+# is the evidence file the job wrote as its own last act; a job that gated
+# itself out wrote none and is never reused, and one that finished more than
+# seven days ago is not believed. To force a rerun anyway: label the merge
+# request `ci: rerun`, or start a pipeline by hand with ORBIT_REUSE=off.
 #
 # Nothing here can fail a job: the script exits non-zero for every fault it
 # meets, and a non-zero status here simply means the job does the work.
@@ -359,8 +365,11 @@ variables:
 # the pipeline overall -- none of them is `allow_failure: true` -- it just no
 # longer holds up a job that never reads their result. Accepted risk: a late
 # policy finding can now arrive after the acceptance stage has already
-# started on unvetted input; auto_cancel (#923 rec 13, above) cancels that run
-# rather than it never starting.
+# started on unvetted input; the pipeline still fails overall (above), it
+# just does not stop the acceptance stage early on it. auto_cancel used to
+# do that instead; ADR-0028 section 5 took it out because on an
+# acceptance-stage failure it also cancelled sibling passes a fix push
+# needed as reuse evidence.
 #
 # `fidelity` and `integration` (`.needs_gated_with_fast_artifacts`) keep the
 # full wait, unchanged by #945.
@@ -805,13 +814,18 @@ classify:
       printf 'ORBIT_LAUNCHER_COMPAT=%s\n' "$launcher_compat" >> classify.env
       printf 'ORBIT_LANE=%s\n' "$lane" >> classify.env
       cat classify.env
-    # The reuse verdict (#898): one input hash per candidate job, then the
-    # lookup that says which of them can stand on an earlier run of this same
-    # merge request. A plain file artefact rather than more dotenv variables:
-    # GitLab caps a dotenv report at twenty variables, eight are already spent
-    # above, and ten candidate jobs need a hash each plus up to two verdict
-    # lines each. Every candidate job takes the file through its own
-    # `needs: classify` and reads it with scripts/ci/reuse-gate.sh.
+    # The reuse keys and, for the jobs whose keys are complete here, the
+    # verdict (#898, rekeyed by ADR-0028). A source key per candidate job --
+    # the checkout minus that job's deny-list, plus this file and
+    # scripts/ci/** -- and a finished key for the five that are not keyed on a
+    # built artefact. The six that test the image have their keys finished in
+    # `build_image`, which is the first place the image content ID exists.
+    #
+    # A plain file artefact rather than more dotenv variables: GitLab caps a
+    # dotenv report at twenty variables, eight are already spent above, and
+    # eleven candidate jobs need a key or two each plus up to two verdict lines.
+    # Every candidate job takes the file through its own `needs: classify` and
+    # reads it with scripts/ci/reuse-gate.sh.
     #
     # Both halves are fail-safe and neither may fail this job: no verdict means
     # every job runs, which is the only direction that cannot be wrong.
@@ -819,12 +833,12 @@ classify:
       set -eu
       mkdir -p .orbit-reuse
       : > .orbit-reuse/reuse.env
-      if node scripts/ci/job-inputs.mjs hashes > .orbit-reuse/hashes.env; then
-        cat .orbit-reuse/hashes.env > .orbit-reuse/reuse.env
+      if node scripts/ci/job-inputs.mjs keys > .orbit-reuse/keys.env; then
+        cat .orbit-reuse/keys.env > .orbit-reuse/reuse.env
       else
-        echo "the job input hashes could not be computed: every job will run"
+        echo "the job reuse keys could not be computed: every job will run"
       fi
-      rm -f .orbit-reuse/hashes.env
+      rm -f .orbit-reuse/keys.env
       node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
         || echo "the reuse lookup failed: every job will run"
   artifacts:
@@ -1676,12 +1690,45 @@ build_image:
       # `launcher_install_compat`, `supply_chain_image`) this is the *image
       # content ID* ... `build_image` computes it after the build and hands it
       # on in `build.env` as `ORBIT_IMAGE_CONTENT_ID`." The derivation itself
-      # is in the script; slice 3 (#1060) is what reads this.
+      # is in the script; the block below is what reads it.
       content_id="$(ORBIT_IMAGE_REF="$ORBIT_CI_IMAGE" bash scripts/ci/image-content-id.sh)"
       printf 'ORBIT_IMAGE_CONTENT_ID=%s\n' "$content_id" >> build.env
       cat build.env
       docker save "$ORBIT_CI_IMAGE" -o image.tar
-    - *reuse_evidence
+    # The reuse verdict for the six jobs that test this image (#1060 slice 3).
+    #
+    # ADR-0028 section 2 puts it here rather than in `classify`: "The lookup
+    # moves to where the fact is known. `build_image`, once it has the content
+    # ID, runs the same lookup for the image-running jobs." This job is the
+    # only place in the pipeline where the artefact axis exists, so it is the
+    # only place those six keys can be finished -- classify published their
+    # source keys before anything was built.
+    #
+    # The file is written whatever the lookup decides, and on a delivery branch
+    # where there is no lookup at all, because scripts/ci/reuse-evidence.sh
+    # reads the key back to label each job's own evidence. A delivery pipeline
+    # that recorded no key is a merge request with nothing to stand on.
+    #
+    # Its own artefact rather than more lines in build.env: that file is a
+    # dotenv report, GitLab caps one at twenty variables, six are spent, and
+    # six jobs need three lines each.
+    #
+    # Never fails this job. The build is what the pipeline came for, and a
+    # lookup that answers nothing means the six jobs run, which is right.
+    - |
+      set -eu
+      mkdir -p .orbit-reuse
+      : > .orbit-reuse/image.env
+      # Read back from build.env rather than taken from the block above, so
+      # this does not depend on the runner keeping one shell across script
+      # entries: under `set -u` an unset variable would end the job, and this
+      # step is never allowed to be the reason a built image is thrown away.
+      image_content_id="$(sed -n 's/^ORBIT_IMAGE_CONTENT_ID=//p' build.env | tail -1)"
+      ORBIT_IMAGE_CONTENT_ID="$image_content_id" \
+        node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
+          --artefact image --out .orbit-reuse/image.env \
+        || echo "the image reuse lookup failed: every image job will run"
+      cat .orbit-reuse/image.env
   after_script:
     # This job's declared artifacts are what `smoke`, `acceptance`,
     # `repair_journeys` and `supply_chain_image` read, and the runner reports
@@ -1691,16 +1738,22 @@ build_image:
     # exist so the skip is quiet. A failed build uploads nothing at all, since
     # the artifacts are `on_success`.
     - |
+      mkdir -p .orbit-reuse
       [ -f image.tar ] || : > image.tar
       [ -f build.env ] || printf 'ORBIT_IMAGE_BUILT=false\n' > build.env
+      [ -f .orbit-reuse/image.env ] || : > .orbit-reuse/image.env
   artifacts:
     paths:
       - image.tar
-      # A path as well as the dotenv report below, because a dotenv report is
-      # not in the downloadable archive: the reuse gate fetches this file back
-      # so a job standing on this one hands the same identity on (#898).
+      # A path as well as the dotenv report below. The reuse gate used to fetch
+      # this file back for a build that skipped (#898); ADR-0028 ends that, so
+      # what is left is that a dotenv report is not in the downloadable
+      # archive, and this is the only way to read a build's identity back
+      # afterwards without rerunning it.
       - build.env
-      - ci-evidence/
+      # The six image jobs' finished keys and verdicts (ADR-0028 section 2).
+      # scripts/ci/reuse-env.sh reads this beside classify's own file.
+      - .orbit-reuse/image.env
     reports:
       dotenv: build.env
     # Only the later stages of this same pipeline `docker load` it, so it need
@@ -3038,14 +3091,24 @@ install_bootstrap:
 #                       publishes an image, only proposes a pin. Never
 #                       printed; read by scripts/ci/repin-base-image.sh,
 #                       which fails clearly if it is unset.
-#                       `classify` reads it too, since #898, but only ever
-#                       sees it on a protected ref. Since #1084 a
+#                       The reuse lookup accepts it as a fallback (#898), but
+#                       only ever sees it on a protected ref: since #1084 a
 #                       merge-request pipeline presents no token at all, so
-#                       the reuse lookup finds nothing and every job runs --
-#                       a cost accepted deliberately to keep a push-capable
-#                       credential out of merge-request pipelines. The unset
-#                       path is covered by scripts/reuse-gate.test.mjs:175
-#                       and scripts/reuse-lookup.test.mjs:212.
+#                       the lookup finds nothing and every job runs -- a cost
+#                       accepted deliberately to keep a push-capable
+#                       credential out of merge-request pipelines.
+#
+#                       That is why ADR-0028's lookup asks first for
+#                       ORBIT_REUSE_TOKEN, which does not exist yet and is the
+#                       owner's to create: a read-only credential (`read_api`,
+#                       no write scope anywhere) left UNprotected, so an
+#                       ordinary merge-request pipeline can read earlier
+#                       pipelines' evidence. Until it exists, every reuse
+#                       verdict on a merge request is "runs", which is the
+#                       safe direction and is the state #898 has been in since
+#                       #1084. The unset path is covered by
+#                       scripts/ci/reuse-lookup.test.mjs, "asks nothing at all
+#                       when there is no token".
 base_image_repin:
   stage: maintenance
   extends: .dind_service
@@ -3086,11 +3149,8 @@ base_image_repin:
 #
 # Schedule-gated, like `renovate`, `sidecar_pin_freshness`,
 # `install_bootstrap` and `base_image_repin`, and for a reason stronger than
-# consistency: this proves something about the host, not about a commit. In an
-# ordinary pipeline a stale tidy would turn an unrelated merge request red,
-# and `workflow: auto_cancel: on_job_failure: all` would cancel that pipeline's
-# remaining jobs over a fact none of them can do anything about. Its own daily
-# schedule fails loudly, on its own, and blocks nobody's merge.
+# consistency: this proves something about the host, not about a commit. Its
+# own daily schedule fails loudly, on its own, and blocks nobody's merge.
 #
 # 36 hours, so one missed or late nightly run does not cry wolf while the run
 # after it still does. That is the window #1023 asked for; #823 needed ten
@@ -3114,7 +3174,7 @@ base_image_repin:
 # caught, so either failing fails the job, which is the entire point of #1023.
 #
 # No reuse gate (#898) and so no entry in scripts/ci/job-inputs.json, which
-# scripts/job-inputs.test.mjs holds to be a matched pair: the answer depends on
+# scripts/ci/job-inputs.test.mjs holds to be a matched pair: the answer depends on
 # the host's clock at the moment it is asked, so standing on an earlier run's
 # verdict would report a tidy that has since stopped.
 tidy_freshness:
@@ -3173,7 +3233,7 @@ tidy_freshness:
 # thing the comparison must not do. It runs at most twice per promotion, so
 # there is nothing worth saving. That is also why it has no entry in
 # scripts/ci/job-inputs.json: that file and the reuse gate are a matched pair,
-# and scripts/job-inputs.test.mjs holds them to it -- an entry without the gate
+# and scripts/ci/job-inputs.test.mjs holds them to it -- an entry without the gate
 # fails as loudly as a gate without an entry.
 #
 # The quiet machine, as far as the runner lanes allow. `orbit-build` is the
