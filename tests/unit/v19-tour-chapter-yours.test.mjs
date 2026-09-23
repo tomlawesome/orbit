@@ -198,19 +198,33 @@ describe("the beats, against a recorder", () => {
     expect(said.join(" ")).not.toContain("in a minute");
   });
 
-  it("lights the demo body, veils the sky, and drops both before the sun is visited", async () => {
+  /* Chapter 12 NEVER raises the veil, and that is the closing chapter's whole
+     point. It is one of only two chapters in the ratified film that does not
+     (the other is 5): the mockup opens it `veil(false)` and never calls
+     `veil(true)` again (design/v19/tour/round-5/f-one-take.html:1104).
+     "Now it's yours." is said over the reader's whole sky, undimmed —
+     dimming it to spotlight one control would be the opposite of handing it
+     over.
+
+     This test previously asserted the opposite, because the chapter was
+     built raising the veil, because veil.js's comment named "chapters
+     5/9/12's travelling hole" and that reads as an instruction. It is not:
+     it describes the mask being able to follow a moving hole. What travels
+     here is the RING, not a hole. Chapter 5 made the same mistake from the
+     same line. */
+  it("lights the demo body and drops it before the sun is visited, without ever veiling", async () => {
     const { log, ctx } = recorder();
     await yours.play(ctx);
-    const veilOn = log.findIndex(([w, on]) => w === "veil" && on === true);
     const lit = log.findIndex(([w, sel]) => w === "light" && sel === ".tourfilm-year-body");
     const unlit = log.findIndex(([w, sel]) => w === "unlight" && sel === ".tourfilm-year-body");
-    const veilOff = log.findLastIndex(([w, on]) => w === "veil" && on === false);
     const gotoSun = log.findIndex(([w, sel]) => w === "goto" && sel === ".sun-link");
     expect(lit).toBeGreaterThanOrEqual(0);
-    expect(lit).toBeLessThan(veilOn);
-    expect(unlit).toBeGreaterThan(veilOn);
-    expect(unlit).toBeLessThan(veilOff);
-    expect(veilOff).toBeLessThan(gotoSun);
+    expect(unlit).toBeGreaterThan(lit);
+    expect(unlit).toBeLessThan(gotoSun);
+    /* The sky the film hands back is never dimmed: the only veil call is the
+       chapter's own opening `veil(false)`, clearing what chapter 11 left. */
+    expect(log.filter(([w, on]) => w === "veil" && on === true)).toEqual([]);
+    expect(log.filter(([w]) => w === "veil").map(([, on]) => on)).toEqual([false]);
   });
 
   it("marks yours-year after the walk", async () => {
