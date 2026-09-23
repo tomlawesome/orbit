@@ -240,3 +240,30 @@ export function createClock({ reducedMotion = stillMotion } = {}) {
     },
   };
 }
+
+/**
+ * Drives a clock from real frames. Kept out of `createClock` so a test can
+ * advance the film by hand — the whole point of the two-position design is
+ * that nothing depends on real elapsed time except this one function.
+ *
+ * @param {FilmClock} clock
+ * @returns {() => void} stops the loop
+ */
+export function startFilmLoop(clock) {
+  let last = 0;
+  let id = 0;
+  let live = true;
+  /** @param {number} ts */
+  const frame = (ts) => {
+    if (!live) return;
+    id = requestAnimationFrame(frame);
+    const dt = last ? ts - last : 0;
+    last = ts;
+    clock.advance(dt);
+  };
+  id = requestAnimationFrame(frame);
+  return () => {
+    live = false;
+    cancelAnimationFrame(id);
+  };
+}
