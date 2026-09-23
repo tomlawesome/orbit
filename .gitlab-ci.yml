@@ -122,22 +122,40 @@ default:
       - scheduler_failure
 
 variables:
+  # Docker Hub images the pipeline pulls repeatedly go through the group
+  # dependency proxy (ai/orbit#1022, design ai/agent-infra#14, enabled on
+  # group `ai` 2026-09-23): same digest, same bytes, cached on the GitLab
+  # server instead of re-crossing the WAN every job. `library/` is Docker
+  # Hub's own namespace for an official, unprefixed image (node, postgres,
+  # docker); a namespaced image (aquasec/trivy, renovate/renovate) keeps its
+  # namespace after the prefix. ghcr.io and mcr.microsoft.com references are
+  # untouched -- the proxy only fronts Docker Hub, and the design ruling
+  # preferred that over a registry-mirror daemon that would need root on the
+  # runner host and its own cache GC.
+  #
+  # This only saves a pull when the runner's local image store is actually
+  # empty or the pin just moved: `pull_policy: if-not-present` (below and on
+  # every job image) already skips the network entirely once an image is
+  # cached on the runner, proxy or not.
+  #
   # Pinned to the linux/amd64 manifest, the way Orbit pins its own base image:
   # a moving tag would silently change what the gate ran on.
-  NODE_IMAGE: node:22-bookworm@sha256:87a4f951f28b85d189df365d24c479d3bdb70be77c1ff5c9029db2ef67e251ac
+  NODE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/node:22-bookworm@sha256:87a4f951f28b85d189df365d24c479d3bdb70be77c1ff5c9029db2ef67e251ac
   # The image the v19 baselines were proven against, byte for byte the pin the
   # GitHub fidelity job uses. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
+  # mcr.microsoft.com, not Docker Hub: stays direct.
   PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
   # Same scanner build as the workflow, so a finding here and a finding there
   # mean the same thing.
-  TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
+  TRIVY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
   # The vendor's own registry rather than Trivy's mirror.gcr.io default, which
   # has no availability commitment to us and 403'd this gate once already
-  # (#673). Deliberately one repository: Trivy does not fall back.
+  # (#673). Deliberately one repository: Trivy does not fall back. ghcr.io,
+  # not Docker Hub: stays direct.
   TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
   # The digest scripts/test-integration.mjs pins for its disposable database.
-  POSTGRES_IMAGE: postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+  POSTGRES_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
   # The tag `build_image` builds under, and nothing else: it names this commit,
   # so it is only ever the tag inside image.tar when this pipeline really built
   # it. The jobs that load that tarball take ORBIT_IMAGE_TAG from build.env
@@ -501,7 +519,11 @@ variables:
     # "blob unknown to registry" (moby/moby#53293). The known-bad versions
     # are listed in renovate.json's docker rule; Renovate offers the next
     # release as usual, and record_image on that bump is the proof.
-    - name: docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659
+    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659
+      # GitLab derives a service's hostname from its image name; through the
+      # proxy that name is the whole prefix path, not "docker", and every
+      # `tcp://docker:2375` below stops resolving (pipeline 1512, #1022).
+      alias: docker
       pull_policy: if-not-present
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -510,7 +532,7 @@ variables:
 .dind:
   extends: .dind_service
   image:
-    name: docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
+    name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
     pull_policy: if-not-present
 
 # The daemon inside the job's own container, for the two jobs that stand up a
@@ -558,6 +580,16 @@ variables:
     sleep 1
   done
   docker info > /dev/null 2>&1 || { echo "the in-job Docker daemon did not start"; cat /tmp/dockerd.log; exit 1; }
+  # This daemon is not the runner's own: GitLab authenticates the job's
+  # `image:`/`services:` pulls to the group dependency proxy automatically,
+  # but a pull this daemon makes on its own account -- `docker compose up`
+  # against a Docker Hub sidecar, `docker run` against a proxied job
+  # variable -- is not covered by that and needs its own login (ai/orbit#1022,
+  # design ai/agent-infra#14). Once, here, for every job that starts this
+  # daemon, rather than repeated in each job's script. --password-stdin only:
+  # never echo the password.
+  echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login "$CI_DEPENDENCY_PROXY_SERVER" \
+    --username "$CI_DEPENDENCY_PROXY_USER" --password-stdin
 
 # The last step of every after_script that started the daemon above. /builds
 # outlives the job, so the daemon's image store -- a whole Orbit stack, 3 to
@@ -1215,6 +1247,13 @@ sidecar_images:
       - 3
   needs: *needs_gated
   cache: *trivy_db_cache
+  variables:
+    # Trivy's own auth variables (ai/orbit#1022, design ai/agent-infra#14):
+    # this job has no Docker daemon of its own for a `docker login`, so the
+    # scanner needs the dependency proxy credential handed to it directly to
+    # pull the Docker Hub sidecars it scans through the proxy below.
+    TRIVY_USERNAME: $CI_DEPENDENCY_PROXY_USER
+    TRIVY_PASSWORD: $CI_DEPENDENCY_PROXY_PASSWORD
   script:
     - *apk_retry
     # bash before the reuse gate: this image is Alpine, and both the gate and
@@ -1254,7 +1293,20 @@ sidecar_images:
             cache="/tmp/trivy-cache-$1"
             rm -rf "$cache"
             cp -a "$TRIVY_CACHE_DIR" "$cache"
-            echo "scanning $2"
+            # $2 is the vendor reference: .github/supply-chain-policy.json
+            # names it and the evidence below records it unchanged, so a
+            # reader never has to know the proxy exists (ai/orbit#1022,
+            # design ai/agent-infra#14). Only the byte source Trivy actually
+            # pulls from moves: ghcr.io stays direct (own registry, not
+            # Docker Hub); everything else here is Docker Hub and goes
+            # through the group dependency proxy, official images (no
+            # namespace, e.g. node, postgres) under "library/".
+            case "$2" in
+              ghcr.io/*) pull_target="$2" ;;
+              */*) pull_target="${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/$2" ;;
+              *) pull_target="${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/$2" ;;
+            esac
+            echo "scanning $2 (pulled via $pull_target)"
             trivy image \
               --cache-dir "$cache" \
               --skip-db-update \
@@ -1262,7 +1314,7 @@ sidecar_images:
               --ignore-unfixed \
               --format json \
               --output ".orbit-supply-chain/sidecar-scans/$1.json" \
-              "$2"
+              "$pull_target"
             rm -rf "$cache"
           ' _
       trivy version --format json > .orbit-supply-chain/trivy-version.json
@@ -1864,7 +1916,7 @@ smoke:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
-    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
   rules:
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -1965,7 +2017,7 @@ smoke_local_only:
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
-    COMPOSE_FILES: -f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.ci-cap.yml
+    COMPOSE_FILES: -f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
   rules:
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -2197,6 +2249,10 @@ repair_journeys:
   needs: *needs_gated_image
   variables:
     ORBIT_REPAIR_JOURNEYS_IMAGE: orbit-repair-journeys:ci
+    # registry:2 has no official-image digest pin here (the harness's own
+    # throwaway registry, not a sidecar Orbit ships); only the pull source
+    # moves, through the group dependency proxy (ai/orbit#1022).
+    ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/registry:2
   rules:
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -2635,7 +2691,7 @@ record_image:
 # is the same digest-pinned docker:29-cli the .dind jobs use.
 sign_evidence:
   stage: publish
-  image: docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
   timeout: 10m
   # Same reasoning as record_image: a cancelled signing run leaves a pushed
   # digest with no evidence and nothing to show why.
@@ -2840,7 +2896,7 @@ renovate:
   # pnpm that rewrites pnpm-lock.yaml comes from. `-full` preinstalls them and
   # costs several gigabytes of pull on a shared runner every week.
   image:
-    name: renovate/renovate:44.65.5@sha256:4e10f76a79f1c597f427f83c788a9f5b14a6295784c4cb68307b89b0a954abce
+    name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/renovate/renovate:44.65.5@sha256:4e10f76a79f1c597f427f83c788a9f5b14a6295784c4cb68307b89b0a954abce
     pull_policy: if-not-present
   timeout: 1h
   # A weekly maintenance run has nothing that could supersede it, and being
