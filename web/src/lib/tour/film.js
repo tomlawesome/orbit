@@ -50,14 +50,10 @@ export function createFilm({
   /** @type {ReturnType<typeof mountTransport> | null} */
   let face = null;
 
-  const player = createFilmPlayer({
-    clock,
-    ctx,
-    chapters,
-    onChapter: (index) => face?.markChapter(index),
-    onEnd: () => face?.setRecede(),
-    onError,
-  });
+  /* No onChapter/onEnd here: the transport subscribes to the player itself
+     (player.js's follower lists), so the two stay wired however this is
+     assembled. */
+  const player = createFilmPlayer({ clock, ctx, chapters, onError });
 
   const hooks = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (window));
 

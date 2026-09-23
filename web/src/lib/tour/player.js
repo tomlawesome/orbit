@@ -34,6 +34,8 @@ import { CANCEL } from "./clock.js";
 /**
  * @typedef {object} FilmPlayer
  * @property {() => Promise<{ offsets: number[], total: number }>} measure
+ * @property {(cb: (index: number) => void) => (() => boolean)} onChapter
+ * @property {(cb: (ended: boolean) => void) => (() => boolean)} onEnd
  * @property {(index?: number) => void} jump
  * @property {() => void} stop
  * @property {() => void} toggle
@@ -66,6 +68,15 @@ export function createFilmPlayer({
   onEnd = () => {},
   onError = () => {},
 }) {
+  /** Followers. The constructor's callbacks are simply the first of each,
+   *  so the transport can subscribe itself rather than depending on whoever
+   *  assembled the film to pass its methods through (film.js used to, and a
+   *  second follower would have been dropped silently).
+   *  @type {Set<(index: number) => void>} */
+  const chapterCbs = new Set([onChapter]);
+  /** @type {Set<(ended: boolean) => void>} */
+  const endCbs = new Set([onEnd]);
+
   /** @type {number[]} */
   let offsets = chapters.map(() => 0);
   let total = 0;
@@ -104,7 +115,13 @@ export function createFilmPlayer({
   /** @param {number} index */
   function setChapter(index) {
     chapter = index;
-    onChapter(index);
+    for (const cb of Array.from(chapterCbs)) cb(index);
+  }
+
+  /** @param {boolean} value */
+  function setEnded(value) {
+    ended = value;
+    for (const cb of Array.from(endCbs)) cb(value);
   }
 
   /**
@@ -136,14 +153,13 @@ export function createFilmPlayer({
 
   /** The end of the film: the stage cleared, the clock parked on the total. */
   function finish() {
-    ended = true;
     generation++;
     clock.cancel();
     clock.seek(total);
     ctx.clear();
     ctx.veil(false);
     clock.setPlaying(false);
-    onEnd(true);
+    setEnded(true);
   }
 
   /** Esc, and the stop button. Same as finishing, but from wherever it is. */
@@ -153,8 +169,7 @@ export function createFilmPlayer({
     ctx.clear();
     ctx.veil(false);
     clock.setPlaying(false);
-    ended = true;
-    onEnd(true);
+    setEnded(true);
   }
 
   /**
@@ -169,11 +184,11 @@ export function createFilmPlayer({
     generation++;
     clock.cancel();
     ctx.clear();
-    ended = false;
-    onEnd(false);
+    setEnded(false);
     clock.seek(offsets[k] ?? 0);
     clock.setPlaying(true);
-    setChapter(k);
+    /* `run` sets the chapter synchronously before its first await, so
+       setting it here as well announced chapter 0 twice on every jump. */
     void run(k);
   }
 
@@ -188,6 +203,16 @@ export function createFilmPlayer({
 
   return {
     measure,
+    /** @param {(index: number) => void} cb */
+    onChapter(cb) {
+      chapterCbs.add(cb);
+      return () => chapterCbs.delete(cb);
+    },
+    /** @param {(ended: boolean) => void} cb */
+    onEnd(cb) {
+      endCbs.add(cb);
+      return () => endCbs.delete(cb);
+    },
     jump,
     stop,
     toggle,
