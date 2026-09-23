@@ -314,6 +314,10 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
    * other spec expects to find it: taken.
    */
   test("first-run tour overlay", async ({ page }, testInfo) => {
+    /* The film has no pocket cut (§24): a phone mounts no transport, so the
+       pill this walkthrough reads is never there (v19-tour.spec.ts skips the
+       same way). */
+    test.skip(test.info().project.name.startsWith("mobile"), "the film is desk-only (owner-decisions.md §24)");
     await signIn(page);
     const forgotten = await page.evaluate(async () => {
       const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
@@ -328,22 +332,45 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     expect(forgotten).toBe(true);
 
     await page.goto("/home");
-    const card = page.locator(".tourcard");
-    await expect(card).toBeVisible({ timeout: 30_000 });
+    // #866 retired the dialog-shaped card for the one-take film: no
+    // `role="dialog"` and, per transport.js, no focus management at all --
+    // the pill is a `role="group"` landmark a reader tabs to like any other
+    // toolbar, not something that grabs focus on arrival. That is a real
+    // difference from the old card's behaviour, not an oversight here.
+    const transport = page.locator("#orbit-tour-transport");
+    await expect(transport).toBeVisible({ timeout: 30_000 });
 
-    await expect(card).toHaveAttribute("role", "dialog");
-    await expect(card).toHaveAccessibleName(/\S/);
-    await expect(card, "the tour card takes focus so keys land on it without the reader hunting for it").toBeFocused();
+    await expect(transport).toHaveAttribute("role", "group");
+    await expect(transport).toHaveAccessibleName(/\S/);
 
-    await expect(page.getByRole("button", { name: "Skip" })).toHaveAccessibleName(/\S/);
-    await expect(page.getByRole("button", { name: "Back" })).toHaveAccessibleName(/\S/);
-    await expect(page.getByRole("button", { name: "Next" })).toHaveAccessibleName(/\S/);
+    await expect(page.getByRole("button", { name: /Play|Pause/ })).toHaveAccessibleName(/\S/);
+    await expect(page.getByRole("button", { name: "Stop" })).toHaveAccessibleName(/\S/);
+
+    // #1097 (round 7): the film is not narrated -- a screen reader gets its
+    // script instead, twelve headings deep, plus one announcement when the
+    // film starts. Both live inside the transport, visually hidden, never
+    // `aria-hidden` (design/v19/tour/round-7/README.md).
+    const script = transport.getByRole("region", { name: "Tour script" });
+    await expect(script).toHaveCount(1);
+    await expect(script.locator("h3")).toHaveCount(12);
+
+    const status = transport.getByRole("status");
+    await expect(status).toHaveCount(1);
+    await expect(status).toHaveText(
+      "Orbit's tour is playing on screen: a short film over your own sky, "
+      + "with a transport at the bottom. Press Escape to stop it. The full "
+      + 'script is in the tour transport, under "Tour script".',
+    );
 
     await writeSnapshot(page, testInfo, "tour-overlay");
 
     // Ends the walk so the record is left taken, as every other spec expects.
-    await page.locator("#tour-skip").click();
-    await expect(card).toHaveCount(0);
+    // Esc reaches transport.js's own listener -> player.stop(), which clears
+    // the veil synchronously; the pill itself lingers as a low-opacity ghost
+    // until the film unmounts (see keyboard.ts's `dismissTourIfShown`), so
+    // the veil -- not the pill -- is what this waits on.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   });
 
   /**
