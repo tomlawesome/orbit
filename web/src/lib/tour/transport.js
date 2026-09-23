@@ -233,6 +233,10 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
   stop.addEventListener("click", () => player.stop());
   doc.addEventListener("keydown", onKeydown);
 
+  /* The transport follows the player directly rather than waiting to be
+     told: whoever assembles the film has no job wiring these two together. */
+  const offChapter = player.onChapter(markChapter);
+  const offEnd = player.onEnd(() => setRecede());
   const offFrame = clock.onFrame(paint);
   const offPlaying = clock.onPlaying(() => {
     setIcon();
@@ -257,6 +261,8 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
     setRecede,
     paint,
     destroy() {
+      offChapter();
+      offEnd();
       offFrame();
       offPlaying();
       stopLoop();
