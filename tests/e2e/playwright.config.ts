@@ -10,24 +10,28 @@ import { defineConfig, devices } from "@playwright/test";
 //
 // TWO, from the measured curve and not from the host's cores. The whole
 // suite, under the CI cpu cap (compose/docker-compose.ci-cap.yml), on a host
-// with twelve of them:
+// with twelve of them. Re-measured 2026-09-23 on this branch rebased onto
+// dev's 1e2883ae, one run per count, sequentially, Playwright's own summary:
 //
 //     workers   suite      result
-//        1      11.8m      green, 198 passed
-//        2       6.5m      green, 198 passed (6.3m on a second run, also green)
-//        4       6.2m      v19-arrival's newcomer journey failed
-//        8       5.8m      the same test failed again
+//        1      15.4m      green, 198 passed (2026-09-22, at 4fc18a27)
+//        2       9.2m      green, 204 passed, 79 skipped
+//        4       6.8m      3 failed, 177 passed, 78 skipped, 25 did not run
 //
-// Nearly all of the saving is at two, and there is almost nothing after it:
-// the app is allowed six tenths of one core however many browsers ask it
-// things, and the workers that are not waiting on the app are waiting at the
-// reset gate (tests/e2e/support/reset-gate.ts) — 36s of gate waiting across
-// the whole run at two workers, 450s at four, 1324s at eight. Raising the
-// count past two buys single-digit percentages and spends them on queueing.
+// Nearly all of the saving is at two, and what is left past it is bought with
+// queueing: the app is allowed six tenths of one core however many browsers
+// ask it things, and the workers that are not waiting on the app are waiting
+// at the reset gate (tests/e2e/support/reset-gate.ts) — 45s of gate waiting
+// across the whole run at two workers, 480s at four. Four is 26% quicker than
+// two in wall-clock and spends eight times as long at the gate to get it.
 //
-// The failures at four and eight are not the reason for the number — the flat
-// curve is — but they are the second reason not to reach for a bigger one
-// until they are understood.
+// The failures at four are the second reason not to reach for a bigger
+// number. None of them is one spec reading another's data — the three were
+// v19-arrival spending its whole 180s budget before the door answered,
+// v19-entry's /home dial missing inside 5s on mobile, and a chromium page
+// that crashed outright in v19-item-actions. They are what a stack capped at
+// 0.6 cpu does when four browsers ask it things at once, so the answer is a
+// smaller number rather than a longer timeout. docs/flakes.md has them.
 //
 // ORBIT_E2E_WORKERS exists to MEASURE that curve and for nothing else: it is
 // set by hand around `scripts/test-e2e-local.sh --ci-cap` and is unset in CI
