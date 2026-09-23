@@ -202,6 +202,20 @@ function dockerShimScript({
   // `appSecretReadable` behaviour untouched.
   appSecretDelayAttempts = 0,
   appSecretDelayCounterPath = "",
+  // #1089: the same crash-loop, one step later. The readability check above
+  // and the `exec cat` READ of the secret are two separate `docker exec`
+  // calls, so a container that holds still for the first can be back in
+  // `restarting` for the second — and `docker exec` into a restarting
+  // container prints "Container ... is restarting, wait until the container
+  // is running" on stderr and exits 1 with nothing on stdout (measured
+  // against docker-ce 29.7.2). `appReaderFailAttempts` makes the reader
+  // branch answer that way for the first `appReaderFailAttempts - 1` calls
+  // and succeed on that call — set it beyond what the budget can reach to
+  // model a container that never lets the read land at all. Requires
+  // `appReaderFailCounterPath` (scratch file, same reason as
+  // `appSecretDelayCounterPath`: each exec is its own process).
+  appReaderFailAttempts = 0,
+  appReaderFailCounterPath = "",
 } = {}) {
   if (unavailable) {
     return "#!/usr/bin/env bash\nexit 1\n";
@@ -436,6 +450,18 @@ function dockerShimScript({
     // secret file, then reads it. Two calls, distinguished by the `exec cat`
     // the reader carries and the precondition does not.
     '    if [[ "$joined" == *"POSTGRES_PASSWORD_FILE"* && "$joined" == *"exec cat"* ]]; then',
+    appReaderFailAttempts > 0
+      ? [
+          `      reader_attempt=0`,
+          `      [[ -f '${appReaderFailCounterPath}' ]] && reader_attempt="$(cat '${appReaderFailCounterPath}')"`,
+          `      reader_attempt=$((reader_attempt + 1))`,
+          `      printf '%s' "$reader_attempt" > '${appReaderFailCounterPath}'`,
+          `      if (( reader_attempt < ${appReaderFailAttempts} )); then`,
+          `        printf 'Error response from daemon: Container %s is restarting, wait until the container is running\\n' '${appId}' >&2`,
+          `        exit 1`,
+          `      fi`,
+        ].join("\n")
+      : "      true",
     appSecretReadable ? `      printf '%s\\n' '${appSecret}'` : "      exit 97",
     appSecretReadable ? "      exit 0" : "",
     "    fi",
@@ -489,6 +515,12 @@ function dockerShimScript({
     "    fi",
     '    if [[ "$joined" == *"psql"* ]]; then',
     '      probe_password="$(cat)"',
+    // repair.sh's own $authenticated_probe runs `PGPASSWORD="$(cat)"` and
+    // exits $PROBE_NO_SECRET_STATUS when nothing arrived, so the shim must
+    // too: a reader whose `docker exec` failed sends no bytes, and a shim
+    // that answered "mismatch" to an empty password would hide exactly the
+    // path #1089 turned out to run down.
+    '      if [[ -z "$probe_password" ]]; then exit 97; fi',
     dbAuthMarkerPath
       ? `      effective_auth_result="${authResult}"; [[ -e '${dbAuthMarkerPath}' ]] && effective_auth_result=ok`
       : `      effective_auth_result="${authResult}"`,
@@ -1495,6 +1527,59 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).toContain("execute action=manual resolves=database-credential-unverifiable result=skipped");
     expect(result.stdout).toContain("dangerous result=empty done=0 failed=0 reason=none");
     expect(result.stdout).not.toContain("rotate-database-credential");
+  });
+
+  // #1089: the readability loop of #822/#1026 guards the question "can this
+  // container read its secret file"; the `exec cat` that reads it was a
+  // single attempt against the one container that is crash-looping by
+  // definition whenever its credential is wrong. When that attempt lands
+  // between restarts `docker exec` writes its error to stderr and exits 1
+  // with nothing on stdout, the probe downstream receives an empty password
+  // and exits 97, and 97 used to mean "this container names no secret file":
+  // no finding at all. The mismatch disappeared from the diagnosis, nothing
+  // planned rotate-database-credential, and the repair journeys failed in a
+  // different journey on each run of the same commit.
+  it("still reports the credential mismatch when the app container's secret read is lost to a restart and the retry lands — #1089", () => {
+    const targetDir = makeFixture();
+    const readerCounterPath = join(scratchDir(), "app-reader-attempts");
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+      app: { present: true, health: "healthy" },
+      appState: "running",
+      appReaderFailAttempts: 2,
+      appReaderFailCounterPath: readerCounterPath,
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-credential-mismatch target=database severity=fail");
+    expect(result.stdout).not.toContain("diagnosis result=healthy");
+  });
+
+  // #1089, the other end of the same budget: a read that never lands must
+  // report the uncertainty it has, in the same terms #1026 chose for the
+  // readability check — never silence, which reads as a healthy deployment.
+  it("reports database-credential-unverifiable, never silence, when the secret read never lands inside the budget — #1089", () => {
+    const targetDir = makeFixture();
+    const readerCounterPath = join(scratchDir(), "app-reader-attempts-exhausted");
+
+    const result = runRepair(
+      targetDir,
+      ["--check"],
+      {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        app: { present: true, health: "healthy" },
+        appState: "running",
+        // Far beyond what a 1s budget of 0.25s retries can reach.
+        appReaderFailAttempts: 1000,
+        appReaderFailCounterPath: readerCounterPath,
+      },
+      { env: { ORBIT_REPAIR_APP_SECRET_BUDGET: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-credential-unverifiable target=database severity=fail");
+    expect(result.stdout).not.toContain("diagnosis result=healthy");
   });
 
   it("reports database-unreachable (fail) when the orbit-db container is absent", () => {

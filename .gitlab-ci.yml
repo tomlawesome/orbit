@@ -568,6 +568,39 @@ variables:
   rm -rf "${CI_BUILDS_DIR:-/builds}/.orbit-docker-data" || :
   if [ -n "${RUNNER_TEMP:-}" ]; then rm -rf "$RUNNER_TEMP" || :; fi
 
+# What a failed acceptance run left behind, captured while the daemon holding
+# it is still alive (#1100).
+#
+# after_script cannot do this, and never could. The runner keeps the job
+# container's filesystem for that second shell -- the Docker client
+# `.docker_in_job` apt-installed is still on PATH, and /tmp/dockerd.log is
+# still readable -- but not the processes the first shell started, so the
+# daemon `nohup dockerd &` left in the background is gone. One file records
+# both halves: launcher_install_compat's own after_script wrote a full
+# `Client:` section and then `Server: Cannot connect to the Docker daemon at
+# unix:///var/run/docker.sock` (job 20424). Every failed `smoke` printed that
+# same line where the stack's logs should have been (jobs 10645, 16651,
+# 20319, 20420), and its copy of dockerd.log stops at the last line `script`
+# produced -- no shutdown record, because nothing asked the daemon to stop.
+#
+# So the capture has to happen before `script` exits. An EXIT trap rather
+# than a wrapper around the test step, because every step from the stack's
+# start onwards is worth a log, and because it prints inside the failing job's
+# own section, above the failure. It re-exits with the status it was handed,
+# so what the job gates does not move. Install it once .env-orbit exists:
+# Compose cannot parse the overlays without it, and there is no stack to
+# report on before then.
+.stack_diagnostics_on_failure: &stack_diagnostics_on_failure |
+  orbit_stack_diagnostics_on_exit() {
+    orbit_exit_status=$?
+    trap - EXIT
+    if [ "$orbit_exit_status" -ne 0 ]; then
+      bash "$CI_PROJECT_DIR/scripts/ci/show-stack-diagnostics.sh" || :
+    fi
+    exit "$orbit_exit_status"
+  }
+  trap orbit_stack_diagnostics_on_exit EXIT
+
 # The client half only, for a job that keeps its own image and takes the daemon
 # from the dind service instead of starting one. Not the `docker.io
 # docker-compose-v2` pair above: those are Ubuntu package names, and $NODE_IMAGE
@@ -1799,6 +1832,7 @@ smoke:
     # image step exports ORBIT_IMAGE after this one; here it is a job
     # variable, so hide it for the one command that must not see it.
     - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
+    - *stack_diagnostics_on_failure
     # The workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
     - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
@@ -1825,13 +1859,14 @@ smoke:
       fi
     - *reuse_evidence
   after_script:
-    # Both scripts read COMPOSE_FILES and ORBIT_IMAGE, which are job variables
-    # and so are still set in this second shell.
-    - |
-      if [ "$CI_JOB_STATUS" != "success" ]; then
-        bash scripts/ci/show-stack-diagnostics.sh || true
-      fi
-      bash scripts/ci/stop-acceptance-stack.sh || true
+    # No diagnostics here: this shell has no daemon to ask (#1100), so the
+    # stack's logs are captured by *stack_diagnostics_on_failure above. The
+    # teardown call stays because it costs nothing and reads plainly; what
+    # actually disposes of the stack either way is *docker_in_job_teardown,
+    # which kills the daemon and removes its store. It reads COMPOSE_FILES and
+    # ORBIT_IMAGE, which are job variables and so are still set in this second
+    # shell.
+    - bash scripts/ci/stop-acceptance-stack.sh || true
     - *docker_in_job_teardown
   artifacts:
     name: orbit-playwright-report
@@ -1896,6 +1931,7 @@ smoke_local_only:
     # Same reason as `smoke`: configure.sh persists ORBIT_IMAGE when it sees
     # one, and here it is a job variable.
     - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
+    - *stack_diagnostics_on_failure
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
@@ -1910,11 +1946,12 @@ smoke_local_only:
       node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts $specs
     - *reuse_evidence
   after_script:
-    - |
-      if [ "$CI_JOB_STATUS" != "success" ]; then
-        bash scripts/ci/show-stack-diagnostics.sh || true
-      fi
-      bash scripts/ci/stop-acceptance-stack.sh || true
+    # No diagnostics here: this shell has no daemon to ask (#1100), so the
+    # stack's logs are captured by *stack_diagnostics_on_failure above. The
+    # teardown call stays because it costs nothing and reads plainly; what
+    # actually disposes of the stack either way is *docker_in_job_teardown,
+    # which kills the daemon and removes its store.
+    - bash scripts/ci/stop-acceptance-stack.sh || true
     - *docker_in_job_teardown
   artifacts:
     name: orbit-playwright-report-local-only
@@ -1994,6 +2031,7 @@ acceptance:
     # image step exports ORBIT_IMAGE after this one; here it is a job
     # variable, so hide it for the one command that must not see it.
     - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
+    - *stack_diagnostics_on_failure
     - bash scripts/ci/validate-deployment-assets.sh
     - |
       set -eu
@@ -2066,10 +2104,9 @@ acceptance:
     # or container identity this run recorded, so a step that never ran leaves
     # nothing for it to match.
     - *step_outputs
+    # No diagnostics here either (#1100): see the note in `smoke`. What
+    # follows is clean-up, and every line of it tolerates a dead daemon.
     - |
-      if [ "$CI_JOB_STATUS" != "success" ]; then
-        bash scripts/ci/show-stack-diagnostics.sh || true
-      fi
       bash scripts/ci/stop-acceptance-stack.sh || true
       REGISTRY_NAME="$(orbit_output registry_name)" \
       REGISTRY_ID="$(orbit_output registry_id)" \
