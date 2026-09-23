@@ -2970,14 +2970,24 @@ install_bootstrap:
 #                       publishes an image, only proposes a pin. Never
 #                       printed; read by scripts/ci/repin-base-image.sh,
 #                       which fails clearly if it is unset.
-#                       `classify` reads it too, since #898, but only ever
-#                       sees it on a protected ref. Since #1084 a
+#                       The reuse lookup accepts it as a fallback (#898), but
+#                       only ever sees it on a protected ref: since #1084 a
 #                       merge-request pipeline presents no token at all, so
-#                       the reuse lookup finds nothing and every job runs --
-#                       a cost accepted deliberately to keep a push-capable
-#                       credential out of merge-request pipelines. The unset
-#                       path is covered by scripts/reuse-gate.test.mjs:175
-#                       and scripts/reuse-lookup.test.mjs:212.
+#                       the lookup finds nothing and every job runs -- a cost
+#                       accepted deliberately to keep a push-capable
+#                       credential out of merge-request pipelines.
+#
+#                       That is why ADR-0028's lookup asks first for
+#                       ORBIT_REUSE_TOKEN, which does not exist yet and is the
+#                       owner's to create: a read-only credential (`read_api`,
+#                       no write scope anywhere) left UNprotected, so an
+#                       ordinary merge-request pipeline can read earlier
+#                       pipelines' evidence. Until it exists, every reuse
+#                       verdict on a merge request is "runs", which is the
+#                       safe direction and is the state #898 has been in since
+#                       #1084. The unset path is covered by
+#                       scripts/ci/reuse-lookup.test.mjs, "asks nothing at all
+#                       when there is no token".
 base_image_repin:
   stage: maintenance
   extends: .dind_service
