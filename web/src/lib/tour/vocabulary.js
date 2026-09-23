@@ -839,6 +839,57 @@ export function createFilmContext({
     wornOver = undefined;
   }
 
+  /* ---- reading a paper --------------------------------------------------- */
+
+  /** Set the moment `read()` opens a card, cleared the moment `unread()`
+   *  closes it — so `clear()` knows whether it owes a close, the same shape
+   *  `wornOver` gives wear/unwear. */
+  let readingOpen = false;
+
+  /**
+   * Opens a paper's reading card FOR REAL (08-the-belt.js, #866/#1093) — the
+   * one place in this whole vocabulary that dispatches a genuine click,
+   * where every other word only ever animates one (`press`'s own doc: "the
+   * whole reason press() does not click").
+   *
+   * That rule is about MUTATION, not about clicking as such: a swatch's
+   * click runs `setSwatch` (localStorage and a server preference, why
+   * 11-your-sky.js reimplements the visual instead — `wear`, above) and the
+   * reading card's own restore button runs `restoreDocument`, a real server
+   * write. A paper's click is neither: `openDoc` (belt.behaviour.js) sets a
+   * class on its own seat and the screen's own view state (`previewIdx`,
+   * `previewDoc`) — no `localStorage`, no address-bar change (that is
+   * `centre`'s, and a document's press never reaches `centre` — #1088's own
+   * rule), no server request. Nothing here persists, so dispatching it is
+   * the honest way to make the real card mount, the same as any reader's
+   * own press would. This word must only ever be handed a paper's own hit —
+   * never the card's own restore button or anything else inside it once the
+   * card is open.
+   *
+   * @param {Control} c one or more papers' own real hits; the first is
+   *   pressed, because the film never knows or cares which paper it is
+   */
+  function read(c) {
+    if (dry() || c.els.length === 0) return;
+    c.els[0].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    readingOpen = true;
+  }
+
+  /**
+   * Closes whatever card `read()` opened, the same way a reader would:
+   * Escape, which the item screen's own `onKeydown` (`+page.svelte`) already
+   * closes the preview on. No selector is needed — the film never named
+   * which paper it opened, only that Escape closes whichever is open — and
+   * no new handle onto the belt is needed either, which keeps the tour/
+   * product boundary one-way exactly as it already is everywhere else.
+   */
+  function unread() {
+    if (!readingOpen) return;
+    readingOpen = false;
+    if (dry()) return;
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  }
+
   /* ---- the callout ------------------------------------------------------ */
 
   /**
@@ -1006,6 +1057,10 @@ export function createFilmContext({
     dropTyped();
     /* The reader's own sky, back — before anything else can be jumped to. */
     unwear();
+    /* Whatever card a paper's own press opened, closed the same way Esc
+       already closes it — a film that ends leaving a reading card open is
+       a bug the same way one that ends leaving a pack worn would be. */
+    unread();
     if (layer) {
       for (const stale of Array.from(layer.querySelectorAll(".tourfilm-ring,.tourfilm-callout,.tourfilm-typed"))) {
         stale.remove();
@@ -1053,6 +1108,8 @@ export function createFilmContext({
     tap,
     typeInto,
     wear,
+    read,
+    unread,
     travel,
     growInto,
     callout,

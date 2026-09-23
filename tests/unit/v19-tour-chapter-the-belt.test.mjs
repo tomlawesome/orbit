@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import belt, { SELECTORS } from "../../web/src/lib/tour/chapters/08-the-belt.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
+import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 
 /*
@@ -121,8 +122,32 @@ function drawBelt(container, { docs = 2 } = {}) {
     capseat.appendChild(label);
     caps.appendChild(capseat);
     box(label, { x: 600 + k * 20, y: 300, w: 60, h: 12 });
+
+    /* #866: a paper's own real hit, near enough belt.behaviour.js's own
+       buildSeats to prove read()/unread() against something that behaves
+       like the shipped screen — a real click really mounts a card (openDoc's
+       own effect), a real Escape really closes it (+page.svelte's own
+       onKeydown), and neither touches localStorage or a server. */
+    const hit = document.createElementNS(SVG_NS, "g");
+    hit.setAttribute("class", "hit");
+    hit.setAttribute("aria-label", `Document ${k}, a document attached to Volvo V60`);
+    hit.addEventListener("click", () => {
+      if (document.getElementById("readcard")) return;
+      const card = document.createElement("aside");
+      card.id = "readcard";
+      container.appendChild(card);
+    });
+    seats.appendChild(hit);
   }
   members.append(ends, seats, caps);
+  if (docs > 0) {
+    const onEscape = (event) => {
+      if (event.key !== "Escape") return;
+      window.removeEventListener("keydown", onEscape);
+      document.getElementById("readcard")?.remove();
+    };
+    window.addEventListener("keydown", onEscape);
+  }
 
   const cardwrap = document.createElement("div");
   cardwrap.id = "cardwrap";
@@ -215,6 +240,8 @@ describe("the beats, in round 6's order", () => {
         callout: async (text, anchor) => log.push(["callout", text, anchor.sel]),
         dropCallout: () => log.push(["dropCallout"]),
         mark: async (name) => log.push(["mark", name]),
+        read: (c) => log.push(["read", c.sel]),
+        unread: () => log.push(["unread"]),
         w: async () => {},
         T: { cross: 350 },
       },
@@ -248,6 +275,22 @@ describe("the beats, in round 6's order", () => {
     await belt.play(ctx);
     const pressed = log.filter(([word]) => word === "press").map(([, sel]) => sel);
     expect(pressed).toEqual([SELECTORS.body, SELECTORS.docLabel, SELECTORS.laterInk, SELECTORS.soonerInk]);
+  });
+
+  it("reads a paper for real right after pressing it, and unreads it on the later step", async () => {
+    const { log, ctx } = recorder();
+    await belt.play(ctx);
+    const pressPapers = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.docLabel);
+    const readAt = log.findIndex(([word]) => word === "read");
+    const pressLater = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.laterInk);
+    const unreadAt = log.findIndex(([word]) => word === "unread");
+    /* one `ctl` call for the paper's real hit sits between the two */
+    expect(readAt).toBe(pressPapers + 2);
+    expect(log[readAt]).toEqual(["read", SELECTORS.docHit]);
+    expect(unreadAt).toBe(pressLater + 1);
+    /* Only ever read once and unread once — one paper, whichever it is. */
+    expect(log.filter(([word]) => word === "read")).toHaveLength(1);
+    expect(log.filter(([word]) => word === "unread")).toHaveLength(1);
   });
 
   it("says no copy for ← sooner — one press each way is enough (round 6)", async () => {
@@ -298,6 +341,67 @@ describe("the chapter played for real", () => {
       "The page itself, read without leaving the sky.",
       "later → steps the belt — so do the arrow keys.",
     ]);
+    ctx.destroy();
+  });
+
+  it("opens the real reading card during beat 3, and it is gone again by the end of the chapter", async () => {
+    drawScene({ docs: 2 });
+    const clock = createClock({ reducedMotion: () => false });
+    const ctx = createFilmContext({ clock, doc: document });
+    clock.setPlaying(true);
+
+    let sawOpen = false;
+    let done = false;
+    const playing = belt.play(ctx).then(() => { done = true; }, () => { done = true; });
+    let spent = 0;
+    while (!done && spent < 400000) {
+      clock.advance(100);
+      spent += 100;
+      await settle();
+      if (document.getElementById("readcard")) sawOpen = true;
+    }
+    await playing;
+
+    expect(sawOpen).toBe(true);
+    /* Closed by beat 4's own unread() (the belt's step), not just by the
+       teardown below — round 6's "two things happen together". */
+    expect(document.getElementById("readcard")).toBeNull();
+    ctx.destroy();
+    expect(document.getElementById("readcard")).toBeNull();
+  });
+
+  it("a jump mid-chapter still closes whatever card the belt opened — clear(), the same law unread() gives unwear()", async () => {
+    drawScene({ docs: 1 });
+    const clock = createClock({ reducedMotion: () => false });
+    const ctx = createFilmContext({ clock, doc: document });
+    const chapters = [belt, { id: "after", name: "After", async play(c) { await c.hold(60000); } }];
+    const player = createFilmPlayer({ clock, ctx, chapters });
+    await player.measure();
+    player.jump(0);
+    await settle();
+
+    let spent = 0;
+    while (!document.getElementById("readcard") && spent < 400000) {
+      clock.advance(100);
+      spent += 100;
+      await settle();
+    }
+    expect(document.getElementById("readcard")).not.toBeNull();
+
+    player.jump(1); /* the reader jumps away mid-chapter, card still open */
+    await settle();
+    expect(document.getElementById("readcard")).toBeNull();
+
+    player.destroy();
+  });
+
+  it("no reading card, no chapter carrying no papers — read() is a no-op with nothing to click", async () => {
+    drawScene({ docs: 0 });
+    const clock = createClock({ reducedMotion: () => false });
+    const ctx = createFilmContext({ clock, doc: document });
+    clock.setPlaying(true);
+    await playOut(clock, belt.play(ctx));
+    expect(document.getElementById("readcard")).toBeNull();
     ctx.destroy();
   });
 

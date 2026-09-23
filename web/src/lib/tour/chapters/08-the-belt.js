@@ -26,20 +26,30 @@
  *    redirects to whichever item is soonest due and therefore never
  *    branches this chapter on what a household actually holds.
  *
- * 2. THE READING CARD IS NARRATED, NOT DRAWN. `press()` (vocabulary.js) only
- *    ever animates a scale — it does not dispatch a click, by the same rule
- *    11-your-sky.js documents for its own swatch press — so no chapter can
- *    make the real screen's `openDoc()` run, and `aside#readcard` is not
- *    even mounted until `openDoc()` sets `previewDoc` (#1088's own comment:
- *    "mounted only while a preview is on its way in or out"). There is
- *    nothing this chapter could ring even if it clicked for real. Round 6
- *    asks for the shipped card's own screenshot, cropped from its own render
- *    (`../round-5/shots/preview-service-history.png`) — a design asset, not
- *    something this build ships to the browser, and painting it in would be
- *    exactly the hand-drawn page round 6 spends a paragraph ruling out. So
- *    beat 3 says the same two lines at the same two holds, anchored to the
- *    real elements that ARE on screen (the papers, then the card), and
- *    stops short of drawing a card that cannot honestly appear.
+ * 2. THE READING CARD IS DRAWN, FOR REAL, BY THE ONE CLICK IN THIS FILM.
+ *    #1088 landed on this branch (the document preview), so `aside#readcard`
+ *    now exists to open. `press()` (vocabulary.js) still only ever animates
+ *    a scale, exactly as 11-your-sky.js's own swatch press and 03-lands.js,
+ *    07-inbox.js and 10-other-households.js all restate for their own
+ *    controls — but that rule is about MUTATION, not about clicking as
+ *    such, and a paper's click is not in the class it guards against. A
+ *    swatch's click runs `setSwatch` (`localStorage` and a server
+ *    preference — why `wear()` reimplements the visual instead of clicking
+ *    at all) and the reading card's own restore button runs
+ *    `restoreDocument`, a real server write. A paper's click runs neither:
+ *    `openDoc` (belt.behaviour.js) sets a class on its own seat and the
+ *    screen's own view state (`previewIdx`, `previewDoc`) — no
+ *    `localStorage`, no address-bar change (that is `centre`'s, and a
+ *    document's press never reaches `centre`), no server request. So this
+ *    beat presses the papers for the gesture as every other beat does, then
+ *    hands vocabulary.js's new `read()` the real hit and lets it dispatch
+ *    the one genuine click this film ever makes — safe because nothing it
+ *    triggers persists. `unread()` closes it again, on the belt's own step
+ *    (round 6's beat 4) and, as a safety net, wherever `unwear()` is —
+ *    `clear()`, so a skip or a finish never leaves a card open. Neither word
+ *    reaches into the belt or the item screen beyond the click and the
+ *    Escape a reader's own hand would make: the tour/product boundary stays
+ *    one-way, exactly as it is everywhere else in this file.
  *
  * 3. THE TWO PAPERS ARE NEVER TWO SPECIFIC DOCUMENTS. Round 6 names a
  *    certificate and a service history because its worked example has both.
@@ -96,6 +106,12 @@ export const SELECTORS = Object.freeze({
   /** Every document currently riding the belt beside the apex item — round
    *  6's "two ringed papers", generalised to however many there are. */
   docLabel: "#caps .doclabel",
+  /** A paper's own real hit, in `#seats` — where `read()` (vocabulary.js)
+   *  dispatches its one genuine click. Picked out from `.hit` by the one
+   *  thing belt.behaviour.js's own `aria-label` always says for a document
+   *  and never for an item; never a specific document (point 3), only
+   *  whichever paper is first in DOM order. */
+  docHit: 'g.hit[aria-label*="a document attached to"]',
   /** The item card at the apex — round 6's anchor for "read without leaving
    *  the sky". */
   cardwrap: "#cardwrap",
@@ -116,7 +132,9 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, mark, w, T } = ctx;
+    const {
+      setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, mark, read, unread, w, T,
+    } = ctx;
 
     /* ---- beat 1: arrival — unchanged from round 5, translated per (1) ---- */
     await setScreen("/home");
@@ -143,6 +161,9 @@ export default {
     /* ---- beat 3: the paper pressed, the page beside the card ---- */
     await callout("Click one to bring it in.", papers, "top", { label: true, hold: 2000, mark: "belt-doc" });
     await press(papers);
+    /* The one genuine click this film makes (see point 2, above) — safe
+       because openDoc mutates nothing that outlives the film. */
+    read(ctl({ sel: SELECTORS.docHit, all: true, optional: true }));
 
     const cardwrap = ctl({ sel: SELECTORS.cardwrap, radius: 16 });
     await callout("The page itself, read without leaving the sky.", cardwrap, "right", { mark: "belt-read" });
@@ -154,6 +175,10 @@ export default {
     await goto(later);
     await callout("later → steps the belt — so do the arrow keys.", later, "top", { mark: "belt-later" });
     await press(later);
+    /* Round 6: "two things happen together" — the card folds away and the
+       belt rolls. The roll itself is still only ever named, never driven
+       for real (#1094's own rule, unchanged); the fold is real, by Esc. */
+    unread();
     unlight(later);
     await w(T.cross);
 
