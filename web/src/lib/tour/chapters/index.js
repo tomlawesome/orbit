@@ -15,6 +15,9 @@
  * Inbox, The belt, Done, Other households, Your sky, Yours.
  */
 import arrive from "./01-arrive.js";
+import add from "./02-add.js";
+import timeRuns from "./05-time-runs.js";
+import yourSky from "./11-your-sky.js";
 
 /**
  * @typedef {object} Chapter
@@ -25,13 +28,21 @@ import arrive from "./01-arrive.js";
  */
 
 /**
- * The film, in order. Eleven more to come (#866's fan-out); each arrives as
- * its own file beside 01-arrive.js and one import line here.
+ * The film, in order. Four of the twelve are cut; the rest arrive the same
+ * way, each as its own file beside 01-arrive.js and one import line here.
+ *
+ * The list is DELIBERATELY not padded with placeholders for the eight still
+ * to come: the transport measures what is here and puts its ticks at the
+ * starts it can see, so an empty chapter would take a tick and a name and
+ * teach nothing. The gaps close as the files land.
  *
  * @type {Chapter[]}
  */
 export const CHAPTERS = [
   arrive,
+  add,
+  timeRuns,
+  yourSky,
 ];
 
 /** @param {string} id */
