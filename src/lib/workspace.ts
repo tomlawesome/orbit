@@ -69,6 +69,8 @@ export const workspaceItemSchema = z.object({
   notes: optionalText(2_000),
   /** Read-only; the write path ignores whatever a client sends here. */
   metadataStatus: itemMetadataStatusSchema.optional(),
+  /** Read-only; count of the item's listable documents, added by the read path (#1091). */
+  documentCount: z.number().int().min(0).optional(),
   status: z.enum(itemStatuses),
   version: z.number().int().positive().optional(),
   updatedAt: z.iso.datetime().optional(),

@@ -46,6 +46,13 @@ node --test scripts/compose-project-name-resolution.test.mjs
 # scratch prototype instead of the real cause.
 node --test scripts/scratch-dir-ignored.test.mjs
 
+# Same reason again (#1020), and it was the only one of the four that no
+# runner ever picked up: vitest.config.ts excludes it and nothing invoked it,
+# so the regression test #1020 wrote to prove the commit-and-push half works,
+# and #1081's proof that the runner's inherited auth header is cleared before
+# the push, both ran nowhere. A test that has never run proves nothing.
+node --test scripts/ci/repin-base-image.test.mjs
+
 # Static analysis covers the full-stack boundary; Vitest exercises all fast
 # server, authentication, database, domain, and reducer tests without Docker.
 #
