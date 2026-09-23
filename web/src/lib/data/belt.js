@@ -105,6 +105,16 @@ export const whenOf = (kind, days, date) => {
 };
 
 /**
+ * The three media types the preview endpoint (#476) can actually turn into a
+ * page — `src/server/documents/validation.ts`'s own list, said here so the
+ * screen can honestly decide NOT to ask before it tries (#1088: "never draw a
+ * fake page" cuts both ways — it also means never spinning on a kind Orbit
+ * was always going to refuse).
+ * @type {ReadonlySet<string>}
+ */
+export const PREVIEW_SUPPORTED_MEDIA_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+
+/**
  * One document, as a body in the band and as its own card.
  *
  * `href` is the honest v1 display the owner ruled for (§15): details, and the
@@ -127,7 +137,37 @@ function documentRowOf(doc) {
     /* GET /api/documents/{id}/download — private, no-store, and the only
        thing Orbit can honestly hand over until the preview endpoint lands. */
     href: `/api/documents/${encodeURIComponent(doc.id)}/download`,
+    /* GET /api/documents/{id}/preview (#476) — page one, whole, in its own
+       proportions. Always page one: Orbit records no page count (#1088). */
+    previewHref: `/api/documents/${encodeURIComponent(doc.id)}/preview`,
+    /* #1088: what the preview card (create-v3's readcard) needs beyond the
+       item-card's honest display above — the raw lifecycle state, so the
+       screen can tell scanning from removed from refused from simply
+       unsupported, and the retention date a removed file's line names. */
+    lifecycle: doc.lifecycle ?? null,
+    mediaType: doc.mediaType ?? null,
+    ready: Boolean(doc.ready),
+    deleteAfter: doc.deleteAfter ? arrivedOn(doc.deleteAfter) : null,
   };
+}
+
+/**
+ * The preview card's own honest state (#1088, owner-decisions.md §18): the
+ * page nearly edge to edge when Orbit can draw one, and otherwise one of the
+ * four states the focus block holds still for. Never a guess: `removed` and
+ * `refused` are the server's own lifecycle, `scanning` is simply "not ready
+ * yet", and `undrawable` is everything ready and clean that is still not one
+ * of the three kinds the renderer understands.
+ *
+ * @param   {BeltDocumentRow} doc
+ * @returns {"available" | "scanning" | "removed" | "refused" | "undrawable"}
+ */
+export function documentPreviewStateOf(doc) {
+  if (doc.lifecycle === "pending_deletion") return "removed";
+  if (doc.lifecycle === "rejected") return "refused";
+  if (!doc.ready) return "scanning";
+  if (!doc.mediaType || !PREVIEW_SUPPORTED_MEDIA_TYPES.has(doc.mediaType)) return "undrawable";
+  return "available";
 }
 
 /**
@@ -143,6 +183,11 @@ function documentRowOf(doc) {
  * @property {boolean} clean
  * @property {?string} scan
  * @property {string} href
+ * @property {string} previewHref
+ * @property {?string} lifecycle
+ * @property {?string} mediaType
+ * @property {boolean} ready
+ * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
  */
 
 /**
