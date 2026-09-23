@@ -11,6 +11,11 @@ import {
   installKeyboardAudit,
   tabTo,
 } from "./support/keyboard";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #849: the pocket-dialect mirror of v19-keyboard.spec.ts — a keyboard-only

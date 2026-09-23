@@ -208,6 +208,37 @@ for (const packagesStale of [true, false]) {
   });
 }
 
+describe("repin-base-image.sh clears the runner's inherited auth header before pushing (#1081)", () => {
+  it("removes every http.*.extraheader from the checkout, naming each without printing its value", () => {
+    const repoDir = deployRepinRepo();
+    const bareDir = deployBareRemote();
+
+    // What GitLab Runner leaves in /builds/<project>/.git/config. The value
+    // shape is the runner's: a base64 basic-auth blob carrying CI_JOB_TOKEN.
+    const key = "http.https://gitlab.example.invalid.extraheader";
+    const secret = "AUTHORIZATION: Basic Z2l0bGFiLWNpLXRva2VuOmpvYi10b2tlbi12YWx1ZQ==";
+    runGit(repoDir, ["config", "--add", key, secret]);
+
+    const result = runRepin({ repoDir, bareDir, packagesStale: false });
+
+    assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+
+    // The header is gone, so nothing but the credential helper can
+    // authenticate the push. This is the assertion that fails without the fix.
+    const remaining = spawnSync("git", ["config", "--name-only", "--get-regexp", "^http\\..*\\.extraheader$"], {
+      cwd: repoDir,
+      encoding: "utf8",
+    });
+    assert.equal(remaining.stdout.trim(), "", `an inherited auth header survived: ${remaining.stdout}`);
+
+    // Named in the log, so a future 403 can be told apart from this one.
+    assert.match(result.stdout, /clearing an inherited git auth header before the push: http\./u);
+
+    // Never the value: it is a working job token.
+    assert.doesNotMatch(result.stdout + result.stderr, /Z2l0bGFiLWNpLXRva2Vu/u);
+  });
+});
+
 // Proves this suite would have caught #1020: with the original
 // `$($packages_stale && printf ...)` form restored, the packages_stale=false
 // run must fail under `set -e` exactly the way the bug report describes --

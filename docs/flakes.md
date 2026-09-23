@@ -110,3 +110,42 @@ skill).
 ## v19-keyboard.spec.ts:568 "administration: the local-user controls are reachable and announced"
 
 - 2026-09-19 · d0d5b47 (+ #1062's uncommitted end-cap focus-ring work, none of it near administration) · local `scripts/test-e2e-local.sh --spec tests/e2e/v19-keyboard.spec.ts --project desktop-chromium` · the "send a new setup link" button was not found at all: `expect(locator).toHaveAttribute` on `.person` filtered to the row that is not "· you", timing out at 5s with "element(s) not found". The other 22 tests in the run passed. The same test passed on the same code in CI — pipeline 1281 / smoke (job 16738), `✓ 111 [desktop-chromium] ... (3.1s)` — where the run's only two failures were the belt end-caps #1062 was fixing. So the row either had no second person or had not rendered when the assertion looked, rather than the control being missing. First sighting; no issue yet (an issue on the third, per the testing-and-ci skill).
+
+## repair_journeys: a different journey fails on each run of the same commit — #1089
+
+- 2026-09-20 · f5349ffa (!962, `design/866-tour-round-5` — tour mockups and `design/owner-decisions.md` only, nothing the harness reads) · pipeline 1373 / `repair_journeys` job 18392 · `FAIL: rotate-database-credential did not report result=done`, after `diagnosis result=failed checked=18 skipped=0`. The `cancelled-repair` journey passed on this run.
+- 2026-09-20 · f5349ffa · pipeline 1373 / `repair_journeys` job 18463 (retry of the above, same commit) · `FAIL: a refused dangerous batch exited 0, expected 6` — in `cancelled-repair`, the journey that had just passed, and `rotate-database-credential` was never reached. A third retry of the same pipeline, job 18499, passed the whole suite.
+
+- 2026-09-22 · ce995b01 (!967, whose diff is `.gitlab-ci.yml` comments, one import in an e2e spec, this file, and `scripts/ci/repin-base-image.sh` with its test — none of it in the install, diagnose or repair path) · pipeline 1460 / `repair_journeys` job 19795, 179s so a real run · `FAIL: rotate-database-credential did not report result=done`, this time in `credential-drift`; `cancelled-repair` and `signal-cleanup` both passed first. The diagnosis found the mismatch; the repair did not run — `restart-services` reported `skipped` and the execution came back `unactionable`.
+
+The signature is the moving failure point, not either symptom: three real runs
+(278s, 241s and 179s, so none was lane-skipped) picked a different journey to
+fail in, and a retry was green, all on a commit the diff could not reach. `dev`
+ran the same job for real at the 2026-09-20 parent commit `3b6ca05c` (pipeline
+1369, job 18305, 241s, passed), so the branch was not the cause then either.
+**Third sighting: #1089 filed.**
+
+## extraction-shortlist-recall.test.ts:108 "adds to the tallies it is given rather than replacing them" — #1087
+
+- 2026-09-22 · b7a5a883 (!964, which changes only the base-image digest in `Dockerfile` and `.github/supply-chain-policy.json`) · pipeline 1417 / fast (job 18983) · `Error: Test timed out in 5000ms`, 5535ms. Passed on the retried job 19206 on the same commit. `dev` ran the same test green at the same base on pipeline 1379.
+
+The failure is a timeout, not an assertion: the test is synchronous, so it
+exceeded the 5 s cap doing its own work. It is the only test in the file that
+runs `countAll` over the whole real corpus twice (`SAMPLE.slice(0, 3)` and then
+`SAMPLE`) instead of reading the `tallies` the describe block computes once, and
+the `fast` project's `testTimeout` is `5_000` (`vitest.config.ts:81`). A loaded
+runner is enough to push it over. If it recurs, the fix shape is a per-test
+timeout on this one case rather than a global raise.
+
+- 2026-09-22 · 25b3c913 (the `dev` merge of !966, which touches only `web/src` and one e2e spec) · pipeline 1454 / fast (job 19676) · `Error: Test timed out in 5000ms`, alongside a timeout in `password.test.ts`. Retried as job 19693 on the same commit: green, 273 of 273 files and 4338 tests. The diff cannot reach either file, and both failures were timeouts rather than assertions, which is why the job was re-run rather than investigated as a regression. Two pipelines were executing on the same host at the time — 1455 was started manually two minutes into 1454 — so the contention was partly self-inflicted. **Third sighting: #1087 filed.**
+
+## password.test.ts "round-trips a password and refuses a wrong one"
+
+- 2026-09-22 · 25b3c913 · pipeline 1454 / fast (job 19676) · `Error: Test timed out in 5000ms`, in the same run as the extraction-shortlist-recall timeout above, under the same two-pipeline contention. Passed on the retry, job 19693.
+
+A different test from the one recorded on 2026-09-18, in the same file: Argon2id
+is deliberately expensive, so every test in this file sits close to the 5 s cap
+and the file has no single slow case to blame. Treated as its own heading rather
+than a second sighting of the 2026-09-18 one, because a fix aimed at one test
+would not touch the other. First sighting of this test; an issue on the third,
+per the testing-and-ci skill.

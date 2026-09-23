@@ -1,5 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { claimCodeFromLog, stackLog } from "./support/bootstrap";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * AN ORBIT WITH NO IDENTITY PROVIDER AT ALL (#916, ADR-0022, ADR-0023 §1).
@@ -18,9 +23,11 @@ import { claimCodeFromLog, stackLog } from "./support/bootstrap";
  * tests/e2e/local-only-specs.txt is the list they share.
  *
  * ORDER AND ISOLATION, for the same reason bootstrap-protection.spec.ts has a
- * note about it: the database is not reset between specs and the claim
- * happens once per stack, so the unclaimed state belongs to whichever file
- * runs first. In this profile that is this one -- it sorts ahead of
+ * note about it: the claim happens once per stack, so the unclaimed state
+ * belongs to whichever file runs first. #1077's reset is silent in this
+ * profile and has to be -- claim.setup.ts skips itself where there is no
+ * provider, so no seed is ever taken, and this file's own precondition is an
+ * instance nobody has claimed. In this profile that is this one -- it sorts ahead of
  * `signed-out`, and the two projects run in declaration order, so the claim
  * is desktop's. Mobile would meet an instance this run had already claimed,
  * which is why the file is desktop-only: nothing in it renders differently on

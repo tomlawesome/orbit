@@ -12,6 +12,11 @@ import {
   settled,
   tabTo,
 } from "./support/keyboard";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #496: a keyboard-only pass over the core journeys — sign-in through to
@@ -616,6 +621,29 @@ test("administration: the local-user controls are reachable and announced", asyn
   try {
     await openSettingsFromHome(page);
     await ensureLocalPassword(page, READER, KEYBOARD_PASSWORD);
+
+    /* #1077: a NEIGHBOUR on the roster, made here rather than inherited. The
+       per-person control asserted at the end of this test needs a row that is
+       somebody other than the reader, and until the database went back to its
+       seed between spec files this test was quietly relying on accounts other
+       specs happened to have created before it ran -- which is the same
+       cross-file coupling that made the tab-order failures move around.
+       Created through the route the screen's own form calls, with the
+       password `ensureLocalPassword` has just set answering the challenge, so
+       the roster it reads is a real one. The address carries the clock
+       because the account outlives this test: the reset takes it away at the
+       next spec file, but a retry of THIS file inside the same one would
+       otherwise collide with the address it used the first time. */
+    const neighbour = await page.request.post("/api/admin/users", {
+      headers: await sessionHeaders(page),
+      data: {
+        email: `roster-neighbour-${Date.now()}@example.invalid`,
+        displayName: "Roster Neighbour",
+        currentPassword: KEYBOARD_PASSWORD,
+      },
+    });
+    expect(neighbour.status(), "administration: the roster neighbour was refused").toBe(201);
+
     await page.goto("/administration");
     await expect(page.locator(".card").first()).toBeVisible({ timeout: 30_000 });
 
