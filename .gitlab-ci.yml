@@ -154,6 +154,10 @@ variables:
   # (#673). Deliberately one repository: Trivy does not fall back. ghcr.io,
   # not Docker Hub: stays direct.
   TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
+  # The Java database the same way, for the same reason: `sidecar_images`
+  # needs it for the tika image, and trivy's default for it is the same
+  # mirror.gcr.io that 403'd above.
+  TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1
   # The digest scripts/test-integration.mjs pins for its disposable database.
   POSTGRES_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
   # The tag `build_image` builds under, and nothing else: it names this commit,
@@ -1271,6 +1275,18 @@ sidecar_images:
     - *trivy_db_dir
     - *trivy_db_warm
     - |
+      # The Java database too, and only here: tika is a Java image, and a
+      # scan that finds no Java database in its cache downloads one (923 MiB
+      # on 2026-09-23) into the worker's private copy below, which is then
+      # thrown away -- so every run paid for it, inside the scan's own
+      # timeout, alongside three other workers' pulls. Pipeline 1534 lost
+      # the ollama scan to that 5-minute default; the dev run the same
+      # afternoon came in at 145 s. Warmed into the shared cache once, it
+      # costs the same as the vulnerability database: nothing on a warm day.
+      if [ ! -e "$TRIVY_CACHE_DIR/java-db/trivy-java.db" ]; then
+        trivy image --download-java-db-only
+      fi
+    - |
       # Fan the scans out, four at a time: this loop is almost all network
       # wait, not CPU, because it pulls each image before scanning it. The lane
       # is capped at 8 CPUs, so four concurrent pulls cannot swamp it (#879).
@@ -1286,6 +1302,8 @@ sidecar_images:
       # non-zero if any scan fails, so the job fails the way it did before.
       # --ignore-unfixed because these are images Orbit pulls rather than
       # builds: a fixable HIGH is actionable (re-pin), an unfixable one is not.
+      # --timeout 10m: trivy's default is 5, and a cold-cache pull of a large
+      # image on a busy runner has already reached it (pipeline 1534).
       node scripts/sidecar-image-evidence.mjs --list-references \
         --policy .github/supply-chain-policy.json \
         | xargs -P 4 -n 2 sh -c '
@@ -1310,6 +1328,8 @@ sidecar_images:
             trivy image \
               --cache-dir "$cache" \
               --skip-db-update \
+              --skip-java-db-update \
+              --timeout 10m \
               --scanners vuln \
               --ignore-unfixed \
               --format json \
@@ -3074,6 +3094,14 @@ install_bootstrap:
   # A weekly maintenance run has nothing that could supersede it, same as
   # `renovate` and `sidecar_pin_freshness`.
   interruptible: false
+  # Shared with install_bootstrap_latest below: .docker_in_job starts its
+  # daemon at a fixed path under $CI_BUILDS_DIR, not a per-job one (see that
+  # macro's own comment on why /builds outlives the job here), and both jobs
+  # run on the same dedicated orbit-build runner. Two of these live at once
+  # would race that daemon's data directory. The resource group only orders
+  # this pair against each other; it is not a promotion-measurement guard
+  # like launch_timing's.
+  resource_group: install_bootstrap_docker_data
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
   allow_failure: false
@@ -3085,6 +3113,51 @@ install_bootstrap:
       bash scripts/test-install-bootstrap.sh --red
       echo "install_bootstrap: green run — the published bootstrap against the live registry"
       bash scripts/test-install-bootstrap.sh
+  after_script:
+    - *docker_in_job_teardown
+
+# Companion to install_bootstrap above, for #1016: that job only ever passes
+# --channel preview, so nothing has exercised what an operator actually gets
+# from the documented bootstrap with no channel named at all. install.sh's
+# own default when ORBIT_CHANNEL is unset is the `latest` tag (scripts/
+# install.sh:15), not `preview` -- the harness's --channel default of
+# `preview` is a choice of that script alone. Passing --channel latest here
+# makes the harness set ORBIT_CHANNEL=latest for the piped install, which is
+# exactly what a truly default, no-flags install receives.
+#
+# Expected RED until the v1.3.0 promotion: today `latest` on GHCR is still
+# the v1.2.0 image, built before ADR-0019's asset bundling, so install.sh
+# refuses it (see the io.orbit.deployment-assets label check and #1038). A
+# red run here before that promotion is the known, accepted state -- do not
+# silence it with allow_failure, which would hide the one thing this job
+# exists to catch: a red run *after* v1.3.0 promotes is a release defect,
+# not an expected gap, and must fail the schedule loudly.
+#
+# Same shape and rules as install_bootstrap otherwise -- same runner, image,
+# timeout, interruptible setting and schedule gate -- so the two are easy to
+# read as a pair and both stop firing together if INSTALL_BOOTSTRAP is ever
+# turned off. No --red self-test of its own: that self-test proves the
+# harness's digest comparison fires, which install_bootstrap already proves
+# every run; running it twice on every schedule would only double the cost
+# for the same evidence.
+install_bootstrap_latest:
+  stage: maintenance
+  extends: .privileged_runner
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  timeout: 45m
+  interruptible: false
+  resource_group: install_bootstrap_docker_data
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
+  allow_failure: false
+  script:
+    - *docker_in_job
+    - |
+      set -eu
+      echo "install_bootstrap_latest: default-channel run — the published bootstrap against the live registry's latest tag"
+      bash scripts/test-install-bootstrap.sh --channel latest
   after_script:
     - *docker_in_job_teardown
 

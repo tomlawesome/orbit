@@ -1477,8 +1477,16 @@ readonly deployment_assets_root="/opt/orbit/deploy"
 if ! bundled_assets_root="$(docker image inspect --format '{{index .Config.Labels "io.orbit.deployment-assets"}}' "$resolved_reference" 2>/dev/null)"; then
   fail "Could not inspect ${resolved_reference} for its bundled deployment assets."
 fi
+# This refusal can never succeed by retrying: the image was built before
+# ADR-0019 and no later attempt against the same tag changes that. The
+# default action for this phase is "retry" (default_failure_action), which
+# would tell a consumer to loop forever (#1038); action=abort marks it
+# terminal instead. install_ui is never loaded this early (load_installer_ui
+# runs after assets are staged), so this raw fail() line bypasses
+# installer-ui.sh's action vocabulary and abort is emitted verbatim — see
+# #1038 for the launcher-side change still needed to treat it as terminal.
 [[ -n "$bundled_assets_root" ]] ||
-  fail "The published image was built before Orbit bundled its deployment assets and is not a supported install target (ADR-0016, ADR-0019)."
+  fail_with image-registry abort "The published image was built before Orbit bundled its deployment assets and is not a supported install target (ADR-0016, ADR-0019)."
 [[ "$bundled_assets_root" == "$deployment_assets_root" ]] ||
   fail "The published image records deployment assets somewhere other than ${deployment_assets_root}."
 readonly bundled_assets_root
