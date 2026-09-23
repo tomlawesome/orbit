@@ -5,8 +5,8 @@
   import { mountTiledSky } from "$lib/sky.js";
   import { every, longDate, money } from "$lib/format.js";
   import Chrome from "$lib/Chrome.svelte";
-  import { WorkspaceError, applyCommand } from "$lib/data/workspace.js";
-  import { beltManifestOf } from "$lib/data/belt.js";
+  import { WorkspaceError, applyCommand, restoreDocument } from "$lib/data/workspace.js";
+  import { beltManifestOf, documentPreviewStateOf } from "$lib/data/belt.js";
   import {
     archiveCommand, completeCommand, nextDateAfter, rescheduleCommand,
     snoozeCommand, statusCommand, upsertCommand,
@@ -120,6 +120,98 @@
   /** @type {PanelForm} */
   let form = $state({});
 
+  /* ---- the document preview (#1088) --------------------------------------
+     create-v3's reading card (design/v19/create-v3.html's `.readcard`,
+     `.topsheet`, `.focus`), reused for its two everyday states — focus while
+     the page is on its way, snap once it has landed — plus the four honest
+     ones owner-decisions.md §18 draws when there is none to show. A document
+     is never the centred body: this rides entirely beside `selected`, opened
+     and closed by the belt's own openDoc/closeDoc (a paper's own press)
+     rather than by centring anything. The belt owns WHICH paper and WHICH
+     side; this screen owns what the card says about it, same division as
+     the item card and its panels. */
+  /** @type {import("./band.js").BeltDoc | null} */
+  let previewDoc = $state(null);
+  let previewSide = $state(/** @type {"left" | "right"} */ ("right"));
+  /** Drives the reading card's own fade — true one tick after it is asked to
+     open, and false the instant it is asked to close, so both ends of the
+     opacity/transform transition actually run rather than snapping. */
+  let previewOpen = $state(false);
+  let previewImgLoaded = $state(false);
+  let previewImgFailed = $state(false);
+  /* create-v3's own walk: the page does not appear the instant it has
+     loaded — it waits for a minimum beat so a fast load never flickers. */
+  let previewBeatDone = $state(false);
+  let previewRestoring = $state(false);
+  /** @type {string | null} */
+  let previewProblem = $state(null);
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let previewCloseTimer;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let previewBeatTimer;
+
+  const previewDocState = $derived(previewDoc ? documentPreviewStateOf(previewDoc) : null);
+  /* A document Orbit believed showable but whose actual page failed to load
+     (the preview endpoint refused it for a reason the summary could not
+     predict, e.g. a structurally invalid PDF) reads exactly as "a kind
+     Orbit cannot draw" — the same honest line, never a stuck loading state. */
+  const previewState = $derived(previewImgFailed ? "undrawable" : previewDocState);
+  const previewShowing = $derived(
+    previewDocState === "available" && previewImgLoaded && previewBeatDone && !previewImgFailed,
+  );
+  const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /** @param {import("./band.js").BeltDoc} doc
+      @param {"left" | "right"} side */
+  function openPreview(doc, side) {
+    clearTimeout(previewCloseTimer);
+    clearTimeout(previewBeatTimer);
+    previewDoc = doc;
+    previewSide = side;
+    previewImgLoaded = false;
+    previewImgFailed = false;
+    previewRestoring = false;
+    previewProblem = null;
+    previewBeatDone = documentPreviewStateOf(doc) !== "available";
+    if (!previewBeatDone) {
+      previewBeatTimer = setTimeout(() => { previewBeatDone = true; }, reducedMotion() ? 0 : 900);
+    }
+    if (!previewOpen) tick().then(() => { previewOpen = true; });
+  }
+  function closePreview() {
+    if (!previewDoc) return;
+    previewOpen = false;
+    clearTimeout(previewBeatTimer);
+    /* The card stays mounted through its own fade-out, same choreography as
+       the belt's cardwrap swap and create-v3's own topsheet. */
+    previewCloseTimer = setTimeout(() => { previewDoc = null; }, reducedMotion() ? 0 : 800);
+  }
+  /* The reading card sits level with the item card's own middle (create-v3's
+     levelWithCard, belt.behaviour.js's port of it) — a figure only the belt
+     can answer, because it is measured off the item card's real footprint.
+     Every visual change to the reading card's own height (opening, the page
+     landing, an honest state replacing the loading block) has to ask again. */
+  $effect(() => {
+    void previewDoc; void previewShowing; void previewState;
+    if (previewDoc) tick().then(() => belt?.remeasure());
+  });
+  /** The removed state's one foot action (#1054's restore, reached here
+     rather than through the reader this issue does not build). */
+  async function restorePreviewDoc() {
+    if (!previewDoc || previewRestoring) return;
+    previewRestoring = true;
+    previewProblem = null;
+    try {
+      await restoreDocument(previewDoc.id);
+      belt?.closeDoc();
+      await invalidateAll();
+    } catch (error) {
+      previewProblem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+    } finally {
+      previewRestoring = false;
+    }
+  }
+
   /** @type {HTMLInputElement | null} */
   let findEl = $state(null);
   /* Deliberately NOT reactive, all three: the mounting effect reads them and
@@ -194,6 +286,9 @@
       /* #1062: the end-caps' press. The same function the arrow keys call —
          the band draws the controls, the screen owns the step. */
       onStep: step,
+      /* #1088: a paper was pressed. The apex does not move — see openPreview. */
+      onOpenPreview(doc, side) { openPreview(doc, side); },
+      onClosePreview() { closePreview(); },
       async onSettle(_i, band) {
         bloom = band.bloom.slice();
         bodies = band.bodies;
@@ -264,7 +359,7 @@
   function onFindKey(event) {
     if (event.key === "Enter") {
       event.preventDefault();
-      if (nearest >= 0) belt?.centre(nearest);
+      if (nearest >= 0) goTo(nearest);
     }
     if (event.key === "Escape") {
       event.preventDefault();
@@ -289,6 +384,22 @@
       && (target === findEl || Boolean(target.closest("input, textarea, select")));
   }
   /**
+   * Go to a seat, whichever kind it is: a rock rolls to the apex; a paper
+   * opens its reading card in place (#1088 — a document is never the
+   * centred body). Every way this screen can be told "go to seat i" — the
+   * end-caps, the arrow keys, Enter in the search field, a hit list row —
+   * goes through this one function rather than three that have to agree.
+   *
+   * @param {number} i
+   */
+  function goTo(i) {
+    const body = bodies[i];
+    if (!body) return;
+    if (body.kind === "doc") belt?.openDoc(i);
+    else belt?.centre(i);
+  }
+
+  /**
    * One step along the belt. The whole of what ← and → do — and, since
    * #1062, the whole of what the two end-caps do as well: they are handed
    * this function, so a press and a key press are one code path and land the
@@ -298,11 +409,14 @@
    */
   function step(d) {
     const next = stepFrom(bodies, selected, bloom, d);
-    if (next >= 0) belt?.centre(next);
+    if (next >= 0) goTo(next);
   }
 
   /** @param {KeyboardEvent} event */
   function onKeydown(event) {
+    /* #1088: Esc closes the reading card first — the belt's own dead-space
+       law (owner-decisions.md §18) — and only then a command panel. */
+    if (event.key === "Escape" && previewDoc) { event.preventDefault(); belt?.closeDoc(); return; }
     if (event.key === "Escape" && panel) { panel = null; armed = null; return; }
     if (typing(event.target)) return;
     if (event.key === "ArrowLeft") {
@@ -407,6 +521,17 @@
     go();
   }
 
+  /** #1088: dead space closes the reading card (owner-decisions.md §18) —
+     everything on the belt except the paper itself, the item card, the
+     reading card, the search field and the chrome. */
+  /** @param {PointerEvent} event */
+  function onDeadSpace(event) {
+    if (!previewDoc) return;
+    const target = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
+    if (target?.closest?.(".readcard, .cardwrap, .hit, .find, .back, .orb, .account")) return;
+    belt?.closeDoc();
+  }
+
   const editsOf = () => ({
     title: (form.title ?? "").trim(),
     provider: (form.provider ?? "").trim() || undefined,
@@ -418,7 +543,7 @@
   });
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onpointerdown={onDeadSpace} />
 
 <svelte:head>
   <title>{data.kind === "belt" ? (row?.title ?? "Item") : "Suggestion"} — Orbit</title>
@@ -469,6 +594,13 @@
     <g id="caps"></g>
   </svg>
 
+  <!-- #1088: create-v3's lanes — the grid the reading card grows beside.
+       The card's own column stays put; the second widens on the paper's own
+       side when a preview is open, sliding the item card off centre and the
+       pair together (owner-decisions.md §18, design/v19/create-v3.html). -->
+  <div class="lanes" id="lanes"
+       class:left={previewSide === "left"} class:right={previewSide === "right"}
+       class:open={previewOpen}>
   <!-- the card, riding at the apex -->
   <div class="cardwrap" id="cardwrap">
     {#if !bodies.length}
@@ -487,43 +619,6 @@
           <button style="--act:var(--accent);--act-text:var(--accent-text)" onclick={() => goto(resolve("/create"))}>add an item</button>
           <button style="--act:var(--upcoming);--act-text:var(--upcoming-text)" onclick={() => goto(resolve("/inbox"))}>mail something in</button>
         </div>
-      </article>
-    {:else if cardBody?.kind === "doc" && row}
-      <!-- A document shows what Orbit honestly holds: what the file is, when
-           it arrived, that it scanned clean, and the original in your hands. -->
-      <article class="glass item-card">
-        <div class="docview">
-          <div class="plate" aria-hidden="true">{cardBody.doc.plate}</div>
-          <div class="docbody">
-            <h2>{cardBody.doc.name}</h2>
-            <div class="sub">document · attached to {row.title}</div>
-            <div class="kv"><span>added</span><b>{cardBody.doc.added}</b></div>
-            <div class="kv"><span>size</span><b>{cardBody.doc.size}</b></div>
-            <div class="kv"><span>kind</span><b>{cardBody.doc.type}</b></div>
-            <div class="kv"><span>scan</span>
-              {#if cardBody.doc.clean}<b class="clean">scanned clean</b>
-              {:else}<b>{cardBody.doc.scan ?? "not scanned"}</b>{/if}</div>
-            <div class="getrow">
-              <!-- doc.href is a download endpoint, not a page route -- outside
-                   resolve()'s typed route union, but still the right runtime
-                   value. The cast picks one no-params route literal so
-                   resolve()'s generic can be satisfied at all; it has no
-                   effect on the string actually passed through. -->
-              <a class="btn-primary" href={resolve(/** @type {"/home"} */ (cardBody.doc.href))} download>download the original</a>
-            </div>
-          </div>
-        </div>
-        <!-- #476 SEAM: when Orbit can render page one, that render fills this
-             half of the card and the plate retires. The endpoint exists —
-             GET /api/documents/&lt;id&gt;/preview — and this screen deliberately does
-             NOT call it yet: v1 is details and the original (owner, §15), and
-             the preview lands once #476's container evidence closes. Until it
-             can, the screen says what it holds and hands over the file — it
-             does not draw a page it has never seen. -->
-        <div class="note">the page itself is not something Orbit holds yet — until it does,
-          this is the honest read, and the original is one click away.<br>
-          <b>{row.title}</b> is the ringed body beside you in the belt.</div>
-        <button class="back" onclick={() => belt?.centreById(row.id)}>← back to {row.title}</button>
       </article>
     {:else if cardBody && row && record}
       <!-- An item shows the item screen as #424/#455 render it: what it is,
@@ -732,6 +827,97 @@
     {/if}
   </div>
 
+  <!-- #1088: the reading card. Mounted only while a preview is on its way in
+       or out — the fade needs the element there to fade, and mounting it
+       unconditionally would hand a screen reader a dialog with nothing in
+       it. `hidden` is never set while mounted: `previewOpen` alone drives
+       the CSS transition (belt.css's `.readcard.open`), same law as
+       create-v3's own `body.doc .readcard`. -->
+  {#if previewDoc}
+    {@const state = previewState}
+    <aside class="glass readcard" id="readcard" class:open={previewOpen}
+           class:snap={previewShowing} class:still={state !== "available"}
+           class:rc-refused={state === "refused"}
+           role="dialog" aria-label={previewDoc.name} tabindex="-1">
+      <div class="pagebox">
+        {#if state === "available" && !previewShowing}
+          <!-- create-v3's focus block, verbatim: the reticle, the owner's
+               words breathing while the page is on its way. -->
+          <div class="focus">
+            <svg class="reticle" viewBox="0 0 96 96" aria-hidden="true">
+              <circle cx="48" cy="48" r="43" fill="none" stroke="var(--chart-line)" stroke-width="1"
+                      stroke-dasharray="3 7" opacity=".8"/>
+              <g class="sweep">
+                <line x1="48" y1="5" x2="48" y2="14" stroke="var(--accent)" stroke-width="1.2" opacity=".8"/>
+                <line x1="48" y1="82" x2="48" y2="91" stroke="var(--accent)" stroke-width="1.2" opacity=".35"/>
+              </g>
+              <g class="pull" fill="none" stroke="var(--accent)" stroke-width="1.1" opacity=".7">
+                <path d="M 26 18 H 18 V 26"/><path d="M 70 18 H 78 V 26"/>
+                <path d="M 26 78 H 18 V 70"/><path d="M 70 78 H 78 V 70"/>
+              </g>
+              <circle cx="48" cy="48" r="16" fill="none" stroke="var(--chart-line)" stroke-width="1" opacity=".9"/>
+              <circle cx="48" cy="48" r="1.8" fill="var(--accent)"/>
+            </svg>
+            <div class="focusline">Focusing on the anomaly</div>
+            <div class="why">orbit is drawing the page it holds<br>nothing is changed, and nothing is assumed</div>
+          </div>
+        {:else if state === "scanning"}
+          <div class="focus">
+            <div class="plate scanning" aria-hidden="true">still scanning</div>
+            <div class="focusline">Still scanning this file</div>
+            <div class="why">the page comes once it scans clean<br>nothing is assumed</div>
+          </div>
+        {:else if state === "removed"}
+          <div class="focus">
+            <div class="plate removed" aria-hidden="true">being removed</div>
+            <div class="focusline">Removed</div>
+            <div class="why">orbit keeps it {previewDoc.deleteAfter ? `until ${previewDoc.deleteAfter}` : "for 30 days"}, then it is gone for good<br>restore puts it back exactly as it was</div>
+          </div>
+        {:else if state === "refused"}
+          <div class="focus">
+            <div class="plate" aria-hidden="true">refused</div>
+            <div class="focusline">Orbit refused this file.</div>
+            <div class="why">it did not pass what orbit checks before keeping a file<br>nothing here can be undone</div>
+          </div>
+        {:else if state === "undrawable"}
+          <div class="focus">
+            <div class="plate" aria-hidden="true">{previewDoc.plate}</div>
+            <div class="focusline">Orbit could not draw a picture of this document.</div>
+            <div class="why">the file is fine — scanned clean, and yours to download<br>orbit just could not turn it into a page to read here</div>
+          </div>
+        {/if}
+
+        {#if state === "available"}
+          <div class="topsheet">
+            <div class="sheet">
+              <img src={previewDoc.previewHref} alt="Page one of {previewDoc.name}"
+                   onload={() => (previewImgLoaded = true)}
+                   onerror={() => { previewImgLoaded = true; previewImgFailed = true; }} />
+            </div>
+          </div>
+        {/if}
+      </div>
+
+      {#if state === "removed"}
+        <div class="rcfoot">
+          <button type="button" class="quiet" disabled={previewRestoring}
+                  onclick={restorePreviewDoc}>restore</button>
+        </div>
+        {#if previewProblem}
+          <div class="problem" role="alert">{previewProblem}</div>
+        {/if}
+      {:else if state === "undrawable"}
+        <div class="rcfoot">
+          <!-- Same cast the old docview card used: doc.href is a download
+               endpoint, not a page route -- outside resolve()'s typed route
+               union, but still the right runtime value. -->
+          <a class="quiet" href={resolve(/** @type {"/home"} */ (previewDoc.href))} download>download</a>
+        </div>
+      {/if}
+    </aside>
+  {/if}
+  </div>
+
   <!-- the nearest few per cent of the band: rubble that passes in FRONT -->
   <canvas id="fore" aria-hidden="true"></canvas>
 
@@ -752,7 +938,7 @@
         {#each hitList.slice(0, 7) as i (bodies[i].id)}
           <button type="button" class:pick={i === nearest}
                   onmousedown={(event) => event.preventDefault()}
-                  onclick={() => belt?.centre(i)}>
+                  onclick={() => goTo(i)}>
             <b>{bodies[i].kind === "doc" ? bodies[i].doc.name : bodies[i].label}</b>
             <small style="color:{bodies[i].tone}">{bodies[i].kind === "doc" ? "document" : bodies[i].t}</small>
             <small>{bodies[i].kind === "doc" ? bodies[i].sub : bodies[i].when}</small>
