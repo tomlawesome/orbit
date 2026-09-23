@@ -454,7 +454,7 @@ export function createFilmContext({
    *  @param {...Control} controls */
   function light(...controls) {
     for (const c of controls) {
-      if (dry()) continue;
+      if (dry() || c.els.length === 0) continue;
       ensureRings(c);
       syncRings(c);
       ringState(c, "on");
@@ -505,6 +505,10 @@ export function createFilmContext({
    */
   async function travel(to, dur) {
     dropCallout();
+    /* A control the product legitimately does not render (`optional`) still
+       costs the film its beat -- the budget must not depend on the data --
+       but the dot has nowhere to go, so it stays where it is. */
+    if (!Array.isArray(to) && to.els.length === 0) return clock.w(dur ?? T.travelBase);
     const target = Array.isArray(to) ? to : /** @type {Point} */ ([boxOf(to.ringEls, to.pad).cx, boxOf(to.ringEls, to.pad).cy]);
     const from = /** @type {Point} */ ([at[0], at[1]]);
     const distance = Math.hypot(target[0] - from[0], target[1] - from[1]);
@@ -541,7 +545,7 @@ export function createFilmContext({
   /** The mockup's `growInto`: the dot becomes the control's outline.
    *  @param {Control} c */
   async function growInto(c) {
-    if (dry()) return clock.w(T.grow);
+    if (dry() || c.els.length === 0) return clock.w(T.grow);
     ensureRings(c);
     syncRings(c);
     ringState(c, "on");
@@ -728,7 +732,9 @@ export function createFilmContext({
     if (!dry()) {
       const pt = Array.isArray(anchor)
         ? anchor
-        : edgeOf(boxOf(anchor.ringEls, anchor.pad), side);
+        : anchor.els.length === 0
+          ? centreOfViewport()
+          : edgeOf(boxOf(anchor.ringEls, anchor.pad), side);
       live = showCallout(text, pt, side, o);
     }
     await clock.hold(o.hold ?? holdFor(text));
