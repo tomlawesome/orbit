@@ -14,20 +14,20 @@
  * (`web/src/routes/home/+page.svelte:971`), so this chapter presses it and
  * then names the screen it leads to, same as any other `setScreen`.
  *
- * TWO THINGS THE MOCKUP DRAWS THAT THE PRODUCT DOES NOT:
- *   1. `typeInto` — the mockup fakes typing by writing one character per
- *      wait into a span it made up (`t-name`, `t-due`, `t-cost`). There is no
- *      such word in vocabulary.js (only `T.typeLead`/`T.typeChar`, unused by
- *      any exported function), and a chapter may not invent one outside this
- *      file's remit. Each typed field is instead lit, pressed, and held for
- *      `T.field` — the same pause the mockup already spends between fields —
- *      without an animated string. Flagged in the chapter 2 report rather
- *      than papered over.
- *   2. `#c-year` — the mockup's yearly chip does not exist; the real
- *      control is `#f-recur`, a `<select>` that already defaults to
- *      "yearly" (`web/src/routes/create/+page.svelte`). This chapter lights
- *      it to say "here's how often", rather than pretending to choose an
- *      option that is chosen already.
+ * THE TYPED FIELDS. Three of them, verbatim from the mockup's own
+ * `typeInto` calls: the name, the date and the cost, each typed one
+ * character per wait once its field has been pressed. The word is
+ * vocabulary.js's `typeInto`, which paints the film's own text over the
+ * field rather than into it — no `value` is set, no input handler fires,
+ * and nothing is left in the form when the film ends. "add-typing" is
+ * handed to that word rather than marked here, because the mockup fires it
+ * 55% of the way through the name so the held frame is a half-typed field.
+ *
+ * ONE THING THE MOCKUP DRAWS THAT THE PRODUCT DOES NOT: `#c-year`, its
+ * yearly chip. The real control is `#f-recur`, a `<select>` that already
+ * defaults to "yearly" (`web/src/routes/create/+page.svelte`). This chapter
+ * lights it to say "here's how often", rather than pretending to choose an
+ * option that is chosen already.
  *
  * THE VEIL. Chapter 1's own header says it: nothing is dimmed until this
  * chapter opens the create drawer. `veil(true)` is called once, before the
@@ -68,7 +68,7 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, press, quiet, unlight, callout, dropCallout, mark, w, T } = ctx;
+    const { setScreen, veil, ctl, goto, press, typeInto, quiet, unlight, callout, dropCallout, mark, w, T } = ctx;
 
     await setScreen("/home");
     veil(false);
@@ -96,13 +96,13 @@ export default {
     dropCallout();
     unlight(card);
 
-    /* What to call it. */
+    /* What to call it, typed in — and marked half-way through the name. */
     const name = ctl({ sel: SELECTORS.name, radius: 10 });
     await goto(name);
     await press(name);
-    await w(T.field);
-    await mark("add-typing");
+    await typeInto(name, "Car MOT — Volvo V60", { mark: "add-typing" });
     unlight(name);
+    await w(T.field);
 
     /* What kind of thing it is — held at a quiet ring once chosen, same as
        the mockup leaves its own insp control. */
@@ -116,6 +116,7 @@ export default {
     const due = ctl({ sel: SELECTORS.due, radius: 12 });
     await goto(due);
     await press(due);
+    await typeInto(due, "29 Aug 2027");
     unlight(due);
     await w(T.field);
 
@@ -123,6 +124,7 @@ export default {
     const cost = ctl({ sel: SELECTORS.cost, radius: 12 });
     await goto(cost);
     await press(cost);
+    await typeInto(cost, "54.85");
     unlight(cost);
     await w(T.field);
 

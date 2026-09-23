@@ -26,17 +26,20 @@
  * exactly that) — rather than by position, since the roster is a fixed list
  * and the title is its real name, not a coordinate.
  *
- * A GAP THIS CHAPTER FOUND, NOT FIXED. `press()` and `tap()` (vocabulary.js)
- * only animate a press — grow the ring, squeeze the control — and never
- * dispatch a real click. Nothing in engine.js, player.js or vocabulary.js
- * does. So pressing the real orb here does not actually toggle `#account`
- * open, and pressing the real dawn swatch does not actually flip
- * `dataset.theme`: both are re-enactments over real, correctly-named
- * elements, exactly as goto()/press() already are for every other chapter,
- * but neither now visibly opens the menu or re-skins the sky the way a
- * reader's own click would. Vocabulary.js has no word for a real click or
- * for "wear a pack," and this chapter does not reach past the vocabulary
- * into the DOM to invent one — that word, if wanted, belongs there, not here.
+ * THE PRESS IS THE GESTURE; `wear` IS THE CHANGE. `press()` (vocabulary.js)
+ * only animates a press and never dispatches a click, deliberately: a real
+ * click on a swatch runs `setSwatch`, which writes `localStorage` and the
+ * reader's saved preference, and a film that did that would change the sky
+ * it promised not to touch. So this chapter presses the product's own dawn
+ * swatch for the gesture and asks `wear("dawn")` for the sky — a pack worn
+ * for the film's duration only, on `documentElement` and nowhere else.
+ *
+ * AND `wear(null)` TAKES IT OFF, putting back whatever pack the reader
+ * arrived in. That is why the closing beat presses the after-dark swatch
+ * (the mockup's own return) but does not name it to `wear`: the sky returns
+ * to THEIRS, not to the mockup's. Skipping mid-chapter returns it too —
+ * vocabulary.js's `clear()` unwears, and the player calls `clear()` on a
+ * jump, on stop and at the end.
  */
 
 /**
@@ -57,7 +60,8 @@ export const SELECTORS = Object.freeze({
   /** The dawn pack's own swatch, named by title the way the product's own
    *  click handler (`packOf`, swatches.js) does. */
   dawn: '#account .swatches button[title="dawn"]',
-  /** After dark — the pack the sky wore before, and the one it returns to. */
+  /** After dark — the mockup's own return, pressed here as the gesture while
+   *  `wear(null)` puts back whatever pack the reader actually arrived in. */
   afterDark: '#account .swatches button[title="after dark"]',
 });
 
@@ -68,7 +72,7 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, press, unlight, callout, dropCallout, mark, hold, w, T } = ctx;
+    const { setScreen, veil, ctl, goto, press, wear, unlight, callout, dropCallout, mark, hold, w, T } = ctx;
 
     await setScreen("/home");
     veil(false);
@@ -104,10 +108,11 @@ export default {
     unlight(swatches);
     dropCallout();
 
-    /* Dawn is pressed, and the whole sky wears it. */
+    /* Dawn is pressed, and the whole sky wears it — for the film only. */
     const dawn = ctl({ sel: SELECTORS.dawn, round: true });
     await goto(dawn);
     await press(dawn);
+    wear("dawn");
     unlight(dawn);
     veil(false);
     await w(T.cross);
@@ -119,6 +124,7 @@ export default {
     const afterDark = ctl({ sel: SELECTORS.afterDark, round: true });
     await goto(afterDark);
     await press(afterDark);
+    wear(null);
     unlight(afterDark);
     veil(false);
     await w(T.cross);
