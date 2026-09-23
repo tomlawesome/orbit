@@ -572,3 +572,103 @@ describe("wearing a pack", () => {
     player.destroy();
   });
 });
+
+describe("reading a paper", () => {
+  /** A paper's own hit, wired to prove `read()`/`unread()` dispatch real
+   *  events rather than only meaning to — the same reason `wearing a
+   *  pack`'s tests, above, check `documentElement.dataset.theme` itself
+   *  rather than a mock. */
+  function paper() {
+    document.body.innerHTML = '<div class="hit"></div>';
+    const el = document.querySelector(".hit");
+    let opened = false;
+    el.addEventListener("click", () => { opened = true; });
+    let closed = false;
+    const onEscape = (event) => { if (event.key === "Escape") closed = true; };
+    window.addEventListener("keydown", onEscape);
+    return {
+      el,
+      opened: () => opened,
+      closed: () => closed,
+      cleanup: () => window.removeEventListener("keydown", onEscape),
+    };
+  }
+
+  it("dispatches a genuine click on the paper's own hit", () => {
+    const p = paper();
+    const { ctx } = stage();
+    ctx.read(ctx.ctl({ sel: ".hit" }));
+    expect(p.opened()).toBe(true);
+    p.cleanup();
+  });
+
+  it("does nothing when there is no paper to read (optional, empty)", () => {
+    const { ctx } = stage();
+    const empty = ctx.ctl({ sel: ".no-such-paper", optional: true });
+    expect(() => ctx.read(empty)).not.toThrow();
+  });
+
+  it("closes with a genuine Escape — and only once something was actually opened", () => {
+    const p = paper();
+    const { ctx } = stage();
+    ctx.unread(); /* nothing read yet: no stray Escape */
+    expect(p.closed()).toBe(false);
+    ctx.read(ctx.ctl({ sel: ".hit" }));
+    ctx.unread();
+    expect(p.closed()).toBe(true);
+    p.cleanup();
+  });
+
+  it("touches nothing in dry mode", () => {
+    const p = paper();
+    const { clock, ctx } = stage();
+    clock.dryStart();
+    ctx.read(ctx.ctl({ sel: ".hit" }));
+    ctx.unread();
+    clock.dryEnd();
+    expect(p.opened()).toBe(false);
+    expect(p.closed()).toBe(false);
+    p.cleanup();
+  });
+
+  it("is undone by clear(), however the film stops — the same law unwear() gives a theme", () => {
+    const p = paper();
+    const { ctx } = stage();
+    ctx.read(ctx.ctl({ sel: ".hit" }));
+    ctx.clear();
+    expect(p.closed()).toBe(true);
+    ctx.destroy();
+    p.cleanup();
+  });
+
+  it("a jump mid-chapter still closes whatever it opened", async () => {
+    const p = paper();
+    const { clock, ctx } = stage();
+    const chapters = [
+      {
+        id: "belt-ish",
+        name: "Belt-ish",
+        async play(c) {
+          c.read(c.ctl({ sel: ".hit" }));
+          await c.hold(60000);
+        },
+      },
+      { id: "after", name: "After", async play(c) { await c.hold(100); } },
+    ];
+    const player = createFilmPlayer({ clock, ctx, chapters });
+    await player.measure();
+    player.jump(0);
+    await settle();
+    clock.advance(1000);
+    await settle();
+    expect(p.opened()).toBe(true);
+    expect(p.closed()).toBe(false);
+
+    player.jump(1); /* the reader jumps away with the card still open */
+    await settle();
+    expect(p.closed()).toBe(true);
+
+    player.destroy();
+    p.cleanup();
+  });
+});
