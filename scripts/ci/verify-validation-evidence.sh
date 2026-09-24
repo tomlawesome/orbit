@@ -9,9 +9,11 @@
 # judges what it says.
 #
 # One verifier, many callers -- the GitLab channel-tag job
-# (scripts/ci/publish-channel.sh), both GitHub publishing jobs
-# (.github/workflows/publish-from-gitlab.yml), and stable promotion
-# (scripts/ci/promote-stable.sh, #877) -- so the refusal logic cannot fork
+# (scripts/ci/publish-channel.sh), the GitHub copy to GHCR
+# (.github/workflows/publish-from-gitlab.yml, #1108), stable promotion
+# (scripts/ci/promote-stable.sh, #877) and the owner's keyless
+# countersignature (.github/workflows/countersign.yml, #1075) -- so the
+# refusal logic cannot fork
 # into drifting copies. Do not inline a second version of these checks
 # anywhere; call this.
 #
