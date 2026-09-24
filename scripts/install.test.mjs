@@ -3072,8 +3072,8 @@ describe("install.sh release manifest (ADR-0031 #7)", () => {
   // Lays out a signed manifest at <dir>/releases/latest/download/..., the
   // path install.sh's self_fetch_release_manifest() builds for the default
   // `latest` channel.
-  function buildSelfFetchFixture(dir, privatePem, overrides = {}) {
-    const assetsDir = join(dir, "releases", "latest", "download");
+  function buildSelfFetchFixture(dir, privatePem, overrides = {}, route = ["releases", "latest", "download"]) {
+    const assetsDir = join(dir, ...route);
     mkdirSync(assetsDir, { recursive: true });
     const manifest = {
       schema: "https://tomlawson.io/schemas/orbit-release-manifest/v1",
@@ -3134,6 +3134,26 @@ describe("install.sh release manifest (ADR-0031 #7)", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Could not verify the release manifest's signature");
+    expect(result.calls).not.toContain("docker pull");
+  });
+
+  it("refuses a validly signed manifest for a different version than ORBIT_CHANNEL pinned, before any pull", () => {
+    const targetDir = makeTarget();
+    const dir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-"));
+    const { privatePem, publicPem } = generateKeyPair(dir);
+    // A correctly signed older release served where v1.2.0 was asked for.
+    const baseUrl = buildSelfFetchFixture(dir, privatePem, { version: "1.0.0" }, ["releases", "download", "v1.2.0"]);
+
+    const result = runInstall(targetDir, {
+      ORBIT_CHANNEL: "v1.2.0",
+      ORBIT_RELEASE_MANIFEST: "",
+      ORBIT_INSTALL_TEST_MANIFEST_BASE_URL: baseUrl,
+      ORBIT_INSTALL_TEST_PUBLIC_KEY_FILE: publicPem,
+      ORBIT_INSTALL_TEST_ALLOW_KEY_OVERRIDE: "1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Asked for v1.2.0 but the signed release manifest is for v1.0.0");
     expect(result.calls).not.toContain("docker pull");
   });
 

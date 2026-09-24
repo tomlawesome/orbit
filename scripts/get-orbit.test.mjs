@@ -223,6 +223,52 @@ describe("get-orbit.sh", () => {
     expect(logged).toContain("install-script-contents=#!/usr/bin/env bash");
   });
 
+  it("runs a pinned ORBIT_VERSION when the signed manifest is for that version", () => {
+    const dir = makeDir("get-orbit-");
+    const { privatePem, publicPem } = generateKeyPair(dir);
+    const baseUrl = buildRelease({ dir, arch, privatePem, version: "1.2.3", routeDir: "releases/download/v1.2.3", serveBundle: false });
+    const launcherLog = join(dir, "launcher.log");
+    const cache = makeDir("get-orbit-cache-");
+
+    const result = run({
+      baseUrl,
+      launcherLog,
+      env: {
+        XDG_CACHE_HOME: cache,
+        ORBIT_VERSION: "v1.2.3",
+        ORBIT_GET_TEST_PUBLIC_KEY_FILE: publicPem,
+        ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE: "1",
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(launcherLog, "utf8")).toContain(`${cache}/orbit/1.2.3/install.sh`);
+  });
+
+  it("refuses a validly signed manifest for a different version than ORBIT_VERSION asked for", () => {
+    const dir = makeDir("get-orbit-");
+    const { privatePem, publicPem } = generateKeyPair(dir);
+    // A real, correctly signed older release served where v1.2.3 was asked
+    // for: the signature passes, so only the version check can catch it.
+    const baseUrl = buildRelease({ dir, arch, privatePem, version: "1.0.0", routeDir: "releases/download/v1.2.3" });
+    const launcherLog = join(dir, "launcher.log");
+
+    const result = run({
+      baseUrl,
+      launcherLog,
+      env: {
+        XDG_CACHE_HOME: makeDir("get-orbit-cache-"),
+        ORBIT_VERSION: "v1.2.3",
+        ORBIT_GET_TEST_PUBLIC_KEY_FILE: publicPem,
+        ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE: "1",
+      },
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("asked for v1.2.3 but the signed manifest is for v1.0.0");
+    expect(() => readFileSync(launcherLog)).toThrow();
+  });
+
   it("refuses a tampered manifest and does not run the launcher", () => {
     const dir = makeDir("get-orbit-");
     const { privatePem, publicPem } = generateKeyPair(dir);

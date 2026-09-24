@@ -30,6 +30,8 @@ k91OtCbfzOoGPhJnnXIynC5JDfyBoZiS59rCFb2hSiERGWQmLH1i8XV4nQ==
 command -v curl >/dev/null 2>&1 || fail "curl is required."
 command -v openssl >/dev/null 2>&1 || fail "openssl is required."
 command -v tar >/dev/null 2>&1 || fail "tar is required."
+command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required."
+command -v base64 >/dev/null 2>&1 || fail "base64 is required."
 
 case "$(uname -s)" in
   Linux) ;;
@@ -113,6 +115,11 @@ fi
 manifest_value() { grep -F "\"$2\":" "$1" | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1; }
 version="$(manifest_value "$manifest_json" version)"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || fail "the manifest has no valid version."
+# A validly signed manifest for a different release must not stand in for
+# the one asked for: an older signed release is still signed.
+if [[ -n "$version_pin" && "v${version}" != "$version_pin" ]]; then
+  fail "asked for ${version_pin} but the signed manifest is for v${version}; refusing."
+fi
 archive_name="orbit-launcher_linux_${arch}.tar.gz"
 archive_sha="$(manifest_value "$manifest_json" "$archive_name")"
 install_sha="$(manifest_value "$manifest_json" install.sh)"

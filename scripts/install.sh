@@ -1174,6 +1174,15 @@ self_fetch_release_manifest() {
     fi
   fi
 
+  # A validly signed manifest for a different release must not stand in for
+  # the version asked for: an older signed release is still signed.
+  if [[ "$channel" =~ $version_pin_pattern ]]; then
+    local manifest_version
+    manifest_version="$(grep -F '"version":' "$manifest_json" | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1)"
+    [[ "v${manifest_version}" == "$channel" ]] ||
+      fail "Asked for ${channel} but the signed release manifest is for v${manifest_version}; refusing."
+  fi
+
   printf '%s\n' "$manifest_json"
 }
 
