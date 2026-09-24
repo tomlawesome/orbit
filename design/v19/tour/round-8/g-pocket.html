@@ -1,0 +1,1247 @@
+<!doctype html>
+<html lang="en" data-direction="G">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tour round 8 — G · the pocket cut</title>
+<style>
+  /* Pack tokens, verbatim from web/src/lib/packs.css [data-theme=afterdark] —
+     the pack every backdrop was captured in (round 5's rule). */
+  :root {
+    --bg:#05070d; --panel-raised:rgba(15,21,36,.8); --panel:rgba(15,21,36,.55); --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#9fa6b2; --ink-quiet:#768295; --ink-faint:#717c8e;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --mono:'JetBrains Mono Variable','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --W:390px; --H:844px;
+  }
+  html,body{margin:0;height:100%;background:#000;color:var(--ink);font-family:var(--ui);overflow:hidden}
+  /* The stage is the phone at 390x844 (a 360x800 check with ?w=360), scaled
+     to whatever window the reviewer has. Every coordinate in this file is in
+     stage pixels — CSS pixels of the real pocket screen. */
+  .stage{position:absolute;left:50%;top:50%;width:var(--W);height:var(--H);transform-origin:0 0;overflow:hidden;background:var(--bg)}
+  .stage img.bg{position:absolute;left:0;top:0;width:var(--W);height:auto;opacity:0;transition:opacity .35s ease}
+  .stage img.bg.on{opacity:1}
+  /* a scrolling strip: the page as one tall capture, translated the way the
+     real page scrolls — on the pocket the whole page scrolls, chrome included */
+  #scroll{position:absolute;left:0;top:0;width:var(--W);height:auto;opacity:0;transition:opacity .35s ease}
+  #scroll.on{opacity:1}
+  .veil{position:absolute;inset:0;background:var(--bg);opacity:0;transition:opacity .45s ease;pointer-events:none}
+  .veil.on{opacity:.62}
+  svg.fx{position:absolute;left:0;top:0;width:var(--W);height:var(--H);overflow:visible;pointer-events:none}
+  .hl{position:absolute;border-radius:14px;box-shadow:0 0 0 1.5px var(--accent),0 0 0 6px color-mix(in srgb,var(--accent) 18%,transparent),0 0 28px color-mix(in srgb,var(--accent) 35%,transparent);opacity:0;transition:opacity .45s ease,box-shadow .3s ease}
+  .hl.on{opacity:1}
+  .hl.round{border-radius:50%}
+  .hl.strong{box-shadow:0 0 0 1.5px var(--accent),0 0 0 6px color-mix(in srgb,var(--accent) 26%,transparent),0 0 40px color-mix(in srgb,var(--accent) 50%,transparent)}
+  .hl.quiet{box-shadow:0 0 0 1.25px var(--accent)}
+  .cut{position:absolute;border-radius:14px;opacity:0;transition:opacity .35s ease}
+  .cut.on{opacity:1}
+  .cut.round{border-radius:50%}
+  .typed{position:absolute;font:600 22px var(--ui);letter-spacing:-.02em;color:var(--ink);white-space:nowrap;overflow:hidden;border-right:2px solid var(--accent);background:#0d121f;height:28px;line-height:28px}
+  .typed.done{border-right-color:transparent}
+  .field-blank{position:absolute;background:#0d121f}
+  #layer{transition:opacity .35s ease}
+  .ctl{position:absolute}
+  .fbox{box-sizing:border-box;border:1px solid var(--line);border-radius:10px;background:rgba(0,0,0,.18);display:flex;align-items:center;gap:2px;padding:0 12px;font:15px var(--ui);color:var(--ink)}
+  .fbox .pre{color:var(--ink-quiet);font:13px var(--mono);margin-right:4px}
+  .cur{display:inline-block;width:0;border-right:2px solid var(--accent);height:16px;vertical-align:-3px}
+  .cur.off{border-right-color:transparent}
+  .btnadd{position:absolute;box-sizing:border-box;border:1px solid var(--accent);border-radius:10px;display:flex;align-items:center;justify-content:center;font:12px var(--mono);letter-spacing:.08em;color:var(--accent);background:rgba(5,7,13,.55)}
+
+  /* the reminder toast: a phone's notification comes from the top */
+  .toast{position:absolute;left:12px;top:-100px;width:366px;box-sizing:border-box;background:var(--panel-raised);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:14px;padding:12px 16px;transition:top .5s cubic-bezier(.2,.8,.2,1);z-index:24}
+  .toast.on{top:60px}
+  .toast b{display:block;font:500 13.5px var(--ui);color:var(--ink)}
+  .toast small{font:11px var(--mono);color:var(--warm);letter-spacing:.06em}
+  .paper{position:absolute;width:26px;height:18px;border:1.5px solid var(--accent);border-radius:3px;background:var(--bg);opacity:0;z-index:24}
+  .paper::after{content:"";position:absolute;left:3px;right:3px;top:2px;height:7px;border:1.5px solid var(--accent);border-top:none;border-radius:0 0 3px 3px;transform:scaleY(.8)}
+
+  /* ---- the callout ---------------------------------------------------------
+     Same box as the desk (round 5), placed by the pocket's rule: above or
+     below the lit thing, whichever has room, never left or right — there is
+     no left or right on a 390px screen. Widest 300px. */
+  .callout{position:absolute;box-sizing:border-box;max-width:300px;width:max-content;text-wrap:balance;
+    background:var(--panel-raised);backdrop-filter:blur(14px);border:1px solid var(--line);
+    border-radius:12px;padding:11px 14px;font:14px/1.45 var(--ui);color:var(--ink);
+    opacity:0;z-index:25;transition:opacity .24s ease-out,transform .24s ease-out}
+  .callout.on{opacity:1;transform:translate(0,0)!important}
+  .callout.out{opacity:0;transition:opacity .18s ease}
+  .callout.label{font:11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mid)}
+  .callout .stem{position:absolute;width:14px;height:14px;background:var(--panel-raised);
+    backdrop-filter:blur(14px);border:1px solid var(--line);transform:rotate(45deg);z-index:-1}
+
+  .dot6{position:absolute;left:0;top:0;width:0;height:0;z-index:27;pointer-events:none;opacity:0;transition:opacity .2s ease}
+  .dot6.on{opacity:1}
+  .dot6 i{position:absolute;left:-3px;top:-3px;width:6px;height:6px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 10px color-mix(in srgb,var(--accent) 25%,transparent)}
+
+  /* ---- the reading sheet (chapter 8), drawn from belt.css's own rules -----
+     `.belt-page .readcard` at max-width 680: fixed to the foot, 18px
+     shoulders, panel-raised glass, border-top, padding 14 16 10, the grab,
+     the page at max-height 60vh, up from 105% below in .3s. The main
+     checkout's build predates #1088, so this sheet could not be captured;
+     the pixels of the page are Orbit's own render (round 5). */
+  .readsheet{position:absolute;left:0;right:0;bottom:0;z-index:23;box-sizing:border-box;border-radius:18px 18px 0 0;
+    background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);padding:14px 16px 10px;
+    transform:translateY(105%);transition:transform .3s cubic-bezier(.3,.7,.3,1)}
+  .readsheet.on{transform:none}
+  .readsheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 8px}
+  .readsheet .page{display:block;margin:0 auto;height:506px;width:auto;border-radius:3px;box-shadow:0 8px 30px rgba(0,0,0,.6)}
+
+  /* ---- the transport, pocket cut ----------------------------------------
+     Round 5's pill, re-cut for a thumb: full width less the page's 12px
+     margins, two rows. Row one is the words — the chapter's name at the left,
+     m:ss / m:ss at the right. Row two is the controls: play/pause and stop at
+     44px, and the rail. The twelve chapter ticks are painted marks only
+     (1x6); the RAIL is the hit — a tap anywhere on it lands on the nearest
+     chapter's start, never mid-sentence, and while a finger is down the
+     chapter name yields to the name of the chapter it would land on (the
+     desk's hover tip, by touch). It recedes while the film plays and returns
+     on touch or pause, and it docks to the top edge whenever the film has a
+     bottom sheet up — the pocket's sheets own the foot of the screen. */
+  .bar{position:absolute;left:12px;right:12px;bottom:12px;height:60px;z-index:40;
+    box-sizing:border-box;display:grid;grid-template-rows:20px 36px;padding:2px 8px 0 8px;
+    background:var(--panel-raised);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:18px;
+    opacity:1;transition:opacity .6s ease,top .35s cubic-bezier(.3,.7,.3,1),bottom .35s cubic-bezier(.3,.7,.3,1)}
+  .bar.top{bottom:auto;top:10px}
+  .bar.dim{opacity:.38}
+  .bar.dim:hover,.bar.dim:focus-within,.bar.dim.touched{opacity:1}
+  .bar.gone{opacity:.16}
+  .bar.gone:hover,.bar.gone:focus-within,.bar.gone.touched{opacity:1}
+  .bar .words{display:flex;justify-content:space-between;align-items:center;padding:0 6px 0 8px}
+  .bar .now{font:9.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-quiet);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar .now.tipping{color:var(--accent)}
+  .bar .clock{font:10px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .bar .row{display:flex;align-items:center;gap:0}
+  .bar button{background:none;border:0;padding:0;margin:0;cursor:pointer;color:var(--ink);
+    display:flex;align-items:center;justify-content:center;touch-action:manipulation}
+  .bar .pp,.bar .stp{width:44px;height:36px;border-radius:12px;flex:none}
+  .bar .pp:focus-visible,.bar .stp:focus-visible{outline:1.5px solid var(--accent);outline-offset:-2px}
+  .bar .pp svg{width:12px;height:12px}
+  .bar .stp svg{width:10px;height:10px}
+  .bar .pp svg,.bar .stp svg{display:block;fill:currentColor}
+  .bar .pp:hover,.bar .stp:hover{color:var(--accent)}
+  .track{position:relative;flex:1;height:36px;margin:0 6px 0 4px;touch-action:none}
+  .track .rail{position:absolute;left:0;right:0;top:17px;height:2px;background:var(--line-soft)}
+  .track .fill{position:absolute;left:0;top:17px;height:2px;width:0;background:var(--accent)}
+  .track .head{position:absolute;top:15px;left:0;width:6px;height:6px;margin-left:-3px;border-radius:50%;
+    background:var(--accent);box-shadow:0 0 8px color-mix(in srgb,var(--accent) 45%,transparent)}
+  /* the ticks stay buttons for a keyboard (Tab, Enter — round 5's own
+     behaviour), but they paint only a mark; a thumb uses the rail */
+  .track .tick{position:absolute;top:0;width:12px;height:36px;margin-left:-6px;padding:0;background:none;border:0;cursor:pointer;pointer-events:none}
+  .track .tick::after{content:"";position:absolute;left:50%;top:15px;width:1px;height:6px;margin-left:-.5px;background:var(--ink-faint)}
+  .track .tick.here::after,.track .tick.aim::after{background:var(--accent)}
+  .track .tick.aim::after{height:10px;top:13px}
+  .track .tick:focus-visible{outline:1.5px solid var(--accent);outline-offset:-6px;border-radius:6px}
+  /* Round 7's Script button and script region: visually hidden, as built */
+  .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  /* ---- the dawn pack, for the one chapter that wears it ---------------- */
+  .stage.dawn{--ink-mid:#5b6478;--ink-quiet:#5b6478;--accent:#1f7ac2}
+  .stage.dawn .bar{background:rgba(250,247,242,.78);border-color:#c6cad6}
+  .stage.dawn .bar button{color:#333c4f}
+  .stage.dawn .track .rail{background:#c9cdd9}
+  .stage.dawn .callout,.stage.dawn .callout .stem{background:rgba(252,250,246,.86);border-color:#c6cad6}
+  .stage.dawn .callout{color:#2b3346}
+
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;transition-duration:0s!important}
+    .callout{transform:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <img class="bg" id="bgA" alt="">
+  <img class="bg" id="bgB" alt="">
+  <img id="scroll" alt="">
+  <div class="veil" id="veil"></div>
+  <div id="cuts"></div>
+  <svg class="fx" id="fx" viewBox="0 0 390 844" aria-hidden="true">
+    <defs>
+      <radialGradient id="p-jade" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#b8f5cf"/><stop offset="45%" stop-color="#2fae6a"/><stop offset="100%" stop-color="#12603a"/></radialGradient>
+      <radialGradient id="p-sky" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#dbe9ff"/><stop offset="45%" stop-color="#6f9fe6"/><stop offset="100%" stop-color="#2b4f8f"/></radialGradient>
+      <radialGradient id="p-amber" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#ffe7a8"/><stop offset="45%" stop-color="#e0a020"/><stop offset="100%" stop-color="#7a4f08"/></radialGradient>
+      <radialGradient id="d-jade" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#e8f6ee"/><stop offset="45%" stop-color="#acd9bd"/><stop offset="100%" stop-color="#6fad8b"/></radialGradient>
+      <radialGradient id="d-sky" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#f1f5ff"/><stop offset="45%" stop-color="#b6cbe8"/><stop offset="100%" stop-color="#7f9bc4"/></radialGradient>
+      <radialGradient id="d-amber" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#fdf3de"/><stop offset="45%" stop-color="#ddc499"/><stop offset="100%" stop-color="#a98a4a"/></radialGradient>
+    </defs>
+    <g id="body"></g>
+    <g id="extra"></g>
+  </svg>
+  <div id="layer"></div>
+  <div class="readsheet" id="readsheet"><div class="grab"></div><img class="page" src="shots/preview-service-history.png" alt=""></div>
+  <div class="toast" id="toast" role="status"><b>Car MOT — Volvo V60 is coming up</b><small>T−16D · 29 AUG · REMINDER SENT</small></div>
+  <div class="dot6" id="dot6"><i></i></div>
+
+  <div class="bar" id="bar" role="group" aria-label="Tour transport">
+    <div class="words"><div class="now" id="now">ARRIVE</div><div class="clock" id="clock">0:00 / 0:00</div></div>
+    <div class="row">
+      <button class="pp" id="pp" aria-label="Pause" title="Pause"><svg id="ppicon" viewBox="0 0 12 12" width="12" height="12"></svg></button>
+      <button class="stp" id="stp" aria-label="Stop" title="Stop"><svg viewBox="0 0 10 10" width="10" height="10"><rect x="0" y="0" width="10" height="10" rx="1"/></svg></button>
+      <button class="vh" type="button" aria-controls="script">Script</button>
+      <div class="track" id="track" aria-hidden="true">
+        <div class="rail"></div><div class="fill" id="fill"></div>
+        <div class="head" id="head"></div>
+      </div>
+    </div>
+    <div class="vh" id="script" role="region" aria-label="Tour script"><h2>Tour script</h2></div>
+  </div>
+</div>
+
+<script>
+/* ===========================================================================
+   ROUND 8 — G, THE POCKET CUT (#1083).
+
+   Round 5's film (ratified, owner-decisions.md §23), round 6's chapter 8 and
+   round 7's script, re-cut for the pocket dialect (CON-10, below 901px).
+   Same twelve chapters, same ratified copy, same Lift mechanic, same clock,
+   same holds. What changes is the stage: the real pocket screens, captured
+   from the fixture app at 390x844 in after dark; the controls the pocket
+   actually has (the avatar's sheet in place of the north star, the inbox
+   orb and the account orb; the strip in place of the other suns; bottom
+   sheets in place of drawers and side cards); callouts placed above or
+   below rather than beside; and a transport cut for a thumb.
+
+   Coordinates are stage pixels = CSS pixels of the real pocket screen,
+   taken from the captures' own getBoundingClientRect.
+   =========================================================================== */
+
+const W360 = new URLSearchParams(location.search).get("w") === "360";
+const SW = 390, SH = 844;
+/* ?w=360: the same film with the 390 captures scaled to 360 wide and the
+   stage 360x800 — a check that the transport and the callouts still fit,
+   not a second set of captures (the README says which two real 360-wide
+   captures sit beside it). */
+const SC = W360 ? 360 / 390 : 1;
+if (W360) { document.documentElement.style.setProperty("--W", "360px"); document.documentElement.style.setProperty("--H", "800px"); }
+const STW = W360 ? 360 : 390, STH = W360 ? 800 : 844;
+
+const T = {
+  cross: 350, travelBase: 500, travelPx: 0.6,
+  ease: "cubic-bezier(.25,.1,.25,1)",
+  hover: 350, press: 120, grow: 200, lift: 300,
+  typeLead: 300, typeChar: 70, field: 600,
+  calloutIn: 120, calloutOut: 180,
+  holdBase: 1000, holdWord: 350, holdMin: 2400,
+  bloom: 600, scroll: 600, sheet: 300, rmHold: 1200,
+};
+const R = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const CANCEL = Symbol("cancel");
+
+/* ---- the clock (round 5's, unchanged) ------------------------------------ */
+let playing = false, cursor = 0, sched = 0, total = 0, token = 0;
+let dry = false, budget = 0;
+const waiters = [];
+const frameCbs = new Set();
+let held = [];
+let lastTs = 0;
+function wait(ms) {
+  ms = Math.max(0, ms);
+  if (dry) { budget += ms; return Promise.resolve(); }
+  const my = token;
+  sched += ms;
+  const at = sched;
+  return new Promise((res, rej) => waiters.push({ at, fire: () => (my === token ? res() : rej(CANCEL)) }));
+}
+const w = (ms) => wait(R ? 0 : ms);
+const hold = (ms) => wait(ms);
+const words = (s) => s.trim().split(/\s+/).length;
+const holdFor = (s) => Math.max(T.holdMin, T.holdBase + T.holdWord * words(s));
+function tween(ms, fn) {
+  if (dry || R) { fn(1); return w(ms); }
+  const start = sched, my = token;
+  const cb = () => { const t = Math.min(1, (cursor - start) / ms); fn(t); if (t >= 1) frameCbs.delete(cb); };
+  frameCbs.add(cb);
+  return wait(ms).then(() => { frameCbs.delete(cb); fn(1); }, (e) => { frameCbs.delete(cb); throw e; });
+}
+function frame(ts) {
+  requestAnimationFrame(frame);
+  const dt = lastTs ? Math.min(ts - lastTs, 120) : 0;
+  lastTs = ts;
+  if (playing) {
+    cursor += dt;
+    for (const cb of [...frameCbs]) cb();
+    for (let k = waiters.length - 1; k >= 0; k--) if (waiters[k].at <= cursor) waiters.splice(k, 1)[0].fire();
+  }
+  paintBar();
+}
+let resumers = [];
+async function mark(name) {
+  window.__mark = name;
+  if (window.__hold === name) {
+    const my = token;
+    setPlaying(false); window.__held = name;
+    await new Promise((res) => resumers.push(res));
+    if (my !== token) throw CANCEL;
+  }
+}
+
+/* ---- the pocket dial's law: chart.js's dialPlacement in a 380 viewBox,
+   drawn at 366px from (12,64) — .mdial's own box in the capture ----------- */
+const K = 366 / 380 * SC, CX = (12 + 190 * 366 / 380) * SC, CY = (64 + 190 * 366 / 380) * SC;
+const pos = (days) => {
+  const a = (Math.max(-90, Math.min(days, 430)) - 90) * Math.PI / 180;
+  const r = days >= 0 ? Math.min(62 + 0.242 * days, 150) : Math.max(24, 62 - 0.625 * -days);
+  return [CX + Math.cos(a) * r * K, CY + Math.sin(a) * r * K];
+};
+const paint = (days) => days <= 30 ? "amber" : days <= 90 ? "sky" : "jade";
+const S = 6.5 * SC;
+const ns = "http://www.w3.org/2000/svg";
+const el = (n, at) => { const e = document.createElementNS(ns, n); for (const k in at) e.setAttribute(k, at[k]); return e; };
+let dawnPack = false;
+function drawBody(days, opacity = 1) {
+  const g = document.getElementById("body"); g.innerHTML = "";
+  g.getAnimations().forEach((a) => a.cancel());
+  g.style.opacity = "";
+  const [x, y] = pos(days), p = (dawnPack ? "d-" : "p-") + paint(days);
+  const wrap = el("g", { opacity });
+  wrap.appendChild(el("circle", { cx: x, cy: y, r: S, fill: `url(#${p})`, style: paint(days) === "amber" && !dawnPack ? "stroke:var(--bg);stroke-width:2" : "" }));
+  wrap.appendChild(el("path", { d: `M${x} ${y - S} A${S} ${S} 0 0 1 ${x} ${y + S} Z`, fill: dawnPack ? "rgba(90,80,70,.22)" : "rgba(0,0,0,.42)" }));
+  wrap.appendChild(el("circle", { cx: x - 0.2 * S, cy: y + 0.25 * S, r: 0.33 * S, fill: "rgba(255,255,255,.38)" }));
+  const dx = CX - x, dy = CY - y, len = Math.hypot(dx, dy) || 1, off = S + 24;
+  const label = el("text", { x: x + dx / len * off, y: y + dy / len * off + 4, "text-anchor": "middle", style: "font:10px var(--mono);fill:var(--ink-mid);letter-spacing:.06em" });
+  label.textContent = `MOT · T−${days}D`;
+  wrap.appendChild(label);
+  g.appendChild(wrap);
+  return wrap;
+}
+function landing(days) {
+  const [x, y] = pos(days); const g = document.getElementById("extra");
+  const ring = el("circle", { cx: x, cy: y, r: S + 2, fill: "none", stroke: "var(--accent)", "stroke-width": 1.5 });
+  g.appendChild(ring);
+  if (R || dry) { ring.remove(); return; }
+  anim(ring, [{ r: S + 2, opacity: .9 }, { r: S + 30, opacity: 0 }], { duration: T.bloom, easing: "ease-out" }).then(() => ring.remove(), () => ring.remove());
+}
+const walk = (from, to, ms) => tween(ms, (t) => { const e = 1 - Math.pow(1 - t, 3); drawBody(Math.round(from + (to - from) * e)); });
+
+/* ---- stage plumbing ------------------------------------------------------ */
+const shots = (f) => `shots/${f}`;
+const stage = document.getElementById("stage");
+const layer = document.getElementById("layer"), cuts = document.getElementById("cuts");
+const dot6 = document.getElementById("dot6");
+const scrollImg = document.getElementById("scroll");
+const fx = document.getElementById("fx");
+const put = (html) => { layer.insertAdjacentHTML("beforeend", html); return layer.lastElementChild; };
+function anim(node, frames, opts) {
+  if (R || dry) return Promise.resolve();
+  const a = node.animate(frames, opts);
+  if (!playing) a.pause();
+  return a.finished.catch(() => {});
+}
+/* Every capture is 2x (780 wide); `sheet` is the capture's CSS size. The
+   strips (home-full, inbox-full, create-typed) are taller than the stage. */
+const SHEETS = { "home-full.png": [390, 1204], "inbox-full.png": [390, 1611], "create-typed.png": [390, 1020] };
+const sheetOf = (bg) => (SHEETS[bg] || [390, 844]).map((v) => v * SC);
+const s = (v) => v * SC;   /* a 390-stage coordinate, scaled for the 360 check */
+function mkCut(bg, x, y, wd, ht, o = {}) {
+  x = s(x); y = s(y); wd = s(wd); ht = s(ht);
+  const c = document.createElement("div");
+  c.className = "cut" + (o.round ? " round" : "");
+  const [sw, sh] = sheetOf(bg);
+  const [ox, oy] = (o.off || [0, 0]).map(s);
+  c.style.cssText = `background-image:url(${shots(bg)});background-size:${sw}px ${sh}px;` +
+    `left:${x}px;top:${y}px;width:${wd}px;height:${ht}px;` +
+    `background-position:-${x + ox}px -${y + oy}px;border-radius:${o.round ? "50%" : (o.r || 14) + "px"}`;
+  cuts.appendChild(c); requestAnimationFrame(() => c.classList.add("on"));
+  return c;
+}
+function mkHl(x, y, wd, ht, o = {}) {
+  const h = document.createElement("div");
+  h.className = "hl" + (o.round ? " round" : "");
+  h.style.cssText = `left:${s(x)}px;top:${s(y)}px;width:${s(wd)}px;height:${s(ht)}px;border-radius:${o.round ? "50%" : (o.r || 14) + "px"}`;
+  cuts.appendChild(h); return h;
+}
+const P = (x, y) => [s(x), s(y)];
+
+/* ---- the travelling dot (round 3's Lift, unchanged) ---------------------- */
+let at = P(195, 247);
+const bez = (p0, c, p1, t) => { const u = 1 - t; return [u * u * p0[0] + 2 * u * t * c[0] + t * t * p1[0], u * u * p0[1] + 2 * u * t * c[1] + t * t * p1[1]]; };
+function placeMover(p) { dot6.getAnimations().forEach((a) => a.cancel()); dot6.style.transform = `translate(${p[0]}px,${p[1]}px)`; }
+function travel(to, dur) {
+  dropCallout();
+  dot6.classList.add("on");
+  const from = at.slice(), d = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  const ms = dur === undefined ? T.travelBase + T.travelPx * d : dur;
+  at = to.slice();
+  if (R || dry || d < 0.5) { placeMover(to); return w(ms); }
+  const nx = -(to[1] - from[1]) / d, ny = (to[0] - from[0]) / d;
+  const c = [(from[0] + to[0]) / 2 + nx * d * 0.12, (from[1] + to[1]) / 2 + ny * d * 0.12];
+  const kf = []; for (let i = 0; i <= 32; i++) { const p = bez(from, c, to, i / 32); kf.push({ transform: `translate(${p[0]}px,${p[1]}px)` }); }
+  dot6.getAnimations().forEach((a) => a.cancel());
+  anim(dot6, kf, { duration: ms, easing: T.ease, fill: "forwards" });
+  return w(ms);
+}
+function growInto(hl) {
+  hl.classList.add("on");
+  if (R || dry) { dot6.classList.remove("on"); return w(T.grow); }
+  const x = parseFloat(hl.style.left), y = parseFloat(hl.style.top);
+  const wd = parseFloat(hl.style.width), ht = parseFloat(hl.style.height);
+  anim(hl, [
+    { left: (at[0] - 3) + "px", top: (at[1] - 3) + "px", width: "6px", height: "6px", borderRadius: "50%" },
+    { left: x + "px", top: y + "px", width: wd + "px", height: ht + "px", borderRadius: hl.style.borderRadius },
+  ], { duration: T.grow, easing: T.ease });
+  dot6.classList.remove("on");
+  return w(T.grow);
+}
+function ctl(o) { return Object.assign({ lifted: false }, o, { pt: o.pt ? P(...o.pt) : undefined }); }
+function xf(c) { return (c.lifted ? "translateY(-2px)" : "translate(0,0)"); }
+async function goto(c, o = {}) {
+  await travel(c.pt);
+  if (c.hl) await growInto(c.hl); else await w(T.grow);
+  if (c.el) {
+    c.lifted = true;
+    c.el.style.transition = `transform ${T.lift}ms ${T.ease},filter ${T.lift}ms ease`;
+    c.el.style.transform = xf(c);
+    c.el.style.filter = "drop-shadow(0 0 14px color-mix(in srgb,var(--accent) 34%,transparent))";
+  }
+  if (c.hl) c.hl.classList.add("strong");
+  await w(T.lift);
+  if (o.willPress !== false) await w(T.hover);
+}
+async function press(c) {
+  const e = c.el;
+  if (e && !R && !dry) {
+    const base = xf(c);
+    e.style.transition = "none";
+    anim(e, [{ transform: base + " scale(1)" }, { transform: base + " scale(.96)" }, { transform: base + " scale(1)" }], { duration: T.press * 2, easing: "ease-in-out" });
+  }
+  await w(T.press * 2);
+}
+function unlight(c) {
+  if (c.hl) c.hl.classList.remove("on", "strong");
+  if (c.el) { c.el.style.filter = "none"; c.lifted = false; c.el.style.transform = "translate(0,0)"; }
+}
+async function tap(c, o = {}) { await goto(c, o); await press(c); if (o.keep !== true) unlight(c); }
+
+/* ---- the callout, placed by the pocket's rule ----------------------------
+   `side` is "top" or "bottom" — where the box goes relative to the anchor.
+   The box is centred on the anchor and clamped to the page's 12px margins,
+   and it never sits under the transport, wherever the transport is docked.
+   A chapter that asked for "left" or "right" (the desk's sides) gets
+   whichever of top/bottom has more room: that is the rule the build should
+   carry, so the same chapter file serves both dialects. */
+let live = null;
+function showCallout(text, pt, side, dy, cls, maxw) {
+  const c = document.createElement("div");
+  c.className = "callout" + (cls ? " " + cls : ""); c.textContent = text;
+  if (maxw) c.style.maxWidth = s(maxw) + "px";
+  const stem = document.createElement("i"); stem.className = "stem"; c.appendChild(stem);
+  stage.appendChild(c);
+  const wd = c.offsetWidth, ht = c.offsetHeight, gap = 18, m = 12;
+  if (side === "left" || side === "right") side = pt[1] > STH / 2 ? "top" : "bottom";
+  let x = pt[0] - wd / 2, y;
+  if (side === "top") y = pt[1] - gap - ht; else y = pt[1] + gap;
+  if (dy) y += s(dy);
+  x = Math.max(m, Math.min(x, STW - m - wd));
+  const barTop = bar.classList.contains("top");
+  const yMin = barTop ? 10 + 60 + 10 : m, yMax = barTop ? STH - m - ht : STH - 12 - 60 - 10 - ht;
+  y = Math.max(yMin, Math.min(y, yMax));
+  c.style.left = x + "px"; c.style.top = y + "px";
+  const sx = Math.max(14, Math.min(pt[0] - x, wd - 14)) - 7;
+  stem.style.left = sx + "px";
+  stem.style[side === "top" ? "bottom" : "top"] = "-8px";
+  const slide = side === "top" ? [0, 6] : [0, -6];
+  c.style.transform = R ? "translate(0,0)" : `translate(${slide[0]}px,${slide[1]}px)`;
+  requestAnimationFrame(() => c.classList.add("on"));
+  return c;
+}
+async function callout(text, pt, side, o = {}) {
+  dropCallout();
+  await w(T.calloutIn);
+  live = showCallout(text, pt, side, o.dy, o.cls, o.w);
+  await hold(o.hold || holdFor(text));
+  if (o.mark) await mark(o.mark);
+}
+function dropCallout() {
+  if (!live) return;
+  const c = live; live = null;
+  c.classList.add("out");
+  setTimeout(() => c.remove(), T.calloutOut + 240);
+}
+
+/* ---- backgrounds and sheets ---------------------------------------------- */
+const bgs = [document.getElementById("bgA"), document.getElementById("bgB")];
+let flip = false;
+function setBg(file, instant) {
+  const showing = bgs[flip ? 1 : 0];
+  if (showing.getAttribute("src") === shots(file) && showing.classList.contains("on")) return;
+  const next = bgs[flip ? 0 : 1], prev = bgs[flip ? 1 : 0];
+  if (next.getAttribute("src") !== shots(file)) next.src = shots(file);
+  if (instant) { next.style.transition = "none"; prev.style.transition = "none"; requestAnimationFrame(() => { next.style.transition = ""; prev.style.transition = ""; }); }
+  next.classList.add("on"); prev.classList.remove("on"); flip = !flip;
+}
+const veil = (on) => document.getElementById("veil").classList.toggle("on", !!on);
+/* The transport gives way to a bottom sheet: whenever the film raises one
+   (the account sheet, the item sheet, the reading sheet) the pill docks to
+   the top edge, and returns to the foot when the sheet goes. In the build
+   this is the transport watching `.msheet.open, .sheet.open, .readcard.open`
+   — no chapter needs to say it. */
+function sheetUp(on) { bar.classList.toggle("top", !!on); }
+const readsheet = document.getElementById("readsheet");
+function scrollTo(y) { const t = `translateY(${-s(y)}px)`; scrollImg.style.transform = t; fx.style.transform = t; layer.style.transform = t; }
+async function scrollBy(from, to) {
+  await tween(T.scroll, (t) => { const e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; scrollTo(from + (to - from) * e); });
+}
+
+/* the drawer's drawn fields (chapter 2): create.png is the drawer as it
+   opens — name and type only. create-typed.png is the same drawer with the
+   name typed and inspection chosen, unfolded (the capture), scrolled for
+   the due, cost, recurrence and add beats. */
+const CRE = 176;  /* how far the unfolded drawer is scrolled for the lower fields */
+function buildForm(filled) {
+  layer.style.opacity = 0; requestAnimationFrame(() => { layer.style.opacity = 1; });
+  put(`<div class="field-blank" style="left:${s(58)}px;top:${s(245)}px;width:${s(274)}px;height:${s(34)}px"></div>`);
+  put(`<div class="ctl" id="f-name" style="left:${s(61)}px;top:${s(248)}px"><span class="typed" id="t-name" style="font-size:${s(22)}px">${filled ? "Car MOT — Volvo V60" : ""}</span></div>`);
+}
+function buildLower() {
+  put(`<div class="field-blank" style="left:${s(61)}px;top:${s(584)}px;width:${s(155)}px;height:${s(38)}px"></div>`);
+  put(`<div class="ctl" id="f-due" style="left:${s(61)}px;top:${s(584)}px;width:${s(155)}px">
+        <div class="fbox" style="height:${s(38)}px;font-size:${s(15)}px"><span id="t-due"></span><i class="cur off"></i></div></div>`);
+  put(`<div class="field-blank" style="left:${s(61)}px;top:${s(655)}px;width:${s(127)}px;height:${s(36)}px"></div>`);
+  put(`<div class="ctl" id="f-cost" style="left:${s(61)}px;top:${s(655)}px;width:${s(127)}px">
+        <div class="fbox" style="height:${s(36)}px;font-size:${s(15)}px"><span class="pre">£</span><span id="t-cost"></span><i class="cur off"></i></div></div>`);
+}
+async function typeInto(node, text, markName) {
+  const cur = node.parentElement.querySelector(".cur");
+  if (cur) cur.classList.remove("off");
+  await w(T.typeLead);
+  if (R || dry) {
+    node.textContent = text;
+    if (dry) for (let k = 0; k < text.length; k++) await w(T.typeChar);
+    if (cur) cur.classList.add("off");
+    return;
+  }
+  for (let k = 0; k < text.length; k++) {
+    node.textContent = text.slice(0, k + 1);
+    if (markName && k === Math.floor(text.length * 0.55)) await mark(markName);
+    await w(T.typeChar);
+  }
+  if (cur) cur.classList.add("off");
+}
+
+/* ===========================================================================
+   THE FILM. Twelve chapters, the ratified copy, on the pocket's own screens.
+   Recurring pocket controls, from the captures' own boxes:
+     the avatar (#morb)            [336,18,36,36]   — the pocket's one door
+     the account sheet (#maccount) [0,497,390,347]  — Add an item [22,598,346,33],
+                                     Inbox [22,633], Settings [22,668], theme swatches y 763
+     the strip (.skies .msys)      [14,440,146,34] [170,440,122,34] [302,440,88,34]
+     the dial (.mdial)             [12,64,366,370], sun at (195,247), ring r 144.5
+     the item sheet (#sheet)       [0,688,390,156]  — open [22,780,109,38]
+   =========================================================================== */
+const MORB = () => ctl({ pt: [354, 36], el: mkCut("home.png", 336, 18, 36, 36, { round: true }), hl: mkHl(332, 14, 44, 44, { round: true }) });
+const SUN = [195, 247];
+const NOTE = [195, 252];   /* where a sky line sits: the dial's empty lower half, under the sun */
+const STRIP = [[14, 440, 146, 34], [170, 440, 122, 34], [302, 440, 88, 34]];
+
+const CH = [
+/* ---------------------------------------------------------------- 1 ARRIVE */
+{ id: "arrive", name: "Arrive", enter: [195, 247], async play() {
+  setBg("home.png", true); veil(false); sheetUp(false);
+  const dial = ctl({ pt: [195, 391], hl: mkHl(50.5, 102.5, 289, 289, { round: true }) });
+  await goto(dial, { willPress: false });
+  await callout("This is your star chart.", P(...NOTE), "bottom", { mark: "arrive-chart" });
+  unlight(dial);
+
+  /* every sun: this household's at centre, and the strip of others under
+     the dial — the pocket's "other skies" */
+  const lit = STRIP.map(([x, y, wd, ht]) => mkHl(x, y, wd, ht, { r: 17 }));
+  const sun = ctl({ pt: SUN, hl: mkHl(183, 235, 24, 24, { round: true }) });
+  await goto(sun, { willPress: false });
+  lit.forEach((h) => h.classList.add("on"));
+  await callout("Every sun is a household you belong to.", P(...NOTE), "bottom", { mark: "arrive-suns" });
+  lit.forEach((h) => h.classList.remove("on"));
+  await callout("That's your sun, at centre — your household, always here.", P(...NOTE), "bottom");
+  unlight(sun); lit.forEach((h) => h.remove());
+
+  const gran = ctl({ pt: [87, 457], hl: mkHl(14, 440, 146, 34, { r: 17 }) });
+  await goto(gran, { willPress: false });
+  await callout("The rest of the sky holds systems you don't belong to — tap one to ask to join.",
+    P(87, 474), "bottom", { mark: "arrive-gran" });
+  unlight(gran); dropCallout();
+} },
+
+/* ------------------------------------------------------------------- 2 ADD */
+{ id: "add", name: "Add", enter: [87, 457], async play() {
+  setBg("home.png", true); veil(false); sheetUp(false);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  /* the pocket has no north star: adding starts at the avatar, whose sheet
+     holds "Add an item" (#1036) */
+  const orb = MORB();
+  await travel(orb.pt);
+  veil(true);
+  await growInto(orb.hl);
+  orb.lifted = true; orb.el.style.transition = `transform ${T.lift}ms ${T.ease}`;
+  orb.el.style.transform = xf(orb); orb.hl.classList.add("strong");
+  await w(T.lift); await w(T.hover);
+  await press(orb);
+  setBg("home-menu.png"); sheetUp(true);
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  await w(T.sheet);
+  cuts.innerHTML = "";
+  const menu = mkCut("home-menu.png", 0, 497, 390, 347, { r: 18 }); menu.classList.add("on");
+  const addLink = ctl({ pt: [195, 614], hl: mkHl(16, 596, 358, 37, { r: 10 }) });
+  await goto(addLink);
+  await press(addLink);
+  await mark("add-star");
+
+  /* the drawer opens: the create screen, whole */
+  setBg("create.png"); sheetUp(false);
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  await w(T.cross);
+  cuts.innerHTML = "";
+  const card = ctl({ pt: [195, 217], el: mkCut("create.png", 24, 217, 342, 409, { r: 16 }), hl: mkHl(24, 217, 342, 409, { r: 16 }) });
+  buildForm();
+  await travel(card.pt); await growInto(card.hl); card.hl.classList.add("strong");
+  await callout("Add anything here, by hand or by forwarding a document.", card.pt, "top", { mark: "add-drawer" });
+  dropCallout();
+  card.hl.classList.remove("on", "strong");
+
+  const name = ctl({ pt: [195, 262], el: document.getElementById("f-name"), hl: mkHl(55, 240, 280, 44, { r: 10 }) });
+  await goto(name); await press(name);
+  await typeInto(document.getElementById("t-name"), "Car MOT — Volvo V60", "add-typing");
+  document.getElementById("t-name").classList.add("done");
+  unlight(name); name.hl.remove();
+  await w(T.field);
+
+  const insp = ctl({ pt: [121, 394], el: mkCut("create.png", 61, 378, 121, 32, { r: 16 }), hl: mkHl(58, 375, 127, 38, { r: 19 }) });
+  await goto(insp); await press(insp);
+  insp.hl.classList.remove("strong"); insp.hl.classList.add("quiet");
+  insp.el.style.filter = "none"; insp.lifted = false; insp.el.style.transform = "translate(0,0)";
+  await w(T.field);
+
+  /* the drawer unfolds (progressive disclosure, §4): the captured, typed
+     drawer replaces the drawn one, and the page scrolls to the fields */
+  scrollImg.src = shots("create-typed.png"); scrollTo(0); scrollImg.classList.add("on");
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  layer.style.opacity = 0;
+  await w(T.cross);
+  cuts.innerHTML = ""; layer.innerHTML = ""; layer.style.opacity = 1;
+  await scrollBy(0, CRE);
+  let card2 = mkCut("create-typed.png", 24, 62 - CRE, 342, 896, { r: 16, off: [0, CRE] });
+  buildLower();
+  await mark("add-unfolded");
+
+  const due = ctl({ pt: [138, 584 - CRE + 19], el: document.getElementById("f-due"), hl: mkHl(55, 584 - CRE - 6, 167, 50, { r: 12 }) });
+  await goto(due); await press(due);
+  await typeInto(document.getElementById("t-due"), "29 Aug 2027");
+  unlight(due); due.hl.remove();
+  await w(T.field);
+
+  const cost = ctl({ pt: [124, 655 - CRE + 18], el: document.getElementById("f-cost"), hl: mkHl(55, 655 - CRE - 6, 139, 48, { r: 12 }) });
+  await goto(cost); await press(cost);
+  await typeInto(document.getElementById("t-cost"), "54.85");
+  unlight(cost); cost.hl.remove();
+  await w(T.field);
+
+  /* recurrence: the pocket form's own select, already reading "yearly" for
+     an inspection — pressed for the gesture, as the desk pressed its chip */
+  const yr = ctl({ pt: [280, 584 - CRE + 19], el: mkCut("create-typed.png", 230, 584 - CRE, 100, 38, { r: 10, off: [0, CRE] }), hl: mkHl(224, 584 - CRE - 6, 112, 50, { r: 12 }) });
+  await goto(yr); await press(yr);
+  unlight(yr); yr.hl.classList.remove("on");
+  await mark("add-yearly");
+  await w(T.field);
+
+  /* the page scrolls the last stretch to the add button; the lit card is
+     re-cut at the new offset, since cut-outs sit in the stage, not the page */
+  card2.classList.remove("on");
+  await scrollBy(CRE, CRE + 120);
+  card2.remove();
+  card2 = mkCut("create-typed.png", 24, 62 - CRE - 120, 342, 896, { r: 16, off: [0, CRE + 120] });
+  const ADD_Y = 885 - CRE - 120;
+  const add = ctl({ pt: [128, ADD_Y + 21], el: mkCut("create-typed.png", 61, ADD_Y, 135, 42, { r: 12, off: [0, CRE + 120] }), hl: mkHl(55, ADD_Y - 6, 147, 54, { r: 14 }) });
+  await goto(add); await press(add);
+  await mark("add-add");
+} },
+
+/* ----------------------------------------------------------------- 3 LANDS */
+{ id: "lands", name: "Lands", enter: [128, 610], async play() {
+  scrollImg.src = shots("create-typed.png"); scrollTo(CRE + 120); scrollImg.classList.add("on");
+  veil(true); sheetUp(false);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  mkCut("create-typed.png", 24, 62 - CRE - 120, 342, 896, { r: 16, off: [0, CRE + 120] }).classList.add("on");
+  await w(80);
+  setBg("home.png", true); veil(false);
+  scrollImg.classList.remove("on");
+  cuts.querySelectorAll(".cut").forEach((c) => c.classList.remove("on"));
+  await w(T.cross);
+  cuts.innerHTML = "";
+  scrollTo(0);
+  drawBody(381);
+  anim(document.getElementById("body"), [{ opacity: 0 }, { opacity: 1 }], { duration: T.bloom, easing: "ease-out" });
+  landing(381);
+  await w(T.bloom);
+
+  const [bx, by] = pos(381);
+  const nb = ctl({ pt: [bx / SC, by / SC], hl: mkHl(bx / SC - 16, by / SC - 16, 32, 32, { round: true }) });
+  await goto(nb, { willPress: false });
+  await callout("Bodies orbit by when they're due.", [bx, by + s(34)], "bottom", { mark: "lands-body" });
+  unlight(nb);
+
+  const ring = ctl({ pt: [195, 391], hl: mkHl(50.5, 102.5, 289, 289, { round: true }) });
+  await goto(ring, { willPress: false });
+  await callout("The nearer the ring, the sooner.", P(...NOTE), "bottom", { mark: "lands-ring" });
+  unlight(ring); dropCallout();
+} },
+
+/* ------------------------------------------------------- 4 BELOW THE DIAL */
+{ id: "manifest", name: "Below the dial", enter: [195, 391], async play() {
+  setBg("home.png", true); veil(false); sheetUp(false); drawBody(381);
+  cuts.innerHTML = "";
+  /* the page scrolls — the whole page, chrome and all: nothing on the
+     pocket home is position:fixed, so nothing needs drawing back */
+  scrollImg.src = shots("home-full.png"); scrollTo(0); scrollImg.classList.add("on");
+  await w(T.cross);
+  await w(400);
+  const SY = 360;   /* the page's whole travel: 1204 tall less the 844 viewport */
+  await scrollBy(0, SY);
+  await mark("manifest-scrolled");
+
+  veil(true);
+  const col = mkCut("home-full.png", 12, 542 - SY, 366, 214, { r: 14, off: [0, SY] });
+  const heading = ctl({ pt: [195, 548 - SY], hl: mkHl(12, 536 - SY, 366, 26, { r: 8 }) });
+  await goto(heading, { willPress: false });
+  await callout("The manifest lists what's ahead, nearest first.", P(195, 536 - SY), "top", { mark: "manifest-today" });
+  unlight(heading); heading.hl.remove();
+
+  const row = ctl({ pt: [195, 593 - SY], hl: mkHl(12, 563 - SY, 366, 60, { r: 14 }) });
+  await goto(row, { willPress: false });
+  await callout("Same law as the dial, read top to bottom instead of round the ring.",
+    P(195, 563 - SY), "top", { mark: "manifest-row" });
+  unlight(row); row.hl.remove(); dropCallout();
+
+  veil(false); col.classList.remove("on");
+  await w(T.cross);
+  await scrollBy(SY, 0);
+  scrollImg.classList.remove("on");
+  await w(T.cross);
+  cuts.innerHTML = "";
+  at = P(...SUN); placeMover(at);
+} },
+
+/* ------------------------------------------------------------ 5 TIME RUNS */
+{ id: "time", name: "Time runs", enter: [195, 247], async play() {
+  setBg("home.png", true); veil(false); sheetUp(false);
+  drawBody(381);
+  await w(400);
+  await walk(381, 16, 2600);
+  await mark("time-warmed");
+  const [bx, by] = pos(16);
+  const body = ctl({ pt: [bx / SC, by / SC], hl: mkHl(bx / SC - 16, by / SC - 16, 32, 32, { round: true }) });
+  await goto(body, { willPress: false });
+  await callout("Time runs. The nearer the sun, the sooner.", P(...NOTE), "bottom");
+  unlight(body);
+
+  /* the reminder: a notification from the top. The sky dims under it —
+     the pocket dial has no empty quarter for a toast and a line together */
+  veil(true);
+  document.getElementById("toast").classList.add("on");
+  await w(500);
+  await callout("At a month out it warms, and Orbit reminds you.", P(195, 118), "bottom", { mark: "time-toast" });
+  dropCallout();
+  document.getElementById("toast").classList.remove("on");
+  veil(false);
+  await w(400);
+} },
+
+/* -------------------------------------------------------- 6 PAPER BY POST */
+{ id: "relay", name: "Paper by post", enter: [195, 118], async play() {
+  setBg("home.png", true); veil(false); sheetUp(false); drawBody(16);
+  cuts.innerHTML = "";
+  await w(250);
+  veil(true);
+  const g = document.getElementById("body");
+  anim(g, [{ opacity: 1 }, { opacity: 0 }], { duration: 450, fill: "forwards" });
+  await w(450);
+  g.getAnimations().forEach((a) => a.cancel());
+  g.innerHTML = ""; g.style.opacity = "";
+  setBg("relay.png");
+  await w(T.cross);
+  const addr = ctl({ pt: [195, 287], el: mkCut("relay.png", 50, 267, 290, 41, { r: 10 }), hl: mkHl(50, 267, 290, 41, { r: 10 }) });
+  await goto(addr, { willPress: false });
+  await callout("Forward a bill to your relay address and Orbit reads a copy.", P(195, 267), "top", { mark: "relay-addr" });
+  if (!R && !dry) {
+    const paper = put(`<div class="paper" style="left:${s(182)}px;top:${s(278)}px"></div>`);
+    paper.style.opacity = "1";
+    anim(paper, [{ transform: "translate(0,0) scale(1)", opacity: 1 }, { transform: `translate(${s(150)}px,${s(-210)}px) scale(.4)`, opacity: 0 }],
+      { duration: 1500, easing: "cubic-bezier(.4,0,.6,1)", fill: "forwards" });
+    setTimeout(() => paper.remove(), 3000);
+  }
+  await w(1500);
+  await callout("Your mail is never redirected — it keeps arriving exactly where it always has.",
+    P(195, 308), "bottom", { mark: "relay-never" });
+  unlight(addr); dropCallout();
+} },
+
+/* ----------------------------------------------------------------- 7 INBOX */
+{ id: "inbox", name: "Inbox", enter: [195, 308], async play() {
+  setBg("relay.png", true); veil(true); sheetUp(false);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  setBg("home.png"); veil(false);
+  drawBody(16);
+  anim(document.getElementById("body"), [{ opacity: 0 }, { opacity: 1 }], { duration: T.cross, easing: "ease-out" });
+  await w(T.cross);
+  /* the pocket has no inbox orb: the way in is the avatar's sheet */
+  const orb = MORB();
+  await travel(orb.pt);
+  veil(true);
+  await growInto(orb.hl);
+  orb.lifted = true; orb.el.style.transition = `transform ${T.lift}ms ${T.ease}`;
+  orb.el.style.transform = xf(orb); orb.hl.classList.add("strong");
+  await w(T.lift);
+  await callout("Mail lands here first — filed, waiting for review, or still being read.",
+    P(354, 58), "bottom", { mark: "inbox-orb" });
+  await w(T.hover);
+  await press(orb);
+  setBg("home-menu.png"); sheetUp(true);
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  document.getElementById("body").innerHTML = "";
+  dropCallout();
+  await w(T.sheet);
+  cuts.innerHTML = "";
+  const menu = mkCut("home-menu.png", 0, 497, 390, 347, { r: 18 }); menu.classList.add("on");
+  const inboxLink = ctl({ pt: [195, 649], hl: mkHl(16, 631, 358, 37, { r: 10 }) });
+  await goto(inboxLink);
+  await press(inboxLink);
+
+  /* the inbox: one column on a phone, the three lanes stacked, so the film
+     scrolls lane to lane */
+  scrollImg.src = shots("inbox-full.png"); scrollTo(0); scrollImg.classList.add("on");
+  sheetUp(false);
+  bgs.forEach((b) => b.classList.remove("on"));
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  await w(T.cross);
+  cuts.innerHTML = "";
+  const lanes = [
+    { r: [24, 190, 342, 248], sy: 0, label: "Filed" },
+    { r: [24, 464, 342, 392], sy: 300, label: "For your review" },
+    { r: [24, 882, 342, 523], sy: 720, label: "Still reading" },
+  ];
+  let sy = 0;
+  for (const ln of lanes) {
+    if (ln.sy !== sy) { await scrollBy(sy, ln.sy); sy = ln.sy; }
+    const [x, y, wd, ht] = ln.r;
+    const c = ctl({ pt: [195, y - sy + Math.min(ht, 380) / 2], el: mkCut("inbox-full.png", x, y - sy, wd, ht, { r: 14, off: [0, sy] }), hl: mkHl(x, y - sy, wd, ht, { r: 14 }) });
+    await goto(c, { willPress: false });
+    await callout(ln.label, P(195, y - sy), "top", { cls: "label", hold: 1500, mark: "inbox-lane-" + ln.label });
+    dropCallout();
+    unlight(c);
+  }
+  await mark("inbox-lanes");
+
+  await scrollBy(sy, 300); sy = 300;
+  const card = mkCut("inbox-full.png", 24, 464 - sy, 342, 392, { r: 14, off: [0, sy] });
+  card.classList.add("on");
+  const addbtn = ctl({ pt: [80, 784 - sy], el: mkCut("inbox-full.png", 43, 761 - sy, 75, 46, { r: 10, off: [0, sy] }), hl: mkHl(43, 761 - sy, 75, 46, { r: 10 }) });
+  await goto(addbtn);
+  await press(addbtn);
+  await mark("inbox-add");
+  await callout("Nothing joins your orbit without your say-so.", P(80, 807 - sy), "bottom", { mark: "inbox-sayso" });
+  unlight(addbtn); dropCallout();
+  window.__inboxScroll = sy;
+} },
+
+/* -------------------------------------------------------------- 8 THE BELT */
+{ id: "belt", name: "The belt", enter: [80, 507], async play() {
+  scrollImg.src = shots("inbox-full.png"); scrollTo(300); scrollImg.classList.add("on");
+  veil(true); sheetUp(false);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  setBg("home.png"); veil(false);
+  scrollImg.classList.remove("on");
+  drawBody(16);
+  anim(document.getElementById("body"), [{ opacity: 0 }, { opacity: 1 }], { duration: T.cross, easing: "ease-out" });
+  await w(T.cross);
+  scrollTo(0);
+  /* the body is tapped: on the pocket the first tap raises the item sheet
+     (CON-10), and its `open` is the door to the item screen */
+  const [bx, by] = pos(16);
+  const body = ctl({ pt: [bx / SC, by / SC], hl: mkHl(bx / SC - 16, by / SC - 16, 32, 32, { round: true }) });
+  await travel(body.pt);
+  veil(true);
+  await growInto(body.hl); body.hl.classList.add("strong");
+  await w(T.lift); await w(T.hover);
+  const g = document.getElementById("body");
+  g.style.transformOrigin = `${bx}px ${by}px`;
+  anim(g, [{ transform: "scale(1)" }, { transform: "scale(.96)" }, { transform: "scale(1)" }], { duration: T.press * 2, easing: "ease-in-out" });
+  await w(T.press * 2);
+  setBg("home-sheet.png"); sheetUp(true);
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  await w(T.sheet);
+  cuts.innerHTML = "";
+  const sheet = mkCut("home-sheet.png", 0, 688, 390, 156, { r: 18 }); sheet.classList.add("on");
+  const open = ctl({ pt: [76, 799], hl: mkHl(18, 776, 117, 46, { r: 12 }) });
+  await goto(open);
+  await press(open);
+  await mark("belt-arrive");
+  unlight(open);
+
+  setBg("belt.png"); sheetUp(false);
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  anim(g, [{ opacity: 1 }, { opacity: 0 }], { duration: T.cross, fill: "forwards" });
+  await w(T.cross);
+  cuts.innerHTML = ""; g.innerHTML = ""; g.style.opacity = "";
+
+  /* the papers: at 390 wide the belt's ring runs off both edges, so the
+     two papers show as slivers at the edges. The card's own documents
+     line names them; it is lit for the first line, the visible paper for
+     the second. */
+  const card = mkCut("belt.png", 25, 162, 340, 390, { r: 16 }); card.classList.add("on");
+  const docline = ctl({ pt: [195, 508], hl: mkHl(46, 478, 298, 60, { r: 10 }) });
+  await goto(docline, { willPress: false });
+  await callout("Every body carries its documents in a belt around it.", P(195, 538), "bottom", { mark: "belt-cert" });
+  unlight(docline); docline.hl.remove();
+  const svc = ctl({ pt: [380, 334], el: mkCut("belt.png", 370, 294, 81, 81, { round: true }), hl: mkHl(370, 294, 81, 81, { round: true }) });
+  await goto(svc, { willPress: false });
+  await callout("The belt is what you have attached to it.", P(380, 375), "bottom", { w: 240, dy: 175, mark: "belt-svc" });
+  await callout("Tap one to bring it in.", P(380, 294), "top", { cls: "label", hold: 2000, mark: "belt-doc" });
+  dropCallout();
+  await w(T.hover);
+  await press(svc);
+  /* the reading card is a bottom sheet on a phone (belt.css, max-width
+     680): it comes up from the foot with the page in it, and the
+     transport docks to the top */
+  readsheet.classList.add("on"); sheetUp(true);
+  card.classList.remove("on"); svc.el.classList.remove("on"); svc.hl.classList.remove("on", "strong");
+  await w(T.sheet + 300);
+  const sheetTop = STH - readsheet.offsetHeight;
+  await callout("The page itself, read without leaving the sky.", [s(195), sheetTop], "top", { mark: "belt-read" });
+  dropCallout();
+  /* the sheet folds (Esc, or a tap on dead sky — the step would close it
+     too, but on a phone the steppers sit where the transport is docked, so
+     the sheet goes first and the transport comes home) */
+  readsheet.classList.remove("on"); sheetUp(false);
+  cuts.innerHTML = "";
+  await w(T.sheet);
+
+  /* the belt steps, by the end-caps in the top row */
+  const later = ctl({ pt: [286, 35], el: mkCut("belt.png", 249, 13, 72, 44, { r: 8 }), hl: mkHl(249, 13, 72, 44, { r: 10 }) });
+  await goto(later);
+  await callout("later → steps the belt — so do the arrow keys.", P(286, 57), "bottom", { mark: "belt-later" });
+  await press(later);
+  setBg("belt-n1.png");
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  dropCallout();
+  await w(T.cross);
+  cuts.innerHTML = "";
+  await mark("belt-step1");
+  await w(300);
+  const sooner = ctl({ pt: [156, 32], el: mkCut("belt-n1.png", 117, 10, 82, 44, { r: 8 }), hl: mkHl(117, 10, 82, 44, { r: 10 }) });
+  await goto(sooner);
+  await press(sooner);
+  setBg("belt.png");
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  await w(T.cross);
+  cuts.innerHTML = "";
+  await mark("belt-back");
+  await w(300);
+} },
+
+/* ------------------------------------------------------------------ 9 DONE */
+{ id: "done", name: "Done", enter: [156, 32], async play() {
+  setBg("belt.png", true); veil(true); sheetUp(false);
+  cuts.innerHTML = "";
+  const card = mkCut("belt.png", 25, 162, 340, 390, { r: 16 }); card.classList.add("on");
+  const done = ctl({ pt: [94, 415], el: mkCut("belt.png", 52, 401, 84, 28, { r: 14 }), hl: mkHl(48, 397, 92, 36, { r: 18 }) });
+  await goto(done);
+  await callout("MOT passed — mark it done and it swings back out to next year.", P(94, 397), "top", { mark: "done-complete" });
+  await press(done);
+  dropCallout();
+
+  setBg("home.png"); veil(false);
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  drawBody(16);
+  anim(document.getElementById("body"), [{ opacity: 0 }, { opacity: 1 }], { duration: T.cross, easing: "ease-out" });
+  await w(T.cross);
+  cuts.innerHTML = "";
+  await w(200);
+  await walk(16, 381, 2200);
+  landing(381);
+  await mark("done-swung");
+  const [bx, by] = pos(381);
+  const nb = ctl({ pt: [bx / SC, by / SC], hl: mkHl(bx / SC - 16, by / SC - 16, 32, 32, { round: true }) });
+  await goto(nb, { willPress: false });
+  await callout("A repeat is never finished; it comes round. A one-off simply ends.", P(...NOTE), "bottom", { mark: "done-round" });
+  unlight(nb); dropCallout();
+} },
+
+/* ------------------------------------------------------ 10 OTHER HOUSEHOLDS */
+{ id: "others", name: "Other households", enter: [247, 112], async play() {
+  setBg("home.png", true); veil(false); sheetUp(false); drawBody(381);
+  cuts.innerHTML = "";
+  /* the other households are the strip under the dial */
+  const gran = ctl({ pt: [87, 457], el: mkCut("home.png", 14, 440, 146, 34, { r: 17 }), hl: mkHl(14, 440, 146, 34, { r: 17 }) });
+  veil(true);
+  await goto(gran);
+  await callout("The rest of the sky holds households you don't belong to.", P(87, 440), "top", { mark: "others-gran" });
+  await press(gran);
+  dropCallout();
+  /* DRAWN, NOT CAPTURED (round 4's rule): the fixture reader belongs to
+     every household, so there is no ask-to-join state to photograph; the
+     chip is the create drawer's own accent-outline button, under the strip */
+  const chip = put(`<div class="btnadd" id="askjoin" style="left:${s(14)}px;top:${s(484)}px;width:${s(146)}px;height:${s(30)}px">ask to join</div>`);
+  chip.style.opacity = "0";
+  anim(chip, [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 300, fill: "forwards" });
+  if (R || dry) chip.style.opacity = "1";
+  const ask = ctl({ pt: [87, 499], hl: mkHl(14, 484, 146, 30, { r: 10 }) });
+  await goto(ask, { willPress: false });
+  await callout("Tap one to ask to join — Gran's flat, the narrowboat.", P(87, 514), "bottom", { mark: "others-ask" });
+  unlight(ask); unlight(gran); dropCallout();
+  anim(chip, [{ opacity: 1 }, { opacity: 0 }], { duration: 250, fill: "forwards" });
+  await w(250);
+  chip.remove();
+  veil(false);
+} },
+
+/* -------------------------------------------------------------- 11 YOUR SKY */
+{ id: "sky", name: "Your sky", enter: [87, 499], async play() {
+  setBg("home.png", true); veil(false); sheetUp(false); drawBody(381);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  const orb = MORB();
+  veil(true);
+  await goto(orb);
+  await press(orb);
+  await mark("sky-orb");
+
+  setBg("home-menu.png"); sheetUp(true);
+  cuts.querySelectorAll(".cut,.hl").forEach((c) => c.classList.remove("on", "strong"));
+  await w(T.sheet);
+  cuts.innerHTML = "";
+  const menu = mkCut("home-menu.png", 0, 497, 390, 347, { r: 18 }); menu.classList.add("on");
+  const settings = ctl({ pt: [195, 684], hl: mkHl(16, 666, 358, 37, { r: 10 }) });
+  await goto(settings, { willPress: false });
+  await callout("Settings holds your sky, your relay and this walk — take it again anytime.",
+    P(195, 666), "top", { mark: "sky-settings" });
+  unlight(settings); settings.hl.remove();
+
+  const sw = ctl({ pt: [124, 773], hl: mkHl(56, 755, 156, 36, { r: 18 }) });
+  await goto(sw, { willPress: false });
+  await callout("star chart · after dark · clouds · dawn · retrograde", P(124, 755), "top",
+    { cls: "label", hold: 2600, mark: "sky-swatches" });
+  unlight(sw); sw.hl.remove(); dropCallout();
+
+  /* dawn is pressed, and the whole sky wears it */
+  const dawn = ctl({ pt: [164, 773], el: mkCut("home-menu.png", 154, 763, 20, 20, { round: true }), hl: mkHl(150, 759, 28, 28, { round: true }) });
+  await goto(dawn);
+  await press(dawn);
+  unlight(dawn); dawn.el.remove(); dawn.hl.remove();
+  menu.classList.remove("on");
+  veil(false);
+  dawnPack = true; stage.classList.add("dawn");
+  drawBody(381);
+  setBg("home-menu-dawn.png");
+  await w(T.cross);
+  await mark("sky-dawn");
+  await hold(R ? Math.max(T.rmHold, 2400) : 2400);
+
+  /* and back to the sky it came in on */
+  veil(true);
+  const back = mkCut("home-menu-dawn.png", 0, 497, 390, 347, { r: 18 }); back.classList.add("on");
+  const ad = ctl({ pt: [104, 773], el: mkCut("home-menu-dawn.png", 94, 763, 20, 20, { round: true }), hl: mkHl(90, 759, 28, 28, { round: true }) });
+  await goto(ad);
+  await press(ad);
+  unlight(ad); back.classList.remove("on"); ad.el.remove(); ad.hl.remove();
+  veil(false);
+  dawnPack = false; stage.classList.remove("dawn");
+  drawBody(381);
+  setBg("home.png"); sheetUp(false);
+  await w(T.cross);
+  cuts.innerHTML = "";
+  await mark("sky-back");
+} },
+
+/* ----------------------------------------------------------------- 12 YOURS */
+{ id: "yours", name: "Yours", enter: [104, 773], async play() {
+  setBg("home.png", true); veil(false); sheetUp(false); drawBody(381);
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  await w(300);
+  await walk(381, 20, 1500);
+  await walk(20, 381, 1500);
+  landing(381);
+  await mark("yours-year");
+  const sun = ctl({ pt: SUN, hl: mkHl(171, 223, 48, 48, { round: true }) });
+  await goto(sun, { willPress: false });
+  await callout("That was a year, in one turn of the ring.", P(...NOTE), "bottom", { dy: 20, mark: "yours-year-line" });
+  await callout("Now it's yours.", P(...NOTE), "bottom", { dy: 20, mark: "yours-close" });
+  unlight(sun); dropCallout();
+  await w(600);
+} },
+];
+
+/* ===========================================================================
+   THE TRANSPORT, pocket cut. Same budget, same jumps, same states as round
+   5; the rail is the thumb's target.
+   =========================================================================== */
+const bar = document.getElementById("bar"), track = document.getElementById("track");
+const fill = document.getElementById("fill"), head = document.getElementById("head");
+const nowLabel = document.getElementById("now");
+const clock = document.getElementById("clock"), ppicon = document.getElementById("ppicon");
+let OFFSETS = CH.map(() => 0);
+let chapter = 0, ended = false;
+const mmss = (ms) => { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
+function setIcon() {
+  ppicon.innerHTML = playing
+    ? `<rect x="1" y="0" width="3.5" height="12"/><rect x="7.5" y="0" width="3.5" height="12"/>`
+    : `<path d="M1 0 L12 6 L1 12 Z"/>`;
+  const b = document.getElementById("pp");
+  b.setAttribute("aria-label", playing ? "Pause" : "Play");
+  b.setAttribute("title", playing ? "Pause" : "Play");
+}
+function paintBar() {
+  const t = total ? Math.min(1, cursor / total) : 0;
+  const wdt = track.clientWidth || 1;
+  fill.style.width = (t * wdt) + "px";
+  head.style.left = (t * wdt) + "px";
+  clock.textContent = `${mmss(Math.min(cursor, total))} / ${mmss(total)}`;
+}
+function buildTicks() {
+  for (const old of track.querySelectorAll(".tick")) old.remove();
+  CH.forEach((c, k) => {
+    const b = document.createElement("button");
+    b.className = "tick"; b.type = "button";
+    b.style.left = (total ? OFFSETS[k] / total * 100 : 0) + "%";
+    b.setAttribute("aria-label", `Chapter ${k + 1}: ${c.name}`);
+    b.onclick = () => jump(k);
+    b.onfocus = () => { nowLabel.textContent = c.name; nowLabel.classList.add("tipping"); };
+    b.onblur = () => { nowLabel.textContent = CH[chapter].name; nowLabel.classList.remove("tipping"); };
+    track.insertBefore(b, head);
+  });
+  const script = document.getElementById("script");
+  CH.forEach((c, k) => { const h = document.createElement("h3"); h.textContent = `Chapter ${k + 1}: ${c.name}`; script.appendChild(h); });
+}
+/* the rail: a finger down names the chapter it would land on, up lands there */
+let aiming = -1;
+function nearest(clientX) {
+  const r = track.getBoundingClientRect();
+  const t = Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * total;
+  let best = 0;
+  OFFSETS.forEach((o, k) => { if (Math.abs(o - t) < Math.abs(OFFSETS[best] - t)) best = k; });
+  return best;
+}
+function aim(k) {
+  aiming = k;
+  track.querySelectorAll(".tick").forEach((tk, i) => tk.classList.toggle("aim", i === k));
+  nowLabel.textContent = k >= 0 ? CH[k].name : CH[chapter].name;
+  nowLabel.classList.toggle("tipping", k >= 0);
+}
+track.addEventListener("pointerdown", (e) => { track.setPointerCapture(e.pointerId); bar.classList.add("touched"); aim(nearest(e.clientX)); });
+track.addEventListener("pointermove", (e) => { if (aiming >= 0) aim(nearest(e.clientX)); });
+track.addEventListener("pointerup", (e) => { const k = nearest(e.clientX); aim(-1); bar.classList.remove("touched"); jump(k); });
+track.addEventListener("pointercancel", () => { aim(-1); bar.classList.remove("touched"); });
+bar.addEventListener("pointerdown", () => bar.classList.add("touched"));
+bar.addEventListener("pointerup", () => setTimeout(() => bar.classList.remove("touched"), 1200));
+function markChapter(k) {
+  chapter = k;
+  nowLabel.textContent = CH[k].name;
+  track.querySelectorAll(".tick").forEach((t, i) => t.classList.toggle("here", i === k));
+}
+function setPlaying(on) {
+  if (on === playing) return;
+  playing = on;
+  bar.classList.toggle("dim", on);
+  if (!on) {
+    held = document.getAnimations().filter((a) => { const t = a.effect && a.effect.target; return a.playState === "running" && t && !bar.contains(t); });
+    held.forEach((a) => { try { a.pause(); } catch { /* done */ } });
+  } else {
+    held.forEach((a) => { try { a.play(); } catch { /* gone */ } });
+    held = [];
+    resumers.splice(0).forEach((r) => r());
+  }
+  setIcon();
+}
+function clearStage() {
+  token++;
+  waiters.splice(0).forEach((wt) => wt.fire());
+  resumers.splice(0).forEach((r) => r());
+  frameCbs.clear();
+  held = [];
+  cuts.innerHTML = ""; layer.innerHTML = "";
+  document.getElementById("extra").innerHTML = "";
+  const g = document.getElementById("body");
+  g.getAnimations().forEach((a) => a.cancel());
+  g.innerHTML = ""; g.style.opacity = "";
+  fx.style.transform = ""; layer.style.transform = "";
+  document.querySelectorAll(".callout").forEach((c) => c.remove()); live = null;
+  document.getElementById("toast").classList.remove("on");
+  readsheet.classList.remove("on"); sheetUp(false);
+  scrollImg.classList.remove("on"); scrollImg.style.transform = "translateY(0)";
+  dot6.classList.remove("on");
+  dawnPack = false; stage.classList.remove("dawn");
+  at = P(...SUN); placeMover(at);
+}
+async function run(from) {
+  const my = token;
+  try {
+    for (let k = from; k < CH.length; k++) {
+      if (my !== token) return;
+      markChapter(k);
+      at = P(...CH[k].enter); placeMover(at);
+      await CH[k].play();
+    }
+  } catch (e) { if (e !== CANCEL) throw e; return; }
+  if (my === token) finish();
+}
+function finish() {
+  ended = true; cursor = total; sched = total;
+  clearStage(); veil(false); setPlaying(false);
+  bar.classList.add("gone"); window.__ended = true;
+}
+function jump(k) {
+  ended = false; window.__ended = false;
+  clearStage();
+  bar.classList.remove("gone");
+  cursor = sched = OFFSETS[k];
+  lastTs = 0;
+  if (!playing) setPlaying(true);
+  markChapter(k);
+  run(k);
+}
+function stop() {
+  clearStage(); veil(false); setPlaying(false);
+  ended = true; window.__ended = true;
+  bar.classList.add("gone");
+}
+document.getElementById("pp").onclick = () => { if (ended) { jump(0); return; } setPlaying(!playing); };
+document.getElementById("stp").onclick = stop;
+addEventListener("keydown", (e) => {
+  if (e.key === " " || e.key === "Spacebar") { e.preventDefault(); document.getElementById("pp").onclick(); }
+  if (e.key === "Escape") stop();
+});
+function fit() { const sc = Math.min(innerWidth / STW, innerHeight / STH); stage.style.transform = `translate(${-STW / 2 * sc}px,${-STH / 2 * sc}px) scale(${sc})`; }
+addEventListener("resize", fit); fit();
+
+async function measure() {
+  dry = true; budget = 0;
+  const offs = [];
+  for (let k = 0; k < CH.length; k++) {
+    offs.push(budget);
+    clearStage();
+    at = P(...CH[k].enter);
+    try { await CH[k].play(); } catch (e) { if (e !== CANCEL) throw e; }
+  }
+  const t = budget;
+  dry = false;
+  clearStage();
+  return { offs, total: t };
+}
+const FILES = ["home.png", "home-full.png", "home-menu.png", "home-sheet.png", "home-dawn.png", "home-menu-dawn.png",
+  "create.png", "create-typed.png", "inbox-full.png", "belt.png", "belt-n1.png", "relay.png", "preview-service-history.png"];
+(async function boot() {
+  await Promise.all(FILES.map((f) => new Promise((res) => { const im = new Image(); im.onload = im.onerror = res; im.src = shots(f); })));
+  const m = await measure();
+  OFFSETS = m.offs; total = m.total;
+  window.__total = total;
+  window.__offsets = OFFSETS.slice();
+  window.__chapters = CH.map((c, k) => ({ id: c.id, name: c.name, at: OFFSETS[k] }));
+  buildTicks(); setIcon(); paintBar();
+  requestAnimationFrame(frame);
+  const wanted = parseInt((location.hash.match(/^#c(\d+)/) || [])[1]);
+  jump(Number.isFinite(wanted) ? Math.max(0, Math.min(wanted - 1, CH.length - 1)) : 0);
+})();
+window.__jump = jump; window.__stop = stop;
+window.__pause = () => setPlaying(false); window.__play = () => setPlaying(true);
+window.__reading = () => ({ cursor, total, chapter, text: clock.textContent, name: nowLabel.textContent });
+</script>
+</body>
+</html>
