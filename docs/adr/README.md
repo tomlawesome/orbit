@@ -45,3 +45,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0028: CI job reuse is keyed on the artefact under test, not on a guess at its inputs](0028-ci-reuse-keyed-on-tested-artefact.md) (Accepted)
 - [ADR-0029: One extraction queue, one job at a time, turns by who is waiting; the GPU is observed, never declared](0029-model-allocation.md) (Accepted)
 - [ADR-0030: Every document takes the queue; the upload form keeps a quick rules-only read as the lesser choice](0030-one-route-in-with-a-quick-rules-read.md) (Accepted)
+- [ADR-0031: The launcher is built from a pinned tag, signed with the image as one manifest, and shipped with each Orbit release](0031-signed-launcher-shipped-with-orbit.md) (Accepted; design details proposed)
