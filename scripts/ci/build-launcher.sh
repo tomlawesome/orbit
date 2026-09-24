@@ -61,8 +61,15 @@ pin_file="${ORBIT_LAUNCHER_PIN_FILE:-${repo_root}/launcher/pin.json}"
 # extracts whatever string is present for the field and hands it to the
 # strict tag/commit regexes below, which are what actually decide the value
 # is trustworthy; this function never has to be strict itself.
+# `;T;q`, not `| head -n1` (#809): a head consuming the pipeline's first
+# line and exiting while sed still had more of the file to read/write would
+# take a SIGPIPE and turn sed's real answer into a 141 under this script's
+# `set -e pipefail`. T branches past `q` only when the preceding `s///` just
+# failed, so the one intended match still stops sed immediately, self-bounded
+# the same way scripts/test-backup-restore.sh's `find -quit` is, with no pipe
+# at all to race.
 read_pin_field() {
-  sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$pin_file" | head -n1
+  sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p;T;q" "$pin_file"
 }
 pin_tag="$(read_pin_field tag)"
 pin_commit="$(read_pin_field commit)"

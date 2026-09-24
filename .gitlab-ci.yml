@@ -2227,6 +2227,7 @@ acceptance:
         ORBIT_REGISTRY=127.0.0.1:5000 \
         ORBIT_REPOSITORY="$IMAGE_NAME" \
         ORBIT_CHANNEL="$(orbit_output channel)" \
+        ORBIT_RELEASE_MANIFEST="$(orbit_output release_manifest)" \
         GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
         GIT_MARKER="$(orbit_output git_marker)" \
           bash "$CI_PROJECT_DIR/scripts/ci/verify-installer-refusal.sh"
@@ -2242,6 +2243,7 @@ acceptance:
         ORBIT_REGISTRY=127.0.0.1:5000 \
         ORBIT_REPOSITORY="$IMAGE_NAME" \
         ORBIT_CHANNEL="$(orbit_output channel)" \
+        ORBIT_RELEASE_MANIFEST="$(orbit_output release_manifest)" \
         GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
           bash "$CI_PROJECT_DIR/scripts/ci/run-installer.sh"
       )
@@ -2606,6 +2608,15 @@ launcher_install_compat:
       export ORBIT_REGISTRY=127.0.0.1:5000
       export ORBIT_REPOSITORY="$IMAGE_NAME"
       export ORBIT_CHANNEL="$(orbit_output channel)"
+      # Same reason as acceptance's own installer steps (#1107 pipeline 1626):
+      # this is a locally built, unpublished image, so install.sh must be
+      # handed an already-verified manifest (ADR-0031 #7) rather than
+      # self-fetching one that does not exist yet. The launcher execs
+      # install.sh as a real subprocess and inherits this shell's
+      # environment the same way it already does for the three exports
+      # above, which this job depends on for ORBIT_REGISTRY/ORBIT_REPOSITORY/
+      # ORBIT_CHANNEL to ever have reached install.sh at all.
+      export ORBIT_RELEASE_MANIFEST="$(orbit_output release_manifest)"
       # The live suite tears its own compose stack down on its way out (see
       # the after_script comment below), so after_script never sees a running
       # Postgres or any other container the suite started -- the only window

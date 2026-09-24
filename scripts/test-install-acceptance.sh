@@ -58,6 +58,15 @@ note() { printf '[acceptance] %s\n' "$*"; }
 fail() { printf '[acceptance] FAIL: %s\n' "$*" >&2; exit 1; }
 
 workdir="$(mktemp -d /tmp/orbit-acceptance.XXXXXX)"
+# Set once positive_scenario pushes the image under test and writes a manifest
+# for it (ADR-0031 #7); empty until then. run_installer() hands it to
+# install.sh via ORBIT_RELEASE_MANIFEST whenever it is set, so install.sh does
+# not self-fetch a signed manifest that does not exist for this locally built,
+# unpublished image (#1107). negative_scenarios() calls run_installer() before
+# this is set, but every one of its scenarios is refused by validate_target
+# before install.sh ever reaches manifest resolution, so an empty value there
+# is harmless -- install.sh treats it exactly like an absent one.
+release_manifest=""
 
 free_port() {
   node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});'
@@ -201,6 +210,7 @@ run_installer() {
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
     COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$project_name}" \
     ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
+    ORBIT_RELEASE_MANIFEST="$release_manifest" \
     timeout 900 bash "$repo_root/scripts/install.sh" </dev/null) \
     > "$workdir/install.log" 2>&1
 }
@@ -424,6 +434,16 @@ positive_scenario() {
     grep -m1 -oE 'sha256:[0-9a-f]{64}')"
   [[ -n "$digest" ]] || fail "could not capture the pushed digest"
 
+  # ADR-0031 #7: install.sh now refuses to run without a release manifest it
+  # can verify, and this is a locally built, unpublished image, so hand it one
+  # directly (the same already-verified hand-over path get-orbit.sh and the
+  # launcher use) instead of letting it self-fetch one from GitHub that does
+  # not exist for this image (#1107).
+  release_manifest="$workdir/orbit-release-manifest.json"
+  bash "$repo_root/scripts/ci/write-test-manifest.sh" \
+    "$release_manifest" "127.0.0.1:$registry_port/$repository" "$digest" >/dev/null ||
+    fail "could not write the test release manifest"
+
   write_shim
   make_preprovisioned_target
 
@@ -463,6 +483,7 @@ positive_scenario() {
     set -m
     ( cd "$target" && env PATH="$workdir/shim:$PATH" \
         ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
+        ORBIT_RELEASE_MANIFEST="$release_manifest" \
         bash "$repo_root/scripts/install.sh" </dev/null ) \
         > "$workdir/install.log" 2>&1 &
     local install_bg=$! waited=0 install_status=0
