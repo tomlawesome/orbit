@@ -27,6 +27,38 @@ This ADR settles the details those decisions leave open.
 
 ## Decision
 
+### Amendment (owner, 2026-09-24, #1107 option 21a)
+
+`publish-from-gitlab.yml` runs automatically on every push to `preview` or a
+`hotfix/*` branch, with no human in the loop. Giving it `contents: write` so
+it could replace the launcher/manifest assets on a rolling `preview`
+prerelease (§5, §6 below) meant an automatic workflow could change what
+appears on the releases page. The owner decided that must not be possible:
+only a human-started workflow may write there.
+
+So `publish-from-gitlab.yml` goes back to `contents: read` and drops the
+launcher-asset download, verification and upload steps, and the rolling
+`preview` prerelease. It still copies the tested image digest to GHCR; that
+never needed write access to releases. A preview install now needs a
+verified release manifest handed to `install.sh` directly via
+`ORBIT_RELEASE_MANIFEST`; the one-line `get-orbit.sh`/`install.sh` self-fetch
+only ever resolves a stable release (`latest` or a `vX.Y.Z` pin) and refuses
+`ORBIT_CHANNEL=preview` with a plain message pointing at that hand-over path.
+`release-on-tag.yml` (triggered by pushing a tag) and `countersign.yml`
+(owner-started) are unaffected: they already ran on human action and keep
+their existing `contents: write`.
+
+Rejected: **21b, fold the countersignature upload into `release-on-tag.yml`.**
+`release-on-tag.yml` runs on the tag push alone, so folding
+`countersign.yml`'s bundle upload into it would make the second signature
+either automatic (no human decision that the release is ready to
+countersign) or force a manual upload step into every release regardless.
+Keeping `countersign.yml` separate and owner-started avoids both.
+
+The sections below describe the design as first proposed and partly
+superseded by this amendment; §5's "Preview" bullet and §6's `preview`
+handling no longer apply as written.
+
 ### 1. One signed release manifest binds everything
 
 Each `preview`/`hotfix/*` pipeline writes `orbit-release-manifest.json`
@@ -108,11 +140,11 @@ Users need plain HTTPS URLs, which a GHCR OCI artifact cannot give them
 without extra tools, so the launcher archives, manifest, `.sig`, `install.sh`
 and `get-orbit.sh` are **GitHub release assets** on Orbit's releases:
 
-- **Preview:** `publish-from-gitlab.yml`, which already downloads the
-  tested-image evidence from the GitLab pipeline's artifacts, also downloads
-  the launcher artifacts and manifest, verifies the `.sig` with `cosign.pub`,
-  and replaces the assets of a rolling prerelease tagged `preview` (the same
-  shape as the launcher's own `preview-latest`).
+- **Preview: not published automatically (amended, see above).**
+  `publish-from-gitlab.yml` only copies the tested image digest to GHCR; it
+  does not hold `contents: write` and does not touch the launcher, manifest
+  or any release. A preview install passes an already-verified manifest to
+  `install.sh` via `ORBIT_RELEASE_MANIFEST` instead.
 - **Stable:** `release-on-tag.yml` locates the GitLab pipeline for the tag's
   commit (`scripts/ci/gitlab-await-tested-image.sh` already does this
   lookup), downloads the same artifacts, verifies the `.sig`, and attaches
@@ -132,18 +164,20 @@ launcher runs, and must stay readable on its own.
 Order of operations:
 
 1. Detect `linux/{amd64,arm64}`; refuse anything else. Channel from
-   `ORBIT_CHANNEL` (`latest` → `releases/latest/download/…`, `preview` →
-   `releases/download/preview/…`), or `ORBIT_VERSION=vX.Y.Z` for a pin.
+   `ORBIT_CHANNEL` (`latest` → `releases/latest/download/…`, the default),
+   or `ORBIT_VERSION=vX.Y.Z` for a pin. Stable only (amended, see above):
+   `ORBIT_CHANNEL=preview` refuses with a plain message pointing at
+   `ORBIT_RELEASE_MANIFEST` for a preview install instead of fetching
+   anything.
 2. Download the manifest and `.sig`. Verify with `openssl dgst -sha256
    -verify` against the key embedded in the script. Failure or absence:
    delete what was downloaded, print which check failed, exit 1.
 3. If `cosign` is on `PATH`: download the `.sigstore.json` bundle and run
    `cosign verify-blob --bundle … --certificate-identity-regexp '^https://github.com/tomlawesome/orbit/' --certificate-oidc-issuer https://token.actions.githubusercontent.com`
-   (the identity `countersign.yml` checks its own work against). On the
-   stable channel a missing or failing bundle refuses. On `preview` the
-   bundle does not exist by design; the script says so in one line and
-   continues. If `cosign` is absent: one line saying only the key-based
-   check ran and how to install cosign.
+   (the identity `countersign.yml` checks its own work against). Since the
+   self-fetch path is stable-only, a missing or failing bundle always
+   refuses. If `cosign` is absent: one line saying only the key-based check
+   ran and how to install cosign.
 4. Download the archive and `install.sh`; compare sha256s to the manifest;
    refuse on mismatch.
 5. Unpack to `${XDG_CACHE_HOME:-~/.cache}/orbit/<version>/` and `exec` the
@@ -157,8 +191,13 @@ anything else. Run on its own (no manifest passed), it fetches and verifies
 the manifest for its channel itself with the same embedded key, so the plain
 `install.sh | bash` path is also signature-checked and the `latest` tag
 becomes a lookup, never the identity (ADR-0008 already says this of tags).
-When `cosign` is present it also runs `cosign verify` on the digest with the
-identity above, refusing on stable when it fails.
+Its self-fetch is stable-only too (amended, see above): `ORBIT_CHANNEL=preview`
+refuses before fetching anything, with the same guidance to pass
+`ORBIT_RELEASE_MANIFEST` instead. When `cosign` is present it also runs
+`cosign verify` on the digest with the identity above, refusing on stable
+when it fails; this part of `install.sh` is unchanged by the amendment,
+since a manifest handed over via `ORBIT_RELEASE_MANIFEST` can still name
+`ORBIT_CHANNEL=preview`.
 
 **Bootstrap, stated plainly.** `get-orbit.sh` itself arrives unsigned over
 HTTPS. That protects against a network attacker altering it in transit. It

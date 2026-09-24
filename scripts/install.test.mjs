@@ -3157,6 +3157,22 @@ describe("install.sh release manifest (ADR-0031 #7)", () => {
     expect(result.calls).not.toContain("docker pull");
   });
 
+  it("refuses ORBIT_CHANNEL=preview without making any network request (#1107)", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {
+      ORBIT_CHANNEL: "preview",
+      ORBIT_RELEASE_MANIFEST: "",
+      ORBIT_INSTALL_TEST_MANIFEST_BASE_URL: "file:///never-fetched",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("only installs stable releases");
+    expect(result.stderr).toContain("ORBIT_RELEASE_MANIFEST");
+    expect(result.calls).not.toContain("curl");
+    expect(result.calls).not.toContain("docker pull");
+  });
+
   it("refuses to swap install.sh's trusted key without the second test-only flag", () => {
     const targetDir = makeTarget();
     const dir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-"));
