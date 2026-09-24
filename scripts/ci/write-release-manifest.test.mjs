@@ -53,7 +53,7 @@ function workspace({
   return { dir, files };
 }
 
-function run({ dir, files, args = ["registry.example/ai/orbit", DIGEST], env = {}, dropEnv = [] }) {
+function run({ files, args = ["registry.example/ai/orbit", DIGEST], env = {}, dropEnv = [] }) {
   const fullEnv = {
     PATH: process.env.PATH,
     CI_COMMIT_SHA: COMMIT,
