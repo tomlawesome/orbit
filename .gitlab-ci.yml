@@ -2805,6 +2805,22 @@ sign_evidence:
       ORBIT_SIGNING_DIR="${ORBIT_SIGNING_DIR:-/etc/orbit-signing}" \
         bash scripts/ci/attest-tested-image.sh \
         "${CI_REGISTRY_IMAGE}@${digest}" "$digest"
+    # ADR-0031 #4: the second signature this job mints, over the release
+    # manifest record_image wrote (scripts/ci/sign-release-manifest.sh,
+    # ADR-0031 implementation slice 4). Cross-checks the manifest's own
+    # image digest against the one just attested above before signing, so a
+    # manifest naming the wrong image is refused rather than signed.
+    - |
+      set -eu
+      ORBIT_SIGNING_DIR="${ORBIT_SIGNING_DIR:-/etc/orbit-signing}" \
+        bash scripts/ci/sign-release-manifest.sh \
+        .orbit-supply-chain/orbit-release-manifest.json "$digest"
+  artifacts:
+    name: orbit-release-manifest-signature
+    paths:
+      - .orbit-supply-chain/orbit-release-manifest.json.sig
+    expire_in: 90 days
+    when: on_success
 
 # The publication half of the split: everything it does lives in
 # scripts/ci/publish-channel.sh so the refusal paths are unit tested
