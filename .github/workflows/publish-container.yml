@@ -771,6 +771,7 @@ jobs:
           ORBIT_REGISTRY: 127.0.0.1:5000
           ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}
           ORBIT_CHANNEL: ${{ steps.installer_registry.outputs.channel }}
+          ORBIT_RELEASE_MANIFEST: ${{ steps.installer_registry.outputs.release_manifest }}
           GIT_GUARD_DIR: ${{ steps.installer_target.outputs.git_guard_dir }}
           GIT_MARKER: ${{ steps.installer_target.outputs.git_marker }}
           ORBIT_RUN_ID: ${{ github.run_id }}
@@ -788,6 +789,7 @@ jobs:
           ORBIT_REGISTRY: 127.0.0.1:5000
           ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}
           ORBIT_CHANNEL: ${{ steps.installer_registry.outputs.channel }}
+          ORBIT_RELEASE_MANIFEST: ${{ steps.installer_registry.outputs.release_manifest }}
           GIT_GUARD_DIR: ${{ steps.installer_target.outputs.git_guard_dir }}
         run: bash "$GITHUB_WORKSPACE/scripts/ci/run-installer.sh"
 
