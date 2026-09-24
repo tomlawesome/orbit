@@ -96,7 +96,13 @@ describe("supply-chain policy", () => {
     for (const file of files) {
       const content = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
       for (const line of content.split(/\r?\n/u)) {
-        const from = line.match(/^FROM\s+(\S+)/u)?.[1];
+        // The optional ${OIDC_BASE_IMAGE_PREFIX} strips the group dependency
+        // proxy path tests/oidc/Dockerfile's FROM carries for CI
+        // (ai/orbit#1111): the policy tracks the vendor reference, and the
+        // digest after it is unchanged either way.
+        const from = line
+          .match(/^FROM\s+(\S+)/u)?.[1]
+          ?.replace(/^\$\{OIDC_BASE_IMAGE_PREFIX\}/u, "");
         const compose =
           file === "docker-compose.yml"
             ? line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1]

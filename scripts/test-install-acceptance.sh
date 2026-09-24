@@ -407,8 +407,12 @@ positive_scenario() {
   fi
 
   docker rm -f "$registry_name" >/dev/null 2>&1 || true
+  # Pinned by digest, the same one scripts/ci/start-installer-registry.sh uses
+  # (ai/orbit#1111): a moving `:2` tag is what let this local-run harness keep
+  # hitting Docker Hub's anonymous pull rate limit.
   docker run -d --name "$registry_name" -p "127.0.0.1:$registry_port:5000" \
-    registry:2 >/dev/null || fail "local registry did not start"
+    registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 >/dev/null ||
+    fail "local registry did not start"
   docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
     fail "push to the local registry failed"
