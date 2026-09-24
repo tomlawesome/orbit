@@ -29,6 +29,11 @@
 # .orbit-crane/ in the repository root).
 set -Eeuo pipefail
 
+# Renovate bumps CRANE_VERSION on its own (renovate.json's custom regex
+# manager, #1116) but cannot compute CRANE_SHA256 -- a release asset
+# checksum -- so a version-only bump leaves this mismatched and the
+# checksum check below fails until a human copies the new checksum from
+# that release's checksums.txt by hand.
 readonly CRANE_VERSION="0.22.1"
 readonly CRANE_SHA256="0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0"
 readonly CRANE_URL="https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"

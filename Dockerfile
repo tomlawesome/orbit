@@ -124,6 +124,12 @@ WORKDIR /opt/orbit
 # --force-missing-repositories: building against a stale index is worse than
 # the failure this fixes. Only the apk fetch is wrapped; the rm/user/mkdir
 # chain below is local and cannot fail transiently.
+# su-exec kept by owner decision on #1063 2026-09-24: BusyBox setpriv in the
+# base image cannot switch user, so something has to drop root before exec,
+# and CVE-2026-82457 (numeric uid/gid wrap) is not reachable here because
+# only the literal orbit:orbit is ever passed to su-exec, never a numeric
+# id. Reconsider if numeric IDs are ever passed here, or if su-exec goes
+# unmaintained.
 RUN apk_retry() { "$@" || { sleep 5; "$@"; } || { sleep 10; "$@"; }; } \
   && apk_retry apk add --no-cache su-exec \
   && rm -rf /usr/local/lib/node_modules /opt/yarn-v* \
