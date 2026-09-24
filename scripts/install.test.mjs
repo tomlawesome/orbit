@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -45,6 +45,33 @@ const imageRepository = `${registry}/${repository}`;
 const digest = "a".repeat(64);
 const revision = "b".repeat(40);
 const resolvedReference = `${imageRepository}@sha256:${digest}`;
+
+// A release manifest handed over already verified, the way get-orbit.sh or
+// the launcher would (ADR-0031 #7). Its image digest matches
+// FAKE_DOCKER_DIGEST/imageRepository above so resolved_reference in
+// install.sh comes out identical to the pre-manifest fixture's
+// `resolvedReference`, and every existing expectation below keeps holding.
+// Tests of the manifest handling itself override ORBIT_RELEASE_MANIFEST or
+// unset it to exercise the self-fetch path.
+const releaseManifestDir = mkdtempSync(join(tmpdir(), "orbit-install-manifest-fixture-"));
+const releaseManifestPath = join(releaseManifestDir, "orbit-release-manifest.json");
+writeFileSync(
+  releaseManifestPath,
+  JSON.stringify(
+    {
+      schema: "https://tomlawson.io/schemas/orbit-release-manifest/v1",
+      version: "1.2.0",
+      channel: "preview",
+      commit: revision,
+      image: { repository: imageRepository, digest: `sha256:${digest}` },
+      launcher: { tag: "v1.0.0", commit: revision },
+      files: {},
+      recordedAt: "2026-09-24T00:00:00Z",
+    },
+    null,
+    2,
+  ),
+);
 const preflightSuccessLine =
   "Orbit installer: configuration, OIDC discovery, and Docker Compose preflight passed; starting services.";
 const deploymentAssets = [
@@ -692,6 +719,19 @@ const fakeCurlScript = [
   "      ;;",
   "  esac",
   "done",
+  'if [[ "$url" == file://* ]]; then',
+  "  # Real local fixtures for install.sh's own manifest self-fetch tests",
+  "  # (ADR-0031 #7); everything else here answers OIDC discovery only or",
+  "  # fails closed, since deployment assets never travel over curl.",
+  '  source_path="${url#file://}"',
+  '  if [[ -f "$source_path" ]]; then',
+  '    cp -- "$source_path" "$output"',
+  '    [[ -z "$write_out" ]] || printf "200"',
+  "    exit 0",
+  "  fi",
+  '  [[ -z "$write_out" ]] || printf "000"',
+  "  exit 37",
+  "fi",
   'if [[ "$url" == https://*"/.well-known/openid-configuration" ]]; then',
   '  if [[ "${FAKE_OIDC_NETWORK_FAIL:-}" == "1" ]]; then',
   "    # Real curl writes the --write-out template even when the transfer never",
@@ -734,6 +774,26 @@ const fakeMvScript = [
   "",
 ].join("\n");
 
+// Shadows any real cosign on PATH (a shared host executable). Unusable by
+// default (`cosign version` fails), matching install.sh's own
+// check_cosign_usable, so every existing test below sees no cosign, exactly
+// as before this fixture existed. FAKE_COSIGN_UNUSABLE=0 plus
+// FAKE_COSIGN_VERIFY_EXIT let manifest/cosign-specific tests opt into a
+// working stub.
+const fakeCosignScript = [
+  "#!/usr/bin/env bash",
+  "set -Eeuo pipefail",
+  'if [[ "${1:-}" == "version" ]]; then',
+  '  [[ "${FAKE_COSIGN_UNUSABLE:-1}" == "0" ]] || exit 1',
+  "  exit 0",
+  "fi",
+  'if [[ "${1:-}" == "verify" || "${1:-}" == "verify-blob" ]]; then',
+  '  exit "${FAKE_COSIGN_VERIFY_EXIT:-0}"',
+  "fi",
+  "exit 1",
+  "",
+].join("\n");
+
 function makeFakeBin() {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-install-fakebin-"));
   writeFileSync(join(binDir, "docker"), fakeDockerScript);
@@ -742,6 +802,8 @@ function makeFakeBin() {
   chmodSync(join(binDir, "curl"), 0o755);
   writeFileSync(join(binDir, "mv"), fakeMvScript);
   chmodSync(join(binDir, "mv"), 0o755);
+  writeFileSync(join(binDir, "cosign"), fakeCosignScript);
+  chmodSync(join(binDir, "cosign"), 0o755);
   return binDir;
 }
 
@@ -944,6 +1006,7 @@ function runInstall(targetDir, envOverrides = {}, args = []) {
       TERM: "xterm",
       ORBIT_REPOSITORY: repository,
       ORBIT_REGISTRY: registry,
+      ORBIT_RELEASE_MANIFEST: releaseManifestPath,
       FAKE_IMAGE_REPOSITORY: imageRepository,
       FAKE_DOCKER_DIGEST: digest,
       FAKE_DOCKER_REVISION: revision,
@@ -982,6 +1045,7 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
       TERM: "xterm",
       ORBIT_REPOSITORY: repository,
       ORBIT_REGISTRY: registry,
+      ORBIT_RELEASE_MANIFEST: releaseManifestPath,
       FAKE_IMAGE_REPOSITORY: imageRepository,
       FAKE_DOCKER_DIGEST: digest,
       FAKE_DOCKER_REVISION: revision,
@@ -1021,6 +1085,7 @@ function runInstallWithPromptedTerminalInput(
           TERM: "xterm",
           ORBIT_REPOSITORY: repository,
           ORBIT_REGISTRY: registry,
+          ORBIT_RELEASE_MANIFEST: releaseManifestPath,
           FAKE_IMAGE_REPOSITORY: imageRepository,
           FAKE_DOCKER_DIGEST: digest,
           FAKE_DOCKER_REVISION: revision,
@@ -2981,5 +3046,111 @@ describe("install.sh --simulate", () => {
     expect(result.stdout).toContain("No deployment occurred.");
     expect(result.calls).toBe("");
     expect(targetEntries(targetDir)).toEqual([]);
+  });
+});
+
+// ADR-0031 #7: install.sh trusts an already-verified ORBIT_RELEASE_MANIFEST
+// (every test above supplies one, via the module-level releaseManifestPath
+// fixture, so none of them touch this code path). These tests exercise the
+// other half: install.sh fetching and verifying its own manifest when no
+// caller has done that for it.
+describe("install.sh release manifest (ADR-0031 #7)", () => {
+  function generateKeyPair(dir, name = "key") {
+    const privatePem = join(dir, `${name}.pem`);
+    const publicPem = join(dir, `${name}.pub.pem`);
+    execFileSync("openssl", ["ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", privatePem]);
+    execFileSync("openssl", ["ec", "-in", privatePem, "-pubout", "-out", publicPem], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return { privatePem, publicPem };
+  }
+
+  function signBase64(path, privatePem) {
+    return execFileSync("openssl", ["dgst", "-sha256", "-sign", privatePem, path]).toString("base64");
+  }
+
+  // Lays out a signed manifest at <dir>/releases/latest/download/..., the
+  // path install.sh's self_fetch_release_manifest() builds for the default
+  // `latest` channel.
+  function buildSelfFetchFixture(dir, privatePem, overrides = {}) {
+    const assetsDir = join(dir, "releases", "latest", "download");
+    mkdirSync(assetsDir, { recursive: true });
+    const manifest = {
+      schema: "https://tomlawson.io/schemas/orbit-release-manifest/v1",
+      version: "1.2.0",
+      channel: "latest",
+      commit: revision,
+      image: { repository: imageRepository, digest: `sha256:${digest}` },
+      launcher: { tag: "v1.0.0", commit: revision },
+      files: {},
+      recordedAt: "2026-09-24T00:00:00Z",
+      ...overrides,
+    };
+    const manifestPath = join(assetsDir, "orbit-release-manifest.json");
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    writeFileSync(join(assetsDir, "orbit-release-manifest.json.sig"), signBase64(manifestPath, privatePem));
+    return `file://${dir}`;
+  }
+
+  it("embeds the same cosign public key as get-orbit.sh and cosign.pub, byte for byte", () => {
+    const cosignPubPath = fileURLToPath(new URL("../cosign.pub", import.meta.url));
+    const source = readFileSync(installScript, "utf8");
+    const match = /embedded_public_key='([\s\S]*?)'/u.exec(source);
+    expect(match).not.toBeNull();
+    expect(`${match[1]}\n`).toBe(readFileSync(cosignPubPath, "utf8"));
+  });
+
+  it("fetches and verifies its own manifest when none is handed over", () => {
+    const targetDir = makeTarget();
+    const dir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-"));
+    const { privatePem, publicPem } = generateKeyPair(dir);
+    const baseUrl = buildSelfFetchFixture(dir, privatePem);
+
+    const result = runInstall(targetDir, {
+      ORBIT_RELEASE_MANIFEST: "",
+      ORBIT_INSTALL_TEST_MANIFEST_BASE_URL: baseUrl,
+      ORBIT_INSTALL_TEST_PUBLIC_KEY_FILE: publicPem,
+      ORBIT_INSTALL_TEST_ALLOW_KEY_OVERRIDE: "1",
+    });
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`CONFIGURE_INVOKED ORBIT_IMAGE=${resolvedReference}`);
+  });
+
+  it("refuses a self-fetched manifest signed by the wrong key, before any pull", () => {
+    const targetDir = makeTarget();
+    const dir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-"));
+    const { privatePem: attackerKey } = generateKeyPair(dir, "attacker");
+    const { publicPem } = generateKeyPair(dir, "committed");
+    const baseUrl = buildSelfFetchFixture(dir, attackerKey);
+
+    const result = runInstall(targetDir, {
+      ORBIT_RELEASE_MANIFEST: "",
+      ORBIT_INSTALL_TEST_MANIFEST_BASE_URL: baseUrl,
+      ORBIT_INSTALL_TEST_PUBLIC_KEY_FILE: publicPem,
+      ORBIT_INSTALL_TEST_ALLOW_KEY_OVERRIDE: "1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Could not verify the release manifest's signature");
+    expect(result.calls).not.toContain("docker pull");
+  });
+
+  it("refuses to swap install.sh's trusted key without the second test-only flag", () => {
+    const targetDir = makeTarget();
+    const dir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-"));
+    const { privatePem, publicPem } = generateKeyPair(dir);
+    const baseUrl = buildSelfFetchFixture(dir, privatePem);
+
+    const result = runInstall(targetDir, {
+      ORBIT_RELEASE_MANIFEST: "",
+      ORBIT_INSTALL_TEST_MANIFEST_BASE_URL: baseUrl,
+      ORBIT_INSTALL_TEST_PUBLIC_KEY_FILE: publicPem,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("refusing to swap the trust anchor");
+    expect(result.calls).not.toContain("docker pull");
   });
 });
