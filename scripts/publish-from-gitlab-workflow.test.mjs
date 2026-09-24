@@ -56,6 +56,24 @@ describe("publish-from-gitlab workflow", () => {
     expect(workflow).toContain('[[ "${published}" == "${DIGEST}" ]]');
   });
 
+  it("verifies GitLab's signed evidence with the shared verifier before copying anything (#1108)", () => {
+    const login = workflow.indexOf("- name: Log in to both registries");
+    const verify = workflow.indexOf("- name: Verify GitLab's signed evidence before copying");
+    const copy = workflow.indexOf("- name: Copy the exact tested digest");
+    expect(login).toBeGreaterThanOrEqual(0);
+    expect(verify).toBeGreaterThan(login);
+    expect(copy).toBeGreaterThan(verify);
+    const step = workflow.slice(verify, workflow.indexOf("\n      - name:", verify + 1));
+    expect(step).toContain("run: bash scripts/ci/verify-validation-evidence.sh");
+    // Against the registry sign_evidence attests in, for this run's own
+    // digest, commit and ref -- never GHCR, which never gets the attestation.
+    expect(step).toContain("ORBIT_IMAGE: ${{ env.GITLAB_REGISTRY }}/ai/orbit");
+    expect(step).toContain("ORBIT_DIGEST: ${{ steps.evidence.outputs.digest }}");
+    expect(step).toContain("ORBIT_COMMIT: ${{ github.sha }}");
+    expect(step).toContain("ORBIT_REF: ${{ github.ref_name }}");
+    expect(step).not.toContain("continue-on-error");
+  });
+
   it("gives the channel tag only to the current head of the branch", () => {
     const tags = workflow.slice(
       workflow.indexOf("- name: Decide which tags this commit may take"),

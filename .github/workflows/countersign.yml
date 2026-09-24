@@ -1,0 +1,141 @@
+name: Countersign a stable release
+
+# The second, independent signature on a released image (#1075), in the shape
+# MikroView uses (mikroview .github/workflows/countersign.yml). GitLab's
+# sign_evidence job signs every tested digest automatically with a key fenced
+# on the orbit-signing runner host (ADR-0020). This workflow is the other
+# custody, and it is manual on purpose. An automatic second signer stops
+# nothing, because whoever holds the signing runner also reaches the registry
+# push path, and their image would collect the second signature as readily as
+# ours. Requiring the owner to start this from their own GitHub login means a
+# bad release needs two independent compromises, on two hosts.
+#
+# Releases only, never previews: a preview is for testing, not for trusting
+# (owner, 2026-09-24).
+#
+# Run it from the Actions tab once `promote_stable` has released vX.Y.Z,
+# giving it that tag. It resolves the release's digest in GHCR and the tag's
+# commit, and checks GitLab's key-based evidence for that pair with the shared
+# verifier (scripts/ci/verify-validation-evidence.sh) -- the same check, and
+# the same four refusals, as every other publishing hop. Only then does it
+# sign the digest keyless. The signature is recorded in the public
+# transparency log, so a release the owner did not make is discoverable
+# afterwards.
+#
+# The verifier refuses evidence older than seven days, the window a validated
+# digest gets before it must revalidate (#661). Promotion already has to
+# happen inside that window, so countersign straight after promoting.
+#
+# GitHub only offers a workflow_dispatch workflow once the file is on the
+# default branch, `main`, so this becomes available with the first stable
+# release that contains it.
+#
+# Secrets: GITLAB_READ_TOKEN_NAME and GITLAB_READ_TOKEN, the read-only GitLab
+# token publish-from-gitlab.yml already uses, for reading the attestation from
+# registry.tomlawson.io. Signing needs no secret: `id-token: write` gives the
+# keyless identity, and the built-in token writes the signature to our own
+# package.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Stable release tag to countersign (vX.Y.Z)"
+        required: true
+        type: string
+
+concurrency:
+  group: countersign-${{ inputs.release }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  GHCR_IMAGE: ghcr.io/tomlawesome/orbit
+  GITLAB_REGISTRY: registry.tomlawson.io
+  # Read in every run: step through this variable, never inline as
+  # ${{ inputs.release }}, which would paste the input into the shell as code.
+  RELEASE: ${{ inputs.release }}
+
+jobs:
+  countersign:
+    name: Verify GitLab's evidence, then countersign keyless
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Validate the release input
+        run: |
+          if ! [[ "${RELEASE}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf '::error::%s is not a stable release tag (want vX.Y.Z); refusing\n' "${RELEASE}"
+            exit 1
+          fi
+
+      - name: Check out the release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.release }}
+          persist-credentials: false
+
+      - name: Set up crane
+        uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
+
+      - name: Log in to both registries
+        env:
+          GITLAB_READ_TOKEN_NAME: ${{ secrets.GITLAB_READ_TOKEN_NAME }}
+          GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "${GITLAB_READ_TOKEN}" | crane auth login "${GITLAB_REGISTRY}" --username "${GITLAB_READ_TOKEN_NAME}" --password-stdin
+          printf '%s' "${GITHUB_TOKEN}" | crane auth login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Resolve the release's digest and commit
+        id: release
+        run: |
+          digest="$(crane digest "${GHCR_IMAGE}:${RELEASE}")" || {
+            printf '::error::%s:%s does not resolve in GHCR; has promote_stable released it?\n' "${GHCR_IMAGE}" "${RELEASE}"
+            exit 1
+          }
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            printf '::error::%s:%s resolved to %s, not a digest; refusing\n' "${GHCR_IMAGE}" "${RELEASE}" "${digest}"
+            exit 1
+          }
+          commit="$(git rev-parse 'HEAD^{commit}')"
+          printf 'Release %s is %s@%s, built from %s.\n' "${RELEASE}" "${GHCR_IMAGE}" "${digest}" "${commit}"
+          printf 'digest=%s\ncommit=%s\n' "${digest}" "${commit}" >> "${GITHUB_OUTPUT}"
+
+      # The four refusals -- mismatch, missing, ambiguous, expired -- are the
+      # shared verifier's, not a second copy of them. Against the GitLab
+      # registry, because that is where sign_evidence attaches the
+      # attestation; GHCR never receives it.
+      - name: Verify GitLab's key-based evidence
+        env:
+          ORBIT_IMAGE: ${{ env.GITLAB_REGISTRY }}/ai/orbit
+          ORBIT_DIGEST: ${{ steps.release.outputs.digest }}
+          ORBIT_COMMIT: ${{ steps.release.outputs.commit }}
+        run: bash scripts/ci/verify-validation-evidence.sh
+
+      - name: Countersign keyless
+        env:
+          DIGEST: ${{ steps.release.outputs.digest }}
+        run: |
+          cosign="$(bash scripts/ci/ensure-cosign.sh)"
+          "${cosign}" sign --yes "${GHCR_IMAGE}@${DIGEST}"
+
+      # Check the result the way an operator would, so a signature that landed
+      # somewhere else, or under another identity, fails here and not later.
+      - name: Verify the countersignature
+        env:
+          DIGEST: ${{ steps.release.outputs.digest }}
+        run: |
+          cosign="$(bash scripts/ci/ensure-cosign.sh)"
+          "${cosign}" verify "${GHCR_IMAGE}@${DIGEST}" \
+            --certificate-identity-regexp '^https://github.com/tomlawesome/orbit/' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            > /dev/null
+          printf 'Countersigned %s (%s@%s).\n' "${RELEASE}" "${GHCR_IMAGE}" "${DIGEST}"

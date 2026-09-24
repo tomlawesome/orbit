@@ -195,6 +195,58 @@ GitLab's push mirror carries the new tag to GitHub within minutes.
 keeps working for the public. GitHub makes no decision of its own: if a
 release for that tag already exists, it does nothing.
 
+### Countersign the release (#1075)
+
+Straight after `promote_stable` finishes, add the second signature:
+
+1. Open the **Countersign a stable release** workflow in the GitHub Actions
+   tab: https://github.com/tomlawesome/orbit/actions/workflows/countersign.yml
+2. Click **Run workflow** and enter the release tag, for example `v1.4.0`.
+
+It resolves the release's digest in GHCR and the tag's commit. Then it checks
+GitLab's key-based evidence for them with the same shared verifier every
+publishing hop uses, and refuses if that fails. Only then does it sign the
+digest keyless and check the new signature.
+
+Why it exists: `sign_evidence` signs automatically with a key on the
+`orbit-signing` runner host. Whoever controlled that host could also push to
+the registry, and sign whatever they pushed. The countersignature can only be
+started from the owner's GitHub login, so a bad release needs two separate
+break-ins on two hosts. Previews don't get one: a preview is for testing, not
+for trusting.
+
+Two limits:
+
+- **Within seven days.** The verifier refuses evidence older than seven days,
+  so countersign right after promoting.
+- **Needs `main`.** GitHub only offers the workflow once the file is on
+  `main`, so it's available from the first stable release that contains it.
+
+### Check both signatures on a release
+
+A stable release is only trustworthy if **both** signatures verify. Treat
+either one missing as a reason not to use it. With
+[cosign](https://docs.sigstore.dev/cosign/system_config/installation/):
+
+```sh
+# 1. The owner's keyless countersignature, made on GitHub.
+cosign verify ghcr.io/tomlawesome/orbit@sha256:... \
+  --certificate-identity-regexp '^https://github.com/tomlawesome/orbit/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# 2. GitLab's key-based validation evidence, with the committed cosign.pub.
+#    It lives beside the image in the GitLab registry, not in GHCR, so this
+#    one needs read access to registry.tomlawson.io/ai/orbit.
+cosign verify-attestation --key cosign.pub \
+  --type https://tomlawson.io/attestations/orbit-validation/v1 \
+  --insecure-ignore-tlog=true \
+  registry.tomlawson.io/ai/orbit@sha256:...
+```
+
+Nothing on a user's machine runs these checks yet. #1107 covers shipping the
+launcher with Orbit, so that the program that installs Orbit is signed and
+checks both signatures itself.
+
 ### Version tags in GHCR start at v1.3.0
 
 `ghcr.io/tomlawesome/orbit` has no `v1.1.0` or `v1.2.0` tag, and never had one
