@@ -78,13 +78,14 @@ describe("bounded esbuild override", () => {
   it("keeps the compatibility edge bounded without changing other consumers", () => {
     expect(lockfile).toMatch(/  '@esbuild-kit\/core-utils@3\.3\.2':\n    dependencies:\n      esbuild: 0\.25\.12/m);
     expect(lockfile).toMatch(/  drizzle-kit@0\.31\.10:\n    dependencies:[\s\S]*?\n      esbuild: 0\.25\.12\n/m);
-    expect(lockfile).toMatch(/  tsx@4\.23\.1:\n    dependencies:\n      esbuild: 0\.28\.2/m);
+    expect(lockfile).toMatch(/  tsx@4\.23\.15:\n    dependencies:\n      esbuild: 0\.28\.2/m);
     /* Pinned deliberately, so an unreviewed change to vite's resolution shows
        up here. Moved 8.1.5 -> 8.2.1 when web/ joined the workspace (#419):
        one lockfile means web's vite requirement now governs the root's too.
        Moved 8.2.1 -> 8.2.2 with esbuild 0.28.1 -> 0.28.2 in the #882 sweep;
        the deprecated core-utils edge above stayed at 0.25.12, which is what
-       this policy is actually about. */
-    expect(lockfile).toMatch(/  vite@8\.2\.2\([^\n]*esbuild@0\.28\.2[^\n]*\):[\s\S]*?\n      esbuild: 0\.28\.2\n/m);
+       this policy is actually about. Moved 8.2.2 -> 8.3.0 in the non-major
+       sweep that superseded !922; esbuild stayed at 0.28.2. */
+    expect(lockfile).toMatch(/  vite@8\.3\.0\([^\n]*esbuild@0\.28\.2[^\n]*\):[\s\S]*?\n      esbuild: 0\.28\.2\n/m);
   });
 });
