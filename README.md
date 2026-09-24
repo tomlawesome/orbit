@@ -31,7 +31,23 @@
 
 ## Quick start
 
-From an empty directory on a Linux host with Docker Compose v2 and `curl`:
+From an empty directory on a Linux host (amd64 or arm64) with Docker Compose
+v2 and `curl`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/get-orbit.sh | bash
+```
+
+This downloads the signed Orbit launcher and checks it before running
+anything: it verifies a signed manifest, checks every file's checksum
+against that manifest, and (if `cosign` is installed) checks a second,
+independent signature too. Only once everything checks out does it hand off
+to the launcher, which runs the same installer described below. See
+[docs/installer-guarantees.md](docs/installer-guarantees.md) for exactly
+what is checked, and [docs/releasing.md](docs/releasing.md) for how the
+signatures are made.
+
+The older direct command still works and is signature-checked the same way:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash
