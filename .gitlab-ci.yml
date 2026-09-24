@@ -2851,8 +2851,9 @@ publish_channel:
   script:
     - *apk_retry
     # node for the verifier's judgement and the policy validation; curl for
-    # the pinned cosign download.
-    - apk_add bash curl nodejs
+    # the pinned cosign download; openssl for the manifest's second signature
+    # check (ADR-0031 #4/#5, scripts/ci/verify-release-manifest.sh).
+    - apk_add bash curl nodejs openssl
     - |
       set -eu
       echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin

@@ -41,6 +41,14 @@
 #   ORBIT_VERIFY_SCRIPT   Optional; the verifier to run, overridable only so
 #                         tests can stub it. Real use always takes
 #                         scripts/ci/verify-validation-evidence.sh.
+#   ORBIT_RELEASE_MANIFEST_FILE  Optional; the signed manifest record_image
+#                         wrote (ADR-0031 #1), default
+#                         .orbit-supply-chain/orbit-release-manifest.json.
+#                         Its signature is expected alongside it as
+#                         "<file>.sig" (sign_evidence's artifact).
+#   ORBIT_VERIFY_MANIFEST_SCRIPT  Optional; the manifest verifier to run,
+#                         overridable only so tests can stub it. Real use
+#                         always takes scripts/ci/verify-release-manifest.sh.
 #
 # The caller must already be logged in to the registry; this script only ever
 # reads image content and creates tags, never pushes bytes.
@@ -110,6 +118,16 @@ reported_version="$(docker run --rm "$pinned" --version)"
   fail 'embedded channel does not match the image release-stage label'
 
 node scripts/supply-chain-policy.mjs validate
+
+# ADR-0031 #4/#5: the release manifest's signature, verified both with cosign
+# and with openssl (scripts/ci/verify-release-manifest.sh) before this job
+# gives the digest its consumer-visible name -- the same "before it creates
+# the channel tag" placement the ADR specifies. Both checks must pass; either
+# one failing refuses publication the same way a failing cheap check above
+# does.
+manifest_file="${ORBIT_RELEASE_MANIFEST_FILE:-.orbit-supply-chain/orbit-release-manifest.json}"
+bash "${ORBIT_VERIFY_MANIFEST_SCRIPT:-${repo_root}/scripts/ci/verify-release-manifest.sh}" \
+  "$manifest_file"
 
 # --- Publication: the tag is the only thing this script creates ------------
 
