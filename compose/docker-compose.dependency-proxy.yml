@@ -15,8 +15,8 @@
 # against docker-compose.yml exactly as shipped, vendor references included.
 services:
   orbit-db:
-    image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+    image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66
   orbit-clamav:
-    image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clamav/clamav:1.5.4-debian@sha256:51e8a6c78895b68bfbbadf8030cc10b4a992d85738f0af9c8f1050b2a176f786
+    image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clamav/clamav:1.5.4-debian@sha256:a1ebc843a1bf773c442a0739778d30e9072da7c52417ab7d805942510fa88394
   orbit-tika:
     image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb
