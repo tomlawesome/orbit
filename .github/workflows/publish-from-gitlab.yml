@@ -54,10 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     permissions:
-      # contents: write is for the launcher-publishing steps below (ADR-0031
-      # #8): they replace the assets on the rolling `preview` prerelease.
-      # Everything else here still only reads and pushes images.
-      contents: write
+      contents: read
       packages: write
       id-token: write
       attestations: write
@@ -76,17 +73,12 @@ jobs:
         with:
           persist-credentials: false
 
-      # ORBIT_FETCH_LAUNCHER_ASSETS also fetches the signed release manifest,
-      # its .sig and the two launcher archives from the same pipeline
-      # (ADR-0031 #8), so the launcher-publishing steps below reuse this
-      # script's pipeline/job resolution instead of a second copy of it.
       - name: Wait for GitLab and fetch its tested-image evidence
         id: evidence
         env:
           GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_REF: ${{ github.ref_name }}
-          ORBIT_FETCH_LAUNCHER_ASSETS: "1"
         run: bash scripts/ci/gitlab-await-tested-image.sh
 
       - name: Set up crane
@@ -221,62 +213,6 @@ jobs:
             printf -- '- Source branch: `%s`\n' "${GITHUB_REF_NAME}"
             printf '\nNo container was built here. Deploy this immutable digest for engineering or release acceptance; it is not stable until protected promotion succeeds.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
-
-      # ADR-0031 #1/#4/#5: the signed release manifest binds this exact image
-      # digest to the launcher build and first-run scripts. Only for a commit
-      # that actually moved the `preview` channel tag above -- a run that only
-      # published its sha- tag lost the race to be branch head, and its
-      # launcher/manifest are already superseded by whichever commit did.
-      - name: Verify the release manifest's signature
-        if: contains(steps.tags.outputs.list, 'preview')
-        run: |
-          bash scripts/ci/verify-release-manifest.sh \
-            "${{ steps.evidence.outputs.release_manifest }}" \
-            "${{ steps.evidence.outputs.release_manifest_sig }}"
-
-      # Every asset this run is about to publish, checked against the sha256
-      # the signed manifest itself records for it -- the signature above only
-      # proves the manifest's own bytes are ours; this proves the files it
-      # describes are the ones it describes. install.sh and get-orbit.sh come
-      # from this workflow's own checkout rather than a second GitLab
-      # download: it is checked out at the exact tested commit (github.sha),
-      # and git's content addressing means the same commit SHA can only ever
-      # mean the same file bytes, on either host -- this check is what proves
-      # that rather than assuming it.
-      - name: Check the launcher assets against the manifest
-        if: contains(steps.tags.outputs.list, 'preview')
-        run: |
-          bash scripts/ci/verify-manifest-assets.sh \
-            "${{ steps.evidence.outputs.release_manifest }}" \
-            "orbit-launcher_linux_amd64.tar.gz=${{ steps.evidence.outputs.launcher_amd64_archive }}" \
-            "orbit-launcher_linux_arm64.tar.gz=${{ steps.evidence.outputs.launcher_arm64_archive }}" \
-            "install.sh=scripts/install.sh" \
-            "get-orbit.sh=scripts/get-orbit.sh"
-
-      # Users need plain HTTPS URLs (ADR-0031 #5), so the launcher, the
-      # manifest and its signature are GitHub release assets on a rolling
-      # `preview` prerelease -- the same shape orbit-launcher's own
-      # preview-latest uses. Nothing here is rebuilt: these are the exact
-      # bytes GitLab tested and signed.
-      - name: Replace the launcher and manifest on the preview release
-        if: contains(steps.tags.outputs.list, 'preview')
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MANIFEST: ${{ steps.evidence.outputs.release_manifest }}
-          MANIFEST_SIG: ${{ steps.evidence.outputs.release_manifest_sig }}
-          AMD64_ARCHIVE: ${{ steps.evidence.outputs.launcher_amd64_archive }}
-          ARM64_ARCHIVE: ${{ steps.evidence.outputs.launcher_arm64_archive }}
-        run: |
-          if gh release view preview --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
-            gh release edit preview --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}"
-          else
-            gh release create preview --repo "${GITHUB_REPOSITORY}" --prerelease \
-              --target "${GITHUB_SHA}" --title "Preview" \
-              --notes "Rolling preview build, replaced on every publish from GitLab. Not for production use."
-          fi
-          gh release upload preview --repo "${GITHUB_REPOSITORY}" --clobber \
-            "${MANIFEST}" "${MANIFEST_SIG}" "${AMD64_ARCHIVE}" "${ARM64_ARCHIVE}" \
-            scripts/install.sh scripts/get-orbit.sh
 
   verify_bootstrap:
     name: Prove the published channel tag resolves (#724)

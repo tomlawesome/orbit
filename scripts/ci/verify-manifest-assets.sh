@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 #
 # Checks that a set of downloaded files match the sha256s
-# orbit-release-manifest.json records for them (ADR-0031 #1/#5). Shared by
-# publish-from-gitlab.yml and release-on-tag.yml so "does this file match
-# what the manifest says" has one implementation rather than two workflow
-# scripts computing sha256sum independently and drifting.
+# orbit-release-manifest.json records for them (ADR-0031 #1/#5, amended
+# #1107 option 21a). Called by release-on-tag.yml so "does this file match
+# what the manifest says" has one implementation.
 #
 # This does not check the manifest's own signature -- that is
 # scripts/ci/verify-release-manifest.sh, called separately, first. This

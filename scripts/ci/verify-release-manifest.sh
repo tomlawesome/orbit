@@ -16,9 +16,9 @@
 #
 # Called by publish_channel (scripts/ci/publish-channel.sh) before it
 # creates the channel tag; shared by every other consumer named in
-# ADR-0031 #5 (publish-from-gitlab.yml, release-on-tag.yml) so the
-# verification logic cannot fork into drifting copies -- call this, do not
-# inline a second version.
+# ADR-0031 #5 (release-on-tag.yml, countersign.yml; amended #1107 option
+# 21a) so the verification logic cannot fork into drifting copies -- call
+# this, do not inline a second version.
 #
 # Usage:
 #   scripts/ci/verify-release-manifest.sh <manifest-path> [signature-path]
