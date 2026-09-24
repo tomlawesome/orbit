@@ -6,7 +6,7 @@ const workspace = readFileSync(new URL("../pnpm-workspace.yaml", import.meta.url
 const lockfile = readFileSync(new URL("../pnpm-lock.yaml", import.meta.url), "utf8");
 
 const compatibilitySelector = "@esbuild-kit/core-utils>esbuild";
-const compatibilityRange = ">=0.25.0 <0.26.0";
+const compatibilityRange = ">=0.25.0 <0.29.0";
 
 function parseOverrides(workspaceText) {
   const section = workspaceText.match(/^overrides:\n((?: {2}.*(?:\n|$))*)/m)?.[1] ?? "";
@@ -36,7 +36,7 @@ function validateOverridePolicy(workspaceText) {
   if (!/security floor[^\n]*0\.25\.0/i.test(policyComment)) {
     return { valid: false, reason: "security floor is missing from the policy comment" };
   }
-  if (!/compatibility (?:ceiling|upper bound)[^\n]*<0\.26\.0/i.test(policyComment)) {
+  if (!/compatibility (?:ceiling|upper bound)[^\n]*<0\.29\.0/i.test(policyComment)) {
     return { valid: false, reason: "compatibility ceiling is missing from the policy comment" };
   }
   return { valid: true };
@@ -76,7 +76,15 @@ describe("bounded esbuild override", () => {
   });
 
   it("keeps the compatibility edge bounded without changing other consumers", () => {
-    expect(lockfile).toMatch(/  '@esbuild-kit\/core-utils@3\.3\.2':\n    dependencies:\n      esbuild: 0\.25\.12/m);
+    // #1112 widened the ceiling from <0.26.0 to <0.29.0 so the deprecated
+    // core-utils edge resolves to the same 0.28.2 the rest of the tree
+    // already uses, instead of pinning its own 0.25.12. Verified for real:
+    // `drizzle-kit check` and `drizzle-kit up` (which load drizzle.config.ts
+    // through @esbuild-kit/esm-loader -> core-utils -> esbuild.transform)
+    // both still succeed with esbuild 0.28.2 resolved here.
+    expect(lockfile).toMatch(/  '@esbuild-kit\/core-utils@3\.3\.2':\n    dependencies:\n      esbuild: 0\.28\.2/m);
+    // drizzle-kit's own direct esbuild dependency (its `^0.25.4` range, not
+    // the deprecated edge) is untouched by this scoped override.
     expect(lockfile).toMatch(/  drizzle-kit@0\.31\.10:\n    dependencies:[\s\S]*?\n      esbuild: 0\.25\.12\n/m);
     expect(lockfile).toMatch(/  tsx@4\.23\.15:\n    dependencies:\n      esbuild: 0\.28\.2/m);
     /* Pinned deliberately, so an unreviewed change to vite's resolution shows
