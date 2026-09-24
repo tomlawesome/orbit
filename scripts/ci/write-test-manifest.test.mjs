@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 
 import { describe, expect, it } from "vitest";
 
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../process-budget.mjs";
+import { failOnProcessDeadline, processGuard } from "../process-budget.mjs";
 
 const script = new URL("./write-test-manifest.sh", import.meta.url).pathname;
 
