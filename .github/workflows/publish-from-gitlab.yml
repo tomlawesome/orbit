@@ -93,6 +93,22 @@ jobs:
           printf '%s' "${GITLAB_READ_TOKEN}" | crane auth login "${GITLAB_REGISTRY}" --username "${GITLAB_READ_TOKEN_NAME}" --password-stdin
           printf '%s' "${GITHUB_TOKEN}" | crane auth login "${REGISTRY}" --username "${GITHUB_ACTOR}" --password-stdin
 
+      # The evidence fetched above is checked only at the transport level: the
+      # right pipeline, commit and ref, and a sign_evidence job that ran. This
+      # is the cryptographic check, with the shared verifier every publishing
+      # hop uses. Nothing reaches GHCR unless GitLab's key-based attestation
+      # for this exact digest verifies with the committed cosign.pub (#1108).
+      # It runs against the GitLab registry, because that is where
+      # sign_evidence attaches the attestation. GHCR never receives it. The
+      # crane login above wrote the Docker config cosign reads.
+      - name: Verify GitLab's signed evidence before copying
+        env:
+          ORBIT_IMAGE: ${{ env.GITLAB_REGISTRY }}/ai/orbit
+          ORBIT_DIGEST: ${{ steps.evidence.outputs.digest }}
+          ORBIT_COMMIT: ${{ github.sha }}
+          ORBIT_REF: ${{ github.ref_name }}
+        run: bash scripts/ci/verify-validation-evidence.sh
+
       # Only the newest commit on the branch may own the channel tag. This run
       # could be for an older commit if two merges landed within an hour.
       - name: Decide which tags this commit may take
