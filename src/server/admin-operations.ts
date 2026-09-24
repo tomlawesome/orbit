@@ -271,7 +271,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
         : notificationConfigError ? "unsafe_input" as const
         : imapConfig?.configured ? preflight.status : "not_configured" as const,
       smtp: notificationConfigError ? "unsafe_input" as const : preflight.smtp,
-      imap: imapCredentialLocked ? "unsafe_input" as const : imapConfigError ? "unsafe_input" as const : preflight.imap,
+      imap: imapCredentialLocked ? "credential_locked" as const : imapConfigError ? "unsafe_input" as const : preflight.imap,
       worker: {
         started: imapWorker.started,
         running: imapWorker.running,
@@ -522,7 +522,8 @@ export async function verifyImapIngestionProvider(actorUserId: string): Promise<
       if (adminImapVerificationDependenciesForTests?.verify) return await adminImapVerificationDependenciesForTests.verify();
       const state = await verifyImapIngestionProviders(await getImapIngestionConfig(), getNotificationWorkerConfig());
       return state.status;
-    } catch {
+    } catch (error) {
+      if (error instanceof MailInCredentialLockedError) return "credential_locked";
       return "unsafe_input";
     }
   })();
