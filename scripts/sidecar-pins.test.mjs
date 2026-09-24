@@ -1132,3 +1132,86 @@ describe("sidecar pins: every pinned .gitlab-ci.yml image is a tracked location 
     }
   });
 });
+
+describe("sidecar pins: the dependency-proxy compose file is a tracked location (#1109)", () => {
+  const DEP_PROXY_FILE = "compose/docker-compose.dependency-proxy.yml";
+
+  function realPolicy() {
+    return JSON.parse(
+      readFileSync(new URL("../.github/supply-chain-policy.json", import.meta.url), "utf8"),
+    );
+  }
+
+  // Same idea as the #807 test above: a pin the policy does not know about is
+  // a pin `check --offline` never looks at, so this reads the real files
+  // rather than a fixture.
+  it("lists the dependency-proxy compose file in the locations of every image it pins", () => {
+    const depProxy = readFileSync(new URL(`../${DEP_PROXY_FILE}`, import.meta.url), "utf8");
+    const realPolicyDoc = realPolicy();
+
+    const pinnedImages = [
+      ...depProxy.matchAll(/image:\s*\$\{CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\/(\S+@sha256:[0-9a-f]{64})\s*$/gmu),
+    ].map((match) => match[1]);
+    expect(pinnedImages.length).toBeGreaterThan(0);
+
+    for (const pinned of pinnedImages) {
+      const vendor = pinned.replace(/^library\//u, "");
+      const tag = vendor.slice(0, vendor.indexOf("@"));
+      const entry = realPolicyDoc.containerImages.find((candidate) => candidate.tag === tag);
+      expect(entry, `no policy entry pins ${tag}`).toBeTruthy();
+      expect(entry.locations, `${entry.name} (${tag}) should list ${DEP_PROXY_FILE}`).toContain(
+        DEP_PROXY_FILE,
+      );
+    }
+  });
+
+  // The behavioural half: even once the location is listed, `check` must
+  // actually catch a stale digest there (through the image-cache prefix) and
+  // `sync` must rewrite it, not just skip it as an unreadable pin.
+  it("reports drift when the dependency-proxy pin disagrees, and sync repairs it", async () => {
+    const realPolicyDoc = realPolicy();
+    const postgres = realPolicyDoc.containerImages.find((image) => image.tag === "postgres:18-alpine");
+    expect(postgres.locations).toContain(DEP_PROXY_FILE);
+
+    const repoDir = scratchDir();
+    for (const location of postgres.locations) {
+      writeFile(repoDir, location, readFileSync(new URL(`../${location}`, import.meta.url), "utf8"));
+    }
+
+    // Corrupt only the dependency-proxy copy, as if it lagged a Dependabot
+    // bump applied everywhere else.
+    const pinnedDigest = postgres.reference.slice(postgres.reference.lastIndexOf("@") + 1);
+    const staleDigest = rotateDigest(pinnedDigest);
+    const proxyPath = join(repoDir, DEP_PROXY_FILE);
+    writeFileSync(proxyPath, readFileSync(proxyPath, "utf8").replace(pinnedDigest, staleDigest), "utf8");
+
+    const checked = await checkPins({
+      policy: realPolicyDoc,
+      repoDir,
+      only: "postgres:18-alpine",
+      offline: true,
+      today: TODAY,
+    });
+    expect(checked.exitCode).toBe(1);
+    const drifted = imageFor(checked, "postgres:18-alpine").axes.drift.files.find(
+      (file) => file.path === DEP_PROXY_FILE,
+    );
+    expect(drifted.status).toBe("different-digest");
+    expect(drifted.found).toBe(`postgres:18-alpine@${staleDigest}`);
+
+    const policyPath = join(repoDir, "policy.json");
+    writeFileSync(policyPath, JSON.stringify(realPolicyDoc, null, 2), "utf8");
+    const synced = await syncPins({
+      policyPath,
+      repoDir,
+      only: "postgres:18-alpine",
+      today: TODAY,
+      resolveTag: resolverFor({
+        "postgres:18-alpine": { indexDigest: postgres.indexDigest, platformDigest: pinnedDigest },
+      }),
+    });
+    expect(synced.changes).toHaveLength(1);
+    expect(readFileSync(proxyPath, "utf8")).toContain(`postgres:18-alpine@${pinnedDigest}`);
+    expect(readFileSync(proxyPath, "utf8")).not.toContain(staleDigest);
+  });
+});

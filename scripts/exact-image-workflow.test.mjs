@@ -687,6 +687,50 @@ describe("exact-image publication workflow", () => {
     expect(cleanupSection).toContain("${current_registry_id}\" == \"${REGISTRY_ID}\"");
   });
 
+  it("routes every GitLab CI pull of the disposable registry through the dependency proxy (#1111)", () => {
+    // pipeline 1597 (jobs 22132/22133/22198/22199) and 1598 (job 22174): three
+    // jobs start scripts/ci/start-installer-registry.sh's disposable registry
+    // -- acceptance, repair_journeys (its own copy of the variable) and
+    // launcher_install_compat -- and all three used to pull it straight from
+    // Docker Hub and trip its anonymous rate limit. The fix is the CI
+    // variable, not the script: the script's fallback stays a direct pull (it
+    // is also what the GitHub workflow above uses), so what has to hold is
+    // that the GitLab pipeline always overrides it with a proxied,
+    // digest-pinned reference.
+    const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
+    const proxyPrefix = "${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/";
+    const registryDigest =
+      "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373";
+
+    const installerRegistryLine = gitlabCi
+      .split(/\r?\n/u)
+      .find((line) => /^\s*ORBIT_INSTALLER_REGISTRY_IMAGE:/u.test(line));
+    expect(installerRegistryLine, "ORBIT_INSTALLER_REGISTRY_IMAGE must be set").toBeDefined();
+    expect(installerRegistryLine).toContain(proxyPrefix);
+    expect(installerRegistryLine).toContain(registryDigest);
+
+    // repair_journeys keeps its own job-level variable (it predates this
+    // fix); it must still resolve to the same proxied, digest-pinned image,
+    // never a bare Docker Hub tag.
+    const repairRegistryLine = gitlabCi
+      .split(/\r?\n/u)
+      .find((line) => /^\s*ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE:/u.test(line));
+    expect(repairRegistryLine, "ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE must be set").toBeDefined();
+    expect(repairRegistryLine).toMatch(
+      /\$\{(?:CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\/library\/registry|ORBIT_INSTALLER_REGISTRY_IMAGE\})/u,
+    );
+    expect(repairRegistryLine).not.toMatch(/registry:2\s*$/u);
+
+    // The disposable OIDC sidecar `smoke` builds (FROM node:24-alpine) is the
+    // same shape of defect: a CI job pulling a Docker Hub base image with no
+    // proxy route.
+    const oidcPrefixLine = gitlabCi
+      .split(/\r?\n/u)
+      .find((line) => /^\s*OIDC_BASE_IMAGE_PREFIX:/u.test(line));
+    expect(oidcPrefixLine, "OIDC_BASE_IMAGE_PREFIX must be set").toBeDefined();
+    expect(oidcPrefixLine).toContain(proxyPrefix);
+  });
+
   it("gates acceptance jobs on system-risk paths, not only dispatch or the label (#617)", () => {
     const supplyChain = jobBlock("supply_chain_source", "fidelity");
     const integration = jobBlock("integration", "smoke");
