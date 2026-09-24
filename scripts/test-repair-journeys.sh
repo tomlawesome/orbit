@@ -240,9 +240,33 @@ install_deployment() {
   docker run -d --name "$registry_name" -p "127.0.0.1:$registry_port:5000" \
       "${ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE:-registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373}" >/dev/null ||
     fail 'local registry did not start'
-  docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
-  docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
+  local local_tag="127.0.0.1:$registry_port/$repository:latest"
+  docker tag "$image" "$local_tag"
+  docker push --quiet "$local_tag" >/dev/null ||
     fail 'push to the local registry failed'
+
+  # install.sh now refuses to run at all without a release manifest it can
+  # verify (ADR-0031 #7): on the default channel ("latest") it self-fetches
+  # one from GitHub, which does not exist for this locally built, unpublished
+  # image (#1107 pipeline 1626: "Could not download the release manifest for
+  # channel latest"). Hand it one directly instead -- the same already-verified
+  # hand-over path get-orbit.sh and the launcher use -- naming the exact
+  # digest this push just gave the registry, read from RepoDigests before
+  # anything else can retag or remove it. `grep -m1`, not `| head -n1` (#809):
+  # grep itself is the one process that stops once it has enough, rather than
+  # a separate head risking a SIGPIPE against docker still writing.
+  local pushed_digest
+  pushed_digest="$(
+    docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$local_tag" |
+      grep -m1 -F "127.0.0.1:$registry_port/$repository@"
+  )"
+  pushed_digest="${pushed_digest#*@}"
+  [[ "$pushed_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    fail "could not read the digest the local registry gave $local_tag"
+  local release_manifest="$workdir/orbit-release-manifest.json"
+  bash "$repo_root/scripts/ci/write-test-manifest.sh" \
+    "$release_manifest" "127.0.0.1:$registry_port/$repository" "$pushed_digest" >/dev/null ||
+    fail 'could not write the test release manifest'
 
   write_shim
   make_target
@@ -251,6 +275,7 @@ install_deployment() {
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
       COMPOSE_PROJECT_NAME="$project" \
       ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
+      ORBIT_RELEASE_MANIFEST="$release_manifest" \
       bash "$repo_root/scripts/install.sh" </dev/null) > "$workdir/install.log" 2>&1 ||
     { tail -n 30 "$workdir/install.log" >&2; fail "install.sh failed; log: $workdir/install.log"; }
 
