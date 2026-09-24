@@ -10,8 +10,11 @@ set -Eeuo pipefail
 # readable on purpose (ADR-0031 #6): install.sh is not extended into this
 # role.
 #
-# Env: ORBIT_CHANNEL (latest|preview, default latest), ORBIT_VERSION
-# (vX.Y.Z, pins a specific release; overrides ORBIT_CHANNEL).
+# Env: ORBIT_CHANNEL (latest, the default; preview is refused, see below),
+# ORBIT_VERSION (vX.Y.Z, pins a specific stable release; overrides
+# ORBIT_CHANNEL). This installer only fetches stable releases: a preview
+# install needs a verified release manifest handed to install.sh directly
+# via ORBIT_RELEASE_MANIFEST (docs/releasing.md).
 #
 # Test-only, not for user environments: ORBIT_GET_BASE_URL overrides the
 # release base URL; ORBIT_GET_TEST_PUBLIC_KEY_FILE overrides the embedded
@@ -49,15 +52,12 @@ version_pin="${ORBIT_VERSION:-}"
 if [[ -n "$version_pin" ]]; then
   [[ "$version_pin" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "ORBIT_VERSION must look like vX.Y.Z: ${version_pin}"
   asset_base="${base_url}/releases/download/${version_pin}"
-  stable=1
 elif [[ "$channel" == "latest" ]]; then
   asset_base="${base_url}/releases/latest/download"
-  stable=1
 elif [[ "$channel" == "preview" ]]; then
-  asset_base="${base_url}/releases/download/preview"
-  stable=0
+  fail "this one-line installer only installs stable releases (ORBIT_CHANNEL=latest, the default, or ORBIT_VERSION=vX.Y.Z). A preview install needs a verified release manifest handed to install.sh directly via ORBIT_RELEASE_MANIFEST; see docs/releasing.md."
 else
-  fail "ORBIT_CHANNEL must be latest or preview, got: ${channel}"
+  fail "ORBIT_CHANNEL must be latest, got: ${channel}"
 fi
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/orbit-get.XXXXXX")" || fail "could not create a private temporary directory."
@@ -99,10 +99,8 @@ if command -v cosign > /dev/null 2>&1; then
       --certificate-oidc-issuer https://token.actions.githubusercontent.com \
       "$manifest_json" > /dev/null 2>&1 ||
       fail "cosign could not verify the countersignature bundle."
-  elif [[ "$stable" == 1 ]]; then
-    fail "no countersignature bundle for this release yet; refusing on channel ${channel}."
   else
-    printf 'get-orbit: no countersignature bundle yet on preview; continuing with the key-based check only.\n' >&2
+    fail "no countersignature bundle for this release yet; refusing."
   fi
 else
   printf 'get-orbit: cosign not found on PATH; only the key-based signature was checked. Install cosign (https://docs.sigstore.dev/system_config/installation/) to also verify the keyless countersignature.\n' >&2
