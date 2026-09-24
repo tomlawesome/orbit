@@ -54,23 +54,20 @@ function workspace({
 }
 
 function run({ dir, files, args = ["registry.example/ai/orbit", DIGEST], env = {}, dropEnv = [] }) {
-  const outputDir = join(dir, "out");
   const fullEnv = {
     PATH: process.env.PATH,
     CI_COMMIT_SHA: COMMIT,
+    CI_COMMIT_BRANCH: "preview",
     ORBIT_VERSION: "1.4.0",
-    ORBIT_CHANNEL: "preview",
     ORBIT_LAUNCHER_TAG: "v1.2.3",
     ORBIT_LAUNCHER_COMMIT: LAUNCHER_COMMIT,
     ORBIT_LAUNCHER_AMD64_ARCHIVE: files.amd64Archive,
     ORBIT_LAUNCHER_ARM64_ARCHIVE: files.arm64Archive,
     ORBIT_INSTALL_SCRIPT: files.installScript,
     ORBIT_GET_ORBIT_SCRIPT: files.getOrbitScript,
-    // Isolate the manifest under the workspace rather than the real repo
-    // root: the script always writes to <repoRoot>/.orbit-supply-chain, so
-    // the test reads it back from there via ORBIT_REPO_ROOT_OVERRIDE is not
-    // needed -- instead it just runs the script with cwd = the real repo and
-    // reads the real output path, cleaning it up after.
+    // The manifest always lands at <repoRoot>/.orbit-supply-chain -- the
+    // script runs with cwd = the real repo, so the test reads it back from
+    // there and cleans it up after (see manifestPath/afterEach below).
     ...env,
   };
   for (const name of dropEnv) delete fullEnv[name];
@@ -146,11 +143,18 @@ describe("write-release-manifest.sh", () => {
     );
   });
 
-  it("refuses a missing or malformed ORBIT_CHANNEL", () => {
+  it("derives the channel from CI_COMMIT_BRANCH via the shared channel-name.sh", () => {
     const { dir, files } = workspace();
-    expect(() => run({ dir, files, dropEnv: ["ORBIT_CHANNEL"] })).toThrow(/ORBIT_CHANNEL is not set/);
-    expect(() => run({ dir, files, env: { ORBIT_CHANNEL: "preview/../x" } })).toThrow(
-      /not a plain channel name/,
+    run({ dir, files, env: { CI_COMMIT_BRANCH: "hotfix/urgent fix#1" } });
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.channel).toBe("hotfix-urgent-fix-1");
+  });
+
+  it("refuses a missing or non-publishing CI_COMMIT_BRANCH", () => {
+    const { dir, files } = workspace();
+    expect(() => run({ dir, files, dropEnv: ["CI_COMMIT_BRANCH"] })).toThrow(/CI_COMMIT_BRANCH is not set/);
+    expect(() => run({ dir, files, env: { CI_COMMIT_BRANCH: "dev" } })).toThrow(
+      /CI_COMMIT_BRANCH \(dev\) is neither preview nor hotfix\/\*/,
     );
   });
 

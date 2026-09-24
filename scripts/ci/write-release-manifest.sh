@@ -39,10 +39,6 @@
 #                                  org.opencontainers.image.version label
 #                                  (scripts/ci/publish-channel.sh already
 #                                  reads that label the same way).
-#   ORBIT_CHANNEL                 The channel this manifest is for: preview
-#                                  or hotfix-<name>, the same shape
-#                                  scripts/ci/publish-channel.sh computes from
-#                                  CI_COMMIT_BRANCH.
 #   ORBIT_LAUNCHER_TAG            launcher/pin.json's "tag" (vX.Y.Z).
 #   ORBIT_LAUNCHER_COMMIT         launcher/pin.json's "commit" (40 hex).
 #   ORBIT_LAUNCHER_AMD64_ARCHIVE  Path to orbit-launcher_linux_amd64.tar.gz.
@@ -53,6 +49,14 @@
 #                                  scripts/get-orbit.sh.
 #   CI_COMMIT_SHA                 The commit this manifest is for, from the
 #                                  predefined GitLab job environment.
+#   CI_COMMIT_BRANCH              The branch this manifest is for, from the
+#                                  predefined GitLab job environment. The
+#                                  manifest's "channel" field is derived from
+#                                  it by scripts/ci/channel-name.sh -- the one
+#                                  place that mapping lives, shared with
+#                                  scripts/ci/publish-channel.sh's channel
+#                                  tag -- so record_image's own job script
+#                                  carries no channel logic of its own.
 #
 # Output: writes .orbit-supply-chain/orbit-release-manifest.json and prints
 # its path.
@@ -74,7 +78,7 @@ image_digest="${2:-}"
   fail "image repository is not a plain registry reference: ${image_repository}"
 
 version="${ORBIT_VERSION:-}"
-channel="${ORBIT_CHANNEL:-}"
+branch="${CI_COMMIT_BRANCH:-}"
 launcher_tag="${ORBIT_LAUNCHER_TAG:-}"
 launcher_commit="${ORBIT_LAUNCHER_COMMIT:-}"
 amd64_archive="${ORBIT_LAUNCHER_AMD64_ARCHIVE:-}"
@@ -86,8 +90,11 @@ commit="${CI_COMMIT_SHA:-}"
 [[ -n "$version" ]] || fail 'ORBIT_VERSION is not set'
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] ||
   fail "ORBIT_VERSION is not a plain semantic version: ${version}"
-[[ -n "$channel" ]] || fail 'ORBIT_CHANNEL is not set'
-[[ "$channel" =~ ^[A-Za-z0-9._-]+$ ]] || fail "ORBIT_CHANNEL is not a plain channel name: ${channel}"
+[[ -n "$branch" ]] || fail 'CI_COMMIT_BRANCH is not set'
+# The mapping itself lives in scripts/ci/channel-name.sh, shared with
+# publish-channel.sh's channel tag, so this script carries no copy of it.
+channel="$(bash "${repo_root}/scripts/ci/channel-name.sh" "$branch" 2> /dev/null)" ||
+  fail "CI_COMMIT_BRANCH (${branch}) is neither preview nor hotfix/*; the release manifest only covers publishing branches"
 [[ -n "$launcher_tag" ]] || fail 'ORBIT_LAUNCHER_TAG is not set (launcher/pin.json "tag")'
 [[ "$launcher_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] ||
   fail "ORBIT_LAUNCHER_TAG is not a plain vX.Y.Z tag: ${launcher_tag}"

@@ -65,12 +65,12 @@ fail() { printf 'publish-channel: %s\n' "$1" >&2; exit 1; }
 
 [[ "$CI_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "CI_COMMIT_SHA is not an exact commit SHA: ${CI_COMMIT_SHA}"
 
-channel_tag=preview
-case "$CI_COMMIT_BRANCH" in
-  preview) ;;
-  hotfix/*) channel_tag="hotfix-$(printf '%s' "${CI_COMMIT_BRANCH#hotfix/}" | tr -c 'A-Za-z0-9._-' '-')" ;;
-  *) fail "branch ${CI_COMMIT_BRANCH} is not a publishing branch; only preview and hotfix/* take a channel tag" ;;
-esac
+# The mapping itself lives in scripts/ci/channel-name.sh, shared with
+# write-release-manifest.sh's "channel" field (ADR-0031 #1) so it cannot fork
+# into two copies; this script only supplies its own wording for a branch the
+# mapping refuses.
+channel_tag="$(bash "${repo_root}/scripts/ci/channel-name.sh" "$CI_COMMIT_BRANCH" 2> /dev/null)" ||
+  fail "branch ${CI_COMMIT_BRANCH} is not a publishing branch; only preview and hotfix/* take a channel tag"
 
 evidence_file="${ORBIT_EVIDENCE_FILE:-.orbit-supply-chain/gitlab-tested-image.json}"
 [[ -f "$evidence_file" ]] ||
