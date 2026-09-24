@@ -52,12 +52,17 @@ output_dir="$(CDPATH= cd -- "$output_dir" && pwd -P)"
 pin_file="${ORBIT_LAUNCHER_PIN_FILE:-${repo_root}/launcher/pin.json}"
 [[ -f "$pin_file" ]] || fail "no pin file at ${pin_file} (ADR-0031 implementation slice 1 not yet landed)"
 
+# pin.json has no node or jq in the build_launcher job's golang image, so
+# this reads the pin without either. Safe only because pin.json's shape is
+# fixed: scripts/bump-launcher-pin.sh is its one writer, and always emits a
+# flat object with a string "tag" and a string "commit" field, each on its
+# own line or not -- this tolerates both the pretty-printed file that script
+# writes and the compact JSON build-launcher.test.mjs's fixtures use. It
+# extracts whatever string is present for the field and hands it to the
+# strict tag/commit regexes below, which are what actually decide the value
+# is trustworthy; this function never has to be strict itself.
 read_pin_field() {
-  node -e '
-    const doc = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-    const value = doc?.[process.argv[2]];
-    process.stdout.write(typeof value === "string" ? value : "");
-  ' -- "$pin_file" "$1"
+  sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$pin_file" | head -n1
 }
 pin_tag="$(read_pin_field tag)"
 pin_commit="$(read_pin_field commit)"

@@ -10,7 +10,7 @@
  * correctly and wires the right flags and archive layout, not re-proving
  * that `go build` itself works.
  */
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -111,7 +111,20 @@ function writePinFile(dir, { tag = "v0.1.0", commit }) {
   return path;
 }
 
-function runBuild({ outputDir, pinFile, remote, goVersion, goBuildExit } = {}) {
+/**
+ * process.env.PATH with every directory that holds a `node` executable
+ * removed -- the golang job image build_launcher actually runs in has no
+ * node on PATH at all (#1107 pipeline 1626), so this is what proves
+ * build-launcher.sh's pin-reading no longer needs it.
+ */
+function pathWithoutNode() {
+  return (process.env.PATH ?? "")
+    .split(":")
+    .filter((dir) => dir && !existsSync(join(dir, "node")))
+    .join(":");
+}
+
+function runBuild({ outputDir, pinFile, remote, goVersion, goBuildExit, path } = {}) {
   const stubDir = mkdtempSync(join(tmpdir(), "go-stub-"));
   const goStub = join(stubDir, "go");
   writeFileSync(goStub, GO_STUB);
@@ -120,7 +133,7 @@ function runBuild({ outputDir, pinFile, remote, goVersion, goBuildExit } = {}) {
   writeFileSync(logFile, "");
 
   const env = {
-    PATH: `${stubDir}:${process.env.PATH}`,
+    PATH: `${stubDir}:${path ?? process.env.PATH}`,
     HOME: process.env.HOME ?? tmpdir(),
     ORBIT_GO: goStub,
     ORBIT_LAUNCHER_REMOTE: remote,
@@ -264,6 +277,21 @@ describe("build-launcher.sh", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("go build failed for linux/amd64");
+  });
+
+  it("reads the pin and builds with no node on PATH (build_launcher's golang image has none, #1107)", () => {
+    const { dir: remote, commit } = deployLauncherRemote();
+    const pinFile = writePinFile(remote, { commit });
+    const outputDir = mkdtempSync(join(tmpdir(), "build-launcher-out-"));
+    const noNodePath = pathWithoutNode();
+    expect(noNodePath.split(":").some((dir) => existsSync(join(dir, "node")))).toBe(false);
+
+    const { result } = runBuild({ outputDir, pinFile, remote, path: noNodePath });
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(existsSync(join(outputDir, "orbit-launcher_linux_amd64.tar.gz"))).toBe(true);
+    expect(existsSync(join(outputDir, "orbit-launcher_linux_arm64.tar.gz"))).toBe(true);
   });
 
   it("refuses a missing pin file, naming the missing slice", () => {
