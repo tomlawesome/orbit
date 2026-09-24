@@ -20,6 +20,18 @@ function jobBlock(job, endMarker) {
 
 const launcherCompatJob = () => jobBlock("launcher_install_compat", "\n# --- publish");
 
+// The rules: block build_launcher and launcher_install_compat now share
+// (ADR-0031 #3) lives in its own anchor immediately above build_launcher,
+// not inline in either job's own text, so tests that inspect rule content
+// read it from here rather than from launcherCompatJob().
+function launcherCompatRules() {
+  const start = gitlabCi.indexOf("\n.launcher_compat_rules: &launcher_compat_rules\n");
+  const end = gitlabCi.indexOf("\nbuild_launcher:\n", start);
+  expect(start, ".launcher_compat_rules anchor not found in .gitlab-ci.yml").toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return gitlabCi.slice(start, end);
+}
+
 describe("launcher install compatibility gate", () => {
   it("no longer exists as a GitHub workflow", () => {
     // Deleted, not merely disarmed: a pull-request-only trigger left in place
@@ -41,15 +53,40 @@ describe("launcher install compatibility gate", () => {
     expect(job).not.toContain("extends: .dind");
   });
 
-  it("builds orbit-launcher and runs its live test suite", () => {
+  it("installs build_launcher's own artifact and runs the launcher's live test suite against it (ADR-0031 #2)", () => {
     const job = launcherCompatJob();
 
-    expect(job).toContain("git clone --quiet https://github.com/tomlawesome/orbit-launcher.git launcher");
-    expect(job).toContain('go build -o "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher" ./cmd/orbit-launcher');
-    expect(job).toContain("go test -tags live -count=1 -v -timeout 30m ./test/live/...");
-    // Overridable orbit-launcher ref, defaulting to its own dev branch —
-    // the workflow_dispatch input's equivalent.
-    expect(job).toMatch(/LAUNCHER_REF:\s*dev/u);
+    // The candidate binary is build_launcher's artifact now, not a fresh
+    // build from a `dev` checkout: no more LAUNCHER_REF, and no `go build`
+    // of the launcher command here.
+    expect(job).not.toMatch(/LAUNCHER_REF/u);
+    expect(job).not.toContain("go build -o");
+    expect(job).not.toContain("./cmd/orbit-launcher");
+    expect(job).toContain(
+      'tar --extract --gunzip \\\n        --file "$CI_PROJECT_DIR/.orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz" \\\n        --directory "$CI_PROJECT_DIR/.orbit-launcher-bin"',
+    );
+    expect(job).toContain('chmod +x "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"');
+
+    // The test *source* still comes from a checkout -- cloned to
+    // .orbit-launcher-src, not `launcher`, because launcher/pin.json (ADR-0031
+    // #2) already occupies that path in this checkout -- but at the pin's own
+    // tag, read from launcher/pin.json, rather than an overridable ref.
+    expect(job).toContain(
+      'launcher_tag="$(sed -n \'s/.*"tag"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p\' launcher/pin.json | head -1)"',
+    );
+    expect(job).toContain(
+      "git clone --quiet https://github.com/tomlawesome/orbit-launcher.git .orbit-launcher-src",
+    );
+    expect(job).toContain('git -C .orbit-launcher-src checkout --quiet "$launcher_tag"');
+    expect(job).toContain("(cd .orbit-launcher-src && go test -tags live -count=1 -v -timeout 30m ./test/live/...)");
+  });
+
+  it("needs build_launcher's artifact, spelled out rather than through *needs_gated_image (ADR-0031 #2)", () => {
+    const job = launcherCompatJob();
+
+    expect(job).toMatch(/needs:\s*\n\s*- job: classify\s*\n\s*artifacts: true/u);
+    expect(job).toMatch(/- job: build_launcher\s*\n\s*artifacts: true/u);
+    expect(job).not.toContain("needs: *needs_gated_image");
   });
 
   it("points the launcher at this commit's own install.sh, served without a token", () => {
@@ -95,21 +132,22 @@ describe("launcher install compatibility gate", () => {
   });
 
   it("always runs on a merge request into main and on every delivery branch, unconditionally (#944)", () => {
-    const job = launcherCompatJob();
+    const rules = launcherCompatRules();
 
     // #944: ORBIT_LAUNCHER_COMPAT was a dotenv variable from `classify`, and
     // `rules:` runs before any job -- including `classify` -- so it could
     // never read it. The promotion gate and the delivery branches are now
     // unconditional `rules:` entries, neither carrying a `changes:` clause,
     // rather than a branch the job's own script took at runtime.
-    expect(job).toMatch(
-      /- if: \$CI_COMMIT_BRANCH == "dev" \|\| \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH == "main" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n {4}- if: \$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"\n {4}- if: \$CI_PIPELINE_SOURCE == "merge_request_event"\n/u,
+    expect(rules).toMatch(
+      /- if: \$CI_COMMIT_BRANCH == "dev" \|\| \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH == "main" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n {2}- if: \$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"\n {2}- if: \$CI_PIPELINE_SOURCE == "merge_request_event"\n/u,
     );
   });
 
   it("gates an ordinary merge request on rules: changes:, off the classifier's own launcher-compat patterns (#944)", async () => {
     const { touchesLauncherInstallCompat } = await import("./classify-changed-paths.mjs");
     const job = launcherCompatJob();
+    const rules = launcherCompatRules();
 
     // The decision used to live in a script-level dotenv read; `rules:`
     // cannot make that read, so the script should no longer reach for either
@@ -119,15 +157,19 @@ describe("launcher install compatibility gate", () => {
     expect(job).not.toContain("${ORBIT_LAUNCHER_COMPAT");
     expect(job).not.toContain("${ORBIT_SYSTEM");
 
-    const changesStart = job.indexOf("      changes:\n");
-    const changesEnd = job.indexOf("\n    - when: manual", changesStart);
+    const changesStart = rules.indexOf("    changes:\n");
+    const changesEnd = rules.indexOf("\n  - when: manual", changesStart);
     expect(changesStart, "no changes: block on the merge-request rule").toBeGreaterThan(-1);
     expect(changesEnd).toBeGreaterThan(changesStart);
-    const listed = [...job.slice(changesStart, changesEnd).matchAll(/^ {10}- (\S+)$/gmu)].map((match) => match[1]);
+    const listed = [...rules.slice(changesStart, changesEnd).matchAll(/^ {8}- (\S+)$/gmu)].map((match) => match[1]);
 
     // touchesLauncherInstallCompat has no catch-all default (unlike
     // ORBIT_SYSTEM's classifyCiRisk), so this list can and should be an
     // exact translation of launcherCompatPatterns rather than a widened one.
+    // launcher/pin.json and scripts/ci/build-launcher.sh joined it with
+    // ADR-0031: build_launcher now builds and installs the pinned launcher
+    // instead of always checking out `dev`, so a pin bump or a change to how
+    // it is built is part of what this job proves too.
     const concretePaths = [
       "scripts/install.sh",
       ".gitlab-ci.yml",
@@ -144,6 +186,8 @@ describe("launcher install compatibility gate", () => {
       "scripts/restore.sh",
       "scripts/repair.sh",
       "scripts/engine-check.sh",
+      "launcher/pin.json",
+      "scripts/ci/build-launcher.sh",
     ];
     for (const path of concretePaths) {
       expect(touchesLauncherInstallCompat([path]), path).toBe(true);
@@ -161,8 +205,16 @@ describe("launcher install compatibility gate", () => {
   it("never runs in a scheduled pipeline and is a required check", () => {
     const job = launcherCompatJob();
 
-    expect(job).toContain("*not_scheduled");
+    expect(launcherCompatRules()).toContain("*not_scheduled");
     expect(job).toContain("allow_failure: false");
+  });
+
+  it("build_launcher shares the exact same rules: as launcher_install_compat (ADR-0031 #3)", () => {
+    const job = launcherCompatJob();
+    const buildLauncherJob = jobBlock("build_launcher", "\nlauncher_install_compat:");
+
+    expect(job).toContain("rules: *launcher_compat_rules");
+    expect(buildLauncherJob).toContain("rules: *launcher_compat_rules");
   });
 
   it("collects Docker and installer diagnostics as an artifact regardless of outcome (#819 follow-up)", () => {

@@ -151,6 +151,11 @@ describe("pipeline lanes", () => {
       "acceptance",
       "base_image",
       "build_image",
+      // ADR-0031 #3: builds the pinned launcher, but needs nothing from
+      // build_image -- it is guarded because it shares *launcher_compat_rules
+      // with launcher_install_compat (which does consume build_image), not
+      // because it has the #1076 placeholder problem itself.
+      "build_launcher",
       "fast",
       "fast_docker",
       "fidelity",
