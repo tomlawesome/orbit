@@ -65,6 +65,11 @@
       "prBodyNotes": [
         "Before merging: run `node scripts/sidecar-pins.mjs sync` on this branch, review the diff and push it. A pin changed here may also be recorded in `.github/supply-chain-policy.json`, which this merge request does not touch, and `node scripts/sidecar-pins.mjs check --offline` fails in CI until the two agree."
       ]
+    },
+    {
+      "description": "@types/node's major must match the runtime Node major (NODE_IMAGE in .gitlab-ci.yml and the base image, currently 22) -- newer types let code type-check against APIs the runtime doesn't have (#1117). Held to the current major here; bump this rule's allowedVersions, not just accept the PR, when the runtime Node major moves.",
+      "matchPackageNames": ["@types/node"],
+      "allowedVersions": "<23"
     }
   ]
 }
