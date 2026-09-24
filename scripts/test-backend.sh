@@ -53,6 +53,10 @@ node --test scripts/scratch-dir-ignored.test.mjs
 # the push, both ran nowhere. A test that has never run proves nothing.
 node --test scripts/ci/repin-base-image.test.mjs
 
+# Same reason (ADR-0031 #2): uses node:test -- see vitest.config.ts's exclude
+# entry for this file too.
+node --test scripts/bump-launcher-pin.test.mjs
+
 # Static analysis covers the full-stack boundary; Vitest exercises all fast
 # server, authentication, database, domain, and reducer tests without Docker.
 #

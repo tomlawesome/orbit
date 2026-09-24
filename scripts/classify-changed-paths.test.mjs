@@ -249,6 +249,20 @@ describe("changed-path CI risk classification", () => {
     expect(touchesLauncherInstallCompat(["scripts/container-entrypoint.sh"])).toBe(false);
   });
 
+  // ADR-0031 #2/#3: build_launcher now builds and installs the pinned
+  // launcher for this job to test, instead of always checking out `dev`, so
+  // a pin bump or a change to how it is built is part of what this job
+  // proves too.
+  it("arms launcher_install_compat for the launcher pin and its build script (ADR-0031)", () => {
+    expect(touchesLauncherInstallCompat(["launcher/pin.json"])).toBe(true);
+    expect(touchesLauncherInstallCompat(["scripts/ci/build-launcher.sh"])).toBe(true);
+    expect(ciRequirements(["launcher/pin.json"]).launcherCompat).toBe(true);
+    // A different launcher/ file, or a different scripts/ci/ script, is
+    // outside this job's reach.
+    expect(touchesLauncherInstallCompat(["launcher/README.md"])).toBe(false);
+    expect(touchesLauncherInstallCompat(["scripts/ci/write-release-manifest.sh"])).toBe(false);
+  });
+
   it("builds executable and dependency-snapshot changes but not inert fast changes", () => {
     expect(ciRequirements(["README.md"]).build).toBe(false);
     expect(ciRequirements(["src/server/workspace-repository.test.ts"]).build).toBe(false);

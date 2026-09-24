@@ -72,6 +72,10 @@ const licencePolicyPaths = new Set([
 // that copy them, what .dockerignore lets into that build context, the two
 // compose files, the example environment file, the Tika configuration and the
 // seven helper scripts under ./deploy/scripts/.
+// ADR-0031 #2/#3: the job also builds and installs the pinned launcher
+// itself now, rather than always checking out orbit-launcher's `dev`, so a
+// pin bump or a change to how it is built is part of what this job proves
+// too.
 const launcherCompatPatterns = [
   /^scripts\/install\.sh$/u,
   /^\.gitlab-ci\.yml$/u,
@@ -82,6 +86,8 @@ const launcherCompatPatterns = [
   /^\.env-orbit\.example$/u,
   /^config\/tika-config\.json$/u,
   /^scripts\/(?:configure|installer-ui|configuration|backup|restore|repair|engine-check)\.sh$/u,
+  /^launcher\/pin\.json$/u,
+  /^scripts\/ci\/build-launcher\.sh$/u,
 ];
 
 // The ignore/policy lane (#889). Both files record what a scanner is allowed

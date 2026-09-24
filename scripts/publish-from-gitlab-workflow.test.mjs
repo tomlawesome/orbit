@@ -29,6 +29,7 @@ const recordScript = readFileSync(
   new URL("./ci/gitlab-record-tested-image.sh", import.meta.url),
   "utf8",
 ).replaceAll("\r\n", "\n");
+const getOrbitScript = readFileSync(new URL("./get-orbit.sh", import.meta.url), "utf8").replaceAll("\r\n", "\n");
 
 describe("publish-from-gitlab workflow", () => {
   it("runs for the mirror's preview and hotfix pushes and never cancels one", () => {
@@ -110,7 +111,11 @@ describe("publish-from-gitlab workflow", () => {
     expect(workflow).toContain("packages: write");
     expect(workflow).toContain("id-token: write");
     expect(workflow).toContain("attestations: write");
-    expect(workflow).not.toContain("contents: write");
+    // The workflow-level default stays contents: read; only the publish job
+    // is granted contents: write, and only for the release-asset steps
+    // below (ADR-0031 #8).
+    const job = workflow.slice(workflow.indexOf("  publish:\n"), workflow.indexOf("  verify_bootstrap:\n"));
+    expect(job).toContain("      contents: write\n");
     expect(workflow).not.toContain("pull-requests: write");
     expect(workflow).toContain("persist-credentials: false");
     // Two GitLab secrets, both read-only, never on a command line.
@@ -130,6 +135,93 @@ describe("publish-from-gitlab workflow", () => {
     for (const reference of actionReferences) {
       expect(reference).toMatch(/@[0-9a-f]{40}$/u);
     }
+  });
+});
+
+/*
+ * ADR-0031 #8: the launcher, the signed manifest and its .sig replace the
+ * assets on the rolling `preview` prerelease, but only after the shared
+ * verifier and the shared asset checker have both run -- never a private
+ * copy of either judgement, and never an unverified upload.
+ */
+describe("publish-from-gitlab workflow: launcher and manifest publication", () => {
+  const stepStart = (name) => workflow.indexOf(`- name: ${name}`);
+  const step = (name) => {
+    const start = stepStart(name);
+    expect(start, name).toBeGreaterThanOrEqual(0);
+    const next = workflow.indexOf("\n      - name:", start + 1);
+    return workflow.slice(start, next === -1 ? undefined : next);
+  };
+
+  it("fetches the manifest, .sig and both launcher archives from the same pipeline", () => {
+    const evidenceStep = step("Wait for GitLab and fetch its tested-image evidence");
+    expect(evidenceStep).toContain('ORBIT_FETCH_LAUNCHER_ASSETS: "1"');
+  });
+
+  it("verifies the manifest's signature with the shared verifier before checking any asset", () => {
+    const verify = step("Verify the release manifest's signature");
+    expect(verify).toContain("run: |");
+    expect(verify).toContain("bash scripts/ci/verify-release-manifest.sh");
+    expect(verify).toContain("${{ steps.evidence.outputs.release_manifest }}");
+    expect(verify).toContain("${{ steps.evidence.outputs.release_manifest_sig }}");
+    expect(verify).not.toContain("continue-on-error");
+    expect(stepStart("Verify the release manifest's signature")).toBeLessThan(
+      stepStart("Check the launcher assets against the manifest"),
+    );
+    expect(stepStart("Check the launcher assets against the manifest")).toBeLessThan(
+      stepStart("Replace the launcher and manifest on the preview release"),
+    );
+  });
+
+  it("checks every downloaded asset get-orbit.sh will fetch against the manifest's own checksums", () => {
+    // Read the archive-name pattern out of get-orbit.sh itself, the one
+    // place it is defined, rather than asserting a hand-typed copy of it
+    // here. The manifest is signature-checked separately (it is what proves
+    // the checksums below); it has no checksum for itself.
+    expect(getOrbitScript).toContain('archive_name="orbit-launcher_linux_${arch}.tar.gz"');
+    const names = ["orbit-launcher_linux_amd64.tar.gz", "orbit-launcher_linux_arm64.tar.gz", "install.sh"];
+
+    const check = step("Check the launcher assets against the manifest");
+    expect(check).toContain("bash scripts/ci/verify-manifest-assets.sh");
+    for (const name of names) {
+      expect(check, name).toContain(`${name}=`);
+    }
+    // get-orbit.sh itself is uploaded too (recorded in the manifest's
+    // "files", per ADR-0031 #1) even though it never fetches itself.
+    expect(check).toContain("get-orbit.sh=");
+  });
+
+  it("uploads every checked asset, plus get-orbit.sh, to a rolling preview prerelease", () => {
+    const upload = step("Replace the launcher and manifest on the preview release");
+    expect(upload).toContain("gh release upload preview");
+    expect(upload).toContain("--clobber");
+    expect(upload).toContain("scripts/install.sh");
+    expect(upload).toContain("scripts/get-orbit.sh");
+    expect(upload).toContain("${MANIFEST}");
+    expect(upload).toContain("${MANIFEST_SIG}");
+    expect(upload).toContain("${AMD64_ARCHIVE}");
+    expect(upload).toContain("${ARM64_ARCHIVE}");
+    expect(upload).toContain("gh release create preview");
+    expect(upload).toContain("--prerelease");
+    expect(upload).toContain("gh release edit preview");
+    expect(upload).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(upload).not.toContain("secrets.");
+  });
+
+  it("only republishes the launcher when this commit actually moved the preview tag", () => {
+    for (const name of [
+      "Verify the release manifest's signature",
+      "Check the launcher assets against the manifest",
+      "Replace the launcher and manifest on the preview release",
+    ]) {
+      expect(step(name)).toContain("if: contains(steps.tags.outputs.list, 'preview')");
+    }
+  });
+
+  it("grants the publish job contents: write only for these steps", () => {
+    const job = workflow.slice(workflow.indexOf("  publish:\n"), workflow.indexOf("  verify_bootstrap:\n"));
+    const permissions = job.slice(job.indexOf("\n    permissions:\n"), job.indexOf("\n    outputs:\n"));
+    expect(permissions).toContain("contents: write\n");
   });
 });
 
