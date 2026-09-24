@@ -233,8 +233,12 @@ install_deployment() {
   fi
 
   docker rm -f "$registry_name" >/dev/null 2>&1 || true
+  # Pinned by digest (ai/orbit#1111) so a local run without
+  # ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE set still pulls a known-good image
+  # instead of a moving `:2` tag; CI points the variable at the dependency
+  # proxy copy of the same digest.
   docker run -d --name "$registry_name" -p "127.0.0.1:$registry_port:5000" \
-      "${ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE:-registry:2}" >/dev/null ||
+      "${ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE:-registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373}" >/dev/null ||
     fail 'local registry did not start'
   docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
@@ -1144,11 +1148,16 @@ journey_hostile_value_privacy_negatives() {
   cp -a -- "$target/.env-orbit" "$workdir/env-orbit.orig"
   printf 'ORBIT_PORT=%s\n' "$canary" >> "$target/.env-orbit"
 
+  # ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE routes this pull through the group
+  # dependency proxy in CI (ai/orbit#1111); a plain Docker Hub pull of the
+  # moving `busybox:stable` tag everywhere else -- this container is a
+  # disposable label vector for the hostile-value journey, not a pin Orbit
+  # ships, so nothing here needs a digest.
   docker run -d --name "orbit-journeys-$canary" \
     --label "com.docker.compose.project=$project" \
     --label "com.docker.compose.service=$canary" \
     --label "com.docker.compose.container-number=1" \
-    busybox:stable sleep 600 >/dev/null 2>&1 ||
+    "${ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE:-busybox:stable}" sleep 600 >/dev/null 2>&1 ||
     fail 'hostile-value: could not start the labelled container vector'
 
   output="$(repair --check 2>&1)" || status=$?

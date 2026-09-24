@@ -169,7 +169,19 @@ variables:
   # mirror.gcr.io that 403'd above.
   TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1
   # The digest scripts/test-integration.mjs pins for its disposable database.
-  POSTGRES_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+  POSTGRES_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66
+  # scripts/ci/start-installer-registry.sh's disposable loopback registry
+  # (acceptance, repair_journeys via its own copy below, and
+  # launcher_install_compat all start it). Through the group dependency proxy,
+  # same digest as the direct-Docker-Hub default the script falls back to, so
+  # these three jobs stop tripping Docker Hub's anonymous pull rate limit
+  # (ai/orbit#1111, pipeline 1597 jobs 22132/22133/22198/22199).
+  ORBIT_INSTALLER_REGISTRY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+  # Same reasoning, for tests/oidc/Dockerfile's FROM node:24-alpine: `smoke`
+  # builds it through docker-compose.acceptance.yml's OIDC_BASE_IMAGE_PREFIX
+  # build arg, and install_bootstrap/install_bootstrap_latest through
+  # scripts/test-install-bootstrap.sh reading the same variable name.
+  OIDC_BASE_IMAGE_PREFIX: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/
   # The tag `build_image` builds under, and nothing else: it names this commit,
   # so it is only ever the tag inside image.tar when this pipeline really built
   # it. The jobs that load that tarball take ORBIT_IMAGE_TAG from build.env
@@ -2281,10 +2293,15 @@ repair_journeys:
   needs: *needs_gated_image
   variables:
     ORBIT_REPAIR_JOURNEYS_IMAGE: orbit-repair-journeys:ci
-    # registry:2 has no official-image digest pin here (the harness's own
-    # throwaway registry, not a sidecar Orbit ships); only the pull source
-    # moves, through the group dependency proxy (ai/orbit#1022).
-    ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/registry:2
+    # The harness's own throwaway registry, not a sidecar Orbit ships, but it
+    # still hit Docker Hub's anonymous pull rate limit unpinned (ai/orbit#1022,
+    # #1111), so it now shares ORBIT_INSTALLER_REGISTRY_IMAGE's proxy path and
+    # digest instead of a bare `:2` tag.
+    ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE: ${ORBIT_INSTALLER_REGISTRY_IMAGE}
+    # The hostile-value journey's disposable label vector (ai/orbit#1111):
+    # same reasoning as the registry image above, but no digest -- see
+    # scripts/test-repair-journeys.sh.
+    ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/busybox:stable
   rules:
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
