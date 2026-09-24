@@ -9,10 +9,9 @@ import { describe, expect, it, vi } from "vitest";
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../process-budget.mjs";
 
 /*
- * The shared check publish-from-gitlab.yml and release-on-tag.yml both run
- * (ADR-0031 #8/#9) before uploading a file: does it match the sha256 the
- * signed manifest recorded for it. One implementation, so the two workflows
- * cannot drift onto different notions of "matches".
+ * The check release-on-tag.yml runs (ADR-0031 #9, amended #1107 option 21a)
+ * before uploading a file: does it match the sha256 the signed manifest
+ * recorded for it.
  */
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 

@@ -1110,9 +1110,11 @@ check_cosign_usable() {
 # the plain `install.sh | bash` path is also signature-checked and a moving
 # tag becomes a lookup, never the identity (ADR-0008).
 #
-# Only the channel shapes get-orbit.sh itself understands -- latest,
-# preview, a vX.Y.Z pin -- have a known release-assets location. Any other
-# ORBIT_CHANNEL has no self-fetch home; pass ORBIT_RELEASE_MANIFEST instead.
+# Only the stable channel shapes get-orbit.sh itself understands -- latest,
+# a vX.Y.Z pin -- have a known release-assets location. Preview is refused
+# here: a preview install needs a verified release manifest passed in via
+# ORBIT_RELEASE_MANIFEST instead. Any other ORBIT_CHANNEL has no self-fetch
+# home either; pass ORBIT_RELEASE_MANIFEST instead.
 #
 # Prints the verified manifest's path on success.
 self_fetch_release_manifest() {
@@ -1122,7 +1124,7 @@ self_fetch_release_manifest() {
   if [[ "$channel" == "latest" ]]; then
     asset_base="${release_manifest_base_url}/releases/latest/download"
   elif [[ "$channel" == "preview" ]]; then
-    asset_base="${release_manifest_base_url}/releases/download/preview"
+    fail "The self-fetch path only installs stable releases (ORBIT_CHANNEL=latest, the default, or a vX.Y.Z pin). A preview install needs a verified release manifest passed in via ORBIT_RELEASE_MANIFEST; see docs/releasing.md."
   elif [[ "$channel" =~ $version_pin_pattern ]]; then
     asset_base="${release_manifest_base_url}/releases/download/${channel}"
   else
@@ -1167,10 +1169,10 @@ self_fetch_release_manifest() {
         --certificate-oidc-issuer "$countersign_oidc_issuer" \
         "$manifest_json" > /dev/null 2>&1 ||
         fail "cosign could not verify the release manifest's countersignature bundle."
-    elif [[ "$release_manifest_stable" == 1 ]]; then
-      fail "No countersignature bundle for this release yet; refusing on channel ${channel}."
     else
-      printf 'Orbit installer: no countersignature bundle yet on preview; continuing with the key-based check only.\n' >&2
+      # self_fetch_release_manifest only ever runs for a stable channel
+      # (preview is refused above), so a missing bundle always refuses here.
+      fail "No countersignature bundle for this release yet; refusing on channel ${channel}."
     fi
   fi
 
