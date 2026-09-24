@@ -35,6 +35,15 @@ name: Countersign a stable release
 # registry.tomlawson.io. Signing needs no secret: `id-token: write` gives the
 # keyless identity, and the built-in token writes the signature to our own
 # package.
+#
+# ADR-0031 #4/#10: after countersigning the image, this also countersigns the
+# release's signed manifest, keyless, the same way -- the second custody
+# extends to the launcher pairing, not only the image. It downloads the
+# manifest and its .sig from the release's own GitHub assets (already
+# verified once and published there by release-on-tag.yml), verifies them
+# again here with the shared verifier, refuses if the manifest names a
+# different image digest than the one just countersigned, then signs and
+# uploads the bundle. `contents: write` is for that upload.
 
 on:
   workflow_dispatch:
@@ -64,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: read
+      contents: write
       packages: write
       id-token: write
 
@@ -139,3 +148,55 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             > /dev/null
           printf 'Countersigned %s (%s@%s).\n' "${RELEASE}" "${GHCR_IMAGE}" "${DIGEST}"
+
+      - name: Download the release manifest and its signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${RELEASE}" --repo "${GITHUB_REPOSITORY}" --clobber \
+            --pattern orbit-release-manifest.json --pattern orbit-release-manifest.json.sig
+
+      - name: Verify the release manifest's signature
+        run: bash scripts/ci/verify-release-manifest.sh orbit-release-manifest.json orbit-release-manifest.json.sig
+
+      # The manifest is signed independently of the image (sign_evidence
+      # mints both, but they are two signatures); a valid signature alone
+      # does not say it is *this* release's manifest, so that is checked
+      # explicitly before anything is countersigned.
+      - name: Refuse a manifest for the wrong image
+        env:
+          DIGEST: ${{ steps.release.outputs.digest }}
+        run: |
+          manifest_digest="$(node -e '
+            const doc = JSON.parse(require("node:fs").readFileSync("orbit-release-manifest.json", "utf8"));
+            process.stdout.write(typeof doc?.image?.digest === "string" ? doc.image.digest : "");
+          ')"
+          [[ "${manifest_digest}" == "${DIGEST}" ]] || {
+            printf '::error::the release manifest names image digest %s, not the %s just countersigned; refusing\n' \
+              "${manifest_digest:-<missing>}" "${DIGEST}" >&2
+            exit 1
+          }
+
+      - name: Countersign the release manifest keyless
+        run: |
+          cosign="$(bash scripts/ci/ensure-cosign.sh)"
+          "${cosign}" sign-blob --yes \
+            --bundle orbit-release-manifest.json.sigstore.json \
+            orbit-release-manifest.json
+
+      - name: Verify the manifest countersignature bundle
+        run: |
+          cosign="$(bash scripts/ci/ensure-cosign.sh)"
+          "${cosign}" verify-blob \
+            --bundle orbit-release-manifest.json.sigstore.json \
+            --certificate-identity-regexp '^https://github.com/tomlawesome/orbit/' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            orbit-release-manifest.json > /dev/null
+
+      - name: Upload the manifest countersignature bundle to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${RELEASE}" --repo "${GITHUB_REPOSITORY}" --clobber \
+            orbit-release-manifest.json.sigstore.json
+          printf 'Uploaded the manifest countersignature bundle to %s.\n' "${RELEASE}"

@@ -83,7 +83,10 @@ describe("countersign workflow", () => {
   it("holds only what signing needs, and only a read token for GitLab", () => {
     expect(workflow).toContain("permissions:\n  contents: read\n");
     const job = workflow.slice(workflow.indexOf("  countersign:\n"));
-    expect(job).toContain("      contents: read\n      packages: write\n      id-token: write\n");
+    // contents: write at the job level only, for uploading the manifest
+    // countersignature bundle (ADR-0031 #10) -- the workflow-level default
+    // above stays read-only.
+    expect(job).toContain("      contents: write\n      packages: write\n      id-token: write\n");
     expect(job).not.toContain("attestations: write");
     const secrets = [...workflow.matchAll(/secrets\.([A-Z_]+)/g)].map((match) => match[1]);
     expect(new Set(secrets)).toEqual(new Set(["GITLAB_READ_TOKEN_NAME", "GITLAB_READ_TOKEN", "GITHUB_TOKEN"]));
@@ -93,5 +96,67 @@ describe("countersign workflow", () => {
     const uses = [...workflow.matchAll(/uses: ([^\s]+)/g)].map((match) => match[1]);
     expect(uses.length).toBeGreaterThan(0);
     for (const action of uses) expect(action).toMatch(/@[0-9a-f]{40}$/);
+  });
+});
+
+/*
+ * ADR-0031 #4/#10: the release manifest gets the same second signature the
+ * image does, keyless, but only after the shared verifier passes on the
+ * manifest actually downloaded from this release, and only for the digest
+ * this run just countersigned -- never a manifest signature taken on trust.
+ */
+describe("countersign workflow: manifest countersignature", () => {
+  it("downloads the manifest and its .sig from the release's own assets, and verifies them", () => {
+    const download = step("Download the release manifest and its signature");
+    expect(download).toContain("gh release download");
+    expect(download).toContain("orbit-release-manifest.json");
+    expect(download).toContain("orbit-release-manifest.json.sig");
+
+    const verify = step("Verify the release manifest's signature");
+    expect(verify).toContain(
+      "run: bash scripts/ci/verify-release-manifest.sh orbit-release-manifest.json orbit-release-manifest.json.sig",
+    );
+    expect(stepStart("Verify the countersignature")).toBeLessThan(stepStart("Download the release manifest and its signature"));
+    expect(stepStart("Download the release manifest and its signature")).toBeLessThan(
+      stepStart("Verify the release manifest's signature"),
+    );
+  });
+
+  it("refuses a manifest naming a digest other than the one just countersigned", () => {
+    const refuse = step("Refuse a manifest for the wrong image");
+    expect(refuse).toContain("DIGEST: ${{ steps.release.outputs.digest }}");
+    expect(refuse).toContain('[[ "${manifest_digest}" == "${DIGEST}" ]]');
+    expect(refuse).toContain("exit 1");
+    expect(stepStart("Verify the release manifest's signature")).toBeLessThan(
+      stepStart("Refuse a manifest for the wrong image"),
+    );
+  });
+
+  it("signs the manifest keyless as a bundle, verifies it, then uploads it to the release", () => {
+    const sign = step("Countersign the release manifest keyless");
+    expect(sign).toContain('"${cosign}" sign-blob --yes \\');
+    expect(sign).toContain("--bundle orbit-release-manifest.json.sigstore.json");
+    expect(sign).toContain("orbit-release-manifest.json");
+    expect(sign).not.toContain("--key");
+    expect(sign).not.toContain("tlog-upload=false");
+
+    const verify = step("Verify the manifest countersignature bundle");
+    expect(verify).toContain("--certificate-identity-regexp '^https://github.com/tomlawesome/orbit/'");
+    expect(verify).toContain("--certificate-oidc-issuer https://token.actions.githubusercontent.com");
+
+    const upload = step("Upload the manifest countersignature bundle to the release");
+    expect(upload).toContain("gh release upload");
+    expect(upload).toContain("--clobber");
+    expect(upload).toContain("orbit-release-manifest.json.sigstore.json");
+
+    expect(stepStart("Refuse a manifest for the wrong image")).toBeLessThan(
+      stepStart("Countersign the release manifest keyless"),
+    );
+    expect(stepStart("Countersign the release manifest keyless")).toBeLessThan(
+      stepStart("Verify the manifest countersignature bundle"),
+    );
+    expect(stepStart("Verify the manifest countersignature bundle")).toBeLessThan(
+      stepStart("Upload the manifest countersignature bundle to the release"),
+    );
   });
 });
