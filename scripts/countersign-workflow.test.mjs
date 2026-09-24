@@ -41,7 +41,7 @@ describe("countersign workflow", () => {
   });
 
   it("never pastes the input into a shell", () => {
-    const runs = workflow.split("\n").filter((line, index, lines) => {
+    const runs = workflow.split("\n").filter((_line, index, lines) => {
       const before = lines.slice(0, index + 1).reverse();
       const runLine = before.findIndex((l) => /^\s+run:/.test(l));
       const withLine = before.findIndex((l) => /^\s+(with|env):/.test(l));
