@@ -112,6 +112,24 @@ const VERIFY_STUB = [
   "",
 ].join("\n");
 
+// Stands in for scripts/ci/verify-release-manifest.sh (ADR-0031 #4/#5): its
+// own cosign-and-openssl behaviour has real-signature tests in
+// scripts/ci/verify-release-manifest.test.mjs, so this stub only proves the
+// call site -- the manifest path handed over, and a refusal's message and
+// exit code passing through publication untouched, the same shape VERIFY_STUB
+// proves for the evidence verifier.
+const MANIFEST_VERIFY_STUB = [
+  "#!/usr/bin/env bash",
+  "set -uo pipefail",
+  "printf 'manifest-verify\\x1f%s\\x1e' \"$1\" >> \"$STUB_LOG\"",
+  'if [ -n "${STUB_MANIFEST_VERIFY_FAIL:-}" ]; then',
+  "  printf 'verify-release-manifest: %s\\n' \"$STUB_MANIFEST_VERIFY_FAIL\" >&2",
+  '  exit 1',
+  "fi",
+  "exit 0",
+  "",
+].join("\n");
+
 function run({
   branch = "preview",
   evidence = { imageDigest: DIGEST },
@@ -133,12 +151,15 @@ function run({
   for (const [name, content] of [
     ["docker", DOCKER_STUB],
     ["verify", VERIFY_STUB],
+    ["manifest-verify", MANIFEST_VERIFY_STUB],
   ]) {
     writeFileSync(join(dir, name), content);
     chmodSync(join(dir, name), 0o755);
   }
   const evidenceFile = join(dir, "gitlab-tested-image.json");
   if (!noEvidenceFile) writeFileSync(evidenceFile, JSON.stringify(evidence));
+  const manifestFile = join(dir, "orbit-release-manifest.json");
+  writeFileSync(manifestFile, JSON.stringify({ image: { digest: DIGEST } }));
 
   const result = failOnProcessDeadline(
     spawnSync("bash", [script], {
@@ -151,6 +172,8 @@ function run({
         CI_COMMIT_REF_NAME: branch,
         ORBIT_EVIDENCE_FILE: evidenceFile,
         ORBIT_VERIFY_SCRIPT: join(dir, "verify"),
+        ORBIT_RELEASE_MANIFEST_FILE: manifestFile,
+        ORBIT_VERIFY_MANIFEST_SCRIPT: join(dir, "manifest-verify"),
         STUB_LOG: logFile,
         STUB_DIGESTS_DIR: digestsDir,
         STUB_LABEL_REVISION: labelRevision,
@@ -184,17 +207,34 @@ describe("publish-channel.sh", () => {
     const recorded = calls();
     const verify = recorded.find((call) => call[0] === "verify");
     expect(verify).toEqual(["verify", IMAGE, DIGEST, COMMIT, "preview"]);
+    const manifestVerify = recorded.find((call) => call[0] === "manifest-verify");
+    expect(manifestVerify[1]).toContain("orbit-release-manifest.json");
 
     const create = recorded.find((call) => call[1]?.includes("imagetools create"));
     expect(create[1]).toContain(`--tag ${IMAGE}:preview`);
     expect(create[1]).toContain(`${IMAGE}@${DIGEST}`);
     // The verifier runs before anything touches the image, and publication
-    // moves no bytes: a tag is created, nothing is pushed or attested.
+    // moves no bytes: a tag is created, nothing is pushed or attested. The
+    // manifest verifier runs before the tag is created too (ADR-0031 #4).
     expect(recorded.findIndex((call) => call[0] === "verify")).toBeLessThan(
       recorded.findIndex((call) => call[1]?.includes("pull")),
     );
+    expect(recorded.findIndex((call) => call[0] === "manifest-verify")).toBeLessThan(
+      recorded.findIndex((call) => call[1]?.includes("imagetools create")),
+    );
     expect(recorded.some((call) => call[1]?.startsWith("push"))).toBe(false);
     expect(recorded.some((call) => call[1]?.includes("attest"))).toBe(false);
+  });
+
+  it("refuses when the release manifest fails verification, before anything is tagged", () => {
+    const { result, calls } = run({
+      env: { STUB_MANIFEST_VERIFY_FAIL: "openssl could not verify orbit-release-manifest.json.sig" },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "verify-release-manifest: openssl could not verify orbit-release-manifest.json.sig",
+    );
+    expect(calls().some((call) => call[1]?.includes("imagetools create"))).toBe(false);
   });
 
   it("tags hotfix-<name> for a hotfix branch", () => {
