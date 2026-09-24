@@ -112,6 +112,17 @@ describe("exact-image publication workflow", () => {
     },
   );
 
+  it("hands both installer runs the manifest for the image under test (#1107)", () => {
+    // install.sh otherwise self-fetches a signed release manifest, which does
+    // not exist for this workflow's local, unpublished image.
+    for (const step of ["installer_refusal", "Run installer against the pre-provisioned disposable registry"]) {
+      const start = workflow.indexOf(step);
+      expect(start).toBeGreaterThan(-1);
+      const block = workflow.slice(start, workflow.indexOf("run:", start));
+      expect(block).toContain("ORBIT_RELEASE_MANIFEST: ${{ steps.installer_registry.outputs.release_manifest }}");
+    }
+  });
+
   it("can be dispatched on demand, and never runs on a label (#572, #757)", () => {
     const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
 
