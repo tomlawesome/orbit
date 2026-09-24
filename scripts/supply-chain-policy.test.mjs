@@ -90,12 +90,19 @@ describe("supply-chain policy", () => {
       "docker-compose.yml",
       "scripts/test-integration.mjs",
       ".gitlab-ci.yml",
+      "compose/docker-compose.dependency-proxy.yml",
     ];
     const discovered = new Map();
     for (const file of files) {
       const content = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
       for (const line of content.split(/\r?\n/u)) {
-        const from = line.match(/^FROM\s+(\S+)/u)?.[1];
+        // The optional ${OIDC_BASE_IMAGE_PREFIX} strips the group dependency
+        // proxy path tests/oidc/Dockerfile's FROM carries for CI
+        // (ai/orbit#1111): the policy tracks the vendor reference, and the
+        // digest after it is unchanged either way.
+        const from = line
+          .match(/^FROM\s+(\S+)/u)?.[1]
+          ?.replace(/^\$\{OIDC_BASE_IMAGE_PREFIX\}/u, "");
         const compose =
           file === "docker-compose.yml"
             ? line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1]
@@ -114,7 +121,16 @@ describe("supply-chain policy", () => {
               )?.[1]
             : undefined
         );
-        const reference = from ?? compose ?? integration ?? pipelinePostgres;
+        // The dependency-proxy overlay (ai/orbit#1109) holds its own copies
+        // of the sidecar pins behind the same group proxy prefix.
+        const proxied =
+          file === "compose/docker-compose.dependency-proxy.yml"
+            ? line.match(
+                /^\s+image:\s+\$\{CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\/(?:library\/)?(\S+)\s*$/u,
+              )?.[1]
+            : undefined;
+        const reference =
+          from ?? compose ?? integration ?? pipelinePostgres ?? proxied;
         if (!reference || reference === "base") continue;
         if (reference.startsWith("${ORBIT_IMAGE:")) {
           expect(reference).toBe(
