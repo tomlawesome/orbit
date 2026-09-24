@@ -31,6 +31,43 @@
         "_IMAGE:\\s+(?<depName>[^\\s:@]+):(?<currentValue>[^\\s@]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
       ],
       "datasourceTemplate": "docker"
+    },
+    {
+      "description": "cosign's release-binary pin in scripts/ci/ensure-cosign.sh (#1116, alongside the crane and gitleaks pins below): no manager reads a version pinned inside a shell script. This reads COSIGN_VERSION and bumps it; COSIGN_SHA256, a release asset checksum, is not something Renovate can compute, so a version-only bump leaves it mismatched and the script's own checksum check fails until a human copies the new checksum from that release's cosign_checksums.txt by hand -- the comment beside the pin says so.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^scripts/ci/ensure-cosign\\.sh$/"],
+      "matchStrings": [
+        "COSIGN_VERSION=\"(?<currentValue>[0-9.]+)\""
+      ],
+      "depNameTemplate": "sigstore/cosign",
+      "packageNameTemplate": "sigstore/cosign",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "crane's release-tarball pin in scripts/ci/ensure-crane.sh (#1116), the imjasonh/setup-crane replacement from #1114. Same shape as the cosign manager above: this bumps CRANE_VERSION only, CRANE_SHA256 needs a human copying the new checksum from that release's checksums.txt.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^scripts/ci/ensure-crane\\.sh$/"],
+      "matchStrings": [
+        "CRANE_VERSION=\"(?<currentValue>[0-9.]+)\""
+      ],
+      "depNameTemplate": "google/go-containerregistry",
+      "packageNameTemplate": "google/go-containerregistry",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "gitleaks is pinned twice -- the `gitleaks` job's GITLEAKS_VERSION in .gitlab-ci.yml and the matching gitleaks_version in scripts/test-secret-scan.sh, kept in sync by comment, not by code (#1116). This manager reads both; each has its own *_SHA256 next to it that Renovate cannot compute, so a version-only bump leaves both mismatched and the checksum check in each place fails until a human copies the new checksum from that release's checksums file by hand.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.gitlab-ci\\.yml$/", "/^scripts/test-secret-scan\\.sh$/"],
+      "matchStrings": [
+        "GITLEAKS_VERSION:\\s*\"(?<currentValue>[0-9.]+)\"",
+        "gitleaks_version=\"(?<currentValue>[0-9.]+)\""
+      ],
+      "depNameTemplate": "gitleaks/gitleaks",
+      "packageNameTemplate": "gitleaks/gitleaks",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ],
   "vulnerabilityAlerts": {
