@@ -130,7 +130,12 @@ trap cleanup EXIT INT TERM
 # --- the disposable identity provider --------------------------------------
 
 start_oidc() {
-  docker build --quiet -t "${project_name}-oidc:test" "$repo_root/tests/oidc" >/dev/null ||
+  # OIDC_BASE_IMAGE_PREFIX routes the sidecar's FROM node:24-alpine through
+  # the group dependency proxy in CI (ai/orbit#1111); empty, and so a direct
+  # Docker Hub pull, everywhere else.
+  docker build --quiet -t "${project_name}-oidc:test" \
+    --build-arg "OIDC_BASE_IMAGE_PREFIX=${OIDC_BASE_IMAGE_PREFIX:-}" \
+    "$repo_root/tests/oidc" >/dev/null ||
     fail "could not build the disposable OIDC sidecar"
   docker run --detach --name "$oidc_container" \
     --env TEST_OIDC_ISSUER="$issuer" \
