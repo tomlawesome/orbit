@@ -2717,10 +2717,43 @@ record_image:
       bash scripts/ci/gitlab-record-tested-image.sh \
         "${CI_REGISTRY_IMAGE}@${published_digest}" "$published_digest" "$policy_version"
       cat .orbit-supply-chain/gitlab-tested-image.json
+    # ADR-0031 #1: the signed release manifest binding this exact image
+    # digest to the launcher build and first-run scripts shipped beside it
+    # (scripts/ci/write-release-manifest.sh, ADR-0031 implementation slice
+    # 3). Three inputs below are not produced anywhere in this pipeline yet
+    # and the step fails closed, naming which one is missing, until they
+    # land:
+    #   - launcher/pin.json (ADR-0031 implementation slice 1).
+    #   - the build_launcher job's two archives (slice 2, not yet written):
+    #     once that job exists, add `needs: job: build_launcher, artifacts:
+    #     true` above and point ORBIT_LAUNCHER_*_ARCHIVE at its artifact
+    #     paths instead of the .orbit-launcher-artifacts/ placeholder below.
+    #   - scripts/get-orbit.sh (slice 6).
+    - |
+      set -eu
+      [ -f launcher/pin.json ] ||
+        { echo "record_image: launcher/pin.json is missing (ADR-0031 implementation slice 1 not yet landed)" >&2; exit 1; }
+      launcher_tag="$(sed -n 's/.*"tag"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' launcher/pin.json | head -1)"
+      launcher_commit="$(sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' launcher/pin.json | head -1)"
+      channel=preview
+      hotfix_prefix=hotfix
+      case "$CI_COMMIT_BRANCH" in
+        hotfix/*) channel="${hotfix_prefix}$(printf -- '-%s' "${CI_COMMIT_BRANCH#hotfix/}" | tr -c 'A-Za-z0-9._-' '-')" ;;
+      esac
+      version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$sha_reference")"
+      ORBIT_VERSION="$version" \
+      ORBIT_CHANNEL="$channel" \
+      ORBIT_LAUNCHER_TAG="$launcher_tag" \
+      ORBIT_LAUNCHER_COMMIT="$launcher_commit" \
+      ORBIT_LAUNCHER_AMD64_ARCHIVE="${CI_PROJECT_DIR}/.orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz" \
+      ORBIT_LAUNCHER_ARM64_ARCHIVE="${CI_PROJECT_DIR}/.orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz" \
+        bash scripts/ci/write-release-manifest.sh "$CI_REGISTRY_IMAGE" "$published_digest"
+      cat .orbit-supply-chain/orbit-release-manifest.json
   artifacts:
     name: orbit-gitlab-tested-image
     paths:
       - .orbit-supply-chain/gitlab-tested-image.json
+      - .orbit-supply-chain/orbit-release-manifest.json
     expire_in: 90 days
     when: on_success
 
