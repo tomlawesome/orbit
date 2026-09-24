@@ -90,6 +90,7 @@ describe("supply-chain policy", () => {
       "docker-compose.yml",
       "scripts/test-integration.mjs",
       ".gitlab-ci.yml",
+      "compose/docker-compose.dependency-proxy.yml",
     ];
     const discovered = new Map();
     for (const file of files) {
@@ -114,7 +115,16 @@ describe("supply-chain policy", () => {
               )?.[1]
             : undefined
         );
-        const reference = from ?? compose ?? integration ?? pipelinePostgres;
+        // The dependency-proxy overlay (ai/orbit#1109) holds its own copies
+        // of the sidecar pins behind the same group proxy prefix.
+        const proxied =
+          file === "compose/docker-compose.dependency-proxy.yml"
+            ? line.match(
+                /^\s+image:\s+\$\{CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\/(?:library\/)?(\S+)\s*$/u,
+              )?.[1]
+            : undefined;
+        const reference =
+          from ?? compose ?? integration ?? pipelinePostgres ?? proxied;
         if (!reference || reference === "base") continue;
         if (reference.startsWith("${ORBIT_IMAGE:")) {
           expect(reference).toBe(
