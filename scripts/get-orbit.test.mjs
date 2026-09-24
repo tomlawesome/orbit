@@ -386,28 +386,23 @@ describe("get-orbit.sh", () => {
     expect(() => readFileSync(launcherLog)).toThrow();
   });
 
-  it("on preview, continues without a countersignature bundle when cosign is on PATH", () => {
+  it("refuses ORBIT_CHANNEL=preview without making any network request (#1107)", () => {
     const dir = makeDir("get-orbit-");
-    const { privatePem, publicPem } = generateKeyPair(dir);
-    const baseUrl = buildRelease({ dir, arch, privatePem, routeDir: "releases/download/preview" });
     const launcherLog = join(dir, "launcher.log");
-    const cosignBin = makeFakeCosign(dir);
 
     const result = run({
-      baseUrl,
+      baseUrl: `file://${join(dir, "never-fetched")}`,
       launcherLog,
       env: {
         ORBIT_CHANNEL: "preview",
         XDG_CACHE_HOME: makeDir("get-orbit-cache-"),
-        ORBIT_GET_TEST_PUBLIC_KEY_FILE: publicPem,
-        ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE: "1",
-        PATH: `${cosignBin}:${pathWithoutCosign}`,
       },
     });
 
-    expect(result.status).toBe(0);
-    expect(result.stderr).toContain("no countersignature bundle yet on preview");
-    expect(readFileSync(launcherLog, "utf8")).toContain("ORBIT_RELEASE_MANIFEST=");
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("only installs stable releases");
+    expect(result.stderr).toContain("ORBIT_RELEASE_MANIFEST");
+    expect(() => readFileSync(launcherLog)).toThrow();
   });
 
   it("on latest, refuses without a countersignature bundle when cosign is on PATH", () => {
