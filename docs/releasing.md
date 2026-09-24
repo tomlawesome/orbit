@@ -243,9 +243,90 @@ cosign verify-attestation --key cosign.pub \
   registry.tomlawson.io/ai/orbit@sha256:...
 ```
 
-Nothing on a user's machine runs these checks yet. #1107 covers shipping the
-launcher with Orbit, so that the program that installs Orbit is signed and
-checks both signatures itself.
+A user's own machine runs the first of these checks automatically: see "The
+launcher and signed release manifest" below.
+
+## The launcher and signed release manifest (ADR-0031)
+
+A user's first command,
+`curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/get-orbit.sh | bash`,
+installs a signed launcher, not just a signed image. This is what makes that
+possible.
+
+**The manifest.** Every `preview`/`hotfix/*` pipeline's `record_image` job
+writes `orbit-release-manifest.json`: the version, channel, Orbit commit, the
+image's repository and digest, the launcher pin (`launcher/pin.json`'s tag
+and commit), and the sha256 of every file shipped alongside it -- the two
+launcher archives, `install.sh` and `get-orbit.sh`. It is one statement,
+"this launcher and these scripts go with this image", covering all of them
+at once rather than one signature per file (which would prove each file is
+ours without proving they belong together).
+
+`sign_evidence` signs the manifest the same way it attests the image: a
+cosign key-based blob signature with the same committed key, no transparency
+log, written to `orbit-release-manifest.json.sig`. Every consumer verifies it
+two ways -- with cosign and with `openssl dgst -sha256 -verify` -- through
+the one shared script, `scripts/ci/verify-release-manifest.sh`.
+
+**Where it travels.** `publish-from-gitlab.yml` downloads the manifest, its
+`.sig` and the two launcher archives from the same GitLab pipeline that
+tested the commit, verifies them, checks each file's sha256 against the
+manifest, and replaces the assets on GitHub's rolling `preview` prerelease.
+`release-on-tag.yml` does the same for the commit a stable tag points at, and
+attaches the assets to that permanent release instead. Neither workflow
+rebuilds anything; both upload `install.sh` and `get-orbit.sh` from their own
+checkout, which is safe only because it is a checkout of the exact tested
+commit -- the same commit SHA can only ever mean the same file bytes, which
+is what each workflow's asset check proves rather than assumes.
+
+**Second signature.** Straight after countersigning a stable release's image
+(above), the **Countersign a stable release** workflow also countersigns the
+manifest: it downloads the manifest and `.sig` already on the release,
+verifies them, refuses if the manifest names a different image digest than
+the one it just countersigned, then signs the manifest keyless
+(`cosign sign-blob --bundle`) and uploads
+`orbit-release-manifest.json.sigstore.json` to the release. Preview releases
+never get this bundle -- a preview is for testing, not for trusting.
+
+**What a user's machine checks.** `scripts/get-orbit.sh` downloads the
+manifest and `.sig` for the requested channel or pinned version, verifies the
+signature with `openssl` against a key baked into the script, downloads the
+launcher archive and `install.sh`, checks their sha256s against the manifest,
+and only then runs the launcher. If `cosign` is installed, it also checks the
+keyless countersignature bundle -- required on the `latest`/pinned channel,
+optional (and usually absent) on `preview`. `install.sh` run on its own does
+the same manifest fetch and check for whichever channel it is given, so the
+plain `install.sh | bash` path is signature-checked too.
+
+**Key fingerprint.** The embedded key in `get-orbit.sh` and `install.sh` is
+`cosign.pub`, byte for byte -- a test fails if either drifts. To check the
+fingerprint yourself:
+
+```sh
+openssl pkey -pubin -in cosign.pub -outform DER | openssl dgst -sha256
+```
+
+```
+SHA2-256(stdin)= ed183527165c366de2a4005d8b20c3df687ea2e35d488de7961806867c9d1a11
+```
+
+**Rotation.** Follows "Key rotation" above, plus one thing specific to the
+launcher path: the scripts on `main` verify only manifests signed after the
+rotation, since they embed only the current key. `latest` and `preview`
+always carry a manifest signed under the current key; a user who pins an
+older `ORBIT_VERSION` must also fetch `get-orbit.sh` from that version's own
+tag (`…/orbit/vX.Y.Z/scripts/get-orbit.sh`), which still embeds the key that
+release was actually signed with.
+
+**A limit worth stating plainly:** on the `latest` channel there is no
+freshness check. Whoever controls what `get-orbit.sh` downloads from could
+serve an *older*, correctly signed release instead of the newest one --
+signed is not the same as current. Pinning `ORBIT_VERSION=vX.Y.Z` closes
+this: both `get-orbit.sh` and `install.sh` refuse a manifest whose own
+`version` field does not match the pin, so an older release can only be
+installed by asking for it by name, never served silently in place of a
+newer one. See `docs/installer-guarantees.md` for the full list of what is
+and is not checked.
 
 ### Version tags in GHCR start at v1.3.0
 

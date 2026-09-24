@@ -6,7 +6,26 @@ name: Release the mirrored stable tag
 # mirror carries that tag here within minutes, and this workflow's only job
 # is to turn it into a GitHub Release so the public Releases page keeps
 # working. GitHub does no judging of its own -- it never refuses a tag or
-# recomputes anything.
+# recomputes anything for the image.
+#
+# ADR-0031 #9: the same signed launcher and release manifest that
+# publish-from-gitlab.yml attaches to the rolling `preview` prerelease are
+# attached here too, to the permanent stable release -- the exact bytes
+# GitLab already tested and signed for this commit. Nothing is rebuilt: a
+# tag only exists because `promote_stable` already validated the preview
+# digest, and `main`/`preview` are the same commit at promotion, so this
+# commit's own GitLab pipeline is the one that tested it.
+#
+# That pipeline is a *push* pipeline for either `preview` or a `hotfix/*`
+# branch (scripts/ci/gitlab-await-tested-image.sh only accepts those), and
+# the tag itself does not record which -- so "Find the branch GitLab tested
+# this commit on" below answers that by checking which mirrored branch's
+# history contains the tagged commit, preferring `preview`.
+#
+# Secrets: the same read-only GitLab project access token
+# publish-from-gitlab.yml uses (GITLAB_READ_TOKEN_NAME, GITLAB_READ_TOKEN),
+# for reading pipeline/job data and downloading artifacts. Nothing here can
+# write to GitLab.
 
 on:
   push:
@@ -16,10 +35,16 @@ on:
 permissions:
   contents: write
 
+env:
+  GITLAB_API_URL: https://gitlab.tomlawson.io/api/v4
+  GITLAB_PROJECT_ID: "49"
+  GITLAB_REGISTRY: registry.tomlawson.io
+
 jobs:
   release:
     name: Create GitHub release from mirrored tag
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Create the release if it does not already exist
         env:
@@ -28,6 +53,85 @@ jobs:
         run: |
           if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
             printf 'Release %s already exists; nothing to do.\n' "${TAG}"
-            exit 0
+          else
+            gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes
           fi
-          gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes
+
+      - name: Check out the tagged commit and its preview/hotfix branches
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The tagged commit is also the head of `main`, which every push shares
+      # -- that alone cannot say which branch GitLab tested it on. Preferring
+      # `preview` matches every promotion so far (ADR-0031's own reading of
+      # #821); a hotfix promotion is the only case where more than one
+      # candidate could contain the commit.
+      - name: Find the branch GitLab tested this commit on
+        id: source
+        env:
+          TAG_COMMIT: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          candidates="$(git for-each-ref --format='%(refname:short)' --contains "${TAG_COMMIT}" \
+            refs/remotes/origin/preview 'refs/remotes/origin/hotfix/*')"
+          if grep -qx 'origin/preview' <<< "${candidates}"; then
+            ref=preview
+          else
+            ref="$(head -n1 <<< "${candidates}" | sed 's#^origin/##')"
+          fi
+          [[ -n "${ref}" ]] || {
+            printf '::error::no mirrored preview or hotfix/* branch contains %s; cannot tell GitLab which pipeline tested this release.\n' "${TAG_COMMIT}" >&2
+            exit 1
+          }
+          printf 'Testing branch for %s: %s\n' "${TAG_COMMIT}" "${ref}"
+          printf 'ref=%s\n' "${ref}" >> "${GITHUB_OUTPUT}"
+
+      # Same script, same evidence shape as publish-from-gitlab.yml -- this
+      # is the promoted commit's own tested pipeline, not a fresh push, so a
+      # short wait budget is enough: `promote_stable` only creates the tag
+      # after that pipeline already succeeded.
+      - name: Fetch the tested launcher, manifest and .sig from GitLab
+        id: evidence
+        env:
+          GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
+          ORBIT_COMMIT: ${{ github.sha }}
+          ORBIT_REF: ${{ steps.source.outputs.ref }}
+          ORBIT_FETCH_LAUNCHER_ASSETS: "1"
+          ORBIT_WAIT_MINUTES: "10"
+        run: bash scripts/ci/gitlab-await-tested-image.sh
+
+      - name: Verify the release manifest's signature
+        run: |
+          bash scripts/ci/verify-release-manifest.sh \
+            "${{ steps.evidence.outputs.release_manifest }}" \
+            "${{ steps.evidence.outputs.release_manifest_sig }}"
+
+      # install.sh and get-orbit.sh come from this checkout, not a second
+      # GitLab download: the checkout above is the exact tagged commit, and
+      # git's content addressing means that commit SHA can only ever mean
+      # the same file bytes on either host -- this check proves that rather
+      # than assuming it.
+      - name: Check the launcher assets against the manifest
+        run: |
+          bash scripts/ci/verify-manifest-assets.sh \
+            "${{ steps.evidence.outputs.release_manifest }}" \
+            "orbit-launcher_linux_amd64.tar.gz=${{ steps.evidence.outputs.launcher_amd64_archive }}" \
+            "orbit-launcher_linux_arm64.tar.gz=${{ steps.evidence.outputs.launcher_arm64_archive }}" \
+            "install.sh=scripts/install.sh" \
+            "get-orbit.sh=scripts/get-orbit.sh"
+
+      - name: Attach the launcher and manifest to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          MANIFEST: ${{ steps.evidence.outputs.release_manifest }}
+          MANIFEST_SIG: ${{ steps.evidence.outputs.release_manifest_sig }}
+          AMD64_ARCHIVE: ${{ steps.evidence.outputs.launcher_amd64_archive }}
+          ARM64_ARCHIVE: ${{ steps.evidence.outputs.launcher_arm64_archive }}
+        run: |
+          gh release upload "${TAG}" --repo "${GITHUB_REPOSITORY}" --clobber \
+            "${MANIFEST}" "${MANIFEST_SIG}" "${AMD64_ARCHIVE}" "${ARM64_ARCHIVE}" \
+            scripts/install.sh scripts/get-orbit.sh

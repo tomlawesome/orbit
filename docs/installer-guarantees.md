@@ -19,8 +19,8 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   the fixed safe/reversible action set only: fix-permissions,
   restore-transaction, restart-services; stage two/dangerous actions remain
   unimplemented) was added 2026-08-13.
-- **Totals:** 371 guarantees — 214 HIGH, 124 MEDIUM, 33 LOW.
-  Install/configuration family: 207 (118 HIGH). Backup/recovery/deploy
+- **Totals:** 381 guarantees — 219 HIGH, 128 MEDIUM, 34 LOW.
+  Install/configuration family: 217 (123 HIGH). Backup/recovery/deploy
   family: 164 (96 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
@@ -294,11 +294,50 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 55. The bounded identity line (`identity schema_version=<v> applied_version=<v> image=<v>`) carries exactly these three ADR-0008 public values — the only place a configured value ever reaches stdout in this script — read directly from `.env-orbit` (never via `configure.sh`, decision 2's source-less rule) only once the managed-file check has already proven `.env-orbit` trustworthy (`env_status == ok`, mirroring `check_application_container`'s own gate), and only after each value independently passes its own bounded format check (the `image` field reuses `check_application_container`'s exact `ORBIT_IMAGE` pattern). A missing or malformed value renders as the fixed placeholder `unknown` — the same convention docs/engine-events.md already uses for an unrecognised enum value — never the raw value and never a shorter line; allowlisting is inherited entirely from `--check`/`--plan`'s own enum-only contract, with no second redaction layer that could drift from it. — repair.sh:3574-3604 — category: secret-handling — criticality: HIGH
 56. The ADR-0016 supported-version gate (#681) fails closed on absence: a readable `.env-orbit` whose `ORBIT_CONFIG_APPLIED_VERSION` is missing, malformed, or names a published release below the v1.3.0 floor raises `deployment-version-unsupported`, and while that finding is present `--execute` (either form) refuses the ENTIRE batch up front — `execution result=refused done=0 failed=0 reason=deployment-version-unsupported`, exit 6, nothing executed, nothing mutated — never just the finding's own (manual, non-executable) plan entry. The gate yields in exactly two states, both deliberate: major version 0 (development builds, not published releases), and any run where `.env-orbit` is untrustworthy or a configuration finding is present — a half-written file legitimately lacks the key, and the restore that repairs it must not be refused by it; the version re-evaluates on the next run. — repair.sh:2144-2179,3860-3875 — category: refusal/fail-closed — criticality: HIGH
 
+## get-orbit.sh (first-run script, ADR-0031 #6 — fetches, verifies and hands off to the signed launcher)
+
+1. Only Linux `amd64`/`arm64` hosts are supported; any other OS or architecture refuses before any network call. — get-orbit.sh:36-44 — category: input-validation — criticality: LOW
+2. `ORBIT_VERSION` must match `^v[0-9]+\.[0-9]+\.[0-9]+$` and `ORBIT_CHANNEL` must be exactly `latest` or `preview`; anything else refuses before any download begins. — get-orbit.sh:46-61 — category: input-validation — criticality: MEDIUM
+3. The embedded public key is the committed `cosign.pub`, byte for byte (checked by `scripts/get-orbit.test.mjs`); overriding it requires two independent test-only environment variables together (`ORBIT_GET_TEST_PUBLIC_KEY_FILE` and `ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE=1`), so a user's own environment can never silently swap the trust anchor. — get-orbit.sh:16-20,23-28,67-73 — category: provenance/immutability — criticality: HIGH
+4. The release manifest's signature is verified with `openssl dgst -sha256 -verify` against the embedded key before any field of the manifest is read; an invalid base64 signature or a failed verification refuses immediately and the private working directory is removed. — get-orbit.sh:85-90 — category: refusal/fail-closed — criticality: HIGH
+5. When `cosign` is on `PATH`, the keyless countersignature bundle is required on the `latest` and version-pinned channels (missing or failing verification refuses) and is optional only on `preview`, where its absence is reported on stderr and the run continues with the key-based check alone. — get-orbit.sh:92-109 — category: refusal/fail-closed — criticality: HIGH
+6. A version pin (`ORBIT_VERSION`) is checked against the signed manifest's own `version` field after the signature verifies, refusing a validly signed manifest for any other release — a correctly signed older release can never be substituted for the one asked for. — get-orbit.sh:116-122 — category: provenance/immutability — criticality: HIGH
+7. The launcher archive and `install.sh` are each checked with `sha256sum -c` against the manifest's own recorded checksum before either is used; either mismatch refuses. — get-orbit.sh:123-135 — category: provenance/immutability — criticality: HIGH
+8. Every downloaded file is written under a private `mktemp -d` working directory that is unconditionally removed on exit (`trap ... EXIT`), so a failed or interrupted run never leaves a partially verified download where a later invocation could find and trust it. — get-orbit.sh:63-64 — category: recovery — criticality: MEDIUM
+9. The extracted archive is only trusted after confirming it produced an executable file named exactly `orbit-launcher`; a mismatched or empty archive refuses rather than executing whatever the archive happened to contain. — get-orbit.sh:139-141 — category: refusal/fail-closed — criticality: MEDIUM
+10. The script never runs the launcher directly from the download's temporary location: it copies the verified manifest and `install.sh` into the version-scoped cache directory first, and only then `exec`s the launcher there, with `ORBIT_LAUNCHER_INSTALL_SCRIPT_PATH`/`ORBIT_RELEASE_MANIFEST` pointing at those verified copies — the program that ends up running is always read from the verified, permanent location, never the transient one. — get-orbit.sh:137-151 — category: provenance/immutability — criticality: MEDIUM
+
+**What `get-orbit.sh` does and does not guarantee, in plain terms (ADR-0031):**
+
+- **Checked:** the release manifest's signature (guarantee 4); the version, if
+  pinned (guarantee 6); the launcher archive and `install.sh`, by sha256,
+  against that signed manifest (guarantee 7); the keyless countersignature
+  bundle, when `cosign` is installed and the channel requires it (guarantee
+  5). Nothing downloaded is ever run before all of that passes.
+- **Not checked: the bootstrap itself.** `get-orbit.sh` arrives over plain
+  HTTPS, unsigned. That stops a network attacker from altering it in
+  transit; it does not stop whoever can write to `main` on the GitHub
+  mirror, who could ship a script with a different embedded key that
+  accepts their own manifest. A careful user can read the script first (it
+  is short by design), compare its embedded key against `cosign.pub` and the
+  fingerprint in `docs/releasing.md`, or fetch it from a release tag instead
+  of `main` and check its own sha256 against the one that release's manifest
+  records for it. None of that closes the loop fully: a fully trusted first
+  download needs a key the user already holds.
+- **Not checked: freshness on the `latest` channel.** A signature only
+  proves a release is genuinely signed, not that it is the newest one.
+  Whoever controls what `get-orbit.sh` downloads from could silently serve
+  an older, still-validly-signed release instead of the current `latest`.
+  Pinning `ORBIT_VERSION=vX.Y.Z` closes this: both `get-orbit.sh` and
+  `install.sh` refuse a manifest whose own `version` field does not equal
+  the pin (guarantee 6, and the matching check in `install.sh`), so an older
+  release can only ever be installed by asking for it by name.
+
 ---
 
 ## Summary
 
-Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh`); `repair.sh` was added separately for its issue #261 first slice (`--check` only), extended in the same file for the #261 second slice (read-only database/application diagnosis), extended again for the #261 third slice (`--plan`, still zero mutation), extended again for the #261 slice 4 stage one (`--execute --safe-only` — the fixed safe/reversible action set only), and extended further by the delta slices that followed it in the same file: #528 (migration and identity diagnosis), #529 (configuration-migration-interrupted recovery), #530 (the document-KEK retention guard, then the `regenerate-secret` dangerous-batch executor under `--execute --dangerous` — stage two is now implemented), #531 (`--export-diagnostics`), and the #681 supported-version gate. No `*.test.mjs` or other scripts were read.
+Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh`); `repair.sh` was added separately for its issue #261 first slice (`--check` only), extended in the same file for the #261 second slice (read-only database/application diagnosis), extended again for the #261 third slice (`--plan`, still zero mutation), extended again for the #261 slice 4 stage one (`--execute --safe-only` — the fixed safe/reversible action set only), and extended further by the delta slices that followed it in the same file: #528 (migration and identity diagnosis), #529 (configuration-migration-interrupted recovery), #530 (the document-KEK retention guard, then the `regenerate-secret` dangerous-batch executor under `--execute --dangerous` — stage two is now implemented), #531 (`--export-diagnostics`), and the #681 supported-version gate. `get-orbit.sh` (ADR-0031 #6) was added 2026-09-24, the first-run script that verifies the signed release manifest and launcher before handing off to it. No `*.test.mjs` or other scripts were read.
 
 **Guarantee count by script**
 
@@ -311,21 +350,22 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 | installer-ui.sh | 13 |
 | repair.sh | 56 |
 | installer-simulation.sh | 8 |
-| **Total** | **207** |
+| get-orbit.sh | 10 |
+| **Total** | **217** |
 
 **Guarantee count by category × criticality**
 
 | Category | HIGH | MEDIUM | LOW | Total |
 |---|---:|---:|---:|---:|
-| refusal/fail-closed | 27 | 25 | 7 | 59 |
+| refusal/fail-closed | 29 | 26 | 7 | 62 |
 | secret-handling | 31 | 5 | 0 | 36 |
-| input-validation | 6 | 20 | 7 | 33 |
-| provenance/immutability | 17 | 9 | 0 | 26 |
+| input-validation | 6 | 21 | 8 | 35 |
+| provenance/immutability | 20 | 10 | 0 | 30 |
 | transactional/rollback | 18 | 3 | 0 | 21 |
 | permissions/ownership | 18 | 0 | 0 | 18 |
 | idempotency | 0 | 4 | 4 | 8 |
-| recovery | 1 | 4 | 1 | 6 |
-| **Total** | **118** | **70** | **19** | **207** |
+| recovery | 1 | 5 | 1 | 7 |
+| **Total** | **123** | **74** | **20** | **217** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 

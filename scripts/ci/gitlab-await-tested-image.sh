@@ -33,9 +33,19 @@
 #   ORBIT_POLL_SECONDS  optional; seconds between polls, default 60
 #   ORBIT_EVIDENCE_DIR  optional; where to write the fetched files,
 #                       default .orbit-supply-chain
+#   ORBIT_FETCH_LAUNCHER_ASSETS
+#                       optional; "1" also fetches the signed release
+#                       manifest, its .sig and the two launcher archives
+#                       (ADR-0031 #8/#9) from the same pipeline, so the
+#                       GitHub publish workflows that need them do not
+#                       duplicate this script's pipeline/job resolution.
+#                       Default unset (only image evidence is fetched, the
+#                       original contract).
 #
 # Outputs (appended to $GITHUB_OUTPUT when set): digest, source_reference,
-# pipeline_url, evidence, sbom.
+# pipeline_url, evidence, sbom, and, when ORBIT_FETCH_LAUNCHER_ASSETS=1:
+# release_manifest, release_manifest_sig, launcher_amd64_archive,
+# launcher_arm64_archive.
 set -Eeuo pipefail
 
 fail() { printf 'gitlab-await-tested-image: %s\n' "$1" >&2; exit 1; }
@@ -126,6 +136,13 @@ sbom_job="$(job_id supply_chain_image)"
 [[ -n "$sign_job" ]] || fail "pipeline ${pipeline_id} has no successful sign_evidence job"
 [[ -n "$sbom_job" ]] || fail "pipeline ${pipeline_id} has no successful supply_chain_image job"
 
+fetch_launcher_assets="${ORBIT_FETCH_LAUNCHER_ASSETS:-}"
+launcher_job=""
+if [[ "$fetch_launcher_assets" == "1" ]]; then
+  launcher_job="$(job_id build_launcher)"
+  [[ -n "$launcher_job" ]] || fail "pipeline ${pipeline_id} has no successful build_launcher job"
+fi
+
 mkdir -p "$evidence_dir"
 evidence="${evidence_dir}/gitlab-tested-image.json"
 sbom="${evidence_dir}/image.spdx.json"
@@ -133,6 +150,25 @@ api --output "$evidence" "${project}/jobs/${publish_job}/artifacts/.orbit-supply
   fail "record_image job ${publish_job} kept no gitlab-tested-image.json artifact"
 api --output "$sbom" "${project}/jobs/${sbom_job}/artifacts/.orbit-supply-chain/image.spdx.json" ||
   fail "supply_chain_image job ${sbom_job} kept no image.spdx.json artifact"
+
+release_manifest=""
+release_manifest_sig=""
+launcher_amd64_archive=""
+launcher_arm64_archive=""
+if [[ "$fetch_launcher_assets" == "1" ]]; then
+  release_manifest="${evidence_dir}/orbit-release-manifest.json"
+  release_manifest_sig="${evidence_dir}/orbit-release-manifest.json.sig"
+  launcher_amd64_archive="${evidence_dir}/orbit-launcher_linux_amd64.tar.gz"
+  launcher_arm64_archive="${evidence_dir}/orbit-launcher_linux_arm64.tar.gz"
+  api --output "$release_manifest" "${project}/jobs/${publish_job}/artifacts/.orbit-supply-chain/orbit-release-manifest.json" ||
+    fail "record_image job ${publish_job} kept no orbit-release-manifest.json artifact"
+  api --output "$release_manifest_sig" "${project}/jobs/${sign_job}/artifacts/.orbit-supply-chain/orbit-release-manifest.json.sig" ||
+    fail "sign_evidence job ${sign_job} kept no orbit-release-manifest.json.sig artifact"
+  api --output "$launcher_amd64_archive" "${project}/jobs/${launcher_job}/artifacts/.orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz" ||
+    fail "build_launcher job ${launcher_job} kept no orbit-launcher_linux_amd64.tar.gz artifact"
+  api --output "$launcher_arm64_archive" "${project}/jobs/${launcher_job}/artifacts/.orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz" ||
+    fail "build_launcher job ${launcher_job} kept no orbit-launcher_linux_arm64.tar.gz artifact"
+fi
 
 # Every field the publisher will act on, checked against what this run knows
 # independently. A record for the right commit but another pipeline means two
@@ -169,6 +205,12 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf 'pipeline_url=%s\n' "$pipeline_url"
     printf 'evidence=%s\n' "$evidence"
     printf 'sbom=%s\n' "$sbom"
+    if [[ "$fetch_launcher_assets" == "1" ]]; then
+      printf 'release_manifest=%s\n' "$release_manifest"
+      printf 'release_manifest_sig=%s\n' "$release_manifest_sig"
+      printf 'launcher_amd64_archive=%s\n' "$launcher_amd64_archive"
+      printf 'launcher_arm64_archive=%s\n' "$launcher_arm64_archive"
+    fi
   } >> "$GITHUB_OUTPUT"
 fi
 printf 'gitlab-await-tested-image: %s tested as %s\n' "$ORBIT_COMMIT" "$source_reference"

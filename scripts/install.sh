@@ -19,6 +19,20 @@ readonly secrets_directory=".orbit-secrets"
 readonly database_volume_key="orbit-db-data"
 readonly image_repository="${registry}/${repository}"
 readonly oidc_discovery_max_bytes=1048576
+# ADR-0031 #7: byte-identical to cosign.pub (scripts/get-orbit.test.mjs also
+# checks this, and the copy embedded in scripts/get-orbit.sh, against the
+# same file). Rotation: docs/releasing.md.
+readonly embedded_public_key='-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEz/p19d5ZrSimfOQ80OCeSG8s32dm
+k91OtCbfzOoGPhJnnXIynC5JDfyBoZiS59rCFb2hSiERGWQmLH1i8XV4nQ==
+-----END PUBLIC KEY-----'
+# The identity countersign.yml signs the image and the release manifest
+# bundle under (ADR-0031 #4, #7; .github/workflows/countersign.yml).
+readonly countersign_identity_regexp='^https://github.com/tomlawesome/orbit/'
+readonly countersign_oidc_issuer='https://token.actions.githubusercontent.com'
+# Test-only: overrides where the release manifest is fetched from when
+# ORBIT_RELEASE_MANIFEST is not set. Never for user environments.
+readonly release_manifest_base_url="${ORBIT_INSTALL_TEST_MANIFEST_BASE_URL:-https://github.com/tomlawesome/orbit}"
 readonly installer_process_started_at="$SECONDS"
 readonly oidc_discovery_parser='const fs = require("node:fs");
 const maximumInputBytes = 1048576 + 8192;
@@ -143,9 +157,19 @@ fi
   printf 'Orbit installer: ORBIT_REGISTRY is invalid.\n' >&2
   exit 2
 }
+# ADR-0031 #7: preview is for testing, not for trusting -- a missing
+# countersignature is tolerated only there; every other channel (latest, or
+# a pinned version tag) is treated as stable.
+if [[ "$channel" == "preview" ]]; then
+  readonly release_manifest_stable=0
+else
+  readonly release_manifest_stable=1
+fi
 
 staging_dir=""
 rollback_dir=""
+release_manifest_work_dir=""
+cosign_usable=0
 deploy_container_id=""
 file_transaction_active=0
 file_transaction_committed=0
@@ -413,6 +437,11 @@ cleanup() {
 
   if [[ -n "$staging_dir" ]] && ! rm -rf -- "$staging_dir"; then
     printf 'Orbit installer: could not remove staging; recovery files remain at %s.\n' "$staging_dir" >&2
+    exit_status=1
+  fi
+
+  if [[ -n "$release_manifest_work_dir" ]] && ! rm -rf -- "$release_manifest_work_dir"; then
+    printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$release_manifest_work_dir" >&2
     exit_status=1
   fi
 
@@ -1051,6 +1080,112 @@ verify_oidc_discovery() {
   fi
 }
 
+# manifest_field <manifest-path> <literal-key>
+#
+# Extracts a string field from the release manifest (ADR-0031 #1's fixed
+# schema, written by scripts/ci/write-release-manifest.sh) by literal key
+# match, not a general JSON parser: safe here because write-release-manifest.sh
+# always writes one field per line, every key this script reads ("digest") is
+# unique in that schema, and every value read back is validated against its
+# own pattern before use.
+manifest_field() {
+  grep -F "\"$2\":" "$1" 2> /dev/null | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1
+}
+
+# check_cosign_usable
+#
+# A `cosign` on PATH that cannot even answer `cosign version` is treated the
+# same as no cosign at all: ADR-0031 only ever asks "is cosign present", and
+# a broken binary on PATH is not meaningfully different from an absent one
+# for that question.
+check_cosign_usable() {
+  command -v cosign > /dev/null 2>&1 && cosign version > /dev/null 2>&1
+}
+
+# self_fetch_release_manifest
+#
+# ADR-0031 #7: when install.sh runs on its own -- no manifest handed over by
+# get-orbit.sh or the launcher via ORBIT_RELEASE_MANIFEST -- it fetches and
+# verifies the manifest for its own channel with the same embedded key, so
+# the plain `install.sh | bash` path is also signature-checked and a moving
+# tag becomes a lookup, never the identity (ADR-0008).
+#
+# Only the channel shapes get-orbit.sh itself understands -- latest,
+# preview, a vX.Y.Z pin -- have a known release-assets location. Any other
+# ORBIT_CHANNEL has no self-fetch home; pass ORBIT_RELEASE_MANIFEST instead.
+#
+# Prints the verified manifest's path on success.
+self_fetch_release_manifest() {
+  local asset_base key_file manifest_json manifest_sig der_file bundle
+  local version_pin_pattern='^v[0-9]+\.[0-9]+\.[0-9]+$'
+
+  if [[ "$channel" == "latest" ]]; then
+    asset_base="${release_manifest_base_url}/releases/latest/download"
+  elif [[ "$channel" == "preview" ]]; then
+    asset_base="${release_manifest_base_url}/releases/download/preview"
+  elif [[ "$channel" =~ $version_pin_pattern ]]; then
+    asset_base="${release_manifest_base_url}/releases/download/${channel}"
+  else
+    fail "ORBIT_CHANNEL (${channel}) has no known release-manifest location to fetch on its own; set ORBIT_RELEASE_MANIFEST to an already-verified manifest for this channel instead."
+  fi
+
+  release_manifest_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/orbit-install-manifest.XXXXXX")" ||
+    fail "Could not create a private temporary directory for the release manifest."
+
+  key_file="$release_manifest_work_dir/trusted.pub"
+  if [[ -n "${ORBIT_INSTALL_TEST_PUBLIC_KEY_FILE:-}" ]]; then
+    [[ "${ORBIT_INSTALL_TEST_ALLOW_KEY_OVERRIDE:-}" == "1" ]] ||
+      fail "ORBIT_INSTALL_TEST_PUBLIC_KEY_FILE is set without ORBIT_INSTALL_TEST_ALLOW_KEY_OVERRIDE=1; refusing to swap the trust anchor."
+    cp "$ORBIT_INSTALL_TEST_PUBLIC_KEY_FILE" "$key_file"
+  else
+    printf '%s\n' "$embedded_public_key" > "$key_file"
+  fi
+
+  manifest_json="$release_manifest_work_dir/orbit-release-manifest.json"
+  manifest_sig="$release_manifest_work_dir/orbit-release-manifest.json.sig"
+  curl --silent --show-error --fail --location --connect-timeout 5 --max-time 60 \
+    -o "$manifest_json" "${asset_base}/orbit-release-manifest.json" ||
+    fail "Could not download the release manifest for channel ${channel}."
+  curl --silent --show-error --fail --location --connect-timeout 5 --max-time 60 \
+    -o "$manifest_sig" "${asset_base}/orbit-release-manifest.json.sig" ||
+    fail "Could not download the release manifest's signature for channel ${channel}."
+
+  der_file="$release_manifest_work_dir/manifest.sig.der"
+  if ! base64 -d < "$manifest_sig" > "$der_file" 2>/dev/null || [[ ! -s "$der_file" ]]; then
+    fail "The release manifest's signature is not valid base64; refusing an unverifiable manifest."
+  fi
+  openssl dgst -sha256 -verify "$key_file" -signature "$der_file" "$manifest_json" > /dev/null 2>&1 ||
+    fail "Could not verify the release manifest's signature against the trusted key."
+
+  if [[ "$cosign_usable" == 1 ]]; then
+    bundle="$release_manifest_work_dir/orbit-release-manifest.json.sigstore.json"
+    if curl --silent --show-error --fail --location --connect-timeout 5 --max-time 60 \
+      -o "$bundle" "${asset_base}/orbit-release-manifest.json.sigstore.json" 2> /dev/null; then
+      cosign verify-blob \
+        --bundle "$bundle" \
+        --certificate-identity-regexp "$countersign_identity_regexp" \
+        --certificate-oidc-issuer "$countersign_oidc_issuer" \
+        "$manifest_json" > /dev/null 2>&1 ||
+        fail "cosign could not verify the release manifest's countersignature bundle."
+    elif [[ "$release_manifest_stable" == 1 ]]; then
+      fail "No countersignature bundle for this release yet; refusing on channel ${channel}."
+    else
+      printf 'Orbit installer: no countersignature bundle yet on preview; continuing with the key-based check only.\n' >&2
+    fi
+  fi
+
+  # A validly signed manifest for a different release must not stand in for
+  # the version asked for: an older signed release is still signed.
+  if [[ "$channel" =~ $version_pin_pattern ]]; then
+    local manifest_version
+    manifest_version="$(grep -F '"version":' "$manifest_json" | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1)"
+    [[ "v${manifest_version}" == "$channel" ]] ||
+      fail "Asked for ${channel} but the signed release manifest is for v${manifest_version}; refusing."
+  fi
+
+  printf '%s\n' "$manifest_json"
+}
+
 prepare_configuration() {
   local readiness readiness_status missing guided_missing existing_auth_mode configure_auth_mode
 
@@ -1416,28 +1551,58 @@ command -v timeout >/dev/null 2>&1 || fail "GNU timeout is required for bounded 
 verify_database_volume_safety
 installer_ui_event host host completed host-tools check
 
-# Resolve the requested channel to an immutable digest. The channel tag is only
-# ever read; the digest is what is recorded and deployed, so a tag that moves
-# later cannot change this deployment.
+# Resolve the release manifest (ADR-0031 #7) and pin the pull to the digest
+# it names, never a moving tag, so `latest`/`preview`/a version pin all
+# become a lookup and never the identity itself (ADR-0008 already says this
+# of tags).
 installer_ui_phase=identity
 installer_ui_component=image
 installer_ui_event identity image starting image-identity pull
-docker pull --quiet "${image_repository}:${channel}" >/dev/null 2>&1 ||
-  fail "Could not pull ${image_repository}:${channel}. If the image is private, authenticate with ${registry} first."
+check_cosign_usable && cosign_usable=1 || cosign_usable=0
 
-if ! inspect_output="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${image_repository}:${channel}" 2>/dev/null)"; then
-  fail "Could not inspect ${image_repository}:${channel} to resolve an immutable digest."
+if [[ -n "${ORBIT_RELEASE_MANIFEST:-}" ]]; then
+  # Handed over already verified -- by get-orbit.sh, or by the launcher via
+  # ai/orbit-launcher#171's ORBIT_LAUNCHER_INSTALL_SCRIPT_PATH caller.
+  [[ -f "$ORBIT_RELEASE_MANIFEST" ]] ||
+    fail "ORBIT_RELEASE_MANIFEST does not point at a readable file: ${ORBIT_RELEASE_MANIFEST}."
+  release_manifest_path="$ORBIT_RELEASE_MANIFEST"
+else
+  release_manifest_path="$(self_fetch_release_manifest)"
 fi
 
-resolved_reference=""
+manifest_digest="$(manifest_field "$release_manifest_path" digest)"
+[[ "$manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+  fail "The release manifest names no valid image digest."
+
+resolved_reference="${image_repository}@${manifest_digest}"
+docker pull --quiet "$resolved_reference" >/dev/null 2>&1 ||
+  fail "Could not pull ${resolved_reference} named by the release manifest. If the image is private, authenticate with ${registry} first."
+
+if ! inspect_output="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$resolved_reference" 2>/dev/null)"; then
+  fail "Could not inspect ${resolved_reference} to confirm its digest."
+fi
+
+digest_confirmed=0
 while IFS= read -r candidate; do
-  if [[ "$candidate" == "${image_repository}@sha256:"* ]]; then
-    resolved_reference="$candidate"
+  if [[ "$candidate" == "$resolved_reference" ]]; then
+    digest_confirmed=1
     break
   fi
 done <<< "$inspect_output"
-[[ "$resolved_reference" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
-  fail "The registry did not return an immutable digest for ${image_repository}:${channel}."
+[[ "$digest_confirmed" == 1 ]] ||
+  fail "The registry did not return an immutable digest matching ${resolved_reference} named by the release manifest."
+
+if [[ "$cosign_usable" == 1 ]]; then
+  if ! cosign verify "$resolved_reference" \
+    --certificate-identity-regexp "$countersign_identity_regexp" \
+    --certificate-oidc-issuer "$countersign_oidc_issuer" \
+    > /dev/null 2>&1; then
+    if [[ "$release_manifest_stable" == 1 ]]; then
+      fail "cosign could not verify the countersignature on ${resolved_reference}; refusing on channel ${channel}."
+    fi
+    printf 'Orbit installer: no countersignature yet for %s; continuing with the release-manifest check only.\n' "$resolved_reference" >&2
+  fi
+fi
 
 # The image records the exact source revision that produced it. That revision
 # is identity evidence, not a download location: the deployment assets come
