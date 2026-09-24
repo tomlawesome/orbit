@@ -130,10 +130,11 @@ skill).
 
 - 2026-09-18 · `fix/m9-surface-bugs` · local `pnpm run test` (whole unit suite, 270 files in parallel) · both timed out at 5000 ms in the full run, then passed together in isolation (32/32, ~4.5 s for both files) on unchanged code. The full run was under heavy load (import phase 239 s, tests 833 s), so this reads as scheduler starvation rather than anything in either test — neither file changed on this branch. First sighting of each; no issue yet (an issue on the third, per the testing-and-ci skill).
 
-## `integration` job: the whole file set runs slow and hits the job's 10-minute timeout
+## `integration` job: the whole file set runs slow and hits the job's 10-minute timeout (#1106 from the third sighting)
 
 - 2026-09-23 · 6d56d06d (!978) and 4475ee73 (!977), neither touching integration tests · pipelines 1538 / job 21138 and 1541 / job 21165, both at 19:16–19:26 UTC · `execution took longer than 10m0s`, with the trace still moving test file to test file (47 of 51 started) at about a third of the usual pace — the same job took 277 s on dev 1537 minutes earlier. Two `integration` jobs, the 40-minute orbit-base-image `build` and four-way sidecar scans shared the runner at the time. Retried on the same commit: 21215 passed in 406 s. Counted as one sighting: one moment, one cause.
 - 2026-09-23 · 4475ee73 (!977) again · pipeline 1541 / job 21221 (retry of 21165), 19:55–20:05 UTC · same timeout, 42 of 51 files started; every file 5–8× its usual time (`local-setup-tokens` 51 s against 10 s, `local-sign-in` 42 s against 5–11 s), so starvation across the board rather than one slow test. The orbit-base-image `build` (pipeline 1544, which compiles Node from source for about 40 minutes) and the full dev pipeline 1545 were running alongside. Second sighting.
+- 2026-09-23 · dev 1712aeb6 (!978's merge, nothing near integration tests) · pipeline 1556 / job 21403, 21:22–21:32 UTC · same timeout, 36 of 51 files finished. The orbit-base-image `build` (pipeline 1557's job 21411, 21:10–21:52) was running alongside again — every sighting so far has overlapped that 40-minute compile. Third sighting: #1106.
 
 ## local-sign-in.test.ts "spends a real derivation whichever of the four cases it is"
 
@@ -205,3 +206,8 @@ waiting for `body[data-home-ready]`; `/settings` has no such marker, so the
 first thing to check on the next sighting is whether the press landed before
 that screen bound its own chrome. The next sighting should also record the
 page's URL at failure, which this one has to infer.
+
+## `sidecar_images` job: the dependency proxy answers 404 for a pinned manifest
+
+- 2026-09-23 · `chore/base-image-repin` c6538042 (!981, a policy-file re-pin, nothing near the sidecar list) · pipeline 1564 / job 21507, 22:07–22:11 UTC · Trivy's worker for `node:24-alpine@sha256:333f6b3e…` got `404 Not Found` (GitLab's HTML error page) from `gitlab.tomlawson.io:443/v2/ai/dependency_proxy/containers/library/node/manifests/sha256:333f6b3e…`; the other three images in the same run resolved. The same digest had scanned on pipeline 1560 forty minutes earlier, and the retry on the same commit (21543) passed in 204 s. First sighting; no issue yet. The host's disk had been cleared by hand about two hours before, so a proxy cache entry gone missing is one guess — the next sighting should check whether the proxy had the manifest cached (`dependency_proxy/manifests` under the group's storage) or had to go upstream.
+- 2026-09-23 · `chore/base-image-repin` 07ad6f6a (!981 after the schedule re-pinned it) · pipeline 1568, 22:59 UTC · five jobs at once — `sidecar_images` (clamav), `smoke` and `smoke_local_only` (postgres), `supply_chain_image` (trivy), `repair_journeys` — each got `not found` from the proxy for a different pinned digest, so the proxy as a whole was refusing rather than one entry missing. `pipelines/1568/retry` about 15 minutes later: all five passed. Second sighting. Both today, both within three hours of the host's disk being cleared by hand; Docker Hub's anonymous pull limit is the other candidate, given the day's pull volume — the next sighting should read the proxy's own log on the GitLab host (`dependency_proxy` entries in `gitlab-rails/production_json.log`) to tell the two apart.
