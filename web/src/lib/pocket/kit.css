@@ -1,0 +1,47 @@
+/*
+ * The pocket kit's shared surfaces (#1120, proposal §1.5-§1.8, §1.13): pills,
+ * cards, caps labels and unlit rows. Global, all prefixed `p-`, so they reach
+ * nothing that does not ask for them; loaded with tokens.css from the root
+ * layout. Components with their own markup (Sheet, Row, TopChrome) keep
+ * their rules scoped to themselves.
+ */
+
+/* Pills (§1.7, §1.8): 44 tall, 16px sides, never shrinking. Ghost pills
+   speak mono; the filled primary speaks ui 600. */
+.p-pill{appearance:none;display:inline-flex;align-items:center;justify-content:center;
+  min-height:var(--p-hit);min-width:var(--p-hit);padding:0 var(--p-pill-pad);flex:none;
+  border-radius:calc(var(--p-hit) / 2);border:1px solid var(--line);background:none;
+  font:var(--p-type-button)/1.2 var(--mono);color:var(--ink-mid);cursor:pointer;
+  text-decoration:none;-webkit-tap-highlight-color:transparent}
+.p-pill:hover{border-color:var(--accent);color:var(--ink)}
+.p-pill.filled{background:var(--accent);border-color:var(--accent);color:var(--bg);
+  font:600 var(--p-type-button)/1.2 var(--ui)}
+.p-pill.danger{color:var(--overdue-text)}
+.p-pill.danger:hover{border-color:var(--overdue)}
+.p-pill.wide{display:flex;width:100%}
+.p-pill:focus-visible,.p-focus:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.p-pills{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap)}
+
+/* Cards (§1.7): glass on the sky. */
+.p-card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+  border-radius:var(--p-card-radius);padding:var(--p-card-pad);margin-bottom:var(--p-card-gap)}
+.p-card-title{font:500 var(--p-type-card)/1.2 var(--display);color:var(--ink);margin:0 0 8px}
+
+/* Caps labels: the floor, 12px, tracked (§1.6). */
+.p-caps{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+  text-transform:uppercase;color:var(--ink-quiet);margin:var(--p-group-above) 0 var(--p-group-below)}
+
+/* Page title (§1.6): one per page. */
+.p-title{font:600 var(--p-type-title)/var(--p-type-title-lh) var(--display);color:var(--ink);margin:0}
+
+/* Loading (§1.13): three unlit rows at row height instead of a spinner. */
+.p-unlit{height:var(--p-row-min);display:flex;align-items:center;gap:var(--p-row-gap)}
+.p-unlit::before{content:"";flex:none;width:var(--p-row-mark);height:var(--p-row-mark);
+  border-radius:50%;border:1px solid var(--line-soft)}
+.p-unlit::after{content:"";flex:1;height:1px;background:var(--line-soft)}
+
+/* Empty (§1.13): one quiet mono sentence. */
+.p-empty{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:0 0 12px}
+
+/* Error inside a card (§1.13): a red line under the control that failed. */
+.p-error{font:var(--p-type-meta)/1.5 var(--mono);color:var(--overdue-text);margin:8px 0 0}

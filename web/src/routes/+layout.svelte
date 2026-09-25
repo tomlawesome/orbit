@@ -28,6 +28,7 @@
   /* The pocket's type, spacing and motion tokens (#1120): custom properties
      only, so nothing moves until a screen reads them. */
   import "$lib/pocket/tokens.css";
+  import "$lib/pocket/kit.css";
 
   import "@fontsource/space-grotesk/500.css";
   import "@fontsource/space-grotesk/600.css";
@@ -39,9 +40,13 @@
      between them. It starts itself, once, on a first landing on /home, and
      renders nothing at all until then — see Tour.svelte. */
   import Tour from "$lib/tour/Tour.svelte";
+  /* The wake (#1120): the pocket's one toast. Mounted once here so any screen
+     can raise one through $lib/pocket/wake.js; empty until one does. */
+  import Wake from "$lib/pocket/Wake.svelte";
 
   let { children } = $props();
 </script>
 
 {@render children()}
 <Tour />
+<Wake />
