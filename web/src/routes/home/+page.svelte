@@ -17,7 +17,6 @@
   import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
-  import { mountPocket, mountPocketAccount } from "./pocket.behaviour.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "./bands.js";
   import CorridorRow from "./CorridorRow.svelte";
@@ -633,8 +632,9 @@
        * It binds here, above the branches, so no branch can forget it: this
        * is the one line every path through the mount shares.
        */
-      const pocketAccount = query.matches ? null : mountPocketAccount();
-      const stopAccount = pocketAccount ? pocketAccount.teardown : mountAccount();
+      /* #1120: on a phone the account menu is the kit's hatch, which
+         pocket.svelte owns and binds itself, so only the desk's needs a mount. */
+      const stopAccount = query.matches ? mountAccount() : () => {};
       /** @param {() => void} stopDialect */
       const withAccount = (stopDialect) => () => { stopDialect(); stopAccount(); };
       /* §11 (#453): no household means the labelled sky in either dialect —
@@ -672,21 +672,10 @@
            photograph the same sky twice. */
         ? mountHome({ galaxy: asView(view).galaxy, primary: asView(view).primary,
                       fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "" })
-        : mountPocket({
-            /* #466: the sheet's two-tap lands on the same idempotent approve
-               protocol the desk rows use — one operation id per receipt. */
-            approve: (/** @type {string} */ id) => {
-              const suggestion = view?.suggestions.find((one) => one.receiptId === id);
-              if (suggestion) { armed = { id: suggestion.id, act: "approve" }; tapReceipt(suggestion, "approve"); }
-            },
-            dismiss: (/** @type {string} */ id) => {
-              const suggestion = view?.suggestions.find((one) => one.receiptId === id);
-              if (suggestion) { armed = { id: suggestion.id, act: "dismiss" }; tapReceipt(suggestion, "dismiss"); }
-            },
-            /* #1074: the menu is mounted above; this hands the dialect the
-               half of the one-overlay rule that is the sheet's. */
-            account: pocketAccount ?? undefined,
-          }));
+        /* #1120: the pocket binds its own controls (pocket.svelte, the kit's
+           sheets and rows); its approve, dismiss and refresh are handed to it
+           as props below. */
+        : () => {});
     };
     const sync = () => {
       delete document.body.dataset.homeReady;
@@ -743,7 +732,13 @@
      company with §14's drawer rule, deliberately. -->
 <svelte:window onkeydown={onWindowKeydown} onclick={onWindowClick} />
 
-<Pocket {view} />
+<!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
+     approve protocol the desk rows use (one operation id per receipt), and
+     answer with the problem, if any, for the sheet to show. -->
+<Pocket {view}
+        onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
+        ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
+        onchanged={async () => { view = await readHome(); }} />
 
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
      descent lands on, and the canvas, mark and void-name between them. Each
