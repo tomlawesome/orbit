@@ -25,11 +25,12 @@
 <div class="p-wake-host" data-pocket-above use:portal>
   <span class="sr-only" role="status" aria-live="polite">{entry && !entry.failure ? entry.message : ""}</span>
   <span class="sr-only" role="alert" aria-live="assertive">{entry?.failure ? entry.message : ""}</span>
-  <div class="p-wake" class:up={entry !== null} class:failure={entry?.failure}>
+  <div class="p-wake" class:up={entry !== null} class:failure={entry?.failure}
+     class:reversible={Boolean(entry?.undo) && !entry?.failure}>
     <!-- Announced by the regions above; drawn here. -->
     <span class="msg" aria-hidden="true">{shown}</span>
     {#if entry?.undo}
-      <button class="p-pill undo" onclick={undoWake}>undo</button>
+      <button class="p-pill act-accent undo" onclick={undoWake}>undo</button>
     {:else if entry}
       <button class="p-pill close" aria-label="Dismiss" onclick={() => dismissWake()}>×</button>
     {/if}
@@ -42,17 +43,22 @@
     padding:0 var(--p-gutter) calc(12px + env(safe-area-inset-bottom))}
   .p-wake{pointer-events:auto;width:100%;max-width:var(--p-column);min-height:52px;
     display:flex;align-items:center;gap:12px;padding:4px 4px 4px 16px;
-    background:var(--panel-raised);backdrop-filter:blur(16px);border:1px solid var(--line);
-    border-radius:26px;box-shadow:0 8px 24px rgb(0 0 0 / .25);
+    background:var(--panel-raised);border:1px solid var(--line);
+    border-radius:26px;box-shadow:inset 3px 0 0 var(--wake-act, var(--ok)), 0 8px 24px rgb(0 0 0 / .25);
     transform:translateY(calc(100% + 24px));visibility:hidden;
     transition:transform var(--p-wake) var(--p-ease),visibility 0s var(--p-wake)}
   .p-wake.up{transform:none;visibility:visible;transition-delay:0s}
   .msg{font:var(--p-type-meta)/1.4 var(--ui);color:var(--ink);min-width:0;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .msg{flex:1}
-  .failure{border-color:var(--overdue)}
+  /* The leading rule (§5.2) says what happened: done in --ok, reversible
+     in the accent, a failure in red. No blur: the raised panel is opaque
+     enough, and this layer is fixed over scrolling content (§5.3). */
+  .p-wake.reversible{--wake-act:var(--accent)}
+  :global([data-theme=retrograde]) .p-wake.reversible{
+    box-shadow:inset 3px 0 0 var(--accent), -3px 0 8px -4px var(--bloom), 0 8px 24px rgb(0 0 0 / .25)}
+  .failure{--wake-act:var(--overdue);border-color:var(--overdue)}
   .failure .msg{color:var(--overdue-text)}
-  .undo{color:var(--accent-text);border-color:transparent}
-  .close{border-color:transparent;font-size:1.25rem}
+  .close{border-color:transparent;background:none;font-size:1.25rem}
   @media (prefers-reduced-motion:reduce){ .p-wake{transition:none} }
 </style>

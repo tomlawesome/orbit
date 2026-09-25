@@ -6,8 +6,9 @@
    * area. The way back on the left (13px mono caps with the desk's star-field
    * halo, 44px hit), or the wordmark on home; whatever `end` draws on the
    * right (the orb). It scrolls away as the page goes down and comes back on
-   * any scroll up, as a glass strip over the sky; at the top of the page it is
-   * bare, like the desk's.
+   * any scroll up on a fade of the page's own ground, the halo doing the
+   * legibility work as the desk's back link does on stars; no blur over
+   * scrolling content (§5.2, §5.3). At the top of the page it is bare.
    *
    * `back` must already be a resolved path.
    * @typedef {{
@@ -64,9 +65,10 @@
     padding:env(safe-area-inset-top) calc(var(--p-gutter) - 8px) 0;
     display:flex;align-items:center;justify-content:space-between;
     border-bottom:1px solid transparent;
-    transition:transform var(--p-spring) var(--p-ease),background-color var(--p-spring),border-color var(--p-spring)}
-  .p-chrome.scrolled{background:color-mix(in srgb, var(--bg) 70%, transparent);
-    backdrop-filter:blur(16px);border-bottom-color:var(--line-soft)}
+    transition:transform var(--p-spring) var(--p-ease),border-color var(--p-spring)}
+  .p-chrome.scrolled{background:linear-gradient(var(--bg) 60%, transparent)}
+  /* On the light packs the fade alone is too soft an edge. */
+  :global(:is([data-theme=dawn],[data-theme=clouds])) .p-chrome.scrolled{border-bottom-color:var(--line-soft)}
   .p-chrome.hidden{transform:translateY(-100%)}
   .back{display:inline-flex;align-items:center;min-height:var(--p-hit);padding:0 8px;
     font:var(--p-type-meta)/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;

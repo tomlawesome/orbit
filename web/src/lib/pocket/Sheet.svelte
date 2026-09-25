@@ -178,8 +178,11 @@
   .p-sheet-layer{position:fixed;inset:0;z-index:50;visibility:hidden;
     transition:visibility 0s var(--p-rise)}
   .p-sheet-layer.open{visibility:visible;transition-delay:0s}
-  .scrim{position:absolute;inset:0;background:color-mix(in srgb, var(--bg) 45%, transparent);
+  /* The desk's scrim (home.css .askcard) on the dark packs; the light
+     packs dim toward their own ground. Never blurred (§5.3). */
+  .scrim{position:absolute;inset:0;background:rgba(4,7,16,.55);
     opacity:0;transition:opacity var(--p-rise) var(--p-ease)}
+  :global(:is([data-theme=dawn],[data-theme=clouds])) .scrim{background:color-mix(in srgb, var(--bg) 45%, transparent)}
   .open .scrim{opacity:1}
 
   /* The panel stands on the keyboard (--p-kb from sheet.js) and never
@@ -188,10 +191,15 @@
     margin:0 auto;max-width:var(--p-column);display:flex;flex-direction:column;
     max-height:calc(var(--h) - env(safe-area-inset-top) - 8px);
     border-radius:18px 18px 0 0;border:1px solid var(--line);border-bottom:0;
-    background:linear-gradient(var(--panel), var(--panel)), color-mix(in srgb, var(--bg) 92%, transparent);
+    background:linear-gradient(var(--panel-raised), var(--panel-raised)), color-mix(in srgb, var(--bg) 92%, transparent);
     backdrop-filter:blur(16px);outline:none;
+    box-shadow:0 -18px 44px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
     padding:0 var(--p-gutter) calc(16px + env(safe-area-inset-bottom));
     transform:translateY(100%);transition:transform var(--p-rise) var(--p-ease),height var(--p-rise) var(--p-ease)}
+  /* Raised off the page (§5.2): the desk's drawer depth, one plane above
+     the cards behind it, with light along the top edge. */
+  :global(:is([data-theme=dawn],[data-theme=clouds])) .panel{
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.78), 0 -16px 36px rgba(48,66,98,.10)}
   .open .panel{transform:translateY(max(var(--p-drag, 0px), -20px))}
   .panel.dragging{transition:none}
   [data-size=callout] .panel{max-height:calc(var(--h) * .45)}
@@ -203,9 +211,12 @@
   .grab{flex:none;height:24px;display:flex;justify-content:center;padding-top:8px;cursor:grab}
   .grab,.head{touch-action:none}
   .grab span{width:36px;height:4px;border-radius:2px;background:var(--line)}
-  .head{flex:none;display:flex;align-items:center;gap:12px;min-height:var(--p-hit);margin-bottom:8px}
-  .title{flex:1;min-width:0;margin:0;font:600 var(--p-type-sheet)/1.3 var(--ui);color:var(--ink)}
-  .head .close{border-color:transparent;margin-right:calc(var(--p-pill-pad) * -1 + 4px)}
+  :global([data-theme=retrograde]) .grab span{box-shadow:0 0 8px var(--bloom)}
+  /* The head: the desk's card-title face, then a full-width hairline. */
+  .head{flex:none;display:flex;align-items:center;gap:12px;min-height:var(--p-hit);
+    margin:0 calc(var(--p-gutter) * -1) 8px;padding:0 var(--p-gutter) 8px;border-bottom:1px solid var(--line-soft)}
+  .title{flex:1;min-width:0;margin:0;font:600 var(--p-type-sheet)/1.3 var(--display);color:var(--ink)}
+  .head .close{border-color:transparent;background:none;margin-right:calc(var(--p-pill-pad) * -1 + 4px)}
   .body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
 
   @media (prefers-reduced-motion:reduce){
