@@ -234,6 +234,9 @@
   .porb span{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
         background:var(--panel);display:grid;place-items:center;
         font:var(--p-type-meta) var(--mono);color:var(--ink-mid)}
-  .porb:focus-visible{outline:none}
-  .porb:focus-visible span{outline:2px solid var(--accent);outline-offset:2px}
+  /* §25: the ring sits on the focused button itself, not its drawn disc --
+     a ring on the child left the button with no indicator of its own. The
+     44px circle inset by 2px draws the same ring the disc's outline did. */
+  .porb{border-radius:50%}
+  .porb:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 </style>
