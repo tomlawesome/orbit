@@ -1,4 +1,9 @@
 <script>
+  import { onDestroy } from "svelte";
+  import { ringFocusIn, ringFocusOut, ringOpens } from "./ring-closes.js";
+
+  onDestroy(ringOpens);
+
   /**
    * THE IDENTITY CARD (#914, plan §2.7; ADR-0022 §2, ADR-0023 §1, §3, §4).
    *
@@ -49,6 +54,7 @@
    *   message?: string,
    *   onsubmit?: () => void,
    *   onprovider?: () => void,
+   *   signInLine?: boolean,
    * }}
    */
   let {
@@ -65,7 +71,18 @@
     message = "",
     onsubmit = () => {},
     onprovider = () => {},
+    /* setup mode, once the link has been refused: the way on is to sign in,
+       so the card offers it under the refusal (#1120, proposal §2.14) */
+    signInLine = false,
   } = $props();
+
+  /* THE REVEAL (#1120, proposal §2.13): a 44px control on every password
+     field, because a password typed on glass is typed blind. One switch for
+     the card, so the two setup fields show and hide together and "those two
+     passwords are not the same" can be checked by eye. Drawn on phones only;
+     the desk card is ratified without it (ringcard.css hides it there). */
+  let revealed = $state(false);
+  const passwordType = $derived(revealed ? "text" : "password");
 
   const asksEmail = $derived(mode !== "setup");
   const asksName = $derived(mode === "create");
@@ -98,8 +115,14 @@
 </script>
 
 <div id="formlayer">
-  <form class="card" aria-label={heading}
+  <form class="card" aria-labelledby="cardask"
+        onfocusin={ringFocusIn} onfocusout={ringFocusOut}
         onsubmit={(event) => { event.preventDefault(); if (ready && !busy) onsubmit(); }}>
+    <!-- THE QUESTION. On a phone the ring holds it (#1127 round 1, proposal
+         §2.13: the heading stands where `orbit` stood). On the desk the
+         ratified card carries no visible heading, so there it is read, not
+         seen (door-phone.css). -->
+    <h2 class="ask asklabel" id="cardask">{heading}</h2>
     {#if asksEmail}
       <div class="field">
         <label for="idemail">email</label>
@@ -108,7 +131,7 @@
              username)", so a password manager should treat it as the
              identifier it is. -->
         <input id="idemail" type="email" autocomplete="username" spellcheck="false"
-               autocapitalize="none" autocorrect="off" inputmode="email"
+               autocapitalize="none" autocorrect="off" inputmode="email" enterkeyhint="next"
                aria-label="Email address" bind:value={email} />
       </div>
     {/if}
@@ -116,16 +139,23 @@
     {#if asksName}
       <div class="field">
         <label for="idname">your name</label>
-        <input id="idname" type="text" autocomplete="name"
+        <input id="idname" type="text" autocomplete="name" enterkeyhint="next"
                aria-label="Your display name" bind:value={displayName} />
       </div>
     {/if}
 
     <div class="field">
       <label for="idpassword">password</label>
-      <input id="idpassword" type="password"
-             autocomplete={mode === "signin" ? "current-password" : "new-password"}
-             aria-label="Password" bind:value={password} />
+      <div class="pw">
+        <input id="idpassword" type={passwordType}
+               autocomplete={mode === "signin" ? "current-password" : "new-password"}
+               enterkeyhint={asksAgain ? "next" : "go"}
+               aria-label="Password" bind:value={password} />
+        <button type="button" class="reveal" aria-pressed={revealed}
+                aria-label={revealed ? "Hide password" : "Show password"}
+                onmousedown={(event) => event.preventDefault()}
+                onclick={() => (revealed = !revealed)}>{revealed ? "hide" : "show"}</button>
+      </div>
       {#if !asksAgain}
         <p class="err" class:shown={Boolean(said)} role="alert">{said}</p>
       {/if}
@@ -134,9 +164,18 @@
     {#if asksAgain}
       <div class="field">
         <label for="idagain">password again</label>
-        <input id="idagain" type="password" autocomplete="new-password"
-               aria-label="Password again" bind:value={again} />
+        <div class="pw">
+          <input id="idagain" type={passwordType} autocomplete="new-password" enterkeyhint="go"
+                 aria-label="Password again" bind:value={again} />
+          <button type="button" class="reveal" aria-pressed={revealed}
+                  aria-label={revealed ? "Hide passwords" : "Show passwords"}
+                  onmousedown={(event) => event.preventDefault()}
+                  onclick={() => (revealed = !revealed)}>{revealed ? "hide" : "show"}</button>
+        </div>
         <p class="err" class:shown={Boolean(said)} role="alert">{said}</p>
+        {#if signInLine}
+          <p class="note after"><a class="quietline" href="/login">sign in</a></p>
+        {/if}
       </div>
     {/if}
 

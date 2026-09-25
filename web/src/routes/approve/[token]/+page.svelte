@@ -5,6 +5,7 @@
   import "$lib/ringcard.css";
   import "$lib/flight/flight.css";
   import "./approve.css";
+  import "$lib/flight/door-phone.css";
 
   /**
    * APPROVING A SIGN-IN (#1033, ADR-0027 §4).
@@ -121,12 +122,16 @@
 
   <div class="bigring" aria-hidden="true">
     <div class="ringglass"></div>
+    <!-- this ring has never drawn its line on the desk; on a phone, where
+         the ring is the door's mark rather than the card's window, it does
+         (door-phone.css) -->
+    <div class="pocketstroke"></div>
     <div class="ringorbit"><i></i></div>
   </div>
 
   <div id="formlayer">
     <div class="card approve" aria-label={heading}>
-      <p class="approve-head">{heading}</p>
+      <p class="approve-head ask">{heading}</p>
 
       {#if phase === "open" && data.request}
         <!-- THE BULLETS, IN THE MAIL'S OWN ORDER (ADR-0027 §4-§5): instance,
