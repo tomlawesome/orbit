@@ -2241,3 +2241,57 @@ export async function restoreDocument(documentId) {
 export async function removeDocument(documentId) {
   return json(await csrfFetch(`/api/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }));
 }
+
+/* ── the portable archive (#1002, #1122) ─────────────────────────────────── */
+
+/**
+ * @typedef {{ id: string, expiresAt: string, includesDocuments: boolean, downloadUrl: string }} WrittenArchive
+ * @typedef {{ householdName: string, sections: number, items: number, documents: number, conflicts: { id: string, title: string }[], documentsExcluded: boolean }} ArchivePreview
+ */
+
+/**
+ * Write this household into an encrypted archive, kept on the server for the
+ * owner to download (POST /api/households/{id}/portable-archives). Synchronous:
+ * the answer arrives once the file is written. Documents travel with it, as the
+ * ratified card says (#1002 round 2).
+ *
+ * `currentPassword` is the recent-authentication proof (§17) for a reader who
+ * has a password. The route does not ask for one today; it is sent so the
+ * phone's challenge works the day the route does (#1122).
+ * @param {string} householdId
+ * @param {{ passphrase: string, currentPassword?: string }} request
+ * @returns {Promise<WrittenArchive>}
+ */
+export async function writePortableArchive(householdId, { passphrase, currentPassword }) {
+  const body = await json(await csrfFetch(`/api/households/${householdId}/portable-archives`, {
+    body: { passphrase, includeDocuments: true, ...(currentPassword ? { currentPassword } : {}) },
+  }));
+  return body.archive;
+}
+
+/**
+ * What an archive would bring in, without writing anything
+ * (POST /api/portable-archives/preview). `archive` is the chosen file, parsed.
+ * @param {string} householdId
+ * @param {{ archive: unknown, passphrase: string, currentPassword?: string }} request
+ * @returns {Promise<ArchivePreview>}
+ */
+export async function previewPortableArchive(householdId, { archive, passphrase, currentPassword }) {
+  const body = await json(await csrfFetch("/api/portable-archives/preview", {
+    body: { householdId, archive, passphrase, ...(currentPassword ? { currentPassword } : {}) },
+  }));
+  return body.preview;
+}
+
+/**
+ * Bring an archive in (POST /api/portable-archives/import). Every entry the
+ * preview found already here is named in `skip`, so it stays out.
+ * @param {string} householdId
+ * @param {{ archive: unknown, passphrase: string, skip: string[], currentPassword?: string }} request
+ * @returns {Promise<{ importedItems: number, documentsExcluded: number }>}
+ */
+export async function importPortableArchive(householdId, { archive, passphrase, skip, currentPassword }) {
+  return json(await csrfFetch("/api/portable-archives/import", {
+    body: { householdId, archive, passphrase, conflictItemIds: skip, ...(currentPassword ? { currentPassword } : {}) },
+  }));
+}
