@@ -196,21 +196,35 @@ test("completing an item from the v19 view moves its orbit", async ({ page }) =>
     // Due in 20 days: needs attention.
     await expect(page.locator(".item-card")).toContainText("T−20d");
 
-    await page.locator(".acts button", { hasText: /^complete$/ }).click();
-    // The next orbit defaults to +recurrenceMonths and stays editable.
-    await expect(page.locator("#a-next")).toHaveValue(/^\d{4}-\d{2}-\d{2}$/);
-    await page.locator(".panel .btn-primary").click();
+    const pocket = test.info().project.name.startsWith("mobile");
+    if (pocket) {
+      /* #1120, proposal §2.3: on a phone an item with no cost to confirm
+         completes on the tap, held behind the wake's undo, and the wake names
+         the next orbit it defaulted to (+recurrenceMonths). */
+      await page.getByRole("group", { name: "Item actions" }).getByRole("button", { name: "complete", exact: true }).click();
+      await expect(page.locator(".p-wake .msg")).toContainText(/^Completed · next due .+ · Boiler service proving$/);
+    } else {
+      await page.locator(".acts button", { hasText: /^complete$/ }).click();
+      // The next orbit defaults to +recurrenceMonths and stays editable.
+      await expect(page.locator("#a-next")).toHaveValue(/^\d{4}-\d{2}-\d{2}$/);
+      await page.locator(".panel .btn-primary").click();
+    }
 
     // The view re-reads: a year of lead time now (allow the ±1 day of month arithmetic).
-    await expect(page.locator(".item-card")).toContainText(/T−36[456]d/);
+    // (The pocket's completion is only sent once the wake's hold has run out.)
+    await expect(page.locator(".item-card")).toContainText(/T−36[456]d/, pocket ? { timeout: 15_000 } : {});
 
     // And home tells the same story. On a desk the row sits in the wide orbit;
-    // in the pocket dialect only attention rows exist, so the truth there is
-    // the item's absence from them.
+    // in the pocket dialect only attention rows are listed, and with this
+    // household's one item a year out its line says nothing needs you and
+    // names the item as next up, a year away.
     await page.goto("/home");
-    if (test.info().project.name.startsWith("mobile")) {
+    if (pocket) {
       await expect(page.locator(".mdial svg")).toBeVisible();
-      await expect(page.locator(".mitem", { hasText: "Boiler service proving" })).toHaveCount(0);
+      const below = page.locator(".pocket .pk-below");
+      await expect(below.locator(".p-row .title", { hasText: /^Boiler service proving$/ })).toHaveCount(0);
+      await expect(below.locator(".p-row", { hasText: "nothing needs you" }))
+        .toContainText(/next up Boiler service proving, T−36[456]d/);
     } else {
       await expect(page.locator(`[id="${itemId}"]`)).toContainText(/T−36[456]d/);
     }
@@ -251,9 +265,17 @@ test("a stale version is refused and the view says so", async ({ page }) => {
       if (!response.ok) throw new Error(`rival reschedule failed: ${response.status}`);
     }, { seededHouseholdId: householdId, seededItemId: itemId });
 
-    await page.locator(".acts button", { hasText: /^reschedule$/ }).click();
-    await page.locator("#a-due").fill("2026-12-01");
-    await page.locator(".panel .btn-primary").click();
+    if (test.info().project.name.startsWith("mobile")) {
+      /* #1120, proposal §2.3: on a phone the act raises its callout sheet. */
+      await page.getByRole("group", { name: "Item actions" }).getByRole("button", { name: "reschedule", exact: true }).click();
+      const sheet = page.getByRole("dialog", { name: /reschedule/i });
+      await sheet.locator("#p-due").fill("2026-12-01");
+      await sheet.getByRole("button", { name: "reschedule", exact: true }).click();
+    } else {
+      await page.locator(".acts button", { hasText: /^reschedule$/ }).click();
+      await page.locator("#a-due").fill("2026-12-01");
+      await page.locator(".panel .btn-primary").click();
+    }
 
     // Refused in the server's own words, and the view re-reads the truth.
     await expect(page.locator(".problem")).toContainText("changed on another device");
@@ -296,7 +318,14 @@ test("/item on an empty household shows the empty state, not a 404", async ({ pa
   try {
     await page.goto("/item");
     await expect(page.getByRole("heading", { name: "Nothing in orbit yet." })).toBeVisible();
-    await expect(page.getByRole("link", { name: "open inbox" })).toHaveAttribute("href", /\/inbox$/);
+    if (test.info().project.name.startsWith("mobile")) {
+      /* #1120, proposal §2.3: a phone's empty belt offers its two ways in,
+         adding an item and setting up the relay that mails things in. */
+      await expect(page.getByRole("link", { name: "add an item" })).toHaveAttribute("href", /\/create$/);
+      await expect(page.getByRole("link", { name: "set up your relay →" })).toHaveAttribute("href", /\/settings\/mail$/);
+    } else {
+      await expect(page.getByRole("link", { name: "open inbox" })).toHaveAttribute("href", /\/inbox$/);
+    }
     await expect(page.getByText("This page fell into a gravity well.")).toHaveCount(0);
   } finally {
     await households.sweep(page);
