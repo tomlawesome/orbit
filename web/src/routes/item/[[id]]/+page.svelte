@@ -256,7 +256,6 @@
      sheet"); the page in it is a button that opens the reader. A paper
      tapped on home arrives in the navigation's state (home's pocket.svelte,
      openPaper) and opens here as soon as the belt has seated its item. */
-  // svelte-ignore state_referenced_locally
   let arrivalPaper = /** @type {string | null} */ (
     (/** @type {Record<string, unknown>} */ (page.state ?? {})).pocketPaper ?? null);
   /** @param {import("./band.js").BeltDoc} doc */
@@ -322,11 +321,8 @@
   /** A date `months` on from `from`, for the quick pills. @param {string} from @param {number} months */
   const monthsOn = (from, months) => nextDateAfter(from, months) ?? from;
   /** @param {string} from @param {number} days */
-  const daysOn = (from, days) => {
-    const at = new Date(`${from}T00:00:00Z`);
-    at.setUTCDate(at.getUTCDate() + days);
-    return at.toISOString().slice(0, 10);
-  };
+  const daysOn = (from, days) =>
+    new Date(Date.parse(`${from}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
   /* ---- the document preview (#1088) --------------------------------------
      create-v3's reading card (design/v19/create-v3.html's `.readcard`,
@@ -801,8 +797,8 @@
 
   <!-- #1072, §2.3: on a phone the find line is the search sheet's button,
        and the count line says what order the belt is in. -->
-  <button class="pk-find" aria-haspopup="dialog" onclick={() => raise("search")}>find an item</button>
-  <p class="pk-count">{findnote}</p>
+  <button class="ip-find" aria-haspopup="dialog" onclick={() => raise("search")}>find an item</button>
+  <p class="ip-count">{findnote}</p>
 
   <!-- the band: everything at or behind the ring plane -->
   <canvas id="band" aria-hidden="true"></canvas>
@@ -845,12 +841,12 @@
     {#if !bodies.length && pocket}
       <!-- The empty household on a phone (§2.3, §1.13): one quiet sentence
            and the two ways in. -->
-      <article class="glass item-card pk pk-emptycard">
+      <article class="glass item-card ip ip-emptycard">
         <h2>Nothing in orbit yet.</h2>
-        <p class="pk-sentence">{data.household?.name ?? "your system"} has nothing on its belt.
+        <p class="ip-sentence">{data.household?.name ?? "your system"} has nothing on its belt.
           Every item you add takes a seat here in the order it comes due.</p>
-        <div class="pk-acts">
-          <a class="p-pill wide pk-lead" href={resolve("/create")}>add an item</a>
+        <div class="ip-acts">
+          <a class="p-pill wide ip-lead" href={resolve("/create")}>add an item</a>
           <a class="p-pill wide" style="--act:var(--upcoming);--act-text:var(--upcoming-text)"
              href={resolve("/settings/mail")}>set up your relay →</a>
         </div>
@@ -878,7 +874,7 @@
            it, when you will be warned, every command reachable. It does NOT
            list its documents any more — they are out in the band beside it,
            which is the owner's ruling; the card only says so, and how many. -->
-      <article class="glass item-card" class:pk={pocket}>
+      <article class="glass item-card" class:ip={pocket}>
         <h2>{row.title}</h2>
         <div class="sub">{[row.section, row.kind].filter(Boolean).join(" · ")}</div>
         <!-- #1005: a one-off ends on its day; nothing is due on it. -->
@@ -918,23 +914,23 @@
           <!-- §2.3: complete first and full width; then reschedule · snooze;
                then edit · retire. Every panel is a sheet; retire arms here
                and asks in its own callout. -->
-          <div class="pk-acts" role="group" aria-label="Item actions">
+          <div class="ip-acts" role="group" aria-label="Item actions">
             {#if row.status === "active"}
-              <button class="p-pill wide pk-lead pk-complete" disabled={busy}
+              <button class="p-pill wide ip-lead ip-complete" disabled={busy}
                       onclick={() => tapComplete(record)}>complete</button>
-              <div class="pk-pair">
+              <div class="ip-pair">
                 <button class="p-pill" style="--act:var(--upcoming);--act-text:var(--upcoming-text)"
                         onclick={() => act("reschedule", record)}>reschedule</button>
                 <button class="p-pill" style="--act:var(--warm);--act-text:var(--warm-text)"
                         onclick={() => act("snooze", record)}>snooze</button>
               </div>
-              <div class="pk-pair">
+              <div class="ip-pair">
                 <button class="p-pill" style="--act:var(--accent);--act-text:var(--accent-text)"
                         onclick={() => act("edit", record)}>edit</button>
                 <ArmButton label="retire" name="Retire {row.title}" onfire={() => act("retire", record)} />
               </div>
             {:else}
-              <button class="p-pill wide pk-lead pk-complete" disabled={busy}
+              <button class="p-pill wide ip-lead ip-complete" disabled={busy}
                       onclick={() => run(() => statusCommand(record, "active"))}>restore</button>
               {#if row.status !== "archived"}
                 <ArmButton label="retire" name="Retire {row.title}" wide onfire={() => act("retire", record)} />
@@ -1097,13 +1093,13 @@
 
         {#if pocket && row.docs.length}
           <!-- §2.3: the documents ride in the belt; this row lists them all. -->
-          <button class="pk-docs" onclick={() => raise("docs")}>
-            <span class="pk-paper" aria-hidden="true">◆</span>
-            <span class="pk-docs-title">{row.docs.length === 1 ? "1 document rides" : `${row.docs.length} documents ride`} in the belt</span>
-            <span class="pk-chev">see {row.docs.length === 1 ? "it" : "them"} ›</span>
+          <button class="ip-docs" onclick={() => raise("docs")}>
+            <span class="ip-paper" aria-hidden="true">◆</span>
+            <span class="ip-docs-title">{row.docs.length === 1 ? "1 document rides" : `${row.docs.length} documents ride`} in the belt</span>
+            <span class="ip-chev">see {row.docs.length === 1 ? "it" : "them"} ›</span>
           </button>
         {:else if pocket}
-          <p class="pk-sentence">No documents yet. Anything you attach, or mail in to your relay,
+          <p class="ip-sentence">No documents yet. Anything you attach, or mail in to your relay,
             rides in the belt beside this item.</p>
         {:else if row.docs.length}
           <div class="note"><b>{row.docs.length === 1
