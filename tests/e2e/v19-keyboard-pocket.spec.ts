@@ -412,9 +412,9 @@ test("household page (pocket): the back link works by keyboard", async ({ page }
 });
 
 /**
- * settings/+page.svelte gates its cards behind `{#if view}`
- * (v19-keyboard.spec.ts's `openSettingsFromHome` documents the exact race);
- * waiting for `.cards` here closes the same race on a direct navigation.
+ * settings/pocket.svelte draws unlit rows until the screen has loaded
+ * (v19-keyboard.spec.ts's `openSettingsFromHome` documents the desk's race);
+ * waiting for the methods' rows here closes the same race on a phone.
  */
 test("settings (pocket): fully reachable by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
@@ -423,12 +423,16 @@ test("settings (pocket): fully reachable by keyboard", async ({ page }) => {
   const household = await seedHousehold(page);
   try {
     await page.goto("/settings");
-    await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
-    /* The sign-in methods block (#915) is read after the helm itself, so an
-       audit that starts on `.cards` alone collects its expected set before the
-       block's buttons exist and then meets them by Tab. Wait for the rows. */
-    await expect(page.locator(".method").first()).toBeVisible({ timeout: 30_000 });
-    await auditTabOrder(page, "settings (pocket)");
+    /* #1125: on a phone settings is its own layout (settings/pocket.svelte);
+       the desk's `.cards` and `.method` are display:none here. The sign-in
+       methods (#915) are read after the screen itself, so an audit that
+       starts before their rows exist would meet them by Tab: wait for the
+       email approval row, which is drawn once the methods have answered. */
+    await expect(page.locator(".st-pocket .p-card").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".st-pocket .p-row", { hasText: "email approval" })).toBeVisible({ timeout: 30_000 });
+    /* The Reminders card's tabs (owner-decisions §22): one tab in the Tab
+       order, ← → between them, so the unchosen tab is never met by Tab. */
+    await auditTabOrder(page, "settings (pocket)", { exclude: "[role=tab][aria-selected=false]" });
   } finally {
     await cleanup(page, household);
   }
@@ -441,7 +445,7 @@ test("settings (pocket): the account panel is light-dismiss by keyboard", async 
   const household = await seedHousehold(page);
   try {
     await page.goto("/settings");
-    await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".st-pocket .p-card").first()).toBeVisible({ timeout: 30_000 });
     /* Below the CON-10 switch Chrome.svelte's account menu is the hatch
        sheet (#1120), opened from the top chrome's orb; the desk dropdown
        (`button.orb`, `#account`) is display:none here. Keyboard-openable,

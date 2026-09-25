@@ -761,8 +761,8 @@
   .st-pack[aria-pressed=true] .st-swatch{outline:2px solid var(--accent);outline-offset:2px}
   .st-pack[aria-pressed=true] .st-packname{color:var(--accent-text)}
   .st-pack:active .st-swatch{transform:scale(.96)}
-  .st-pack:focus-visible{outline:none}
-  .st-pack:focus-visible .st-swatch{outline:2px solid var(--accent);outline-offset:4px}
+  .st-pack{border-radius:12px}
+  .st-pack:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
   :global([data-theme=retrograde]) .st-pack[aria-pressed=true] .st-swatch{box-shadow:0 0 12px -2px var(--bloom)}
 
   /* REMINDERS' head: §22 under 560px, the pair wraps under the heading. */
@@ -794,8 +794,9 @@
   .st-switch[aria-busy=true] i::after{animation:p-breathe 1.2s ease-in-out infinite}
   .st-switch:disabled{cursor:default;opacity:.45}
   :global([data-theme=retrograde]) .st-switch[aria-checked=true] i::after{box-shadow:0 0 8px var(--bloom)}
-  .st-switch:focus-visible{outline:none}
-  .st-switch:focus-visible i{outline:2px solid var(--accent);outline-offset:2px}
+  /* The ring on the button itself, round the drawn track. */
+  .st-switch{border-radius:18px}
+  .st-switch:focus-visible{outline:2px solid var(--accent);outline-offset:-5px}
 
   /* SENT TO YOU LATELY (§2.8). */
   .st-warm{margin:4px 0 8px;color:var(--warm-text)}
