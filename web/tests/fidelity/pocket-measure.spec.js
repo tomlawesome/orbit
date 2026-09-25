@@ -32,6 +32,7 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 /** @type {{ path: string, pending?: string, chromePending?: string }[]} */
 const ROUTES = [
   { path: "/kit" },
+  { path: "/home" },
   { path: "/item/i-mot", pending: "step 3 (item and the belt)" },
   { path: "/create", pending: "step 4 (create / edit)" },
   { path: "/inbox", pending: "step 5 (inbox)" },

@@ -47,9 +47,10 @@ resetDatabaseBetweenSpecFiles();
  * find these, rather than guessed:
  *
  *   - /home in its pocket form: the sky strip (`.skies`, #845's own
- *     `tabindex="0"` scrollable region), the pocket search (`.msearch
- *     input`), and the one overlay the pocket dialect has — the bottom sheet
- *     (`#sheet`) a dial body or a signal row raises. v19-axe-sweep.spec.ts's
+ *     `tabindex="0"` scrollable region, whose chips link to each household
+ *     since #1118), the search line (`.msearch`, a button raising the search
+ *     sheet), and the pocket's sheets (#1120, the kit's `.p-sheet-layer`) —
+ *     the item sheet a dial body or a row raises, and the hatch. v19-axe-sweep.spec.ts's
  *     own comment on this route confirms the pocket dialect "has no drawers
  *     of its own at all" beyond that: the account panel and the three home
  *     drawers this file's desktop twin light-dismiss-tests are `.desk`-only
@@ -61,18 +62,12 @@ resetDatabaseBetweenSpecFiles();
  *     walked again here, at the phone viewport, to prove the phone's own
  *     rendering of them is still fully keyboard-reachable.
  *
- * A KNOWN GAP, NOW PARTLY CLOSED (#852): mtop's avatar (`.morb`) used to bind
- * no keyboard handler of any kind — it is a real `<button>` now
- * (pocket.svelte), reached by Tab and activated natively by Enter/Space, and
- * it opens the account menu (`#maccount`) with keyboard access to Inbox,
- * Settings and Administration — see the two tests below. `/household` still
- * has no route from pocket home's own chrome (the desk account panel #852
- * mirrors has none either), and the dial's own item/suggestion bodies are
- * unchanged by this issue. The sub-screen tests below still reach their
- * screens by direct navigation as well, because that is the only way this
- * file can audit a real, rendered screen on its own. The bottom-sheet test
- * below (raising `#sheet` from a dial body) is unrelated to #852 and
- * unchanged — see its own comment.
+ * #852 made the avatar a real `<button>`, reached by Tab and activated by
+ * Enter/Space; since #1120 it keeps its id (`#morb`) and opens the kit's
+ * hatch, with keyboard access to Inbox, Settings and Administration — see the
+ * two tests below. The sub-screen tests still reach their screens by direct
+ * navigation, because that is the only way this file can audit a real,
+ * rendered screen on its own.
  */
 
 /* #1080: this worker's own administrator, resolved lazily (worker env only). */
@@ -168,6 +163,15 @@ async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
   return { id: householdId, name, itemId };
 }
 
+/*
+ * #1120: pocket home's overlays are the kit's sheets (web/src/lib/pocket),
+ * portalled to the end of <body>, each a `.p-sheet-layer` that wears `open`
+ * while it is up. The hatch is the one holding the "Go to" nav; the item
+ * sheet is the one holding the item's card.
+ */
+const HATCH = '.p-sheet-layer:has(nav[aria-label="Go to"])';
+const ITEM_SHEET = ".p-sheet-layer:has(.pk-item)";
+
 /** #730: every household this file makes is removed, even when the test fails. */
 async function cleanup(page: Page, household: { id: string; name: string }) {
   await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
@@ -187,7 +191,7 @@ async function cleanup(page: Page, household: { id: string; name: string }) {
 async function settledPocket(p: Page) {
   await dismissTourIfShown(p);
   await p.waitForFunction(() => !document.body.classList.contains("launching"), null, { timeout: 60_000 });
-  await expect(p.locator(".morb")).not.toHaveText("", { timeout: 60_000 });
+  await expect(p.locator("#morb")).not.toHaveText("", { timeout: 60_000 });
   /* ...and the avatar carries its initials from the server's own render
      (#842), so that says the markup arrived, not that anything is listening
      to it. `homeIsLive` is the wait that means the sheet will open when the
@@ -216,61 +220,9 @@ async function arriveAtHomePocket(page: Page, options: { withItem?: boolean } = 
  * ──────────────────────────────────────────────────────────────────────── */
 
 /**
- * KNOWN PRODUCT BUG, kept failing on purpose: the closed `#sheet`'s seven
- * controls (`#sh-acts-item`'s "open"/"documents"/"close", `#sh-acts-sugg`'s
- * "Add to orbit"/"Dismiss"/"close", and the "review & amend →" link) are all
- * real Tab stops even while the sheet sits off-screen. pocket.css moves the
- * closed sheet out of view with `transform:translateY(105%)` alone — no
- * `visibility:hidden` — and its own `.sheet .acts{display:flex}` rule
- * (an ordinary author rule, which always outranks the user-agent stylesheet
- * regardless of specificity) overrides the `hidden` attribute `#sh-acts-sugg`
- * and `#sh-amend` are marked with in the markup, so even those stay
- * `display:flex`/`display:block` rather than `display:none`. A transform
- * alone does not remove an element from the Tab order in a real browser —
- * only `display:none`, `visibility:hidden`, `inert`, `tabindex="-1"` or
- * `disabled` do — which is exactly the lesson `web/src/lib/Chrome.svelte`'s
- * own `.account` panel already carries a comment about (its #847 fix): "opacity
- * and pointer-events alone still let Tab land on the links... visibility is
- * delayed to match the close animation". That same delayed-`visibility`
- * treatment was never applied to pocket's `#sheet`. Not fixed here — see the
- * rules in this file's own brief.
- */
-test("home (pocket): every control is reachable, focus is visible, and Tab is not trapped", async ({ page }) => {
-  test.setTimeout(60_000);
-  const household = await arriveAtHomePocket(page, { withItem: true });
-  try {
-    await auditTabOrder(page, "home (pocket)");
-  } finally {
-    await cleanup(page, household);
-  }
-});
-
-test("home (pocket): the sky strip is reachable and keeps focus visible", async ({ page }) => {
-  test.setTimeout(60_000);
-  const household = await arriveAtHomePocket(page);
-  try {
-    /* #845: the strip of other systems scrolls sideways under a thumb, and
-       is reachable to scroll by keyboard via its own tabindex — proved
-       directly (not just as part of the whole-page walk above) since it is
-       the one piece of #845's own work this file exists to cover. */
-    await tabTo(page, { selector: ".skies" }, { screen: "home (pocket)" });
-    const skies = await currentFocus(page);
-    expect(skies?.focusVisible, "home (pocket): the sky strip has no visible focus indicator").toBe(true);
-  } finally {
-    await cleanup(page, household);
-  }
-});
-
-/**
- * KNOWN PRODUCT BUG, kept failing on purpose (see the file header): the
- * dial's item bodies (`[data-sheet-title]`) and its suggestion markers
- * (`[data-sheet-sugg]`) are plain SVG `<circle>`/`<g>` elements.
- * pocket.behaviour.js binds only `click` listeners to them — no `tabindex`,
- * no `role`, no `keydown` handler anywhere — so Tab can never land on one and
- * the bottom sheet (`#sheet`) has no keyboard path to open at all. This test
- * drives that real path (Tab to the first dial body, Enter) rather than
- * inventing a keyboard-only substitute, so it fails with a precise, honest
- * message instead of silently passing on a path nobody can actually take.
+ * The dial's bodies are SVG `<g role="button" tabindex="0">` (#851), and
+ * pocket.svelte teaches them Enter and Space. Tab to the first, Enter raises
+ * the item sheet (#1119, the kit's Sheet), Escape puts it away (#1120).
  */
 test("home (pocket): the item sheet opens and light-dismisses by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
@@ -278,9 +230,9 @@ test("home (pocket): the item sheet opens and light-dismisses by keyboard", asyn
   try {
     await tabTo(page, { selector: "[data-sheet-title]" }, { screen: "home (pocket) dial" });
     await page.keyboard.press("Enter");
-    await expect(page.locator("#sheet")).toHaveClass(/open/);
+    await expect(page.locator(ITEM_SHEET)).toHaveClass(/open/);
     await page.keyboard.press("Escape");
-    await expect(page.locator("#sheet")).not.toHaveClass(/open/);
+    await expect(page.locator(ITEM_SHEET)).not.toHaveClass(/open/);
   } finally {
     await cleanup(page, household);
   }
@@ -296,7 +248,7 @@ test("home (pocket): the account menu is light-dismiss by keyboard", async ({ pa
   test.setTimeout(60_000);
   const household = await arriveAtHomePocket(page);
   try {
-    await auditLightDismiss(page, "home (pocket)", "#morb", "#maccount");
+    await auditLightDismiss(page, "home (pocket)", "#morb", HATCH);
   } finally {
     await cleanup(page, household);
   }
@@ -312,8 +264,8 @@ test("home (pocket): the account menu's Inbox link is reachable by Tab and navig
   try {
     await tabTo(page, { selector: "#morb" }, { screen: "home (pocket)" });
     await page.keyboard.press("Enter");
-    await expect(page.locator("#maccount")).toHaveClass(/open/);
-    await tabTo(page, { selector: "#maccount nav a", textIncludes: "Inbox" }, { screen: "home (pocket) account menu" });
+    await expect(page.locator(HATCH)).toHaveClass(/open/);
+    await tabTo(page, { selector: `${HATCH} nav a`, textIncludes: "Inbox" }, { screen: "home (pocket) account menu" });
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/inbox/);
   } finally {
@@ -345,10 +297,10 @@ test("create (pocket): fillable and submittable by keyboard alone", async ({ pag
     await page.keyboard.press("Enter");
 
     await expect(page).toHaveURL(/\/home$/, { timeout: 10_000 });
-    /* The pocket dialect draws a created item as a `.mitem` row (its manifest
-       is a list, not the desk's dial + corridor pair) — not the desk's
+    /* The pocket dialect draws a created item as a kit row in its manifest
+       list (#1120), not the desk's dial + corridor pair — not the desk's
        `.item`, which pocket.svelte never renders. */
-    await expect(page.locator(".mitem", { hasText: name })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".pocket .pk-list .p-row", { hasText: name })).toBeVisible({ timeout: 30_000 });
   } finally {
     await cleanup(page, household);
   }

@@ -21,45 +21,59 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * drawn circle moving or changing size (the fidelity baseline still governs
  * what is drawn — this only asks what answers a tap between them).
  */
-const PHONE = { width: 390, height: 844 };
+/*
+ * #1120 (proposal §1.7) settles the pair the other way. Shrinking a crowded
+ * body's hit circle (#1129's first answer) kept both bodies but left targets
+ * under 44px; the spacing law instead keeps the one due sooner on the dial
+ * and leaves the other in the manifest, so every body keeps a full 44px
+ * target and no two targets touch. Gutter clearing (overdue) stays; Car MOT
+ * lives in NEEDS ATTENTION only. What #1129 asked stays asked: a tap near a
+ * body, outside its small drawn circle, raises that body's sheet.
+ */
+const PHONES = [{ width: 390, height: 844 }, { width: 360, height: 780 }];
 
 /**
  * @param {import("@playwright/test").Page} page
- * @returns {Promise<{ title: string, x: number, y: number }[]>}
+ * @returns {Promise<{ title: string, x: number, y: number, w: number, h: number }[]>}
  */
-async function dialBodyCenters(page) {
+async function dialBodies(page) {
   return page.evaluate(() =>
-    [...document.querySelectorAll(".mdial [data-sheet-title]")].map((el) => {
+    [...document.querySelectorAll(".mdial [data-sheet-title], .mdial [data-sheet-sugg]")].map((el) => {
       const r = el.getBoundingClientRect();
-      return { title: /** @type {HTMLElement} */ (el).dataset.sheetTitle ?? "", x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      return { title: el.getAttribute("aria-label") ?? "", x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
     }));
 }
 
-test("a tap nearer one dial body than another raises that body's sheet, not the other's", async ({ page }) => {
-  await page.setViewportSize(PHONE);
-  await page.goto(`${APP}/home`, { waitUntil: "load" });
-  await page.waitForFunction(() => document.querySelectorAll(".mdial [data-sheet-title]").length > 0);
+for (const phone of PHONES) {
+  test(`at ${phone.width}, every dial body has a 44px target clear of its neighbours`, async ({ page }) => {
+    await page.setViewportSize(phone);
+    await page.goto(`${APP}/home`, { waitUntil: "load" });
+    await page.waitForFunction(() => document.body.dataset.homeReady === "true"
+      && document.querySelectorAll(".mdial [data-sheet-title]").length > 0);
 
-  const bodies = await dialBodyCenters(page);
-  const found = bodies.find((one) => one.title === "Gutter clearing");
-  const other = bodies.find((one) => one.title === "Car MOT — Volvo V60");
-  expect(found, "fixture no longer draws \"Gutter clearing\" on the dial").toBeTruthy();
-  expect(other, "fixture no longer draws \"Car MOT — Volvo V60\" on the dial").toBeTruthy();
-  if (!found || !other) throw new Error("unreachable — the expects above already failed the test");
-  const a = found, b = other;
+    const bodies = await dialBodies(page);
+    for (const body of bodies) {
+      expect(body.w, `${body.title}'s target is narrower than 44px`).toBeGreaterThanOrEqual(44);
+      expect(body.h, `${body.title}'s target is shorter than 44px`).toBeGreaterThanOrEqual(44);
+    }
+    for (const [i, a] of bodies.entries()) {
+      for (const b of bodies.slice(i + 1)) {
+        expect(Math.hypot(a.x - b.x, a.y - b.y), `${a.title} and ${b.title} sit closer than 48px`)
+          .toBeGreaterThanOrEqual(48);
+      }
+    }
 
-  const gap = Math.hypot(a.x - b.x, a.y - b.y);
-  expect(gap, "the fixture pair this test needs no longer sits close enough to matter").toBeLessThan(45);
+    const titles = bodies.map((one) => one.title);
+    expect(titles, "the overdue body lost its place on the dial").toContain("Gutter clearing");
+    expect(titles, "the later of the close pair is still drawn on the dial").not.toContain("Car MOT — Volvo V60");
+    await expect(page.locator(".pocket .pk-list", { hasText: "Car MOT — Volvo V60" }),
+      "the body the dial gave up is missing from the manifest").toHaveCount(1);
 
-  /* 40% of the way from a to b: nearer a, but outside both bodies' raw
-     drawn radius (~7-8px), so today's native circle hit-testing answers
-     neither. */
-  const point = { x: a.x + (b.x - a.x) * 0.4, y: a.y + (b.y - a.y) * 0.4 };
-  const distToA = Math.hypot(point.x - a.x, point.y - a.y);
-  const distToB = Math.hypot(point.x - b.x, point.y - b.y);
-  expect(distToA, "test point must be genuinely nearer Gutter clearing").toBeLessThan(distToB);
-
-  await page.mouse.click(point.x, point.y);
-  await expect(page.locator("#sheet")).toHaveClass(/open/);
-  await expect(page.locator("#sh-title")).toHaveText(a.title);
-});
+    /* 18px off the centre: outside the 7-8px drawn body, inside its target. */
+    const gutter = /** @type {{ x: number, y: number }} */ (bodies.find((one) => one.title === "Gutter clearing"));
+    await page.mouse.click(gutter.x + 18, gutter.y);
+    const sheet = page.getByRole("dialog");
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByRole("heading")).toHaveText("Gutter clearing");
+  });
+}

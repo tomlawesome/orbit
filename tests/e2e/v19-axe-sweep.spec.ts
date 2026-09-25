@@ -221,7 +221,7 @@ test.describe("the signed-in v19 sweep", () => {
 
   // `button.orb`, `#nstar`, `#edge-health` and `#keydrawer` are the DESKTOP
   // chrome (home.css scopes them under `.desk`); the pocket dialect draws its
-  // own account trigger (`.morb`, pocket.svelte) and has no drawers of its
+  // own account trigger (`#morb`, pocket.svelte) and has no drawers of its
   // own at all. Confirmed by running these against mobile-chromium first:
   // every one of the four times out with "element is not visible" rather
   // than finding a pocket equivalent, so there is nothing there for axe to
@@ -239,11 +239,11 @@ test.describe("the signed-in v19 sweep", () => {
   });
 
   // #852: the pocket dialect's own account menu — the mobile mirror of the
-  // desk `button.orb`/`#account` state above. `#morb`/`#maccount` are the
-  // pocket dialect's own trigger and panel (pocket.svelte), so this is
+  // desk `button.orb`/`#account` state above. `#morb` and the kit's hatch
+  // (#1120) are the pocket dialect's own trigger and panel, so this is
   // skipped on desktop the same way the state above skips mobile.
   test("/home pocket account menu open has no automated WCAG A/AA violations", async ({ page, isMobile }) => {
-    test.skip(!isMobile, "#morb/#maccount are pocket-only chrome; the desk dialect's own state is covered above");
+    test.skip(!isMobile, "#morb and the hatch are pocket-only chrome; the desk dialect's own state is covered above");
     const household = await arriveWithHousehold(page);
     try {
       await page.locator("#morb").click();
