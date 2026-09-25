@@ -17,6 +17,7 @@
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { SETUP_LINK_DAYS, initialsOf, lapses, openFor, plainly, sendWords, setupWords, stamp } from "./words.js";
   import "./administration.css";
 
   /**
@@ -56,10 +57,6 @@
   const need = () => /** @type {NonNullable<typeof view>} */ (view);
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
-
-  /** @param {string} name */
-  const initialsOf = (name) =>
-    name.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
 
   /* §11 (#453): direct placement — it lands on the real route and refreshes
      the screen with the server's answer. Deciding join requests is NOT an
@@ -171,7 +168,6 @@
          somebody with a password answers with it here; somebody with only a
          provider identity is sent back to that provider first and returns with
          the proof in a cookie. `?stepup=` names what they left to do. */
-  const SETUP_LINK_DAYS = { min: 1, max: 14, fallback: 7 };
   let localDraft = $state({ email: "", displayName: "", expiresInDays: SETUP_LINK_DAYS.fallback });
   /** True once Create has been tapped and the challenge under it is open. */
   let localArmed = $state(false);
@@ -231,32 +227,6 @@
   let resendDelivery = $state(null);
   /** @type {string | null} */
   let resendProblem = $state(null);
-
-  /** The lapse date as a reader reads it, in UTC so the gate photographs one date. */
-  /** @param {string} iso */
-  const lapses = (iso) =>
-    new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-
-  /** The mailer's bounded word, said plainly. @param {string} reason */
-  const sendWords = (reason) =>
-    reason === "smtp_unconfigured"
-      ? "this instance has no outgoing mail configured, so nothing was sent"
-      : reason === "smtp_unavailable"
-        ? "the mail server could not be reached, so nothing was sent"
-        : reason === "smtp_rejected"
-          ? "the mail server refused the message, so nothing was sent"
-          : "the message could not be sent";
-
-  /** What a refused action means here, from the bounded code. @param {unknown} error */
-  function setupWords(error) {
-    const code = /** @type {{ code?: string, message?: string }} */ (error)?.code;
-    if (code === "recent_authentication_required") return "that isn't your current password — nothing was created";
-    if (code === "too_many_attempts") return "too many attempts at once; try again shortly";
-    if (code === "provider_handover_unreadable") {
-      return "not started — Orbit could not hand you to your identity provider";
-    }
-    return /** @type {{ message?: string }} */ (error)?.message ?? String(error);
-  }
 
   /**
    * The first tap on a challenged action. An administrator with a password
@@ -376,26 +346,6 @@
   });
 
   const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
-  /** @param {string} word */
-  const plainly = (word) => word.replaceAll("_", " ");
-  /** @param {?string} iso */
-  const stamp = (iso) => (iso ? new Date(iso).toLocaleString("en-GB", { timeZone: "UTC" }) : "never");
-
-  /**
-   * How long the rotation card's subject has been open (#956), in the
-   * sentence register — "open 3 days" — where format.js's ago() speaks in
-   * chrome shorthand and appends "ago".
-   * @param {string} iso
-   */
-  const openFor = (iso) => {
-    const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
-    if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-    const hours = Math.round(minutes / 60);
-    if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"}`;
-    const days = Math.round(hours / 24);
-    return `${days} day${days === 1 ? "" : "s"}`;
-  };
-
   function openMailboxEditor() {
     const current = need().mailbox;
     if (current) {
