@@ -5,6 +5,7 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { homeIsLive } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { entrancesSettled } from "./support/motion";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -364,6 +365,9 @@ test.describe("the signed-in v19 sweep", () => {
     try {
       await page.goto(`/household/${household.id}`);
       await expect(page.getByRole("heading", { name: household.name })).toBeVisible();
+      /* #1122: on a phone the household's cards rise in; measure them drawn,
+         not through the entrance's fading opacity. */
+      await entrancesSettled(page.locator(".hh-pocket"));
       await axeCheck(page);
     } finally {
       await cleanup(page, household);
