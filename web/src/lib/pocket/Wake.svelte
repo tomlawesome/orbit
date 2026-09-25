@@ -59,6 +59,6 @@
     box-shadow:inset 3px 0 0 var(--accent), -3px 0 8px -4px var(--bloom), 0 8px 24px rgb(0 0 0 / .25)}
   .failure{--wake-act:var(--overdue);border-color:var(--overdue)}
   .failure .msg{color:var(--overdue-text)}
-  .close{border-color:transparent;font-size:1.25rem}
+  .close{border-color:transparent;background:none;font-size:1.25rem}
   @media (prefers-reduced-motion:reduce){ .p-wake{transition:none} }
 </style>
