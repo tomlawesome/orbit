@@ -17,6 +17,8 @@
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { isPocket } from "$lib/pocket/media.js";
+  import Pocket from "./pocket.svelte";
   import { SETUP_LINK_DAYS, initialsOf, lapses, openFor, plainly, sendWords, setupWords, stamp } from "./words.js";
   import "./administration.css";
 
@@ -57,6 +59,8 @@
   const need = () => /** @type {NonNullable<typeof view>} */ (view);
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
+  /* #1123: on a phone the pocket's column holds the page's one main landmark. */
+  const pocket = isPocket();
 
   /* §11 (#453): direct placement — it lands on the real route and refreshes
      the screen with the server's answer. Deciding join requests is NOT an
@@ -510,7 +514,14 @@
 <Chrome user={view?.user} current="administration"
         role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
 
-<div class="page" role="main">
+<!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
+     shares this page's state and acts (the step-up challenge, the re-read),
+     so both dialects answer the server the same way. -->
+<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} bind:draft={localDraft}
+        challenge={challengeThen} reread={async () => { view = await readAdminScreen(); }}
+        spent={() => (provenIntent = "")} />
+
+<div class="page" role={pocket ? undefined : "main"}>
   <header class="screen">
     <h1>Administration</h1>
     <div class="sub">{view
