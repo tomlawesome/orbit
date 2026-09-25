@@ -46,9 +46,10 @@ async function atHome(page) {
 /** @param {import("@playwright/test").Page} page */
 async function landedOnCreate(page) {
   await page.waitForURL("**/create");
-  /* Landed on the form itself, not merely at the address: the create card is
-     what the reader came for. */
-  await expect(page.locator("#card")).toBeVisible();
+  /* Landed on the form itself, not merely at the address: the create form is
+     what the reader came for. At this width that is the pocket's own form
+     (#1120, proposal §2.5); the desk's #card is hidden by the dialect switch. */
+  await expect(page.locator("#pocket-entry")).toBeVisible();
 }
 
 test("a pocket reader can reach the create form from home by the north star", async ({ page }) => {
