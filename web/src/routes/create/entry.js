@@ -253,3 +253,45 @@ export function createCommandOf(entry, { householdId, currency, id }) {
 export function entryChanged(entry, start) {
   return JSON.stringify(entry) !== JSON.stringify(start);
 }
+
+/**
+ * REVIEW MODE (#1120, proposal §2.5, §2.6): what the relay proposed for a
+ * piece of mail, as the form holds it for the reader to amend before it
+ * enters the orbit. The fields are pre-filled with the readings; the section
+ * still has no default (#1058), and a reading that named no recurrence comes
+ * in as once rather than guessing a year. The household is the receipt's,
+ * or the reader's own when the mail named none.
+ * @param {import('$lib/data/workspace.js').ItemProposal} [proposal]
+ * @param {{ householdId?: string | null }} [where]
+ * @returns {Entry}
+ */
+export function entryOfProposal(proposal = {}, { householdId = null } = {}) {
+  return {
+    ...entryOf({
+      title: proposal.title ?? "",
+      subtype: proposal.subtype ?? null,
+      scheduleKind: proposal.scheduleKind ?? null,
+      provider: proposal.provider ?? null,
+      reference: proposal.reference ?? null,
+      dueDate: proposal.dueDate ?? null,
+      recurrenceMonths: proposal.recurrenceMonths ?? null,
+      costMinor: proposal.costMinor ?? null,
+      notes: proposal.notes ?? null,
+    }),
+    name: (proposal.title ?? "").slice(0, 100),
+    householdId,
+    reminderDays: [...REMINDER_DEFAULT],
+  };
+}
+
+/**
+ * The item a reviewed receipt is approved as: the same fields create writes,
+ * the kind's subtype, and the currency the mail was read in. The section
+ * travels beside it (approveReceipt), as the reviewed-intake route takes it.
+ * @param {Entry} entry
+ * @param {string} currency
+ */
+export function reviewItemOf(entry, currency) {
+  const { sectionId: _section, ...fields } = fieldsOf(entry);
+  return { ...fields, subtype: scheduleOf(entry.kind).subtype, currency };
+}
