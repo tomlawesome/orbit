@@ -39,6 +39,16 @@ describe("release-on-tag workflow", () => {
     expect(create).toContain("--generate-notes");
   });
 
+  it("classifies the tag and never marks a pre-release tag Latest (#1121)", () => {
+    const create = step("Create the release if it does not already exist");
+    expect(create).toContain("bash scripts/ci/classify-release-tag.sh");
+    expect(create).toContain("--prerelease");
+    expect(create).toContain("--latest=false");
+    expect(stepStart("Check out the tagged commit and its preview/hotfix branches")).toBeLessThan(
+      stepStart("Create the release if it does not already exist"),
+    );
+  });
+
   it("resolves which mirrored branch GitLab tested this commit on, preferring preview", () => {
     const source = step("Find the branch GitLab tested this commit on");
     expect(source).toContain("--contains");
