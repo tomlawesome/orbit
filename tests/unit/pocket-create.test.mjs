@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 // mapping, the recurrence range, the section with no default, and the one
 // command both create and edit build from the same form.
 import {
-  RECURRENCE_MAX, REMINDER_DEFAULT, blankEntry, createCommandOf, entryChanged, entryOf, fieldsOf,
-  kindOf, minorOf, recurrenceWords, refusalOf, scheduleOf, stepRecurrence, toggleReminder,
+  RECURRENCE_MAX, REMINDER_DEFAULT, blankEntry, createCommandOf, entryChanged, entryOf, entryOfProposal, fieldsOf,
+  kindOf, minorOf, recurrenceWords, refusalOf, reviewItemOf, scheduleOf, stepRecurrence, toggleReminder,
 } from "../../web/src/routes/create/entry.js";
 import { upsertCommand } from "../../web/src/lib/data/commands.js";
 
@@ -131,5 +131,38 @@ describe("the entry's fields", () => {
     const command = upsertCommand(/** @type {any} */ (item), edits, { uuid: () => "op", now: () => "2026-09-25T12:00:00.000Z" });
     expect(command.item).toMatchObject({ title: "Car MOT", recurrenceMonths: 24, scheduleKind: "service", version: 5 });
     expect(command.item).not.toHaveProperty("provider");
+  });
+});
+
+describe("review mode: amending what the relay read (#1120, §2.5, §2.6)", () => {
+  const proposal = {
+    title: "Home insurance renewal", provider: "Harbour Mutual", costMinor: 40000, currency: "GBP",
+    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12,
+  };
+
+  it("pre-fills the form with the readings, and still leaves the section to the reader", () => {
+    const entry = entryOfProposal(proposal, { householdId: "hh-1" });
+    expect(entry).toMatchObject({
+      kind: "renewal", name: "Home insurance renewal", householdId: "hh-1", sectionId: null,
+      provider: "Harbour Mutual", dueDate: "2026-10-03", recurrence: 12, cost: "400.00",
+      reminderDays: REMINDER_DEFAULT,
+    });
+    expect(refusalOf(entry)).toBe("not yet — choose a section");
+  });
+
+  it("reads mail that proposed nothing as an empty form, not a guessed one", () => {
+    const entry = entryOfProposal({});
+    expect(entry).toMatchObject({ kind: null, name: "", recurrence: 0, cost: "", dueDate: "" });
+  });
+
+  it("approves the amended values with the kind's subtype and the mail's currency", () => {
+    const entry = { ...entryOfProposal(proposal), sectionId: "s-home", provider: "Harbour Mutual plc", cost: "412" };
+    const item = reviewItemOf(entry, "GBP");
+    expect(item).toMatchObject({
+      title: "Home insurance renewal", provider: "Harbour Mutual plc", costMinor: 41200, currency: "GBP",
+      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, subtype: "renewal",
+      reminderDays: [21, 7],
+    });
+    expect(item).not.toHaveProperty("sectionId");
   });
 });
