@@ -52,6 +52,10 @@ body{background:#04070f}
   100%{transform:rotate(-50deg) scale(.25);opacity:0}}
 
 /* the well never sits still */
+/* The well fills the screen and is cropped to it (xMidYMid slice); on a phone
+   it is drawn whole instead, below. */
+.world>svg{width:100%;height:100%}
+
 .disc-precess{transform-origin:800px 450px;animation:precess 56s ease-in-out infinite alternate}
 @keyframes precess{from{transform:rotate(-1.4deg)}to{transform:rotate(1.6deg)}}
 .disc-glow{animation:dbreathe 9s ease-in-out infinite alternate;mix-blend-mode:screen}
@@ -73,7 +77,13 @@ body{background:#04070f}
 .line-b a:hover{text-decoration:underline}
 
 /* ══ ON A PHONE (#1120 step 9, proposal §2.19) ════════════════════════════
-   The well stands as built. What changes is the words: a heading, the line
+   The well is the desk's composition drawn smaller, not cropped: its svg is
+   a 16:10 box, as wide as the screen inside the gutters (or as tall as a
+   landscape screen), centred, so slice crops nothing and the disc, its glow
+   and every falling label stay on screen. The star fall keeps the desk's
+   size -- it is sky, and bleeds -- and only moves to stay centred on the
+   hole (`--kw`, the well's scale, is the same sum in both places).
+   What else changes is the words: a heading, the line
    at 15px, and the way home as a 44px pill, stacked above the safe area so
    nothing crossing the well sits on them.
 
@@ -86,6 +96,12 @@ body{background:#04070f}
 .stage .errring,.stage .said{display:none}
 
 @media (max-width: 900px), (max-height: 600px){
+  .world{container-type:size}
+  .world>svg,.fall,.first{--kw:min((100cqw - 2 * var(--p-gutter)) / 1600, 100cqh / 1000)}
+  .world>svg{position:absolute;inset:0;margin:auto;overflow:visible;
+      width:calc(1600 * var(--kw));height:calc(1000 * var(--kw))}
+  .fall,.first{top:calc(50% - 50 * var(--kw) - var(--band) / 2)}
+
   .offchart{position:fixed;left:var(--p-gutter);right:var(--p-gutter);width:auto;height:auto;margin:0;
       overflow:visible;clip:auto;white-space:normal;z-index:3;text-align:center;
       bottom:calc(env(safe-area-inset-bottom, 0px) + 142px);
