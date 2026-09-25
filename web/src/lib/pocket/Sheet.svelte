@@ -216,7 +216,7 @@
   .head{flex:none;display:flex;align-items:center;gap:12px;min-height:var(--p-hit);
     margin:0 calc(var(--p-gutter) * -1) 8px;padding:0 var(--p-gutter) 8px;border-bottom:1px solid var(--line-soft)}
   .title{flex:1;min-width:0;margin:0;font:600 var(--p-type-sheet)/1.3 var(--display);color:var(--ink)}
-  .head .close{border-color:transparent;margin-right:calc(var(--p-pill-pad) * -1 + 4px)}
+  .head .close{border-color:transparent;background:none;margin-right:calc(var(--p-pill-pad) * -1 + 4px)}
   .body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
 
   @media (prefers-reduced-motion:reduce){
