@@ -205,7 +205,7 @@
 
   .pk-column{position:relative;z-index:2;box-sizing:border-box;max-width:var(--p-column);margin:0 auto;
     padding:calc(var(--p-chrome) + env(safe-area-inset-top) + 8px) var(--p-gutter)
-      calc(var(--pc-bar, 120px) + 24px)}
+      calc(var(--pc-bar, 120px) + var(--p-kb, 0px) + 24px)}
   .pk-head{margin:0 0 20px;padding:0 2px}
   .pk-sub{margin:6px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
 
