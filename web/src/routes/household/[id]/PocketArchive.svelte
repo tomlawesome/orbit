@@ -206,7 +206,7 @@
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
     tab = tab === "out" ? "in" : "out";
-    queueMicrotask(() => document.getElementById(`pk-tab-${tab}`)?.focus());
+    queueMicrotask(() => document.getElementById(`hh-tab-${tab}`)?.focus());
   }
 
   const readyUntil = $derived(written
@@ -214,20 +214,20 @@
     : "");
 </script>
 
-<section class="p-card pk-archive" aria-labelledby="pk-archive-title" data-pk="archive">
-  <div class="pk-archive-head">
-    <h2 class="p-caps" id="pk-archive-title">The archive</h2>
-    <div class="pk-tabs" role="tablist" aria-labelledby="pk-archive-title">
-      <button role="tab" id="pk-tab-out" aria-selected={tab === "out"} aria-controls="pk-panel-out"
+<section class="p-card hh-archive" aria-labelledby="hh-archive-title" data-hh="archive">
+  <div class="hh-archive-head">
+    <h2 class="p-caps" id="hh-archive-title">The archive</h2>
+    <div class="hh-tabs" role="tablist" aria-labelledby="hh-archive-title">
+      <button role="tab" id="hh-tab-out" aria-selected={tab === "out"} aria-controls="hh-panel-out"
               tabindex={tab === "out" ? 0 : -1} onclick={() => (tab = "out")} onkeydown={tabKey}>take it with you</button>
-      <button role="tab" id="pk-tab-in" aria-selected={tab === "in"} aria-controls="pk-panel-in"
+      <button role="tab" id="hh-tab-in" aria-selected={tab === "in"} aria-controls="hh-panel-in"
               tabindex={tab === "in" ? 0 : -1} onclick={() => (tab = "in")} onkeydown={tabKey}>bring one in</button>
     </div>
   </div>
 
-  <div role="tabpanel" id="pk-panel-out" aria-labelledby="pk-tab-out" hidden={tab !== "out"}>
-    <p class="p-prose pk-say">One encrypted file with everything in {householdName}, to keep or to bring into another Orbit.</p>
-    <div class="pk-manifest">
+  <div role="tabpanel" id="hh-panel-out" aria-labelledby="hh-tab-out" hidden={tab !== "out"}>
+    <p class="p-prose hh-say">One encrypted file with everything in {householdName}, to keep or to bring into another Orbit.</p>
+    <div class="hh-manifest">
       <div class="p-kv"><span>entries</span><b>{entries}</b></div>
       <div class="p-kv"><span>sections</span><b>{sections}</b></div>
       <div class="p-kv"><span>documents</span><b>travel with it</b></div>
@@ -237,15 +237,15 @@
     {#if outPhase === "rest"}
       <button class="p-pill act-accent wide" onclick={() => (outPhase = "form")}>export this system</button>
     {:else if outPhase === "form"}
-      <div class="pk-fields">
-        <label class="pk-label" for="pk-pass-out">a passphrase for the file</label>
-        <input id="pk-pass-out" class="pk-input" type="password" autocomplete="new-password" enterkeyhint="next"
+      <div class="hh-fields">
+        <label class="hh-label" for="hh-pass-out">a passphrase for the file</label>
+        <input id="hh-pass-out" class="hh-input" type="password" autocomplete="new-password" enterkeyhint="next"
                bind:value={passOut}>
-        <label class="pk-label" for="pk-pass-again">the passphrase again</label>
-        <input id="pk-pass-again" class="pk-input" type="password" autocomplete="new-password" enterkeyhint="done"
+        <label class="hh-label" for="hh-pass-again">the passphrase again</label>
+        <input id="hh-pass-again" class="hh-input" type="password" autocomplete="new-password" enterkeyhint="done"
                bind:value={passAgain}>
-        <p class="pk-note warm">Orbit never keeps this passphrase · without it the file cannot be opened</p>
-        {#if outRefusal && (passOut || passAgain)}<p class="pk-note">{outRefusal}</p>{/if}
+        <p class="hh-note warm">Orbit never keeps this passphrase · without it the file cannot be opened</p>
+        {#if outRefusal && (passOut || passAgain)}<p class="hh-note">{outRefusal}</p>{/if}
       </div>
       {#if outRefusal}
         <button class="p-pill act-accent wide" disabled>write the archive</button>
@@ -254,32 +254,32 @@
       {/if}
       {#if outProblem}<p class="p-error" role="alert">{outProblem}</p>{/if}
     {:else if outPhase === "writing"}
-      <div class="pk-progress" role="status">
+      <div class="hh-progress" role="status">
         <span class="p-body accent breathing" aria-hidden="true"></span>
         <span><b>writing the archive</b><small>encrypting {entries} {entries === 1 ? "entry" : "entries"} and their documents</small></span>
         <i aria-hidden="true"></i>
       </div>
     {:else if written}
-      <div class="pk-written">
+      <div class="hh-written">
         <Row title="orbit-archive.json" meta="ready until {readyUntil} · {written.includesDocuments ? 'documents in' : 'no documents'}"
              href={written.downloadUrl} trail="download">
           {#snippet mark()}<span class="p-paper">◆</span>{/snippet}
         </Row>
       </div>
-      <p class="pk-note">kept here for a day, then gone · write another whenever you like</p>
+      <p class="hh-note">kept here for a day, then gone · write another whenever you like</p>
     {/if}
   </div>
 
-  <div role="tabpanel" id="pk-panel-in" aria-labelledby="pk-tab-in" hidden={tab !== "in"}>
-    <p class="p-prose pk-say">Brings entries in, never people. Anything already here stays as it is.</p>
+  <div role="tabpanel" id="hh-panel-in" aria-labelledby="hh-tab-in" hidden={tab !== "in"}>
+    <p class="p-prose hh-say">Brings entries in, never people. Anything already here stays as it is.</p>
     <input class="sr-only" type="file" accept=".json,application/json" tabindex="-1" aria-hidden="true"
            bind:this={picker} onchange={chose}>
     {#if inPhase === "done"}
-      <p class="pk-done"><span class="p-body ok" aria-hidden="true"></span>brought in {brought} {brought === 1 ? "entry" : "entries"} from {preview?.householdName ?? "the archive"}</p>
+      <p class="hh-done"><span class="p-body ok" aria-hidden="true"></span>brought in {brought} {brought === 1 ? "entry" : "entries"} from {preview?.householdName ?? "the archive"}</p>
       <button class="p-pill wide" onclick={startOver}>bring in another</button>
     {:else}
       {#if file}
-        <div class="pk-written">
+        <div class="hh-written">
           <Row title={file.name} meta={sizeLabel(file.size)}>
             {#snippet mark()}<span class="p-paper">◆</span>{/snippet}
           </Row>
@@ -287,37 +287,37 @@
       {/if}
       {#if inPhase === "rest"}
         <button class="p-pill act-accent wide" onclick={() => picker?.click()}>choose a file</button>
-        <p class="pk-note">an Orbit archive, up to {sizeLabel(ARCHIVE_MAX_BYTES)}</p>
+        <p class="hh-note">an Orbit archive, up to {sizeLabel(ARCHIVE_MAX_BYTES)}</p>
       {:else if inPhase === "chosen" || inPhase === "looking"}
-        <div class="pk-fields">
-          <label class="pk-label" for="pk-pass-in">the file's passphrase</label>
-          <input id="pk-pass-in" class="pk-input" type="password" autocomplete="off" enterkeyhint="go"
+        <div class="hh-fields">
+          <label class="hh-label" for="hh-pass-in">the file's passphrase</label>
+          <input id="hh-pass-in" class="hh-input" type="password" autocomplete="off" enterkeyhint="go"
                  bind:value={passIn} onkeydown={(event) => { if (event.key === "Enter") lookInside(); }}>
         </div>
-        <div class="pk-pair">
+        <div class="hh-pair">
           <button class="p-pill" onclick={startOver}>another file</button>
           <button class="p-pill filled" disabled={passIn.length < 12 || inPhase === "looking"} onclick={lookInside}>
             {inPhase === "looking" ? "looking…" : "look inside"}</button>
         </div>
       {:else if preview}
-        <div class="p-card proposed pk-preview">
+        <div class="p-card proposed hh-preview">
           <p class="p-caps">inside · {preview.householdName}</p>
           <div class="p-kv"><span>entries</span><b>{preview.items}</b></div>
           <div class="p-kv"><span>sections</span><b>{preview.sections}</b></div>
           <div class="p-kv"><span>documents</span><b class:ended={preview.documentsExcluded}>{preview.documentsExcluded ? `${preview.documents} · stay out for now` : preview.documents}</b></div>
           {#each preview.conflicts as clash (clash.id)}
-            <div class="p-kv pk-clashrow"><span class="pk-clash">{clash.title}</span><b class="soon">already here · stays out</b></div>
+            <div class="p-kv hh-clashrow"><span class="hh-clash">{clash.title}</span><b class="soon">already here · stays out</b></div>
           {/each}
         </div>
         {#if bringCount > 0}
           <ArmButton label="bring in {bringCount} {bringCount === 1 ? 'entry' : 'entries'}" wide danger={false}
                      class="act-accent" armedLabel="tap again · it can't be undone as one act" onfire={bringIn} />
         {:else}
-          <p class="pk-note">everything in this archive is already here</p>
+          <p class="hh-note">everything in this archive is already here</p>
         {/if}
-        <button class="p-pill wide pk-again" onclick={startOver}>choose another file</button>
+        <button class="p-pill wide hh-again" onclick={startOver}>choose another file</button>
       {:else if inPhase === "bringing"}
-        <div class="pk-progress" role="status">
+        <div class="hh-progress" role="status">
           <span class="p-body accent breathing" aria-hidden="true"></span>
           <span><b>bringing it in</b><small>{bringCount} {bringCount === 1 ? "entry" : "entries"}</small></span>
           <i aria-hidden="true"></i>
@@ -329,15 +329,15 @@
 </section>
 
 <Sheet bind:open={challengeOpen} size="callout" title="Confirm it’s you" onclose={() => { retry = null; }}>
-  <p class="p-prose pk-sheet-say">The archive carries everything in {householdName}, so Orbit asks you to sign in again first.</p>
+  <p class="p-prose hh-sheet-say">The archive carries everything in {householdName}, so Orbit asks you to sign in again first.</p>
   {#if hasPassword === false}
     <button class="p-pill filled wide" onclick={toProvider}>confirm with your identity provider →</button>
   {:else}
     <form onsubmit={(event) => { event.preventDefault(); prove(); }}>
-      <label class="pk-label" for="pk-proof">your password</label>
-      <input id="pk-proof" class="pk-input" type="password" autocomplete="current-password" enterkeyhint="done"
+      <label class="hh-label" for="hh-proof">your password</label>
+      <input id="hh-proof" class="hh-input" type="password" autocomplete="current-password" enterkeyhint="done"
              bind:value={currentPassword}>
-      <button class="p-pill filled wide pk-confirm" type="submit" disabled={!currentPassword || proving}>
+      <button class="p-pill filled wide hh-confirm" type="submit" disabled={!currentPassword || proving}>
         {proving ? "confirming…" : "confirm and carry on"}</button>
     </form>
   {/if}
@@ -346,60 +346,60 @@
 
 <style>
   /* §22 under 560px: the pill pair follows the heading, wrapping under it. */
-  .pk-archive-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin:0 0 12px}
-  .pk-archive-head .p-caps{margin:0}
-  .pk-tabs{display:flex;border:1px solid var(--line);border-radius:calc(var(--p-hit) / 2);overflow:hidden;flex:1 1 100%}
-  .pk-tabs button{appearance:none;flex:1;min-height:var(--p-hit);padding:0 12px;border:0;background:none;
+  .hh-archive-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin:0 0 12px}
+  .hh-archive-head .p-caps{margin:0}
+  .hh-tabs{display:flex;border:1px solid var(--line);border-radius:calc(var(--p-hit) / 2);overflow:hidden;flex:1 1 100%}
+  .hh-tabs button{appearance:none;flex:1;min-height:var(--p-hit);padding:0 6px;white-space:nowrap;border:0;background:none;
     font:var(--p-type-meta)/1.2 var(--mono);color:var(--ink-mid);cursor:pointer;
     transition:background-color var(--p-arm),color var(--p-arm)}
-  .pk-tabs button + button{border-left:1px solid var(--line)}
-  .pk-tabs button[aria-selected=true]{background:var(--accent);color:var(--bg);font-weight:600}
-  :global(:is([data-theme=dawn],[data-theme=clouds])) .pk-tabs button[aria-selected=true]{color:#fff}
-  :global([data-theme=retrograde]) .pk-tabs button[aria-selected=true]{box-shadow:0 0 12px -2px var(--bloom)}
-  .pk-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-4px}
-  [role=tabpanel]{animation:pk-panel 240ms var(--p-ease) both}
-  @keyframes pk-panel{from{opacity:0;transform:translateY(4px)}}
+  .hh-tabs button + button{border-left:1px solid var(--line)}
+  .hh-tabs button[aria-selected=true]{background:var(--accent);color:var(--bg);font-weight:600}
+  :global(:is([data-theme=dawn],[data-theme=clouds])) .hh-tabs button[aria-selected=true]{color:#fff}
+  :global([data-theme=retrograde]) .hh-tabs button[aria-selected=true]{box-shadow:0 0 12px -2px var(--bloom)}
+  .hh-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-4px}
+  [role=tabpanel]{animation:hh-panel 240ms var(--p-ease) both}
+  @keyframes hh-panel{from{opacity:0;transform:translateY(4px)}}
 
-  .pk-say{color:var(--ink-mid);margin:0 0 12px}
-  .pk-manifest{margin:0 0 16px}
-  .pk-manifest .p-kv:last-child{border-bottom:0}
+  .hh-say{color:var(--ink-mid);margin:0 0 12px}
+  .hh-manifest{margin:0 0 16px}
+  .hh-manifest .p-kv:last-child{border-bottom:0}
   .p-kv .ended{color:var(--ink-quiet)}
 
-  .pk-fields{display:flex;flex-direction:column;margin:0 0 12px}
-  .pk-label{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
+  .hh-fields{display:flex;flex-direction:column;margin:0 0 12px}
+  .hh-label{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
     color:var(--ink-quiet);margin:12px 0 6px}
-  .pk-label:first-child{margin-top:0}
-  .pk-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;border-radius:12px;
+  .hh-label:first-child{margin-top:0}
+  .hh-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;border-radius:12px;
     border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
     font:var(--p-type-body)/1.2 var(--ui)}
-  .pk-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
-  .pk-note{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
-  .pk-note.warm{color:var(--warm-text)}
+  .hh-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+  .hh-note{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
+  .hh-note.warm{color:var(--warm-text)}
   .p-pill:disabled{opacity:.45;cursor:default}
 
-  .pk-progress{display:flex;align-items:center;gap:12px;min-height:var(--p-row-min);padding:0 4px;position:relative;overflow:hidden}
-  .pk-progress > span:nth-child(2){display:flex;flex-direction:column;gap:2px;font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink)}
-  .pk-progress small{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
-  .pk-progress .p-body{margin:0 7px}
+  .hh-progress{display:flex;align-items:center;gap:12px;min-height:var(--p-row-min);padding:0 4px;position:relative;overflow:hidden}
+  .hh-progress > span:nth-child(2){display:flex;flex-direction:column;gap:2px;font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink)}
+  .hh-progress small{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  .hh-progress .p-body{margin:0 7px}
   /* The desk has no spinner (§5.2); a thin accent comet runs the row's foot
      while the server works. Transform only. */
-  .pk-progress i{position:absolute;left:0;bottom:0;height:2px;width:40%;border-radius:1px;
-    background:linear-gradient(90deg, transparent, var(--accent), transparent);animation:pk-comet 1.4s var(--p-ease) infinite}
-  @keyframes pk-comet{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
+  .hh-progress i{position:absolute;left:0;bottom:0;height:2px;width:40%;border-radius:1px;
+    background:linear-gradient(90deg, transparent, var(--accent), transparent);animation:hh-comet 1.4s var(--p-ease) infinite}
+  @keyframes hh-comet{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
 
-  .pk-written{margin:0 calc(var(--p-card-pad) * -1) 4px}
-  .pk-done{display:flex;align-items:center;gap:12px;margin:0 0 12px;font:var(--p-type-body)/1.4 var(--ui);color:var(--ink)}
-  .pk-preview{margin:4px 0 12px}
-  .pk-preview .p-kv:last-child{border-bottom:0}
-  .pk-clashrow{flex-direction:column;gap:2px}
-  .pk-clash{min-width:0;overflow-wrap:anywhere;color:var(--ink)}
-  .pk-pair{display:flex;gap:var(--p-pill-gap)}
-  .pk-pair .p-pill{flex:1}
-  .pk-again{margin-top:8px}
-  .pk-sheet-say{color:var(--ink-mid);margin:4px 0 16px}
-  .pk-confirm{margin-top:16px}
+  .hh-written{margin:0 calc(var(--p-card-pad) * -1) 4px}
+  .hh-done{display:flex;align-items:center;gap:12px;margin:0 0 12px;font:var(--p-type-body)/1.4 var(--ui);color:var(--ink)}
+  .hh-preview{margin:4px 0 12px}
+  .hh-preview .p-kv:last-child{border-bottom:0}
+  .hh-clashrow{flex-direction:column;gap:2px}
+  .hh-clash{min-width:0;overflow-wrap:anywhere;color:var(--ink)}
+  .hh-pair{display:flex;gap:var(--p-pill-gap)}
+  .hh-pair .p-pill{flex:1}
+  .hh-again{margin-top:8px}
+  .hh-sheet-say{color:var(--ink-mid);margin:4px 0 16px}
+  .hh-confirm{margin-top:16px}
 
   @media (prefers-reduced-motion:reduce){
-    [role=tabpanel],.pk-progress i{animation:none}
+    [role=tabpanel],.hh-progress i{animation:none}
   }
 </style>
