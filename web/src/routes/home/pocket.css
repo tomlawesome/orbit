@@ -38,131 +38,159 @@
 @media (min-width:901px) and (min-height:601px){ .pocket{display:none} }
 @media (max-width:900px), (max-height:600px){ .desk{display:none} body{overflow-y:auto;overflow-x:hidden} }
 
+
 /*
- * The mobile dialect — lifted from design/family/mobile-home.html and owned
- * here from that point on.
+ * The pocket dialect: home on a phone (CON-10, #430), lifted onto the kit's
+ * type scale and spacing in #1120 (proposal §1.6, §1.7, §2.1). Sizes come
+ * from $lib/pocket/tokens.css: row titles 16px, meta, T-labels and dates
+ * 13px, group heads 12px tracked caps, every tap target 44px.
  *
- * CON-10 states a dialect rather than a second design: the dial owns the
- * width, callouts and drawers become bottom sheets, and the other households
- * collapse from a sky you fly through into a strip you scroll. One identity,
- * one chart, a different grammar for a thumb.
- *
- * Global rather than component-scoped, alongside family.css.
+ * Global, so every selector is scoped: under .pocket for the page, and by
+ * its own pk- class for what sits in the sheet, which the kit portals to the
+ * end of <body>, outside .pocket.
  */
 
-
-.pocket .sky g{animation:drift 180s linear infinite}
-@keyframes drift{to{transform:translateX(-40px)}}
-.pocket .mpage{position:relative;z-index:2;max-width:400px;margin:0 auto;padding:14px 12px 40px}
-.pocket .mtop{display:flex;justify-content:space-between;align-items:center;padding:4px 6px 10px}
-/* #852: a <button> now (it opens the account sheet), reset to draw exactly as
- * the plain div it replaces — same size, border, background and font, so the
- * fidelity screenshots do not move. */
-.pocket .morb{appearance:none;padding:0;margin:0;cursor:pointer;
-      width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
-      background:var(--panel);backdrop-filter:blur(8px);display:grid;place-items:center;
-      font:11px var(--mono);color:var(--ink-mid)}
-.pocket .mdial{width:100%;aspect-ratio:1;position:relative}
-.pocket .mdial svg{width:100%;height:100%}
-.pocket .skies{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 10px}
-.pocket .skies .msys{flex:none;display:flex;align-items:center;gap:8px;font:10.5px var(--mono);
-             color:var(--ink-mid);border:1px solid var(--line);border-radius:99px;
-             padding:6px 13px;background:var(--panel)}
-.pocket .skies svg{flex:none}
-.pocket .msearch{margin:8px 0 18px;text-align:center}
-.pocket .msearch input{width:88%;background:none;border:0;outline:0;border-bottom:1px solid var(--line);
-      text-align:center;font:12.5px var(--mono);color:var(--ink);padding:7px}
-.pocket .mgroup h3{font:10px var(--mono);letter-spacing:.16em;color:var(--ink-quiet);margin:14px 4px 8px}
-.pocket .mitem{display:flex;align-items:center;gap:11px;border:1px solid var(--line-soft);
-       background:var(--panel);backdrop-filter:blur(8px);border-radius:12px;
-       padding:11px 13px;margin-bottom:6px}
-.pocket .mitem b{display:block;font-size:13.5px;font-weight:520}
-.pocket .mitem span{font-size:11px;color:var(--ink-mid)}
-.pocket .mitem .flex{flex:1;min-width:0}
-.pocket .mt{font:500 12px var(--mono);text-align:right}
-.pocket .mt small{display:block;font-size:9.5px;color:var(--ink-quiet)}
-.pocket .dot{width:7px;height:7px;border-radius:50%;flex:none}
-/* #850: a transform alone does not remove an element from the Tab order in a
- * real browser — only display:none, visibility:hidden, inert, tabindex="-1"
- * or disabled do. Same fix as home.css's .account/.drawer/.drawer-top
- * (#847): visibility is delayed to match the close animation, so the
- * closed sheet's controls stop being real Tab stops only once it is fully
- * off-screen. `.msheet` (#852, the account menu) is the same bottom-sheet
- * frame as `.sheet` — one rule for both rather than a second copy. */
-.pocket .sheet,.pocket .msheet{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:18px 18px 0 0;
-       background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
-       padding:18px 22px 26px;transform:translateY(105%);visibility:hidden;
-       transition:transform .3s cubic-bezier(.3,.7,.3,1),visibility 0s .3s}
-.pocket .sheet.open,.pocket .msheet.open{transform:none;visibility:visible;transition-delay:0s}
-.pocket .sheet .grab,.pocket .msheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
-.pocket .sheet b{font-size:15px;font-weight:600}
-.pocket .sheet .meta{font:12px var(--mono);color:var(--ink-mid);margin:4px 0 14px}
-/* ---- #852: the account menu's own contents, adapted from home.css's
- * `.account` rules (desk, 240px fixed panel) to the sheet's full width. ---- */
-.pocket .msheet .mwho b{display:block;font-size:14px;font-weight:560}
-.pocket .msheet .mwho span{font-size:12px;color:var(--ink-mid)}
-.pocket .msheet nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
-             padding:12px 0;border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft)}
-.pocket .msheet nav a{font-size:14px;color:var(--ink-mid);text-decoration:none;padding:8px}
-.pocket .msheet nav a:hover{color:var(--ink);background:var(--panel)}
-.pocket .msheet .mswatches{display:flex;gap:10px;align-items:center;margin-bottom:14px}
-.pocket .msheet .mswatches span{font:10.5px var(--mono);color:var(--ink-quiet);margin-right:2px}
-.pocket .msheet .mswatches button{width:20px;height:20px;border-radius:50%;cursor:pointer;
-                   border:1px solid var(--line);padding:0}
-.pocket .msheet .mswatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
-.pocket .msheet .msignout{font:13px var(--mono);color:var(--ink-quiet);background:none;
-         border:0;cursor:pointer;padding:0}
-.pocket .msheet .msignout:hover{color:var(--overdue-text)}
-.pocket .msheet .msignout-problem:not([hidden]){font:10.5px var(--mono);color:var(--overdue-text);
-                margin-top:7px;line-height:1.7}
-/* #850: :not([hidden]) so the hidden attribute on #sh-acts-sugg wins — an
- * ordinary author rule like the old .acts{display:flex} always outranks the
- * user-agent stylesheet's [hidden]{display:none} regardless of specificity. */
-.pocket .sheet .acts:not([hidden]){display:flex;gap:9px}
-.pocket .sheet .acts button{flex:1;font:12px var(--mono);padding:10px;border-radius:10px;cursor:pointer;
-      background:none;border:1px solid var(--line);color:var(--ink-mid)}
-.pocket .sheet .acts .pri{color:var(--accent-text);border-color:var(--accent)}
-
-/* ---- the three rules the dialect used from family.css, scoped -----------
- * Copied rather than linked: family.css is global and its body rules would
- * reach the desk chart. The other family screens keep owning that file.
- */
+/* ---- the sky, from family.css, scoped --------------------------------- */
 .pocket{line-height:normal}
 .pocket .sky{position:fixed;inset:-5%;pointer-events:none}
 .pocket .sky svg{position:absolute;inset:0;width:100%;height:100%}
-.pocket .mark-row{display:flex;align-items:center;gap:10px;font-family:var(--display);
-                  font-weight:600;font-size:17px;letter-spacing:.02em}
-@media (prefers-reduced-motion:reduce){ .pocket .sky g{animation:none} }
+.pocket .sky g{animation:drift 180s linear infinite}
+@keyframes drift{to{transform:translateX(-40px)}}
 
-/* ---- #466: the signals surface — what the relay caught, pocket grammar -- */
-.pocket .mitem.suggest{border-style:dashed;cursor:pointer}
-.pocket .mitem.suggest span{color:var(--accent-text)}
-.pocket .dot.sug{background:none;border:1.6px solid var(--accent)}
-.pocket .mitem.reading b{color:var(--ink-mid);font-weight:500}
-.pocket .mitem.reading .dot{background:var(--upcoming);animation:pocket-breathe 2.4s ease-in-out infinite}
+/* ---- the page ---------------------------------------------------------
+ * Under the kit's top chrome, in the kit's column, and clear of the north
+ * star at the foot. */
+.pocket .mpage{position:relative;z-index:2;max-width:var(--p-column);margin:0 auto;box-sizing:border-box;
+  padding:calc(var(--p-chrome) + env(safe-area-inset-top)) var(--p-gutter) calc(104px + env(safe-area-inset-bottom))}
+.pocket .p-caps{margin:var(--p-group-above) 4px var(--p-group-below)}
+
+/* The orb: drawn 36px, hit 44px (§1.3). Arrivals waiting in the inbox give
+   it a 2px accent ring and a count bead (§2.1). */
+.pocket .porb{appearance:none;position:relative;width:var(--p-hit);height:var(--p-hit);padding:0;border:0;
+  background:none;display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pocket .porb .disc{box-sizing:border-box;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
+  background:var(--panel);backdrop-filter:blur(8px);display:grid;place-items:center;
+  font:var(--p-type-meta) var(--mono);color:var(--ink-mid)}
+.pocket .porb.waiting .disc{border:2px solid var(--accent)}
+.pocket .porb .bead{position:absolute;right:-2px;bottom:-2px;box-sizing:border-box;min-width:20px;height:20px;
+  padding:0 5px;border-radius:10px;background:var(--accent);color:var(--bg);
+  font:600 var(--p-type-meta)/20px var(--mono);text-align:center}
+.pocket .porb:focus-visible{outline:none}
+.pocket .porb:focus-visible .disc{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---- the dial: it owns the width (§2.1) ------------------------------- */
+.pocket .mdial{width:100%;aspect-ratio:1;position:relative;
+  transition:transform 600ms cubic-bezier(.5,0,.75,0),opacity 600ms ease-in}
+.pocket .mdial svg{display:block;width:100%;height:100%}
+.pocket .pk-body{cursor:pointer;outline:none;-webkit-tap-highlight-color:transparent}
+.pocket .pk-body .hit{fill:transparent;pointer-events:all}
+.pocket .pk-body:focus-visible .hit{stroke:var(--accent);stroke-width:1.5}
+
+/* ---- other skies: a chip flies there (#1118) --------------------------
+ * The strip bleeds to the screen's edges so a long one scrolls under the
+ * thumb; the chips are 44px, the ring glyph and the name in 14px mono. */
+.pocket .skies{display:flex;gap:var(--p-pill-gap);overflow-x:auto;scrollbar-width:none;
+  margin:4px calc(var(--p-gutter) * -1) 0;padding:6px var(--p-gutter)}
+.pocket .skies::-webkit-scrollbar{display:none}
+.pocket .skies:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:12px}
+.pocket .skies .msys{flex:none;display:flex;align-items:center;gap:8px;box-sizing:border-box;min-height:var(--p-hit);
+  padding:0 16px 0 12px;border:1px solid var(--line);border-radius:calc(var(--p-hit) / 2);background:var(--panel);
+  font:.875rem/1 var(--mono);color:var(--ink-mid);text-decoration:none;-webkit-tap-highlight-color:transparent;
+  transition:border-color 200ms,color 200ms,box-shadow 300ms}
+.pocket .skies .msys:active{background:var(--panel-raised)}
+.pocket .skies .msys:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pocket .skies svg{flex:none}
+/* The flight: the dial streams toward the chip and falls away into it while
+   the rest of the page dims; the household's own screen is where it lands. */
+.pocket .skies .msys.target{border-color:var(--accent);color:var(--ink);
+  box-shadow:0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent)}
+.pocket.pk-flying .mdial{transform:translate(var(--fx), var(--fy)) scale(.08);opacity:0}
+.pocket .msearch,.pocket .pk-below{transition:opacity 400ms ease}
+.pocket.pk-flying .msearch,.pocket.pk-flying .pk-below{opacity:.2}
+
+/* ---- the search line: a button drawn as the desk's field (§2.1) ------- */
+.pocket .msearch{appearance:none;display:block;width:88%;min-height:var(--p-hit);margin:8px auto 4px;padding:0 8px;
+  background:none;border:0;border-bottom:1px solid var(--line);border-radius:0;
+  font:var(--p-type-body)/1 var(--mono);color:var(--ink-quiet);text-align:center;cursor:text;
+  -webkit-tap-highlight-color:transparent}
+.pocket .msearch:hover{color:var(--ink-mid);border-bottom-color:var(--ink-quiet)}
+.pocket .msearch:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+
+/* ---- the manifest's rows: the kit's row grammar (§1.5) ----------------
+ * Each row its own glass, as home has always drawn them. */
+.pocket .pk-list{display:flex;flex-direction:column;gap:6px}
+.pocket .pk-list .p-row{border:1px solid var(--line-soft)}
+.pk-dot{display:block;box-sizing:border-box;width:10px;height:10px;border-radius:50%}
+.pk-dot.quiet{background:var(--line)}
+.pk-dot.hollow{background:none;border:1.6px solid var(--accent)}
+.pk-dot.breathing{background:var(--upcoming);animation:pocket-breathe 2.4s ease-in-out infinite}
+.pk-dot.failed{background:var(--degraded, #fb8b24)}
 @keyframes pocket-breathe{0%,100%{opacity:1}50%{opacity:.4}}
-.pocket .mitem.failed .dot{background:var(--degraded,#fb8b24)}
-.pocket .mitem.failed span{color:var(--ink-mid)}
-.pocket .burnup{font:9.5px var(--mono);color:var(--ink-quiet);text-align:center;
-                margin:10px 0 0;letter-spacing:.06em}
-/* the suggestion sheet: the pocket's review surface */
-.pocket .sheet .fields:not(:empty){margin-bottom:8px}
-.pocket .sheet .kv{display:flex;justify-content:space-between;font:11px var(--mono);
-                   color:var(--ink-mid);padding:6px 2px;border-bottom:1px solid var(--line-soft)}
-.pocket .sheet .kv:last-of-type{border:0}
-.pocket .sheet .kv b{font-size:11px;font-weight:500;color:var(--ink)}
-/* #850: same [hidden]-wins fix as .acts above — .amend is hidden/shown via
- * the hidden attribute in pocket.behaviour.js. */
-.pocket .sheet .amend:not([hidden]){display:block;text-align:center;font:10.5px var(--mono);
-                      color:var(--ink-mid);text-decoration:none;margin-top:12px}
-.pocket .sheet .amend:hover{color:var(--accent-text)}
-@media (prefers-reduced-motion: reduce){ .pocket .mitem.reading .dot{animation:none} }
+.pk-paper{font:.875rem/1 var(--mono);color:var(--accent-text)}
+.pk-plus{font:var(--p-type-body)/1 var(--mono);color:var(--accent-text)}
+/* #466: the relay's catch, dashed and in the accent, as the desk draws it. */
+.pocket .pk-sugg .p-row{border-style:dashed;border-color:color-mix(in srgb, var(--accent) 45%, var(--line-soft))}
+.pocket .pk-sugg .meta{color:var(--accent-text)}
+.pocket .pk-reading .title{color:var(--ink-mid);font-weight:400}
+.pocket .burnup{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);text-align:center;margin:16px 8px 0}
 
-/* ---- #453: the pocket's labelled sky ----------------------------------- */
-.pocket .adrift{margin-top:18px}
+/* ---- §11 (#453): the labelled sky, at the same scale ------------------- */
+.pocket .adrift{margin-top:8px}
+.pocket .mitem{display:flex;align-items:center;gap:var(--p-row-gap);box-sizing:border-box;min-height:var(--p-row-min);
+  padding:6px var(--p-gutter);margin-bottom:6px;border:1px solid var(--line-soft);border-radius:12px;
+  background:var(--panel);backdrop-filter:blur(8px)}
+.pocket .mitem .flex{flex:1;min-width:0}
+.pocket .mitem b{display:block;font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink)}
+.pocket .mitem span{font:var(--p-type-meta)/1.4 var(--ui);color:var(--ink-quiet)}
 .pocket .askrow{cursor:pointer}
-.pocket .askrow span{color:var(--ink-quiet)}
 .pocket .askrow[data-ask-requested="true"]{border-style:dashed;cursor:default}
 .pocket .askrow[data-ask-requested="true"] span{color:var(--accent-text)}
-.pocket .adrift .burnup a{color:var(--ink-mid);text-decoration:none}
+.pocket .adrift .burnup a{display:inline-flex;align-items:center;min-height:var(--p-hit);
+  color:var(--ink-mid);text-decoration:none}
 .pocket .adrift .burnup a:hover{color:var(--accent-text)}
+
+/* ---- the north star hides while the film plays (§2.1) ----------------- */
+body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
+
+/* ---- inside the sheet (portalled, so pk- classes, not .pocket) ---------
+ * The item sheet (#1119), its documents, the suggestion sheet (#466) and
+ * the search sheet (#1057). Rows in a sheet sit on the sheet's glass. */
+.pk-meta{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:-4px 0 12px}
+.pk-acts{margin-top:16px}
+.pk-acts > *{flex:1 1 0}
+.p-sheet-layer .pk-list{display:flex;flex-direction:column;gap:2px}
+.p-sheet-layer .pk-list .face,.p-sheet-layer .pk-results .face{background:transparent;padding-left:4px;padding-right:4px}
+.p-sheet-layer .pk-list a.face:active,.p-sheet-layer .pk-list [role=button].face:active,
+.p-sheet-layer .pk-results a.face:active,.p-sheet-layer .pk-results [role=button].face:active{background:var(--panel-raised)}
+.pk-amend{display:flex;align-items:center;justify-content:center;min-height:var(--p-hit);margin-top:8px;
+  font:var(--p-type-meta) var(--mono);color:var(--ink-mid);text-decoration:none}
+.pk-amend:hover{color:var(--accent-text)}
+.pk-amend:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
+/* The search field rides at the top of its sheet, 16px so iOS does not zoom. */
+.pk-field{flex:1;min-width:0;box-sizing:border-box;min-height:var(--p-hit);padding:0 4px;margin:0;
+  background:none;border:0;border-bottom:1px solid var(--line);border-radius:0;outline:none;-webkit-appearance:none;
+  appearance:none;font:var(--p-type-body)/1.2 var(--mono);color:var(--ink)}
+.pk-field::placeholder{color:var(--ink-quiet)}
+/* The accent underline is the focus mark; the app's square input outline
+   would box the sheet's head. */
+.p-sheet-layer .pk-field:focus,.p-sheet-layer .pk-field:focus-visible{outline:none;border-bottom-color:var(--accent)}
+.pk-field::-webkit-search-cancel-button{display:none}
+/* The one accent action for the top match, arming like every act that
+   cannot be taken back (§2.4). */
+.pk-top{margin-top:12px}
+.pk-top .p-pill{color:var(--accent-text);border-color:var(--accent);min-height:var(--p-hit);padding-block:10px;
+  text-align:left;justify-items:start}
+
+/* ---- the approach: the sheet lifts into the item (§1.9, #1119) --------
+ * `open` runs a view transition (pocket.svelte, onNavigate). The item
+ * card in the sheet is named; until the belt's card carries the same name
+ * (step 3) it lifts away as the item screen arrives under it. */
+.pk-item{view-transition-name:pocket-item}
+::view-transition-old(pocket-item){animation:pk-lift var(--p-rise) var(--p-ease) both}
+::view-transition-new(pocket-item){animation:none}
+@keyframes pk-lift{to{transform:translateY(-96px);opacity:0}}
+
+@media (prefers-reduced-motion:reduce){
+  .pocket .sky g,.pk-dot.breathing{animation:none}
+  .pocket .mdial,.pocket .msearch,.pocket .pk-below{transition:none}
+}

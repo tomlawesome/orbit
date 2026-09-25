@@ -1,56 +1,75 @@
 <script>
   import "./pocket.css";
+  import { goto, onNavigate } from "$app/navigation";
+  import { page } from "$app/state";
   import { resolve } from "$app/paths";
+  import { applyCommand, readItemDocuments } from "$lib/data/workspace.js";
+  import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
   import { ago, money } from "$lib/format.js";
+  import ArmButton from "$lib/pocket/ArmButton.svelte";
+  import Hatch from "$lib/pocket/Hatch.svelte";
+  import NorthStar from "$lib/pocket/NorthStar.svelte";
+  import Row from "$lib/pocket/Row.svelte";
+  import Sheet from "$lib/pocket/Sheet.svelte";
+  import TopChrome from "$lib/pocket/TopChrome.svelte";
+  import { POCKET_QUERY } from "$lib/pocket/media.js";
+  import { wake } from "$lib/pocket/wake.js";
+  import { markDoor } from "../household/[id]/door.js";
+  import { HIT_R, spacedBodies } from "./pocket-dial.js";
+  import { searchPocket } from "./pocket-search.js";
 
   /**
-   * Home in the mobile dialect (CON-10, #430) — the dial owns the width, the
-   * other households collapse from a sky you fly through into a strip you
-   * scroll, and what is a hover callout on a desk becomes a bottom sheet under
-   * a thumb.
+   * HOME ON A PHONE: the pocket sky (CON-10, #430; lifted to the kit in #1120,
+   * proposal §2.1). Wordmark and orb, the dial, the other skies, the search
+   * line, NEEDS ATTENTION, SIGNALS, and the north star.
    *
-   * It shares home's URL. Both dialects are server-rendered and the viewport
-   * chooses between them in CSS, because selecting in JS would flash the wrong
-   * one and would break the non-JS fallback. See pocket.css for the switch.
+   * Both dialects are server-rendered and CSS picks one (pocket.css), so no
+   * flash of the wrong one and no-JS still gets a page. This dialect's own
+   * controls are Svelte's: the kit's sheets and rows bind their own
+   * listeners, and nothing here reaches the desk's markup.
    *
-   * Lifted from design/family/mobile-home.html; live since #451 — the same
-   * view-model the desk dialect renders, through the same laws. A thumb gets
-   * fewer, bigger bodies: the overdue one, the closest approach, and anything
-   * carrying documents on a wide orbit; the rest live in the rows.
-   *
-   * Markup only: +page.svelte mounts whichever dialect the viewport selected,
-   * so the hidden one never binds listeners.
-   */
-  /** @type {{ view?: import('$lib/data/workspace.js').HomeView | null }} */
-  let { view = null } = $props();
-
-  /**
-   * The dial body shape `dialBodiesOf` (chart.js) actually returns —
-   * `closest` is set afterwards on at most one entry, so it stays optional.
+   * One sheet, several faces. The item sheet (#1119), its documents, the
+   * suggestion sheet (#466) and the search sheet (#1057) are one kit Sheet
+   * whose contents change, because a search result raises the item's sheet
+   * and the item's `documents` grows it (§1.4: a sheet that needs another
+   * grows rather than stacking). One history entry, so Back always closes
+   * whatever is up. The hatch is its own sheet, opened from the orb.
    * @typedef {{
-   *   id: string, title: string, days: number, dueDate?: string | null,
-   *   placement: { angle: number, radius: number, x: number, y: number },
-   *   size: number, paint: string, kind: string, suggestion: boolean,
-   *   costMinor: number | null, costIsEstimate: boolean, currency: string,
-   *   documentCount: number, trail: boolean, overdue: boolean, closest?: boolean,
-   * }} DialBody
+   *   view?: import('$lib/data/workspace.js').HomeView | null,
+   *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
+   *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
+   *   onchanged?: () => Promise<unknown>,
+   * }} Props
    */
+  /** @type {Props} */
+  let { view = null, onapprove = undefined, ondismiss = undefined, onchanged = undefined } = $props();
+  let sheetOpen = $state(false);
+  let hatchOpen = $state(false);
 
+  /* ---- what the page draws ----------------------------------------------
+     `DialBody` is the shape dialBodiesOf (chart.js) returns; `closest` is set
+     afterwards on at most one entry, so it stays optional. */
+  /** @typedef {{ id: string, title: string, days: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean }} DialBody */
   /** @type {DialBody[]} */
   const bodies = $derived(
-    view
+    view?.household
       ? dialBodiesOf(view.household, { suggestions: /** @type {any} */ (view.suggestions), today: view.today })
       : [],
   );
+  // A thumb gets fewer, bigger bodies: the overdue one, the closest approach,
+  // the relay's catch, anything carrying documents on a wide orbit; then the
+  // spacing law (pocket-dial.js) keeps every 44px target clear of the next.
   const pocketBodies = $derived(
-    bodies.filter((b) => b.suggestion || b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade")),
+    spacedBodies(bodies.filter((b) => b.suggestion || b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade"))),
   );
   const groups = $derived(
-    view
+    view?.household
       ? manifestGroupsOf(view.household, { suggestions: /** @type {any} */ (view.suggestions), today: view.today })
       : null,
   );
+  const rows = $derived(groups ? [...groups.attention, ...groups.later] : []);
+  const rawItems = $derived(new Map((view?.household?.items ?? []).map((item) => [item.id, item])));
   const others = $derived(
     view
       ? Object.entries(view.galaxy)
@@ -75,89 +94,311 @@
       .slice(0, 2)
       .toUpperCase(),
   );
-  /* #852: the same "household · role" line the desk account panel derives
-     inline (+page.svelte, the `#who-role` span) — copied rather than shared
-     because that one is a plain template expression, not a function. */
+  // #852: the same "household · role" line the desk account panel derives.
   const roleLine = $derived(
-    view
-      ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}`
+    view?.household
+      ? `${view.household.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}`
       : "",
   );
+  // The pocket's inbox orb (§2.1): arrivals from the relay still waiting on
+  // the reader wear a ring and a count bead.
+  const waiting = $derived((view?.suggestions ?? []).filter((s) => s.receiptId).length);
+  const isAdmin = $derived(Boolean(page.data?.isAdmin));
+
   const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-  const QUARTER_POS = [[190, 26], [356, 196], [190, 364], [24, 196]];
+  const QUARTER_POS = [[190, 30], [352, 196], [190, 370], [28, 196]];
   const quarters = $derived(
     QUARTER_POS.map(([x, y], k) => ({
       x, y,
       label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12],
     })),
   );
+  // `ended` is the expiry past its date (#1005): quiet ink, never the alarm.
   /** @type {Record<string, string>} */
-  /* `ended` is the expiry past its date (#1005): quiet ink, never the alarm. */
   const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", ended: "--ink-mid" };
   /** @type {(b: { days: number | null }) => string} */
   const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
   /** @type {(iso: string) => string} */
   const short = (iso) =>
     new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
-  /* #1005: a renewal comes round, a one-off ends. The proposal's own schedule
-     kind is what says which word the date takes. */
+  // #1005: a renewal comes round, a one-off ends.
   /** @type {(s: { scheduleKind?: ?string }) => string} */
   const dateWord = (s) => (s.scheduleKind === "expiry" ? "ends" : "renews");
   /** @type {(b: DialBody) => string} */
   const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {(b: DialBody) => number} */
   const bodyR = (b) => (b.overdue ? 8 : b.closest ? 7 : 7.5);
-  /*
-   * #1129: fixture bodies can sit as close as ~35px apart, well under the
-   * 44px accessibility tap-target minimum, so a naive fix that just grew
-   * every body to a 44px (r22) circle would make neighbouring circles
-   * overlap — a tap between two close bodies could then raise the wrong
-   * one's sheet. Each body's hit radius is instead capped at half its
-   * distance to its NEAREST neighbour (minus a small margin), so no two
-   * bodies' hit circles ever overlap: a tap always resolves to the body it
-   * is nearer. This governs only the invisible tap target, never the drawn
-   * circle — the dial's geometry is ratified and unchanged. */
-  const HIT_TARGET_R = 22; // half of the 44px WCAG 2.5.5/2.5.8 minimum
-  const HIT_MARGIN = 1;
-  /** @type {(b: DialBody, all: DialBody[]) => number} */
-  const hitR = (b, all) => {
-    let nearest = Infinity;
-    for (const other of all) {
-      if (other.id === b.id) continue;
-      const d = Math.hypot(other.placement.x - b.placement.x, other.placement.y - b.placement.y);
-      if (d < nearest) nearest = d;
-    }
-    const cap = Number.isFinite(nearest) ? nearest / 2 - HIT_MARGIN : HIT_TARGET_R;
-    return Math.max(bodyR(b), Math.min(HIT_TARGET_R, cap));
-  };
-  /** @type {(b: DialBody) => string} */
-  const sheetMeta = (b) =>
-    [
-      tlabel(b),
-      b.dueDate ? short(b.dueDate) : null,
-      b.costMinor ? money(b.costMinor, b.currency, b.costIsEstimate) : null,
-      b.documentCount > 0 ? `◆ ${b.documentCount} documents` : null,
-    ].filter(Boolean).join(" · ");
-  /* #466: the relay's signals — days until an unreviewed arrival burns up,
-     elapsed time in the pocket's short register. `now` is pinned by the seam. */
+  /** @type {(row: { costMinor: number | null, currency: string, costIsEstimate: boolean }) => string | null} */
+  const cost = (row) => (row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null);
   /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => number | null} */
-  const burnsIn = (s) =>
-    s.expiresAt
-      ? daysUntil(s.expiresAt.slice(0, 10), /** @type {import('$lib/data/workspace.js').HomeView} */ (view).today)
-      : null;
+  const burnsIn = (s) => (s.expiresAt && view ? daysUntil(s.expiresAt.slice(0, 10), view.today) : null);
   /** @type {(iso: string | null | undefined) => string} */
-  const agoShort = (iso) =>
-    iso
-      ? ago(iso, /** @type {import('$lib/data/workspace.js').HomeView} */ (view).now ?? new Date().toISOString())
-      : "";
-  /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => string} */
-  const suggMeta = (s) =>
-    `caught by your relay ${short(
-      (s.receivedAt ?? /** @type {import('$lib/data/workspace.js').HomeView} */ (view).today).slice(0, 10),
-    )} · burns up in ${burnsIn(s)}d`;
+  const agoShort = (iso) => (iso && view ? ago(iso, view.now ?? new Date().toISOString()) : "");
+
+  // ---- the one sheet ------------------------------------------------------
+
+  let face = $state(/** @type {"search" | "item" | "docs" | "sugg"} */ ("item"));
+  /** @type {string | null} */
+  let itemId = $state(null);
+  /** @type {string | null} */
+  let suggId = $state(null);
+  /** @type {string | null} */
+  let problem = $state(null);
+  let busy = $state(false);
+
+  const row = $derived(itemId ? rows.find((one) => one.id === itemId) ?? null : null);
+  const documentCount = $derived(itemId ? rawItems.get(itemId)?.documentCount ?? 0 : 0);
+  const suggestion = $derived(suggId ? view?.suggestions.find((one) => one.id === suggId) ?? null : null);
+  const itemMeta = $derived(
+    row
+      ? [
+          tlabel(row),
+          row.dueDate ? short(row.dueDate) : null,
+          cost(row),
+          documentCount > 0 ? `◆ ${documentCount} document${documentCount === 1 ? "" : "s"}` : null,
+        ].filter(Boolean).join(" · ")
+      : "",
+  );
+  const sheetSize = $derived(face === "search" || face === "docs" ? "list" : "callout");
+  const sheetTitle = $derived(
+    face === "search" ? "Search your orbit"
+      : face === "sugg" ? suggestion?.title ?? ""
+      : row?.title ?? "",
+  );
+
+  /** @param {string} id */
+  function openItem(id) {
+    itemId = id;
+    face = "item";
+    problem = null;
+    sheetOpen = true;
+  }
+  /** @param {string} id */
+  function openSuggestion(id) {
+    suggId = id;
+    face = "sugg";
+    problem = null;
+    sheetOpen = true;
+  }
+  function openSearch() {
+    face = "search";
+    problem = null;
+    query = "";
+    sheetOpen = true;
+    loadSearchDocuments();
+  }
+
+  // The dial's bodies are SVG, so Enter and Space have to be taught (#851).
+  /** @type {(event: KeyboardEvent, then: () => void) => void} */
+  const onKeyActivate = (event, then) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    then();
+  };
+
+  // A sheet that was up when the screen widened past the pocket would float
+  // over the desk; put everything away instead.
+  $effect(() => {
+    const media = matchMedia(POCKET_QUERY);
+    const onchange = () => {
+      if (!media.matches) { sheetOpen = false; hatchOpen = false; }
+    };
+    media.addEventListener("change", onchange);
+    return () => media.removeEventListener("change", onchange);
+  });
+
+  // ---- documents: the sheet grows (#1119) ---------------------------------
+
+  /** @type {{ id: string, itemId: string, name: string, meta: string }[] | null} */
+  let documents = $state(null);
+  /** @type {string | null} */
+  let documentsFor = null;
+
+  async function showDocuments() {
+    const id = itemId;
+    if (!id || !view?.primary) return;
+    face = "docs";
+    if (documentsFor === id && documents) return;
+    documents = null;
+    documentsFor = id;
+    problem = null;
+    try {
+      const found = await readItemDocuments(view.primary, id);
+      if (documentsFor === id) documents = found;
+    } catch (error) {
+      if (documentsFor === id) problem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't read the documents — try again";
+    }
+  }
+
+  // The approach (§1.2, §1.9): `open` goes to the item's own screen and the
+  // sheet lifts into it. The morph is a view transition; pocket.css names the
+  // sheet's card and says how it lifts. Reduced motion, or a browser without
+  // view transitions, simply navigates.
+  let morphing = false;
+  onNavigate((navigation) => {
+    if (!morphing) return;
+    morphing = false;
+    if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    return new Promise((ready) => {
+      document.startViewTransition(async () => {
+        ready(undefined);
+        await navigation.complete;
+      });
+    });
+  });
+
+  // A document has no address of its own yet (item/[[id]]/+page.svelte), so a
+  // paper opens its item's belt and says which paper it meant in the
+  // navigation's state, where the belt can pick it up (step 3).
+  /** @param {{ id: string, itemId: string }} doc */
+  function openPaper(doc) {
+    morphing = true;
+    goto(resolve("/item/[[id]]", { id: encodeURIComponent(doc.itemId) }), {
+      replaceState: true,
+      state: { pocketPaper: doc.id },
+    });
+  }
+
+  // ---- the suggestion sheet (#466) ----------------------------------------
+
+  /** @param {"approve" | "dismiss"} act */
+  async function decide(act) {
+    const target = suggestion;
+    const handler = act === "approve" ? onapprove : ondismiss;
+    if (!target || !handler || busy) return;
+    busy = true;
+    problem = null;
+    try {
+      const failed = await handler(target);
+      if (failed) { problem = failed; return; }
+      sheetOpen = false;
+      wake(act === "approve" ? `${target.title} added to your orbit` : `${target.title} dismissed`);
+    } finally {
+      busy = false;
+    }
+  }
+  /** @type {Record<string, string>} */
+  const EVIDENCE = { provider: "provider", renewsOn: "dueDate", costMinor: "costMinor" };
+  /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion, field: string) => string} */
+  const sureness = (s, field) => {
+    const evidence = s.fieldEvidence?.[EVIDENCE[field]];
+    return evidence ? (evidence.confidence === "low" ? "unsure" : "sure") : "";
+  };
+
+  // ---- the search sheet (#1057, §2.4) -------------------------------------
+
+  let query = $state("");
+  /** @type {import('./pocket-search.js').SearchDocument[]} */
+  let searchDocuments = $state([]);
+  /** @type {object | null} */
+  let searchDocumentsFor = null;
+
+  async function loadSearchDocuments() {
+    const household = view?.household;
+    const householdId = view?.primary;
+    if (!household || !householdId || searchDocumentsFor === household) return;
+    searchDocumentsFor = household;
+    const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
+    // Additive: an item whose papers cannot be read loses its papers from the
+    // results, not the search.
+    const found = await Promise.all(carrying.map(async (item) => {
+      try {
+        const papers = await readItemDocuments(householdId, item.id);
+        return papers.map((doc) => ({ ...doc, itemTitle: item.title }));
+      } catch {
+        return [];
+      }
+    }));
+    if (searchDocumentsFor === household) searchDocuments = found.flat();
+  }
+
+  const results = $derived(
+    searchPocket(query, { items: rows, attention: groups?.attention ?? [], documents: searchDocuments }),
+  );
+
+  /** @param {{ id: string, title: string }} target */
+  async function complete(target) {
+    const raw = rawItems.get(target.id);
+    if (!raw || !view?.primary || busy) return;
+    busy = true;
+    problem = null;
+    const completedDate = view.today;
+    try {
+      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), {
+        completedDate,
+        nextDate: nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined,
+      }));
+      sheetOpen = false;
+      wake(`${target.title} completed`);
+      await onchanged?.();
+    } catch (error) {
+      problem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Keyboard (§2.4): ↓ from the field walks into the results, ↑ and ↓ move
+  // through them, ↑ from the first goes back to the field, Enter in the field
+  // takes the first result. Escape is the sheet's own.
+  /** @type {HTMLElement | undefined} */
+  let resultList = $state();
+  const resultStops = () =>
+    /** @type {HTMLElement[]} */ ([...(resultList?.querySelectorAll("[data-row-face], .pk-act") ?? [])]);
+  /** @param {KeyboardEvent} event */
+  function fieldKey(event) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      resultStops()[0]?.focus();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      resultStops()[0]?.click();
+    }
+  }
+  /** @param {KeyboardEvent} event */
+  function listKey(event) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const stops = resultStops();
+    const at = stops.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+    if (at < 0) return;
+    event.preventDefault();
+    const next = at + (event.key === "ArrowDown" ? 1 : -1);
+    if (next < 0) /** @type {HTMLElement | null} */ (document.querySelector(".pk-field"))?.focus();
+    else stops[Math.min(next, stops.length - 1)]?.focus();
+  }
+
+  // ---- other skies: a chip flies there (#1118, owner 2026-09-25, 7a) --------
+
+  /** @type {string | null} */
+  let flying = $state(null);
+  let flight = $state({ x: 0, y: 0 });
+  /** @type {HTMLElement | undefined} */
+  let dialEl = $state();
+  // As the desk does: the sky streams toward the other household and you
+  // arrive at it, through the sun's door, so its way back reads "← your sky".
+  /**
+   * @param {MouseEvent} event
+   * @param {string} id
+   */
+  function fly(event, id) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    markDoor("sky");
+    if (flying) { event.preventDefault(); return; }
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches || !dialEl) return;
+    event.preventDefault();
+    const chip = /** @type {HTMLElement} */ (event.currentTarget).getBoundingClientRect();
+    const dial = dialEl.getBoundingClientRect();
+    flight = {
+      x: Math.round(chip.left + chip.width / 2 - (dial.left + dial.width / 2)),
+      y: Math.round(chip.top + chip.height / 2 - (dial.top + dial.height / 2)),
+    };
+    flying = id;
+    const href = /** @type {HTMLAnchorElement} */ (event.currentTarget).href;
+    setTimeout(() => goto(href).finally(() => { flying = null; }), 620);
+  }
 </script>
 
-<div class="pocket">
+<div class="pocket" class:pk-flying={flying}>
 <div class="sky"><svg viewBox="0 0 400 850" preserveAspectRatio="xMidYMid slice">
 <g fill="var(--star-far, #e9edf8)"><circle cx="152.4" cy="196.1" r="0.52" opacity="0.37"/>
       <circle cx="231.2" cy="586.6" r="0.79" opacity="0.22"/>
@@ -219,68 +460,25 @@
       <circle cx="193.5" cy="214.6" r="0.88" opacity="0.26"/>
       <circle cx="109.0" cy="588.2" r="1.03" opacity="0.17"/>
       <circle cx="325.1" cy="640.6" r="0.77" opacity="0.16"/></g></svg></div>
+<TopChrome wordmark>
+  {#snippet end()}
+    <!-- #852: the avatar opens the account menu; #1120: that menu is the
+         kit's hatch. It opens rather than toggles, so a press replayed after
+         the screen went live (#1064, +page.svelte) cannot close it again. -->
+    <button class="porb" id="morb" class:waiting={waiting > 0} aria-haspopup="dialog" aria-expanded={hatchOpen}
+            aria-label={waiting > 0 ? `Account and menu, ${waiting} waiting in your inbox` : "Account and menu"}
+            onclick={() => (hatchOpen = true)}>
+      <span class="disc">{initials}</span>
+      {#if waiting > 0}<span class="bead" aria-hidden="true">{waiting}</span>{/if}
+    </button>
+  {/snippet}
+</TopChrome>
 <div class="mpage">
-  <div class="mtop">
-    <div class="mark-row" style="font-size:15px"><svg width="22" height="22" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg> orbit</div>
-    <!-- #852: the avatar opens the same account panel the desk orb does
-         (+page.svelte's `.account`/`#account`), laid out as a bottom sheet
-         here — see `.msheet` below and pocket.behaviour.js for the wiring. -->
-    <button class="morb" id="morb" aria-expanded="false" aria-controls="maccount" title="Menu">{initials}</button>
-    <!-- #852: the account menu as a bottom sheet — the desk `.account`'s
-         contents (+page.svelte lines ~779-810) plus the one thing the pocket
-         has nowhere else to put (#1036, the create link below), same wiring (pocket.behaviour.js
-         imports setSwatch/packOf from ./swatches.js, the same functions
-         home.behaviour.js's swatches use, and drives sign-out the way
-         Chrome.svelte's sub-screen orb does: two taps, the second one revoking
-         the session before it navigates). Only one of `#sheet`/`#maccount` is
-         ever open at a time — pocket.behaviour.js enforces that. It sits here,
-         straight after `#morb`, for the same reason the desk `.account` follows
-         its orb: one Tab from the open toggle must land inside the sheet
-         (tests/e2e/support/keyboard.ts auditLightDismiss). It is position:fixed,
-         so its place in the DOM changes nothing visually. -->
-    <div class="msheet" id="maccount" role="region" aria-label="Account and menu">
-      <div class="grab"></div>
-      <div class="mwho"><b>{view?.user?.displayName ?? ""}</b><span>{roleLine}</span></div>
-      <nav>
-        <!-- #1036: THE POCKET'S WAY TO ADD SOMETHING. The desk's create
-             handle is the north star above the dial, and the north star is
-             `.desk` chrome — pocket.css hides the whole subtree below
-             901px/600px, so on a phone the create drawer and its "open the
-             full form →" link were in the page but unreachable, and the only
-             way to add an item was to type /create into the address bar.
-
-             It goes in this nav, not on the dial, for #1014's reason: a
-             surface with no front door of its own in the chrome gets one
-             here. First in the list because adding is what a reader comes to
-             the sky to do; the desk's own drawer is still the desk's.
-
-             What the pocket's create handle should EVENTUALLY be — whether
-             the dial earns a north star of its own in this dialect — is a
-             design question and stays open (#1036 says so). This is the
-             door, not the drawing. -->
-        <a href={resolve("/create")}>Add an item</a>
-        <a href={resolve("/inbox")}>Inbox</a>
-        <a href={resolve("/settings")}>Settings</a>
-        <a href={resolve("/administration")}>Administration</a>
-      </nav>
-      <div class="mswatches" role="group" aria-label="Theme">
-        <span>THEME</span>
-        <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
-        <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
-        <button style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
-        <button style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
-        <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
-                aria-pressed="false"></button>
-      </div>
-      <button class="msignout" id="msignout">sign out →</button>
-      <div class="msignout-problem" id="msignout-problem" hidden></div>
-    </div>
-  </div>
   {#if view?.emptySky}
   <!-- §11 (#453): the pocket's labelled sky is a list — each system a ring
        and a name, nothing else. Tapping asks; asking rides data attributes
-       because the hidden dialect must never bind listeners. -->
-  <div class="mgroup adrift"><h3>SYSTEMS AROUND YOU</h3>
+       that +page.svelte binds, the same ask the desk's labelled sky raises. -->
+  <div class="mgroup adrift"><h3 class="p-caps">Systems around you</h3>
     {#each Object.entries(view.galaxy) as [id, hh] (id)}
       <div class="mitem askrow" data-ask={id} data-ask-name={hh.name} data-ask-requested={String(Boolean(hh.requested))}>
         <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
@@ -293,123 +491,228 @@
     <div class="burnup">the systems around you are labels until someone lets you in<br><a href={resolve("/")}>— or start your own system →</a></div>
   </div>
   {:else}
-  <div class="mdial">
+  <div class="mdial" bind:this={dialEl} style:--fx="{flight.x}px" style:--fy="{flight.y}px">
     <svg viewBox="0 0 380 380">
       <circle cx="190" cy="190" r="150" fill="none" stroke="var(--line)" stroke-width="1.5"/>
       <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3"
               stroke-width="1" stroke-dasharray="3 5"/>
-      <g font-size="11" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
+      <!-- Quarter labels at 15 units: 13px at the narrowest dial (§2.1). -->
+      <g font-size="15" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
         {#each quarters as q, k (k)}<text x={q.x} y={q.y}>{q.label}</text>{/each}</g>
-      <path d="M190 34 l6 10 h-12 Z" style="fill:var(--accent)"/>
+      <path d="M190 38 l6 10 h-12 Z" style="fill:var(--accent)"/>
       <circle cx="190" cy="190" r="8" style="fill:#fff6e6"/>
       {#each pocketBodies as b (b.id)}
+        <!-- #1129/§1.7: the drawn body keeps its size; an invisible 44px
+             circle round it takes the tap, and the spacing law keeps every
+             such circle clear of its neighbours. -->
         {#if b.suggestion}
           <!-- #466: the relay's catch is ON the dial at its law position —
-               the same hollow accent body the desk shows (§12). #1129: the
-               drawn circles below are unchanged; a third, invisible circle
-               carries the (possibly larger) tap target, sized so it never
-               overlaps a neighbour's — see hitR() above. -->
-          <g data-sheet-sugg={b.id} style="cursor:pointer" tabindex="0" role="button"
-             aria-label={`caught receipt: ${b.title}`}>
+               the same hollow accent body the desk shows (§12). -->
+          <g class="pk-body" data-sheet-sugg={b.id} tabindex="0" role="button" aria-label={`caught receipt: ${b.title}`}
+             onclick={() => openSuggestion(b.id)} onkeydown={(event) => onKeyActivate(event, () => openSuggestion(b.id))}>
             <circle cx={b.placement.x} cy={b.placement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
             <circle cx={b.placement.x} cy={b.placement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
-            <circle cx={b.placement.x} cy={b.placement.y} r={hitR(b, pocketBodies)} fill="transparent" style="pointer-events:all"/>
+            <circle class="hit" cx={b.placement.x} cy={b.placement.y} r={HIT_R}/>
           </g>
         {:else}
-          <!-- #1129: same split — the drawn circle keeps its own size and
-               colour, a sibling invisible circle owns the tap target. -->
-          <g data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}
-             tabindex="0" role="button" aria-label={b.title}>
-            <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}" aria-hidden="true"/>
+          <g class="pk-body" data-sheet-title={b.title} tabindex="0" role="button" aria-label={b.title}
+             onclick={() => openItem(b.id)} onkeydown={(event) => onKeyActivate(event, () => openItem(b.id))}>
+            <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}"/>
             {#if b.documentCount > 0 && b.paint === "jade"}
               <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
                        transform="rotate(-24 {b.placement.x} {b.placement.y})"
                        fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
             {/if}
-            <circle cx={b.placement.x} cy={b.placement.y} r={hitR(b, pocketBodies)} fill="transparent" style="pointer-events:all"/>
+            <circle class="hit" cx={b.placement.x} cy={b.placement.y} r={HIT_R}/>
           </g>
         {/if}
       {/each}
     </svg>
   </div>
+  {#if others.length}
   <!-- #845: the strip scrolls sideways, so it must be reachable to scroll by
-       keyboard. A region that scrolls has to be focusable to be operable
-       without a mouse or touch (WCAG 2.1.1), and a focusable `role="region"`
-       with an accessible name is the technique for it. The rule below is
-       aimed at tabindex on elements that do nothing; it cannot see that this
-       one scrolls, so it is wrong here and is silenced deliberately rather
-       than obeyed. Do not drop the tabindex to quieten it: that takes the
-       strip away from keyboard-only readers and leaves the warning's real
-       target untouched. -->
+       keyboard (WCAG 2.1.1): a focusable, named region. The rule below cannot
+       see that it scrolls, so it is silenced deliberately. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div class="skies" tabindex="0" role="region" aria-label="Other skies">
     {#each others as hh (hh.id)}
-      <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx={hh.dx} cy={hh.dy} r="2" style="fill:var({hh.tone === "--warm" ? "--warm" : hh.tone === "--upcoming" ? "--upcoming" : "--ok"})" opacity=".6"/></svg>{hh.name}</div>
+      <a class="msys" class:target={flying === hh.id} href={resolve("/household/[id]", { id: hh.id })}
+         onclick={(event) => fly(event, hh.id)}>
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx={hh.dx} cy={hh.dy} r="2" style="fill:var({hh.tone === "--warm" ? "--warm" : hh.tone === "--upcoming" ? "--upcoming" : "--ok"})" opacity=".6"/></svg>{hh.name}</a>
     {/each}
   </div>
-  <div class="msearch"><input placeholder="explore your world" readonly></div>
+  {/if}
+  <!-- §2.1: a button drawn as the desk's field, never a field on the page,
+       so iOS never scrolls to an input that is about to move into the sheet. -->
+  <button class="msearch" onclick={openSearch}>explore your world</button>
+  <div class="pk-below">
   {#if groups?.attention.length}
-  <div class="mgroup"><h3>NEEDS ATTENTION</h3>
-    {#each groups.attention as row (row.id)}
-      <div class="mitem"><span class="dot" style="background:var({BAND_VAR[row.band]})"></span>
-        <div class="flex"><b>{row.title}</b><span>{[row.section, row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null].filter(Boolean).join(" · ")}</span></div>
-        <div class="mt" style="color:var({BAND_VAR[row.band]})">{tlabel(row)}<small>{row.dueDate ? short(row.dueDate) : ""}</small></div></div>
-    {/each}
-  </div>
+    <h3 class="p-caps">Needs attention</h3>
+    <div class="pk-list">
+      {#each groups.attention as one (one.id)}
+        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
+             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             onactivate={() => openItem(one.id)}>
+          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
+        </Row>
+      {/each}
+    </div>
+  {:else if groups?.later.length}
+    <h3 class="p-caps">Needs attention</h3>
+    <div class="pk-list">
+      <Row title="nothing needs you" meta={`next up ${groups.later[0].title}${groups.later[0].days !== null ? `, ${tlabel(groups.later[0])}` : ""}`}
+           onactivate={() => openItem(groups.later[0].id)}>
+        {#snippet mark()}<span class="pk-dot quiet"></span>{/snippet}
+      </Row>
+    </div>
   {/if}
-  <!-- #466: the pocket's signals surface — what the relay caught, in the
-       pocket's own grammar. Suggestion rows raise the suggestion sheet;
-       failures speak the server's words. -->
+  <!-- #466: the pocket's signals — what the relay caught. A suggestion row
+       raises the suggestion sheet; failures speak the server's words. -->
   {#if view?.suggestions?.length || view?.mailReading?.length || view?.mailFailures?.length}
-  <div class="mgroup"><h3>SIGNALS — YOUR RELAY CAUGHT</h3>
-    {#each view.suggestions as s (s.id)}
-      <div class="mitem suggest" data-sheet-sugg={s.id}>
-        <span class="dot sug"></span>
-        <div class="flex"><b>{s.title}</b><span>{[
-          `from ${s.sourceDocument}`,
-          burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : null,
-        ].filter(Boolean).join(" · ")}</span></div>
-        <div class="mt" style="color:var(--accent-text)">{s.costMinor ? money(s.costMinor, s.currency, true) : ""}<small>{s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""}</small></div>
-      </div>
-    {/each}
-    {#each view.mailReading as r (r.id)}
-      <div class="mitem reading">
-        <span class="dot"></span>
-        <div class="flex"><b>A message arrived {agoShort(r.receivedAt)}</b><span>still reading its document</span></div>
-      </div>
-    {/each}
-    {#each view.mailFailures as f (f.id)}
-      <div class="mitem failed">
-        <span class="dot"></span>
-        <div class="flex"><b>A message from {short(f.receivedAt.slice(0, 10))}</b><span>{f.message}</span></div>
-      </div>
-    {/each}
-    <div class="burnup">unreviewed arrivals burn up after 45 days · nothing is added without you</div>
+    <h3 class="p-caps">Signals — your relay caught</h3>
+    <div class="pk-list">
+      {#each view.suggestions as s (s.id)}
+        <div class="pk-sugg">
+          <Row title={s.title}
+               meta={[`from ${s.sourceDocument}`, burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : null].filter(Boolean).join(" · ")}
+               trail={s.costMinor ? money(s.costMinor, s.currency, true) : ""}
+               trailSub={s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
+               onactivate={() => openSuggestion(s.id)}>
+            {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
+          </Row>
+        </div>
+      {/each}
+      {#each view.mailReading as r (r.id)}
+        <div class="pk-reading">
+          <Row title={`A message arrived ${agoShort(r.receivedAt)}`} meta="still reading its document">
+            {#snippet mark()}<span class="pk-dot breathing"></span>{/snippet}
+          </Row>
+        </div>
+      {/each}
+      {#each view.mailFailures as f (f.id)}
+        <Row title={`A message from ${short(f.receivedAt.slice(0, 10))}`} meta={f.message}>
+          {#snippet mark()}<span class="pk-dot failed"></span>{/snippet}
+        </Row>
+      {/each}
+    </div>
+    <p class="burnup">unreviewed arrivals burn up after 45 days · nothing is added without you</p>
+  {/if}
   </div>
   {/if}
+</div>
+{#if !view?.emptySky}<NorthStar />{/if}
+</div>
+
+<Sheet bind:open={sheetOpen} size={sheetSize} title={sheetTitle} hideTitle={face === "search"}>
+  <!-- The search field rides in the sheet's head (§2.4). Declared in here
+       rather than at the top of the markup: a top-level snippet trips the
+       production bundler (#1130). -->
+  {#snippet head()}
+    {#if face === "search"}
+      <input class="pk-field" type="search" placeholder="explore your world" aria-label="Search your orbit"
+             autocomplete="off" enterkeyhint="go" bind:value={query} onkeydown={fieldKey}>
+    {/if}
+  {/snippet}
+  {#if face === "item" && row}
+    <!-- The item sheet (#1119, §2.1): the card the approach lifts. -->
+    <div class="pk-item">
+      <p class="pk-meta">{itemMeta}</p>
+      <div class="p-pills pk-acts">
+        <a class="p-pill filled" href={resolve("/item/[[id]]", { id: encodeURIComponent(row.id) })}
+           onclick={() => (morphing = true)}>open</a>
+        {#if documentCount > 0}<button class="p-pill" onclick={showDocuments}>documents</button>{/if}
+      </div>
+    </div>
+  {:else if face === "docs" && row}
+    <!-- `documents` grows the sheet into the item's papers (§2.1, #1119). -->
+    <div class="pk-item">
+      <p class="pk-meta">{itemMeta}</p>
+      <div class="pk-list flat">
+        {#if documents}
+          {#each documents as doc (doc.id)}
+            <Row title={doc.name} meta={doc.meta} onactivate={() => openPaper(doc)}>
+              {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
+            </Row>
+          {:else}
+            <p class="p-empty">no documents ride with this item yet</p>
+          {/each}
+        {:else if !problem}
+          <div class="p-unlit"></div><div class="p-unlit"></div>
+        {/if}
+      </div>
+      {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+      <div class="p-pills pk-acts">
+        <a class="p-pill filled" href={resolve("/item/[[id]]", { id: encodeURIComponent(row.id) })}
+           onclick={() => (morphing = true)}>open</a>
+      </div>
+    </div>
+  {:else if face === "sugg" && suggestion}
+    <!-- The suggestion sheet (#466, §2.1): what the relay read, how sure it
+         was, and the two decisions, each arming before it acts. -->
+    <p class="pk-meta">{[
+      suggestion.receivedAt ? `caught ${short(suggestion.receivedAt.slice(0, 10))}` : null,
+      burnsIn(suggestion) !== null ? `burns up in ${burnsIn(suggestion)}d` : null,
+    ].filter(Boolean).join(" · ")}</p>
+    <div class="pk-list flat">
+      {#if suggestion.provider}<Row title={suggestion.provider} meta="provider" trail={sureness(suggestion, "provider")} />{/if}
+      {#if suggestion.renewsOn}<Row title={`${short(suggestion.renewsOn)} ${suggestion.renewsOn.slice(0, 4)}`} meta={dateWord(suggestion)}
+                                     trail={sureness(suggestion, "renewsOn")} />{/if}
+      {#if suggestion.costMinor}<Row title={money(suggestion.costMinor, suggestion.currency, true)} meta="cost"
+                                      trail={sureness(suggestion, "costMinor")} />{/if}
+      <Row title={suggestion.sourceDocument} meta="scanned clean">
+        {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
+      </Row>
+    </div>
+    {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+    <div class="p-pills pk-acts">
+      <ArmButton label="Add to orbit" armedLabel="tap again to add" danger={false} class="filled"
+                 onfire={() => decide("approve")} />
+      <ArmButton label="Dismiss" armedLabel="tap again to dismiss" danger={false} onfire={() => decide("dismiss")} />
+    </div>
+    <a class="pk-amend" href={resolve("/item/[[id]]", { id: encodeURIComponent(suggestion.receiptId ?? suggestion.id) })}>review &amp; amend →</a>
+  {:else if face === "search"}
+    <!-- #1057's phone half (§2.4; phone-search round 1, B). -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="pk-results" bind:this={resultList} onkeydown={listKey}>
+      {#if !results.query}
+        {#each results.items as one (one.id)}
+          <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
+               trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+               onactivate={() => openItem(one.id)}>
+            {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
+          </Row>
+        {/each}
+        <Row title="→ add an item" href={resolve("/create")} />
+      {:else if results.nothing}
+        <p class="p-empty">nothing in your orbit is called “{results.query}”</p>
+        <Row title={`add “${results.query}” as an item`} href={resolve("/create")}>
+          {#snippet mark()}<span class="pk-plus" aria-hidden="true">+</span>{/snippet}
+        </Row>
+      {:else}
+        {#each results.items as one (one.id)}
+          <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
+               trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+               onactivate={() => openItem(one.id)}>
+            {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
+          </Row>
+        {/each}
+        {#each results.documents as doc (doc.id)}
+          <Row title={doc.name} meta={`${doc.itemTitle} · ${doc.meta}`} onactivate={() => openPaper(doc)}>
+            {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
+          </Row>
+        {/each}
+        {#if results.complete}
+          {@const top = results.complete}
+          <div class="pk-top">
+            <ArmButton label={`→ complete “${top.title}”`} armedLabel="tap again to complete" danger={false} wide
+                       class="pk-act" onfire={() => complete(top)} />
+          </div>
+        {/if}
+      {/if}
+      {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+    </div>
   {/if}
-</div>
-<div class="sheet" id="sheet">
-  <div class="grab"></div><b id="sh-title"></b><div class="meta" id="sh-meta"></div>
-  <div class="fields" id="sh-fields"></div>
-  <div class="acts" id="sh-acts-item"><button class="pri">open</button><button>documents</button><button
-    data-sheet-close>close</button></div>
-  <div class="acts" id="sh-acts-sugg" hidden>
-    <button class="pri" data-sugg-act="approve">Add to orbit</button>
-    <button data-sugg-act="dismiss">Dismiss</button>
-    <button data-sheet-close>close</button>
-  </div>
-  <a class="amend" id="sh-amend" href={resolve("/home")} hidden>review &amp; amend →</a>
-</div>
-{#each view?.suggestions ?? [] as s (s.id)}
-  <!-- The suggestion sheet's copy, rendered by Svelte and cloned into the
-       sheet by the behaviour — no markup is ever built from strings. -->
-  <template data-sugg-template={s.id} data-title={s.title}
-            data-meta={suggMeta(s)}>
-    {#if s.provider}<div class="kv"><span>provider</span><b>{s.provider}</b></div>{/if}
-    {#if s.renewsOn}<div class="kv"><span>{dateWord(s)}</span><b>{short(s.renewsOn)} {s.renewsOn.slice(0, 4)}</b></div>{/if}
-    {#if s.costMinor}<div class="kv"><span>cost</span><b>{money(s.costMinor, s.currency, true)}</b></div>{/if}
-    <div class="kv"><span>document</span><b>◆ {s.sourceDocument} · scanned clean</b></div>
-  </template>
-{/each}
-</div>
+</Sheet>
+
+<Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}
+       inboxCount={waiting || null} />
