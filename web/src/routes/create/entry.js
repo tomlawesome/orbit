@@ -104,6 +104,12 @@ export function toggleReminder(days, day) {
 }
 
 /**
+ * A household as the form offers it: where an entry can live.
+ * @typedef {{ id: string, name: string, currency?: string,
+ *   sections: { id: string, name: string, icon: string, accent: string, visible: boolean }[] }} FormHousehold
+ */
+
+/**
  * @typedef {{
  *   kind: Kind | null,
  *   name: string,
@@ -144,7 +150,7 @@ export function blankEntry({ name = "", householdId = null } = {}) {
 /**
  * An existing item, as the form holds it for editing.
  * @param {{ title?: string, subtype?: string | null, scheduleKind?: string | null, householdId?: string,
- *   sectionId: string, provider?: string | null, reference?: string | null, dueDate?: string | null,
+ *   sectionId?: string | null, provider?: string | null, reference?: string | null, dueDate?: string | null,
  *   recurrenceMonths?: number | null, costMinor?: number | null, reminderDays?: number[] | null,
  *   notes?: string | null }} item
  * @returns {Entry}
@@ -154,7 +160,7 @@ export function entryOf(item) {
     kind: kindOf(item),
     name: item.title ?? "",
     householdId: item.householdId ?? null,
-    sectionId: item.sectionId,
+    sectionId: item.sectionId ?? null,
     provider: item.provider ?? "",
     reference: item.reference ?? "",
     dueDate: item.dueDate ?? "",
@@ -197,11 +203,13 @@ export function refusalOf(entry) {
  * the kind and only exists with a date (the schema's rule); recurrence only
  * with a schedule that comes round.
  * @param {Entry} entry
- * @param {{ scheduleKind?: ScheduleKind | undefined }} [keep] an edited item's own schedule, which wins
+ * @param {{ scheduleKind?: string | undefined }} [keep] an edited item's own schedule, which wins
  */
 export function fieldsOf(entry, keep = {}) {
   const dated = kindHasDate(entry.kind) && entry.dueDate ? entry.dueDate : undefined;
-  const scheduleKind = dated ? (keep.scheduleKind ?? scheduleOf(entry.kind).scheduleKind) : undefined;
+  const scheduleKind = dated
+    ? (/** @type {ScheduleKind | undefined} */ (keep.scheduleKind) ?? scheduleOf(entry.kind).scheduleKind)
+    : undefined;
   const recurs = Boolean(scheduleKind) && scheduleKind !== "expiry" && entry.recurrence > 0;
   const cost = minorOf(entry.cost);
   return {
