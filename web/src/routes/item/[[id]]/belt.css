@@ -617,3 +617,173 @@
                     background:var(--line);margin:0 auto 8px}
   .belt-page .sheet img{max-height:60vh}
 }
+
+/* ==========================================================================
+ * THE POCKET (#1072, design/v19/phone-vision/proposal.md §2.3; drawn in
+ * design/v19/item-phone/round-1, "stands with changes"). Below the CON-10
+ * switch — the same query $lib/pocket/media.js holds — the belt is a low arc
+ * across the top of a page that scrolls, with the card hanging beneath it
+ * at the §1.6 scale (16/13): the band plate is 360px tall from the top safe
+ * area, the find line and the count line sit over its crest, the end-caps
+ * are pills at its shoulders, and the card starts at 340px. Band geometry
+ * is band.js's THE POCKET'S BELT; the painter's pocket parts are in
+ * belt.behaviour.js. Everything the desk unfolds in or beside the card is
+ * a kit Sheet on a phone, styled by the .bp-* rules after this block.
+ * ========================================================================== */
+.belt-page .pk-find,.belt-page .pk-count{display:none}
+@media (max-width:900px), (max-height:600px){
+  /* A page that scrolls, not a stage: the chrome retracts over it (§1.3). */
+  html:has(.belt-page) body{overflow:visible}
+  .belt-page{--pk-card-top:340px;position:relative;min-height:100dvh;overflow-x:clip;
+    padding:calc(var(--pk-card-top) + env(safe-area-inset-top)) 0 calc(48px + env(safe-area-inset-bottom))}
+  .belt-page .find{display:none}
+
+  .belt-page .pk-find{appearance:none;display:block;position:absolute;z-index:6;
+    top:calc(env(safe-area-inset-top) + 60px);left:50%;transform:translateX(-50%);
+    width:min(88%, var(--p-column));min-height:var(--p-hit);padding:0 8px;
+    background:none;border:0;border-bottom:1px solid var(--line);border-radius:0;
+    font:var(--p-type-body)/1 var(--mono);letter-spacing:.04em;color:var(--ink-quiet);text-align:center;
+    cursor:text;-webkit-tap-highlight-color:transparent}
+  .belt-page .pk-find:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  .belt-page .pk-count{display:block;position:absolute;z-index:6;left:0;right:0;margin:0;
+    top:calc(env(safe-area-inset-top) + 114px);padding:0 var(--p-gutter);text-align:center;
+    font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
+    color:var(--ink-quiet);text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg);pointer-events:none}
+
+  /* the band plate: the two canvases and the members, riding the page */
+  .belt-page #band,.belt-page #fore,.belt-page #members{position:absolute;inset:auto;
+    top:env(safe-area-inset-top);left:0;width:100%;height:360px}
+  .belt-page #members{overflow:hidden;touch-action:pan-y}
+  /* captions at the pocket's scale, haloed so the band never eats them */
+  .belt-page .cap-name{font:var(--p-type-meta) var(--ui);fill:var(--ink);
+    paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+  .belt-page .cap-t{font:var(--p-type-meta) var(--mono);letter-spacing:.02em;
+    paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+  .belt-page .doclabel{font:var(--p-type-meta) var(--ui);fill:var(--paper)}
+  /* the end-caps: ghost pills at the shoulders (§2.3), the button type */
+  .belt-page .endcap-hit.pocket .endcap{font:var(--p-type-button) var(--mono);letter-spacing:.02em;
+    text-transform:none;fill:var(--ink-mid)}
+  .belt-page .endpill{fill:color-mix(in srgb, var(--panel) 85%, transparent);stroke:var(--line);stroke-width:1}
+  .belt-page .endcap-hit.pocket:active .endpill{stroke:var(--accent);
+    fill:color-mix(in srgb, var(--accent) 14%, var(--panel))}
+  .belt-page .endcap-hit.pocket:focus-visible{outline-offset:1px}
+  .belt-page .endcap-hit.pocket.off .endpill{opacity:.4}
+  .belt-page .clump .fring{opacity:0}
+  .belt-page .clump:focus-visible .fring{opacity:1}
+
+  /* the card, in the page's flow beneath the band */
+  .belt-page .lanes,.belt-page .lanes.left,.belt-page .lanes.left.open,.belt-page .lanes.right.open{
+    position:relative;inset:auto;display:block;z-index:4;pointer-events:auto;
+    padding:0 var(--p-gutter);transition:none}
+  .belt-page .lanes .cardwrap,.belt-page .lanes.left .cardwrap{position:relative;left:auto;top:auto;
+    width:auto;max-width:var(--p-column);margin:0 auto;max-height:none;overflow:visible;touch-action:pan-y;
+    transform:translate(calc(var(--cdx) + var(--sdx, 0px)),var(--cdy)) scale(var(--csc));transform-origin:50% 0}
+
+  .belt-page .item-card.pk{padding:20px var(--p-card-pad) 12px;border-radius:var(--p-card-radius);
+    background:var(--panel-raised);border-color:var(--line);
+    box-shadow:0 18px 44px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);
+    /* the approach from home morphs the item sheet into this card (§2.1) */
+    view-transition-name:pocket-item}
+  .belt-page .item-card.pk h2{font:600 var(--p-type-card)/1.2 var(--display);overflow-wrap:anywhere}
+  .belt-page .item-card.pk .sub{font:var(--p-type-meta)/1.4 var(--mono);letter-spacing:.02em;margin:6px 0 10px}
+  .belt-page .item-card.pk .kv{align-items:baseline;gap:16px;min-height:var(--p-hit);padding:11px 0;
+    font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  .belt-page .item-card.pk .kv span{flex:none}
+  .belt-page .item-card.pk .kv b{font:500 var(--p-type-button)/1.35 var(--mono);min-width:0;overflow-wrap:anywhere}
+  .belt-page .item-card.pk h3{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:.18em;margin:20px 0 10px}
+  .belt-page .item-card.pk p{font:var(--p-type-body)/1.5 var(--ui);color:var(--ink-mid)}
+  .belt-page .item-card.pk .problem{font:var(--p-type-meta)/1.5 var(--mono)}
+  .belt-page .pk-acts{display:flex;flex-direction:column;gap:var(--p-pill-gap)}
+  .belt-page .pk-pair{display:grid;grid-template-columns:1fr 1fr;gap:var(--p-pill-gap)}
+  .belt-page .pk-pair>*{width:100%}
+  /* act colour on the pills, the desk's item.css way (§5.2) */
+  .belt-page .pk-acts .p-pill{background:var(--panel);
+    border-color:color-mix(in srgb, var(--act, var(--line)) 45%, transparent);color:var(--act-text, var(--ink-mid))}
+  .belt-page .pk-acts .p-pill:active{border-color:var(--act, var(--accent));
+    background:color-mix(in srgb, var(--act, var(--accent)) 14%, var(--panel))}
+  .belt-page .pk-acts .arm{--act:var(--overdue);--act-text:var(--overdue-text)}
+  .belt-page .pk-acts .arm.armed{border-color:var(--overdue);background:color-mix(in srgb, var(--overdue) 12%, var(--panel))}
+  .belt-page .pk-acts .pk-lead{--act:var(--accent);--act-text:var(--accent-text)}
+  .belt-page .pk-acts .pk-complete{--act:var(--ok);--act-text:var(--ok-text);
+    background:color-mix(in srgb, var(--ok) 16%, var(--panel));border-color:color-mix(in srgb, var(--ok) 60%, transparent);
+    font:600 var(--p-type-button)/1.2 var(--display);letter-spacing:.01em}
+  .belt-page .pk-acts .p-pill:disabled{opacity:.5}
+  .belt-page .pk-docs{appearance:none;display:flex;align-items:center;gap:12px;width:100%;min-height:56px;
+    margin:16px 0 0;padding:0;border:0;border-top:1px solid var(--line-soft);background:none;text-align:left;
+    font:var(--p-type-body)/1.35 var(--ui);color:var(--ink);cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .belt-page .pk-docs:active{background:var(--panel-raised)}
+  .belt-page .pk-docs:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  .belt-page .pk-paper{flex:none;width:24px;text-align:center;color:var(--paper)}
+  .belt-page .pk-docs-title{min-width:0}
+  .belt-page .pk-chev{flex:none;margin-left:auto;padding-right:4px;font:var(--p-type-meta)/1.3 var(--mono);color:var(--accent-text)}
+  .belt-page .item-card.pk .pk-sentence{font:var(--p-type-meta)/1.55 var(--mono);color:var(--ink-quiet);margin:16px 0 4px}
+  .belt-page .pk-emptycard .pk-acts{margin-top:16px}
+}
+@media (max-width:389px){
+  .belt-page .pk-find{width:calc(100% - 2 * var(--p-gutter))}
+  /* one line at 360: the count's tracking tightens, the size holds the floor */
+  .belt-page .pk-count{letter-spacing:.08em}
+}
+
+/* ---- the pocket's sheets (#1072): portalled to <body>, so not under
+   .belt-page. The kit's field and pill grammar at 44px, 16px inputs. ---- */
+.bp-sheet{padding-bottom:4px}
+.bp-spacer{flex:1}
+.bp-lede{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-mid);margin:0 0 14px}
+.bp-field{margin:0 0 12px;min-width:0}
+.bp-field label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+  text-transform:uppercase;color:var(--ink-quiet);margin:0 0 6px}
+.bp-field input,.bp-field textarea{box-sizing:border-box;display:block;width:100%;min-height:var(--p-hit);
+  padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);
+  font:var(--p-type-body)/1.4 var(--ui)}
+.bp-field .mono{font-family:var(--mono)}
+.bp-field textarea{resize:vertical}
+.bp-field input:focus-visible,.bp-field textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.bp-field input:disabled,.bp-field textarea:disabled{opacity:.55}
+.bp-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.bp-quick{margin:0 0 14px}
+.bp-quick .p-pill[aria-pressed=true]{border-color:var(--accent);color:var(--accent-text);
+  background:color-mix(in srgb, var(--accent) 14%, transparent)}
+.bp-note{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:0 0 12px}
+.bp-go{margin-top:8px}
+.bp-go.filled{background:var(--act, var(--accent));border-color:var(--act, var(--accent));
+  font:600 var(--p-type-button)/1.2 var(--display)}
+.bp-go:disabled{opacity:.5}
+.bp-pair{display:grid;grid-template-columns:1fr 1fr;gap:var(--p-pill-gap)}
+.bp-danger{border-color:var(--overdue);color:var(--overdue-text);
+  background:color-mix(in srgb, var(--overdue) 14%, transparent);font-weight:600}
+.bp-paper{color:var(--paper, var(--accent-text));font-size:1rem}
+.bp-dot{display:block;width:10px;height:10px;border-radius:50%;box-shadow:0 0 0 2.5px var(--bg)}
+.bp-plus{color:var(--accent-text);font:var(--p-type-body) var(--mono)}
+.bp-field-find{flex:1;min-width:0;box-sizing:border-box;min-height:var(--p-hit);padding:0 4px;margin:0;
+  border:0;border-bottom:1px solid var(--line);border-radius:0;background:none;color:var(--ink);outline:0;
+  font:var(--p-type-body)/1 var(--mono);-webkit-appearance:none;appearance:none}
+.bp-field-find::placeholder{color:var(--ink-quiet)}
+.bp-field-find:focus{border-bottom-color:var(--accent)}
+.bp-field-find::-webkit-search-cancel-button{display:none}
+/* the preview: page one on the cream sheet with the tilted sheet under it
+   (§18, create-v3's topsheet), nearly edge to edge; the page is a button */
+.bp-page{appearance:none;position:relative;display:flex;justify-content:center;width:100%;margin:0;
+  padding:10px 10px 18px;border:0;background:none;cursor:zoom-in;-webkit-tap-highlight-color:transparent}
+.bp-page:disabled{cursor:default}
+.bp-page img{position:relative;display:block;max-width:100%;height:auto;max-height:calc(var(--p-vvh, 100dvh) * .6 - 120px);
+  padding:8px;background:#f6f4ee;border-radius:5px;box-sizing:border-box;
+  box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset;
+  opacity:0;transition:opacity .35s ease}
+.bp-page.shown img{opacity:1}
+.bp-under{position:absolute;inset:14px 18px 20px;background:#e7e3d8;border-radius:5px;
+  transform:rotate(-1.6deg) translate(-4px,4px);opacity:.9}
+.bp-page:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:10px}
+.bp-honest{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:8px 0 4px}
+.bp-plate{position:relative;box-sizing:border-box;width:132px;height:170px;border:1px solid var(--paper, var(--accent));
+  border-radius:8px;background:var(--panel);display:grid;place-items:end center;padding-bottom:10px;overflow:hidden;
+  font:var(--p-type-caps)/1.3 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--paper, var(--accent-text))}
+.bp-plate.scanning::after{content:"";position:absolute;left:0;right:0;top:8px;height:2px;
+  background:var(--paper, var(--accent));box-shadow:0 0 12px var(--paper, var(--accent));
+  animation:bp-sweep 2.4s ease-in-out infinite alternate}
+@keyframes bp-sweep{to{top:calc(100% - 10px)}}
+.bp-line{font:600 var(--p-type-body)/1.35 var(--display);color:var(--ink);margin:4px 0 0}
+.bp-line.quiet{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);text-align:center;margin:0}
+.bp-why{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:0}
+.bp-restore{border-color:color-mix(in srgb, var(--accent) 45%, transparent);color:var(--accent-text)}
+@media (prefers-reduced-motion:reduce){ .bp-plate.scanning::after{animation:none} .bp-page img{transition:none} }
