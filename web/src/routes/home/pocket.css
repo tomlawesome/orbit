@@ -182,13 +182,15 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
   text-align:left;justify-items:start}
 
 /* ---- the approach: the sheet lifts into the item (§1.9, #1119) --------
- * `open` runs a view transition (pocket.svelte, onNavigate). The item
- * card in the sheet is named; until the belt's card carries the same name
- * (step 3) it lifts away as the item screen arrives under it. */
+ * `open` runs a view transition (pocket.svelte, onNavigate). The item card
+ * in the sheet and the belt's card (item/[[id]]/belt.css, #1072) carry the
+ * same name, so the one morphs into the other: the sheet's card rises to
+ * the card's seat and grows into it along the sheet's own curve, the two
+ * faces crossfading on the way, while the dial fades and the band draws. */
 .pk-item{view-transition-name:pocket-item}
-::view-transition-old(pocket-item){animation:pk-lift var(--p-rise) var(--p-ease) both}
-::view-transition-new(pocket-item){animation:none}
-@keyframes pk-lift{to{transform:translateY(-96px);opacity:0}}
+::view-transition-group(pocket-item){animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
+::view-transition-old(pocket-item),::view-transition-new(pocket-item){
+  animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
 
 @media (prefers-reduced-motion:reduce){
   .pocket .sky g,.pk-dot.breathing{animation:none}

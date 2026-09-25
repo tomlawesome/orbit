@@ -2229,3 +2229,15 @@ export async function readBelt(id) {
 export async function restoreDocument(documentId) {
   return json(await csrfFetch(`/api/documents/${encodeURIComponent(documentId)}/restore`));
 }
+
+/**
+ * Removes a document (#1059's reader, owner-decisions.md §18): `DELETE
+ * /api/documents/{id}`, a soft delete the server keeps on the clock, so
+ * restoreDocument above puts it back. The caller re-reads the belt.
+ *
+ * @param {string} documentId
+ * @returns {Promise<{ document: import('./workspace.js').DocumentSummary }>}
+ */
+export async function removeDocument(documentId) {
+  return json(await csrfFetch(`/api/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }));
+}
