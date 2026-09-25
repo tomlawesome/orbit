@@ -229,8 +229,10 @@
   /* The orb: drawn 36px, hit 44px (§1.3). */
   .porb{appearance:none;width:var(--p-hit);height:var(--p-hit);padding:0;border:0;background:none;
         display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  /* No blur: --panel over the sky is enough at 36px, and a blur on a fixed
+     layer repaints on every scroll (§5.3). */
   .porb span{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
-        background:var(--panel);backdrop-filter:blur(8px);display:grid;place-items:center;
+        background:var(--panel);display:grid;place-items:center;
         font:var(--p-type-meta) var(--mono);color:var(--ink-mid)}
   .porb:focus-visible{outline:none}
   .porb:focus-visible span{outline:2px solid var(--accent);outline-offset:2px}
