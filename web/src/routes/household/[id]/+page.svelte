@@ -9,6 +9,8 @@
   import { MAX_SECTIONS, deletionNameMatches, entriesLabel } from "$lib/data/household.js";
   import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
   import { consumeDoor } from "./door.js";
+  import { isPocket } from "$lib/pocket/media.js";
+  import Pocket from "./pocket.svelte";
   import {
     addMember,
     decideJoinRequest,
@@ -89,6 +91,7 @@
    * everything that happens ON this screen and nothing that happens off it.
    */
   const door = consumeDoor();
+  const pocket = isPocket();
 
   /* The identity fields (2c): three saves TO THE EYE over one bundled
      command. Local copies so a field can be edited, saved and left alone
@@ -620,6 +623,10 @@
   });
 
   onMount(() => {
+    /* #1122: the pocket hides this backdrop (proposal §1.10) and draws the
+       household's year for its own field, so a phone does not solve the
+       desk's room behind it. */
+    if (isPocket()) return;
     fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
     descend();
     /*
@@ -666,7 +673,13 @@
 
 <svelte:head><title>Orbit — {v.name}</title></svelte:head>
 
-<div class="household-page" class:member={!v.canManage} bind:this={stage} role="main">
+<!-- #1122, proposal §2.10: the pocket's own household, chosen by CSS. Outside
+     the desk's wrapper so its resets stay the desk's; on a phone the pocket
+     holds the page's one main landmark (this route renders only in the
+     browser, so the dialect is known here). -->
+<Pocket household={v} />
+
+<div class="household-page" class:member={!v.canManage} bind:this={stage} role={pocket ? undefined : "main"}>
 <!-- your own system, drawn from the inside (§15 H2). Behind the dust, not in
      front of it: your system is the structure you are standing in, and the dust
      of the wider sky streams past nearer to the eye. Nothing in here is
