@@ -93,19 +93,19 @@
 
   /* ── the tells: failures further down the page, said at the top (#1071) ─ */
   const tells = $derived.by(() => {
-    /** @type {{ href: string, word: string }[]} */
+    /** @type {{ id: string, word: string }[]} */
     const list = [];
     if (!view) return list;
     const failing = view.services.filter(([tone]) => tone === "overdue" || tone === "warm");
     for (const [tone, name] of failing.slice(0, 2)) {
-      list.push({ href: "#ad-operations", word: `${name} ${tone === "overdue" ? "down" : "retrying"}` });
+      list.push({ id: "ad-operations", word: `${name} ${tone === "overdue" ? "down" : "retrying"}` });
     }
-    if (failing.length > 2) list.push({ href: "#ad-operations", word: `${failing.length - 2} more failing` });
+    if (failing.length > 2) list.push({ id: "ad-operations", word: `${failing.length - 2} more failing` });
     const failedJobs = jobs.filter((job) => job.status === "failed").length;
-    if (failedJobs) list.unshift({ href: "#ad-documents", word: `${count(failedJobs, "job")} failed` });
-    if (tests.relay?.word === "failed") list.push({ href: "#ad-mail", word: "relay failed" });
+    if (failedJobs) list.unshift({ id: "ad-documents", word: `${count(failedJobs, "job")} failed` });
+    if (tests.relay?.word === "failed") list.push({ id: "ad-mail", word: "relay failed" });
     if (tests.mailbox?.word === "failed" || (!tests.mailbox && view.mailbox?.verificationState === "failed")) {
-      list.push({ href: "#ad-mail", word: "mailbox failed" });
+      list.push({ id: "ad-mail", word: "mailbox failed" });
     }
     return list;
   });
@@ -606,7 +606,7 @@
     {#if tells.length}
       <nav class="ad-tells ad-rise" style:--i="0" aria-label="Needs you">
         {#each tells as tell (tell.word)}
-          <a class="ad-tell" href={tell.href} onclick={(event) => jump(event, tell.href.slice(1))}>{tell.word}</a>
+          <a class="ad-tell" href="#{tell.id}" onclick={(event) => jump(event, tell.id)}>{tell.word}</a>
         {/each}
       </nav>
     {/if}
