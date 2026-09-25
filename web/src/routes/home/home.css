@@ -245,11 +245,11 @@
   .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
                  padding:6px 8px;border-radius:8px}
   .account nav a:hover{color:var(--ink);background:var(--panel)}
-  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
-  .swatches span{font:10.5px var(--mono);color:var(--ink-quiet);margin-right:2px}
-  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+  .desk .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .desk .swatches span{font:10.5px var(--mono);color:var(--ink-quiet);margin-right:2px}
+  .desk .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
                    border:1px solid var(--line);padding:0}
-  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .desk .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
   .signout{font:12px var(--mono);color:var(--ink-quiet);background:none;
            border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue-text)}
@@ -472,9 +472,11 @@
   /* Named for the classic mark rather than for any glint: retrograde's beacon
      is a wireframe, and filling its paths would solder it shut (§15/#480). */
   .drawer-top.open .nstar .classic path{fill:var(--accent)}
-  .scrim{position:fixed;inset:0;z-index:10;background:rgba(4,7,16,.55);
+  /* .desk-scoped (#1120): the pocket kit's sheets have a .scrim of their
+     own, and an unscoped rule here lifted it over the sheet and blurred it. */
+  .desk .scrim{position:fixed;inset:0;z-index:10;background:rgba(4,7,16,.55);
          backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .4s}
-  body.create-open .scrim{opacity:1;pointer-events:auto}
+  body.create-open .desk .scrim{opacity:1;pointer-events:auto}
 
   /* POL-1: arrival — the mark expands into the dial once per ARRIVAL.
      Coming back through history is not arriving (owner, 2026-08-15), so the
@@ -1055,7 +1057,7 @@
 [data-theme=dawn] :is(.item,.account,.docview,.drawer-top,.callout,.palette),
 [data-theme=clouds] :is(.item,.account,.docview,.drawer-top,.callout,.palette){
   border-top-color:rgba(255,255,255,.85)}
-[data-theme=dawn] .scrim,[data-theme=clouds] .scrim{background:rgba(196,206,222,.5)}
+[data-theme=dawn] .desk .scrim,[data-theme=clouds] .desk .scrim{background:rgba(196,206,222,.5)}
 /* The bodies are hazy pastels rather than flat ink (their stops are in
    packs.css): the same status colours seen through morning air. The haze is a
    pale halo, not a glow — it lightens the edge, it does not add light. Gloss
