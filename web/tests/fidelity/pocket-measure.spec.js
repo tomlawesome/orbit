@@ -392,3 +392,52 @@ for (const phone of PHONES) {
     }
   });
 }
+
+/*
+ * THE GRAPHIC CHECK (#1120). The floors above measure tappable elements and
+ * text, so they passed a 404 whose black hole ran off both sides of the phone
+ * (the owner, on a real phone: "the 404 graphic is too wide for mobile").
+ * This holds the error page's main graphic -- the well, `.world > svg` -- to
+ * the screen: the disc glow, the precessing disc and its rings, both 4s, and
+ * every falling label at every moment of its orbit must sit inside the
+ * viewport. The star fall behind it (`.infall`) is sky and bleeds by design.
+ *
+ * Runs in the page. Returns each part outside the viewport, as a string.
+ */
+function wellOverflow() {
+  const svg = /** @type {SVGSVGElement} */ (document.querySelector(".world > svg"));
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  /** @type {Map<string, string>} the first place each part was caught outside */
+  const out = new Map();
+  /** @param {Element | null} el @param {string} what */
+  const check = (el, what) => {
+    if (!el) { out.set(what, `${what} is missing`); return; }
+    const r = el.getBoundingClientRect();
+    if (!out.has(what) && (r.left < 0 || r.top < 0 || r.right > vw || r.bottom > vh))
+      out.set(what, `${what} at ${Math.round(r.left)},${Math.round(r.top)}..${Math.round(r.right)},${Math.round(r.bottom)} of ${vw}x${vh}`);
+  };
+  check(svg.querySelector("circle.disc-glow"), "circle.disc-glow");
+  check(svg.querySelector("g.disc-precess"), "g.disc-precess");
+  /* The labels ride SMIL paths (13s, 17s, 21s): step the svg's clock through
+     the longest cycle and measure each label wherever it has got to. */
+  svg.pauseAnimations();
+  for (let t = 0; t <= 21; t += 0.25) {
+    svg.setCurrentTime(t);
+    for (const text of svg.querySelectorAll("text")) check(text, `text "${text.textContent}"`);
+  }
+  return [...out.values()];
+}
+
+for (const phone of PHONES) {
+  test.describe(`pocket measurement at ${phone.name}: the error page's graphic`, () => {
+    test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true });
+
+    test(".world > svg (the gravity well) fits inside the screen", async ({ page }) => {
+      await page.goto(`${APP}/pocket-measure-no-such-page`, { waitUntil: "load" });
+      await page.waitForSelector(".world[data-rasterised=ready]");
+      const problems = await page.evaluate(wellOverflow);
+      expect(problems, problems.join("\n")).toEqual([]);
+    });
+  });
+}
