@@ -1335,7 +1335,7 @@
     <button class="p-pill filled wide bp-go" disabled={busy || locked || !form.title?.trim()}
             onclick={() => { const item = record, edits = editsOf(); sheetOpen = false; run(() => upsertCommand(item, edits)); }}>save</button>
   {:else if face === "retire" && record}
-    <p class="bp-lede">It leaves the belt and the dial. Its history and its documents are kept.</p>
+    <p class="bp-lede prose">It leaves the belt and the dial. Its history and its documents are kept.</p>
     <div class="bp-pair">
       <button class="p-pill wide bp-danger" disabled={busy}
               onclick={() => { const item = record; sheetOpen = false; run(() => archiveCommand(item), { leave: true }); }}>retire</button>
