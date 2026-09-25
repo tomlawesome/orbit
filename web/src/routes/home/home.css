@@ -799,10 +799,7 @@
    two reticle ticks hold the horizontal width the old glint had, so the
    silhouette still reads as a beacon at a glance. The classic glint stays up
    in the other four packs — only one form is ever rendered. */
-.nstar .tron{display:none}
-[data-theme=retrograde] .nstar .classic{display:none}
-[data-theme=retrograde] .nstar .tron{display:block;
-  filter:drop-shadow(0 0 3px var(--bloom))}
+/* Which form is up is chosen in $lib/NorthStarMark.svelte (#1120). */
 [data-theme=retrograde] .drawer-top.open .nstar .tron :is(path,line){
   stroke:var(--accent)}
 
@@ -1086,9 +1083,7 @@
    hold the glint's own ±13.4, so the mark's footprint in the chrome does not
    move; no bloom, no drop-shadow, because this is a daylight pack and it
    engraves rather than glows. */
-.nstar .sonde{display:none}
-[data-theme=clouds] .nstar .classic{display:none}
-[data-theme=clouds] .nstar .sonde{display:block}
+/* Which form is up is chosen in $lib/NorthStarMark.svelte (#1120). */
 /* open: the instrument is already the accent, so what the open state changes is
    the ENVELOPE — the balloon is lit by the drawer it has pulled down, which is
    the same grammar retrograde's beacon uses (its wireframe goes accent) and the
