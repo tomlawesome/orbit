@@ -13,6 +13,8 @@
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import Reader from "./Reader.svelte";
+  import EntryForm from "../../create/EntryForm.svelte";
+  import { entryOf, fieldsOf, refusalOf } from "../../create/entry.js";
   import { beltManifestOf, documentPreviewStateOf } from "$lib/data/belt.js";
   import {
     archiveCommand, completeCommand, nextDateAfter, rescheduleCommand,
@@ -695,6 +697,7 @@
     if (panel === "reschedule") form = { dueDate: item.dueDate ?? todayISO() };
     if (panel === "snooze") form = { until: item.snoozedUntil ?? todayISO() };
     if (panel === "edit") {
+      editEntry = entryOf(item);
       form = {
         title: item.title,
         provider: item.provider ?? "",
@@ -758,6 +761,24 @@
     const target = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
     if (target?.closest?.(".readcard, .cardwrap, .hit, .find, .back, .orb, .account")) return;
     belt?.closeDoc();
+  }
+
+  /* ---- edit on a phone: create's form (§2.3, §2.5) -------------------- */
+  /** @type {import("../../create/entry.js").Entry | null} */
+  let editEntry = $state(null);
+  const editRefusal = $derived(editEntry ? refusalOf(editEntry) : null);
+  async function saveEdit() {
+    if (!record || !editEntry || editRefusal) return;
+    const item = record;
+    const edits = fieldsOf(editEntry, { scheduleKind: item.scheduleKind ?? undefined });
+    await run(() => upsertCommand(item, edits));
+    if (problem) {
+      /* Loud (#1058): the server's reason, in the refusal vocabulary. */
+      if (!/^not saved/i.test(problem)) problem = `not saved — ${problem}`;
+      return;
+    }
+    sheetOpen = false;
+    wake(`saved · ${edits.title}`);
   }
 
   const editsOf = () => ({
@@ -1309,31 +1330,20 @@
       <input id="p-until" type="date" bind:value={form.until}></div>
     <button class="p-pill filled wide bp-go" style="--act:var(--warm)" disabled={busy || !form.until}
             onclick={() => { const item = record, until = form.until; sheetOpen = false; run(() => snoozeCommand(item, until)); }}>snooze</button>
-  {:else if face === "edit" && record}
-    <!-- #941: damaged fields stay open and say what saving does; locked
-         locks every field, because item.upsert is refused whole. -->
-    <div class="bp-field"><label for="pe-title">title</label>
-      <input id="pe-title" bind:value={form.title} disabled={locked}></div>
-    <div class="bp-field"><label for="pe-provider">provider</label>
-      <input id="pe-provider" bind:value={form.provider} placeholder="optional" disabled={locked}></div>
-    <div class="bp-field"><label for="pe-reference">reference</label>
-      <input id="pe-reference" class="mono" bind:value={form.reference} disabled={locked}
-             placeholder={referenceState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional"}></div>
-    <div class="bp-row2">
-      <div class="bp-field"><label for="pe-cost">cost</label>
-        <input id="pe-cost" class="mono" inputmode="decimal" bind:value={form.cost} placeholder="optional" disabled={locked}></div>
-      <div class="bp-field"><label for="pe-due">due date</label>
-        <input id="pe-due" type="date" bind:value={form.dueDate} disabled={locked}></div>
-    </div>
-    <div class="bp-field"><label for="pe-recur">orbital period (months)</label>
-      <input id="pe-recur" class="mono" inputmode="numeric" bind:value={form.recurrenceMonths} placeholder="optional"
-             disabled={locked}></div>
-    <div class="bp-field"><label for="pe-notes">notes</label>
-      <textarea id="pe-notes" rows="4" bind:value={form.notes} disabled={locked}
-                placeholder={notesState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional"}></textarea></div>
+  {:else if face === "edit" && record && editEntry}
+    <!-- §2.3/§2.5: edit is create's form in edit mode (EntryForm.svelte):
+         type locked, no household or document row, `save` at the sheet's
+         foot. #941 carries over: damaged fields stay open and say what saving
+         does; locked locks every field, because item.upsert is refused whole.
+         A failure is loud and keeps the sheet up with what was typed. -->
+    <EntryForm bind:entry={editEntry} households={data.household ? [data.household] : []} mode="edit" nested
+               disabled={locked || busy} {referenceState} {notesState} />
     {#if locked}<p class="bp-note">{PANEL_LOCKED}</p>{/if}
-    <button class="p-pill filled wide bp-go" disabled={busy || locked || !form.title?.trim()}
-            onclick={() => { const item = record, edits = editsOf(); sheetOpen = false; run(() => upsertCommand(item, edits)); }}>save</button>
+    {#if problem}<p class="p-error" role="alert">{problem}</p>
+    {:else if editRefusal}<p class="bp-note" id="pe-refusal">{editRefusal}</p>{/if}
+    <button class="p-pill filled wide bp-go" disabled={busy || locked || Boolean(editRefusal)}
+            aria-describedby={editRefusal ? "pe-refusal" : undefined}
+            onclick={saveEdit}>{busy ? "saving…" : "save"}</button>
   {:else if face === "retire" && record}
     <p class="bp-lede">It leaves the belt and the dial. Its history and its documents are kept.</p>
     <div class="bp-pair">
