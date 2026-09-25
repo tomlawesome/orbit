@@ -1,5 +1,6 @@
 <script>
   import { onDestroy } from "svelte";
+  import { resolve } from "$app/paths";
   import { ringFocusIn, ringFocusOut, ringOpens } from "./ring-closes.js";
 
   onDestroy(ringOpens);
@@ -174,7 +175,7 @@
         </div>
         <p class="err" class:shown={Boolean(said)} role="alert">{said}</p>
         {#if signInLine}
-          <p class="note after"><a class="quietline" href="/login">sign in</a></p>
+          <p class="note after"><a class="quietline" href={resolve("/login")}>sign in</a></p>
         {/if}
       </div>
     {/if}
