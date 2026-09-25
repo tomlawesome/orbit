@@ -1191,3 +1191,7 @@ on a real iPhone, a real Android phone and the desk, and recorded on the
 issue. Departures are the owner's decision. Agents raise gaps; they don't
 decide them. First case: #1122 (swipe-only row actions; departs from WCAG
 2.5.1).
+
+That first case is withdrawn (owner, 2026-09-25, after using it on a real
+phone): row actions open on a tap, on every phone row that has them, so it
+no longer departs from 2.5.1. The principle above stands.
