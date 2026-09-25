@@ -40,6 +40,9 @@
 .p-pill.filled{background:var(--accent);border-color:var(--accent);color:var(--bg);
   font:600 var(--p-type-button)/1.2 var(--display);letter-spacing:.01em;box-shadow:var(--p-pill-glow)}
 .p-pill.filled:active{filter:brightness(.92)}
+/* The floor wins over "text on --bg" (§5.3): on dawn and clouds --bg on
+   --accent is 3.03:1; white is 4.57:1. */
+:is([data-theme=dawn],[data-theme=clouds]) .p-pill.filled{color:#fff}
 [data-theme=retrograde] .p-pill.filled{box-shadow:0 0 12px -2px var(--bloom), var(--p-pill-glow)}
 
 .p-pill.wide{display:flex;width:100%}
