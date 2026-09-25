@@ -1022,13 +1022,13 @@ export async function commandContact(command) {
  * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle, health] =
+  const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
       .then(
-        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean }[] }} */ body) =>
+        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
           body.users ?? [],
       )
       .catch(() => []),
@@ -1071,6 +1071,9 @@ export async function readAdminScreen() {
     json(await fetch("/api/admin/health", { credentials: "same-origin" }))
       .then((/** @type {{ health?: AdminHealth }} */ body) => body.health ?? null)
       .catch(() => null),
+    /* The document jobs (#1071). Additive on the same terms: a route that
+       cannot answer means no jobs card, never a sunk screen. */
+    readAdminOperations().catch(() => null),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   /* Real owner names where the members route answers (#453); the fixture's
@@ -1109,6 +1112,15 @@ export async function readAdminScreen() {
        render where the route genuinely cannot answer. */
     services: health ? serviceRowsOf(health, now) : adminFixture.services,
     instance: health ? instanceLineOf(health.build) : adminFixture.instance,
+    /* The answer itself, for the pocket's per-service callout (#1123): when
+       each service was last checked, last succeeded and last failed. Null
+       where the route cannot answer, and the callout then says only the row. */
+    health,
+    now,
+    operations,
+    /* Systems whose deletion is asked for and still inside its window
+       (#1001, §19): an instance administrator's workspace lists every one. */
+    recoverable: workspace.recoverableHouseholds ?? [],
     mailbox,
     contact,
     rotation,
@@ -1116,6 +1128,100 @@ export async function readAdminScreen() {
     recoveryBundle,
     owners,
   };
+}
+
+/**
+ * One document job as `GET /api/admin/operations` reports it (#1071): its
+ * kind only, never the document's name (owner, 2026-09-19), and a bounded
+ * failure code rather than the raw error.
+ *
+ * @typedef {object} AdminDocumentJob
+ * @property {string} id
+ * @property {"scan" | "encrypt" | "purge" | "reconcile" | "rewrap"} kind
+ * @property {"pending" | "processing" | "retry" | "completed" | "failed" | "cancelled"} status
+ * @property {number} attempts
+ * @property {?string} lastErrorCode
+ * @property {?string} nextAttemptAt
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ */
+
+/**
+ * The part of the operations snapshot the administration screen reads.
+ *
+ * @typedef {object} AdminOperations
+ * @property {AdminDocumentJob[]} documentJobs      the 25 most recently touched
+ * @property {Record<string, number>} documentJobCounts
+ */
+
+/**
+ * The operations snapshot (#735 port, #1071).
+ *
+ * @returns {Promise<AdminOperations>}
+ */
+export async function readAdminOperations() {
+  /** @type {{ operations?: AdminOperations }} */
+  const body = await json(await fetch("/api/admin/operations", { credentials: "same-origin" }));
+  if (!body.operations) throw new Error("no operations snapshot");
+  return body.operations;
+}
+
+/**
+ * Retry one failed document job. The server refuses anything that is no
+ * longer in the status the caller last saw (409 `operation_conflict`).
+ *
+ * @param {string} jobId
+ * @param {AdminDocumentJob["status"]} expectedStatus
+ */
+export async function retryDocumentJob(jobId, expectedStatus) {
+  return json(await csrfFetch(`/api/admin/operations/document-jobs/${encodeURIComponent(jobId)}`, {
+    body: { action: "retry", expectedStatus },
+  }));
+}
+
+/**
+ * The two live mail tests (#1071): the incoming mailbox (the IMAP verify and
+ * the relay half together) and the outbound relay. Each answers one bounded
+ * word. The server does not keep the answer.
+ *
+ * @param {"mailbox" | "relay"} which
+ * @returns {Promise<{ result: string }>}
+ */
+export async function testMail(which) {
+  return json(await csrfFetch(`/api/admin/operations/${which === "mailbox" ? "imap-test" : "smtp-test"}`));
+}
+
+/**
+ * Disable or enable a person's account (`PATCH /api/admin/users`).
+ *
+ * @param {string} userId
+ * @param {boolean} disabled
+ */
+export async function setUserDisabled(userId, disabled) {
+  return json(await csrfFetch("/api/admin/users", { method: "PATCH", body: { userId, disabled } }));
+}
+
+/**
+ * Turn a system's deletion back inside its window (#1001, §19). An instance
+ * administrator's act, drawn on administration only ("57 admin only").
+ *
+ * @param {string} householdId
+ */
+export async function restoreHousehold(householdId) {
+  return json(await csrfFetch(`/api/households/${householdId}/lifecycle`, { body: { action: "restore" } }));
+}
+
+/**
+ * Delete a system for good now, skipping the rest of its window (#1001). The
+ * typed name goes over as `confirmation` and the SERVER compares it.
+ *
+ * @param {string} householdId
+ * @param {string} confirmation
+ */
+export async function hardDeleteHousehold(householdId, confirmation) {
+  return json(await csrfFetch(`/api/households/${householdId}/lifecycle`, {
+    body: { action: "hard_delete", confirmation },
+  }));
 }
 
 /**
