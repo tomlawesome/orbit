@@ -218,7 +218,7 @@
   }
   /** @param {SentRow} row */
   const sentMeta = (row) =>
-    `${row.channel === "email" ? "email" : "browser alert"} · ${row.warning} warning · ${beforeWord(row.daysBefore)}`;
+    `${row.channel === "email" ? "email" : "browser alert"} · ${beforeWord(row.daysBefore)}`;
 
   const bothOff = $derived(view !== null && !emailOn && !browserAlerts);
 
