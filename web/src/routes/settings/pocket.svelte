@@ -84,8 +84,7 @@
   /* ── reminders ────────────────────────────────────────────────────────── */
   let tab = $state(/** @type {"reminders" | "sent"} */ ("reminders"));
   let emailSaving = $state(false);
-  /** @type {string | null} */
-  let reminderProblem = $state(null);
+  let reminderProblem = $state(/** @type {string | null} */ (null));
   const emailOn = $derived(view?.reminders.emailEnabled ?? false);
 
   async function toggleEmail() {
@@ -118,8 +117,7 @@
   let alertsAvailable = $state(true);
   let browserAlerts = $state(false);
   let alertsBusy = $state(false);
-  /** @type {string | null} */
-  let alertsProblem = $state(null);
+  let alertsProblem = $state(/** @type {string | null} */ (null));
 
   async function toggleAlerts() {
     if (alertsBusy || !alertsAvailable) return;
@@ -150,11 +148,9 @@
      picker offers only choices it will accept. */
   const FIRST_CHOICES = [60, 30, 21, 14, 7];
   const FINAL_CHOICES = [7, 3, 1, 0];
-  /** @type {"first" | "final" | null} */
-  let picking = $state(null);
+  let picking = $state(/** @type {"first" | "final" | null} */ (null));
   let pickerOpen = $state(false);
-  /** @type {"first" | "final" | null} */
-  let timingSaving = $state(null);
+  let timingSaving = $state(/** @type {"first" | "final" | null} */ (null));
 
   /** @param {number} days */
   const daysWord = (days) => (days === 0 ? "on the day" : `${days} day${days === 1 ? "" : "s"}`);
@@ -163,9 +159,11 @@
 
   const choices = $derived.by(() => {
     if (!view || !picking) return [];
-    const { firstWarningDays: first, finalWarningDays: final } = view.reminders;
+    /* Unset offsets read as the server's own defaults (14 and 3). */
+    const first = view.reminders.firstWarningDays ?? 14;
+    const final = view.reminders.finalWarningDays ?? 3;
     const pool = picking === "first" ? [...FIRST_CHOICES, first] : [...FINAL_CHOICES, final];
-    const allowed = pool.filter((days) => (picking === "first" ? days > (final ?? 0) : days < (first ?? 1)));
+    const allowed = pool.filter((days) => (picking === "first" ? days > final : days < first));
     return [...new Set(allowed)].sort((a, b) => b - a);
   });
 
@@ -204,8 +202,7 @@
      reads a member's `notification_deliveries` back yet, so outside the
      gate the list is `null` and the tab says so; under fixtures it is the
      shape #1003 names. `?sent=none|off` picks the gate's other two states. */
-  /** @type {SentRow[] | null} */
-  let sent = $state(null);
+  let sent = $state(/** @type {SentRow[] | null} */ (null));
   let scene = $state("some");
 
   /** @param {string} iso */
@@ -253,14 +250,12 @@
   /* ── sign-in methods and the recent-authentication callout (§17) ─────── */
   const hasPassword = $derived(methods?.local.set ?? false);
   const identities = $derived(methods?.oidc ?? []);
-  /** @type {string | null} */
-  let action = $state(null);
+  let action = $state(/** @type {string | null} */ (null));
   let methodOpen = $state(false);
   let currentPassword = $state("");
   let newPassword = $state("");
   let methodBusy = $state(false);
-  /** @type {string | null} */
-  let methodProblem = $state(null);
+  let methodProblem = $state(/** @type {string | null} */ (null));
   /** Whether this visit is standing on a step-up proof for `action`. */
   let proven = $state(false);
 
@@ -346,10 +341,8 @@
   }
 
   /* ── where you're signed in ───────────────────────────────────────────── */
-  /** @type {string | null} */
-  let sessionProblem = $state(null);
-  /** @type {string | null} */
-  let everywhereProblem = $state(null);
+  let sessionProblem = $state(/** @type {string | null} */ (null));
+  let everywhereProblem = $state(/** @type {string | null} */ (null));
   const now = new Date().toISOString();
 
   /** @param {Sessions[number]} row */
