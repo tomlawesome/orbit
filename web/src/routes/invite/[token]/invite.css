@@ -81,3 +81,38 @@
   cursor: not-allowed;
   filter: none;
 }
+
+/* ══ ON A PHONE (#1120 step 9, proposal §2.15) ═════════════════════════════
+   The door's station: the ring rides high (302.4px, the login ring's own
+   line and orb) and holds the line; one sentence at 15px beneath it; one
+   full-width pill. The small `orbit` mark goes, because the ring is the
+   mark. Above the cut the station dissolves into the column it always was. */
+.invite-card .station{display:contents}
+.invite-card .invite-ring{display:none}
+.invite-card .pocket-only{display:none}
+
+@media (max-width: 900px), (max-height: 600px){
+  .invite-card{justify-content:flex-start;gap:0;box-sizing:border-box;
+    padding:calc(env(safe-area-inset-top, 0px) + 44px) var(--p-gutter) calc(env(safe-area-inset-bottom, 0px) + 24px)}
+  .invite-card .name{display:none}
+  .invite-card .station{display:grid;place-items:center;flex:none;width:302.4px;height:302.4px}
+  .invite-card .station>*{grid-area:1/1}
+  .invite-card .invite-ring{display:block;width:100%;height:100%;position:relative;
+    border-radius:50%;border:4.2px solid #8791b3}
+  .invite-card .invite-ring i{position:absolute;left:93.26%;top:24.94%;width:29.4px;height:29.4px;
+    margin:-14.7px 0 0 -14.7px;border-radius:50%;background:#d8b45a}
+  .invite-card h1{max-width:232px;font-size:20px;line-height:1.3;position:relative}
+  .invite-card .said{margin-top:28px;max-width:376px;font:.9375rem/1.55 var(--ui);letter-spacing:0;color:#aab1c8}
+  .invite-card .gate{display:flex;align-items:center;justify-content:center;width:100%;max-width:376px;box-sizing:border-box;
+    min-height:var(--p-hit);margin-top:28px;padding:0 24px;border-radius:99px;
+    font-size:var(--p-type-button);letter-spacing:.04em;text-transform:none}
+  .invite-card .gate:focus-visible{outline:2px solid #d8b45a;outline-offset:2px}
+  .invite-card .desk-only{display:none}
+  .invite-card .pocket-only{display:flex;flex-direction:column;align-items:center;gap:8px;
+    width:100%;max-width:376px;margin-top:28px}
+  .invite-card .acts .p-pill{color:#e6e9f2;border-color:rgba(240,244,251,.3);font-size:var(--p-type-button)}
+  .invite-card .quiet{display:inline-flex;align-items:center;min-height:var(--p-hit);padding:0 14px;
+    font:var(--p-type-meta) var(--mono);letter-spacing:.05em;color:#8f9bb5;
+    text-decoration:underline;text-underline-offset:3px;text-decoration-color:rgba(216,180,90,.5)}
+  .invite-card .quiet:focus-visible{outline:2px solid #d8b45a;outline-offset:2px;border-radius:4px}
+}
