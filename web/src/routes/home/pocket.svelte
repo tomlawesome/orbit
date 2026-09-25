@@ -6,7 +6,7 @@
   import { applyCommand, readItemDocuments } from "$lib/data/workspace.js";
   import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, money } from "$lib/format.js";
+  import { ago, every, longDate, money } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import NorthStar from "$lib/pocket/NorthStar.svelte";
@@ -116,6 +116,12 @@
   // `ended` is the expiry past its date (#1005): quiet ink, never the alarm.
   /** @type {Record<string, string>} */
   const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", ended: "--ink-mid" };
+  // The kit's mark and value tones (kit.css .p-body, .p-kv) for a band, and
+  // the mark's face for a kind, the dial's chart key (chart.js dialBodiesOf).
+  /** @type {Record<string, string>} */
+  const TONE_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok", ended: "ended" };
+  /** @type {Record<string, string>} */
+  const FACE_CLASS = { inspection: "ter", renewal: "con", expiry: "exp" };
   /** @type {(b: { days: number | null }) => string} */
   const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
   /** @type {(iso: string) => string} */
@@ -159,7 +165,7 @@
         ].filter(Boolean).join(" · ")
       : "",
   );
-  const sheetSize = $derived(face === "search" || face === "docs" ? "list" : "callout");
+  const sheetSize = $derived(face === "sugg" ? "callout" : "list");
   const sheetTitle = $derived(
     face === "search" ? "Search your orbit"
       : face === "sugg" ? suggestion?.title ?? ""
@@ -602,7 +608,7 @@
 {#if !view?.emptySky}<NorthStar />{/if}
 </div>
 
-<Sheet bind:open={sheetOpen} size={sheetSize} title={sheetTitle} hideTitle={face === "search"}>
+<Sheet bind:open={sheetOpen} size={sheetSize} title={sheetTitle} hideTitle={face === "search" || face === "item"}>
   <!-- The search field rides in the sheet's head (§2.4). Declared in here
        rather than at the top of the markup: a top-level snippet trips the
        production bundler (#1130). -->
@@ -613,9 +619,29 @@
     {/if}
   {/snippet}
   {#if face === "item" && row}
-    <!-- The item sheet (#1119, §2.1): the card the approach lifts. -->
+    <!-- The item sheet (#1119, §2.1): a preview of the item's own card
+         (item/[[id]]/+page.svelte), which `open` grows it into. The dialog's
+         hidden title names it for a screen reader, so the visible name here
+         is not read twice. -->
     <div class="pk-item">
-      <p class="pk-meta">{itemMeta}</p>
+      <div class="p-card pk-card">
+        <div class="pk-card-head" aria-hidden="true">
+          <span class="p-body pk-mark {TONE_CLASS[row.band] ?? ''} {FACE_CLASS[row.kind] ?? ''}"></span>
+          <span class="pk-name">{row.title}</span>
+        </div>
+        <div class="pk-sub">{[row.section, row.kind].filter(Boolean).join(" · ")}</div>
+        {#if row.dueDate}
+          <div class="p-kv"><span>{row.kind === "expiry" ? "ends" : "due"}</span>
+            <b class={TONE_CLASS[row.band] ?? ""}>{tlabel(row)} · {longDate(row.dueDate)}</b></div>
+        {/if}
+        {#if row.kind === "expiry"}
+          <div class="p-kv"><span>orbital period</span><b>one-off — does not come round</b></div>
+        {:else if row.recurrenceMonths}
+          <div class="p-kv"><span>orbital period</span><b>{every(row.recurrenceMonths)}</b></div>
+        {/if}
+        <div class="p-kv"><span>cost</span><b>{money(row.costMinor, row.currency, row.costIsEstimate)}</b></div>
+        <div class="p-kv"><span>documents</span><b>{documentCount > 0 ? documentCount : "none yet"}</b></div>
+      </div>
       <div class="p-pills pk-acts">
         <a class="p-pill filled" href={resolve("/item/[[id]]", { id: encodeURIComponent(row.id) })}
            onclick={() => (morphing = true)}>open</a>
