@@ -8,13 +8,20 @@ name: Release the mirrored stable tag
 # working. GitHub does no judging of its own -- it never refuses a tag or
 # recomputes anything for the image.
 #
-# ADR-0031 #9: the same signed launcher and release manifest that
-# publish-from-gitlab.yml attaches to the rolling `preview` prerelease are
-# attached here too, to the permanent stable release -- the exact bytes
-# GitLab already tested and signed for this commit. Nothing is rebuilt: a
-# tag only exists because `promote_stable` already validated the preview
-# digest, and `main`/`preview` are the same commit at promotion, so this
-# commit's own GitLab pipeline is the one that tested it.
+# ADR-0031 #9: the same signed launcher and release manifest are attached
+# here, to the permanent stable release -- the exact bytes GitLab already
+# tested and signed for this commit. There is no rolling `preview`
+# prerelease to also carry them: the owner removed that (21a, #1107),
+# so publish-from-gitlab.yml only copies the tested image digest to GHCR
+# and never touches a release. Nothing is rebuilt: a tag only exists
+# because `promote_stable` already validated the preview digest, and
+# `main`/`preview` are the same commit at promotion, so this commit's own
+# GitLab pipeline is the one that tested it.
+#
+# A pre-release-shaped tag (`vX.Y.Z-<prerelease>`, e.g. a throwaway
+# `vX.Y.Z-e2e.N` tag used to prove the launcher/signature path end to end,
+# #1121) is published as a GitHub pre-release and never marked Latest --
+# scripts/ci/classify-release-tag.sh decides which shape a given tag is.
 #
 # That pipeline is a *push* pipeline for either `preview` or a `hotfix/*`
 # branch (scripts/ci/gitlab-await-tested-image.sh only accepts those), and
@@ -46,6 +53,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Check out the tagged commit and its preview/hotfix branches
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # A stable vX.Y.Z tag becomes the release exactly as it always has (gh
+      # release create defaults to marking it Latest). A pre-release-shaped
+      # tag -- a throwaway vX.Y.Z-e2e.N proving the launcher/signature path,
+      # #1121 -- is published as a GitHub pre-release and explicitly kept off
+      # Latest, so scripts/get-orbit.sh's default ORBIT_CHANNEL=latest can
+      # never resolve to it.
       - name: Create the release if it does not already exist
         env:
           GH_TOKEN: ${{ github.token }}
@@ -54,15 +74,14 @@ jobs:
           if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
             printf 'Release %s already exists; nothing to do.\n' "${TAG}"
           else
-            gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes
+            kind="$(bash scripts/ci/classify-release-tag.sh "${TAG}")"
+            if [[ "${kind}" == "prerelease" ]]; then
+              gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes \
+                --prerelease --latest=false
+            else
+              gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes
+            fi
           fi
-
-      - name: Check out the tagged commit and its preview/hotfix branches
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: refs/tags/${{ github.ref_name }}
-          fetch-depth: 0
-          persist-credentials: false
 
       # The tagged commit is also the head of `main`, which every push shares
       # -- that alone cannot say which branch GitLab tested it on. Preferring
