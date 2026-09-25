@@ -88,16 +88,25 @@ async function assertEveryControlIsNamed(page: Page, screen: string) {
   }
 }
 
-/** Criterion 2: one main, one h1, and no skipped heading level. */
+/**
+ * Criterion 2: one main, one h1, and no skipped heading level -- as a screen
+ * reader meets them. #1120: a screen with a pocket dialect carries both its
+ * desk and its pocket markup and shows one with display:none on the other,
+ * so what is counted is what the accessibility tree exposes (getByRole
+ * leaves out display:none, visibility:hidden and aria-hidden, but keeps
+ * anything merely moved off-screen). Counting raw elements would pass a
+ * phone whose only main is the hidden desk's, and fail a page whose second
+ * main no reader can reach.
+ */
 async function assertLandmarksAndHeadings(page: Page, screen: string) {
-  const main = page.locator('main, [role="main"]');
+  const main = page.getByRole("main");
   await expect.soft(main, `${screen}: expected exactly one main landmark`).toHaveCount(1);
 
-  const h1 = page.locator("h1");
+  const h1 = page.getByRole("heading", { level: 1 });
   await expect.soft(h1, `${screen}: expected exactly one h1`).toHaveCount(1);
 
-  const levels = await page.locator("h1, h2, h3, h4, h5, h6").evaluateAll((elements) =>
-    elements.map((element) => Number(element.tagName.slice(1))),
+  const levels = await page.getByRole("heading").evaluateAll((elements) =>
+    elements.map((element) => Number(element.getAttribute("aria-level")) || Number(element.tagName.slice(1))),
   );
   let previous = 0;
   for (const level of levels) {
@@ -387,10 +396,21 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   test("sign-out screen", async ({ page }, testInfo) => {
     await signIn(page);
     await page.goto("/settings");
-    await page.locator("button.orb").click();
-    const signOutButton = page.locator(".account .signout");
-    await signOutButton.click();
-    await signOutButton.click();
+    if (test.info().project.name.startsWith("mobile")) {
+      /* #1120: on a phone the sub-screen chrome's orb opens the hatch, and
+         its sign-out pill arms on the first tap and fires on the second --
+         the same two-tap control, in the pocket's own sheet. */
+      await page.getByRole("button", { name: "Account and menu" }).click();
+      const signOutPill = page.getByRole("dialog").getByRole("button", { name: /sign out/ });
+      await signOutPill.click();
+      await expect(signOutPill).toHaveAccessibleName("tap again to sign out");
+      await signOutPill.click();
+    } else {
+      await page.locator("button.orb").click();
+      const signOutButton = page.locator(".account .signout");
+      await signOutButton.click();
+      await signOutButton.click();
+    }
     await expect(page).toHaveURL(/\/logout$/, { timeout: 30_000 });
     await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
 
