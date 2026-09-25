@@ -1,0 +1,384 @@
+<script>
+  import Mark from "$lib/Mark.svelte";
+  import Sheet from "$lib/pocket/Sheet.svelte";
+  import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
+  import {
+    KINDS, RECURRENCE_MAX, REMINDER_CHOICES, kindHasDate, kindRecurs, recurrenceWords, stepRecurrence, toggleReminder,
+  } from "./entry.js";
+  const uid = $props.id();
+
+  /**
+   * CREATE'S FORM ON A PHONE (#1120, proposal §2.5): one column, label above
+   * field, 16px inputs 48px tall, 44px chips. The same form edits an item
+   * (the belt's `edit` sheet, §2.3): `mode="edit"` locks the type chips and
+   * hides the household and the document row. The save bar is the host's,
+   * because on /create it is fixed to the foot and in the edit sheet it is
+   * the sheet's last row.
+   *
+   * `nested` says the form is already inside a sheet: the reminders callout
+   * then unfolds in place, because a sheet never stacks on a sheet (§1.4).
+   *
+   * The reading card sits below the fields (§2.5, the desk's second lane)
+   * and only once a document is chosen. Upload and reading are not wired on
+   * either dialect yet (create.behaviour.js, departure 1), so the card holds
+   * the paper and says plainly that it is not read or kept; `readings` is
+   * where that build will hand the rows in.
+   * @typedef {import('./entry.js').FormHousehold} FormHousehold
+   * @typedef {{ label: string, value: string, sure: boolean, field: "provider" | "reference" | "dueDate" | "cost" }} Reading
+   * @typedef {{
+   *   entry: import('./entry.js').Entry,
+   *   households?: FormHousehold[],
+   *   mode?: "create" | "edit",
+   *   nested?: boolean,
+   *   disabled?: boolean,
+   *   referenceState?: string | null,
+   *   notesState?: string | null,
+   *   attachment?: File | null,
+   *   readings?: Reading[],
+   * }} Props
+   */
+  /** @type {Props} */
+  let {
+    entry = $bindable(),
+    households = [],
+    mode = "create",
+    nested = false,
+    disabled = false,
+    referenceState = null,
+    notesState = null,
+    attachment = $bindable(null),
+    readings = [],
+  } = $props();
+
+  const household = $derived(households.find((one) => one.id === entry.householdId) ?? households[0] ?? null);
+  const sections = $derived((household?.sections ?? []).filter((one) => one.visible || one.id === entry.sectionId));
+  const currency = $derived(household?.currency ?? "GBP");
+  const symbol = $derived(
+    new Intl.NumberFormat("en-GB", { style: "currency", currency }).formatToParts(0)
+      .find((part) => part.type === "currency")?.value ?? currency,
+  );
+
+  /** @param {string} id */
+  function pickHousehold(id) {
+    if (entry.householdId === id) return;
+    /* Sections belong to a household: a new household is a new choice. */
+    entry.householdId = id;
+    entry.sectionId = null;
+  }
+
+  /* ---- reminders: two chips, editable in a callout (§2.5) -------------- */
+  let remindOpen = $state(false);
+  const remindWords = $derived(entry.reminderDays.length ? entry.reminderDays.map((d) => `${d}d`) : ["none"]);
+
+  /* ---- the document picker (§2.5, item 3) ------------------------------ */
+  /** @type {HTMLInputElement | undefined} */
+  let picker = $state();
+  /** @param {Event} event */
+  function onPick(event) {
+    const file = /** @type {HTMLInputElement} */ (event.currentTarget).files?.[0];
+    if (!file) return;
+    attachment = file;
+    if (!entry.name.trim()) entry.name = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").slice(0, 100);
+  }
+  /** A reading accepted is copied into its field; nothing is saved until the form is. */
+  /** @param {Reading} reading */
+  function accept(reading) {
+    if (reading.field === "cost") entry.cost = reading.value.replace(/[^\d.]/g, "");
+    else entry[reading.field] = reading.value;
+  }
+  const size = (/** @type {number} */ bytes) =>
+    bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+</script>
+
+<div class="pc-form">
+  <section class="p-card pc-card" aria-labelledby="{uid}-type">
+    <h2 class="p-caps" id="{uid}-type">type</h2>
+    <div class="pc-kinds" role="group" aria-labelledby="{uid}-type">
+      {#each KINDS as kind (kind.id)}
+        <button type="button" class="pc-chip" aria-pressed={entry.kind === kind.id}
+                disabled={disabled || mode === "edit"}
+                onclick={() => { entry.kind = entry.kind === kind.id ? null : kind.id; }}>
+          <span class="pc-glyph" aria-hidden="true">{kind.glyph}</span>{kind.word}
+        </button>
+      {/each}
+    </div>
+    {#if mode === "edit"}
+      <p class="pc-hint">the type is set when the item is made</p>
+    {/if}
+
+    {#if mode === "create"}
+      <button type="button" class="pc-doc" onclick={() => picker?.click()} disabled={disabled}>
+        <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
+        <span class="pc-doc-words">
+          <b>add a document</b>
+          <span>photo or file · dates, amounts and references read for you</span>
+        </span>
+      </button>
+      <input bind:this={picker} type="file" accept="application/pdf,image/*" hidden onchange={onPick}>
+    {/if}
+  </section>
+
+  <section class="p-card pc-card" aria-labelledby="{uid}-details">
+    <h2 class="p-caps" id="{uid}-details">details</h2>
+
+    <div class="pc-field">
+      <label for="{uid}-name">name</label>
+      <input id="{uid}-name" bind:value={entry.name} maxlength="100" autocomplete="off" enterkeyhint="next"
+             placeholder="e.g. Car MOT" {disabled}>
+    </div>
+
+    <div class="pc-field" role="group" aria-labelledby="{uid}-section">
+      <div class="pc-label" id="{uid}-section">section <span class="pc-need">{entry.sectionId ? "tap to swap" : "required · choose one"}</span></div>
+      {#if sections.length}
+        <div class="pc-strip">
+          {#each sections as section (section.id)}
+            <button type="button" class="pc-chip pc-sec" aria-pressed={entry.sectionId === section.id} {disabled}
+                    onclick={() => { entry.sectionId = section.id; }}>
+              <Mark icon={section.icon} accent={section.accent} size={16} class="pc-mark" aria-hidden="true" />
+              {section.name}
+            </button>
+          {/each}
+        </div>
+      {:else}
+        <p class="p-empty">this household has no sections to file into</p>
+      {/if}
+    </div>
+
+    {#if mode === "create" && households.length > 1}
+      <div class="pc-field" role="group" aria-labelledby="{uid}-household">
+        <div class="pc-label" id="{uid}-household">household</div>
+        <div class="pc-strip">
+          {#each households as one (one.id)}
+            <button type="button" class="pc-chip" aria-pressed={household?.id === one.id} {disabled}
+                    onclick={() => pickHousehold(one.id)}>{one.name}</button>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <div class="pc-field">
+      <label for="{uid}-provider">provider</label>
+      <input id="{uid}-provider" bind:value={entry.provider} maxlength="100" autocomplete="off" enterkeyhint="next"
+             placeholder="optional · e.g. Kwik Fit" {disabled}>
+    </div>
+
+    <div class="pc-field">
+      <label for="{uid}-reference">reference</label>
+      <input id="{uid}-reference" class="mono" bind:value={entry.reference} maxlength="80" autocomplete="off"
+             enterkeyhint="next" {disabled}
+             placeholder={referenceState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional · policy or account no."}>
+    </div>
+
+    {#if kindHasDate(entry.kind)}
+      <div class="pc-field">
+        <label for="{uid}-due">{entry.kind === "document" ? "expires on" : "due date"}</label>
+        <input id="{uid}-due" type="date" class="mono" bind:value={entry.dueDate} {disabled}>
+        {#if entry.kind === "document"}<p class="pc-hint">optional · a document ends once and does not come round</p>{/if}
+      </div>
+    {/if}
+
+    {#if entry.kind && kindRecurs(entry.kind)}
+      <div class="pc-field" role="group" aria-labelledby="{uid}-recur">
+        <div class="pc-label" id="{uid}-recur">comes round</div>
+        <div class="pc-stepper">
+          <button type="button" class="p-pill pc-step" aria-label="Less often"
+                  disabled={disabled || entry.recurrence <= 0}
+                  onclick={() => { entry.recurrence = stepRecurrence(entry.recurrence, -1); }}>−</button>
+          <output class="pc-recur" aria-live="polite">{recurrenceWords(entry.recurrence)}</output>
+          <button type="button" class="p-pill pc-step" aria-label="More months between"
+                  disabled={disabled || entry.recurrence >= RECURRENCE_MAX}
+                  onclick={() => { entry.recurrence = stepRecurrence(entry.recurrence, 1); }}>+</button>
+        </div>
+        <div class="pc-quick" role="group" aria-label="Common periods">
+          {#each [[0, "once"], [1, "monthly"], [6, "6 months"], [12, "yearly"]] as [months, word] (months)}
+            <button type="button" class="pc-chip pc-mini" aria-pressed={entry.recurrence === months} {disabled}
+                    onclick={() => { entry.recurrence = Number(months); }}>{word}</button>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <div class="pc-field">
+      <label for="{uid}-cost">cost</label>
+      <div class="pc-money">
+        <span class="pc-sym" aria-hidden="true">{symbol}</span>
+        <input id="{uid}-cost" class="mono" bind:value={entry.cost} inputmode="decimal" autocomplete="off"
+               enterkeyhint="next" placeholder="0.00" aria-describedby="{uid}-cur" {disabled}>
+        <span class="pc-cur" id="{uid}-cur">{currency}</span>
+      </div>
+    </div>
+
+    <div class="pc-field" role="group" aria-labelledby="{uid}-remind">
+      <div class="pc-label" id="{uid}-remind">reminders</div>
+      <button type="button" class="pc-remind" aria-expanded={remindOpen} {disabled}
+              aria-label="Reminders: {entry.reminderDays.length ? entry.reminderDays.map((d) => `${d} days`).join(', ') + ' before' : 'none'}. Change"
+              onclick={() => { remindOpen = !remindOpen; }}>
+        {#each remindWords as word (word)}<span class="pc-tag">{word}</span>{/each}
+        <span class="pc-before">before</span>
+        <span class="pc-change">change</span>
+      </button>
+      {#if nested && remindOpen}
+        <div class="pc-remind-pick">
+          {@render remindChoices()}
+        </div>
+      {/if}
+    </div>
+
+    <div class="pc-field">
+      <label for="{uid}-notes">notes</label>
+      <textarea id="{uid}-notes" rows="3" bind:value={entry.notes} maxlength="2000" {disabled}
+                placeholder={notesState === DAMAGED ? DAMAGED_PLACEHOLDER : "anything else worth keeping"}></textarea>
+    </div>
+  </section>
+
+  {#if attachment}
+    <!-- The reading card, below the fields (§2.5). -->
+    <section class="p-card proposed pc-card pc-reading" aria-labelledby="{uid}-reading" aria-live="polite">
+      <h2 class="p-caps" id="{uid}-reading">the document</h2>
+      <div class="pc-paper">
+        <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
+        <span class="pc-paper-words"><b>{attachment.name}</b><span>{size(attachment.size)}</span></span>
+      </div>
+      {#if readings.length}
+        {#each readings as reading (reading.field)}
+          <div class="pc-read">
+            <span class="pc-read-label">{reading.label}</span>
+            <b class="pc-read-value">{reading.value}</b>
+            <span class="pc-read-sure" class:unsure={!reading.sure}>{reading.sure ? "sure" : "unsure"}</span>
+            <button type="button" class="p-pill act-ok pc-accept" aria-label="Accept {reading.label}: {reading.value}"
+                    onclick={() => accept(reading)}>accept</button>
+          </div>
+        {/each}
+      {:else}
+        <p class="pc-honest">Orbit does not read or keep documents from this form yet: the entry saves without this one.</p>
+      {/if}
+      <button type="button" class="p-pill pc-drop" onclick={() => { attachment = null; if (picker) picker.value = ""; }}>not this one</button>
+    </section>
+  {/if}
+
+  <!-- Inside the form, not at the top level: a top-level snippet trips the
+       production bundler (#1130). -->
+  {#snippet remindChoices()}
+    <div class="pc-strip pc-remind-choices" role="group" aria-label="Remind me this many days before">
+      {#each REMINDER_CHOICES as day (day)}
+        <button type="button" class="pc-chip pc-mini" aria-pressed={entry.reminderDays.includes(day)}
+                onclick={() => { entry.reminderDays = toggleReminder(entry.reminderDays, day); }}>{day}d</button>
+      {/each}
+    </div>
+    <p class="pc-hint">days before it is due · as many as you like, or none</p>
+  {/snippet}
+
+  {#if !nested}
+    <Sheet bind:open={remindOpen} size="callout" title="Reminders">
+      {@render remindChoices()}
+      <button type="button" class="p-pill filled wide pc-done" onclick={() => { remindOpen = false; }}>done</button>
+    </Sheet>
+  {/if}
+</div>
+
+<style>
+  .pc-form{display:flex;flex-direction:column}
+  .pc-card{padding:var(--p-card-pad) var(--p-card-pad) 20px}
+
+  /* CHIPS (§2.5, §1.7): 44px, glyph + word, pressed is the desk's aria-pressed look. */
+  .pc-chip{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    min-height:var(--p-hit);min-width:var(--p-hit);padding:0 14px;box-sizing:border-box;
+    border-radius:calc(var(--p-hit) / 2);border:1px solid var(--line);background:var(--panel);
+    color:var(--ink-mid);font:var(--p-type-button)/1.2 var(--ui);cursor:pointer;
+    -webkit-tap-highlight-color:transparent;transition:background-color 120ms,border-color 120ms,color 120ms}
+  .pc-chip[aria-pressed=true]{border-color:var(--accent);color:var(--ink);
+    background:color-mix(in srgb, var(--accent) 16%, var(--panel))}
+  :global([data-theme=retrograde]) .pc-chip[aria-pressed=true]{box-shadow:0 0 10px -3px var(--bloom)}
+  .pc-chip:disabled{cursor:default}
+  .pc-chip:disabled:not([aria-pressed=true]){opacity:.55}
+  .pc-chip:focus-visible,.pc-doc:focus-visible,.pc-remind:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .pc-kinds{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--p-pill-gap)}
+  /* Two rows, three over two (§2.5), each chip filling its share. */
+  .pc-kinds .pc-chip{grid-column:span 2;padding:0 6px;gap:6px;font-size:.875rem}
+  .pc-kinds .pc-chip:nth-child(n+4){grid-column:span 3}
+  .pc-glyph{color:var(--accent-text);font-size:var(--p-type-body);line-height:1}
+
+  /* The document row: the desk's dashed drop target, as a 56px row. */
+  .pc-doc{appearance:none;display:flex;align-items:center;gap:var(--p-row-gap);width:100%;min-height:var(--p-row-min);
+    margin-top:12px;padding:8px 12px;box-sizing:border-box;border-radius:12px;text-align:left;cursor:pointer;
+    border:1.5px dashed color-mix(in srgb, var(--accent) 45%, var(--line-soft));background:none;color:var(--ink)}
+  .pc-doc:active{background:color-mix(in srgb, var(--accent) 10%, transparent)}
+  .pc-doc-mark{width:var(--p-row-mark);text-align:center;font-size:var(--p-type-body)}
+  .pc-doc-words{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .pc-doc-words b{font:500 var(--p-type-body)/1.3 var(--ui)}
+  .pc-doc-words span{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+
+  /* FIELDS: label above, 16px inputs 48px tall, full width (§2.5). */
+  .pc-field{margin:0 0 18px}
+  .pc-field:last-child{margin-bottom:0}
+  .pc-field > label,.pc-label{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+    margin:0 0 6px;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+    text-transform:uppercase;color:var(--ink-quiet)}
+  .pc-need{letter-spacing:.04em;text-transform:none;font-size:var(--p-type-caps);color:var(--accent-text)}
+  .pc-field input,.pc-field textarea{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;
+    border-radius:12px;border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);
+    color:var(--ink);font:var(--p-type-body)/1.4 var(--ui);
+    scroll-margin-top:calc(var(--p-chrome) + 12px);scroll-margin-bottom:calc(var(--pc-bar, 0px) + 12px)}
+  .pc-field textarea{padding:12px 14px;resize:vertical;min-height:96px}
+  .pc-field input.mono{font-family:var(--mono)}
+  .pc-field input::placeholder,.pc-field textarea::placeholder{color:var(--ink-quiet);opacity:1}
+  .pc-field input:focus,.pc-field textarea:focus{outline:none;border-color:var(--accent);
+    box-shadow:0 0 0 1px var(--accent)}
+  .pc-field input:disabled,.pc-field textarea:disabled{opacity:.6}
+  .pc-hint{margin:6px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+
+  /* A chip strip: one line that scrolls sideways, as households are drawn (§1.10). */
+  .pc-strip{display:flex;gap:var(--p-pill-gap);overflow-x:auto;scrollbar-width:none;
+    margin:0 calc(var(--p-card-pad) * -1);padding:2px var(--p-card-pad);scroll-padding:0 var(--p-card-pad)}
+  .pc-strip::-webkit-scrollbar{display:none}
+  .pc-strip .pc-chip{flex:none}
+  :global(.pc-mark){display:inline-flex;line-height:0}
+  :global(.pc-mark svg){fill:none;stroke:var(--sec);stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+  :global(.pc-mark circle){fill:var(--sec);stroke:none}
+  :global(.pc-mark i){display:none}
+
+  /* The recurrence stepper: − / value / + at 44px, once as its zero. */
+  .pc-stepper{display:flex;align-items:center;gap:8px}
+  .pc-step{font:500 1.25rem/1 var(--mono);padding:0}
+  .pc-step:disabled{opacity:.4;cursor:default}
+  .pc-recur{flex:1;text-align:center;min-height:var(--p-hit);display:grid;place-items:center;
+    border-radius:12px;border:1px solid var(--line-soft);font:500 var(--p-type-body)/1.2 var(--mono);color:var(--ink)}
+  .pc-quick{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);margin-top:8px}
+  .pc-mini{padding:0 12px;font:var(--p-type-meta)/1.2 var(--mono)}
+
+  .pc-money{display:flex;align-items:center;position:relative}
+  .pc-sym{position:absolute;left:14px;font:var(--p-type-body)/1 var(--mono);color:var(--ink-quiet);pointer-events:none}
+  .pc-money input{padding-left:34px;padding-right:56px}
+  .pc-cur{position:absolute;right:14px;font:var(--p-type-meta)/1 var(--mono);color:var(--ink-quiet);pointer-events:none}
+
+  /* Reminders: the chips as one 44px control; the callout edits them. */
+  .pc-remind{appearance:none;display:flex;align-items:center;flex-wrap:wrap;gap:8px;width:100%;min-height:var(--p-hit);
+    padding:6px 14px 6px 8px;box-sizing:border-box;border-radius:12px;border:1px solid var(--line-soft);
+    background:none;color:var(--ink-mid);cursor:pointer;text-align:left}
+  .pc-tag{display:inline-flex;align-items:center;min-height:30px;padding:0 10px;border-radius:15px;
+    border:1px solid color-mix(in srgb, var(--upcoming) 40%, transparent);color:var(--upcoming-text);
+    font:var(--p-type-meta)/1 var(--mono)}
+  .pc-before{font:var(--p-type-meta)/1 var(--mono);color:var(--ink-quiet)}
+  .pc-change{margin-left:auto;font:var(--p-type-meta)/1 var(--mono);color:var(--accent-text)}
+  .pc-remind-pick{margin-top:10px}
+  .pc-remind-choices{flex-wrap:wrap;overflow:visible;margin:0;padding:0}
+  .pc-done{margin-top:16px}
+
+  /* The reading card: something Orbit proposes, so the desk's dashed pen. */
+  .pc-paper{display:flex;align-items:center;gap:var(--p-row-gap);min-height:var(--p-row-min)}
+  .pc-paper-words{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .pc-paper-words b{font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink);overflow-wrap:anywhere}
+  .pc-paper-words span{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  .pc-read{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;padding:10px 0;
+    border-top:1px solid var(--line-soft)}
+  .pc-read-label{font:var(--p-type-meta)/1.4 var(--ui);color:var(--ink-quiet)}
+  .pc-read-value{font:500 var(--p-type-body)/1.3 var(--mono);color:var(--ink);grid-column:1}
+  .pc-read-sure{font:var(--p-type-caps)/1 var(--mono);letter-spacing:var(--p-type-caps-track);
+    text-transform:uppercase;color:var(--ok-text);grid-column:1}
+  .pc-read-sure.unsure{color:var(--warm-text)}
+  .pc-accept{grid-column:2;grid-row:1 / span 3}
+  .pc-honest{margin:4px 0 14px;font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-mid)}
+  .pc-drop{--act:var(--overdue);--act-text:var(--overdue-text)}
+
+  @media (prefers-reduced-motion:reduce){ .pc-chip{transition:none} }
+</style>
