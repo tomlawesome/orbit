@@ -22,6 +22,9 @@
    * An act's `tone` colours its pill the desk way (ok complete, up
    * reschedule, warm snooze, accent edit or open); danger is the red one.
    *
+   * `bead` draws the trail as an accent count bead (the inbox waiting);
+   * `trailName` is what a screen reader hears instead of the drawn trail.
+   *
    * `meta` speaks mono, the desk's face for data (section · amount, date,
    * role); `metaFace="ui"` when the meta is a sentence (§5.2).
    * @typedef {{
@@ -31,6 +34,8 @@
    *   trail?: string,
    *   trailSub?: string,
    *   trailTone?: string,
+   *   trailName?: string,
+   *   bead?: boolean,
    *   href?: string,
    *   onactivate?: () => void,
    *   current?: boolean,
@@ -48,6 +53,8 @@
     trail = "",
     trailSub = "",
     trailTone = "",
+    trailName = "",
+    bead = false,
     href = undefined,
     onactivate = undefined,
     current = false,
@@ -118,7 +125,7 @@
       {#if meta}<span class="meta" class:ui={metaFace === "ui"}>{meta}</span>{/if}
     </span>
     {#if trail || trailSub}
-      <span class="trail" style:color={trailTone || undefined}>{trail}{#if trailSub}<small>{trailSub}</small>{/if}</span>
+      <span class="trail" class:bead style:color={trailTone || undefined}><span aria-hidden={trailName ? "true" : undefined}>{trail}</span>{#if trailName}<span class="sr-only">{trailName}</span>{/if}{#if trailSub}<small>{trailSub}</small>{/if}</span>
     {/if}
   </svelte:element>
   {#if acts.length}
@@ -162,6 +169,9 @@
   .meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
   .meta.ui{font-family:var(--ui)}
   .trail{flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(--ink-mid)}
+  .trail.bead{min-width:22px;height:22px;padding:0 6px;box-sizing:border-box;border-radius:11px;
+    display:grid;place-items:center;background:var(--accent);color:var(--bg);font-weight:600}
+  :global([data-theme=retrograde]) .trail.bead{box-shadow:0 0 9px var(--bloom)}
   .trail small{display:block;font-size:var(--p-type-meta);color:var(--ink-quiet);font-weight:400}
 
   /* ON THE CARD'S GLASS (§5.2): the face is transparent at rest, so a row
