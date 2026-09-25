@@ -107,6 +107,11 @@
         <button class="p-pill">Dismiss</button>
       {/snippet}
     </Row>
+    <!-- Meta that is a sentence speaks the body face (metaFace="ui"). -->
+    <Row title="A message from 09 Aug" metaFace="ui"
+         meta="Its attachment is a picture-only scan, and Orbit couldn't read any text from it. You can add the item yourself and attach the file from Documents.">
+      {#snippet mark()}<span class="p-body"></span>{/snippet}
+    </Row>
   </section>
 
   <h2 class="p-caps">Rows · long-press to reorder</h2>

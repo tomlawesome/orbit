@@ -130,12 +130,20 @@
   margin:0 calc((var(--p-row-mark) - 10px) / 2);border-radius:50%;border:1px solid var(--line)}
 .p-unlit::after{content:"";flex:1;height:1px;background:var(--line-soft)}
 
-/* Empty (§1.13): one quiet mono sentence. */
+/* MONO IS FOR DATA (#1120): labels, dates, amounts, counts, codes, the
+   trailing value. A sentence or descriptive prose takes the body face at
+   the 13px meta size, untracked, with room between its lines. Say so per
+   use: `.p-prose` on a line of text, `metaFace="ui"` on a Row. Decide by
+   what the words are, not how long they happen to be. */
+.p-prose{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
+
+/* Empty (§1.13): one quiet mono line, short by design. */
 .p-empty{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:0 0 12px}
 
 /* Error inside a card (§1.13): a red line under the control that failed.
-   It arrives rather than appears (the desk's errin). */
-.p-error{font:var(--p-type-meta)/1.5 var(--mono);color:var(--overdue-text);margin:8px 0 0;
+   It arrives rather than appears (the desk's errin). It carries the
+   server's own sentence, so it speaks prose, not mono. */
+.p-error{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--overdue-text);margin:8px 0 0;
   animation:p-errin 200ms var(--p-ease) both}
 @keyframes p-errin{from{opacity:0;transform:translateY(-4px)}}
 
