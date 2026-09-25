@@ -564,7 +564,8 @@
     <section class="p-card st-rise" style:--i="4" aria-labelledby="st-relay">
       <h2 class="p-caps" id="st-relay">Your relay</h2>
       {#if view}
-        <button class="st-address" onclick={copyAddress} aria-label="Copy your relay address, {view.relay.address}">
+        <button class="st-address" onclick={copyAddress} disabled={view.relay.address === "no address yet"}
+                aria-label={view.relay.address === "no address yet" ? "No relay address yet" : `Copy your relay address, ${view.relay.address}`}>
           <span class="st-dish" aria-hidden="true"><span></span><span></span><i></i></span>
           <span class="st-addr">{view.relay.address}</span>
           <span class="st-copy" aria-hidden="true">copy</span>
@@ -812,6 +813,8 @@
     transition:background-color 120ms,border-color 120ms}
   .st-address:active{background:color-mix(in srgb, var(--accent) 16%, var(--panel));border-style:solid}
   .st-address:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .st-address:disabled{cursor:default;border-color:var(--line);background:var(--panel)}
+  .st-address:disabled :is(.st-addr, .st-copy){color:var(--ink-quiet)}
   .st-addr{flex:1;min-width:0;text-align:left;font:var(--p-type-meta)/1.35 var(--mono);color:var(--accent-text);
     overflow-wrap:anywhere}
   .st-copy{flex:none;font:var(--p-type-caps)/1 var(--mono);letter-spacing:var(--p-type-caps-track);
