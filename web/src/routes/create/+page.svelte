@@ -8,6 +8,8 @@
   import Chrome from "$lib/Chrome.svelte";
   import { readHome } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
+  import { isPocket } from "$lib/pocket/media.js";
+  import Pocket from "./pocket.svelte";
 
   /**
    * New entry — the full form (CON-9: "create = genesis"). Reached from the
@@ -48,6 +50,9 @@
     readHome().then((view) => {
       if (disposed) return;
       chrome = view;
+      /* #1120: the pocket hides the constellations (proposal §1.10), so a
+         phone does not run them behind its own sky. */
+      if (isPocket()) return;
       const seed = data?.fixtures ? seedFromWorkspace(view.primary ?? "") : rollSeed();
       backdropTeardown = mountConstellations(
         /** @type {HTMLDivElement} */ (backdropRoot),
@@ -75,6 +80,9 @@
      below is the other way out and stays. -->
 <Chrome user={chrome?.user} current=""
         role={chrome?.household ? `${chrome.household.name ?? ""} · ${chrome.household.canManage ? "owner" : "member"}` : ""} />
+
+<!-- #1120, proposal §2.5: the pocket's own create, chosen by CSS. -->
+<Pocket />
 
 <!-- §14 (#471): clicking off the form returns to the landing page — the same
      light-dismiss the item view has. -->
