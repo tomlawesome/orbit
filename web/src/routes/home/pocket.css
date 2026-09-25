@@ -171,9 +171,9 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
   background:none;border:0;border-bottom:1px solid var(--line);border-radius:0;outline:none;-webkit-appearance:none;
   appearance:none;font:var(--p-type-body)/1.2 var(--mono);color:var(--ink)}
 .pk-field::placeholder{color:var(--ink-quiet)}
-/* The accent underline is the focus mark; the app's square input outline
-   would box the sheet's head. */
-.p-sheet-layer .pk-field:focus,.p-sheet-layer .pk-field:focus-visible{outline:none;border-bottom-color:var(--accent)}
+/* The app's own focus outline stays (#848: every text field shows keyboard
+   focus); the underline turns accent as well. */
+.pk-field:focus{border-bottom-color:var(--accent)}
 .pk-field::-webkit-search-cancel-button{display:none}
 /* The one accent action for the top match, arming like every act that
    cannot be taken back (§2.4). */
