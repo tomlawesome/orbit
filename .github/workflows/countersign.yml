@@ -92,7 +92,9 @@ jobs:
           persist-credentials: false
 
       - name: Set up crane
-        uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
+        run: |
+          crane_dir="$(bash scripts/ci/ensure-crane.sh)"
+          echo "${crane_dir}" >> "$GITHUB_PATH"
 
       - name: Log in to both registries
         env:

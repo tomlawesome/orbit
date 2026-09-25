@@ -35,6 +35,11 @@
 set -Eeuo pipefail
 
 # Keep in sync with the `gitleaks` job in .gitlab-ci.yml.
+# Renovate bumps gitleaks_version on its own (renovate.json's custom regex
+# manager, #1116) but cannot compute gitleaks_sha256 -- a release asset
+# checksum -- so a version-only bump leaves this mismatched and the
+# `sha256sum -c` check below fails until a human copies the new checksum
+# from that release's checksums file by hand.
 readonly gitleaks_version="8.30.1"
 readonly gitleaks_sha256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
 

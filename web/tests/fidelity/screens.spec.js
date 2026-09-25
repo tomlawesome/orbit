@@ -3,6 +3,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import pixelmatch from "pixelmatch";
+// Kept by owner decision on #1063 (#1115 evidence, 2026-09-24): a trial swap
+// to @napi-rs/canvas (already a runtime dependency, decode via loadImage +
+// getImageData, encode via toBuffer("image/png")) moved the "item" screen's
+// baseline diff from 1379 to 1510 pixels on an unchanged tree -- canvas's
+// colour handling shifts pixel values, so it fails the zero-move bar this
+// swap needed. Every other screen was unaffected. Reconsider on a pngjs CVE
+// or a Node version pngjs stops supporting.
 // @ts-expect-error -- pngjs ships no declaration file and none is vendored for this project;
 // there is no `@type`/`@typedef` spelling that fixes a missing module declaration.
 import { PNG } from "pngjs";

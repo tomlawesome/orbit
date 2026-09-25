@@ -61,7 +61,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
-    "@types/node": "^24.13.4",
+    "@types/node": "^22.20.4",
     "@types/nodemailer": "^8.0.1",
     "@types/web-push": "^3.6.4",
     "@vitest/coverage-v8": "5.0.0",
