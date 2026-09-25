@@ -62,12 +62,12 @@ export const TOUR_STOPS = [
     /* Second line rewritten for EVERYONE (#481, ratified Q45). An invitee
        arrives inside a household without having chosen it, so the tour is
        where they learn more are possible — but the old line only described
-       the sky, and this one says what to do with it. It is how joining works
-       today (home's ask-to-join veil), it is true for every reader, and it
-       needs no separate invitee script. */
+       the sky, and this one says what to do with it. Since #1118 (owner,
+       2026-09-25) a tap on another household flies there, on the desk and
+       on a phone's chips alike, rather than asking to join. */
     copy: [
       "That's your sun, at centre — your household, always here.",
-      "The rest of the sky holds systems you don't belong to — tap one to ask to join.",
+      "The rest of the sky holds systems you don't belong to — tap one to fly there.",
     ],
   },
   {
