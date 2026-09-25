@@ -393,8 +393,7 @@
       y: Math.round(chip.top + chip.height / 2 - (dial.top + dial.height / 2)),
     };
     flying = id;
-    const href = /** @type {HTMLAnchorElement} */ (event.currentTarget).href;
-    setTimeout(() => goto(href).finally(() => { flying = null; }), 620);
+    setTimeout(() => goto(resolve("/household/[id]", { id })).finally(() => { flying = null; }), 620);
   }
 </script>
 
