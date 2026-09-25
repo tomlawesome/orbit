@@ -69,7 +69,7 @@
 
 <div id="formlayer">
   <div class="card waiting" aria-label={heading}>
-    <p class="waiting-head">{heading}</p>
+    <p class="waiting-head ask">{heading}</p>
 
     {#if phase === "waiting"}
       <!-- What is happening, in the order it happens: a link went out, it has

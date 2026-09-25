@@ -138,3 +138,257 @@ for (const phone of PHONES) {
     }
   });
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   STEP 9 · THE DOOR FAMILY (#1120, #1127; proposal §2.13–§2.20)
+   Kept as one block so the lanes adding other steps' routes above never
+   touch it, and it never touches theirs.
+
+   The door's screens are states rather than addresses, so each entry says
+   how to reach its state, the way screens.spec.js does: the same faked
+   health, availability and session answers the fidelity gate gives, and the
+   auth endpoints answered where a card has to be refused or kept waiting.
+   `/approve` and `/invite` read the database in their `load`, which this
+   harness has none of, so they are reached by a client-side navigation whose
+   `__data.json` is answered here -- the real built page, rendered from data
+   stated in the test. Reduced motion, so the door's delayed first-light
+   entrances are measured where they settle rather than mid-fade.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * @param {import("@playwright/test").Route} route
+ * @param {number} status
+ * @param {unknown} body
+ */
+const answer = (route, status, body) =>
+  route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+
+/**
+ * SvelteKit's `__data.json` payload is devalue: a flat array whose first
+ * entry maps each key to the index of its value. Enough of it for plain
+ * objects of strings, booleans and null.
+ * @param {unknown} root
+ */
+function devalue(root) {
+  /** @type {unknown[]} */
+  const out = [];
+  /** @param {unknown} value */
+  const put = (value) => {
+    const at = out.length;
+    out.push(null);
+    if (value && typeof value === "object") {
+      /** @type {Record<string, number>} */
+      const refs = {};
+      for (const [key, inner] of Object.entries(value)) refs[key] = inner === null ? -1 : put(inner);
+      out[at] = refs;
+    } else out[at] = value;
+    return at;
+  };
+  put(root);
+  return out;
+}
+
+const DOOR_LAYOUT = { type: "data", data: [{ fixtures: 1, isAdmin: 2 }, true, false], uses: {} };
+const HEALTHY = { configured: true, phase: "running", contactAddress: null };
+const MIXED_DOOR = { ...HEALTHY, claimed: true, methods: { local: true, oidc: true, localAccounts: true } };
+const LOCAL_DOOR = { ...HEALTHY, claimed: true, methods: { local: true, oidc: false, localAccounts: true } };
+const UNCLAIMED_DOOR = { ...HEALTHY, claimed: false, methods: { local: true, oidc: true } };
+const APPROVAL = {
+  instance: "Lawson Home", device: "Firefox on a Mac", where: "near Leeds, United Kingdom",
+  requestedAt: "25 Sep 2026, 21:14 UTC", expiresAt: "25 Sep 2026, 21:29 UTC",
+};
+
+/**
+ * @param {import("@playwright/test").Page} page
+ * @param {{ availability?: unknown, signedOut?: boolean }} [options]
+ */
+async function doorAnswers(page, { availability = HEALTHY, signedOut = true } = {}) {
+  await page.route("**/api/health", (route) => answer(route, 200, { status: "ready" }));
+  if (availability === null) await page.route("**/api/auth/availability", (route) => route.fulfill({ status: 500, body: "" }));
+  else await page.route("**/api/auth/availability", (route) => answer(route, 200, availability));
+  if (signedOut) await page.route("**/api/auth/session", (route) => answer(route, 401, { error: "unauthenticated" }));
+}
+
+/**
+ * Land on a database-backed page through the client router, its data stated.
+ * @param {import("@playwright/test").Page} page
+ * @param {string} path
+ * @param {unknown} node the page's own `__data.json` node
+ */
+async function throughRouter(page, path, node) {
+  await doorAnswers(page);
+  await page.route(`**${path}/__data.json*`, (route) => answer(route, 200, { type: "data", nodes: [DOOR_LAYOUT, node] }));
+  await page.goto(`${APP}/login`, { waitUntil: "load" });
+  await page.waitForFunction(() => document.body.classList.contains("lit"));
+  await page.evaluate((href) => {
+    const link = Object.assign(document.createElement("a"), { href, id: "door-measure-go", textContent: "go" });
+    document.body.append(link);
+    link.click();
+    link.remove();
+  }, path);
+  await page.waitForURL(`**${path}`);
+}
+
+/** @param {import("@playwright/test").Page} page */
+async function signInCard(page) {
+  await doorAnswers(page, { availability: LOCAL_DOOR });
+  await page.goto(`${APP}/login`, { waitUntil: "load" });
+  await page.waitForSelector("#idemail");
+}
+
+/** @param {import("@playwright/test").Page} page */
+async function submitSignIn(page) {
+  await page.fill("#idemail", "tom@lawson.example");
+  await page.fill("#idpassword", "a fixture password");
+  await page.click("#idbtn");
+  await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
+}
+
+/** @type {{ name: string, reach: (page: import("@playwright/test").Page) => Promise<void> }[]} */
+const DOOR_STATES = [
+  { name: "/ (the door, signed out)", reach: async (page) => {
+    await doorAnswers(page);
+    await page.goto(`${APP}/`, { waitUntil: "load" });
+    await page.waitForSelector("#gate");
+  } },
+  { name: "/login (the door with `local login`)", reach: async (page) => {
+    await doorAnswers(page, { availability: MIXED_DOOR });
+    await page.goto(`${APP}/login`, { waitUntil: "load" });
+    await page.waitForSelector("#localopen");
+  } },
+  { name: "/login (local sign-in card)", reach: signInCard },
+  { name: "/login (sign-in card, typing)", reach: async (page) => {
+    await signInCard(page);
+    await page.fill("#idemail", "tom@lawson.example");
+    await page.focus("#idpassword");
+  } },
+  { name: "/login (sign-in refused)", reach: async (page) => {
+    await signInCard(page);
+    await page.route("**/api/auth/local/login", (route) => answer(route, 401, { error: { code: "credentials_invalid" } }));
+    await submitSignIn(page);
+    await page.waitForSelector(".err.shown");
+  } },
+  { name: "/login (too many attempts)", reach: async (page) => {
+    await signInCard(page);
+    await page.route("**/api/auth/local/login", (route) => answer(route, 429, { error: { code: "too_many_attempts" } }));
+    await submitSignIn(page);
+    await page.waitForSelector(".err.shown");
+  } },
+  { name: "/login (waiting for the email, countdown)", reach: async (page) => {
+    await signInCard(page);
+    const canResendAt = new Date(Date.now() + 60_000).toISOString();
+    await page.route("**/api/auth/local/login", (route) => answer(route, 200, { pending: { canResendAt, limited: false } }));
+    await page.route("**/api/auth/local/login/pending", (route) => answer(route, 200, { state: "pending" }));
+    await submitSignIn(page);
+    await page.waitForSelector(".card.waiting");
+  } },
+  { name: "/login (waiting, send it again)", reach: async (page) => {
+    await signInCard(page);
+    const canResendAt = new Date(Date.now() - 1000).toISOString();
+    await page.route("**/api/auth/local/login", (route) => answer(route, 200, { pending: { canResendAt, limited: false } }));
+    await page.route("**/api/auth/local/login/pending", (route) => answer(route, 200, { state: "pending" }));
+    await submitSignIn(page);
+    await page.waitForSelector("#resendapproval");
+  } },
+  { name: "/login (claim code)", reach: async (page) => {
+    await doorAnswers(page, { availability: UNCLAIMED_DOOR });
+    await page.goto(`${APP}/login`, { waitUntil: "load" });
+    await page.waitForSelector("#claimcode");
+  } },
+  { name: "/login (first administrator)", reach: async (page) => {
+    await doorAnswers(page, { availability: UNCLAIMED_DOOR });
+    await page.route("**/api/auth/bootstrap/claim", (route) =>
+      answer(route, 200, { claimed: false, methods: { local: true, oidc: true } }));
+    await page.goto(`${APP}/login#claim=ABCD-EFGH-2345`, { waitUntil: "load" });
+    await page.waitForSelector("#idname");
+  } },
+  { name: "/login (sign-in not set up)", reach: async (page) => {
+    await doorAnswers(page, { availability: { configured: false, phase: "running", contactAddress: null } });
+    await page.goto(`${APP}/login`, { waitUntil: "load" });
+    await page.waitForFunction(() => document.body.dataset.state === "unconfigured");
+  } },
+  { name: "/login (waking up)", reach: async (page) => {
+    await doorAnswers(page, { availability: { configured: true, phase: "starting", contactAddress: null } });
+    await page.goto(`${APP}/login`, { waitUntil: "load" });
+    await page.waitForFunction(() => document.body.dataset.state === "starting");
+  } },
+  { name: "/login (couldn't open)", reach: async (page) => {
+    await doorAnswers(page, { availability: null });
+    await page.goto(`${APP}/login`, { waitUntil: "load" });
+    await page.waitForFunction(() => document.body.dataset.state === "failed");
+  } },
+  { name: "/setup/<token>", reach: async (page) => {
+    await doorAnswers(page);
+    await page.goto(`${APP}/setup/pocket-measure-placeholder-token`, { waitUntil: "load" });
+    await page.waitForSelector("#idagain");
+  } },
+  { name: "/setup/<token> (link spent)", reach: async (page) => {
+    await doorAnswers(page);
+    await page.route("**/api/auth/local/setup", (route) => answer(route, 400, { error: { code: "setup_token_invalid" } }));
+    await page.goto(`${APP}/setup/pocket-measure-placeholder-token`, { waitUntil: "load" });
+    await page.fill("#idpassword", "a fixture password");
+    await page.fill("#idagain", "a fixture password");
+    await page.click("#idbtn");
+    await page.waitForSelector(".note.after .quietline");
+  } },
+  { name: "/approve/<token>", reach: async (page) => {
+    await throughRouter(page, "/approve/pocket-measure-placeholder-token", {
+      type: "data", uses: {},
+      data: devalue({ token: "pocket-measure-placeholder-token", request: { ...APPROVAL, state: "open" } }),
+    });
+    await page.waitForSelector("#approveyes");
+  } },
+  { name: "/approve/<token> (spent)", reach: async (page) => {
+    await throughRouter(page, "/approve/pocket-measure-placeholder-token", {
+      type: "data", uses: {}, data: devalue({ token: "pocket-measure-placeholder-token", request: null }),
+    });
+    await page.waitForSelector(".card.approve");
+  } },
+  { name: "/invite/<token> (used)", reach: async (page) => {
+    await throughRouter(page, "/invite/pocket-measure-placeholder-token", {
+      type: "data", uses: {}, data: devalue({ state: "used", inviterName: "Tom Lawson" }),
+    });
+    await page.waitForSelector(".invite-card .gate");
+  } },
+  { name: "/invite/<token> (someone else)", reach: async (page) => {
+    await throughRouter(page, "/invite/pocket-measure-placeholder-token", {
+      type: "data", uses: {}, data: devalue({ state: "mismatch", inviterName: "Tom Lawson" }),
+    });
+    await page.waitForSelector(".invite-card .acts");
+  } },
+  { name: "/logout", reach: async (page) => {
+    await doorAnswers(page);
+    await page.goto(`${APP}/logout`, { waitUntil: "load" });
+    await page.waitForFunction(() => document.body.classList.contains("farewell"));
+  } },
+  { name: "404 (off the chart)", reach: async (page) => {
+    await page.goto(`${APP}/pocket-measure-no-such-page`, { waitUntil: "load" });
+    await page.waitForSelector(".line-b a");
+  } },
+  { name: "500 (another status)", reach: async (page) => {
+    await throughRouter(page, "/approve/pocket-measure-placeholder-token",
+      { type: "error", error: { message: "Internal Error" }, status: 500 });
+    await page.waitForSelector(".stage .said");
+  } },
+  { name: "/maintenance (earlier updates open)", reach: async (page) => {
+    await page.goto(`${APP}/maintenance`, { waitUntil: "load" });
+    await page.click(".earlier summary");
+  } },
+];
+
+for (const phone of PHONES) {
+  test.describe(`pocket measurement at ${phone.name}: the door family`, () => {
+    test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true, reducedMotion: "reduce" });
+
+    for (const state of DOOR_STATES) {
+      test(`${state.name} meets the pocket floors`, async ({ page }) => {
+        await state.reach(page);
+        await page.evaluate(() => document.fonts.ready);
+        /* reduced motion still crossfades the card in over .7s (ringcard.css) */
+        await page.waitForTimeout(900);
+        const problems = await page.evaluate(measure, "");
+        expect(problems, problems.join("\n")).toEqual([]);
+      });
+    }
+  });
+}
