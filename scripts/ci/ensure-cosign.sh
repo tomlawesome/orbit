@@ -23,6 +23,11 @@
 # ORBIT_COSIGN_DIR (default: .orbit-cosign/ in the repository root).
 set -Eeuo pipefail
 
+# Renovate bumps COSIGN_VERSION on its own (renovate.json's custom regex
+# manager, #1116) but cannot compute COSIGN_SHA256 -- a release asset
+# checksum -- so a version-only bump leaves this mismatched and the
+# checksum check below fails until a human copies the new checksum from
+# that release's cosign_checksums.txt by hand.
 readonly COSIGN_VERSION="3.1.3"
 readonly COSIGN_SHA256="4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"
 readonly COSIGN_URL="https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-amd64"
