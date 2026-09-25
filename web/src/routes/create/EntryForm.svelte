@@ -166,7 +166,7 @@
       <label for="{uid}-reference">reference</label>
       <input id="{uid}-reference" class="mono" bind:value={entry.reference} maxlength="80" autocomplete="off"
              enterkeyhint="next" {disabled}
-             placeholder={referenceState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional · policy or account no."}>
+             placeholder={referenceState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional · policy no."}>
     </div>
 
     {#if kindHasDate(entry.kind)}
@@ -318,7 +318,7 @@
   .pc-field input,.pc-field textarea{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;
     border-radius:12px;border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);
     color:var(--ink);font:var(--p-type-body)/1.4 var(--ui);
-    scroll-margin-top:calc(var(--p-chrome) + 12px);scroll-margin-bottom:calc(var(--pc-bar, 0px) + 12px)}
+    scroll-margin-top:calc(var(--p-chrome) + 12px);scroll-margin-bottom:calc(var(--pc-bar, 0px) + var(--p-kb, 0px) + 12px)}
   .pc-field textarea{padding:12px 14px;resize:vertical;min-height:96px}
   .pc-field input.mono{font-family:var(--mono)}
   .pc-field input::placeholder,.pc-field textarea::placeholder{color:var(--ink-quiet);opacity:1}
@@ -343,7 +343,8 @@
   .pc-step:disabled{opacity:.4;cursor:default}
   .pc-recur{flex:1;text-align:center;min-height:var(--p-hit);display:grid;place-items:center;
     border-radius:12px;border:1px solid var(--line-soft);font:500 var(--p-type-body)/1.2 var(--mono);color:var(--ink)}
-  .pc-quick{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);margin-top:8px}
+  .pc-quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}
+  .pc-quick .pc-mini{padding:0 2px;white-space:nowrap;letter-spacing:-.02em}
   .pc-mini{padding:0 12px;font:var(--p-type-meta)/1.2 var(--mono)}
 
   .pc-money{display:flex;align-items:center;position:relative}
