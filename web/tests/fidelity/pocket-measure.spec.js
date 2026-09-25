@@ -40,7 +40,7 @@ const ROUTES = [
   { path: "/household/hh-seaside-4551" },
   { path: "/settings", pending: "step 7 (settings)" },
   { path: "/settings/mail", pending: "step 7 (settings › mail)" },
-  { path: "/administration", pending: "step 8 (administration)" },
+  { path: "/administration" },
 ];
 
 const PHONES = [
