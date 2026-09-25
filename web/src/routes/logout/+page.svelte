@@ -4,6 +4,7 @@
   import Dusk from "$lib/flight/Dusk.svelte";
   import { resolve } from "$app/paths";
   import "$lib/flight/flight.css";
+  import "$lib/flight/door-phone.css";
 
   /**
    * SIGNED OUT — the descent's own dusk, at its own address (#410, §15).
