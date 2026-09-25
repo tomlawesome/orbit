@@ -23,8 +23,15 @@
     right:calc(var(--p-gutter) + env(safe-area-inset-right));
     bottom:calc(20px + env(safe-area-inset-bottom));
     box-sizing:border-box;width:56px;height:56px;border-radius:50%;display:grid;place-items:center;
-    background:var(--panel-raised);backdrop-filter:blur(16px);border:1px solid var(--line);
-    box-shadow:0 6px 20px rgb(0 0 0 / .3);-webkit-tap-highlight-color:transparent}
+    background:var(--panel-raised);border:1px solid var(--line);
+    box-shadow:0 6px 20px rgb(0 0 0 / .3), 0 0 0 1px var(--line),
+      0 0 24px -6px color-mix(in srgb, var(--accent) 40%, transparent);
+    -webkit-tap-highlight-color:transparent}
+  /* The halo (§5.2): the accent's soft light on the dark packs only; no
+     blur, since this sits fixed over scrolling content (§5.3). */
+  :global(:is([data-theme=dawn],[data-theme=clouds])) .p-northstar{
+    box-shadow:0 6px 20px rgb(0 0 0 / .3), 0 0 0 1px var(--line)}
+  :global([data-theme=retrograde]) .p-northstar :global(.glint){filter:drop-shadow(0 0 2.5px var(--bloom))}
   .p-northstar:active{background:var(--panel)}
   .p-northstar:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   /* The desk's pulse, slowed to the pocket's drift. */
