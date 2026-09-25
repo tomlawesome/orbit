@@ -37,10 +37,8 @@
   const never = $derived(shown.lastReceived === "nothing yet");
   const listening = $derived(!paused && /listen|connect/i.test(shown.status));
 
-  /** @type {"rotate" | "pause" | "resume" | null} */
-  let working = $state(null);
-  /** @type {string | null} */
-  let problem = $state(null);
+  let working = $state(/** @type {"rotate" | "pause" | "resume" | null} */ (null));
+  let problem = $state(/** @type {string | null} */ (null));
   let canShare = $state(false);
 
   /** @param {"rotate" | "pause" | "resume"} action */
