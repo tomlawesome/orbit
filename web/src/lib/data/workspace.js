@@ -1292,6 +1292,36 @@ export async function readItem(id) {
 }
 
 /**
+ * One item's papers, for the pocket home's item sheet and search (#1119,
+ * #1057): the per-item documents route readItem and readBelt already read,
+ * with each paper's id kept so a row can say which one it means. The
+ * household id comes from the home view the caller already holds, which the
+ * route's own membership check still guards.
+ *
+ * @param {string} householdId
+ * @param {string} itemId
+ * @returns {Promise<{ id: string, itemId: string, name: string, meta: string }[]>}
+ */
+export async function readItemDocuments(householdId, itemId) {
+  /** @type {{ documents?: DocumentSummary[] }} */
+  const body = await json(
+    await fetch(`/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`, {
+      credentials: "same-origin",
+    }),
+  );
+  return (body.documents ?? []).map((doc) => ({
+    id: doc.id,
+    itemId,
+    name: doc.displayName,
+    meta: [
+      sizeLabel(doc.sizeBytes),
+      `added ${shortDate(doc.availableAt)}`,
+      doc.lifecycle === "pending_deletion" ? "removed" : null,
+    ].filter(Boolean).join(" · "),
+  }));
+}
+
+/**
  * The signed-in user's mail-in relay (#432), live from
  * `GET /api/settings/mail-relay`.
  *
