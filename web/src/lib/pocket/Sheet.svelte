@@ -161,7 +161,7 @@
   <!-- The scrim is a pointer's dismiss; Escape and the close word are the
        keyboard's, so it needs no key handler of its own. -->
   <div class="scrim" aria-hidden="true" onclick={dismiss}></div>
-  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="{uid}-title" tabindex="-1"
+  <div class="p-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="{uid}-title" tabindex="-1"
        bind:this={panel} class:dragging style:--p-drag="{drag}px"
        onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={cancel}>
     <div class="grab" aria-hidden="true"><span></span></div>
@@ -187,7 +187,7 @@
 
   /* The panel stands on the keyboard (--p-kb from sheet.js) and never
      taller than what is left above it (--p-vvh). */
-  .panel{--h:var(--p-vvh, 100dvh);box-sizing:border-box;position:absolute;left:0;right:0;bottom:var(--p-kb, 0px);
+  .p-sheet-panel{--h:var(--p-vvh, 100dvh);box-sizing:border-box;position:absolute;left:0;right:0;bottom:var(--p-kb, 0px);
     margin:0 auto;max-width:var(--p-column);display:flex;flex-direction:column;
     max-height:calc(var(--h) - env(safe-area-inset-top) - 8px);
     border-radius:18px 18px 0 0;border:1px solid var(--line);border-bottom:0;
@@ -198,13 +198,13 @@
     transform:translateY(100%);transition:transform var(--p-rise) var(--p-ease),height var(--p-rise) var(--p-ease)}
   /* Raised off the page (§5.2): the desk's drawer depth, one plane above
      the cards behind it, with light along the top edge. */
-  :global(:is([data-theme=dawn],[data-theme=clouds])) .panel{
+  :global(:is([data-theme=dawn],[data-theme=clouds])) .p-sheet-panel{
     box-shadow:inset 0 1px 0 rgba(255,255,255,.78), 0 -16px 36px rgba(48,66,98,.10)}
-  .open .panel{transform:translateY(max(var(--p-drag, 0px), -20px))}
-  .panel.dragging{transition:none}
-  [data-size=callout] .panel{max-height:calc(var(--h) * .45)}
-  [data-size=list] .panel{height:calc(var(--h) * .6)}
-  [data-size=list].grown .panel,[data-size=full] .panel{height:calc(var(--h) - env(safe-area-inset-top) - 8px)}
+  .open .p-sheet-panel{transform:translateY(max(var(--p-drag, 0px), -20px))}
+  .p-sheet-panel.dragging{transition:none}
+  [data-size=callout] .p-sheet-panel{max-height:calc(var(--h) * .45)}
+  [data-size=list] .p-sheet-panel{height:calc(var(--h) * .6)}
+  [data-size=list].grown .p-sheet-panel,[data-size=full] .p-sheet-panel{height:calc(var(--h) - env(safe-area-inset-top) - 8px)}
 
   /* The grab handle: 36x4, 8px from the top, inside a full-width 24px strip
      that is the drag target. */
@@ -220,7 +220,7 @@
   .body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
 
   @media (prefers-reduced-motion:reduce){
-    .scrim,.panel{transition:none}
+    .scrim,.p-sheet-panel{transition:none}
     .p-sheet-layer{transition:none}
   }
 </style>
