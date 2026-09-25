@@ -36,7 +36,7 @@
   background:color-mix(in srgb, var(--act, var(--accent)) 14%, transparent)}
 
 /* The filled primary: the desk's .btn, display 600, text on --bg. Its glow
-   on the dark packs is parked (--p-pill-glow, owner question 5). */
+   on the dark packs comes from --p-pill-glow (tokens.css). */
 .p-pill.filled{background:var(--accent);border-color:var(--accent);color:var(--bg);
   font:600 var(--p-type-button)/1.2 var(--display);letter-spacing:.01em;box-shadow:var(--p-pill-glow)}
 .p-pill.filled:active{filter:brightness(.92)}
