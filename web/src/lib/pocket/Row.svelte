@@ -19,9 +19,15 @@
    *
    * Every act's `name` is its full accessible name, object included:
    * { label: "remove", name: "Remove Emma Lawson", onact, danger: true }.
+   * An act's `tone` colours its pill the desk way (ok complete, up
+   * reschedule, warm snooze, accent edit or open); danger is the red one.
+   *
+   * `meta` speaks mono, the desk's face for data (section · amount, date,
+   * role); `metaFace="ui"` when the meta is a sentence (§5.2).
    * @typedef {{
    *   title: string,
    *   meta?: string,
+   *   metaFace?: "mono" | "ui",
    *   trail?: string,
    *   trailSub?: string,
    *   trailTone?: string,
@@ -38,6 +44,7 @@
   let {
     title,
     meta = "",
+    metaFace = "mono",
     trail = "",
     trailSub = "",
     trailTone = "",
@@ -108,7 +115,7 @@
     <span class="mark" aria-hidden="true">{@render mark?.()}</span>
     <span class="text">
       <span class="title">{title}</span>
-      {#if meta}<span class="meta">{meta}</span>{/if}
+      {#if meta}<span class="meta" class:ui={metaFace === "ui"}>{meta}</span>{/if}
     </span>
     {#if trail || trailSub}
       <span class="trail" style:color={trailTone || undefined}>{trail}{#if trailSub}<small>{trailSub}</small>{/if}</span>
@@ -122,7 +129,8 @@
                ("tap again to remove Emma Lawson") are the accessible name. -->
           <ArmButton label={act.label} armedLabel="tap again" name={act.name} tabindex={-1} onfire={() => run(act)} />
         {:else}
-          <button class="p-pill" tabindex="-1" aria-label={act.name} onclick={() => run(act)}>{act.label}</button>
+          <button class="p-pill {act.tone ? `act-${act.tone}` : ''}" tabindex="-1" aria-label={act.name}
+                  onclick={() => run(act)}>{act.label}</button>
         {/if}
       {/each}
     </div>
@@ -140,7 +148,7 @@
   .p-row{position:relative;overflow:clip;border-radius:12px}
   .face{position:relative;z-index:1;display:flex;align-items:center;gap:var(--p-row-gap);
     min-height:var(--p-row-min);padding:6px var(--p-gutter);box-sizing:border-box;
-    background:linear-gradient(var(--panel), var(--panel)), var(--bg);color:var(--ink);text-decoration:none;
+    background:transparent;color:var(--ink);text-decoration:none;
     touch-action:pan-y;-webkit-tap-highlight-color:transparent;transition:background-color 120ms}
   a.face,[role=button].face{cursor:pointer}
   a.face:active,[role=button].face:active{background:var(--panel-raised)}
@@ -151,9 +159,21 @@
   .title{font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .current .title{color:var(--accent-text)}
-  .meta{font:var(--p-type-meta)/1.4 var(--ui);color:var(--ink-quiet)}
+  .meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  .meta.ui{font-family:var(--ui)}
   .trail{flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(--ink-mid)}
   .trail small{display:block;font-size:var(--p-type-meta);color:var(--ink-quiet);font-weight:400}
+
+  /* ON THE CARD'S GLASS (§5.2): the face is transparent at rest, so a row
+     is a line on its card, not a strip one tone darker. Rows after the
+     first draw a hairline from the text edge, so the mark column reads as
+     a rail, as the desk's members list does. The face turns opaque only
+     while the tray is out, so the tray never shows through it. */
+  :global(:is(.p-row, .p-row-below)) + .p-row > .face::before{content:"";position:absolute;top:0;right:0;
+    left:calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap));border-top:1px solid var(--line-soft)}
+  :global(:is(.p-row, .p-row-below)) + .p-row > .face:has(> .mark:empty)::before{left:var(--p-gutter)}
+  :global(.p-row[data-open]) .face,:global(.p-row[data-swiping]) .face{
+    background:linear-gradient(var(--panel), var(--panel)), var(--bg)}
 
   /* THE ACT TRAY (Fable, #1120): the face never moves. The tray slides over
      it from the trailing edge, as wide as its pills and never wider than
@@ -186,6 +206,8 @@
   /* Long-press lift (reorder.js). */
   :global(.p-row[data-lifted]){z-index:3;overflow:visible;box-shadow:0 10px 28px rgb(0 0 0 / .35);
     transition:none}
+  /* Picked up off the glass. */
+  :global(.p-row[data-lifted]) .face{background:linear-gradient(var(--panel-raised), var(--panel-raised)), var(--bg)}
   :global([data-reordering]) .face{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   .p-row-below{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);padding:0 var(--p-gutter) 12px
     calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap))}

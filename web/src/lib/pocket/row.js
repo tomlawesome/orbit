@@ -3,7 +3,7 @@ import { dragAxis, swipeOffset, swipeSettles } from "./gesture.js";
 /**
  * One management act on a row. `name` is the full accessible name, object
  * included ("Remove Emma Lawson"); `label` is what the pill says ("remove").
- * @typedef {{ label: string, name: string, onact: () => unknown, danger?: boolean }} RowAct
+ * @typedef {{ label: string, name: string, onact: () => unknown, danger?: boolean, tone?: "ok" | "up" | "warm" | "accent" }} RowAct
  */
 
 /**
