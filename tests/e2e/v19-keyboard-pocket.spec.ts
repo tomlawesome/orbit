@@ -430,6 +430,9 @@ test("settings (pocket): fully reachable by keyboard", async ({ page }) => {
        email approval row, which is drawn once the methods have answered. */
     await expect(page.locator(".st-pocket .p-card").first()).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".st-pocket .p-row", { hasText: "email approval" })).toBeVisible({ timeout: 30_000 });
+    /* The cards arrive in turn (a rise of under a second); the audit's
+       snapshot of what is visible must wait for the last one to land. */
+    await expect(page.locator(".st-pocket .st-sessions")).toHaveCSS("opacity", "1");
     /* The Reminders card's tabs (owner-decisions §22): one tab in the Tab
        order, ← → between them, so the unchosen tab is never met by Tab. */
     await auditTabOrder(page, "settings (pocket)", { exclude: "[role=tab][aria-selected=false]" });
