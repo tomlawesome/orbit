@@ -7,11 +7,12 @@ import {
   auditTabOrder,
   currentFocus,
   dismissTourIfShown,
-  fillCreateForm,
+  gotoCreate,
   homeIsLive,
   installKeyboardAudit,
   tabTo,
 } from "./support/keyboard";
+import { entrancesSettled } from "./support/motion";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
@@ -55,12 +56,15 @@ resetDatabaseBetweenSpecFiles();
  *     of its own at all" beyond that: the account panel and the three home
  *     drawers this file's desktop twin light-dismiss-tests are `.desk`-only
  *     chrome (home.css) that pocket.css hides outright below 901px/600px.
- *   - /inbox, /create, /item/<id>, /household/<id> and /settings:
- *     none of these routes draw a second dialect (no `.pocket`/`.desk` switch
- *     in their own CSS — checked each file; every @media rule found only
- *     reflows columns) so the same controls the desktop file walks are
- *     walked again here, at the phone viewport, to prove the phone's own
- *     rendering of them is still fully keyboard-reachable.
+ *   - /inbox, /create, /item/<id> and /household/<id> each draw their own
+ *     pocket beside the desk's markup since #1120/#1122 (inbox/pocket.svelte,
+ *     create/pocket.svelte, the item page's pocket card and sheets,
+ *     household/[id]/pocket.svelte), chosen by CSS, so the tests below walk
+ *     the pocket's own controls and wait on the pocket's own loaded state.
+ *     /settings draws no second dialect of its own; only its shared chrome
+ *     (Chrome.svelte) turns into the kit's top chrome and hatch, so the same
+ *     controls the desktop file walks are walked again here, at the phone
+ *     viewport, to prove they are still fully keyboard-reachable.
  *
  * #852 made the avatar a real `<button>`, reached by Tab and activated by
  * Enter/Space; since #1120 it keeps its id (`#morb`) and opens the kit's
@@ -217,6 +221,44 @@ async function arriveAtHomePocket(page: Page, options: { withItem?: boolean } = 
   return household;
 }
 
+/**
+ * #1120, proposal §2.5: on a phone /create is the pocket's own form
+ * (create/pocket.svelte over EntryForm.svelte), not the desk card
+ * `fillCreateForm` walks, so this is its keyboard-only fill. Its order is
+ * the form's own: the type chips, then name, the section (a required
+ * choice, #1058), provider, reference, the due date, how often it comes
+ * round, cost, reminders, notes. Every control is reached by Tab and
+ * activated by Enter; the date goes through `fill()` for the locale reason
+ * `fillCreateForm` gives.
+ */
+const POCKET_FORM = "#pocket-entry";
+async function fillPocketCreateForm(page: Page, name: string) {
+  const screen = "create form (pocket)";
+  await gotoCreate(page);
+  const form = page.getByRole("form", { name: "New entry" });
+  await expect(form).toBeVisible({ timeout: 30_000 });
+
+  await tabTo(page, { selector: `${POCKET_FORM} .pc-kinds button`, textIncludes: "service" }, { screen });
+  await page.keyboard.press("Enter");
+  await expect(form.getByRole("button", { name: "service" })).toHaveAttribute("aria-pressed", "true");
+
+  await tabTo(page, { selector: `${POCKET_FORM} input[id$="-name"]` }, { screen });
+  await page.keyboard.type(name);
+
+  await tabTo(page, { selector: `${POCKET_FORM} .pc-sec`, textIncludes: "Home" }, { screen });
+  await page.keyboard.press("Enter");
+  await expect(form.getByRole("button", { name: "Home" })).toHaveAttribute("aria-pressed", "true");
+
+  await tabTo(page, { selector: `${POCKET_FORM} input[type="date"]` }, { screen });
+  const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const due = form.locator('input[type="date"]');
+  await due.fill(dueDate);
+  await expect(due).toHaveValue(dueDate);
+
+  await tabTo(page, { selector: `${POCKET_FORM} textarea[id$="-notes"]` }, { screen });
+  await page.keyboard.type("added by the keyboard-only pass");
+}
+
 /* ────────────────────────────────────────────────────────────────────────
  * The journeys. One `test(...)` per pocket screen state; each signs in and
  * seeds its own household (where one is needed), and cleans it up in
@@ -281,7 +323,13 @@ test("create (pocket): the whole form is reachable in order", async ({ page }) =
   test.setTimeout(60_000);
   const household = await arriveAtHomePocket(page);
   try {
-    await fillCreateForm(page, "Keyboard-only proving ground (pocket audit)");
+    await fillPocketCreateForm(page, "Keyboard-only proving ground (pocket audit)");
+    /* The kit's top chrome retracts once the page scrolls and comes back
+       when it takes focus (TopChrome.svelte's focusin); the audit reads what
+       is shown once, up front, so it starts from the top of the form, where
+       the chrome is down, as a reader arriving on it finds it. */
+    await page.evaluate(() => scrollTo(0, 0));
+    await expect(page.locator(TOP_BACK)).toBeInViewport();
     await auditTabOrder(page, "create form (pocket)");
   } finally {
     await cleanup(page, household);
@@ -293,17 +341,20 @@ test("create (pocket): fillable and submittable by keyboard alone", async ({ pag
   const household = await arriveAtHomePocket(page);
   try {
     const name = "Keyboard-only proving ground (pocket)";
-    await fillCreateForm(page, name);
+    await fillPocketCreateForm(page, name);
 
-    await tabTo(page, { selector: ".btn-primary" }, { screen: "create form (pocket)" });
+    /* The save sits in the pocket's bar at the foot, after the form. */
+    await tabTo(page, { selector: ".pk-save" }, { screen: "create form (pocket)" });
     const submit = await currentFocus(page);
     expect(submit?.focusVisible, "create (pocket): the submit button has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
 
-    await expect(page).toHaveURL(/\/home$/, { timeout: 10_000 });
-    /* The pocket dialect draws a created item as a kit row in its manifest
-       list (#1120), not the desk's dial + corridor pair — not the desk's
+    /* Saved (§2.5): the new item is approached on its belt. */
+    await expect(page).toHaveURL(/\/item\/[0-9a-f-]{36}$/, { timeout: 10_000 });
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    /* And home's pocket lists it as a kit row (#1120), not the desk's
        `.item`, which pocket.svelte never renders. */
+    await page.goto("/home");
     await expect(page.locator(".pocket .pk-list .p-row", { hasText: name })).toBeVisible({ timeout: 30_000 });
   } finally {
     await cleanup(page, household);
@@ -367,8 +418,11 @@ test("item page (pocket): actions and the back link work by keyboard", async ({ 
 });
 
 /**
- * household/[id]/+page.svelte is likewise dialect-blind, and pocket home has
- * no sun/dial door onto it (that is desk-only chrome) — direct navigation.
+ * #1122: the household draws its own pocket (household/[id]/pocket.svelte,
+ * proposal §2.10) beside the desk's cards, which are display:none on a
+ * phone, so these wait for the pocket's own heading, not the desk's
+ * `.cards`. Pocket home has no sun/dial door onto it (that is desk-only
+ * chrome) — direct navigation.
  */
 test("household page (pocket): fully reachable by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
@@ -377,12 +431,31 @@ test("household page (pocket): fully reachable by keyboard", async ({ page }) =>
   const household = await seedHousehold(page);
   try {
     await page.goto(`/household/${household.id}`);
-    await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { level: 1, name: household.name })).toBeVisible({ timeout: 30_000 });
+    /* The pocket's cards rise in over their first ~800ms; audit them drawn. */
+    await entrancesSettled(page.locator(".hh-pocket"));
     /* Scoped away from `.cand`, same reason as the desktop file: "Add
        someone" lists every account on this shared acceptance instance not
        yet in the household, genuinely unbounded and not part of what this
        test proves. */
-    await auditTabOrder(page, "household page (pocket)", { exclude: ".cand" });
+    /* #1122: two kinds of control on the pocket household are out of the
+       Tab order by design and reached another way, proved below rather
+       than by Tab: the archive's unselected tab (§22's tabs, the WAI-ARIA
+       tabs pattern: the tablist is one Tab stop and ← → move between its
+       tabs), and a section row's "Move … up/down" buttons, visually hidden
+       for a screen reader, whose keyboard way is Alt-↑/↓ on the row itself
+       (Row.svelte). */
+    await auditTabOrder(page, "household page (pocket)", {
+      exclude: '.cand, [role="tab"][aria-selected="false"], .p-row .move',
+    });
+    const archive = page.getByRole("tablist", { name: "The archive" });
+    await tabTo(page, { selector: '[role="tab"][aria-selected="true"]' }, { screen: "household page (pocket) archive" });
+    await page.keyboard.press("ArrowRight");
+    await expect(archive.getByRole("tab", { name: "bring one in" })).toBeFocused();
+    await expect(archive.getByRole("tab", { name: "bring one in" })).toHaveAttribute("aria-selected", "true");
+    const section = page.locator(".hh-sections .p-row [data-row-face]").first();
+    await expect(section).toHaveAttribute("tabindex", "0");
+    await expect(section).toHaveAttribute("aria-keyshortcuts", /Alt\+ArrowUp Alt\+ArrowDown/);
   } finally {
     await cleanup(page, household);
   }
@@ -395,8 +468,9 @@ test("household page (pocket): the back link works by keyboard", async ({ page }
   const household = await seedHousehold(page);
   try {
     await page.goto(`/household/${household.id}`);
-    await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
-    await tabTo(page, { selector: "a.back" }, { screen: "household page (pocket)" });
+    await expect(page.getByRole("heading", { level: 1, name: household.name })).toBeVisible({ timeout: 30_000 });
+    /* On a phone Chrome.svelte's way back is the kit's top chrome. */
+    await tabTo(page, { selector: TOP_BACK }, { screen: "household page (pocket)" });
     const back = await currentFocus(page);
     expect(back?.focusVisible, "household page (pocket): the back link has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
@@ -459,10 +533,12 @@ test("inbox (pocket): fully reachable by keyboard", async ({ page }) => {
   const household = await seedHousehold(page);
   try {
     await page.goto("/inbox");
-    /* The inbox draws its queue or its empty-state relay bar only once the
-       view has loaded (inbox/+page.svelte: `{#if view}`) — audit the loaded
-       screen, not the shell, same as the desktop file. */
-    await expect(page.locator(".inbox-page .lanes, .inbox-page .quietnote").first()).toBeVisible({ timeout: 30_000 });
+    /* The inbox draws its queue or its empty-state relay card only once the
+       view has loaded — audit the loaded screen, not the shell, same as the
+       desktop file. On a phone that is the pocket's own inbox
+       (inbox/pocket.svelte, proposal §2.6): its lanes or its quiet card,
+       where the desk's `.lanes`/`.quietnote` are display:none. */
+    await expect(page.locator(".pk-inbox :is(.pki-lane, .pki-quiet)").first()).toBeVisible({ timeout: 30_000 });
     await auditTabOrder(page, "inbox (pocket)");
   } finally {
     await cleanup(page, household);
