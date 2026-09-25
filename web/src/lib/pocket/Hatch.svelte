@@ -40,6 +40,10 @@
     inboxCount = null,
   } = $props();
 
+  const initials = $derived(
+    name.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
+  );
+
   let active = $state(DEFAULT_THEME);
   $effect(() => {
     if (open) active = document.documentElement.dataset.theme || DEFAULT_THEME;
@@ -61,16 +65,36 @@
   }
 </script>
 
-<Sheet bind:open size="list" title={name || "Account and menu"}>
-  {#if roleLine}<p class="role">{roleLine}</p>{/if}
+<!-- The head is the account (§5.2): avatar, name, role. The sheet's own
+     title carries the name for a screen reader; the drawn one is hidden
+     from it so the name is heard once. -->
+<Sheet bind:open size="list" title={name || "Account and menu"} hideTitle={Boolean(name)}>
+  {#snippet head()}
+    {#if name}
+      <span class="who">
+        <span class="p-avatar lg" aria-hidden="true">{initials}</span>
+        <span class="whotext">
+          <span class="name" aria-hidden="true">{name}</span>
+          {#if roleLine}<span class="role">{roleLine}</span>{/if}
+        </span>
+      </span>
+    {/if}
+  {/snippet}
+  {#if !name && roleLine}<p class="role">{roleLine}</p>{/if}
   <nav class="rows" aria-label="Go to">
-    <Row title="Add an item" href={resolve("/create")} current={current === "create"} />
-    <Row title="Items" href={resolve("/item")} current={current === "item"} />
-    <Row title={inboxCount ? `Inbox · ${inboxCount} waiting` : "Inbox"} href={resolve("/inbox")}
-         current={current === "inbox"} />
-    <Row title="Settings" href={resolve("/settings")} current={current === "settings"} />
+    <Row title="Add an item" href={resolve("/create")} current={current === "create"}>
+      {#snippet mark()}<span class="plus">+</span>{/snippet}
+    </Row>
+    <Row title="Items" href={resolve("/item")} current={current === "item"}>{#snippet mark()}<span></span>{/snippet}</Row>
+    <Row title="Inbox" href={resolve("/inbox")} current={current === "inbox"}
+         trail={inboxCount ? String(inboxCount) : ""} trailName={inboxCount ? `${inboxCount} waiting` : ""}
+         bead={Boolean(inboxCount)}>{#snippet mark()}<span></span>{/snippet}</Row>
+    <Row title="Settings" href={resolve("/settings")} current={current === "settings"}>{#snippet mark()}<span></span>{/snippet}</Row>
     {#if isAdmin}
-      <Row title="Administration" href={resolve("/administration")} current={current === "administration"} />
+      <Row title="Administration" href={resolve("/administration")} current={current === "administration"}>
+        <!-- The station, in the chart pen: truss, two ruled arrays, a module. -->
+        {#snippet mark()}<svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="1"><path d="M1 7h20"/><rect x="2" y="2" width="5" height="10"/><rect x="15" y="2" width="5" height="10"/><path d="M2 4.5h5M2 9.5h5M15 4.5h5M15 9.5h5"/><rect x="9" y="5" width="4" height="4" fill="currentColor"/></svg>{/snippet}
+      </Row>
     {/if}
   </nav>
   <h3 class="p-caps" id="{uid}-theme">Theme</h3>
@@ -90,12 +114,15 @@
 </Sheet>
 
 <style>
-  .role{margin:-6px 0 12px;font:var(--p-type-meta)/1.4 var(--ui);color:var(--ink-quiet)}
-  .rows{display:flex;flex-direction:column;gap:2px;padding:8px 0;
-    border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft)}
-  /* Rows in a sheet sit on the sheet's glass, not on a panel of their own. */
-  .rows :global(.face){background:transparent;padding-left:4px;padding-right:4px}
-  .rows :global(a.face:active){background:var(--panel-raised)}
+  .who{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
+  .whotext{min-width:0;display:flex;flex-direction:column;gap:2px}
+  .name{font:600 var(--p-type-sheet)/1.25 var(--display);color:var(--ink);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .role{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  p.role{margin:0 0 12px}
+  /* Rows sit on the sheet's glass, inset 4px, and their rail follows. */
+  .rows{--p-gutter:4px;display:flex;flex-direction:column;padding:0 0 8px;border-bottom:1px solid var(--line-soft)}
+  .plus{font:600 var(--p-type-body)/1 var(--mono);color:var(--accent-text)}
   .swatches{display:flex;gap:8px}
   .swatch{appearance:none;width:var(--p-hit);height:var(--p-hit);padding:0;border:0;background:none;
     border-radius:50%;display:grid;place-items:center;cursor:pointer}
