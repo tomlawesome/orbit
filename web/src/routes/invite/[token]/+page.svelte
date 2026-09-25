@@ -1,6 +1,7 @@
 <script>
   import { resolve } from "$app/paths";
   import { signOut } from "$lib/data/workspace.js";
+  import ArmButton from "$lib/pocket/ArmButton.svelte";
   import "./invite.css";
 
   /**
@@ -75,12 +76,28 @@
   <div class="invite-stage" aria-hidden="true"></div>
   <div class="invite-card">
     <div class="name">orbit</div>
-    <h1>{line}</h1>
+    <!-- On a phone this is the door's station (proposal §2.15): the ring
+         riding high holds the line, and the mark above goes. On the desk the
+         station is `display:contents` and the ring is not drawn, so the
+         screen is exactly what it was. -->
+    <div class="station">
+      <div class="invite-ring" aria-hidden="true"><i></i></div>
+      <h1>{line}</h1>
+    </div>
     <p class="said">{note}</p>
     {#if data.state === "mismatch"}
-      <button class="gate" onclick={leave} disabled={leaving}>
+      <!-- The desk's one button, and the phone's pair (§2.15): signing out
+           arms before it fires, because a stray tap on a phone should not end
+           a session, and staying signed in is offered as plainly. CSS shows
+           one or the other, as it picks the dialect everywhere else. -->
+      <button class="gate desk-only" onclick={leave} disabled={leaving}>
         {leaving ? "signing out…" : "Sign out"}
       </button>
+      <div class="pocket-only acts">
+        <ArmButton label={leaving ? "signing out…" : "sign out and try again"} danger={false} wide
+                   onfire={leave} />
+        <a class="quiet" href={resolve("/home")}>stay signed in</a>
+      </div>
     {:else}
       <a class="gate" href={resolve("/")}>Go to Orbit</a>
     {/if}

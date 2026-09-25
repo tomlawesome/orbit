@@ -672,6 +672,10 @@
   </g>
 </svg></div>
 
+<!-- The page's one heading. The desk well is told by its art and its two
+     lines, so there it is read, not seen; on a phone it stands over them at
+     28px (proposal §2.19; notfound.css). -->
+<h1 class="offchart">off the chart</h1>
 <div class="line-a">This page fell into a gravity well.</div>
 <div class="line-b"><a href={resolve("/")}>plot a course home &rarr;</a></div>
 
@@ -681,7 +685,14 @@
 {:else}
   <div class="stage">
     <div class="lockup">
-      <div class="name mono">{page.status}</div>
+      <!-- On a phone this is the door's station (proposal §2.19): the ring
+           holds the status and one sentence says what happened. The desk
+           keeps the bare fact; notfound.css draws the ring on phones only. -->
+      <div class="station">
+        <div class="errring" aria-hidden="true"><i></i></div>
+        <div class="name mono">{page.status}</div>
+      </div>
+      <p class="said">Orbit couldn’t answer that · {page.status}</p>
       <p><a href={resolve("/")}>return home</a></p>
     </div>
   </div>

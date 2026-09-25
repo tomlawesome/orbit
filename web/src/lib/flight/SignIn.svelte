@@ -13,6 +13,7 @@
   } from "./door-state.js";
   import "$lib/ringcard.css";
   import "./flight.css";
+  import "./door-phone.css";
 
   /**
    * THE SIGN-IN (#410, §15).
@@ -628,6 +629,9 @@
            4.2px stroke never thins. See ringcard.css. -->
       <div class="ringstroke"></div>
       <div class="ringorbit"><i></i></div>
+      <!-- the claim card has no heading, so on a phone the ring keeps the
+           word (door-phone.css; hidden on the desk, where it never stood) -->
+      {#if card === "claim"}<div class="ringword">orbit</div>{/if}
     </div>
     {#if card === "claim"}
       <Claim bind:claim={claimCode} {busy} {message} onsubmit={submitClaim} />

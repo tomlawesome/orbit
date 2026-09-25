@@ -71,3 +71,46 @@ body{background:#04070f}
         font:11px var(--mono);letter-spacing:.14em}
 .line-b a{color:var(--accent);text-decoration:none}
 .line-b a:hover{text-decoration:underline}
+
+/* ══ ON A PHONE (#1120 step 9, proposal §2.19) ════════════════════════════
+   The well stands as built. What changes is the words: a heading, the line
+   at 15px, and the way home as a 44px pill, stacked above the safe area so
+   nothing crossing the well sits on them.
+
+   Any other status: the door's station -- the ring riding high with the
+   status in it at 48px mono, one sentence, and `return home` as the pill.
+   The desk keeps the bare fact, so all of that is hidden above the cut. */
+.offchart{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
+      clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.stage .station{display:contents}
+.stage .errring,.stage .said{display:none}
+
+@media (max-width: 900px), (max-height: 600px){
+  .offchart{position:fixed;left:var(--p-gutter);right:var(--p-gutter);width:auto;height:auto;margin:0;
+      overflow:visible;clip:auto;white-space:normal;z-index:3;text-align:center;
+      bottom:calc(env(safe-area-inset-bottom, 0px) + 142px);
+      font:600 var(--p-type-title)/var(--p-type-title-lh) var(--display);letter-spacing:.01em;color:var(--ink)}
+  .line-a{left:var(--p-gutter);right:var(--p-gutter);bottom:calc(env(safe-area-inset-bottom, 0px) + 104px);
+      font-size:.9375rem;letter-spacing:.04em;line-height:1.4}
+  .line-b{bottom:calc(env(safe-area-inset-bottom, 0px) + 36px);font-size:var(--p-type-meta);letter-spacing:.1em}
+  .line-b a{display:inline-flex;align-items:center;justify-content:center;min-height:var(--p-hit);
+      padding:0 22px;border:1px solid color-mix(in srgb,var(--accent) 55%,transparent);border-radius:99px;
+      background:rgba(4,7,15,.55)}
+  .line-b a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .stage{place-items:start center;padding:0 var(--p-gutter)}
+  .stage .lockup{display:flex;flex-direction:column;align-items:center;width:100%;max-width:376px;text-align:center}
+  .stage .station{display:grid;place-items:center;width:302.4px;height:302.4px;
+      margin-top:calc(env(safe-area-inset-top, 0px) + 44px)}
+  .stage .station>*{grid-area:1/1}
+  .stage .errring{display:block;width:100%;height:100%;border-radius:50%;border:4.2px solid #8791b3;position:relative}
+  .stage .errring i{position:absolute;left:93.26%;top:24.94%;width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px;
+      border-radius:50%;background:#d8b45a}
+  .stage .name{font:500 48px var(--mono);color:var(--ink);letter-spacing:.04em}
+  .stage .said{display:block;margin-top:28px;font:.9375rem/1.5 var(--ui);color:var(--ink-mid)}
+  .stage .said+p{width:100%;margin-top:24px}
+  .stage .said+p a{display:flex;align-items:center;justify-content:center;min-height:var(--p-hit);width:100%;
+      border-radius:99px;background:#d8b45a;color:#04060e;text-decoration:none;
+      font:600 var(--p-type-button) var(--display);letter-spacing:.04em}
+  .stage .said+p a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+}

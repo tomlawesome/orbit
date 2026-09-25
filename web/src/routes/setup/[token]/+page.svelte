@@ -7,6 +7,7 @@
   import { cardMessageFor } from "$lib/flight/door-state.js";
   import "$lib/ringcard.css";
   import "$lib/flight/flight.css";
+  import "$lib/flight/door-phone.css";
 
   /**
    * CHOOSING A PASSWORD (#914, plan §2.7 — the card's fourth mode).
@@ -35,6 +36,8 @@
   let again = $state("");
   let busy = $state(false);
   let message = $state("");
+  /* the link itself was refused: the way on is to sign in (proposal §2.14) */
+  let spent = $state(false);
 
   onMount(() => {
     document.body.classList.add("showform");
@@ -83,6 +86,7 @@
         code = undefined;
       }
       message = cardMessageFor(code);
+      spent = code === "setup_token_invalid";
     } catch {
       message = cardMessageFor(undefined);
     } finally {
@@ -113,5 +117,5 @@
     <div class="ringstroke"></div>
     <div class="ringorbit"><i></i></div>
   </div>
-  <Identity mode="setup" bind:password bind:again {busy} {message} onsubmit={submit} />
+  <Identity mode="setup" bind:password bind:again {busy} {message} signInLine={spent} onsubmit={submit} />
 </main>
