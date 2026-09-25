@@ -48,7 +48,7 @@ async function swipe(page, row, dx) {
 
 /** Every act button on the page that a finger could hit at its centre right now. @param {import("@playwright/test").Page} page */
 const hittableActs = (page) => page.evaluate(() =>
-  [...document.querySelectorAll(".pk-hh [data-row-acts] button")].filter((b) => {
+  [...document.querySelectorAll(".hh-pocket [data-row-acts] button")].filter((b) => {
     const r = b.getBoundingClientRect();
     if (r.width <= 1 || r.bottom < 0 || r.top > innerHeight) return false;
     const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
@@ -58,7 +58,7 @@ const hittableActs = (page) => page.evaluate(() =>
 test("no row act is visible at rest, and a tap on a row opens none", async ({ page }) => {
   await open(page);
   expect(await hittableActs(page)).toEqual([]);
-  const emma = page.locator(".pk-members [data-row]", { hasText: "Emma Lawson" });
+  const emma = page.locator(".hh-members [data-row]", { hasText: "Emma Lawson" });
   await emma.locator("[data-row-face]").tap();
   await page.waitForTimeout(300);
   await expect(emma).not.toHaveAttribute("data-open", "");
@@ -67,7 +67,7 @@ test("no row act is visible at rest, and a tap on a row opens none", async ({ pa
 
 test("a left swipe reveals a member's acts, and only that row's", async ({ page }) => {
   await open(page);
-  const emma = page.locator(".pk-members [data-row]", { hasText: "Emma Lawson" });
+  const emma = page.locator(".hh-members [data-row]", { hasText: "Emma Lawson" });
   await swipe(page, emma, -200);
   await expect(emma).toHaveAttribute("data-open", "");
   await page.waitForTimeout(300);
@@ -76,7 +76,7 @@ test("a left swipe reveals a member's acts, and only that row's", async ({ page 
 
 test("an invitation's acts are behind the same swipe", async ({ page }) => {
   await open(page);
-  const invite = page.locator(".pk-members [data-row]", { hasText: "daniel.lawson@example.com" });
+  const invite = page.locator(".hh-members [data-row]", { hasText: "daniel.lawson@example.com" });
   await invite.scrollIntoViewIfNeeded();
   await swipe(page, invite, -200);
   await expect(invite).toHaveAttribute("data-open", "");
@@ -134,7 +134,7 @@ test("a knock keeps approve and decline on show", async ({ page }) => {
 
 test("the save bar rises with a change, counts it, and undo puts it away", async ({ page }) => {
   await open(page);
-  const bar = page.locator("[data-pk=savebar]");
+  const bar = page.locator("[data-hh=savebar]");
   await expect(bar).toBeHidden();
   const services = page.getByRole("switch", { name: "Services shown on the chart" });
   await services.scrollIntoViewIfNeeded();
@@ -142,12 +142,12 @@ test("the save bar rises with a change, counts it, and undo puts it away", async
   await expect(services).toHaveAttribute("aria-checked", "false");
   await expect(bar).toBeVisible();
   await expect(bar).toContainText("1 change");
-  await page.fill("#pk-name", "Lawson House");
+  await page.fill("#hh-name", "Lawson House");
   await expect(bar).toContainText("2 changes");
   await bar.getByRole("button", { name: "undo" }).click();
   await expect(bar).toBeHidden();
   await expect(services).toHaveAttribute("aria-checked", "true");
-  await expect(page.locator("#pk-name")).toHaveValue("Lawson Home");
+  await expect(page.locator("#hh-name")).toHaveValue("Lawson Home");
 });
 
 test("a failed save stays on the bar in red until the next attempt", async ({ page }) => {
@@ -159,7 +159,7 @@ test("a failed save stays on the bar in red until the next attempt", async ({ pa
   const services = page.getByRole("switch", { name: "Services shown on the chart" });
   await services.scrollIntoViewIfNeeded();
   await services.click();
-  const bar = page.locator("[data-pk=savebar]");
+  const bar = page.locator("[data-hh=savebar]");
   await bar.getByRole("button", { name: "save" }).click();
   await expect(bar.getByRole("alert")).toHaveText("not saved — Orbit could not store the sections just now");
   await page.waitForTimeout(4500);
@@ -169,11 +169,11 @@ test("a failed save stays on the bar in red until the next attempt", async ({ pa
 
 test("sections reorder from the keyboard (Alt-↓), and the move collects into the bar", async ({ page }) => {
   await open(page);
-  const titles = () => page.locator(".pk-sections [data-row] .title").allTextContents();
+  const titles = () => page.locator(".hh-sections [data-row] .title").allTextContents();
   const before = await titles();
   const face = page.getByRole("group", { name: "Home" });
   await face.focus();
   await page.keyboard.press("Alt+ArrowDown");
   expect(await titles()).toEqual([before[1], before[0], ...before.slice(2)]);
-  await expect(page.locator("[data-pk=savebar]")).toContainText("1 change");
+  await expect(page.locator("[data-hh=savebar]")).toContainText("1 change");
 });

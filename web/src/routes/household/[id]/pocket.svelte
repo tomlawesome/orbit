@@ -345,7 +345,7 @@
     const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
     const next = trayMarks[(at + (forward ? 1 : -1) + trayMarks.length) % trayMarks.length];
     editing.icon = next;
-    queueMicrotask(() => document.getElementById(`pk-mark-${next}`)?.focus());
+    queueMicrotask(() => document.getElementById(`hh-mark-${next}`)?.focus());
   }
   function keepSection() {
     const draft = editing;
@@ -439,17 +439,17 @@
   let barHeight = $state(0);
   $effect(() => (root ? standOnKeyboard(root) : undefined));
 
-  const MARK_BUTTON = "pk-markbtn";
+  const MARK_BUTTON = "hh-markbtn";
 </script>
 
-<div class="pk-hh" class:member={!v.canManage} bind:this={root} style:--pk-bar="{barUp ? barHeight : 0}px"
+<div class="hh-pocket" class:member={!v.canManage} bind:this={root} style:--hh-bar="{barUp ? barHeight : 0}px"
      style:--hh-tone="var({tone})">
   <Sky />
-  <div class="pk-art" aria-hidden="true" bind:this={art}>
-    <div class="pk-glow"></div>
+  <div class="hh-art" aria-hidden="true" bind:this={art}>
+    <div class="hh-glow"></div>
     {#if room}
       <svg viewBox="0 0 400 850" preserveAspectRatio="xMidYMid slice">
-        <g class="pk-year">
+        <g class="hh-year">
           <circle cx={room.sun[0]} cy={room.sun[1]} r={room.rings.overdue} fill="none" style="stroke:var(--overdue)"
                   stroke-opacity=".2" stroke-width="1" stroke-dasharray="2 4"/>
           <circle cx={room.sun[0]} cy={room.sun[1]} r={room.rings.year} fill="none" style="stroke:var(--chart-line)"
@@ -461,7 +461,7 @@
                   stroke-opacity=".6" stroke-width="1.6"/>
           {/each}
           {#each room.stars as star (star.id)}
-            <circle cx={star.cx} cy={star.cy} r={Math.max(2.4, star.r * 0.16).toFixed(2)} class="pk-star"
+            <circle cx={star.cx} cy={star.cy} r={Math.max(2.4, star.r * 0.16).toFixed(2)} class="hh-star"
                     style="fill:var({star.band === 'overdue' ? '--overdue' : star.band === 'due-soon' ? '--warm' : star.band === 'upcoming' ? '--upcoming' : '--ok'})"/>
           {/each}
         </g>
@@ -469,47 +469,47 @@
     {/if}
   </div>
 
-  <main class="pk-column" style:--pk-bar-room="{barUp ? barHeight + 16 : 0}px">
-    <header class="pk-head pk-rise" style:--i="0">
-      <svg class="pk-glyph" width="64" height="64" viewBox="0 0 48 48" aria-hidden="true">
-        <circle class="pk-ring" cx="24" cy="24" r="15" fill="none"/>
+  <main class="hh-column" style:--hh-bar-room="{barUp ? barHeight + 16 : 0}px">
+    <header class="hh-head hh-rise" style:--i="0">
+      <svg class="hh-glyph" width="64" height="64" viewBox="0 0 48 48" aria-hidden="true">
+        <circle class="hh-ring" cx="24" cy="24" r="15" fill="none"/>
         <circle cx="24" cy="24" r="2.6" style="fill:var({v.primary ? '--sun' : '--ink-mid'})"/>
         {#each ringDots as dot, i (i)}
-          <circle class="pk-dot" style:--d="{i}" cx={dot.cx} cy={dot.cy} r={dot.r} style:fill="var({dot.tone})" opacity=".85"/>
+          <circle class="hh-dot" style:--d="{i}" cx={dot.cx} cy={dot.cy} r={dot.r} style:fill="var({dot.tone})" opacity=".85"/>
         {/each}
-        <g class="pk-chipbody">
+        <g class="hh-chipbody">
           <circle cx={24 + chip.x} cy={24 + chip.y} r="3.4" style="fill:var(--bg)"/>
           <circle cx={24 + chip.x} cy={24 + chip.y} r="2.4" style="fill:var(--hh-tone)"/>
         </g>
       </svg>
-      <div class="pk-named">
+      <div class="hh-named">
         <h1 class="p-title">{v.name}</h1>
-        <p class="pk-sub">{v.subtitle}</p>
+        <p class="hh-sub">{v.subtitle}</p>
       </div>
     </header>
 
     <!-- MEMBERS FIRST (3b, a trial): on a phone the likely errand is a person. -->
-    <h2 class="p-caps pk-rise" style:--i="1" id="pk-members-head">Members · {v.memberCount}</h2>
-    <section class="p-card pk-flush pk-members pk-rise" style:--i="1" aria-labelledby="pk-members-head" data-pk="members">
+    <h2 class="p-caps hh-rise" style:--i="1" id="hh-members-head">Members · {v.memberCount}</h2>
+    <section class="p-card hh-flush hh-members hh-rise" style:--i="1" aria-labelledby="hh-members-head" data-hh="members">
       {#each v.roster as person (person.id)}
         <Row title="{person.name}{person.you ? ' · you' : ''}" trail={person.role}
              trailTone={person.role === "owner" ? "var(--accent-text)" : ""} acts={personActs(person)}>
           {#snippet mark()}<span class="p-avatar" class:owner={person.role === "owner"}>{person.initials}</span>{/snippet}
           {#snippet below()}
             {#if person.you && person.role === "owner" && ownerRefused}
-              <p class="pk-moment warn" role="status">an owner can’t leave · hand the system over first</p>
+              <p class="hh-moment warn" role="status">an owner can’t leave · hand the system over first</p>
             {:else if person.you && person.role !== "owner"}
-              <p class="pk-moment leave">nothing you added goes with you · the entries stay with {v.name}</p>
+              <p class="hh-moment leave">nothing you added goes with you · the entries stay with {v.name}</p>
             {/if}
           {/snippet}
         </Row>
       {/each}
 
       {#if v.joinRequests.length}
-        <p class="p-caps pk-sub-head">Knocking</p>
+        <p class="p-caps hh-sub-head">Knocking</p>
         {#each v.joinRequests as request (request.id)}
           <Row title="{request.name} asked to join" meta={request.waited ?? ""}>
-            {#snippet mark()}<span class="p-avatar pk-joiner">{request.initials}</span>{/snippet}
+            {#snippet mark()}<span class="p-avatar hh-joiner">{request.initials}</span>{/snippet}
             {#snippet below()}
               <button class="p-pill act-ok" aria-label="Approve {request.name}" onclick={() => decide(request, "approve")}>approve</button>
               <button class="p-pill" aria-label="Decline {request.name}" onclick={() => decide(request, "decline")}>decline</button>
@@ -519,18 +519,18 @@
       {/if}
 
       {#if v.invitations.length}
-        <p class="p-caps pk-sub-head">Invited</p>
+        <p class="p-caps hh-sub-head">Invited</p>
         {#each v.invitations as invitation (invitation.id)}
           <Row title={invitation.email} acts={invitationActs(invitation)}
                meta={v.canManage ? `${invitation.failed ? "not sent" : `sent ${invitation.sent}`} · expires ${invitation.expires}` : `expires ${invitation.expires}`}>
-            {#snippet mark()}<span class="pk-seat"></span>{/snippet}
+            {#snippet mark()}<span class="hh-seat"></span>{/snippet}
           </Row>
         {/each}
       {/if}
 
-      {#if membersProblem}<p class="p-error pk-inset" role="alert">{membersProblem}</p>{/if}
+      {#if membersProblem}<p class="p-error hh-inset" role="alert">{membersProblem}</p>{/if}
       {#if v.canManage}
-        <div class="pk-foot">
+        <div class="hh-foot">
           <button class="p-pill act-accent wide" onclick={() => { inviteProblem = null; inviteOpen = true; }}>invite someone</button>
           {#if v.candidates.length}
             <button class="p-pill wide" onclick={() => { addQuery = ""; addOpen = true; }}>add an existing account</button>
@@ -539,65 +539,65 @@
       {/if}
     </section>
 
-    <h2 class="p-caps pk-rise" style:--i="2" id="pk-system-head">The system</h2>
-    <section class="p-card pk-rise" style:--i="2" aria-labelledby="pk-system-head" data-pk="system">
+    <h2 class="p-caps hh-rise" style:--i="2" id="hh-system-head">The system</h2>
+    <section class="p-card hh-rise" style:--i="2" aria-labelledby="hh-system-head" data-hh="system">
       {#if v.canManage}
-        <label class="pk-label" for="pk-name">name</label>
-        <input id="pk-name" class="pk-input" maxlength="60" autocomplete="off" enterkeyhint="done" bind:value={identity.name}>
-        <div class="pk-flushrows">
+        <label class="hh-label" for="hh-name">name</label>
+        <input id="hh-name" class="hh-input" maxlength="60" autocomplete="off" enterkeyhint="done" bind:value={identity.name}>
+        <div class="hh-flushrows">
           <Row title="time zone" trail={identity.timezone.replaceAll("_", " ")} onactivate={() => pick("timezone")}>
-            {#snippet mark()}<span class="pk-kmark">◷</span>{/snippet}
+            {#snippet mark()}<span class="hh-kmark">◷</span>{/snippet}
           </Row>
           <Row title="currency" trail={identity.currency} onactivate={() => pick("currency")}>
-            {#snippet mark()}<span class="pk-kmark">¤</span>{/snippet}
+            {#snippet mark()}<span class="hh-kmark">¤</span>{/snippet}
           </Row>
         </div>
       {:else}
         <div class="p-kv"><span>name</span><b>{v.name}</b></div>
         <div class="p-kv"><span>time zone</span><b>{v.timezone.replaceAll("_", " ")}</b></div>
-        <div class="p-kv pk-last"><span>currency</span><b>{v.currency}</b></div>
+        <div class="p-kv hh-last"><span>currency</span><b>{v.currency}</b></div>
       {/if}
     </section>
 
     {#if v.canManage}
-      <h2 class="p-caps pk-rise" style:--i="3" id="pk-sections-head">Sections · {shown.length} of {MAX_SECTIONS}</h2>
-      <section class="p-card pk-flush pk-sections pk-rise" style:--i="3" aria-labelledby="pk-sections-head" data-pk="sections">
-        <div class="pk-seclist" use:mountReorder={{ onreorder: reorder }}>
+      <h2 class="p-caps hh-rise" style:--i="3" id="hh-sections-head">Sections · {shown.length} of {MAX_SECTIONS}</h2>
+      <section class="p-card hh-flush hh-sections hh-rise" style:--i="3" aria-labelledby="hh-sections-head" data-hh="sections">
+        <div class="hh-seclist" use:mountReorder={{ onreorder: reorder }}>
           {#each shown as row, index (row.id)}
             <Row title={row.name || "unnamed section"} meta="{entriesLabel(row.count)} · {row.visible ? 'shown' : 'hidden'}"
                  acts={sectionActs(row)} onmove={(direction) => moveBy(index, direction)}>
-              {#snippet mark()}<span class="pk-secmark" class:off={!row.visible}><Mark icon={row.icon} accent={row.accent} size={20} /></span>{/snippet}
+              {#snippet mark()}<span class="hh-secmark" class:off={!row.visible}><Mark icon={row.icon} accent={row.accent} size={20} /></span>{/snippet}
               {#snippet end()}
-                <button class="pk-switch" role="switch" aria-checked={row.visible}
+                <button class="hh-switch" role="switch" aria-checked={row.visible}
                         aria-label="{sectionName(row)} shown on the chart" onclick={() => flip(row)}><i></i></button>
               {/snippet}
             </Row>
           {/each}
         </div>
         <p class="sr-only" role="status">{moveSaid}</p>
-        <div class="pk-foot">
+        <div class="hh-foot">
           <button class="p-pill act-accent wide" disabled={shown.length >= MAX_SECTIONS} onclick={newSection}>add a section</button>
-          {#if shown.length >= MAX_SECTIONS}<p class="pk-note">{MAX_SECTIONS} is the most a system can hold</p>{/if}
+          {#if shown.length >= MAX_SECTIONS}<p class="hh-note">{MAX_SECTIONS} is the most a system can hold</p>{/if}
         </div>
       </section>
 
-      <div class="pk-rise" style:--i="4">
+      <div class="hh-rise" style:--i="4">
         <PocketArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} />
       </div>
 
-      <section class="p-card danger pk-danger pk-rise" style:--i="5" aria-labelledby="pk-danger-head" data-pk="danger">
-        <h2 class="pk-danger-head" id="pk-danger-head">
+      <section class="p-card danger hh-danger hh-rise" style:--i="5" aria-labelledby="hh-danger-head" data-hh="danger">
+        <h2 class="hh-danger-head" id="hh-danger-head">
           <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden="true">
             <path d="M9 2.2 16.4 15H1.6L9 2.2Z"/><path d="M9 6.6v4.1"/><path d="M9 12.8v.05"/>
           </svg>
           The danger line
         </h2>
         {#if saidDoom}
-          <p class="p-prose pk-doomsaid" role="status">
+          <p class="p-prose hh-doomsaid" role="status">
             requested · {v.name} stops now, and is gone for good in 30 days · an instance admin can turn this back until then
           </p>
         {:else}
-          <p class="p-prose pk-doomsay">Deleting stops everything in {v.name} at once. There are 30 days to change your mind.</p>
+          <p class="p-prose hh-doomsay">Deleting stops everything in {v.name} at once. There are 30 days to change your mind.</p>
           <button class="p-pill danger wide" onclick={() => { typedName = ""; doomProblem = null; doomOpen = true; }}>delete this system</button>
         {/if}
       </section>
@@ -606,17 +606,17 @@
 
   <!-- THE SAVE BAR (2b): rises while something is unsaved, stands on the
        keyboard, keeps a failure on screen until the next attempt. -->
-  <div class="pk-bar" class:up={barUp} inert={!barUp} bind:clientHeight={barHeight} data-pk="savebar">
-    <div class="pk-bar-in">
+  <div class="hh-bar" class:up={barUp} inert={!barUp} bind:clientHeight={barHeight} data-hh="savebar">
+    <div class="hh-bar-in">
       {#if problem}
-        <p class="pk-problem" role="alert">{problem}</p>
+        <p class="hh-problem" role="alert">{problem}</p>
       {:else if refusal}
-        <p class="pk-refusal">{refusal}</p>
+        <p class="hh-refusal">{refusal}</p>
       {/if}
-      <div class="pk-bar-row">
-        <span class="pk-count" role="status">{saving ? "saving…" : barUp && changes.length ? changesLabel(changes.length) : ""}</span>
+      <div class="hh-bar-row">
+        <span class="hh-count" role="status">{saving ? "saving…" : barUp && changes.length ? changesLabel(changes.length) : ""}</span>
         <button class="p-pill" disabled={saving} onclick={undo}>undo</button>
-        <button class="p-pill filled pk-save" disabled={saving || Boolean(refusal) || !changes.length} onclick={save}>
+        <button class="p-pill filled hh-save" disabled={saving || Boolean(refusal) || !changes.length} onclick={save}>
           {saving ? "saving…" : "save"}</button>
       </div>
     </div>
@@ -624,49 +624,49 @@
 
   <Sheet bind:open={inviteOpen} size="callout" title="Invite someone">
     <form onsubmit={(event) => { event.preventDefault(); invite(); }}>
-      <label class="pk-label" for="pk-invite">their email address</label>
-      <input id="pk-invite" class="pk-input" type="email" inputmode="email" autocomplete="email" enterkeyhint="send"
+      <label class="hh-label" for="hh-invite">their email address</label>
+      <input id="hh-invite" class="hh-input" type="email" inputmode="email" autocomplete="email" enterkeyhint="send"
              placeholder="name@example.com" bind:value={inviteEmail}>
-      <p class="pk-note">the link admits only someone signed in with this exact address</p>
-      <button class="p-pill filled wide pk-sheet-act" type="submit" disabled={!inviteEmail.trim() || inviting}>
+      <p class="hh-note">the link admits only someone signed in with this exact address</p>
+      <button class="p-pill filled wide hh-sheet-act" type="submit" disabled={!inviteEmail.trim() || inviting}>
         {inviting ? "sending…" : "send"}</button>
       {#if inviteProblem}<p class="p-error" role="alert">{inviteProblem}</p>{/if}
     </form>
   </Sheet>
 
   <Sheet bind:open={addOpen} size="list" title="Add an existing account">
-    <input class="pk-input pk-filter" type="search" enterkeyhint="search" aria-label="Find an account by name"
+    <input class="hh-input hh-filter" type="search" enterkeyhint="search" aria-label="Find an account by name"
            placeholder="find by name" bind:value={addQuery}>
-    <div class="pk-flushrows">
+    <div class="hh-flushrows">
       {#each candidates as candidate (candidate.id)}
         <Row title={candidate.name} trail="add" trailTone="var(--accent-text)" trailName="add {candidate.name}"
              onactivate={() => putMember(candidate)}>
           {#snippet mark()}<span class="p-avatar">{candidate.initials}</span>{/snippet}
         </Row>
       {:else}
-        <p class="p-empty pk-inset">nobody here is called “{addQuery.trim()}”</p>
+        <p class="p-empty hh-inset">nobody here is called “{addQuery.trim()}”</p>
       {/each}
     </div>
   </Sheet>
 
   <Sheet bind:open={handoverOpen} size="callout" title="Hand {v.name} over?">
     {#if heir}
-      <p class="p-prose pk-sheet-say">{heir.name} becomes its owner. You stay a member and keep everything you added.</p>
+      <p class="p-prose hh-sheet-say">{heir.name} becomes its owner. You stay a member and keep everything you added.</p>
       <ArmButton label="hand over to {heir.name}" armedLabel="tap again to hand over" danger={false} wide
                  class="act-accent" onfire={handOver} />
     {/if}
   </Sheet>
 
   <Sheet bind:open={pickOpen} size="list" title={picking === "currency" ? "Currency" : "Time zone"}>
-    <input class="pk-input pk-filter" type="search" enterkeyhint="search"
+    <input class="hh-input hh-filter" type="search" enterkeyhint="search"
            aria-label={picking === "currency" ? "Find a currency" : "Find a time zone"}
            placeholder={picking === "currency" ? "find a currency" : "find a city or region"} bind:value={pickQuery}>
-    <div class="pk-options" role="listbox" aria-label={picking === "currency" ? "Currencies" : "Time zones"}>
+    <div class="hh-options" role="listbox" aria-label={picking === "currency" ? "Currencies" : "Time zones"}>
       {#each options as value (value)}
-        <button class="pk-option" role="option" aria-selected={picking ? identity[picking] === value : false}
+        <button class="hh-option" role="option" aria-selected={picking ? identity[picking] === value : false}
                 onclick={() => choose(value)}>{pickLabel(value)}</button>
       {:else}
-        <p class="p-empty pk-inset">nothing matches “{pickQuery.trim()}”</p>
+        <p class="p-empty hh-inset">nothing matches “{pickQuery.trim()}”</p>
       {/each}
     </div>
   </Sheet>
@@ -674,38 +674,38 @@
   <Sheet bind:open={editOpen} size="list" title={editing?.id ? `Edit ${editing.name.trim() || "section"}` : "Add a section"}>
     {#if editing}
       <form onsubmit={(event) => { event.preventDefault(); keepSection(); }}>
-        <label class="pk-label" for="pk-secname">name</label>
-        <input id="pk-secname" class="pk-input" maxlength="30" autocomplete="off" enterkeyhint="done"
+        <label class="hh-label" for="hh-secname">name</label>
+        <input id="hh-secname" class="hh-input" maxlength="30" autocomplete="off" enterkeyhint="done"
                placeholder="name it" bind:value={editing.name}>
         {#if !editing.shipped}
-          <p class="pk-label" id="pk-tray-head">mark · tap to swap</p>
-          <div class="pk-tray" role="radiogroup" aria-labelledby="pk-tray-head" tabindex="-1" onkeydown={trayKey}>
+          <p class="hh-label" id="hh-tray-head">mark · tap to swap</p>
+          <div class="hh-tray" role="radiogroup" aria-labelledby="hh-tray-head" tabindex="-1" onkeydown={trayKey}>
             {#each trayMarks as icon (icon)}
               <Mark {icon} accent={inkOf(icon)} tag="button" type="button" role="radio" size={22} class={MARK_BUTTON}
-                    id="pk-mark-{icon}" aria-label={icon} aria-checked={icon === editing.icon}
+                    id="hh-mark-{icon}" aria-label={icon} aria-checked={icon === editing.icon}
                     tabindex={icon === editing.icon ? 0 : -1} onclick={() => { if (editing) editing.icon = icon; }} />
             {/each}
           </div>
         {:else}
-          <p class="pk-note">a shipped section keeps its mark</p>
+          <p class="hh-note">a shipped section keeps its mark</p>
         {/if}
-        <button class="p-pill filled wide pk-sheet-act" type="submit" disabled={!editing.name.trim()}>
+        <button class="p-pill filled wide hh-sheet-act" type="submit" disabled={!editing.name.trim()}>
           {editing.id ? "done" : "add"}</button>
-        <p class="pk-note">saved with the rest of your changes</p>
+        <p class="hh-note">saved with the rest of your changes</p>
       </form>
     {/if}
   </Sheet>
 
   <Sheet bind:open={doomOpen} size="list" title="Delete {v.name}?">
-    <p class="p-prose pk-sheet-say">
+    <p class="p-prose hh-sheet-say">
       Everything in {v.name} — {v.entries} {v.entries === 1 ? "entry" : "entries"}, their documents, their history
-      and every reminder still queued — stops the moment you ask. You have <b class="pk-red">30 days</b> to change
+      and every reminder still queued — stops the moment you ask. You have <b class="hh-red">30 days</b> to change
       your mind; after that it is gone for good.
     </p>
-    <label class="pk-label" for="pk-delname">type the system’s name exactly</label>
-    <input id="pk-delname" class="pk-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
+    <label class="hh-label" for="hh-delname">type the system’s name exactly</label>
+    <input id="hh-delname" class="hh-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
            placeholder={v.name} bind:value={typedName}>
-    <div class="pk-sheet-act">
+    <div class="hh-sheet-act">
       {#if nameOk}
         <ArmButton label="delete" armedLabel="tap again to delete {v.name}" wide onfire={requestDeletion} />
       {:else}
@@ -720,9 +720,9 @@
   /* THE DIALECT SWITCH: the same query as $lib/pocket/media.js. The desk's
      cards and backdrop go; its chrome stays, because on a phone
      Chrome.svelte draws the kit's top chrome and the hatch. */
-  .pk-hh{display:none}
+  .hh-pocket{display:none}
   @media (max-width:900px), (max-height:600px){
-    .pk-hh{display:block;position:relative;min-height:100dvh}
+    .hh-pocket{display:block;position:relative;min-height:100dvh}
     :global(.household-page > :is(.consty, .sky, .vignette, .page)){display:none}
     :global(div.household-page){min-height:0}
   }
@@ -730,152 +730,152 @@
   /* THE HOUSEHOLD'S OWN SKY: the kit's stars, then this system's year at
      room scale and a glow in the tone of its nearest body, the tone its chip
      wears on home. Fixed, under the vignette's corners, transform only. */
-  .pk-art{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.6}
-  .pk-art svg{position:absolute;inset:-4% -4% auto;width:108%;height:108%;
+  .hh-art{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.6}
+  .hh-art svg{position:absolute;inset:-4% -4% auto;width:108%;height:108%;
     transform:translate3d(0, calc(var(--lift, 0) * -26vh), 0) scale(calc(1 + var(--lift, 0) * .08));
     transform-origin:30% 20%}
-  .pk-year{animation:pk-turn 240s linear infinite;transform-origin:50% 50%;transform-box:view-box}
-  @keyframes pk-turn{to{transform:rotate(6deg)}}
-  .pk-star{opacity:.55}
-  .pk-glow{position:absolute;left:-30%;top:-18%;width:130%;height:62%;
+  .hh-year{animation:hh-turn 240s linear infinite;transform-origin:50% 50%;transform-box:view-box}
+  @keyframes hh-turn{to{transform:rotate(6deg)}}
+  .hh-star{opacity:.55}
+  .hh-glow{position:absolute;left:-30%;top:-18%;width:130%;height:62%;
     background:radial-gradient(ellipse at 30% 40%, color-mix(in srgb, var(--hh-tone) 16%, transparent) 0%,
       color-mix(in srgb, var(--hh-tone) 5%, transparent) 42%, transparent 70%)}
-  :global(:is([data-theme=dawn],[data-theme=clouds])) .pk-art{opacity:.45}
+  :global(:is([data-theme=dawn],[data-theme=clouds])) .hh-art{opacity:.45}
 
-  .pk-column{position:relative;z-index:2;box-sizing:border-box;max-width:var(--p-column);margin:0 auto;
+  .hh-column{position:relative;z-index:2;box-sizing:border-box;max-width:var(--p-column);margin:0 auto;
     padding:calc(var(--p-chrome) + env(safe-area-inset-top) + 8px) var(--p-gutter)
-      calc(var(--pk-bar-room, 0px) + var(--p-kb, 0px) + 32px + env(safe-area-inset-bottom));
+      calc(var(--hh-bar-room, 0px) + var(--p-kb, 0px) + 32px + env(safe-area-inset-bottom));
     transition:padding-bottom var(--p-rise) var(--p-ease)}
 
   /* The head: home's chip, grown. The ring arrives from the chip's size, the
      body takes its place, then the real due dots light one by one. */
-  .pk-head{display:flex;align-items:center;gap:14px;margin:4px 0 8px}
-  .pk-glyph{flex:none;overflow:visible}
-  .pk-ring{stroke:var(--chart-line, var(--line));stroke-width:1.2}
-  .pk-glyph{animation:pk-land 620ms var(--p-ease) both}
-  .pk-chipbody{transform-origin:24px 24px;animation:pk-orbit 900ms var(--p-ease) both}
-  .pk-dot{animation:pk-light 400ms ease both;animation-delay:calc(420ms + var(--d) * 70ms)}
-  @keyframes pk-land{from{transform:scale(.32);opacity:0}}
-  @keyframes pk-orbit{from{transform:rotate(-70deg)}}
-  @keyframes pk-light{from{opacity:0}}
-  :global([data-theme=retrograde]) .pk-chipbody{filter:drop-shadow(0 0 2.5px var(--bloom))}
-  .pk-named{min-width:0}
-  .pk-named .p-title{overflow-wrap:anywhere}
-  .pk-sub{margin:6px 0 0;font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet)}
+  .hh-head{display:flex;align-items:center;gap:14px;margin:4px 0 8px}
+  .hh-glyph{flex:none;overflow:visible}
+  .hh-ring{stroke:var(--chart-line, var(--line));stroke-width:1.2}
+  .hh-glyph{animation:hh-land 620ms var(--p-ease) both}
+  .hh-chipbody{transform-origin:24px 24px;animation:hh-orbit 900ms var(--p-ease) both}
+  .hh-dot{animation:hh-light 400ms ease both;animation-delay:calc(420ms + var(--d) * 70ms)}
+  @keyframes hh-land{from{transform:scale(.32);opacity:0}}
+  @keyframes hh-orbit{from{transform:rotate(-70deg)}}
+  @keyframes hh-light{from{opacity:0}}
+  :global([data-theme=retrograde]) .hh-chipbody{filter:drop-shadow(0 0 2.5px var(--bloom))}
+  .hh-named{min-width:0}
+  .hh-named .p-title{overflow-wrap:anywhere}
+  .hh-sub{margin:6px 0 0;font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet)}
 
   /* Cards arrive in turn, never in sync (§1.9). */
-  .pk-rise{animation:pk-rise 420ms var(--p-ease) both;animation-delay:calc(var(--i, 0) * 60ms + 80ms)}
-  @keyframes pk-rise{from{opacity:0;transform:translateY(10px)}}
+  .hh-rise{animation:hh-rise 420ms var(--p-ease) both;animation-delay:calc(var(--i, 0) * 60ms + 80ms)}
+  @keyframes hh-rise{from{opacity:0;transform:translateY(10px)}}
 
-  .pk-flush{padding:4px 0}
-  .pk-flushrows{margin:8px calc(var(--p-card-pad) * -1) -8px}
-  .pk-sub-head{margin:16px var(--p-gutter) 4px}
-  .pk-inset{margin-left:var(--p-gutter);margin-right:var(--p-gutter)}
-  .pk-foot{display:flex;flex-direction:column;gap:var(--p-pill-gap);padding:12px var(--p-gutter) 12px}
+  .hh-flush{padding:4px 0}
+  .hh-flushrows{margin:8px calc(var(--p-card-pad) * -1) -8px}
+  .hh-sub-head{margin:16px var(--p-gutter) 4px}
+  .hh-inset{margin-left:var(--p-gutter);margin-right:var(--p-gutter)}
+  .hh-foot{display:flex;flex-direction:column;gap:var(--p-pill-gap);padding:12px var(--p-gutter) 12px}
 
   /* A person knocking wears the desk's joiner ring: dashed, breathing. */
-  .pk-joiner{border:1.5px dashed var(--accent);animation:p-breathe 2.4s ease-in-out infinite}
+  .hh-joiner{border:1.5px dashed var(--accent);animation:p-breathe 2.4s ease-in-out infinite}
   /* An invitation's seat: the empty ring, no one in it yet. */
-  .pk-seat{box-sizing:border-box;width:24px;height:24px;border-radius:50%;border:1.5px dashed var(--line)}
-  .pk-kmark{font:var(--p-type-body)/1 var(--mono);color:var(--ink-quiet)}
+  .hh-seat{box-sizing:border-box;width:24px;height:24px;border-radius:50%;border:1.5px dashed var(--line)}
+  .hh-kmark{font:var(--p-type-body)/1 var(--mono);color:var(--ink-quiet)}
 
   /* The two lines the members card says only when they apply (#481): the
      owner's refusal, and a member's consequence while their leave is armed. */
-  .pk-moment{margin:0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid);flex:1 1 100%}
-  .pk-moment.warn{color:var(--warm-text);animation:p-errin 200ms var(--p-ease) both}
-  .pk-members :global(.p-row-below:not(:has(*))){display:none}
-  .pk-members :global(.p-row:not(:has(.armed)) + .p-row-below:has(.pk-moment.leave)){display:none}
-  .pk-members :global(.p-row:has(.armed) + .p-row-below .pk-moment.leave){animation:p-errin 200ms var(--p-ease) both}
+  .hh-moment{margin:0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid);flex:1 1 100%}
+  .hh-moment.warn{color:var(--warm-text);animation:p-errin 200ms var(--p-ease) both}
+  .hh-members :global(.p-row-below:not(:has(*))){display:none}
+  .hh-members :global(.p-row:not(:has(.armed)) + .p-row-below:has(.hh-moment.leave)){display:none}
+  .hh-members :global(.p-row:has(.armed) + .p-row-below .hh-moment.leave){animation:p-errin 200ms var(--p-ease) both}
 
   /* The system card. */
-  .pk-label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+  .hh-label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
     text-transform:uppercase;color:var(--ink-quiet);margin:0 0 6px}
-  .pk-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;border-radius:12px;
+  .hh-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;border-radius:12px;
     border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
     font:var(--p-type-body)/1.2 var(--ui)}
-  .pk-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
-  .pk-input::placeholder{color:var(--ink-quiet)}
-  .pk-last{border-bottom:0}
-  .pk-note{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
+  .hh-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+  .hh-input::placeholder{color:var(--ink-quiet)}
+  .hh-last{border-bottom:0}
+  .hh-note{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
 
   /* A section's mark, the desk's drawing (household.css): the pen line in
      ink, one small dot in the section's colour. */
-  :is(.pk-secmark, .pk-tray) :global(:is(.mark, .pk-markbtn)){position:relative;display:grid;place-items:center}
-  :is(.pk-secmark, .pk-tray) :global(:is(.mark, .pk-markbtn) svg){display:block;fill:none;stroke:var(--ink-mid);
+  :is(.hh-secmark, .hh-tray) :global(:is(.mark, .hh-markbtn)){position:relative;display:grid;place-items:center}
+  :is(.hh-secmark, .hh-tray) :global(:is(.mark, .hh-markbtn) svg){display:block;fill:none;stroke:var(--ink-mid);
     stroke-width:1.15;stroke-linecap:round;stroke-linejoin:round;opacity:.9}
-  :is(.pk-secmark, .pk-tray) :global(:is(.mark, .pk-markbtn) i){position:absolute;right:-1px;bottom:0;width:6px;height:6px;
+  :is(.hh-secmark, .hh-tray) :global(:is(.mark, .hh-markbtn) i){position:absolute;right:-1px;bottom:0;width:6px;height:6px;
     border-radius:50%;background:var(--sec);opacity:.92}
-  .pk-tray :global(.pk-markbtn i){right:9px;bottom:9px}
+  .hh-tray :global(.hh-markbtn i){right:9px;bottom:9px}
   /* Sections: the mark dims with its row when the section is hidden. */
-  .pk-secmark{display:grid;place-items:center;transition:opacity 150ms}
-  .pk-secmark.off{opacity:.4}
-  .pk-sections :global(.p-row:has(.pk-secmark.off) .title){color:var(--ink-quiet)}
+  .hh-secmark{display:grid;place-items:center;transition:opacity 150ms}
+  .hh-secmark.off{opacity:.4}
+  .hh-sections :global(.p-row:has(.hh-secmark.off) .title){color:var(--ink-quiet)}
   /* The switch: 52x32 drawn, 44 tall hit (§1.7). */
-  .pk-switch{appearance:none;box-sizing:border-box;width:56px;height:var(--p-hit);padding:0;border:0;background:none;
+  .hh-switch{appearance:none;box-sizing:border-box;width:56px;height:var(--p-hit);padding:0;border:0;background:none;
     display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent;margin-right:-6px}
-  .pk-switch i{position:relative;box-sizing:border-box;width:46px;height:28px;border-radius:14px;
+  .hh-switch i{position:relative;box-sizing:border-box;width:46px;height:28px;border-radius:14px;
     border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 60%, transparent);
     transition:background-color var(--p-spring),border-color var(--p-spring)}
-  .pk-switch i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
+  .hh-switch i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
     background:var(--ink-quiet);transition:transform var(--p-spring) var(--p-ease),background-color var(--p-spring)}
-  .pk-switch[aria-checked=true] i{background:color-mix(in srgb, var(--accent) 30%, transparent);border-color:var(--accent)}
-  .pk-switch[aria-checked=true] i::after{transform:translateX(18px);background:var(--accent)}
-  :global([data-theme=retrograde]) .pk-switch[aria-checked=true] i::after{box-shadow:0 0 8px var(--bloom)}
-  .pk-switch:focus-visible{outline:none}
-  .pk-switch:focus-visible i{outline:2px solid var(--accent);outline-offset:2px}
+  .hh-switch[aria-checked=true] i{background:color-mix(in srgb, var(--accent) 30%, transparent);border-color:var(--accent)}
+  .hh-switch[aria-checked=true] i::after{transform:translateX(18px);background:var(--accent)}
+  :global([data-theme=retrograde]) .hh-switch[aria-checked=true] i::after{box-shadow:0 0 8px var(--bloom)}
+  .hh-switch:focus-visible{outline:none}
+  .hh-switch:focus-visible i{outline:2px solid var(--accent);outline-offset:2px}
 
   /* The mark tray (#867): 44px marks, four to a line. */
-  .pk-tray{display:grid;grid-template-columns:repeat(4, var(--p-hit));justify-content:space-between;gap:8px;margin:0 0 4px}
-  .pk-tray :global(.pk-markbtn){appearance:none;width:var(--p-hit);height:var(--p-hit);border-radius:12px;
+  .hh-tray{display:grid;grid-template-columns:repeat(4, var(--p-hit));justify-content:space-between;gap:8px;margin:0 0 4px}
+  .hh-tray :global(.hh-markbtn){appearance:none;width:var(--p-hit);height:var(--p-hit);border-radius:12px;
     border:1px solid var(--line-soft);background:var(--panel);display:grid;place-items:center;cursor:pointer}
-  .pk-tray :global(.pk-markbtn[aria-checked=true]){border-color:var(--accent);
+  .hh-tray :global(.hh-markbtn[aria-checked=true]){border-color:var(--accent);
     background:color-mix(in srgb, var(--accent) 14%, transparent)}
-  .pk-tray :global(.pk-markbtn:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
-  form .pk-label:not(:first-child){margin-top:16px}
+  .hh-tray :global(.hh-markbtn:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+  form .hh-label:not(:first-child){margin-top:16px}
 
   /* The danger line: the kit's danger card, heading on its own line. */
-  .pk-danger{margin-top:var(--p-group-above)}
-  .pk-danger-head{display:flex;align-items:center;gap:8px;margin:6px 0 8px;
+  .hh-danger{margin-top:var(--p-group-above)}
+  .hh-danger-head{display:flex;align-items:center;gap:8px;margin:6px 0 8px;
     font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
     color:var(--overdue-text)}
-  .pk-danger-head svg{fill:none;stroke:var(--overdue-text);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-  .pk-doomsay{color:var(--ink-mid);margin:0 0 12px}
-  .pk-doomsaid{color:var(--overdue-text);margin:0}
-  .pk-red{color:var(--overdue-text)}
+  .hh-danger-head svg{fill:none;stroke:var(--overdue-text);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .hh-doomsay{color:var(--ink-mid);margin:0 0 12px}
+  .hh-doomsaid{color:var(--overdue-text);margin:0}
+  .hh-red{color:var(--overdue-text)}
 
   /* Sheets' insides. */
-  .pk-sheet-say{color:var(--ink-mid);margin:4px 0 16px}
-  .pk-sheet-act{margin-top:16px}
-  .pk-filter{margin:4px 0 8px}
-  .pk-options{display:flex;flex-direction:column}
-  .pk-option{appearance:none;min-height:var(--p-row-min);padding:0 4px;border:0;border-bottom:1px solid var(--line-soft);
+  .hh-sheet-say{color:var(--ink-mid);margin:4px 0 16px}
+  .hh-sheet-act{margin-top:16px}
+  .hh-filter{margin:4px 0 8px}
+  .hh-options{display:flex;flex-direction:column}
+  .hh-option{appearance:none;min-height:var(--p-row-min);padding:0 4px;border:0;border-bottom:1px solid var(--line-soft);
     background:none;text-align:left;font:var(--p-type-body)/1.3 var(--ui);color:var(--ink);cursor:pointer}
-  .pk-option[aria-selected=true]{color:var(--accent-text);font-weight:600}
-  .pk-option:active{background:var(--panel-raised)}
-  .pk-option:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .hh-option[aria-selected=true]{color:var(--accent-text);font-weight:600}
+  .hh-option:active{background:var(--panel-raised)}
+  .hh-option:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .p-pill:disabled{opacity:.45;cursor:default;box-shadow:none}
 
   /* THE SAVE BAR (2b): off the foot and unseen at rest; rises 300ms. The
      one blurred fixed layer on this screen (§5.3). */
-  .pk-bar{position:fixed;z-index:15;left:0;right:0;bottom:var(--p-kb, 0px);
+  .hh-bar{position:fixed;z-index:15;left:0;right:0;bottom:var(--p-kb, 0px);
     background:color-mix(in srgb, var(--panel-raised) 88%, transparent);backdrop-filter:blur(16px);
     border-top:1px solid var(--line-soft);box-shadow:0 -12px 32px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05);
     padding:10px var(--p-gutter) calc(10px + env(safe-area-inset-bottom));
     transform:translateY(calc(100% + 12px));visibility:hidden;
     transition:transform var(--p-rise) var(--p-ease),visibility 0s var(--p-rise)}
-  .pk-bar.up{transform:none;visibility:visible;transition-delay:0s}
-  :global(:is([data-theme=dawn],[data-theme=clouds])) .pk-bar{
+  .hh-bar.up{transform:none;visibility:visible;transition-delay:0s}
+  :global(:is([data-theme=dawn],[data-theme=clouds])) .hh-bar{
     box-shadow:inset 0 1px 0 rgba(255,255,255,.78), 0 -12px 28px rgba(48,66,98,.10)}
-  .pk-bar-in{max-width:var(--p-column);margin:0 auto}
-  .pk-bar-row{display:flex;align-items:center;gap:var(--p-pill-gap)}
-  .pk-count{flex:1;min-width:0;font:var(--p-type-meta)/1.3 var(--mono);color:var(--ink-mid)}
-  .pk-save{min-width:96px}
-  .pk-refusal,.pk-problem{margin:0 0 8px;font:var(--p-type-meta)/1.4 var(--ui)}
-  .pk-refusal{color:var(--ink-mid)}
-  .pk-problem{color:var(--overdue-text);animation:p-errin 200ms var(--p-ease) both}
+  .hh-bar-in{max-width:var(--p-column);margin:0 auto}
+  .hh-bar-row{display:flex;align-items:center;gap:var(--p-pill-gap)}
+  .hh-count{flex:1;min-width:0;font:var(--p-type-meta)/1.3 var(--mono);color:var(--ink-mid)}
+  .hh-save{min-width:96px}
+  .hh-refusal,.hh-problem{margin:0 0 8px;font:var(--p-type-meta)/1.4 var(--ui)}
+  .hh-refusal{color:var(--ink-mid)}
+  .hh-problem{color:var(--overdue-text);animation:p-errin 200ms var(--p-ease) both}
 
   @media (prefers-reduced-motion:reduce){
-    .pk-year,.pk-glyph,.pk-chipbody,.pk-dot,.pk-rise,.pk-joiner,.pk-moment.warn,.pk-problem{animation:none}
-    .pk-bar,.pk-column{transition:none}
+    .hh-year,.hh-glyph,.hh-chipbody,.hh-dot,.hh-rise,.hh-joiner,.hh-moment.warn,.hh-problem{animation:none}
+    .hh-bar,.hh-column{transition:none}
   }
 </style>
