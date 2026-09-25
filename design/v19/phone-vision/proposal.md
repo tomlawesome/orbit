@@ -894,3 +894,350 @@ fly to that sky.
  a) Chips fly to that household's sky, as desk; fix the film's chapter 1/10
     copy to say so (my recommendation).
  b) Build an ask-to-join flow behind the chips and keep the film's copy.
+
+---
+
+## 5. Carrying the desk's character (after the kit build)
+
+Written 2026-09-25 against the built kit (`web/src/lib/pocket/`, shots at
+390 wide) and the desk's fidelity baselines. The owner's verdict on the kit:
+acceptable for now, but basic next to the main site. This section says what
+"basic" is, part by part, and the CSS-level rules that fix it in the kit so
+every screen inherits the fix. Nothing here re-opens §1: the floor (12px,
+13px for anything read to act), 44px targets, the swipe-only row acts and
+the rest of §25 stand, and every rule below was checked against them.
+
+### 5.1 What the desk does that the kit does not
+
+Looking at `home.png`, `item.png`, `household.png`, `settings.png` and
+`inbox.png` next to `01-kit-rest.png` through `13-reorder-lifted.png`, the
+difference is not the components; it is everything around and inside them.
+
+- **The sky.** Every signed-in desk page stands on a fixed, drifting, seeded
+  star field (`lib/sky.js`: two tiled layers, 95 far and 46 near stars over
+  a 1600×1000 tile, `driftf` 400s and `driftn` 195s from `atmosphere.css`)
+  and a vignette (`radial-gradient(ellipse at 50% 34%, transparent 55%,
+  rgba(0,0,0,.28) 100%)`, off on dawn and clouds). The kit route draws
+  neither: `body{background:var(--bg)}` and nothing else. The built pocket
+  home has a sky (`pocket.svelte`, a 400×850 field), so the character
+  exists; it is just not a kit part, and every other pocket screen would
+  currently arrive on a flat colour. On a flat colour, glass is invisible:
+  `--panel` at 55% over `--bg` is `--bg`, so the cards read as hairline
+  boxes, which is the "basic" the owner sees.
+- **Glass, and what sits on it.** Desk cards are `var(--panel)` +
+  `backdrop-filter:blur(8px)` + `1px solid var(--line-soft)` + radius 16
+  (`household.css`, `settings.css`), and rows inside them are transparent
+  with a `--line-soft` hairline between. The kit's `.p-card` matches, but
+  `Row.svelte` paints every row face opaque
+  (`linear-gradient(var(--panel),var(--panel)), var(--bg)`) so the acts
+  never show through. Inside a card that makes each row a solid strip, one
+  tone darker than the card, and there is no hairline between rows. That is
+  the second half of "basic".
+- **Colour on acts.** Desk act pills each carry their act's colour
+  (`item.css`: `--act` on the border at 40%, `--act-text` on the word,
+  `--panel` behind; complete is `--ok`, reschedule `--upcoming`, snooze
+  `--warm`, edit `--accent`, retire `--overdue`). Every kit pill is
+  `--line` grey with `--ink-mid` mono; only `.danger` differs. The pills
+  card in `01-kit-rest.png` is a row of grey.
+- **Marks.** Desk bodies are layered: a core with a halo ring
+  (`box-shadow:0 0 0 2.5px var(--bg)`), status variants (`.ter` half-lit,
+  `.con` ringed, `.exp` dashed, `.sug` hollow accent), avatar rings with
+  mono initials, the paper `◆` in `--paper`. The kit's rows use a flat
+  10px dot and a 24px ring; the pocket home's `.pk-dot` variants already
+  carry the status forms but they live in `pocket.css`, not the kit.
+- **Depth.** Desk drawers and callouts are `--panel-raised` at blur 14 to
+  16 over a scrim of `rgba(4,7,16,.55)`, with a lifted shadow
+  (`0 18px 44px rgba(0,0,0,.45)` on the belt's card) and a top hairline.
+  The kit's sheet is the same tone as the page's cards, has no shadow and
+  no edge light, so in `07-sheet-list.png` the sheet and the card behind
+  it are one flat plane.
+- **Typography.** The desk pairs Space Grotesk for the page title and
+  filled buttons (`household.css .btn`: `600 13px var(--display)`) with
+  mono for everything that is data (brand principle 4, "mono is memory":
+  `.kv`, `.sub`, dates, amounts, roles) and caps tracked at `.18em`. The
+  kit's title and card title are right; the filled pill is `--ui` 600, row
+  meta ("Home · £84", "member") is `--ui`, and caps track at `.14em`. The
+  effect is that the kit reads as a system font UI with a display heading
+  on top, not as the desk's mono-and-display pairing.
+- **Chrome.** The desk orb is 40px glass on the sky with an `--accent`
+  hover ring; the back link carries a three-layer `--bg` halo. The kit's
+  orb and back link match. What the kit lacks is the returned chrome's
+  ground: `color-mix(--bg 70%)` + blur 16 over scrolling content is both
+  the most expensive rule in the kit and the least desk-like (the desk
+  never puts a glass strip over content; it lets the halo do the work).
+- **Signatures.** The desk's small habits: `→` at the end of a pill word
+  that leaves the page, `·` as the separator, dashed borders on anything
+  Orbit proposes (`.pk-sugg`, the joiner's ring, the empty seat), the
+  hazard rule along the top of a danger card
+  (`repeating-linear-gradient(115deg, var(--overdue) 0 2px, transparent
+  2px 6px)`, 6px tall) with a red wash at 8.5%, the accent ring on the
+  orb when the inbox waits, retrograde's bloom on accent things only, and
+  the north star's glint. The kit has the halo, the dashed suggestion and
+  the glint; it has none of the others.
+- **Motion.** The desk's sky drifts on two periods; the pocket home's
+  drifts on one (`drift` 180s, 40px). Row press is 120ms; hover states
+  exist on pills but a phone has no hover, so a pressed pill shows nothing.
+- **Grain.** Not a gap. `Grain.svelte` mounts only on the door, sign-in
+  flight, sign-out, `+error` and maintenance; signed-in desk pages have no
+  grain. §1.9 said "grain fades in" for every page; that overstated the
+  desk. The pocket matches the desk: grain on the same five personalities,
+  none on signed-in screens (owner question 4).
+
+### 5.2 The rules, part by part
+
+Tokens and classes named here are the desk's own unless marked **new**. New
+tokens go in `pocket/tokens.css`; new rules in `pocket/kit.css` or the part's
+own `<style>`.
+
+**Surfaces: the sky and the vignette.**
+
+- **new** `pocket/Sky.svelte`: lift `pocket.svelte`'s `.sky` into the kit.
+  A fixed `inset:-5%` SVG, `viewBox 0 0 400 850`, `preserveAspectRatio
+  xMidYMid slice`, two `<g>` layers filled `var(--star-far)` and
+  `var(--star-near)`, stars from `fillStarTiles` (`lib/sky.js`) with the
+  counts scaled to the tile: 40 far, 20 near. Layer drift as the desk's
+  two periods, transform only: far `translateX(-400px)` over 400s, near
+  over 195s, each tile repeated once with `<use x="400">` so the wrap is
+  seamless. Opacity `var(--stars)` (afterdark's .6 comes free). Below the
+  stars a **new** `.p-vignette`: the desk's radial rule verbatim,
+  `display:none` on dawn and clouds, as `inbox.css` does.
+- Dawn and clouds: apply the desk's sky masks (`home.css` `[data-theme=dawn]
+  .desk .sky` and clouds) to `.p-sky` so stars fade toward the ground.
+- Every pocket screen mounts `Sky` first in its markup; the kit route too.
+  The five personality screens (door, sign-out, 404, maintenance, the
+  film) keep their own skies and are the only ones that also mount
+  `Grain`.
+- `theme-color` per pack is `--bg` (§1.11); unchanged.
+
+**Cards.**
+
+- `.p-card` keeps `--panel` + blur 8 + `--line-soft` + radius 16. Add the
+  light packs' edge light from `home.css` 1051: on dawn and clouds
+  `box-shadow:inset 0 1px 0 rgba(255,255,255,.72), 0 8px 20px
+  rgba(48,66,98,.07)`; on the dark packs `inset 0 1px 0 rgba(255,255,255,
+  .05)`. One rule, per theme, in `kit.css`.
+- Card heads: `.p-caps` tracking to `.18em` (the desk's `card h2`). 12px
+  stays. Inside a card the head's margin is `0 0 12px`; between cards it
+  keeps `--p-group-above`.
+- Rows inside a card: transparent faces (below) with `border-top:1px solid
+  var(--line-soft)` on every row after the first, at the row's text edge
+  (`margin-left:calc(var(--p-row-mark) + var(--p-row-gap))`) so the mark
+  column reads as a rail, as the desk's members list does.
+- Danger card, **new** `.p-card.danger`: the household's rule verbatim,
+  `border:1.5px solid var(--overdue)`, `::after` wash `--overdue` at .085
+  (.12 on dawn and clouds), `::before` hazard rule 6px along the top. Used
+  by the household's deletion card, settings' danger line and any card
+  whose primary act cannot be undone.
+- Proposal card, **new** `.p-card.proposed`: `border-style:dashed;
+  border-color:color-mix(in srgb, var(--accent) 45%, var(--line-soft))`,
+  already the pocket home's `.pk-sugg`; move it into the kit.
+
+**Rows.**
+
+- `Row.svelte` `.face`: `background:transparent` at rest. While
+  `[data-swiping]` or `[data-open]`, `background:linear-gradient(
+  var(--panel),var(--panel)), var(--bg)` so the acts under it stay hidden
+  where the face still covers them. The acts are `opacity:0` at rest, so
+  nothing shows through a transparent face; this changes no behaviour §25
+  relies on.
+- Press: `--panel-raised` for 120ms, unchanged.
+- `.meta`: `var(--mono)` when the meta is data (section · amount, date,
+  size, role, address); `var(--ui)` only for a sentence ("still reading its
+  document"). Expose it as a prop `metaFace="mono"|"ui"`, default mono.
+- `.trail`: unchanged (mono, 13px), but the T-label takes its urgency ink
+  as the pocket home already does: `--overdue-text`, `--warm`,
+  `--upcoming`, `--ok-text`.
+- Marks, **new** `pocket/Mark.svelte` or classes in `kit.css`, lifted from
+  `pocket.css` and `home.css`'s corridor: `.p-body` 10px core with
+  `box-shadow:0 0 0 2.5px var(--bg)` (the halo ring), colour from the
+  urgency token; `.p-body.ter` half-lit gradient; `.p-body.con` ringed
+  radial; `.p-body.exp` `1.6px dashed currentColor`; `.p-body.sug` hollow
+  `--accent`; `.p-body.breathing` the 2.4s pulse; `.p-body.failed`
+  `--degraded`. Avatar ring `.p-avatar`: 24px, `1px solid var(--line)`,
+  `--panel` fill, `600 .75rem var(--mono)` initials, `--ink-mid`; the
+  owner's ring `--accent`. Paper `.p-paper`: `◆` in `--accent-text`
+  (`--paper` where the belt defines it). Asterism `.p-aster`: `--accent`.
+  Rule: a mark is never a plain filled circle.
+- Long-press lift: keep the shadow; add `background:var(--panel-raised)`
+  on the lifted face so it reads as picked up off the glass.
+
+**Pills.**
+
+- Ghost pill takes an act colour the desk way. **new** on `.p-pill`:
+  `border-color:color-mix(in srgb, var(--act, var(--line)) 40%,
+  transparent); color:var(--act-text, var(--ink-mid));
+  background:var(--panel)`. Callers set `--act`/`--act-text` per act,
+  exactly as `item.css` does: complete `--ok`/`--ok-text`, reschedule
+  `--upcoming`/`--upcoming`, snooze `--warm`/`--warm`, edit and open
+  `--accent`/`--accent-text`, remove/retire/sign out `--overdue`/
+  `--overdue-text`. `.p-pill.danger` becomes the `--overdue` case of the
+  same rule. Navigational pills (documents, settings) stay unset, so grey.
+- Filled primary: `font:600 var(--p-type-button) var(--display)`,
+  `letter-spacing:.01em`, text `var(--bg)` (the desk's `.btn`); add
+  `box-shadow:0 0 28px -8px color-mix(in srgb, var(--accent) 35%,
+  transparent)` on the dark packs only (`ringcard.css`'s `.act` glow, cut
+  to a third). No glow on dawn or clouds.
+- Press state, since there is no hover: `.p-pill:active{border-color:
+  var(--act, var(--accent)); background:color-mix(in srgb, var(--act,
+  var(--accent)) 14%, transparent)}` (the desk's `aria-pressed` look);
+  `.p-pill.filled:active{filter:brightness(.92)}`.
+- A pill whose word leaves the page ends in `→` (open, sign out, review &
+  amend); a pill that acts in place does not. Text, not CSS.
+- Armed: `ArmButton` keeps the crossfade; while armed the border is
+  `--overdue` at full and the wash `color-mix(--overdue 12%)`, so "tap
+  again to remove" reads as lit, not just red text.
+
+**Sheets.**
+
+- `.panel` background `var(--panel-raised)` (not `--panel`), blur 16
+  stays: one fixed element, the one place a big blur is worth its cost.
+  Add `box-shadow:0 -18px 44px rgba(0,0,0,.45), inset 0 1px 0
+  rgba(255,255,255,.06)`; dawn and clouds `inset 0 1px 0
+  rgba(255,255,255,.78), 0 -16px 36px rgba(48,66,98,.10)`.
+- Scrim `rgba(4,7,16,.55)` on dark packs (`home.css` `.askcard`'s), `color-
+  mix(var(--bg) 45%)` on the light packs. No blur on the scrim.
+- Head: title in `600 var(--p-type-sheet) var(--display)`, the desk's
+  card title face; the `close` word stays mono. Under the head a
+  `--line-soft` hairline, full width, as the hatch already draws.
+- Key/value lines inside a sheet, **new** `.p-kv`: the belt's `.kv` at the
+  floor size: `display:flex; justify-content:space-between;
+  font:var(--p-type-meta) var(--mono); color:var(--ink-mid); padding:8px
+  2px; border-bottom:1px solid var(--line-soft)`, value `b` in `--ink`,
+  status classes `.over .soon .up .ok .clean .ended` with the belt's inks.
+  The item sheet's "T-16d · 29 Aug · £84" line becomes three `.p-kv` rows
+  only where the sheet grows to full; the callout keeps the one-line
+  `.pk-meta`.
+- The grab handle takes `--line` (unchanged) and, on retrograde, `box-
+  shadow:0 0 8px var(--bloom)`.
+
+**Top chrome.**
+
+- Rest: unchanged (halo on the back link, orb 36 drawn, 44 hit).
+- Returned after a scroll (`.scrolled`): drop the blur. Ground is
+  `linear-gradient(var(--bg) 60%, transparent)` with the halo doing the
+  legibility work, the way the desk's back link sits on stars. Keep the
+  `--line-soft` hairline only on the light packs, where the gradient alone
+  is too soft.
+- The orb: drop its `backdrop-filter:blur(8px)`; `--panel` over the sky is
+  enough at 36px and it removes a blur from a fixed layer that repaints on
+  every scroll. Inbox waiting: the `--accent` 2px ring and count bead as
+  the pocket home does; on retrograde the bead takes `box-shadow:0 0 9px
+  var(--bloom)`.
+- Wordmark on home: the desk's mark at 22px beside the word, `--display`
+  600, unchanged.
+
+**The hatch.**
+
+- The head is the account: `.p-avatar` at 36px before the name, the name
+  in display 600 18px, the role line under it in mono 13px (`--ink-quiet`).
+- Menu rows use the row grammar with marks: `+` for Add an item
+  (`--accent-text` mono), the inbox row's trail is the count in an accent
+  bead when it is above zero, Administration takes the station's mark.
+- Swatches: 30px discs stay; the chosen one takes the desk's ring
+  (`outline:2px solid var(--accent); outline-offset:3px`, unchanged) and
+  each disc paints the pack's `--bg` plus its swatch shadow from
+  `theme-swatches.js` (retrograde's magenta ring is the tell).
+- Sign out is the `--overdue` act pill with `→`, armed as now.
+
+**The wake.**
+
+- `--panel-raised`, no blur (it is opaque enough at 75–86%), keep the
+  shadow. A 2px inset rule on the leading edge in the act's colour:
+  `box-shadow:inset 3px 0 0 var(--act, var(--accent))`, `--ok` for
+  completed, `--accent` for reversible, `--overdue` for a failure (which
+  also keeps its red border). `undo` is the `--accent` act pill.
+
+**Empty, loading and error states.**
+
+- Unlit rows: keep; the leading placeholder becomes a hollow `.p-body`
+  ring in `--line-soft`, not a 24px circle, so it matches the lit row.
+- Empty: the mono sentence stays; its pill (`add an item`) carries
+  `--accent`. The card that is empty takes `.p-card.proposed`'s dashed
+  edge, the desk's "nothing here yet" pen (the empty seat, the joiner).
+- Error line: keep; add the desk's `errin` entrance (`opacity 0 → 1,
+  translateY(-4px) → 0`, 200ms) so a failure arrives rather than appears.
+- No spinners, no skeleton shimmer: the desk has neither.
+
+**The north star.**
+
+- Keep the disc and the glint. Add the pocket's `--stars`-independent
+  halo: `box-shadow:0 6px 20px rgba(0,0,0,.3), 0 0 0 1px var(--line), 0 0
+  24px -6px color-mix(in srgb, var(--accent) 40%, transparent)` on the
+  dark packs; on retrograde the glint takes `filter:drop-shadow(0 0 2.5px
+  var(--bloom))`, the desk's rule. Dawn and clouds: the first two shadows
+  only.
+
+**Page personalities on the pocket.**
+
+- Where a desk page has backdrop art (administration's station, create's
+  constellations, the household's H2 year, the relay's dish), the pocket
+  shows the art only where it survives whole at 390 (§1.10), dimmed one
+  step (`opacity:.6` on the art's root), never labelled text that the edge
+  would cut. Art is `position:fixed`, transform-only motion, under the
+  vignette and above the stars. Where the art is hidden the sky and
+  vignette alone carry the page.
+
+**Retrograde, once.** The desk's bloom law (`home.css` §3): accent things
+only, small radius, low alpha, no animation, always `var(--bloom)`. In the
+kit that is: the filled pill, the armed act's border, the orb's waiting
+ring, the wake's accent rule, the north star, the grab handle, `.p-body.sug`
+and the T-label when it is the accent. Never on greens, reds or ink.
+
+### 5.3 What stays, and what to avoid
+
+- The floor: nothing under 12px; 12px only for tracked caps; anything read
+  to act 13px or larger. Colour on a pill word always uses the `-text`
+  companion (`packs.css` #491), so every act colour passes 4.5:1 on every
+  pack, including dawn and clouds where `--accent` alone fails.
+- 44px targets and the swipe-only row acts (§25 / #1122): untouched. The
+  transparent face changes how a row looks, not what it does.
+- Focus rings, `inert`, live regions, reduced motion: unchanged. Under
+  `prefers-reduced-motion` the sky's drift, the glint, the breathing body
+  and the arrival of the error line all stop; rows still swipe.
+- Performance, the budget: one `backdrop-filter` per fixed layer at most
+  (sheet 16, nothing else fixed), cards at blur 8 and never more than the
+  viewport's worth, and no blur on anything that scrolls inside a
+  scroller (rows, pills, marks, the orb) or on the scrim. The sky is one
+  SVG of ~60 circles animated by `transform` on two `<g>`s; the vignette
+  and every glow is a static gradient or `box-shadow`. No `filter` on
+  moving elements outside retrograde's three drop-shadows. No `will-change`
+  on rows. Measure on the lowest device in the test set (§1.12): sixty
+  frames while scrolling the household page with the chrome returning.
+- Nothing decorative on the dial (owner §12): every body is a real item.
+  The rules above dress the marks; they add no bodies.
+
+### 5.4 Priority order
+
+The five that do most of the lift, in order; each is one change to one kit
+file and every screen inherits it.
+
+1. **The sky and vignette as a kit part** (`Sky.svelte`, `.p-vignette`),
+   mounted on every pocket screen. Without it nothing else reads as glass.
+2. **Transparent row faces and the hairline rail** (`Row.svelte`, `kit.css`).
+   Turns solid strips back into rows on a card.
+3. **Act colour on pills** (`--act`/`--act-text` on `.p-pill`, display face
+   on the filled pill, `:active` states). The desk's "more colour on the
+   action buttons" (owner, 2026-08-15) carried over.
+4. **Sheet depth** (`--panel-raised`, shadow, edge light, dark scrim,
+   display-face title).
+5. **Marks** (`.p-body` variants, `.p-avatar`, `.p-paper`) and the north
+   star's halo.
+
+Then, as one pass: caps tracking `.18em`, mono meta, the danger and
+proposal cards, the wake's leading rule, the chrome's returned ground, the
+hatch head, retrograde's bloom list.
+
+### 5.5 Questions for the owner (continuing §4's numbering)
+
+**4** Grain on signed-in pocket screens. The desk has none there (grain is
+the door, sign-in, sign-out, error and maintenance only); §1.9 said every
+page.
+ a) Match the desk: no grain on signed-in screens (my recommendation; it is
+    also the cheapest choice on a phone).
+ b) Grain everywhere on the pocket, at the desk's opacity.
+
+**5** The filled primary's soft accent glow on the dark packs (§5.2, pills).
+It is the door's sign-in button glow at a third strength, on every
+"Add to orbit" and "Save".
+ a) Yes, on the dark packs (my recommendation).
+ b) No glow on filled pills anywhere; keep the bloom to retrograde.
