@@ -509,9 +509,12 @@
   };
 
   /* Rotate every address (§2.12 7): the administrator chooses how long the
-     old addresses keep working, 0 to 90 days (mailbox-settings.ts). */
+     old addresses keep working, 0 to 90 days (mailbox-settings.ts). It starts
+     at the relay's own standard grace, RELAY_PREVIOUS_GRACE_MS (14 days,
+     src/server/mail-in/core/relay-generations.ts). */
+  const STANDARD_GRACE_DAYS = 14;
   let aliasOpen = $state(false);
-  let graceDays = $state(30);
+  let graceDays = $state(STANDARD_GRACE_DAYS);
   /** @param {number} by */
   const graceStep = (by) => (graceDays = Math.min(90, Math.max(0, graceDays + by)));
 
@@ -769,7 +772,7 @@
         {#if view.mailbox?.configured}
           <Row title="every address" metaFace="ui" meta="issue every member a new relay address; the old ones keep working for a while"
                trail="rotate" trailTone="var(--warm-text)" trailName="rotate every address"
-               onactivate={() => { graceDays = 30; mailProblem = null; aliasOpen = true; }}>
+               onactivate={() => { graceDays = STANDARD_GRACE_DAYS; mailProblem = null; aliasOpen = true; }}>
             {#snippet mark()}<span class="ad-kmark">↻</span>{/snippet}
           </Row>
         {/if}
