@@ -109,7 +109,11 @@
       if (done) return;
       done = true;
       removeEventListener("popstate", go);
-      setTimeout(() => goto(to ? `${to.pathname}${to.search}${to.hash}` : resolve("/home")), 0);
+      /* `to` is the address the held-back navigation was already going to,
+         so it is resolved; only the fallback needs resolve(). */
+      const href = to ? `${to.pathname}${to.search}${to.hash}` : resolve("/home");
+      // eslint-disable-next-line svelte/no-navigation-without-resolve
+      setTimeout(() => goto(href), 0);
     };
     addEventListener("popstate", go);
     setTimeout(go, 350);
