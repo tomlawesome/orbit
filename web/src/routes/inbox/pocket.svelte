@@ -51,9 +51,9 @@
   /** Per receipt: the red line under its pills (§1.13), until the next try. */
   const problems = new SvelteMap();
   /** One operation id per receipt across retries (approveReceipt's contract). */
-  const operationIds = new Map();
+  const operationIds = new SvelteMap();
   /** How each departing card leaves: "filed" into the orbit, or "burn". */
-  const exits = new Map();
+  const exits = new SvelteMap();
 
   async function reload() {
     view = await readInboxScreen();
@@ -294,7 +294,7 @@
                 <span class="pki-touch" aria-hidden="true"><span class="p-body sug"></span></span>
                 <div class="pki-rwords">
                   <h3 class="pki-rtitle" id="pki-r-{receipt.id}">{titleOf(receipt)}</h3>
-                  <p class="pki-rwhen">caught {short(/** @type {string} */ (receipt.receivedAt))}{#if days !== null}{" · "}<span class:soon={days < 14}>burns up in {days}d</span>{/if}</p>
+                  <p class="pki-rwhen">caught {short(/** @type {string} */ (receipt.receivedAt))}{#if days !== null}&nbsp;· <span class:soon={days < 14}>burns up in {days}d</span>{/if}</p>
                 </div>
               </div>
 
@@ -310,7 +310,7 @@
               {/if}
 
               {#each papersOf(receipt) as paper (paper.name)}
-                <p class="pki-paper"><span class="p-paper" aria-hidden="true">◆</span><span><span class="pki-pname">{paper.name}</span>{#if paper.meta}{` · ${paper.meta}`}{/if}{" · "}<span class="clean">scanned clean</span></span></p>
+                <p class="pki-paper"><span class="p-paper" aria-hidden="true">◆</span><span><span class="pki-pname">{paper.name}</span>{#if paper.meta}{` · ${paper.meta}`}{/if}&nbsp;· <span class="clean">scanned clean</span></span></p>
               {/each}
 
               {#if unreadable}<p class="p-prose pki-unread">{unreadable}</p>{/if}
