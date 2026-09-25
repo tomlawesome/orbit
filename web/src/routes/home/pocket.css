@@ -157,6 +157,20 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
  * the search sheet (#1057). Rows in a sheet sit on the sheet's glass. */
 .pk-meta{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:-4px 0 12px}
 .pk-acts{margin-top:16px}
+/* The item sheet's card (#1120): the item card's phone face
+   (item/[[id]]/belt.css .item-card.ip) at sheet scale, so `open` reads as
+   this card growing into that one. */
+/* its name rides in the card, so `close` keeps the head's right edge */
+.p-sheet-layer:has(.pk-card) [data-sheet-close]{margin-left:auto}
+.pk-card{margin:0;background:var(--panel-raised);border-color:var(--line)}
+.pk-card-head{display:flex;align-items:center;gap:12px}
+.pk-mark{width:14px;height:14px}
+.pk-name{min-width:0;font:600 var(--p-type-card)/1.2 var(--display);color:var(--ink);overflow-wrap:anywhere}
+.pk-sub{font:var(--p-type-meta)/1.4 var(--mono);letter-spacing:.02em;color:var(--ink-quiet);margin:6px 0 6px 26px}
+.pk-card .p-kv{align-items:baseline;color:var(--ink-quiet)}
+.pk-card .p-kv span{flex:none}
+.pk-card .p-kv b{min-width:0;text-align:right;overflow-wrap:anywhere}
+.pk-card .p-kv:last-child{border-bottom:0;padding-bottom:0}
 .pk-acts > *{flex:1 1 0}
 .p-sheet-layer .pk-list{display:flex;flex-direction:column;gap:2px}
 .p-sheet-layer .pk-list .face,.p-sheet-layer .pk-results .face{background:transparent;padding-left:4px;padding-right:4px}
@@ -188,6 +202,8 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
  * the card's seat and grows into it along the sheet's own curve, the two
  * faces crossfading on the way, while the dial fades and the band draws. */
 .pk-item{view-transition-name:pocket-item}
+.pk-item:has(> .pk-card){view-transition-name:none}
+.pk-card{view-transition-name:pocket-item}
 ::view-transition-group(pocket-item){animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
 ::view-transition-old(pocket-item),::view-transition-new(pocket-item){
   animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
