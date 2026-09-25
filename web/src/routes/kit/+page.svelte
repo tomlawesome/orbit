@@ -73,10 +73,6 @@
   <h2 class="p-caps">Pills</h2>
   <section class="p-card p-pills" data-kit="pills">
     <button class="p-pill filled">Add to orbit</button>
-    <button class="p-pill act-ok">complete</button>
-    <button class="p-pill act-up">reschedule</button>
-    <button class="p-pill act-warm">snooze</button>
-    <button class="p-pill act-accent">edit</button>
     <button class="p-pill">documents</button>
     <ArmButton label="remove" name="Remove the boiler service" onfire={() => wake("The boiler service removed")} />
     <ArmButton label="sign out →" armedLabel="tap again to sign out" wide onfire={() => wake("signed out (kit)")} />
@@ -120,6 +116,14 @@
         {#snippet mark()}<span class="p-aster" aria-hidden="true">✦</span>{/snippet}
       </Row>
     {/each}
+  </section>
+
+  <h2 class="p-caps">Pills · act colours</h2>
+  <section class="p-card p-pills" data-kit="act-pills">
+    <button class="p-pill act-ok">complete</button>
+    <button class="p-pill act-up">reschedule</button>
+    <button class="p-pill act-warm">snooze</button>
+    <button class="p-pill act-accent">edit</button>
   </section>
 
   <h2 class="p-caps">Marks</h2>
