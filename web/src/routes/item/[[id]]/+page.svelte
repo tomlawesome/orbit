@@ -1,11 +1,18 @@
 <script>
   import { onMount, tick } from "svelte";
-  import { goto, invalidateAll, replaceState } from "$app/navigation";
+  import { beforeNavigate, goto, invalidateAll, replaceState } from "$app/navigation";
+  import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { mountTiledSky } from "$lib/sky.js";
-  import { every, longDate, money } from "$lib/format.js";
+  import { every, longDate, money, shortDate } from "$lib/format.js";
   import Chrome from "$lib/Chrome.svelte";
-  import { WorkspaceError, applyCommand, restoreDocument } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, removeDocument, restoreDocument } from "$lib/data/workspace.js";
+  import ArmButton from "$lib/pocket/ArmButton.svelte";
+  import Row from "$lib/pocket/Row.svelte";
+  import Sheet from "$lib/pocket/Sheet.svelte";
+  import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
+  import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
+  import Reader from "./Reader.svelte";
   import { beltManifestOf, documentPreviewStateOf } from "$lib/data/belt.js";
   import {
     archiveCommand, completeCommand, nextDateAfter, rescheduleCommand,
@@ -16,6 +23,7 @@
     fieldState, itemLocked, saveProblem,
   } from "$lib/data/metadata-status.js";
   import { matchesOf, nearestMatchOf, reachableAt, stepFrom } from "./band.js";
+  import { searchBelt } from "./pocket-find.js";
   import { mountBelt } from "./belt.behaviour.js";
   import "./belt.css";
 
@@ -119,6 +127,202 @@
   let problem = $state(null);
   /** @type {PanelForm} */
   let form = $state({});
+
+  /* ---- THE POCKET (#1072, proposal §2.3) ---------------------------------
+     Below the CON-10 switch the same belt is drawn closer — a low arc across
+     the top with the card hanging beneath it (band.js, THE POCKET'S BELT) —
+     and everything the desk unfolds inside the card or beside it is a kit
+     Sheet instead: the five acts' panels, the document list, the preview,
+     the search. One sheet at a time; a sheet that needs another grows into
+     it (the list into a paper's preview) rather than stacking. The reader
+     is the one full-screen window, over the belt (Reader.svelte). This
+     route renders in the browser only (+page.js), so the dialect is known
+     from the first frame and follows the switch if the window crosses it. */
+  let pocket = $state(isPocket());
+  $effect(() => {
+    const query = matchMedia(POCKET_QUERY);
+    const follow = () => { pocket = query.matches; };
+    query.addEventListener("change", follow);
+    return () => query.removeEventListener("change", follow);
+  });
+
+  /** @typedef {PanelName | "docs" | "preview" | "search"} Face */
+  /** @type {Record<Face, "callout" | "list" | "full">} */
+  const SHEET_SIZE = {
+    complete: "callout", reschedule: "callout", snooze: "callout", retire: "callout",
+    edit: "full", docs: "list", preview: "list", search: "list",
+  };
+  let sheetOpen = $state(false);
+  /** @type {Face | null} */
+  let face = $state(null);
+  let readerOpen = $state(false);
+  /** @param {Face} next */
+  function raise(next) {
+    face = next;
+    sheetOpen = true;
+  }
+  /* Whatever closed the sheet (scrim, drag, the close word, Escape, back),
+     what it was holding goes with it. */
+  function sheetClosed() {
+    const was = face;
+    face = null;
+    panel = null;
+    armed = null;
+    readerOpen = false;
+    if (was === "preview") { belt?.closeDoc(); closePreview(); }
+    if (was === "search") pocketQuery = "";
+  }
+  /* A step taken the moment a sheet closes has to wait for the sheet's own
+     history entry to come off, or the address it writes lands on the entry
+     that is about to be popped. */
+  /** @param {() => void} then */
+  function afterSheet(then) {
+    if (!sheetOpen) { then(); return; }
+    sheetOpen = false;
+    let done = false;
+    const go = () => { if (done) return; done = true; removeEventListener("popstate", go); setTimeout(then, 0); };
+    addEventListener("popstate", go);
+    setTimeout(go, 350);
+  }
+
+  /** The act pressed on the card: on the desk its panel unfolds in the card;
+      on a phone it rises as a sheet.
+      @param {PanelName} name
+      @param {ItemRecord} item */
+  function act(name, item) {
+    if (!pocket) { open(name, item); return; }
+    panel = null;
+    open(name, item);
+    raise(name);
+  }
+
+  /* ---- complete, with an undo wake (§2.3, §1.13) --------------------------
+     An item with nothing to record — no cost to confirm — completes on the
+     tap; one with a cost raises the record sheet first. Either way the
+     completion is HELD for the wake's four seconds and only then sent, so
+     `undo` is a real undo: there is no command that takes a completion back,
+     and a reschedule would leave the completion in the item's history.
+     Leaving the page sends it at once. */
+  /** @typedef {{ build: () => object, leave: boolean, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
+  /** @type {HeldCompletion | null} */
+  let pending = null;
+  /** @param {ItemRecord} item */
+  function tapComplete(item) {
+    if (item.costMinor !== null && item.costMinor !== undefined) { act("complete", item); return; }
+    const done = todayISO();
+    holdCompletion(item, { completedDate: done, nextDate: nextDateAfter(done, item.recurrenceMonths) ?? undefined });
+  }
+  /**
+   * @param {ItemRecord} item
+   * @param {{ completedDate: string, nextDate?: string, costMinor?: number, notes?: string }} fields
+   */
+  function holdCompletion(item, fields) {
+    sendPending();
+    /** @type {HeldCompletion} */
+    const job = { build: () => completeCommand(item, fields), leave: !fields.nextDate, timer: undefined, done: false };
+    job.timer = setTimeout(() => firePending(job), WAKE_HOLD_MS);
+    pending = job;
+    /* The date first: the wake is one line and ellipsises, and the card above
+       already names the item; the live region still reads the whole line. */
+    wake(`Completed${fields.nextDate ? ` · next due ${shortDate(fields.nextDate)}` : ""} · ${item.title}`, {
+      undo: () => { clearTimeout(job.timer); job.done = true; if (pending === job) pending = null; },
+    });
+  }
+  /** @param {HeldCompletion} job */
+  async function firePending(job) {
+    if (job.done) return;
+    job.done = true;
+    if (pending === job) pending = null;
+    await run(job.build, { leave: job.leave });
+    if (problem) wake(problem, { failure: true });
+  }
+  /* Leaving before the wake has gone: the completion is sent now, not lost. */
+  function sendPending() {
+    const job = pending;
+    if (!job || job.done) return;
+    clearTimeout(job.timer);
+    job.done = true;
+    pending = null;
+    applyCommand(job.build()).catch(() => {});
+  }
+  beforeNavigate(() => { sendPending(); });
+  $effect(() => {
+    addEventListener("pagehide", sendPending);
+    return () => { removeEventListener("pagehide", sendPending); };
+  });
+
+  /* ---- the papers on a phone ---------------------------------------------
+     A paper opens the preview sheet (§18: "on a phone it is the bottom
+     sheet"); the page in it is a button that opens the reader. A paper
+     tapped on home arrives in the navigation's state (home's pocket.svelte,
+     openPaper) and opens here as soon as the belt has seated its item. */
+  let arrivalPaper = /** @type {string | null} */ (
+    (/** @type {Record<string, unknown>} */ (page.state ?? {})).pocketPaper ?? null);
+  /** @param {import("./band.js").BeltDoc} doc */
+  function showPaper(doc) {
+    const i = bodies.findIndex((b) => b.kind === "doc" && b.id === doc.id);
+    if (i >= 0 && belt) { belt.openDoc(i); return; }
+    openPreview(doc, "right");
+    raise("preview");
+  }
+  /** @param {string} id */
+  function showPaperById(id) {
+    const doc = row?.docs.find((one) => one.id === id);
+    if (doc) showPaper(doc);
+  }
+  async function removePreviewDoc() {
+    const doc = previewDoc;
+    if (!doc) return;
+    await removeDocument(doc.id);
+    readerOpen = false;
+    sheetOpen = false;
+    await invalidateAll();
+    wake(`${doc.name} removed`, {
+      undo: () => { restoreDocument(doc.id).then(() => invalidateAll()).catch(() => {}); },
+    });
+  }
+
+  /* ---- the find line (§2.3, §2.4): the search sheet, over the belt -------
+     Results approach directly — the belt is already the item screen. */
+  let pocketQuery = $state("");
+  const found = $derived(searchBelt(pocketQuery, bodies));
+  /** @param {number} i */
+  function approach(i) {
+    afterSheet(() => { if (i !== selected) belt?.centre(i); });
+  }
+  /** @param {{ doc: import("./band.js").BeltDoc, itemIdx: number }} hit */
+  function approachPaper({ doc, itemIdx }) {
+    const at = bodies.findIndex((b) => b.kind === "item" && b.itemIdx === itemIdx);
+    afterSheet(() => {
+      if (at === selected) { showPaper(doc); return; }
+      arrivalPaper = doc.id;
+      belt?.centre(at);
+    });
+  }
+  /** @param {KeyboardEvent} event */
+  function findKey(event) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const top = found.items[0];
+    if (top) approach(top.index);
+    else if (found.documents[0]) approachPaper(found.documents[0]);
+  }
+  /* The sheet titles, for the dialog's name. */
+  const sheetTitle = $derived.by(() => {
+    if (face === "complete") return "Record a completion";
+    if (face === "reschedule") return "Reschedule";
+    if (face === "snooze") return "Snooze";
+    if (face === "edit") return `Edit ${row?.title ?? "item"}`;
+    if (face === "retire") return `Retire ${row?.title ?? "this item"}?`;
+    if (face === "docs") return `${row?.docs.length ?? 0} documents · ${row?.title ?? ""}`;
+    if (face === "preview") return previewDoc?.name ?? "Document";
+    return "Find an item";
+  });
+  /** A date `months` on from `from`, for the quick pills. @param {string} from @param {number} months */
+  const monthsOn = (from, months) => nextDateAfter(from, months) ?? from;
+  /** @param {string} from @param {number} days */
+  const daysOn = (from, days) =>
+    new Date(Date.parse(`${from}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
   /* ---- the document preview (#1088) --------------------------------------
      create-v3's reading card (design/v19/create-v3.html's `.readcard`,
@@ -287,8 +491,16 @@
          the band draws the controls, the screen owns the step. */
       onStep: step,
       /* #1088: a paper was pressed. The apex does not move — see openPreview. */
-      onOpenPreview(doc, side) { openPreview(doc, side); },
-      onClosePreview() { closePreview(); },
+      onOpenPreview(doc, side) {
+        openPreview(doc, side);
+        if (pocket) raise("preview");
+      },
+      onClosePreview() {
+        closePreview();
+        if (pocket && face === "preview" && sheetOpen) sheetOpen = false;
+      },
+      /* #1072: the pocket's "+N" clump lists every paper. */
+      onOpenList() { raise("docs"); },
       async onSettle(_i, band) {
         bloom = band.bloom.slice();
         bodies = band.bodies;
@@ -297,6 +509,13 @@
            the rubble down around it. */
         await tick();
         band.remeasure?.();
+        /* A paper asked for on arrival, or by the search, opens once its item
+           is seated (#1072). */
+        if (arrivalPaper && pocket) {
+          const id = arrivalPaper;
+          arrivalPaper = null;
+          showPaperById(id);
+        }
       },
     });
     belt = controller;
@@ -414,6 +633,14 @@
 
   /** @param {KeyboardEvent} event */
   function onKeydown(event) {
+    /* #1072: on a phone the sheets hold their own keys; the belt behind one
+       must not step while it is up. */
+    if (pocket && (sheetOpen || readerOpen)) return;
+    if (pocket && (event.key === "/" || ((event.metaKey || event.ctrlKey) && event.key === "k")) && !typing(event.target)) {
+      event.preventDefault();
+      raise("search");
+      return;
+    }
     /* #1088: Esc closes the reading card first — the belt's own dead-space
        law (owner-decisions.md §18) — and only then a command panel. */
     if (event.key === "Escape" && previewDoc) { event.preventDefault(); belt?.closeDoc(); return; }
@@ -526,7 +753,8 @@
      reading card, the search field and the chrome. */
   /** @param {PointerEvent} event */
   function onDeadSpace(event) {
-    if (!previewDoc) return;
+    /* On a phone the preview is a sheet, which closes itself (#1072). */
+    if (!previewDoc || pocket) return;
     const target = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
     if (target?.closest?.(".readcard, .cardwrap, .hit, .find, .back, .orb, .account")) return;
     belt?.closeDoc();
@@ -567,6 +795,11 @@
   <div class="sky" aria-hidden="true" bind:this={sky}></div>
   <div class="vignette" aria-hidden="true"></div>
 
+  <!-- #1072, §2.3: on a phone the find line is the search sheet's button,
+       and the count line says what order the belt is in. -->
+  <button class="ip-find" aria-haspopup="dialog" onclick={() => raise("search")}>find an item</button>
+  <p class="ip-count">{findnote}</p>
+
   <!-- the band: everything at or behind the ring plane -->
   <canvas id="band" aria-hidden="true"></canvas>
 
@@ -592,6 +825,8 @@
     <g id="ends"></g>
     <g id="seats"></g>
     <g id="caps"></g>
+    <!-- #1072: the pocket's "+N" clump, drawn by belt.behaviour.js on a phone -->
+    <g id="clump"></g>
   </svg>
 
   <!-- #1088: create-v3's lanes — the grid the reading card grows beside.
@@ -603,7 +838,20 @@
        class:open={previewOpen}>
   <!-- the card, riding at the apex -->
   <div class="cardwrap" id="cardwrap">
-    {#if !bodies.length}
+    {#if !bodies.length && pocket}
+      <!-- The empty household on a phone (§2.3, §1.13): one quiet sentence
+           and the two ways in. -->
+      <article class="glass item-card ip ip-emptycard">
+        <h2>Nothing in orbit yet.</h2>
+        <p class="ip-sentence">{data.household?.name ?? "your system"} has nothing on its belt.
+          Every item you add takes a seat here in the order it comes due.</p>
+        <div class="ip-acts">
+          <a class="p-pill wide ip-lead" href={resolve("/create")}>add an item</a>
+          <a class="p-pill wide" style="--act:var(--upcoming);--act-text:var(--upcoming-text)"
+             href={resolve("/settings/mail")}>set up your relay →</a>
+        </div>
+      </article>
+    {:else if !bodies.length}
       <!-- The empty household. The band is still a belt — ambient rock and
            dust, thinner, because nothing here has swept anything yet. -->
       <article class="glass item-card">
@@ -626,7 +874,7 @@
            it, when you will be warned, every command reachable. It does NOT
            list its documents any more — they are out in the band beside it,
            which is the owner's ruling; the card only says so, and how many. -->
-      <article class="glass item-card">
+      <article class="glass item-card" class:ip={pocket}>
         <h2>{row.title}</h2>
         <div class="sub">{[row.section, row.kind].filter(Boolean).join(" · ")}</div>
         <!-- #1005: a one-off ends on its day; nothing is due on it. -->
@@ -662,6 +910,34 @@
         {/if}
 
         <h3>actions</h3>
+        {#if pocket}
+          <!-- §2.3: complete first and full width; then reschedule · snooze;
+               then edit · retire. Every panel is a sheet; retire arms here
+               and asks in its own callout. -->
+          <div class="ip-acts" role="group" aria-label="Item actions">
+            {#if row.status === "active"}
+              <button class="p-pill wide ip-lead ip-complete" disabled={busy}
+                      onclick={() => tapComplete(record)}>complete</button>
+              <div class="ip-pair">
+                <button class="p-pill" style="--act:var(--upcoming);--act-text:var(--upcoming-text)"
+                        onclick={() => act("reschedule", record)}>reschedule</button>
+                <button class="p-pill" style="--act:var(--warm);--act-text:var(--warm-text)"
+                        onclick={() => act("snooze", record)}>snooze</button>
+              </div>
+              <div class="ip-pair">
+                <button class="p-pill" style="--act:var(--accent);--act-text:var(--accent-text)"
+                        onclick={() => act("edit", record)}>edit</button>
+                <ArmButton label="retire" name="Retire {row.title}" onfire={() => act("retire", record)} />
+              </div>
+            {:else}
+              <button class="p-pill wide ip-lead ip-complete" disabled={busy}
+                      onclick={() => run(() => statusCommand(record, "active"))}>restore</button>
+              {#if row.status !== "archived"}
+                <ArmButton label="retire" name="Retire {row.title}" wide onfire={() => act("retire", record)} />
+              {/if}
+            {/if}
+          </div>
+        {:else}
         <div class="acts" role="group" aria-label="Item actions">
           {#if row.status === "active"}
             <button style="--act:var(--ok);--act-text:var(--ok-text)" aria-pressed={panel === "complete"}
@@ -801,6 +1077,8 @@
           </div>
         {/if}
 
+        {/if}
+
         {#if problem}
           <div class="problem" role="alert">{problem}</div>
         {/if}
@@ -813,7 +1091,17 @@
           <p class={notesState === DAMAGED ? "failed" : "locked"}>{NOTES_WORDS[notesState]}</p>
         {/if}
 
-        {#if row.docs.length}
+        {#if pocket && row.docs.length}
+          <!-- §2.3: the documents ride in the belt; this row lists them all. -->
+          <button class="ip-docs" onclick={() => raise("docs")}>
+            <span class="ip-paper" aria-hidden="true">◆</span>
+            <span class="ip-docs-title">{row.docs.length === 1 ? "1 document rides" : `${row.docs.length} documents ride`} in the belt</span>
+            <span class="ip-chev">see {row.docs.length === 1 ? "it" : "them"} ›</span>
+          </button>
+        {:else if pocket}
+          <p class="ip-sentence">No documents yet. Anything you attach, or mail in to your relay,
+            rides in the belt beside this item.</p>
+        {:else if row.docs.length}
           <div class="note"><b>{row.docs.length === 1
             ? "one document rides"
             : `${row.docs.length} documents ride`}</b>
@@ -833,7 +1121,7 @@
        it. `hidden` is never set while mounted: `previewOpen` alone drives
        the CSS transition (belt.css's `.readcard.open`), same law as
        create-v3's own `body.doc .readcard`. -->
-  {#if previewDoc}
+  {#if previewDoc && !pocket}
     {@const state = previewState}
     <aside class="glass readcard" id="readcard" class:open={previewOpen}
            class:snap={previewShowing} class:still={state !== "available"}
@@ -948,4 +1236,187 @@
     </div>
   </div>
 </div>
+
+<!-- #1072: every panel, list and preview on a phone is this one kit Sheet;
+     `face` says which. On a desk it is never raised. -->
+<Sheet bind:open={sheetOpen} size={face ? SHEET_SIZE[face] : "callout"} title={sheetTitle}
+       hideTitle={face === "search" || face === "preview"} onclose={sheetClosed}>
+  <!-- The search field rides in the sheet's head (§2.4). Declared in here
+       rather than at the top of the markup: a top-level snippet trips the
+       production bundler (#1130). -->
+  {#snippet head()}
+    {#if face === "preview"}
+      <!-- the title is for the dialog's name only (§18: no head); this keeps
+           `close` at the head's far end where it always is -->
+      <span class="bp-spacer" aria-hidden="true"></span>
+    {/if}
+    {#if face === "search"}
+      <input class="bp-field-find" type="search" placeholder="find an item" aria-label="Find an item in the belt"
+             autocomplete="off" spellcheck="false" enterkeyhint="go" bind:value={pocketQuery} onkeydown={findKey}>
+    {/if}
+  {/snippet}
+  <div class="bp-sheet">
+  {#if face === "complete" && record}
+    <p class="bp-lede">{row?.title}</p>
+    <div class="bp-row2">
+      <div class="bp-field"><label for="p-done">completed on</label>
+        <input id="p-done" type="date" bind:value={form.completedDate}></div>
+      {#if record.recurrenceMonths}
+        <div class="bp-field"><label for="p-next">next orbit</label>
+          <input id="p-next" type="date" bind:value={form.nextDate}></div>
+      {/if}
+    </div>
+    <div class="bp-field"><label for="p-cost">actual cost</label>
+      <input id="p-cost" class="mono" inputmode="decimal" enterkeyhint="next" bind:value={form.cost}
+             placeholder="optional" disabled={locked}></div>
+    <div class="bp-field"><label for="p-cnotes">note</label>
+      <input id="p-cnotes" bind:value={form.notes} placeholder="optional" enterkeyhint="done"></div>
+    {#if locked}<p class="bp-note">{COST_LOCKED}</p>{/if}
+    <button class="p-pill filled wide bp-go" style="--act:var(--ok);--act-text:var(--ok-text)"
+            disabled={busy || !form.completedDate}
+            onclick={() => {
+              const fields = {
+                completedDate: /** @type {string} */ (form.completedDate),
+                nextDate: form.nextDate || undefined,
+                costMinor: minorOf(form.cost),
+                notes: (form.notes ?? "").trim() || undefined,
+              };
+              const item = record;
+              sheetOpen = false;
+              holdCompletion(item, fields);
+            }}>record</button>
+  {:else if face === "reschedule" && record}
+    <p class="bp-lede">{row?.title} · due {row?.longWhen}</p>
+    <div class="bp-field"><label for="p-due">new due date</label>
+      <input id="p-due" type="date" bind:value={form.dueDate}></div>
+    <div class="p-pills bp-quick" role="group" aria-label="Move it on by">
+      {#each [[1, "+1 month"], [3, "+3 months"], [12, "+1 year"]] as [months, word] (months)}
+        <button class="p-pill" aria-pressed={form.dueDate === monthsOn(record.dueDate ?? todayISO(), Number(months))}
+                onclick={() => { form.dueDate = monthsOn(record.dueDate ?? todayISO(), Number(months)); }}>{word}</button>
+      {/each}
+    </div>
+    <button class="p-pill filled wide bp-go" style="--act:var(--upcoming)" disabled={busy || !form.dueDate}
+            onclick={() => { const item = record, due = form.dueDate; sheetOpen = false; run(() => rescheduleCommand(item, due)); }}>reschedule</button>
+  {:else if face === "snooze" && record}
+    <p class="bp-lede">{row?.title} · due {row?.longWhen}</p>
+    <div class="p-pills bp-quick" role="group" aria-label="Snooze for">
+      <button class="p-pill" aria-pressed={form.until === daysOn(todayISO(), 7)}
+              onclick={() => { form.until = daysOn(todayISO(), 7); }}>1 week</button>
+      <button class="p-pill" aria-pressed={form.until === monthsOn(todayISO(), 1)}
+              onclick={() => { form.until = monthsOn(todayISO(), 1); }}>1 month</button>
+    </div>
+    <div class="bp-field"><label for="p-until">or until</label>
+      <input id="p-until" type="date" bind:value={form.until}></div>
+    <button class="p-pill filled wide bp-go" style="--act:var(--warm)" disabled={busy || !form.until}
+            onclick={() => { const item = record, until = form.until; sheetOpen = false; run(() => snoozeCommand(item, until)); }}>snooze</button>
+  {:else if face === "edit" && record}
+    <!-- #941: damaged fields stay open and say what saving does; locked
+         locks every field, because item.upsert is refused whole. -->
+    <div class="bp-field"><label for="pe-title">title</label>
+      <input id="pe-title" bind:value={form.title} disabled={locked}></div>
+    <div class="bp-field"><label for="pe-provider">provider</label>
+      <input id="pe-provider" bind:value={form.provider} placeholder="optional" disabled={locked}></div>
+    <div class="bp-field"><label for="pe-reference">reference</label>
+      <input id="pe-reference" class="mono" bind:value={form.reference} disabled={locked}
+             placeholder={referenceState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional"}></div>
+    <div class="bp-row2">
+      <div class="bp-field"><label for="pe-cost">cost</label>
+        <input id="pe-cost" class="mono" inputmode="decimal" bind:value={form.cost} placeholder="optional" disabled={locked}></div>
+      <div class="bp-field"><label for="pe-due">due date</label>
+        <input id="pe-due" type="date" bind:value={form.dueDate} disabled={locked}></div>
+    </div>
+    <div class="bp-field"><label for="pe-recur">orbital period (months)</label>
+      <input id="pe-recur" class="mono" inputmode="numeric" bind:value={form.recurrenceMonths} placeholder="optional"
+             disabled={locked}></div>
+    <div class="bp-field"><label for="pe-notes">notes</label>
+      <textarea id="pe-notes" rows="4" bind:value={form.notes} disabled={locked}
+                placeholder={notesState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional"}></textarea></div>
+    {#if locked}<p class="bp-note">{PANEL_LOCKED}</p>{/if}
+    <button class="p-pill filled wide bp-go" disabled={busy || locked || !form.title?.trim()}
+            onclick={() => { const item = record, edits = editsOf(); sheetOpen = false; run(() => upsertCommand(item, edits)); }}>save</button>
+  {:else if face === "retire" && record}
+    <p class="bp-lede">It leaves the belt and the dial. Its history and its documents are kept.</p>
+    <div class="bp-pair">
+      <button class="p-pill wide bp-danger" disabled={busy}
+              onclick={() => { const item = record; sheetOpen = false; run(() => archiveCommand(item), { leave: true }); }}>retire</button>
+      <button class="p-pill wide" onclick={() => { sheetOpen = false; }}>keep</button>
+    </div>
+  {:else if face === "docs" && row}
+    <div class="bp-list">
+      {#each row.docs as doc (doc.id)}
+        <Row title={doc.name} meta={[doc.size, doc.plate, doc.added === "unknown" ? null : `added ${doc.added}`].filter(Boolean).join(" · ")}
+             onactivate={() => showPaper(doc)}>
+          {#snippet mark()}<span class="bp-paper" aria-hidden="true">◆</span>{/snippet}
+        </Row>
+      {/each}
+    </div>
+  {:else if face === "preview" && previewDoc}
+    {@const state = previewState}
+    <!-- §18 on a phone: the page nearly edge to edge on the cream sheet with
+         the tilted second sheet under it, and nothing else. The page is a
+         button: it opens the reader. The honest states hold the plate still:
+         the line says what is happening; the foot holds only what can be
+         done. -->
+    {#if state === "available"}
+      <button class="bp-page" class:shown={previewShowing} disabled={!previewShowing}
+              aria-label="Read {previewDoc.name}" onclick={() => { readerOpen = true; }}>
+        <span class="bp-under" aria-hidden="true"></span>
+        <img src={previewDoc.previewHref} alt="Page one of {previewDoc.name}"
+             onload={() => (previewImgLoaded = true)}
+             onerror={() => { previewImgLoaded = true; previewImgFailed = true; }} />
+      </button>
+      {#if !previewShowing}<p class="bp-line quiet" aria-live="polite">Orbit is drawing the page</p>{/if}
+    {:else}
+      <div class="bp-honest">
+        <div class="bp-plate" class:scanning={state === "scanning"} aria-hidden="true">
+          {state === "scanning" ? "still scanning" : state === "removed" ? "removed" : state === "refused" ? "refused" : previewDoc.plate}
+        </div>
+        {#if state === "scanning"}
+          <p class="bp-line">Still checking this file</p>
+          <p class="bp-why">the page comes once it scans clean</p>
+        {:else if state === "removed"}
+          <p class="bp-line">Removed</p>
+          <p class="bp-why">kept {previewDoc.deleteAfter ? `until ${previewDoc.deleteAfter}` : "for 30 days"}, then gone for good</p>
+          <button class="p-pill bp-restore" disabled={previewRestoring} onclick={restorePreviewDoc}>restore</button>
+          {#if previewProblem}<p class="p-error" role="alert">{previewProblem}</p>{/if}
+        {:else if state === "refused"}
+          <p class="bp-line">Orbit refused this file.</p>
+          <p class="bp-why">it did not pass what Orbit checks before keeping a file</p>
+        {:else}
+          <p class="bp-line">Orbit could not draw a picture of this document.</p>
+          <p class="bp-why">the file is fine and yours to download</p>
+          <a class="p-pill bp-restore" href={resolve(/** @type {"/home"} */ (previewDoc.href))} download>download</a>
+        {/if}
+      </div>
+    {/if}
+  {:else if face === "search"}
+    <div class="bp-list">
+      {#if found.nothing}
+        <p class="p-empty">nothing in your orbit is called “{found.query}”</p>
+        <Row title={`add “${found.query}” as an item`} href={resolve("/create")}>
+          {#snippet mark()}<span class="bp-plus" aria-hidden="true">+</span>{/snippet}
+        </Row>
+      {:else}
+        {#each found.items as hit (hit.body.id)}
+          <Row title={hit.body.label} meta={hit.body.kind === "item" ? [hit.body.item.section, hit.body.when].filter(Boolean).join(" · ") : ""}
+               trail={hit.body.kind === "item" ? hit.body.t : ""} trailTone={hit.body.tone}
+               current={hit.index === selected} onactivate={() => approach(hit.index)}>
+            {#snippet mark()}<span class="bp-dot" style:background={hit.body.tone}></span>{/snippet}
+          </Row>
+        {/each}
+        {#each found.documents as hit (hit.doc.id)}
+          <Row title={hit.doc.name} meta={`${hit.itemTitle} · ${hit.doc.size}`} onactivate={() => approachPaper(hit)}>
+            {#snippet mark()}<span class="bp-paper" aria-hidden="true">◆</span>{/snippet}
+          </Row>
+        {/each}
+        {#if !found.query}<Row title="→ add an item" href={resolve("/create")} />{/if}
+      {/if}
+    </div>
+  {/if}
+  </div>
+</Sheet>
+
+{#if previewDoc && previewShowing && row}
+  <Reader bind:open={readerOpen} doc={previewDoc} itemTitle={row.title} onremove={removePreviewDoc} />
+{/if}
 {/if}

@@ -16,9 +16,15 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * What is proved here: a press is the arrow key's press — same landing —
  * by pointer and by keyboard; both end-caps are reachable by Tab and wear a
  * focus ring; the target is the product's 44px floor even though the ink
- * stays 9.5px; a phone can traverse the whole belt with no keyboard; and the
- * end that has run out is disabled and says so rather than quietly doing
- * nothing.
+ * stays 9.5px on the desk; a phone can traverse the whole belt with no
+ * keyboard; and the end that has run out is disabled and says so rather than
+ * quietly doing nothing.
+ *
+ * On a phone the end-caps are the pocket's (#1072, proposal §2.3): 44px ghost
+ * pills at the band's shoulders, below the chrome rather than under it, in
+ * the pocket's 15px button type — owner decision §25 puts nothing a person
+ * reads to act under 13px, so the desk's 9.5px ink does not come to the
+ * phone. Everything else asserted here is the same on both.
  *
  * The same shape and harness as belt-chrome-viewport.spec.js, and here for
  * the same reason: it is real layout and real hit-testing, and this harness
@@ -31,6 +37,10 @@ const VIEWPORTS = [
   { width: 1600, height: 1000 },
   { width: 390, height: 844 },
 ];
+
+/** The end-caps' ink: the desk's 9.5px (#1062), the pocket's button type
+    (§1.6, 15px) below the CON-10 switch (#1072). */
+const INK = (/** @type {number} */ width) => (width <= 900 ? "15px" : "9.5px");
 
 /** The roll: GLIDE is 420ms and the card lands 430ms after the press. */
 const SETTLE = 500;
@@ -166,7 +176,7 @@ for (const { width, height } of VIEWPORTS) {
     for (const box of boxes) {
       expect(box.w, `end-cap ${box.step} is too narrow to press`).toBeGreaterThanOrEqual(44);
       expect(box.h, `end-cap ${box.step} is too short to press`).toBeGreaterThanOrEqual(44);
-      expect(box.ink, `end-cap ${box.step}'s ink changed size`).toBe("9.5px");
+      expect(box.ink, `end-cap ${box.step}'s ink changed size`).toBe(INK(width));
     }
   });
 }
