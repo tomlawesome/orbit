@@ -35,7 +35,7 @@ const ROUTES = [
   { path: "/home" },
   { path: "/item/i-mot" },
   { path: "/create" },
-  { path: "/inbox", pending: "step 5 (inbox)" },
+  { path: "/inbox" },
   { path: "/household/hh-lawson-1", pending: "step 6 (household)",
     chromePending: "step 6 (household): the page overflows sideways and carries the chrome off-screen" },
   { path: "/settings", pending: "step 7 (settings)" },
