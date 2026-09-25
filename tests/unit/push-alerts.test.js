@@ -316,7 +316,9 @@ describe("the signed-out surface", () => {
       .filter(([, source]) => source.includes("$lib/push/alerts.js"))
       .map(([name]) => name);
 
-    expect(callers).toEqual(["settings/+page.svelte"]);
+    /* One screen, two dialects: the helm's desk cards and its phone layout
+       (#1125), both rendered by the /settings route and chosen by CSS. */
+    expect(callers.sort()).toEqual(["settings/+page.svelte", "settings/pocket.svelte"]);
   });
 
   it("registers a service worker nowhere else, and never on the sign-in surface", () => {
