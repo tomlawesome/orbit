@@ -5,6 +5,7 @@
   import NorthStar from "$lib/pocket/NorthStar.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
+  import Sky from "$lib/pocket/Sky.svelte";
   import { mountReorder } from "$lib/pocket/reorder.js";
   import { wake } from "$lib/pocket/wake.js";
 
@@ -53,6 +54,7 @@
 
 <svelte:head><title>Orbit · pocket kit</title></svelte:head>
 
+<Sky />
 <Chrome {user} role="Lawson Home · owner" current="" />
 
 
