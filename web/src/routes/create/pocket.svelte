@@ -145,7 +145,7 @@
   <main class="pk-column">
     <header class="pk-head">
       <h1 class="p-title">New entry</h1>
-      <p class="pk-sub">add something to your orbit</p>
+      <p class="pc-sub">add something to your orbit</p>
     </header>
 
     {#if phase === "loading"}
@@ -211,7 +211,7 @@
     padding:calc(var(--p-chrome) + env(safe-area-inset-top) + 8px) var(--p-gutter)
       calc(var(--pc-bar, 120px) + var(--p-kb, 0px) + 24px)}
   .pk-head{margin:0 0 20px;padding:0 2px}
-  .pk-sub{margin:6px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
+  .pc-sub{margin:6px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
 
   /* Genesis (CON-9): the desk's constellations are cut by a phone's edge, so
      they are hidden (§1.10); a first light behind the title carries the
