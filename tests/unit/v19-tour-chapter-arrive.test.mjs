@@ -183,7 +183,7 @@ describe("the beats, in the mockup's order", () => {
       ["This is your star chart.", ".dial"],
       ["Every sun is a household you belong to.", ".sun-link"],
       ["That's your sun, at centre — your household, always here.", ".sun-link"],
-      ["The rest of the sky holds systems you don't belong to — tap one to ask to join.", ".minisys .msring"],
+      ["The rest of the sky holds systems you don't belong to — tap one to fly there.", ".minisys .msring"],
     ]);
   });
 
@@ -248,7 +248,7 @@ describe("the chapter played for real", () => {
       "This is your star chart.",
       "Every sun is a household you belong to.",
       "That's your sun, at centre — your household, always here.",
-      "The rest of the sky holds systems you don't belong to — tap one to ask to join.",
+      "The rest of the sky holds systems you don't belong to — tap one to fly there.",
     ]);
     ctx.destroy();
   });
