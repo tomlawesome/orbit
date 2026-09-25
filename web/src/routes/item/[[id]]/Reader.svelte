@@ -146,28 +146,29 @@
     event.preventDefault();
     zoomTo(shownScale * (event.deltaY < 0 ? 1.1 : 1 / 1.1));
   }
-  /** @type {Map<number, { x: number, y: number }>} */
-  const touches = new Map();
+  /* Plain, not reactive: only the handlers below read it. */
+  /** @type {Record<number, { x: number, y: number }>} */
+  const touches = {};
   let pinch = { d: 0, s: 1 };
   /** @param {PointerEvent} event */
   function down(event) {
     if (event.pointerType !== "touch") return;
-    touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (touches.size === 2) {
-      const [a, b] = [...touches.values()];
+    touches[event.pointerId] = { x: event.clientX, y: event.clientY };
+    if (Object.keys(touches).length === 2) {
+      const [a, b] = Object.values(touches);
       pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s: shownScale };
     }
   }
   /** @param {PointerEvent} event */
   function move(event) {
-    if (!touches.has(event.pointerId)) return;
-    touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (touches.size !== 2) return;
-    const [a, b] = [...touches.values()];
+    if (!(event.pointerId in touches)) return;
+    touches[event.pointerId] = { x: event.clientX, y: event.clientY };
+    if (Object.keys(touches).length !== 2) return;
+    const [a, b] = Object.values(touches);
     zoomTo(pinch.s * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d));
   }
   /** @param {PointerEvent} event */
-  function up(event) { touches.delete(event.pointerId); }
+  function up(event) { delete touches[event.pointerId]; }
 
   async function remove() {
     if (removing) return;
