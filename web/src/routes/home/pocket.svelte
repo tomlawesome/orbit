@@ -684,7 +684,9 @@
         <Row title="→ add an item" href={resolve("/create")} />
       {:else if results.nothing}
         <p class="p-empty">nothing in your orbit is called “{results.query}”</p>
-        <Row title={`add “${results.query}” as an item`} href={resolve("/create")}>
+        <!-- #1120: the name rides along; /create's pocket reads ?name= (§2.5). -->
+        <Row title={`add “${results.query}” as an item`}
+             href={`${resolve("/create")}?${new URLSearchParams({ name: results.query })}`}>
           {#snippet mark()}<span class="pk-plus" aria-hidden="true">+</span>{/snippet}
         </Row>
       {:else}
