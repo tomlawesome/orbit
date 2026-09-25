@@ -170,6 +170,10 @@ async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
  * sheet is the one holding the item's card.
  */
 const HATCH = '.p-sheet-layer:has(nav[aria-label="Go to"])';
+/* The pocket top chrome's way back. Chrome.svelte also renders the desk
+   `a.back`, display:none below the CON-10 switch, so a bare `a.back` matches
+   two elements (one hidden) and trips strict mode. */
+const TOP_BACK = "header.p-chrome a.back";
 const ITEM_SHEET = ".p-sheet-layer:has(.pk-item)";
 
 /** #730: every household this file makes is removed, even when the test fails. */
@@ -319,7 +323,7 @@ test("item page (pocket): fully reachable by keyboard", async ({ page }) => {
   const household = await seedHousehold(page, { withItem: true });
   try {
     await page.goto(`/item/${household.itemId}`);
-    await expect(page.locator("a.back")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(TOP_BACK)).toBeVisible({ timeout: 30_000 });
     await auditTabOrder(page, "item page (pocket)");
   } finally {
     await cleanup(page, household);
@@ -333,22 +337,26 @@ test("item page (pocket): actions and the back link work by keyboard", async ({ 
   const household = await seedHousehold(page, { withItem: true });
   try {
     await page.goto(`/item/${household.itemId}`);
-    await expect(page.locator("a.back")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(TOP_BACK)).toBeVisible({ timeout: 30_000 });
 
     await tabTo(page, { tag: "BUTTON", textIncludes: "reschedule" }, { screen: "item page (pocket) actions" });
     await page.keyboard.press("Enter");
-    await expect(page.locator(".panel")).toBeVisible();
-    await tabTo(page, { selector: "#a-due" }, { screen: "item page (pocket) reschedule panel" });
+    /* On a phone reschedule is the kit Sheet's "Reschedule" face (#1072),
+       not the desk inline `.panel`; by role and name, since the closed hatch
+       is a `.panel` too. */
+    const reschedule = page.getByRole("dialog", { name: "Reschedule" });
+    await expect(reschedule).toBeVisible();
+    await tabTo(page, { selector: "#p-due" }, { screen: "item page (pocket) reschedule sheet" });
     const dueField = await currentFocus(page);
     expect(dueField?.focusVisible, "item page (pocket): the reschedule date field has no visible focus indicator").toBe(true);
     const newDue = new Date(Date.now() + 40 * 86400000).toISOString().slice(0, 10);
-    await page.locator("#a-due").fill(newDue);
-    await tabTo(page, { selector: ".panel .btn-primary" }, { screen: "item page (pocket) reschedule panel" });
+    await page.locator("#p-due").fill(newDue);
+    await tabTo(page, { selector: ".bp-go" }, { screen: "item page (pocket) reschedule sheet" });
     await page.keyboard.press("Enter");
-    await expect(page.locator(".panel")).toBeHidden();
+    await expect(reschedule).toBeHidden();
     await expect(page.locator(".problem")).toBeHidden();
 
-    await tabTo(page, { selector: "a.back" }, { screen: "item page (pocket)" });
+    await tabTo(page, { selector: TOP_BACK }, { screen: "item page (pocket)" });
     const back = await currentFocus(page);
     expect(back?.focusVisible, "item page (pocket): the back link has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
@@ -434,11 +442,11 @@ test("settings (pocket): the account panel is light-dismiss by keyboard", async 
   try {
     await page.goto("/settings");
     await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
-    /* Chrome.svelte's account panel is the same component instance
-       v19-keyboard.spec.ts's desk settings test exercises; walked again here
-       to prove it still light-dismisses at the phone viewport, since it is
-       not itself dialect-switched. */
-    await auditLightDismiss(page, "settings (pocket)", "button.orb", "#account");
+    /* Below the CON-10 switch Chrome.svelte's account menu is the hatch
+       sheet (#1120), opened from the top chrome's orb; the desk dropdown
+       (`button.orb`, `#account`) is display:none here. Keyboard-openable,
+       Escape closes it, focus returns to the orb. */
+    await auditLightDismiss(page, "settings (pocket)", "button.porb", HATCH);
   } finally {
     await cleanup(page, household);
   }
