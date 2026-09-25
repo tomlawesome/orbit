@@ -337,7 +337,10 @@ test.describe("the signed-in v19 sweep", () => {
 
   const PLAIN_ROUTES: Array<{ path: string; ready: (page: Page) => Promise<unknown> }> = [
     { path: "/inbox", ready: (page) => expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible() },
-    { path: "/create", ready: (page) => expect(page.locator("#f-name")).toBeVisible() },
+    /* #1120: the form's one exposed name field -- the desk card's `#f-name`,
+       or on a phone the pocket's own form (proposal §2.5), whose fields only
+       draw once the households have loaded; the other dialect's is hidden. */
+    { path: "/create", ready: (page) => expect(page.getByRole("textbox", { name: "name", exact: true })).toBeVisible() },
     { path: "/settings", ready: (page) => expect(page.getByRole("heading", { name: "Settings" })).toBeVisible() },
     { path: "/settings/mail", ready: (page) => expect(page.locator(".relay-card")).toBeVisible() },
     {
