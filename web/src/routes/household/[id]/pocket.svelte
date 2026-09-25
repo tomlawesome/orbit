@@ -63,16 +63,30 @@
   const v = $derived(household);
 
   /* ── the page's unsaved edits (2b) ────────────────────────────────────── */
-  let identity = $state({ name: "", timezone: "", currency: "" });
+  /** @param {HouseholdView} one */
+  function identityOf(one) {
+    return { name: one.name, timezone: one.timezone, currency: one.currency };
+  }
+  /** @param {HouseholdView} one @returns {EditorRow[]} */
+  function rowsOf(one) {
+    return one.sections.map((row) => ({ ...row }));
+  }
+  /* Seeded from the household itself, not blanks the effect below fills in
+     after the first paint: blanks read as three unsaved changes, and the
+     save bar rose on arrival and slid away again. The effect keeps them in
+     step with every later load. */
+  // svelte-ignore state_referenced_locally
+  let identity = $state(identityOf(household));
   /** @type {EditorRow[]} */
-  let rows = $state([]);
+  // svelte-ignore state_referenced_locally
+  let rows = $state(rowsOf(household));
   let saving = $state(false);
   /** @type {string | null} */
   let problem = $state(null);
 
   function reset() {
-    identity = { name: household.name, timezone: household.timezone, currency: household.currency };
-    rows = household.sections.map((row) => ({ ...row }));
+    identity = identityOf(household);
+    rows = rowsOf(household);
   }
   /* Whatever the server says replaces every local edit: a save reloads, and
      stale dirt on something it has since answered for would be a lie. */
@@ -821,8 +835,11 @@
   .hh-switch[aria-checked=true] i{background:color-mix(in srgb, var(--accent) 30%, transparent);border-color:var(--accent)}
   .hh-switch[aria-checked=true] i::after{transform:translateX(18px);background:var(--accent)}
   :global([data-theme=retrograde]) .hh-switch[aria-checked=true] i::after{box-shadow:0 0 8px var(--bloom)}
-  .hh-switch:focus-visible{outline:none}
-  .hh-switch:focus-visible i{outline:2px solid var(--accent);outline-offset:2px}
+  /* §25: the ring sits on the focused button itself, not its drawn track --
+     a ring on the child left the button with no indicator of its own. The
+     pill inset by 3px rings the track as the track's own outline did. */
+  .hh-switch{border-radius:22px}
+  .hh-switch:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
 
   /* The mark tray (#867): 44px marks, four to a line. */
   .hh-tray{display:grid;grid-template-columns:repeat(4, var(--p-hit));justify-content:space-between;gap:8px;margin:0 0 4px}
