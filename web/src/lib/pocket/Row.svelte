@@ -25,6 +25,11 @@
    * `bead` draws the trail as an accent count bead (the inbox waiting);
    * `trailName` is what a screen reader hears instead of the drawn trail.
    *
+   * `end` draws a control in the trailing column instead of a value (the
+   * household's section switch, §2.10). It sits inside the face so it lifts
+   * with the row on a long press, and like the trail it goes while the tray
+   * is out.
+   *
    * `meta` speaks mono, the desk's face for data (section · amount, date,
    * role). Set `metaFace="ui"` wherever the meta is a sentence or
    * descriptive prose (a failure's reason, a status in words): it then
@@ -44,6 +49,7 @@
    *   acts?: import("./row.js").RowAct[],
    *   onmove?: (direction: -1 | 1) => void,
    *   mark?: import('svelte').Snippet,
+   *   end?: import('svelte').Snippet,
    *   below?: import('svelte').Snippet,
    * }} Props
    */
@@ -63,6 +69,7 @@
     acts = [],
     onmove = undefined,
     mark = undefined,
+    end = undefined,
     below = undefined,
   } = $props();
 
@@ -129,6 +136,7 @@
     {#if trail || trailSub}
       <span class="trail" class:bead style:color={trailTone || undefined}><span aria-hidden={trailName ? "true" : undefined}>{trail}</span>{#if trailName}<span class="sr-only">{trailName}</span>{/if}{#if trailSub}<small>{trailSub}</small>{/if}</span>
     {/if}
+    {#if end}<span class="end">{@render end()}</span>{/if}
   </svelte:element>
   {#if acts.length}
     <div class="acts" data-row-acts>
@@ -211,6 +219,8 @@
     padding-right:max(var(--p-gutter), var(--p-row-tray, 0px))}
   :global(.p-row[data-open]) .meta,:global(.p-row[data-swiping]) .meta{visibility:hidden}
   :global(.p-row[data-open]) .trail,:global(.p-row[data-swiping]) .trail{display:none}
+  .end{flex:none;display:flex;align-items:center}
+  :global(.p-row[data-open]) .end,:global(.p-row[data-swiping]) .end{display:none}
 
   /* The global .sr-only leaves a button's own padding and border, which
      would draw a small visible box. */
