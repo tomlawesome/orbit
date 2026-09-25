@@ -478,12 +478,15 @@
     </button>
   {/snippet}
 </TopChrome>
-<div class="mpage">
+<!-- #1120: the pocket's one main landmark and its one h1, as the desk's
+     `.desk` role=main and sr-only h1 are; the section heads under it are h2. -->
+<main class="mpage">
+  <h1 class="sr-only">Orbit</h1>
   {#if view?.emptySky}
   <!-- §11 (#453): the pocket's labelled sky is a list — each system a ring
        and a name, nothing else. Tapping asks; asking rides data attributes
        that +page.svelte binds, the same ask the desk's labelled sky raises. -->
-  <div class="mgroup adrift"><h3 class="p-caps">Systems around you</h3>
+  <div class="mgroup adrift"><h2 class="p-caps">Systems around you</h2>
     {#each Object.entries(view.galaxy) as [id, hh] (id)}
       <div class="mitem askrow" data-ask={id} data-ask-name={hh.name} data-ask-requested={String(Boolean(hh.requested))}>
         <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
@@ -552,7 +555,7 @@
   <button class="msearch" onclick={openSearch}>explore your world</button>
   <div class="pk-below">
   {#if groups?.attention.length}
-    <h3 class="p-caps">Needs attention</h3>
+    <h2 class="p-caps">Needs attention</h2>
     <div class="pk-list">
       {#each groups.attention as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
@@ -563,7 +566,7 @@
       {/each}
     </div>
   {:else if groups?.later.length}
-    <h3 class="p-caps">Needs attention</h3>
+    <h2 class="p-caps">Needs attention</h2>
     <div class="pk-list">
       <Row title="nothing needs you" meta={`next up ${groups.later[0].title}${groups.later[0].days !== null ? `, ${tlabel(groups.later[0])}` : ""}`}
            onactivate={() => openItem(groups.later[0].id)}>
@@ -574,7 +577,7 @@
   <!-- #466: the pocket's signals — what the relay caught. A suggestion row
        raises the suggestion sheet; failures speak the server's words. -->
   {#if view?.suggestions?.length || view?.mailReading?.length || view?.mailFailures?.length}
-    <h3 class="p-caps">Signals — your relay caught</h3>
+    <h2 class="p-caps">Signals — your relay caught</h2>
     <div class="pk-list">
       {#each view.suggestions as s (s.id)}
         <div class="pk-sugg">
@@ -604,7 +607,7 @@
   {/if}
   </div>
   {/if}
-</div>
+</main>
 {#if !view?.emptySky}<NorthStar />{/if}
 </div>
 
