@@ -5,6 +5,8 @@
   import Chrome from "$lib/Chrome.svelte";
   import { rotateRelay } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
+  import { isPocket } from "$lib/pocket/media.js";
+  import Pocket from "./pocket.svelte";
 
   /**
    * Your relay — the per-user mail-in address (CON-9: "settings-mail =
@@ -39,6 +41,7 @@
   let working = $state(false);
   const relay = $derived(rotated ?? data.relay);
   const failures = $derived(data.failures ?? []);
+  const pocket = isPocket();
   /** @type {(value: string | number | Date) => string} */
   const shortDate = (value) =>
     new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
@@ -66,6 +69,9 @@
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
   onMount(() => {
+    /* #1125: the phone hides the satellites (their labels would be cut at
+       the screen's edge), so it does not fly them either. */
+    if (isPocket()) return;
     const seed = data.fixtures ? seedFromWorkspace(data.relay.address) : rollSeed();
     return mountSatellites(/** @type {HTMLDivElement} */ (backdropRoot), seed);
   });
@@ -75,6 +81,9 @@
   <link rel="stylesheet" href="/screens/family.css" />
   <title>Orbit — your relay</title>
 </svelte:head>
+
+<!-- #1125, proposal §2.9: the phone's own relay, chosen by CSS. -->
+<Pocket relay={data.relay} bind:rotated {failures} fixtures={Boolean(data.fixtures)} />
 
 <div class="relay-page">
 <div class="satellites" bind:this={backdropRoot} aria-hidden="true"></div>
@@ -86,7 +95,7 @@
         role={data.household ? `${data.household.name ?? ""} · ${data.household.canManage ? "owner" : "member"}` : ""} />
 <!-- §14 (#471): clicking off the card returns to wherever the reader came
      from — the inbox, settings, or home as the deep-link fallback. -->
-<div class="stage" role="main" onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
+<div class="stage" role={pocket ? undefined : "main"} onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
   <div class="dish" id="relaydish"><span></span><span></span><span></span><i></i></div>
   <h1 style="text-align:center">Your relay</h1>
   <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
