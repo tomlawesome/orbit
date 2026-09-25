@@ -138,7 +138,10 @@ export function mountRow(row, { holdMs = 6000 } = {}) {
     if (track.axis === null) {
       track.axis = dragAxis(dx, event.clientY - track.y);
       if (track.axis === "y") { track = null; return; }
-      if (track.axis === "x") face.setPointerCapture?.(event.pointerId);
+      if (track.axis === "x") {
+        row.dataset.swiping = "";
+        face.setPointerCapture?.(event.pointerId);
+      }
     }
     if (track.axis !== "x") return;
     const dt = Math.max(1, event.timeStamp - track.lastT);
@@ -154,6 +157,7 @@ export function mountRow(row, { holdMs = 6000 } = {}) {
     const dx = event.clientX - track.x;
     const velocity = track.v;
     track = null;
+    delete row.dataset.swiping;
     if (!moved) return;
     swallowClick = true;
     if (swipeSettles({ dx, reveal: reveal(), open: isOpen, velocity })) open();
@@ -162,6 +166,7 @@ export function mountRow(row, { holdMs = 6000 } = {}) {
   const onCancel = () => {
     if (!track) return;
     track = null;
+    delete row.dataset.swiping;
     if (isOpen) open();
     else close();
   };

@@ -4,6 +4,9 @@
   import { sheetRelease } from "./gesture.js";
   import { portal } from "./portal.js";
   import { holdSheet, standOnKeyboard } from "./sheet.js";
+  /* First, with no comment of its own: Svelte hoists $props.id() and would
+     carry a leading doc comment into the compiled declaration (#1120). */
+  const uid = $props.id();
 
   /**
    * THE SHEET (#1120, proposal §1.4): one component, three sizes, used
@@ -22,7 +25,7 @@
    * `open` is bindable; the sheet sets it false itself on any dismiss and
    * then calls `onclose`. One sheet at a time is the caller's rule: a sheet
    * that needs another grows rather than stacking.
-   * @type {{
+   * @typedef {{
    *   open?: boolean,
    *   size?: "callout" | "list" | "full",
    *   title: string,
@@ -31,8 +34,9 @@
    *   history?: boolean,
    *   children?: import('svelte').Snippet,
    *   head?: import('svelte').Snippet,
-   * }}
+   * }} Props
    */
+  /** @type {Props} */
   let {
     open = $bindable(false),
     size = "callout",
@@ -44,7 +48,6 @@
     head = undefined,
   } = $props();
 
-  const uid = $props.id();
   /** @type {HTMLElement | undefined} */
   let layer = $state();
   /** @type {HTMLElement | undefined} */
@@ -181,7 +184,7 @@
 
   /* The panel stands on the keyboard (--p-kb from sheet.js) and never
      taller than what is left above it (--p-vvh). */
-  .panel{--h:var(--p-vvh, 100dvh);position:absolute;left:0;right:0;bottom:var(--p-kb, 0px);
+  .panel{--h:var(--p-vvh, 100dvh);box-sizing:border-box;position:absolute;left:0;right:0;bottom:var(--p-kb, 0px);
     margin:0 auto;max-width:var(--p-column);display:flex;flex-direction:column;
     max-height:calc(var(--h) - env(safe-area-inset-top) - 8px);
     border-radius:18px 18px 0 0;border:1px solid var(--line);border-bottom:0;

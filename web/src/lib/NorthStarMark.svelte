@@ -1,4 +1,7 @@
 <script>
+  /* First, with no comment of its own: Svelte hoists $props.id() and would
+     carry a leading doc comment into the compiled declaration (#1120). */
+  const uid = $props.id();
   /**
    * The north star's mark (#1120): the desk's create handle, drawn in its
    * three forms, one per pack family: the four-point glint, retrograde's
@@ -7,10 +10,10 @@
    * the same mark rather than a copy; the pack chooses the form in CSS here.
    * The gradient id is per instance, so two marks in one document (the
    * desk's and the pocket's, one of them hidden) never share a reference.
-   * @type {{ size?: number }}
+   * @typedef {{ size?: number }} Props
    */
+  /** @type {Props} */
   let { size = 30 } = $props();
-  const uid = $props.id();
 </script>
 
 <svg class="nsmark" width={size} height={size} viewBox="-15 -15 30 30" aria-hidden="true">

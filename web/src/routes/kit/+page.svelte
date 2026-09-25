@@ -163,7 +163,7 @@
   .t-meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);margin:0 0 8px}
   .flush{margin:0}
   .flushcard{padding:4px 0;overflow:hidden;display:flex;flex-direction:column;gap:2px}
-  .ring{width:28px;height:28px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;
+  .ring{width:24px;height:24px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;
     font:600 .75rem var(--mono);color:var(--ink-mid)}
   .dot{width:10px;height:10px;border-radius:50%}
   .aster{color:var(--accent-text)}

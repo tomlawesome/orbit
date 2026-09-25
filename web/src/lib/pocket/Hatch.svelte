@@ -6,6 +6,9 @@
   import ArmButton from "./ArmButton.svelte";
   import Row from "./Row.svelte";
   import Sheet from "./Sheet.svelte";
+  /* First, with no comment of its own: Svelte hoists $props.id() and would
+     carry a leading doc comment into the compiled declaration (#1120). */
+  const uid = $props.id();
 
   /**
    * THE HATCH (#1120, proposal §2.2): the account menu as a list sheet,
@@ -18,15 +21,16 @@
    * it is the belt's only way in (#1014). Administration shows to instance
    * admins only; the page's own server gate is unchanged either way.
    * `inboxCount` adds "· N waiting" when a caller has it.
-   * @type {{
+   * @typedef {{
    *   open?: boolean,
    *   name?: string,
    *   roleLine?: string,
    *   current?: string,
    *   isAdmin?: boolean,
    *   inboxCount?: number | null,
-   * }}
+   * }} Props
    */
+  /** @type {Props} */
   let {
     open = $bindable(false),
     name = "",
@@ -36,7 +40,6 @@
     inboxCount = null,
   } = $props();
 
-  const uid = $props.id();
   let active = $state(DEFAULT_THEME);
   $effect(() => {
     if (open) active = document.documentElement.dataset.theme || DEFAULT_THEME;
