@@ -5,6 +5,7 @@
   import NorthStar from "$lib/pocket/NorthStar.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
+  import Sky from "$lib/pocket/Sky.svelte";
   import { mountReorder } from "$lib/pocket/reorder.js";
   import { wake } from "$lib/pocket/wake.js";
 
@@ -53,6 +54,7 @@
 
 <svelte:head><title>Orbit · pocket kit</title></svelte:head>
 
+<Sky />
 <Chrome {user} role="Lawson Home · owner" current="" />
 
 
@@ -81,10 +83,10 @@
     {#each members as m (m.id)}
       <Row title={m.name} meta={m.role} trail={m.role === "owner" ? "OWNER" : ""}
            acts={[
-             { label: "hand over", name: `Hand over to ${m.name}`, onact: () => wake(`Handed over to ${m.name}`) },
+             { label: "hand over", name: `Hand over to ${m.name}`, tone: "accent", onact: () => wake(`Handed over to ${m.name}`) },
              { label: "remove", name: `Remove ${m.name}`, onact: () => removeMember(m.id), danger: true },
            ]}>
-        {#snippet mark()}<span class="ring">{m.name.split(" ").map((w) => w[0]).join("")}</span>{/snippet}
+        {#snippet mark()}<span class="p-avatar" class:owner={m.role === "owner"}>{m.name.split(" ").map((w) => w[0]).join("")}</span>{/snippet}
       </Row>
     {/each}
   </section>
@@ -92,14 +94,14 @@
   <h2 class="p-caps">Rows · navigate, and acts that are the point</h2>
   <section class="p-card flushcard" data-kit="rows">
     <Row title="Boiler service with a long name that ellipses" meta="Home · £84" trail="T−16d" trailSub="29 Aug"
-         trailTone="var(--warm)" onactivate={() => (callout = true)}>
-      {#snippet mark()}<span class="dot" style="background:var(--warm)"></span>{/snippet}
+         trailTone="var(--warm-text)" onactivate={() => (callout = true)}>
+      {#snippet mark()}<span class="p-body soon ter"></span>{/snippet}
     </Row>
     <Row title="Car insurance" meta="Car · £412" trail="T−41d" trailSub="23 Oct" href="/kit#rows">
-      {#snippet mark()}<span class="dot" style="background:var(--ok)"></span>{/snippet}
+      {#snippet mark()}<span class="p-body ok con"></span>{/snippet}
     </Row>
     <Row title="Energy bill, caught by your relay" meta="from bill-sept.pdf · burns up in 12d">
-      {#snippet mark()}<span class="dot" style="background:var(--accent)"></span>{/snippet}
+      {#snippet mark()}<span class="p-body sug"></span>{/snippet}
       {#snippet below()}
         <button class="p-pill filled">Add to orbit</button>
         <button class="p-pill">Dismiss</button>
@@ -111,9 +113,32 @@
   <section class="p-card flushcard" data-kit="sections" use:mountReorder={{ onreorder: reorder }}>
     {#each sections as name, index (name)}
       <Row title={name} meta="section" onmove={(direction) => move(index, direction)}>
-        {#snippet mark()}<span class="aster" aria-hidden="true">✦</span>{/snippet}
+        {#snippet mark()}<span class="p-aster" aria-hidden="true">✦</span>{/snippet}
       </Row>
     {/each}
+  </section>
+
+  <h2 class="p-caps">Pills · act colours</h2>
+  <section class="p-card p-pills" data-kit="act-pills">
+    <button class="p-pill act-ok">complete</button>
+    <button class="p-pill act-up">reschedule</button>
+    <button class="p-pill act-warm">snooze</button>
+    <button class="p-pill act-accent">edit</button>
+  </section>
+
+  <h2 class="p-caps">Marks</h2>
+  <section class="p-card marks" data-kit="marks">
+    <span class="p-body over" title="overdue"></span>
+    <span class="p-body soon ter" title="inspection"></span>
+    <span class="p-body up con" title="renewal"></span>
+    <span class="p-body ended exp" title="expiry"></span>
+    <span class="p-body sug" title="suggested"></span>
+    <span class="p-body ok breathing" title="breathing"></span>
+    <span class="p-body failed" title="failed"></span>
+    <span class="p-avatar">AL</span>
+    <span class="p-avatar owner">RL</span>
+    <span class="p-paper" aria-hidden="true">◆</span>
+    <span class="p-aster" aria-hidden="true">✦</span>
   </section>
 
   <h2 class="p-caps">States</h2>
@@ -122,6 +147,15 @@
     <p class="p-empty">nothing in orbit yet · add an item</p>
     <button class="p-pill">try again</button>
     <p class="p-error">couldn't save — still here, try again</p>
+  </section>
+  <section class="p-card proposed" data-kit="empty">
+    <p class="p-empty">nothing in this section yet</p>
+    <button class="p-pill act-accent">add an item</button>
+  </section>
+  <section class="p-card danger" data-kit="danger">
+    <h2 class="p-caps">Delete this household</h2>
+    <p class="p-empty">every item and document goes, for everyone in it</p>
+    <ArmButton label="delete household" name="Delete Lawson Home" onfire={() => wake("deleted (kit)")} />
   </section>
 
   <h2 class="p-caps">Sheets and the wake</h2>
@@ -137,16 +171,21 @@
 <Sheet bind:open={callout} size="callout" title="Boiler service">
   <p class="t-meta">T−16d · 29 Aug · £84 · ◆ 2 documents</p>
   <div class="p-pills sheet-acts">
-    <button class="p-pill filled">open</button>
+    <button class="p-pill filled">open →</button>
     <button class="p-pill">documents</button>
   </div>
 </Sheet>
 <Sheet bind:open={list} size="list" title="Documents">
   {#each ["invoice-2025.pdf", "certificate.pdf", "manual.pdf", "photo-plate.jpg", "warranty.pdf", "quote-2026.pdf"] as doc (doc)}
-    <Row title={doc} meta="scanned clean" trail="84 KB">{#snippet mark()}<span aria-hidden="true">◆</span>{/snippet}</Row>
+    <Row title={doc} meta="scanned clean" trail="84 KB">{#snippet mark()}<span class="p-paper">◆</span>{/snippet}</Row>
   {/each}
 </Sheet>
 <Sheet bind:open={full} size="full" title="Edit item">
+  <div class="kvs">
+    <div class="p-kv">due <b class="soon">T−16d</b></div>
+    <div class="p-kv">date <b>29 Aug</b></div>
+    <div class="p-kv">cost <b>£84</b></div>
+  </div>
   <label class="field">Name<input value="Boiler service" enterkeyhint="done"></label>
   <label class="field">Cost<input value="84.00" inputmode="decimal" enterkeyhint="done"></label>
   <button class="p-pill filled wide">Save</button>
@@ -162,11 +201,9 @@
   .t-body{font:var(--p-type-body)/1.4 var(--ui);margin:0 0 8px}
   .t-meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);margin:0 0 8px}
   .flush{margin:0}
-  .flushcard{padding:4px 0;overflow:hidden;display:flex;flex-direction:column;gap:2px}
-  .ring{width:24px;height:24px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;
-    font:600 .75rem var(--mono);color:var(--ink-mid)}
-  .dot{width:10px;height:10px;border-radius:50%}
-  .aster{color:var(--accent-text)}
+  .flushcard{padding:4px 0;overflow:hidden;display:flex;flex-direction:column}
+  .marks{display:flex;flex-wrap:wrap;align-items:center;gap:18px}
+  .kvs{margin-bottom:16px}
   .sheet-acts{margin-top:12px}
   .sheet-acts > :global(*){flex:1}
   .field{display:flex;flex-direction:column;gap:6px;font:var(--p-type-meta) var(--mono);color:var(--ink-quiet);margin-bottom:16px}

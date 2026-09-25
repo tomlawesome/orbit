@@ -68,12 +68,13 @@ test("the kit at rest", async ({ page }) => {
   await shot(page, "01-kit-rest");
   await page.locator("[data-kit=members]").scrollIntoViewIfNeeded();
   await shot(page, "02-rows-rest");
-  /* No act is visible at rest: every act button is covered by its row. */
+  /* No act is visible at rest: every act button is off its row (clipped,
+     or off the screen, where nothing is hit at all) or covered. */
   const covered = await page.evaluate(() =>
     [...document.querySelectorAll("[data-row-acts] button")].every((b) => {
       const r = b.getBoundingClientRect();
       const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return hit !== null && !b.contains(hit);
+      return !(hit && b.contains(hit));
     }));
   expect(covered, "a row act is visible without a swipe").toBe(true);
 });
@@ -102,30 +103,89 @@ test("row acts: keyboard reveals with an arrow, Tab walks them, Escape hides", a
   await expect(face).toBeFocused();
 });
 
-test("row acts: a touch swipe reveals, the danger act arms then fires, the wake undoes", async ({ page }) => {
-  await open(page);
-  const face = page.getByRole("group", { name: "Ada Lawson" });
-  await face.scrollIntoViewIfNeeded();
-  const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await face.boundingBox());
-  await swipe(page, { x: box.x + box.width - 30, y: box.y + box.height / 2 }, -200);
-  const row = page.locator("[data-row]", { has: face });
-  await expect(row).toHaveAttribute("data-open", "");
-  await page.waitForTimeout(300);
-  await shot(page, "03-row-swiped");
+/**
+ * The swiped row's layout (Fable, #1120): the face has not moved, the tray
+ * sits inside the row on its trailing side, the mark and at least 56px of
+ * the title show left of it, and every pill is 44 tall with a 13px+ label.
+ * @param {import('@playwright/test').Page} page
+ * @param {import('@playwright/test').Locator} row
+ * @param {{ x: number }} rest the face's box before the swipe
+ */
+async function expectSwipedLayout(page, row, rest) {
+  const m = await row.evaluate((el) => {
+    const box = (/** @type {Element | null} */ n) => {
+      const r = /** @type {Element} */ (n).getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+    };
+    const face = /** @type {HTMLElement} */ (el.querySelector("[data-row-face]"));
+    const title = /** @type {HTMLElement} */ (el.querySelector(".title"));
+    const t = title.getBoundingClientRect();
+    const hit = document.elementFromPoint(t.left + 8, t.top + t.height / 2);
+    return {
+      width: innerWidth,
+      row: box(el),
+      face: box(face),
+      faceTransform: getComputedStyle(face).transform,
+      mark: box(el.querySelector(".mark")),
+      title: box(title),
+      titleHit: Boolean(hit && title.contains(hit)),
+      tray: box(el.querySelector("[data-row-acts]")),
+      pills: [...el.querySelectorAll("[data-row-acts] button")].map((b) => {
+        const label = [...b.querySelectorAll("span")].find((s) => getComputedStyle(s).opacity !== "0") ?? b;
+        return { height: b.getBoundingClientRect().height, font: parseFloat(getComputedStyle(label).fontSize) };
+      }),
+    };
+  });
+  expect(m.faceTransform, "the face moved").toBe("none");
+  expect(Math.abs(m.face.left - rest.x), "the face moved").toBeLessThan(0.5);
+  expect(m.tray.right).toBeLessThanOrEqual(m.row.right + 0.5);
+  expect(m.tray.right).toBeLessThanOrEqual(m.width);
+  expect(m.tray.width, "the tray is over its cap").toBeLessThanOrEqual(m.row.width - 120 + 0.5);
+  expect(m.mark.left).toBeGreaterThanOrEqual(0);
+  expect(m.mark.right, "the tray covers the mark").toBeLessThanOrEqual(m.tray.left);
+  expect(m.title.left).toBeGreaterThanOrEqual(0);
+  expect(m.tray.left - m.title.left, "less than 56px of the title shows").toBeGreaterThanOrEqual(56);
+  expect(m.titleHit, "the title's start is covered").toBe(true);
+  expect(m.pills.length).toBe(2);
+  for (const pill of m.pills) {
+    expect(pill.height).toBeGreaterThanOrEqual(44);
+    expect(pill.font).toBeGreaterThanOrEqual(13);
+  }
+}
 
-  const remove = page.getByRole("button", { name: "Remove Ada Lawson" });
-  await remove.tap();
-  await expect(page.getByRole("button", { name: "tap again to remove Ada Lawson" })).toBeVisible();
-  await page.waitForTimeout(200);
-  await shot(page, "04-row-armed");
-  await page.getByRole("button", { name: "tap again to remove Ada Lawson" }).tap();
-  await expect(page.getByRole("group", { name: "Ada Lawson" })).toHaveCount(0);
-  await expect(page.locator(".p-wake-host [role=status]")).toHaveText("Ada Lawson removed");
-  await page.waitForTimeout(300);
-  await shot(page, "05-wake-undo");
-  await page.getByRole("button", { name: "undo" }).tap();
-  await expect(page.getByRole("group", { name: "Ada Lawson" })).toHaveCount(1);
-});
+for (const width of [390, 360]) {
+  test.describe(`at ${width}`, () => {
+    test.use({ viewport: { width, height: 844 } });
+
+    test("row acts: a touch swipe slides the tray over a still face, the danger act arms then fires, the wake undoes", async ({ page }) => {
+      await open(page);
+      const face = page.getByRole("group", { name: "Ada Lawson" });
+      await face.scrollIntoViewIfNeeded();
+      const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await face.boundingBox());
+      await swipe(page, { x: box.x + box.width - 30, y: box.y + box.height / 2 }, -200);
+      const row = page.locator("[data-row]", { has: face });
+      await expect(row).toHaveAttribute("data-open", "");
+      await page.waitForTimeout(300);
+      await expectSwipedLayout(page, row, box);
+      await expect(row.locator(".meta")).toBeHidden();
+      await shot(page, `03-row-swiped-${width}`);
+
+      const remove = page.getByRole("button", { name: "Remove Ada Lawson" });
+      await remove.tap();
+      await expect(page.getByRole("button", { name: "tap again to remove Ada Lawson" })).toBeVisible();
+      await page.waitForTimeout(200);
+      await expectSwipedLayout(page, row, box);
+      await shot(page, `04-row-armed-${width}`);
+      await page.getByRole("button", { name: "tap again to remove Ada Lawson" }).tap();
+      await expect(page.getByRole("group", { name: "Ada Lawson" })).toHaveCount(0);
+      await expect(page.locator(".p-wake-host [role=status]")).toHaveText("Ada Lawson removed");
+      await page.waitForTimeout(300);
+      await shot(page, `05-wake-undo-${width}`);
+      await page.getByRole("button", { name: "undo" }).tap();
+      await expect(page.getByRole("group", { name: "Ada Lawson" })).toHaveCount(1);
+    });
+  });
+}
 
 test("arm-then-fire disarms by itself after 4s", async ({ page }) => {
   await open(page);

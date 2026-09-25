@@ -3,16 +3,17 @@ import { dragAxis, swipeOffset, swipeSettles } from "./gesture.js";
 /**
  * One management act on a row. `name` is the full accessible name, object
  * included ("Remove Emma Lawson"); `label` is what the pill says ("remove").
- * @typedef {{ label: string, name: string, onact: () => unknown, danger?: boolean }} RowAct
+ * @typedef {{ label: string, name: string, onact: () => unknown, danger?: boolean, tone?: "ok" | "up" | "warm" | "accent" }} RowAct
  */
 
 /**
  * ROW ACTS, BEHIND A SWIPE (#1120, proposal §1.5; owner decision §25 and
  * #1122). The acts on a management row (remove, hand over, resend, ...) are
  * revealed only by a horizontal swipe: no tap opens them and no extra button
- * shows at rest. The row's face slides toward the leading edge to uncover
- * them; it springs back on a tap elsewhere, on scroll, or after 6s. A swipe
- * never performs an act.
+ * shows at rest. The row's face never moves: the act tray slides over it
+ * from the trailing edge (Fable, #1120), and the face's text column shrinks
+ * to the tray's width. The tray goes back on a tap elsewhere, on scroll, or
+ * after 6s. A swipe never performs an act.
  *
  *   keyboard       focus the row, ← or → reveals, Tab walks the acts,
  *                  Escape hides and returns to the row
@@ -23,8 +24,10 @@ import { dragAxis, swipeOffset, swipeSettles } from "./gesture.js";
  *
  * The DOM this drives (Row.svelte draws it):
  *   [data-row]            the row
- *     [data-row-face]     what the row shows; slides
- *     [data-row-acts]     the acts, under the face on the trailing side
+ *     [data-row-face]     what the row shows; stays put
+ *     [data-row-acts]     the act tray, over the face, off the trailing side
+ *                         at rest; CSS places it open or shut from
+ *                         [data-open], this only moves it with a finger
  *       button...
  *
  * @param {HTMLElement} row
@@ -43,10 +46,21 @@ export function mountRow(row, { holdMs = 6000 } = {}) {
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let timer;
 
-  const place = (/** @type {number} */ x, /** @type {boolean} */ animate) => {
-    face.style.transition = animate ? "" : "none";
-    face.style.transform = x === 0 ? "" : `translateX(${x}px)`;
+  /* `x` is swipeOffset's answer, how far open (negative) the finger has
+     pulled the tray; the tray sits `reveal + x` from its open place. With
+     `settle`, hand the tray back to the CSS, which slides it home. */
+  const place = (/** @type {number} */ x, /** @type {boolean} */ settle) => {
+    if (!acts) return;
+    if (settle) {
+      acts.style.transition = "";
+      acts.style.transform = "";
+      return;
+    }
+    acts.style.transition = "none";
+    acts.style.transform = `translateX(${Math.max(0, reveal() + x)}px)`;
   };
+  /* The face's text column makes room for the whole tray at once. */
+  const makeRoom = () => row.style.setProperty("--p-row-tray", `${reveal()}px`);
   const setTabStops = (/** @type {boolean} */ on) => {
     for (const button of buttons()) button.tabIndex = on ? 0 : -1;
   };
@@ -70,6 +84,7 @@ export function mountRow(row, { holdMs = 6000 } = {}) {
     if (!acts) return;
     if (!isOpen) {
       isOpen = true;
+      makeRoom();
       row.dataset.open = "";
       setTabStops(true);
       win.addEventListener("pointerdown", onOutside, true);
@@ -139,6 +154,7 @@ export function mountRow(row, { holdMs = 6000 } = {}) {
       track.axis = dragAxis(dx, event.clientY - track.y);
       if (track.axis === "y") { track = null; return; }
       if (track.axis === "x") {
+        makeRoom();
         row.dataset.swiping = "";
         face.setPointerCapture?.(event.pointerId);
       }
