@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from "svelte";
   import { beforeNavigate, goto, invalidateAll, replaceState } from "$app/navigation";
-  import { page } from "$app/state";
+  import { navigating, page } from "$app/state";
   import { resolve } from "$app/paths";
   import { mountTiledSky } from "$lib/sky.js";
   import { every, longDate, money, shortDate } from "$lib/format.js";
@@ -727,7 +727,7 @@
       panel = null;
       armed = null;
       if (leave) await goto(resolve("/home"));
-      else await invalidateAll();
+      else await rereadUnlessLeaving();
     } catch (error) {
       /* The seam throws WorkspaceError and nothing else carries a `code`,
          so this is the same two readings the line always made. */
@@ -735,10 +735,18 @@
          the server's is the locked 503 -- a panel opened before the key went
          away and sent after it. Everything else keeps what the server said. */
       problem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
-      if (error instanceof WorkspaceError && error.code === "version_conflict") await invalidateAll();
+      if (error instanceof WorkspaceError && error.code === "version_conflict") await rereadUnlessLeaving();
     } finally {
       busy = false;
     }
+  }
+  /* The view re-reads once a command has landed, unless the reader has
+     already set off somewhere else: a re-read is itself a navigation, and
+     one begun after theirs superseded it and held them on this page (#1120:
+     reschedule, then the way back at once, stayed on the item). The page
+     they are leaving has no need of it. */
+  async function rereadUnlessLeaving() {
+    if (!navigating.to) await invalidateAll();
   }
 
   /** Two taps for what cannot be undone, the protocol home and the inbox use
