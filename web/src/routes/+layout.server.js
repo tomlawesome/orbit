@@ -13,6 +13,16 @@ import { env } from "$env/dynamic/private";
  * Read per request, never prerendered, for the same reason `/home` gives: a
  * baked-in value would ship the gate's world to a real instance.
  */
-export function load() {
-  return { fixtures: env.ORBIT_FIXTURES === "1" };
+/*
+ * #1120: whether the reader is an instance administrator, for the pocket
+ * hatch's Administration row. Read off the session the hooks already put on
+ * locals, so it costs no query. Showing the row is all this decides; the
+ * administration page and its API keep their own server-side gates.
+ */
+/** @type {import("./$types").LayoutServerLoad} */
+export function load({ locals }) {
+  return {
+    fixtures: env.ORBIT_FIXTURES === "1",
+    isAdmin: Boolean(locals.session?.user?.isInstanceAdmin),
+  };
 }
