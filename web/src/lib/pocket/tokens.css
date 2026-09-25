@@ -1,0 +1,45 @@
+/*
+ * The pocket's type scale, spacing and motion (#1120, proposal §1.6, §1.7,
+ * §1.9). Custom properties only: defining them changes nothing on screen, so
+ * this loads for every screen from the root layout and each pocket screen
+ * opts in by reading them. Home keeps its own sizes until step 2 lifts it.
+ *
+ * Sizes are rem so the platform's larger-text setting scales them (§1.6).
+ * The floor: nothing under 12px, and 12px only for tracked caps labels.
+ */
+:root{
+  /* type (§1.6) */
+  --p-type-title:1.75rem;      /* 28px, page title, display, one per page */
+  --p-type-title-lh:1.15;
+  --p-type-card:1.3125rem;     /* 21px, card title / item name, display */
+  --p-type-body:1rem;          /* 16px, body, row title, inputs (no iOS zoom) */
+  --p-type-sheet:1.125rem;     /* 18px, sheet title, ui 600 */
+  --p-type-meta:.8125rem;      /* 13px, meta, T-labels, values */
+  --p-type-caps:.75rem;        /* 12px, tracked caps label, the floor */
+  --p-type-caps-track:.14em;
+  --p-type-button:.9375rem;    /* 15px, pills */
+
+  /* spacing and targets (§1.7) */
+  --p-hit:44px;                /* every tappable thing, at least */
+  --p-gutter:16px;             /* 12px at 360, below */
+  --p-card-pad:16px;
+  --p-card-radius:16px;
+  --p-card-gap:12px;
+  --p-group-above:24px;
+  --p-group-below:8px;
+  --p-pill-gap:8px;
+  --p-pill-pad:16px;
+  --p-column:480px;            /* centred max width */
+  --p-row-min:56px;            /* the row grammar (§1.5) */
+  --p-row-mark:24px;
+  --p-row-gap:12px;
+  --p-chrome:56px;             /* top chrome, plus the safe-area inset (§1.3) */
+
+  /* motion (§1.9) */
+  --p-ease:cubic-bezier(.3,.7,.3,1);
+  --p-rise:300ms;              /* sheets, the approach morph */
+  --p-spring:200ms;            /* a released row swipe, the chrome retract */
+  --p-arm:150ms;               /* arm/disarm crossfade */
+  --p-wake:250ms;              /* the wake's rise and fall */
+}
+@media (max-width:389px){ :root{ --p-gutter:12px } }

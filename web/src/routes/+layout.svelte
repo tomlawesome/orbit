@@ -25,6 +25,9 @@
   import "$lib/packs.css";
   import "$lib/atmosphere.css";
   import "../app.css";
+  /* The pocket's type, spacing and motion tokens (#1120): custom properties
+     only, so nothing moves until a screen reads them. */
+  import "$lib/pocket/tokens.css";
 
   import "@fontsource/space-grotesk/500.css";
   import "@fontsource/space-grotesk/600.css";
