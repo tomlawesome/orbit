@@ -69,6 +69,8 @@
   .arm .set{opacity:0}
   .arm.armed .rest{opacity:0}
   .arm.armed .set{opacity:1}
-  .arm.armed{border-color:var(--overdue)}
+  /* Armed reads as lit (§5.2): the red at full on the border and a wash
+     under the words, not just red text. */
+  .arm.armed{border-color:var(--overdue);background:color-mix(in srgb, var(--overdue) 12%, transparent)}
   @media (prefers-reduced-motion:reduce){ .arm span{transition:none} }
 </style>
