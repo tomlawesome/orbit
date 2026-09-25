@@ -55,3 +55,59 @@ export const openFor = (iso) => {
 
 /** The setup link's lifetime, in days, as the server bounds it (ADR-0023 §3). */
 export const SETUP_LINK_DAYS = { min: 1, max: 14, fallback: 7 };
+
+/* ── document jobs and the two mail tests (#1071, #1055 round 2) ───────── */
+
+/** A job's kind as its row's title. Kind only, never the document (owner, 2026-09-19). */
+export const JOB_KINDS = /** @type {Record<string, string>} */ ({
+  scan: "Virus scan", encrypt: "Encryption", purge: "Purge", reconcile: "Reconcile", rewrap: "Re-key",
+});
+
+/** The server's bounded failure codes, in plain words. */
+export const JOB_REASONS = /** @type {Record<string, string>} */ ({
+  key_unavailable: "the encryption key wasn’t available",
+  purge_failed: "the stored file couldn’t be removed",
+  processing_interrupted: "processing was interrupted",
+  storage_object_missing: "the stored file is missing",
+  scanner_unavailable: "couldn’t reach the virus scanner",
+  scanner_timeout: "the virus scanner took too long",
+  scanner_protocol: "the virus scanner’s answer couldn’t be read",
+  scanner_failed: "the virus scanner failed",
+  stage_purge_failed: "the upload’s staging copy couldn’t be removed",
+  scan_recovery_expired: "the scan couldn’t be recovered in time",
+  staging_object_invalid: "the uploaded file couldn’t be read",
+  unknown: "failed for a reason Orbit doesn’t name",
+});
+
+/** A job's state as its pill says it, and the order the card reads them in. */
+export const JOB_STATES = /** @type {Record<string, { word: string, tone: string, rank: number }>} */ ({
+  failed: { word: "failed", tone: "over", rank: 0 },
+  retry: { word: "retrying", tone: "soon", rank: 1 },
+  processing: { word: "running", tone: "up", rank: 2 },
+  pending: { word: "queued", tone: "up", rank: 3 },
+  completed: { word: "done", tone: "", rank: 4 },
+  cancelled: { word: "cancelled", tone: "", rank: 5 },
+});
+
+/** The test's bounded answer: passed, still running, or failed and why. */
+const PASSED = new Set(["available", "ready"]);
+const BUSY = new Set(["verification_pending", "retrying"]);
+const TEST_REASONS = /** @type {Record<string, string>} */ ({
+  provider_unavailable: "the mail provider couldn’t be reached",
+  unsafe_input: "the settings Orbit holds can’t be used as they are",
+  credential_locked: "the stored password is locked · the encryption key isn’t available",
+  not_configured: "no mailbox is set up",
+  disabled: "ingest is paused",
+  exhausted: "it gave up after repeated failures",
+  retention_backlog: "old mail is waiting to be cleared",
+  smtp_rejected: "the relay refused the sign-in details",
+  smtp_unavailable: "the relay couldn’t be reached",
+  smtp_unconfigured: "no outgoing mail is configured",
+});
+
+/** @param {string} result */
+export const testVerdict = (result) => PASSED.has(result)
+  ? { word: "passed", tone: "ok", reason: "" }
+  : BUSY.has(result)
+    ? { word: "checking", tone: "up", reason: "a test is already running · try again in a moment" }
+    : { word: "failed", tone: "over", reason: TEST_REASONS[result] ?? plainly(result) };
