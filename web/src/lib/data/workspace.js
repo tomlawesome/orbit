@@ -601,9 +601,11 @@ export async function readInbox(fetchImpl = globalThis.fetch) {
  * @param {?string} fallbackHouseholdId  used when the receipt names no household
  * @param {string} operationId           kept across retries; that is the point
  * @param {?ItemProposal} [amendedItem]  what the reader edited, if they did
+ * @param {?string} [sectionId]  the section the reader chose (the phone's
+ *   review & amend, #1120); the household's first section when none was
  * @returns {Promise<{ outcome: string, itemId?: string }>}
  */
-export async function approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem = null) {
+export async function approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem = null, sectionId = null) {
   const householdId = suggestion.householdId ?? fallbackHouseholdId;
   if (!householdId) throw new WorkspaceError("This account has no household yet", { code: "no_household" });
   if (!suggestion.householdId) {
@@ -613,7 +615,7 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
   const review = await json(
     await fetch(`/api/imap-inbox/${suggestion.receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),
   );
-  const section = review.sections?.[0];
+  const section = review.sections?.find((one) => one.id === sectionId) ?? review.sections?.[0];
   if (!section) throw new WorkspaceError("This household has no section to file into", { code: "no_section" });
   /** @type {{ outcome: string, itemId?: string }} */
   const body = await json(await csrfFetch("/api/reviewed-intake/approve", {
@@ -849,6 +851,9 @@ export async function readInboxScreen() {
     filed,
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
+    /* Every household the reader is in: the phone's review & amend (#1120)
+       offers the sections of the one a receipt will file into. */
+    households: workspace.households,
     primary,
     today,
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
