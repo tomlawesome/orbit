@@ -245,6 +245,35 @@ describe("get-orbit.sh", () => {
     expect(readFileSync(launcherLog, "utf8")).toContain(`${cache}/orbit/1.2.3/install.sh`);
   });
 
+  it("runs a pinned ORBIT_VERSION for a pre-release tag (e.g. a throwaway e2e tag, #1121)", () => {
+    const dir = makeDir("get-orbit-");
+    const { privatePem, publicPem } = generateKeyPair(dir);
+    const baseUrl = buildRelease({
+      dir,
+      arch,
+      privatePem,
+      version: "1.3.0-e2e.1",
+      routeDir: "releases/download/v1.3.0-e2e.1",
+      serveBundle: false,
+    });
+    const launcherLog = join(dir, "launcher.log");
+    const cache = makeDir("get-orbit-cache-");
+
+    const result = run({
+      baseUrl,
+      launcherLog,
+      env: {
+        XDG_CACHE_HOME: cache,
+        ORBIT_VERSION: "v1.3.0-e2e.1",
+        ORBIT_GET_TEST_PUBLIC_KEY_FILE: publicPem,
+        ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE: "1",
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(launcherLog, "utf8")).toContain(`${cache}/orbit/1.3.0-e2e.1/install.sh`);
+  });
+
   it("refuses a validly signed manifest for a different version than ORBIT_VERSION asked for", () => {
     const dir = makeDir("get-orbit-");
     const { privatePem, publicPem } = generateKeyPair(dir);
