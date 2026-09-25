@@ -172,6 +172,7 @@
   .trail.bead{min-width:22px;height:22px;padding:0 6px;box-sizing:border-box;border-radius:11px;
     display:grid;place-items:center;background:var(--accent);color:var(--bg);font-weight:600}
   :global([data-theme=retrograde]) .trail.bead{box-shadow:0 0 9px var(--bloom)}
+  :global(:is([data-theme=dawn],[data-theme=clouds])) .trail.bead{color:#fff}
   .trail small{display:block;font-size:var(--p-type-meta);color:var(--ink-quiet);font-weight:400}
 
   /* ON THE CARD'S GLASS (§5.2): the face is transparent at rest, so a row
