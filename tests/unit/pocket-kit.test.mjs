@@ -32,7 +32,7 @@ describe("gesture arithmetic", () => {
     expect(dragAxis(-20, 4)).toBe("x");
     expect(dragAxis(4, 20)).toBe("y");
   });
-  it("lets the face follow the finger toward the trailing side, never the other way", () => {
+  it("lets the tray follow the finger toward the trailing side, never the other way", () => {
     expect(swipeOffset({ dx: 30, reveal: 150, open: false })).toBe(0);
     expect(swipeOffset({ dx: -60, reveal: 150, open: false })).toBe(-60);
     expect(swipeOffset({ dx: -250, reveal: 150, open: false })).toBeGreaterThan(-250);
@@ -206,6 +206,32 @@ describe("the row's acts (owner decision §25)", () => {
     remove.focus();
     vi.advanceTimersByTime(6000);
     expect(control.isOpen).toBe(true);
+    control.destroy();
+  });
+  it("slides the tray over a face that never moves, and makes room for it (Fable, #1120)", () => {
+    const { row, face, control } = rowFixture();
+    const tray = /** @type {HTMLElement} */ (row.querySelector("[data-row-acts]"));
+    /* happy-dom has no layout: give the tray the width two pills make. */
+    Object.defineProperty(tray, "offsetWidth", { value: 204 });
+    /** @param {string} type @param {number} x */
+    const pointer = (type, x) => face.dispatchEvent(
+      new PointerEvent(type, { bubbles: true, pointerId: 1, clientX: x, clientY: 20, button: 0 }));
+    pointer("pointerdown", 300);
+    pointer("pointermove", 280);
+    pointer("pointermove", 200);
+    expect(row.hasAttribute("data-swiping")).toBe(true);
+    expect(tray.style.transform).toBe("translateX(104px)");
+    expect(face.style.transform).toBe("");
+    expect(row.style.getPropertyValue("--p-row-tray")).toBe("204px");
+    pointer("pointerup", 200);
+    expect(control.isOpen).toBe(true);
+    expect(row.hasAttribute("data-swiping")).toBe(false);
+    /* Settled: the tray is the CSS's again ([data-open] places it). */
+    expect(tray.style.transform).toBe("");
+    expect(face.style.transform).toBe("");
+    control.close();
+    expect(tray.style.transform).toBe("");
+    expect(face.style.transform).toBe("");
     control.destroy();
   });
   it("never opens from a tap: only a swipe or a key does", () => {

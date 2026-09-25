@@ -135,13 +135,13 @@
 {#if below}<div class="p-row-below">{@render below()}</div>{/if}
 
 <style>
-  .p-row{position:relative;overflow:hidden;border-radius:12px}
+  /* clip, not hidden: hidden can still scroll, and focusing a pill that is
+     still sliding in would scroll the row and close it (row.js onScroll). */
+  .p-row{position:relative;overflow:clip;border-radius:12px}
   .face{position:relative;z-index:1;display:flex;align-items:center;gap:var(--p-row-gap);
     min-height:var(--p-row-min);padding:6px var(--p-gutter);box-sizing:border-box;
-    /* Opaque: the acts wait underneath and must not show through. */
     background:linear-gradient(var(--panel), var(--panel)), var(--bg);color:var(--ink);text-decoration:none;
-    touch-action:pan-y;-webkit-tap-highlight-color:transparent;
-    transition:transform var(--p-spring) var(--p-ease),background-color 120ms}
+    touch-action:pan-y;-webkit-tap-highlight-color:transparent;transition:background-color 120ms}
   a.face,[role=button].face{cursor:pointer}
   a.face:active,[role=button].face:active{background:var(--panel-raised)}
   .face:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
@@ -155,19 +155,29 @@
   .trail{flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(--ink-mid)}
   .trail small{display:block;font-size:var(--p-type-meta);color:var(--ink-quiet);font-weight:400}
 
-  /* The acts wait under the face, flush right, at least 40% of the row. */
-  .acts{position:absolute;top:0;right:0;bottom:0;min-width:40%;display:flex;align-items:center;
-    justify-content:flex-end;gap:6px;padding:0 8px 0 12px;box-sizing:border-box;
-    background:var(--panel-raised);opacity:0;transition:opacity var(--p-spring)}
-  /* Unseen at rest but still in the accessibility tree (opacity, never
-     visibility or display): a screen reader reaches them, a sighted reader
-     meets them only by swiping (owner decision §25). */
+  /* THE ACT TRAY (Fable, #1120): the face never moves. The tray slides over
+     it from the trailing edge, as wide as its pills and never wider than
+     the row less 120px, so the mark and at least 56px of the title always
+     show. Off the row at rest and unseen (opacity, never visibility or
+     display, so a screen reader still reaches the acts: owner decision §25).
+     row.js moves it with the finger and clears that for the CSS to settle. */
+  .acts{position:absolute;z-index:2;top:0;right:0;bottom:0;max-width:calc(100% - 120px);
+    display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:0 8px;box-sizing:border-box;
+    background:var(--panel-raised);opacity:0;transform:translateX(100%);
+    transition:transform var(--p-spring) var(--p-ease),opacity var(--p-spring)}
+  /* Tray pills: still 44 tall, 14px mono labels, 10px sides. */
+  .acts :global(.p-pill){padding:0 10px;font-size:.875rem}
   /* :global because row.js sets these attributes, so the compiler cannot
      see them in the template and would drop the rule as unused. */
-  /* Compact pills: still 44 tall, narrower sides, so two acts leave the
-     row's mark and the start of its title in view. */
-  .acts :global(.p-pill){padding:0 12px}
   :global(.p-row[data-open]) .acts,:global(.p-row[data-swiping]) .acts{opacity:1}
+  :global(.p-row[data-open]) .acts{transform:none}
+  /* Swiped: the text column gives the tray its room (row.js sets
+     --p-row-tray to the tray's width) and the title ellipsises; the meta
+     line keeps its height so the list does not jump, and the trail goes. */
+  :global(.p-row[data-open]) .face,:global(.p-row[data-swiping]) .face{
+    padding-right:max(var(--p-gutter), var(--p-row-tray, 0px))}
+  :global(.p-row[data-open]) .meta,:global(.p-row[data-swiping]) .meta{visibility:hidden}
+  :global(.p-row[data-open]) .trail,:global(.p-row[data-swiping]) .trail{display:none}
 
   /* The global .sr-only leaves a button's own padding and border, which
      would draw a small visible box. */
@@ -180,5 +190,6 @@
   .p-row-below{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);padding:0 var(--p-gutter) 12px
     calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap))}
   .p-row-below > :global(*){flex:1 1 40%}
-  @media (prefers-reduced-motion:reduce){ .face{transition:background-color 120ms} }
+  /* Reduced motion: the tray appears and goes without sliding. */
+  @media (prefers-reduced-motion:reduce){ .acts{transition:none} }
 </style>

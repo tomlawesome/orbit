@@ -20,12 +20,12 @@ export function dragAxis(dx, dy) {
 }
 
 /**
- * Where a swiped row's face sits while the finger is down (§1.5): it follows
- * the finger toward the trailing side, never past the acts' full width, and
- * resists a little past it rather than stopping dead. `open` is where the
- * swipe started from.
+ * How far a swipe has pulled a row's act tray open while the finger is down
+ * (§1.5): it follows the finger toward the trailing side, never past the
+ * tray's full width, and resists a little past it rather than stopping dead.
+ * `open` is where the swipe started from.
  * @param {{ dx: number, reveal: number, open: boolean }} p
- * @returns {number} the face's translateX, 0 or negative
+ * @returns {number} 0 (shut) to -reveal (fully open), a little beyond past it
  */
 export function swipeOffset({ dx, reveal, open }) {
   const raw = (open ? -reveal : 0) + dx;
