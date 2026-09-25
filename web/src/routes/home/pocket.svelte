@@ -583,13 +583,13 @@
       {/each}
       {#each view.mailReading as r (r.id)}
         <div class="pk-reading">
-          <Row title={`A message arrived ${agoShort(r.receivedAt)}`} meta="still reading its document">
+          <Row title={`A message arrived ${agoShort(r.receivedAt)}`} meta="still reading its document" metaFace="ui">
             {#snippet mark()}<span class="pk-dot breathing"></span>{/snippet}
           </Row>
         </div>
       {/each}
       {#each view.mailFailures as f (f.id)}
-        <Row title={`A message from ${short(f.receivedAt.slice(0, 10))}`} meta={f.message}>
+        <Row title={`A message from ${short(f.receivedAt.slice(0, 10))}`} meta={f.message} metaFace="ui">
           {#snippet mark()}<span class="pk-dot failed"></span>{/snippet}
         </Row>
       {/each}

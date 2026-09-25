@@ -26,7 +26,9 @@
    * `trailName` is what a screen reader hears instead of the drawn trail.
    *
    * `meta` speaks mono, the desk's face for data (section · amount, date,
-   * role); `metaFace="ui"` when the meta is a sentence (§5.2).
+   * role). Set `metaFace="ui"` wherever the meta is a sentence or
+   * descriptive prose (a failure's reason, a status in words): it then
+   * reads in the body face, untracked, as kit.css's `.p-prose` (§5.2).
    * @typedef {{
    *   title: string,
    *   meta?: string,
@@ -167,7 +169,7 @@
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .current .title{color:var(--accent-text)}
   .meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
-  .meta.ui{font-family:var(--ui)}
+  .meta.ui{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
   .trail{flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(--ink-mid)}
   .trail.bead{min-width:22px;height:22px;padding:0 6px;box-sizing:border-box;border-radius:11px;
     display:grid;place-items:center;background:var(--accent);color:var(--bg);font-weight:600}
