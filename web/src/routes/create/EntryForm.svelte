@@ -15,6 +15,13 @@
    * because on /create it is fixed to the foot and in the edit sheet it is
    * the sheet's last row.
    *
+   * `mode="review"` amends what the relay read from a piece of mail (the
+   * inbox's `review & amend`, §2.6): the fields arrive pre-filled, the type
+   * stays open, and the household is the receipt's, so neither its strip
+   * nor the document row shows. The mail's own `papers` and `readings` sit
+   * below the fields in the same reading card, each reading with its sure or
+   * unsure word and `accept` to put it back after an edit.
+   *
    * `nested` says the form is already inside a sheet: the reminders callout
    * then unfolds in place, because a sheet never stacks on a sheet (§1.4).
    *
@@ -28,13 +35,14 @@
    * @typedef {{
    *   entry: import('./entry.js').Entry,
    *   households?: FormHousehold[],
-   *   mode?: "create" | "edit",
+   *   mode?: "create" | "edit" | "review",
    *   nested?: boolean,
    *   disabled?: boolean,
    *   referenceState?: string | null,
    *   notesState?: string | null,
    *   attachment?: File | null,
    *   readings?: Reading[],
+   *   papers?: { name: string, meta: string }[],
    * }} Props
    */
   /** @type {Props} */
@@ -48,6 +56,7 @@
     notesState = null,
     attachment = $bindable(null),
     readings = [],
+    papers = [],
   } = $props();
 
   const household = $derived(households.find((one) => one.id === entry.householdId) ?? households[0] ?? null);
@@ -231,7 +240,19 @@
     </div>
   </section>
 
-  {#if attachment}
+  {#if mode === "review" && (papers.length || readings.length)}
+    <!-- Review mode: what the relay read, below the fields (§2.5, §2.6). -->
+    <section class="p-card proposed pc-card pc-reading" aria-labelledby="{uid}-reading">
+      <h2 class="p-caps" id="{uid}-reading">what the relay read</h2>
+      {#each papers as paper (paper.name)}
+        <div class="pc-paper">
+          <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
+          <span class="pc-paper-words"><b>{paper.name}</b><span>{paper.meta}</span></span>
+        </div>
+      {/each}
+      {@render readingRows()}
+    </section>
+  {:else if attachment}
     <!-- The reading card, below the fields (§2.5). -->
     <section class="p-card proposed pc-card pc-reading" aria-labelledby="{uid}-reading" aria-live="polite">
       <h2 class="p-caps" id="{uid}-reading">the document</h2>
@@ -240,15 +261,7 @@
         <span class="pc-paper-words"><b>{attachment.name}</b><span>{size(attachment.size)}</span></span>
       </div>
       {#if readings.length}
-        {#each readings as reading (reading.field)}
-          <div class="pc-read">
-            <span class="pc-read-label">{reading.label}</span>
-            <b class="pc-read-value">{reading.value}</b>
-            <span class="pc-read-sure" class:unsure={!reading.sure}>{reading.sure ? "sure" : "unsure"}</span>
-            <button type="button" class="p-pill act-ok pc-accept" aria-label="Accept {reading.label}: {reading.value}"
-                    onclick={() => accept(reading)}>accept</button>
-          </div>
-        {/each}
+        {@render readingRows()}
       {:else}
         <p class="pc-honest">Orbit does not read or keep documents from this form yet: the entry saves without this one.</p>
       {/if}
@@ -258,6 +271,17 @@
 
   <!-- Inside the form, not at the top level: a top-level snippet trips the
        production bundler (#1130). -->
+  {#snippet readingRows()}
+    {#each readings as reading (reading.field)}
+      <div class="pc-read">
+        <span class="pc-read-label">{reading.label}</span>
+        <b class="pc-read-value">{reading.value}</b>
+        <span class="pc-read-sure" class:unsure={!reading.sure}>{reading.sure ? "sure" : "unsure"}</span>
+        <button type="button" class="p-pill act-ok pc-accept" aria-label="Accept {reading.label}: {reading.value}"
+                {disabled} onclick={() => accept(reading)}>accept</button>
+      </div>
+    {/each}
+  {/snippet}
   {#snippet remindChoices()}
     <div class="pc-strip pc-remind-choices" role="group" aria-label="Remind me this many days before">
       {#each REMINDER_CHOICES as day (day)}
