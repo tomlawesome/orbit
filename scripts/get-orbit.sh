@@ -50,7 +50,7 @@ base_url="${ORBIT_GET_BASE_URL:-https://github.com/tomlawesome/orbit}"
 channel="${ORBIT_CHANNEL:-latest}"
 version_pin="${ORBIT_VERSION:-}"
 if [[ -n "$version_pin" ]]; then
-  [[ "$version_pin" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "ORBIT_VERSION must look like vX.Y.Z: ${version_pin}"
+  [[ "$version_pin" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || fail "ORBIT_VERSION must look like vX.Y.Z: ${version_pin}"
   asset_base="${base_url}/releases/download/${version_pin}"
 elif [[ "$channel" == "latest" ]]; then
   asset_base="${base_url}/releases/latest/download"
