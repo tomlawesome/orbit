@@ -8,7 +8,7 @@
    *
    * `label` is what the pill says ("remove"); `name` is its full accessible
    * name where the label alone would be ambiguous ("Remove Emma Lawson").
-   * @type {{
+   * @typedef {{
    *   label: string,
    *   armedLabel?: string,
    *   name?: string,
@@ -18,8 +18,9 @@
    *   ms?: number,
    *   tabindex?: number,
    *   class?: string,
-   * }}
+   * }} Props
    */
+  /** @type {Props} */
   let {
     label,
     armedLabel = `tap again to ${label.replace(/\s*→$/, "").toLowerCase()}`,
