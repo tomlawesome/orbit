@@ -59,17 +59,35 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
     /* #856: waits for the mount that attaches the listeners, not just for
        `load` — `fill()` and the chip click below both need them. */
     await gotoCreate(page);
-    await page.locator("#f-name").fill("Gutter clearing proving");
-    await page.locator('#types button[data-type="service"]').click();
     const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
-    await page.locator("#f-date").fill(dueDate);
-    await page.locator(".btn-primary").click();
-
-    // Saved and returned to the orbit, where the new item needs attention.
-    await expect(page).toHaveURL(/\/home$/);
     if (test.info().project.name.startsWith("mobile")) {
-      await expect(page.locator(".mitem", { hasText: "Gutter clearing proving" })).toBeVisible();
+      /* #1120, proposal §2.5: a phone's create is the pocket's own form,
+         where the section is a required choice (#1058: none is chosen for
+         you), and a save approaches the new item on its belt. */
+      const form = page.getByRole("form", { name: "New entry" });
+      await form.getByRole("textbox", { name: "name", exact: true }).fill("Gutter clearing proving");
+      await form.getByRole("button", { name: "service" }).click();
+      await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+      await form.getByLabel("due date").fill(dueDate);
+      await page.getByRole("button", { name: "Add to orbit" }).click();
+
+      await expect(page).toHaveURL(/\/item\/[0-9a-f-]{36}$/);
+      await expect(page.getByRole("heading", { name: "Gutter clearing proving" })).toBeVisible();
+      await expect(page.locator(".item-card")).toContainText("T−20d");
+
+      // And the orbit lists it where it needs attention.
+      await page.goto("/home");
+      const row = page.locator(".pocket .pk-below .p-row", { hasText: "Gutter clearing proving" });
+      await expect(row).toBeVisible();
+      await expect(row).toContainText("T−20d");
     } else {
+      await page.locator("#f-name").fill("Gutter clearing proving");
+      await page.locator('#types button[data-type="service"]').click();
+      await page.locator("#f-date").fill(dueDate);
+      await page.locator(".btn-primary").click();
+
+      // Saved and returned to the orbit, where the new item needs attention.
+      await expect(page).toHaveURL(/\/home$/);
       const row = page.locator(".item", { hasText: "Gutter clearing proving" });
       await expect(row).toBeVisible();
       await expect(row).toContainText("T−20d");
