@@ -34,7 +34,7 @@ const ROUTES = [
   { path: "/kit" },
   { path: "/home" },
   { path: "/item/i-mot" },
-  { path: "/create", pending: "step 4 (create / edit)" },
+  { path: "/create" },
   { path: "/inbox", pending: "step 5 (inbox)" },
   { path: "/household/hh-lawson-1", pending: "step 6 (household)",
     chromePending: "step 6 (household): the page overflows sideways and carries the chrome off-screen" },
