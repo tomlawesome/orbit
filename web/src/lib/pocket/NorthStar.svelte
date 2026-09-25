@@ -8,8 +8,9 @@
    * bottom right, in thumb reach, drawn with the desk's own mark. The one
    * floating control in the app, and it appears only on home: step 2 places
    * it there. It is a link to /create, so it works without script.
-   * @type {{ label?: string }}
+   * @typedef {{ label?: string }} Props
    */
+  /** @type {Props} */
   let { label = "Add an item" } = $props();
 </script>
 
@@ -21,7 +22,7 @@
   .p-northstar{position:fixed;z-index:15;
     right:calc(var(--p-gutter) + env(safe-area-inset-right));
     bottom:calc(20px + env(safe-area-inset-bottom));
-    width:56px;height:56px;border-radius:50%;display:grid;place-items:center;
+    box-sizing:border-box;width:56px;height:56px;border-radius:50%;display:grid;place-items:center;
     background:var(--panel-raised);backdrop-filter:blur(16px);border:1px solid var(--line);
     box-shadow:0 6px 20px rgb(0 0 0 / .3);-webkit-tap-highlight-color:transparent}
   .p-northstar:active{background:var(--panel)}

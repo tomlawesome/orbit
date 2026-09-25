@@ -144,7 +144,8 @@ test("sheets are dialogs: focus in, Tab held, Escape out, focus back, page inert
   const dialog = page.getByRole("dialog", { name: "Documents" });
   await expect(dialog).toBeVisible();
   await expect.poll(() => page.evaluate(() => Boolean(document.activeElement?.closest("[role=dialog]")))).toBe(true);
-  await expect(page.locator("main.kit")).toHaveJSProperty("inert", true);
+  const behindInert = () => page.evaluate(() => Boolean(document.querySelector("main.kit")?.closest("[inert]")));
+  await expect.poll(behindInert).toBe(true);
   for (let i = 0; i < 12; i++) {
     await page.keyboard.press("Tab");
     expect(await page.evaluate(() => Boolean(document.activeElement?.closest("[role=dialog]")))).toBe(true);
@@ -155,7 +156,7 @@ test("sheets are dialogs: focus in, Tab held, Escape out, focus back, page inert
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(opener).toBeFocused();
-  await expect(page.locator("main.kit")).toHaveJSProperty("inert", false);
+  await expect.poll(behindInert).toBe(false);
 });
 
 test("sheets: back closes the sheet without leaving the page; the scrim closes it", async ({ page }) => {
@@ -174,6 +175,8 @@ test("sheets: back closes the sheet without leaving the page; the scrim closes i
   const full = page.getByRole("dialog", { name: "Edit item" });
   await expect(full).toBeVisible();
   await page.waitForTimeout(350);
+  const top = await full.evaluate((el) => el.getBoundingClientRect().top);
+  expect(top, "the full sheet's head is off the top of the screen").toBeGreaterThanOrEqual(0);
   await shot(page, "08-sheet-full");
   await full.getByRole("button", { name: "close" }).tap();
   await expect(full).toBeHidden();

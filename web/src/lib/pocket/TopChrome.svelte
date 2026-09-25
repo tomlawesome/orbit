@@ -10,13 +10,14 @@
    * bare, like the desk's.
    *
    * `back` must already be a resolved path.
-   * @type {{
+   * @typedef {{
    *   back?: string,
    *   backLabel?: string,
    *   wordmark?: boolean,
    *   end?: import('svelte').Snippet,
-   * }}
+   * }} Props
    */
+  /** @type {Props} */
   let { back = undefined, backLabel = "← your sky", wordmark = false, end = undefined } = $props();
 
   let hidden = $state(false);

@@ -19,7 +19,7 @@
    *
    * Every act's `name` is its full accessible name, object included:
    * { label: "remove", name: "Remove Emma Lawson", onact, danger: true }.
-   * @type {{
+   * @typedef {{
    *   title: string,
    *   meta?: string,
    *   trail?: string,
@@ -32,8 +32,9 @@
    *   onmove?: (direction: -1 | 1) => void,
    *   mark?: import('svelte').Snippet,
    *   below?: import('svelte').Snippet,
-   * }}
+   * }} Props
    */
+  /** @type {Props} */
   let {
     title,
     meta = "",
@@ -77,47 +78,49 @@
     event.preventDefault();
     onactivate?.();
   }
+  /** @param {KeyboardEvent} event */
+  function onfacekey(event) {
+    if (onactivate) onkeyactivate(event);
+    onkeydown(event);
+  }
   const keys = $derived(
     [acts.length ? "ArrowLeft ArrowRight" : "", onmove ? "Alt+ArrowUp Alt+ArrowDown" : ""].filter(Boolean).join(" ")
     || undefined,
   );
 </script>
 
-{#snippet face()}
-  <span class="mark" aria-hidden="true">{@render mark?.()}</span>
-  <span class="text">
-    <span class="title">{title}</span>
-    {#if meta}<span class="meta">{meta}</span>{/if}
-  </span>
-  {#if trail || trailSub}
-    <span class="trail" style:color={trailTone || undefined}>{trail}{#if trailSub}<small>{trailSub}</small>{/if}</span>
-  {/if}
-{/snippet}
-
 <div class="p-row" class:current class:has-acts={acts.length > 0} data-row bind:this={row}>
-  {#if href}
-    <!-- Callers pass an already-resolved path; the row cannot resolve() an
-         arbitrary one for them. -->
-    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-    <a class="face" data-row-face {href} aria-current={current ? "page" : undefined}
-       aria-keyshortcuts={keys} {onkeydown}>{@render face()}</a>
-  {:else if onactivate}
-    <div class="face" data-row-face role="button" tabindex="0" aria-keyshortcuts={keys}
-         onclick={onactivate} onkeydown={(event) => { onkeyactivate(event); onkeydown(event); }}>{@render face()}</div>
-  {:else if acts.length || onmove}
-    <!-- Focusable only so the keyboard can reach its acts (← →) or move it;
-         those keys are the handler's whole job (owner decision §25). -->
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-    <div class="face" data-row-face role="group" aria-label={title} tabindex="0"
-         aria-keyshortcuts={keys} {onkeydown}>{@render face()}</div>
-  {:else}
-    <div class="face" data-row-face>{@render face()}</div>
-  {/if}
+  <!-- One face whatever the row does: a link when it navigates, a button
+       when it summons a sheet, a focusable group when its only job for the
+       keyboard is to reach its acts (← →) or move (Alt-↑/↓), else inert.
+       A dynamic element rather than four branches sharing a snippet: a
+       snippet here is hoisted by the compiler and drags the script's doc
+       comments into a declaration the production bundler cannot parse. -->
+  <svelte:element this={href ? "a" : "div"} class="face" data-row-face
+      href={href || undefined}
+      role={href ? undefined : onactivate ? "button" : acts.length || onmove ? "group" : undefined}
+      aria-label={!href && !onactivate && (acts.length || onmove) ? title : undefined}
+      aria-current={href && current ? "page" : undefined}
+      tabindex={href ? undefined : onactivate || acts.length || onmove ? 0 : undefined}
+      aria-keyshortcuts={keys}
+      onclick={onactivate}
+      onkeydown={onfacekey}>
+    <span class="mark" aria-hidden="true">{@render mark?.()}</span>
+    <span class="text">
+      <span class="title">{title}</span>
+      {#if meta}<span class="meta">{meta}</span>{/if}
+    </span>
+    {#if trail || trailSub}
+      <span class="trail" style:color={trailTone || undefined}>{trail}{#if trailSub}<small>{trailSub}</small>{/if}</span>
+    {/if}
+  </svelte:element>
   {#if acts.length}
     <div class="acts" data-row-acts>
       {#each acts as act (act.name)}
         {#if act.danger}
-          <ArmButton label={act.label} name={act.name} tabindex={-1} onfire={() => run(act)} />
+          <!-- "tap again" alone: the row's slot is narrow, and the full words
+               ("tap again to remove Emma Lawson") are the accessible name. -->
+          <ArmButton label={act.label} armedLabel="tap again" name={act.name} tabindex={-1} onfire={() => run(act)} />
         {:else}
           <button class="p-pill" tabindex="-1" aria-label={act.name} onclick={() => run(act)}>{act.label}</button>
         {/if}
@@ -125,8 +128,8 @@
     </div>
   {/if}
   {#if onmove}
-    <button class="sr-only" tabindex="-1" onclick={() => onmove(-1)}>Move {title} up</button>
-    <button class="sr-only" tabindex="-1" onclick={() => onmove(1)}>Move {title} down</button>
+    <button class="sr-only move" tabindex="-1" onclick={() => onmove(-1)}>Move {title} up</button>
+    <button class="sr-only move" tabindex="-1" onclick={() => onmove(1)}>Move {title} down</button>
   {/if}
 </div>
 {#if below}<div class="p-row-below">{@render below()}</div>{/if}
@@ -135,13 +138,14 @@
   .p-row{position:relative;overflow:hidden;border-radius:12px}
   .face{position:relative;z-index:1;display:flex;align-items:center;gap:var(--p-row-gap);
     min-height:var(--p-row-min);padding:6px var(--p-gutter);box-sizing:border-box;
-    background:var(--panel);color:inherit;text-decoration:none;
+    /* Opaque: the acts wait underneath and must not show through. */
+    background:linear-gradient(var(--panel), var(--panel)), var(--bg);color:var(--ink);text-decoration:none;
     touch-action:pan-y;-webkit-tap-highlight-color:transparent;
     transition:transform var(--p-spring) var(--p-ease),background-color 120ms}
   a.face,[role=button].face{cursor:pointer}
   a.face:active,[role=button].face:active{background:var(--panel-raised)}
   .face:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-  .mark{flex:none;width:var(--p-row-mark);display:grid;place-items:center}
+  .mark{flex:none;width:var(--p-row-mark);display:grid;place-items:center;color:var(--ink-mid)}
   .mark:empty{display:none}
   .text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
   .title{font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink);
@@ -153,8 +157,21 @@
 
   /* The acts wait under the face, flush right, at least 40% of the row. */
   .acts{position:absolute;top:0;right:0;bottom:0;min-width:40%;display:flex;align-items:center;
-    justify-content:flex-end;gap:var(--p-pill-gap);padding:0 12px 0 16px;box-sizing:border-box;
-    background:var(--panel-raised)}
+    justify-content:flex-end;gap:6px;padding:0 8px 0 12px;box-sizing:border-box;
+    background:var(--panel-raised);opacity:0;transition:opacity var(--p-spring)}
+  /* Unseen at rest but still in the accessibility tree (opacity, never
+     visibility or display): a screen reader reaches them, a sighted reader
+     meets them only by swiping (owner decision §25). */
+  /* :global because row.js sets these attributes, so the compiler cannot
+     see them in the template and would drop the rule as unused. */
+  /* Compact pills: still 44 tall, narrower sides, so two acts leave the
+     row's mark and the start of its title in view. */
+  .acts :global(.p-pill){padding:0 12px}
+  :global(.p-row[data-open]) .acts,:global(.p-row[data-swiping]) .acts{opacity:1}
+
+  /* The global .sr-only leaves a button's own padding and border, which
+     would draw a small visible box. */
+  .move{padding:0;border:0;margin:-1px}
 
   /* Long-press lift (reorder.js). */
   :global(.p-row[data-lifted]){z-index:3;overflow:visible;box-shadow:0 10px 28px rgb(0 0 0 / .35);
