@@ -1,7 +1,8 @@
 /**
  * ARM, THEN FIRE (#1120, proposal §1.8). A dangerous act's first tap arms it
  * ("tap again to remove") and does nothing else; the second tap fires. It
- * disarms by itself after 4s, on scroll, on any other tap, and on Escape.
+ * disarms by itself after 4s, on the reader's scroll, on any other tap, and
+ * on Escape.
  *
  * The desk has written this inline five times (Chrome.svelte's sign-out, the
  * belt's archive/cancel, the inbox's approve/dismiss, settings' methods and
@@ -48,28 +49,42 @@ export function createArm({ ms = ARM_MS, onchange = () => {} } = {}) {
   };
 }
 
+/** Keys that scroll the page when pressed anywhere but in a field. */
+const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
+
 /**
- * The page-wide disarm triggers: scroll anywhere, a press anywhere outside
- * `button`, Escape. Returns the cleanup.
+ * The page-wide disarm triggers: the reader scrolling (a wheel, a touch
+ * drag, a scrolling key), a press anywhere outside `button`, Escape.
+ * Returns the cleanup.
+ *
+ * "On scroll" (proposal §1.8) is the reader's scroll, read from the input
+ * that makes it, not from `scroll` events: tapping the pill focuses it, and
+ * a browser that focuses on tap scrolls a pill sitting at a sheet's edge
+ * into view, which fired `scroll` and disarmed it between the two taps, so
+ * the second tap only armed it again.
  * @param {HTMLElement} button
  * @param {() => void} disarm
  */
 export function disarmOnElsewhere(button, disarm) {
   const win = /** @type {Window} */ (button.ownerDocument.defaultView);
   /** @param {Event} event */
-  const onPress = (event) => {
-    if (!(event.target instanceof Node) || !button.contains(event.target)) disarm();
+  const outside = (event) => !(event.target instanceof Node) || !button.contains(event.target);
+  /** @param {Event} event */
+  const onElsewhere = (event) => {
+    if (outside(event)) disarm();
   };
   /** @param {KeyboardEvent} event */
   const onKey = (event) => {
-    if (event.key === "Escape") disarm();
+    if (event.key === "Escape" || (SCROLL_KEYS.has(event.key) && outside(event))) disarm();
   };
-  win.addEventListener("scroll", disarm, { capture: true, passive: true });
-  win.addEventListener("pointerdown", onPress, true);
+  win.addEventListener("wheel", disarm, { capture: true, passive: true });
+  win.addEventListener("touchmove", onElsewhere, { capture: true, passive: true });
+  win.addEventListener("pointerdown", onElsewhere, true);
   win.addEventListener("keydown", onKey, true);
   return () => {
-    win.removeEventListener("scroll", disarm, { capture: true });
-    win.removeEventListener("pointerdown", onPress, true);
+    win.removeEventListener("wheel", disarm, { capture: true });
+    win.removeEventListener("touchmove", onElsewhere, { capture: true });
+    win.removeEventListener("pointerdown", onElsewhere, true);
     win.removeEventListener("keydown", onKey, true);
   };
 }

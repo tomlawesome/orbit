@@ -85,7 +85,7 @@ describe("arm, then fire", () => {
     expect(arm.armed).toBe(false);
     expect(arm.tap()).toBe(false);
   });
-  it("disarms on a press elsewhere, on scroll and on Escape, not on a press on itself", () => {
+  it("disarms on a press elsewhere, on the reader's scroll and on Escape, not on a press on itself", () => {
     const button = document.createElement("button");
     const other = document.createElement("button");
     document.body.append(button, other);
@@ -96,12 +96,38 @@ describe("arm, then fire", () => {
     expect(arm.armed).toBe(true);
     other.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     expect(arm.armed).toBe(false);
+    /* the reader scrolls: a wheel, a touch drag, a scrolling key */
     arm.tap();
-    window.dispatchEvent(new Event("scroll"));
+    document.body.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 40 }));
+    expect(arm.armed).toBe(false);
+    arm.tap();
+    other.dispatchEvent(new Event("touchmove", { bubbles: true }));
+    expect(arm.armed).toBe(false);
+    arm.tap();
+    document.body.dispatchEvent(key("PageDown"));
     expect(arm.armed).toBe(false);
     arm.tap();
     document.body.dispatchEvent(key("Escape"));
     expect(arm.armed).toBe(false);
+    release();
+  });
+  it("stays armed when the browser scrolls the tapped pill into view, or the finger wobbles on it", () => {
+    /* #1120: a browser that focuses on tap scrolls a pill at a sheet's edge
+       into view; that scroll is not the reader's, and disarming on it left
+       the second tap only arming again. */
+    const scroller = document.createElement("div");
+    const button = document.createElement("button");
+    scroller.append(button);
+    document.body.append(scroller);
+    const arm = createArm();
+    const release = disarmOnElsewhere(button, arm.disarm);
+    arm.tap();
+    scroller.dispatchEvent(new Event("scroll"));
+    window.dispatchEvent(new Event("scroll"));
+    button.dispatchEvent(new Event("touchmove", { bubbles: true }));
+    button.dispatchEvent(key(" "));
+    expect(arm.armed).toBe(true);
+    expect(arm.tap()).toBe(true);
     release();
   });
 });
