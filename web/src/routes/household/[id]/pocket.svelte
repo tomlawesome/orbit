@@ -489,7 +489,7 @@
   </div>
 
   <main class="hh-column" style:--hh-bar-room="{barUp ? barHeight + 16 : 0}px">
-    <header class="hh-head hh-rise" style:--i="0">
+    <header class="hh-head p-land" style:--i="0">
       <svg class="hh-glyph" width="64" height="64" viewBox="0 0 48 48" aria-hidden="true">
         <circle class="hh-ring" cx="24" cy="24" r="15" fill="none"/>
         <circle cx="24" cy="24" r="2.6" style="fill:var({v.primary ? '--sun' : '--ink-mid'})"/>
@@ -508,8 +508,8 @@
     </header>
 
     <!-- MEMBERS FIRST (3b, a trial): on a phone the likely errand is a person. -->
-    <h2 class="p-caps hh-rise" style:--i="1" id="hh-members-head">Members<span class="p-count">{v.memberCount}</span></h2>
-    <section class="p-card hh-flush hh-members hh-rise" style:--i="1" aria-labelledby="hh-members-head" data-hh="members" data-row-group>
+    <h2 class="p-caps p-land" style:--i="1" id="hh-members-head">Members<span class="p-count">{v.memberCount}</span></h2>
+    <section class="p-card hh-flush hh-members" style:--i="1" aria-labelledby="hh-members-head" data-hh="members" data-row-group>
       {#each v.roster as person (person.id)}
         {#snippet leaveDetail()}
           <p class="hh-moment leave">nothing you added goes with you · the entries stay with {v.name}</p>
@@ -560,8 +560,8 @@
       {/if}
     </section>
 
-    <h2 class="p-caps hh-rise" style:--i="2" id="hh-system-head">The system</h2>
-    <section class="p-card hh-rise" style:--i="2" aria-labelledby="hh-system-head" data-hh="system">
+    <h2 class="p-caps p-land" style:--i="2" id="hh-system-head">The system</h2>
+    <section class="p-card" style:--i="2" aria-labelledby="hh-system-head" data-hh="system">
       {#if v.canManage}
         <label class="hh-label" for="hh-name">name</label>
         <input id="hh-name" class="hh-input" maxlength="60" autocomplete="off" enterkeyhint="done" bind:value={identity.name}>
@@ -581,8 +581,8 @@
     </section>
 
     {#if v.canManage}
-      <h2 class="p-caps hh-rise" style:--i="3" id="hh-sections-head">Sections · {shown.length} of {MAX_SECTIONS}</h2>
-      <section class="p-card hh-flush hh-sections hh-rise" style:--i="3" aria-labelledby="hh-sections-head" data-hh="sections">
+      <h2 class="p-caps p-land" style:--i="3" id="hh-sections-head">Sections · {shown.length} of {MAX_SECTIONS}</h2>
+      <section class="p-card hh-flush hh-sections" style:--i="3" aria-labelledby="hh-sections-head" data-hh="sections">
         <div class="hh-seclist" use:mountReorder={{ onreorder: reorder }} data-row-group>
           {#each shown as row, index (row.id)}
             <Row title={row.name || "unnamed section"} meta="{entriesLabel(row.count)} · {row.visible ? 'shown' : 'hidden'}"
@@ -602,11 +602,11 @@
         </div>
       </section>
 
-      <div class="hh-rise" style:--i="4">
+      <div class="p-land" style:--i="4">
         <PocketArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} />
       </div>
 
-      <section class="p-card danger hh-danger hh-rise" style:--i="5" aria-labelledby="hh-danger-head" data-hh="danger">
+      <section class="p-card danger hh-danger" style:--i="5" aria-labelledby="hh-danger-head" data-hh="danger">
         <h2 class="hh-danger-head" id="hh-danger-head">
           <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden="true">
             <path d="M9 2.2 16.4 15H1.6L9 2.2Z"/><path d="M9 6.6v4.1"/><path d="M9 12.8v.05"/>
@@ -794,10 +794,6 @@
   .hh-named .p-title{overflow-wrap:anywhere}
   .hh-sub{margin:6px 0 0;font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet)}
 
-  /* Cards arrive in turn, never in sync (§1.9). */
-  .hh-rise{animation:hh-rise 420ms var(--p-ease) both;animation-delay:calc(var(--i, 0) * 60ms + 80ms)}
-  @keyframes hh-rise{from{opacity:0;transform:translateY(10px)}}
-
   .hh-flush{padding:4px 0}
   .hh-flushrows{margin:8px calc(var(--p-card-pad) * -1) -8px}
   .hh-sub-head{margin:16px var(--p-gutter) 4px}
@@ -907,7 +903,7 @@
   .hh-problem{color:var(--overdue-text);animation:p-errin 200ms var(--p-ease) both}
 
   @media (prefers-reduced-motion:reduce){
-    .hh-year,.hh-glyph,.hh-chipbody,.hh-dot,.hh-rise,.hh-joiner,.hh-moment.warn,.hh-problem{animation:none}
+    .hh-year,.hh-glyph,.hh-chipbody,.hh-dot,.hh-joiner,.hh-moment.warn,.hh-problem{animation:none}
     .hh-bar,.hh-column{transition:none}
   }
 </style>

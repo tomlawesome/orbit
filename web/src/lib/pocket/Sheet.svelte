@@ -68,9 +68,6 @@
   let grown = $state(false);
   let drag = $state(0);
   let dragging = $state(false);
-  /* The foot's height, for the body's scroll padding (§1.2: a focused field
-     lands clear of the foot, which stands on the keyboard). */
-  let footHeight = $state(0);
 
   function dismiss() {
     if (!open) return;
@@ -178,7 +175,7 @@
        keyboard's, so it needs no key handler of its own. -->
   <div class="scrim" aria-hidden="true" onclick={dismiss}></div>
   <div class="p-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="{uid}-title" tabindex="-1"
-       bind:this={panel} class:dragging style:--p-drag="{drag}px" style:--p-foot={foot ? `${footHeight}px` : undefined}
+       bind:this={panel} class:dragging style:--p-drag="{drag}px"
        onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={cancel}>
     <div class="grab" aria-hidden="true"><span></span></div>
     <div class="head">
@@ -187,7 +184,7 @@
       <button class="p-pill close" data-sheet-close onclick={dismiss}>close</button>
     </div>
     <div class="body">{@render children?.()}</div>
-    {#if foot}<div class="p-sheet-foot" bind:clientHeight={footHeight}>{@render foot()}</div>{/if}
+    {#if foot}<div class="p-sheet-foot">{@render foot()}</div>{/if}
   </div>
 </div>
 
@@ -237,7 +234,7 @@
   .title{flex:1;min-width:0;margin:0;font:600 var(--p-type-sheet)/1.3 var(--display);color:var(--ink)}
   .head .close{border-color:transparent;background:none;margin-right:calc(var(--p-pill-pad) * -1 + 4px)}
   .body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
-    scroll-padding-bottom:calc(var(--p-foot, 80px) + 12px)}
+    scroll-padding-bottom:12px}
   /* THE FOOT (§1.2): pinned under the body, outside the scroller, edge to
      edge across the panel and down over its bottom padding, on the raised
      glass with a hairline above. */
