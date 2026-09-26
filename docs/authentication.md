@@ -187,8 +187,9 @@ It recovers nothing, and it refuses to run while the key still works.
 ## Recent authentication (step-up)
 
 Every sensitive action — setting or changing a password, linking or
-unlinking a sign-in method, re-issuing another user's setup link, and
-transferring primary-administrator authority — always re-challenges the
+unlinking a sign-in method, re-issuing another user's setup link,
+transferring primary-administrator authority, creating a system for somebody
+else, and writing out or bringing in a portable archive — always re-challenges the
 person taking it, regardless of how recently they signed in. There is no
 freshness window: a session left open at an unlocked screen is never itself
 enough to take one of these actions.
