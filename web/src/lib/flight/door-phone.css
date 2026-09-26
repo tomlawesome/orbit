@@ -6,10 +6,11 @@
    390 or 360, and no card fits inside a ring that fits the phone, so on a
    phone the ring cannot be the card. It is still the door:
 
-     · the ring RIDES HIGH -- the login ring at its own size (302.4px, a
-       4.2px line, the 29.4px orb), its top edge 44px under the safe area, in
-       the same station on every door screen, so nothing travels when a card
-       opens or the launch begins;
+     · the ring STANDS AT THE UPPER-MIDDLE (review round §2.7, #1127) -- the
+       login ring at its own size (302.4px, a 4.2px line, the 29.4px orb),
+       its centre at 40% of the visible height on the bare door, the held
+       dawn and the goodbye; at 30% over a card, where it closes to 240px
+       under 760px of visible height so the card below it fits;
      · the ring HOLDS THE QUESTION -- where `orbit` stands on the door, a card
        puts its own heading, 22px in the display face; the answers stand in
        the column beneath and the act is the pill;
@@ -38,19 +39,27 @@
 :where(.ringcard) .bigring .pocketstroke{display:none}
 
 @media (max-width: 900px), (max-height: 600px){
+  /* THE STATION (review round §2.7). The ring's top edge is placed so its
+     centre sits at a share of the visible height (dvh, so the browser's
+     own bars are already taken off), held between 28px and 200px under
+     the safe area. At 844 the bare door's top is 187px, at 664 it is 115px. */
   :root{
     --door-ring:302.4px;
-    --door-top:calc(env(safe-area-inset-top, 0px) + 44px);
+    --door-top:clamp(calc(env(safe-area-inset-top, 0px) + 28px),
+                     calc(40dvh - var(--door-ring) / 2),
+                     calc(env(safe-area-inset-top, 0px) + 200px));
     /* the login glyph is a 420px box around its 302.4px ring */
     --door-glyph-inset:58.8px;
     --door-gap:28px;
   }
-  /* A short phone (360x780 and the like) stands the ring a little higher
-     and the card a little closer, on every door screen alike, so the
-     tallest card -- the first administrator's -- ends above the horizon. */
+  /* A short phone (360x780 and the like) stands the card a little closer
+     to the ring, so the tallest card -- the first administrator's -- ends
+     above the horizon. */
   @media (max-height: 800px){
-    :root{--door-top:calc(env(safe-area-inset-top, 0px) + 28px);--door-gap:20px}
+    :root{--door-gap:20px}
   }
+  /* A card on the door has its own station (30%, and a 240px ring under
+     760px of visible height): see THE CARD'S STATION, below the card. */
 
   /* ══ THE BARE DOOR, THE HELD DAWN, THE GOODBYE ═══════════════════════════
      The lockup the desk centres, stood at the ring's station instead. The
@@ -85,20 +94,34 @@
         text-shadow:0 1px 5px rgba(4,6,14,.9)}
 
   /* THE GOODBYE (§2.18): the ring holds the farewell where it held the
-     word, the second line stands under the ring, and `Sign back in` is a
-     full-width pill in the lower third, above the ember rim. */
-  #dusk .lockup .name{visibility:hidden}
-  #dusk .farewell{top:0;bottom:auto;height:0}
-  #dusk .farewell .said{position:absolute;left:50%;top:calc(var(--door-top) + var(--door-ring) / 2);
+     word, and the second line and `Sign back in` stand in ONE COLUMN under
+     the ring, on the axis (review round §5.1): the line 26px under the
+     ring, the pill in the lower third at 68% where there is room and 24px
+     under the line where there is not (70px is the line's 26px gap and its
+     two 13px/1.7 lines). In flow, so a line that wraps to three on a large
+     text setting pushes the pill down rather than running into it.
+     The lockup steps out of the way (`display:contents`) so its glyph, the
+     farewell and the gate are one grid's rows; the farewell keeps its own
+     box, and with it the entrance it makes with the farewell beat. */
+  #dusk .loginchrome{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto;
+        align-content:start;justify-items:center;
+        padding-bottom:calc(env(safe-area-inset-bottom, 0px) + 24px)}
+  #dusk .loginchrome .lockup{display:contents}
+  #dusk .lockup .glyph{grid-area:1/1;justify-self:unsafe center;
+        margin-top:calc(var(--door-top) - var(--door-glyph-inset))}
+  #dusk .lockup .name{grid-area:1/1;visibility:hidden}
+  #dusk .farewell{grid-area:2/1;position:relative;top:auto;bottom:auto;left:auto;right:auto;
+        width:100%;box-sizing:border-box;padding:0 var(--p-gutter);
+        margin-top:calc(0px - var(--door-glyph-inset))}
+  #dusk .farewell .said{position:absolute;left:50%;top:calc(0px - var(--door-ring) / 2);
         transform:translate(-50%,-50%);width:236px;
         font:600 22px/1.2 var(--display);letter-spacing:.005em;color:#e9edf8}
-  #dusk .farewell .sub{position:absolute;left:var(--p-gutter);right:var(--p-gutter);margin:0;
-        top:calc(var(--door-top) + var(--door-ring) + 26px);
+  #dusk .farewell .sub{margin:26px 0 0;
         font-size:var(--p-type-meta);line-height:1.7;letter-spacing:.04em;color:#9aa0b8;
         text-shadow:0 1px 5px rgba(4,6,14,.9)}
-  #dusk .loginchrome .gate-wrap{align-self:start;
+  #dusk .loginchrome .gate-wrap{grid-area:3/1;align-self:start;justify-self:center;transform:none;
         width:calc(100vw - 2 * var(--p-gutter));max-width:376px;
-        transform:translateY(calc(68dvh - var(--door-top) + var(--door-glyph-inset)))}
+        margin-top:max(24px, calc(68dvh - var(--door-top) - var(--door-ring) - 70px))}
   #dusk .gate-wrap a{display:flex;align-items:center;justify-content:center;width:100%;box-sizing:border-box;
         min-height:var(--p-hit);padding:0 24px;font-size:var(--p-type-button)}
 
@@ -202,6 +225,55 @@
         min-height:52px;padding:0 20px;font-size:var(--p-type-body)}
   .ringcard #formlayer .card.approve .approve-no{margin-top:12px;background:rgba(4,6,14,.5)}
   .ringcard #formlayer .card.approve .note{margin:20px 0 0}
+
+  /* ══ THE CARD'S STATION (review round §2.7, §5.2, §5.4) ═══════════════
+     While no card shows, the column's ring rests at the bare door's station
+     (40%, 302.4px) even though it is not seen there. `showform` moves it to
+     the card's: its centre at 30%, and under 760px of visible height a
+     240px ring in the glyph's proportion (302.4 : 4.2 : 29.4, so a 3.4px
+     line and a 23.4px orb) with the question 200px wide at 20px inside it.
+     The ring's own .5s margin-top/width/height transitions carry it between
+     the two, so it travels rather than jumps; a launch sends it back the
+     same way. Reduced motion drops the transitions: it simply stands there.
+     The custom properties are re-declared on the column because a custom
+     property resolves its var()s where it is declared. `:where()` keeps
+     these under the typing rules below, which close the ring further. */
+  :where(body.showform:not(.launching)) .ringcard{
+    --door-top:clamp(calc(env(safe-area-inset-top, 0px) + 28px),
+                     calc(30dvh - var(--door-ring) / 2),
+                     calc(env(safe-area-inset-top, 0px) + 200px));
+  }
+  @media (height < 760px){
+    :where(body.showform:not(.launching)) .ringcard{--door-ring:240px}
+    :where(body.showform:not(.launching)) .ringcard .bigring .ringstroke,
+    :where(body.showform:not(.launching)) .ringcard .bigring .pocketstroke{border-width:3.4px}
+    :where(body.showform:not(.launching)) .ringcard .bigring .ringorbit i{
+          width:23.4px;height:23.4px;margin:-11.7px 0 0 -11.7px}
+    :where(body.showform:not(.launching)) .ringcard #formlayer .card .ask{width:200px;font-size:20px}
+  }
+  /* ringcard.css's rule that shows the ring while a card is up names its
+     own transition (opacity and visibility) at a specificity the column's
+     list above cannot reach, which left the ring's travel -- and the close
+     while typing -- without their .5s. The same selector, named for this
+     column, restores the whole list. */
+  body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
+    :not(.bare):not(.showwarp):not(.launching):not(.belong) .ringcard .bigring{
+        transition:opacity .8s ease,visibility .8s,
+                   width .5s cubic-bezier(.55,0,.2,1),height .5s cubic-bezier(.55,0,.2,1),
+                   margin-top .5s cubic-bezier(.55,0,.2,1)}
+  /* A card raised in the same moment as its column (the door's `local
+     login`, a claim or local-only door answering) still starts from the
+     bare door's station, so the ring travels to the card's from where the
+     door's ring stood. */
+  @starting-style{
+    .ringcard .bigring{width:302.4px;height:302.4px;
+          margin-top:clamp(calc(env(safe-area-inset-top, 0px) + 28px),
+                           calc(40dvh - 151.2px),
+                           calc(env(safe-area-inset-top, 0px) + 200px))}
+    .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke{border-width:4.2px}
+    .ringcard .bigring .ringorbit i{width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px}
+    .ringcard #formlayer .card .ask{top:calc(0px - var(--door-gap) - 151.2px);width:236px;font-size:22px}
+  }
 
   /* ══ THE RING CLOSES WHILE YOU TYPE ════════════════════════════════════
      96px, 12px under the safe area, in the mark's own proportion (line and
