@@ -481,12 +481,16 @@ function ellipses(scope) {
  * `.p-sub`, `.p-hint` or `.p-foot` over 40. Those caps are set in 13px
  * mono at 7.8px a character; a meta in the body face (`metaFace="ui"`,
  * about 6.3px a character at 13px, §1's own measurements) gets the same
- * width in its own characters. An email address alone is R5's exception.
+ * width in its own characters. An email address alone is R5's exception,
+ * and a meta's trailing file name is R5's elastic part: the guard trims it
+ * (the ellipsis check above allows that cut), so only the fixed data before
+ * it counts against the cap.
  * @param {string} scope
  */
 function sentences(scope) {
   const roots = scope ? [...document.querySelectorAll(scope)] : [document.body];
   const UI = 7.8 / 6.3;
+  const FILE_TAIL = /\s·\s[^\s·]+\.[a-z0-9]{2,5}$/i;
   const out = new Set();
   /** @param {Element} el */
   const shown = (el) => {
@@ -496,10 +500,11 @@ function sentences(scope) {
   for (const root of roots) {
     for (const el of root.querySelectorAll("[data-row] .meta, .p-sub, .p-hint, .p-foot")) {
       if (!shown(el)) continue;
-      const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+      let text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
       let cap = 40;
       if (el.classList.contains("meta")) {
         if (el.classList.contains("email")) continue;
+        text = text.replace(FILE_TAIL, "");
         const row = el.closest("[data-row]");
         cap = row?.querySelector(".trail") ? 20 : 34;
         if (el.classList.contains("ui")) cap = Math.floor(cap * UI);

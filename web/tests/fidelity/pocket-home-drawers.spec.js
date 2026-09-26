@@ -179,3 +179,30 @@ test("the north star hides while a row is open", async ({ page }) => {
   await expect(catch_).not.toHaveAttribute("data-open", "");
   await expect(star).toBeVisible();
 });
+
+/* ROUND 3 §4 (#1140): home raises the review sheet in place, from a
+   suggestion's `review & amend →` and from a second tap on its hollow body
+   on the dial, rather than going to the receipt page. */
+test("review & amend raises the review sheet on home", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const catch_ = page.locator(".pocket .pk-signals [data-row]", { hasText: "Home insurance" }).first();
+  await openRow(page, catch_);
+  await catch_.getByRole("button", { name: "review & amend →" }).click();
+  const sheet = page.getByRole("dialog", { name: "Review & amend" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("textbox", { name: "name", exact: true })).toHaveValue("Home insurance renewal");
+  await expect(page).toHaveURL(/\/home$/);
+});
+test("a second tap on the relay's catch raises the review sheet on home", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const body = page.locator(".mdial .pk-body[data-body-sugg]").first();
+  await body.click();
+  const catch_ = page.locator(".pocket .pk-signals [data-row]", { hasText: "Home insurance" }).first();
+  await expect(catch_).toHaveAttribute("data-open", "");
+  await body.scrollIntoViewIfNeeded();
+  await body.click();
+  await expect(page.getByRole("dialog", { name: "Review & amend" })).toBeVisible();
+  await expect(page).toHaveURL(/\/home$/);
+});

@@ -1,9 +1,11 @@
 <script>
   import { onMount } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
+  import FailedRow from "$lib/pocket/FailedRow.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { rotateRelay } from "$lib/data/workspace.js";
+  import { dismissReceipt, rotateRelay } from "$lib/data/workspace.js";
 
   /*
    * YOUR RELAY ON A PHONE (#1125, proposal §2.9). Beside the desk's card and
@@ -18,11 +20,18 @@
    * nothing wraps mid-word. `rotate address` arms: the old address keeps
    * collecting for fourteen days, but anyone holding it should not.
    *
+   * Round 3 §3.8: one line under the title, `nothing yet · forward one to
+   * try`, and mail that could not be read as the inbox's failed rows
+   * (FailedRow.svelte, the one drawing of them): title the day, meta the
+   * first clause, the message and `remove` when opened. No footnote: the
+   * outbound line is settings' own row, and the promises are cut from the
+   * pocket (owner's answer 10b).
+   *
    * `rotated` is the desk page's own, bound, so a rotation shows in both.
    */
 
   /** @typedef {Awaited<ReturnType<typeof rotateRelay>>} Relay */
-  /** @type {{ relay: Relay, rotated: Relay | null, failures: { id: string, receivedAt: string, message: string }[], fixtures: boolean }} */
+  /** @type {{ relay: Relay, rotated: Relay | null, failures: import('$lib/data/workspace.js').MailFailure[], fixtures: boolean }} */
   let { relay, rotated = $bindable(), failures, fixtures } = $props();
 
   /* The gate's other two states, `?relay=never|paused`, fixtures only. */
@@ -74,8 +83,19 @@
     try { await navigator.share({ title: "My Orbit relay address", text: shown.address }); } catch { /* dismissed */ }
   }
 
-  /** @param {string} iso */
-  const day = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  /* A removed message leaves the list at once; the page's read is not
+     taken again for it. */
+  const removed = new SvelteSet();
+  const unread = $derived(failures.filter((one) => !removed.has(one.id)));
+  /** @param {{ id: string }} failure */
+  async function removeFailed(failure) {
+    try {
+      await dismissReceipt(failure.id);
+      removed.add(failure.id);
+    } catch (error) {
+      wake(`not removed — ${/** @type {{ message?: string }} */ (error)?.message ?? String(error)}`, { failure: true });
+    }
+  }
 
   onMount(() => {
     canShare = typeof navigator.share === "function";
@@ -102,7 +122,7 @@
   <main class="rl-column">
     <header class="rl-head p-land" style:--i="0">
       <h1 class="p-card-title rl-title">Your relay</h1>
-      <p class="p-prose rl-sentence">Forward a document to your private address and it arrives in your review queue.</p>
+      <p class="p-sub">forward a document to this address</p>
     </header>
 
     <section class="p-card" style:--i="1" aria-label="Your address">
@@ -122,7 +142,7 @@
         <div class="rl-field">
           <span class="rl-label">last received</span>
           {#if never}
-            <span class="rl-value quiet p-prose">nothing yet — forward a document to try it</span>
+            <span class="rl-value quiet">nothing yet · forward one to try</span>
           {:else}
             <span class="rl-value">{shown.lastReceived}</span>
           {/if}
@@ -143,23 +163,18 @@
       {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
     </section>
 
-    {#if failures.length}
-      <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
+    {#if unread.length}
+      <!-- #434: arrived-but-unreadable mail; round 3 §3.8: the inbox's
+           failed rows, the server's words opened from the first clause. -->
       <section class="p-card" style:--i="2" aria-labelledby="rl-failed">
-        <h2 class="p-caps" id="rl-failed">Arrived, but could not be read</h2>
-        {#each failures as failure (failure.id)}
-          <div class="rl-failure">
-            <span class="rl-date">{day(failure.receivedAt)}</span>
-            <p class="p-prose">{failure.message}</p>
-          </div>
-        {/each}
+        <h2 class="p-caps" id="rl-failed">couldn’t be read<span class="p-count">{unread.length}</span></h2>
+        <div class="rl-rows" data-row-group>
+          {#each unread as failure (failure.id)}
+            <FailedRow {failure} onremove={removeFailed} />
+          {/each}
+        </div>
       </section>
     {/if}
-
-    <footer class="rl-notes p-land p-prose" style:--i="3">
-      <p>Every person gets their own relay. Nothing is created without your review.</p>
-      <p>Outbound reminder email is set by your administrator.</p>
-    </footer>
   </main>
 </div>
 
@@ -198,8 +213,7 @@
     padding:calc(var(--p-chrome) + env(safe-area-inset-top) + 200px) var(--p-gutter)
       calc(96px + env(safe-area-inset-bottom))}
   .rl-head{text-align:center;margin:0 0 16px}
-  .rl-title{margin:0 0 6px}
-  .rl-sentence{margin:0 auto;max-width:30ch;color:var(--ink-mid)}
+  .rl-title{margin:0}
 
   /* The address: the desk's dashed alias, full width, 14px mono. */
   .rl-address{appearance:none;box-sizing:border-box;width:100%;min-height:64px;padding:10px 16px;margin:0 0 8px;
@@ -223,20 +237,15 @@
   .rl-label{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
     color:var(--ink-quiet)}
   .rl-field b,.rl-value{font:500 var(--p-type-meta)/1.45 var(--mono);color:var(--ink);overflow-wrap:anywhere}
-  .rl-value.quiet{font-family:var(--ui);font-weight:400;color:var(--ink-mid)}
+  .rl-value.quiet{font-weight:400;color:var(--ink-mid)}
   .rl-field b.ok{color:var(--ok-text)}
   .rl-field b.warm{color:var(--warm-text)}
 
   .rl-acts{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);margin:16px 0 0}
   .rl-acts > :global(*){flex:1 1 40%;white-space:nowrap}
 
-  .rl-failure{display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--line-soft)}
-  .rl-failure:first-of-type{border-top:0;padding-top:0}
-  .rl-date{flex:none;width:52px;font:500 var(--p-type-meta)/1.5 var(--mono);color:var(--ink-mid)}
-  .rl-failure p{margin:0;color:var(--overdue-text)}
-
-  .rl-notes{color:var(--ink-quiet);text-align:center;padding:4px 8px 0}
-  .rl-notes p{margin:0 0 4px}
+  /* The failed rows run flush to the card's edges, as settings' own do. */
+  .rl-rows{margin:0 calc(var(--p-card-pad) * -1) -8px}
 
   @media (prefers-reduced-motion:reduce){
     .rl-waves circle,.rl-craft,.rl-core{animation:none}
