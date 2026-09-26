@@ -83,11 +83,13 @@ test("disable arms before it fires", async ({ page }) => {
 test("a system on the clock keeps restore on show; delete now sits in its opened row", async ({ page }) => {
   await open(page);
   const clock = row(page, "[data-ad=systems]", "Aunt May");
-  await expect(clock).toContainText("on the clock · 13 days left · gone for good 26 Aug");
+  /* Round 3 §3.9: the meta is the state and the days; the date is the panel's. */
+  await expect(clock.locator(".meta")).toHaveText("deleted · 13 days left");
   await expect(page.getByRole("button", { name: "Restore Aunt May’s Cottage" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Delete Aunt May’s Cottage now, for good" })).toHaveCount(0);
 
   await openRow(page, clock);
+  await expect(clock.locator("[data-row-panel] .p-kv").first()).toHaveText(/gone for good\s*26 Aug/);
   await clock.getByRole("button", { name: "Delete Aunt May’s Cottage now, for good" }).click();
   await clock.getByRole("button", { name: "tap again to delete Aunt May’s Cottage now, for good" }).click();
   const sheet = page.getByRole("dialog", { name: /Delete Aunt May’s Cottage now/ });
@@ -103,12 +105,37 @@ test("a failed document job says why and offers retry, with no interaction", asy
   const card = page.locator(".ad-pocket [data-ad=documents]");
   const failed = card.locator(".p-row").filter({ hasText: "FAILED" });
   await expect(failed).toContainText("Virus scan");
-  await expect(failed).toContainText("couldn’t reach the virus scanner · 5 tries · last tried 6m ago");
+  /* Round 3 §3.9: the reason's first words and when, at rest; the tries are the panel's. */
+  await expect(failed.locator(".meta")).toHaveText("couldn’t reach the scanner · 6m ago");
   await expect(page.getByRole("button", { name: "Retry the virus scan" })).toBeVisible();
+  await openRow(page, failed);
+  await expect(failed.locator("[data-row-panel] .p-kv").first()).toHaveText(/tries\s*5/);
   /* Kind only, never a document's name (owner, 2026-09-19); one retry, on the failed row only. */
   await expect(card.getByRole("button", { name: /^Retry/ })).toHaveCount(1);
   /* And it is told at the top of the page. */
   await expect(page.locator(".ad-pocket .ad-tells a", { hasText: "1 job failed" })).toHaveAttribute("href", "#ad-documents");
+});
+
+test("a row's meta is its data alone; the rest is the panel's first line", async ({ page }) => {
+  await open(page);
+  await expect(page.locator(".ad-pocket .ad-sub")).toHaveText("5 people · 5 systems");
+  /* People: the email alone at rest; the systems they are in, once opened. */
+  const emma = row(page, "[data-ad=people]", "Emma Lawson");
+  await expect(emma.locator(".meta")).not.toContainText("·");
+  await expect(emma.locator(".meta")).not.toContainText("system");
+  await openRow(page, emma);
+  await expect(emma.locator("[data-row-panel] .p-kv").first()).toHaveText("owns 2 systems");
+  /* Systems: members and items at rest; the owner, once opened. */
+  const lawson = row(page, "[data-ad=systems]", "Lawson Home");
+  await expect(lawson.locator(".meta")).toHaveText(/^\d+ members? · \d+ items?$/);
+  await openRow(page, lawson);
+  await expect(lawson.locator("[data-row-panel] .p-kv").first()).toHaveText(/owner\s*Tom Lawson/);
+  /* The public contact and the rotate row carry no sentence at rest. */
+  await expect(page.locator(".ad-pocket [data-ad=contact] .p-row .meta")).toHaveCount(0);
+  await expect(row(page, "[data-ad=mail]", "every address").locator(".meta")).toHaveCount(0);
+  /* The jobs card has no foot, and the version is one line with no promise (10b). */
+  await expect(page.locator(".ad-pocket [data-ad=documents]")).not.toContainText("most recently");
+  await expect(page.locator(".ad-pocket .ad-strip")).toHaveText("ORBIT 1.3.0 · PREVIEW · FD6A7E6");
 });
 
 test("alerts stand first, and the jump strip is links, not tabs", async ({ page }) => {
