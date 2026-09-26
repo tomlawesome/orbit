@@ -50,7 +50,7 @@ longer it is rewritten to a line, not squeezed; where it only reassures
 **R4. A promise is said once, on the screen that owns it.** "nothing is
 added without you", "originals stay in your mailbox", "nothing leaves this
 machine" are the product's promises, and the desk repeats them at the foot
-of several pages. On the pocket each is said once — question **9** picks
+of several pages. On the pocket each is said once — question **10** picks
 where — and never as a footnote to a list it does not belong to.
 
 **R5. A row's meta is one line of data, never a sentence.** Cap **20
@@ -121,11 +121,11 @@ reader sees: rows, a gap, a dashed box. Two different things.
   pen, `href=/inbox`, no panel: title `2 messages couldn't be read` /
   `reading a message` / `reading 1 · 2 couldn't be read`, meta `inbox →`
   in `--accent-text`, mark the breathing dot while anything is reading,
-  else the amber failed dot. Question **11** confirms this, since home is a
+  else the amber failed dot. Question **12** confirms this, since home is a
   ratified surface.
 - The footnote "unreviewed arrivals burn up after 45 days · nothing is
   added without you" goes. The row says when it burns up; the promise goes
-  where question **9** puts it.
+  where question **10** puts it.
 - The pen is omitted when there is nothing to show, as the group is now.
 - The foot of the page pads by the star (§5) so the pen scrolls clear.
 
@@ -173,7 +173,7 @@ desk words on a phone:
   words; one vocabulary).
 - `nothing is created without your acceptance — an unaccepted suggestion
   simply expires and is purged` → cut (the caught line says when it burns
-  up; question **9**).
+  up; question **10**).
 - `← back to your orbit` → `← your sky` (§4).
 - Sheet: `required · choose one`, `not yet — give it a name`: keep.
 
@@ -204,7 +204,7 @@ desk words on a phone:
 
 ### 3.5 Inbox
 - Subtitle `what your relay has caught · nothing enters your orbit without
-  your say-so` (two lines) → question **9**: `nothing enters without your
+  your say-so` (two lines) → question **10**: `nothing enters without your
   say-so` (a) or cut (b).
 - Review card: `caught 11 Aug · burns up in 43d`, readings: keep.
   Attachment `policy-schedule.pdf · 812 KB · scanned clean` (wraps) →
@@ -228,7 +228,7 @@ desk words on a phone:
   orbit and it lands here` → `nothing filed yet`.
 - Footnote `unreviewed arrivals burn up after 45 days · originals stay in
   your mailbox, Orbit only ever reads copies` → `unreviewed arrivals burn
-  up after 45 days`; the mailbox promise → question **9**.
+  up after 45 days`; the mailbox promise → question **10**.
 - Empty inbox: `your relay is listening · nothing waiting` → `relay
   listening · nothing waiting`; the sentence `Forward a bill, a renewal or a
   certificate to your relay address and it lands here for your say-so.` →
@@ -304,7 +304,7 @@ desk words on a phone:
   service sheet the row opens. `retry` stays visible (#1071). Foot `the 25
   most recently touched jobs are kept; older ones are not` → cut.
 - Version line (three lines of caps) → `ORBIT 1.3.0 · PREVIEW · FD6A7E6`;
-  `self-hosted — nothing leaves this machine` → question **9**.
+  `self-hosted — nothing leaves this machine` → question **10**.
 - Invite sheet note (two sentences): keep (sheet).
 
 ### 3.10 The door family
@@ -393,7 +393,7 @@ first attention row's date at first glance at both 390×664 and 360×640,
 and that date is the thing the manifest is for. A star in the sky beside
 the dial is the desk's own idea of the north star and covers nothing; the
 afloat station keeps the reason the star exists (add from anywhere in the
-list, one tap). Question **10** offers the owner the plain alternative.
+list, one tap). Question **11** offers the owner the plain alternative.
 
 ---
 
@@ -424,7 +424,7 @@ document-job failures (§3.5).
 
 Numbering continues the session's (9 upward).
 
-**9** The promise lines — "nothing is added without you", "originals stay
+**10** The promise lines — "nothing is added without you", "originals stay
 in your mailbox, Orbit only reads copies", "self-hosted — nothing leaves
 this machine". The desk says them at the foot of several pages.
  a) Say each once, on the screen that owns it: the inbox's subtitle reads
@@ -435,14 +435,14 @@ this machine". The desk says them at the foot of several pages.
     clutter you saw).
  b) Cut them all from the pocket; the acts (`Add to orbit`) are the promise.
 
-**10** The north star's rest station (§5).
+**11** The north star's rest station (§5).
  a) In the sky at the dial's corner at rest, afloat at the bottom right once
     the dial has scrolled off (my recommendation: covers nothing at first
     glance, still one tap from anywhere in the list).
  b) Keep it fixed at the bottom right always, with the foot pad only, and
     accept that at rest it covers the first row's date.
 
-**11** Reading and failed mail on home (§2). The proposal listed them as
+**12** Reading and failed mail on home (§2). The proposal listed them as
 rows under Signals; they carry the sentences that crowded the manifest.
  a) One summary row in the pen (`2 messages couldn't be read · inbox →`);
     the rows themselves live in the inbox (my recommendation: home shows
