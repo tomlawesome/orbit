@@ -349,8 +349,12 @@
   // takes the first result. Escape is the sheet's own.
   /** @type {HTMLElement | undefined} */
   let resultList = $state();
+  /* The results, then the top match's act in the sheet's foot. */
   const resultStops = () =>
-    /** @type {HTMLElement[]} */ ([...(resultList?.querySelectorAll("[data-row-face], .pk-act") ?? [])]);
+    /** @type {HTMLElement[]} */ ([
+      ...(resultList?.querySelectorAll("[data-row-face]") ?? []),
+      ...document.querySelectorAll(".p-sheet-layer.open .pk-act"),
+    ]);
   /** @param {KeyboardEvent} event */
   function fieldKey(event) {
     if (event.key === "ArrowDown") {
@@ -645,11 +649,6 @@
         <div class="p-kv"><span>cost</span><b>{money(row.costMinor, row.currency, row.costIsEstimate)}</b></div>
         <div class="p-kv"><span>documents</span><b>{documentCount > 0 ? documentCount : "none yet"}</b></div>
       </div>
-      <div class="p-pills pk-acts">
-        <a class="p-pill filled" href={resolve("/item/[[id]]", { id: encodeURIComponent(row.id) })}
-           onclick={() => (morphing = true)}>open</a>
-        {#if documentCount > 0}<button class="p-pill" onclick={showDocuments}>documents</button>{/if}
-      </div>
     </div>
   {:else if face === "docs" && row}
     <!-- `documents` grows the sheet into the item's papers (§2.1, #1119). -->
@@ -669,10 +668,6 @@
         {/if}
       </div>
       {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
-      <div class="p-pills pk-acts">
-        <a class="p-pill filled" href={resolve("/item/[[id]]", { id: encodeURIComponent(row.id) })}
-           onclick={() => (morphing = true)}>open</a>
-      </div>
     </div>
   {:else if face === "sugg" && suggestion}
     <!-- The suggestion sheet (#466, §2.1): what the relay read, how sure it
@@ -692,11 +687,6 @@
       </Row>
     </div>
     {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
-    <div class="p-pills pk-acts">
-      <ArmButton label="Add to orbit" armedLabel="tap again to add" danger={false} class="filled"
-                 onfire={() => decide("approve")} />
-      <ArmButton label="Dismiss" armedLabel="tap again to dismiss" danger={false} onfire={() => decide("dismiss")} />
-    </div>
     <a class="pk-amend" href={resolve("/item/[[id]]", { id: encodeURIComponent(suggestion.receiptId ?? suggestion.id) })}>review &amp; amend →</a>
   {:else if face === "search"}
     <!-- #1057's phone half (§2.4; phone-search round 1, B). -->
@@ -731,17 +721,27 @@
             {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
           </Row>
         {/each}
-        {#if results.complete}
-          {@const top = results.complete}
-          <div class="pk-top">
-            <ArmButton label={`→ complete “${top.title}”`} armedLabel="tap again to complete" danger={false} wide
-                       class="pk-act" onfire={() => complete(top)} />
-          </div>
-        {/if}
       {/if}
       {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
     </div>
   {/if}
+  <!-- Every act in the sheet's pinned foot (review round §1.2). -->
+  {#snippet foot()}
+    {#if (face === "item" || face === "docs") && row}
+      <a class="p-pill filled" href={resolve("/item/[[id]]", { id: encodeURIComponent(row.id) })}
+         onclick={() => (morphing = true)}>open</a>
+      {#if face === "item" && documentCount > 0}<button class="p-pill" onclick={showDocuments}>documents</button>{/if}
+    {:else if face === "sugg" && suggestion}
+      <ArmButton label="Add to orbit" armedLabel="tap again to add" danger={false} class="filled"
+                 onfire={() => decide("approve")} />
+      <ArmButton label="Dismiss" armedLabel="tap again to dismiss" danger={false} onfire={() => decide("dismiss")} />
+    {:else if face === "search" && results.query && !results.nothing && results.complete}
+      {@const top = results.complete}
+      <!-- The one accent action for the top match (§2.4). -->
+      <ArmButton label={`→ complete “${top.title}”`} armedLabel="tap again to complete" danger={false} wide
+                 class="pk-act" onfire={() => complete(top)} />
+    {/if}
+  {/snippet}
 </Sheet>
 
 <Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}

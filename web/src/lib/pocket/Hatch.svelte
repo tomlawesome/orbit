@@ -107,10 +107,11 @@
       </button>
     {/each}
   </div>
-  <div class="out">
+  {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+  <!-- The sheet's one act, in its pinned foot (review round §1.2). -->
+  {#snippet foot()}
     <ArmButton label="sign out →" armedLabel="tap again to sign out" onfire={leave} />
-    {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
-  </div>
+  {/snippet}
 </Sheet>
 
 <style>
@@ -129,5 +130,4 @@
   .swatch span{width:30px;height:30px;border-radius:50%;border:1px solid var(--line)}
   .swatch[aria-pressed=true] span{outline:2px solid var(--accent);outline-offset:3px}
   .swatch:focus-visible{outline:2px solid var(--accent);outline-offset:0}
-  .out{margin-top:20px}
 </style>

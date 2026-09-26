@@ -41,6 +41,13 @@
   .p-wake-host{position:fixed;left:0;right:0;bottom:0;z-index:60;pointer-events:none;
     display:flex;justify-content:center;
     padding:0 var(--p-gutter) calc(12px + env(safe-area-inset-bottom))}
+  /* Over a page with the north star (NorthStar.svelte sets the flag), the
+     wake stands above the star's 56px and its 20px foot (§1.3). The star
+     is only drawn in the pocket dialect (media.js's query). */
+  @media (max-width:900px), (max-height:600px){
+    :global(body[data-northstar]) .p-wake-host{
+      padding-bottom:calc(12px + 56px + 20px + env(safe-area-inset-bottom))}
+  }
   .p-wake{pointer-events:auto;width:100%;max-width:var(--p-column);min-height:52px;
     display:flex;align-items:center;gap:12px;padding:4px 4px 4px 16px;
     background:var(--panel-raised);border:1px solid var(--line);
