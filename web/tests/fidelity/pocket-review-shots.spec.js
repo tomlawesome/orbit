@@ -26,6 +26,16 @@ const OUT = process.env.POCKET_SHOTS_DIR ?? "/tmp/orbit-phone-vision/review";
 const BASELINES = join(dirname(fileURLToPath(import.meta.url)), "baselines");
 const THEMES = ["afterdark", "starchart", "clouds"];
 
+/*
+ * The phones as a browser actually leaves them (review round §3 step 6):
+ * the owner judges the home from these, not the full-height design frames.
+ * POCKET_SHOTS_FULL=1 photographs the full-height frames instead.
+ */
+const SHOT_PHONES = process.env.POCKET_SHOTS_FULL ? PHONES : [
+  { name: "390x664", viewport: { width: 390, height: 664 } },
+  { name: "360x640", viewport: { width: 360, height: 640 } },
+];
+
 /** A route's folder: `/household/hh-lawson-1` → `household-hh-lawson-1`. @param {string} route */
 const slugOf = (route) => route.replace(/^\/+/, "").replace(/[^a-z0-9]+/gi, "-") || "door";
 
@@ -39,7 +49,7 @@ const SHOTS = [
 ];
 
 for (const theme of THEMES) {
-  for (const phone of PHONES) {
+  for (const phone of SHOT_PHONES) {
     test.describe(`review shots · ${theme} · ${phone.name}`, () => {
       test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true });
 
@@ -86,12 +96,12 @@ test("the review index", async () => {
     const files = new Set(readdirSync(join(OUT, slug)));
     const states = [...new Set(SHOTS.filter((s) => s.slug === slug).map((s) => s.state))];
     const rows = states.map((state) => {
-      const shots = PHONES.flatMap((phone) => THEMES.map((theme) => [`${state}-${phone.name}-${theme}.png`, `${state} · ${phone.name} · ${theme}`]))
+      const shots = SHOT_PHONES.flatMap((phone) => THEMES.map((theme) => [`${state}-${phone.name}-${theme}.png`, `${state} · ${phone.name} · ${theme}`]))
         .filter(([f]) => files.has(f))
         .map(([f, caption]) => figure(`${slug}/${f}`, caption));
       return `<h3>${esc(state)}</h3><div class="strip">${shots.join("")}</div>`;
     });
-    const full = PHONES.flatMap((phone) => THEMES.map((theme) => [`rest-full-${phone.name}-${theme}.png`, `full page · ${phone.name} · ${theme}`]))
+    const full = SHOT_PHONES.flatMap((phone) => THEMES.map((theme) => [`rest-full-${phone.name}-${theme}.png`, `full page · ${phone.name} · ${theme}`]))
       .filter(([f]) => files.has(f)).map(([f, caption]) => figure(`${slug}/${f}`, caption));
     const deskShots = (DESK[slug] ?? []).map((f) => figure(`desk/${f}`, `desk · ${f}`, true));
     return `<section id="${esc(slug)}"><h2>${esc(slug)}</h2>`
