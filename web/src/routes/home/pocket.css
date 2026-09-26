@@ -132,6 +132,11 @@
 .pocket .pk-sugg .p-row{border-style:dashed;border-color:color-mix(in srgb, var(--accent) 45%, var(--line-soft))}
 .pocket .pk-sugg .meta{color:var(--accent-text)}
 .pocket .pk-reading .title{color:var(--ink-mid);font-weight:400}
+/* An opened row (review round §2.1, the desk's .item.open): its own glass
+   takes the accent's edge, its bottom corners handed to the panel. The
+   drawer's `copy link` is the desk's quiet .ivcopy. */
+.pocket .pk-list .p-row[data-open]{border-color:var(--accent)}
+.pocket .pk-copy{color:var(--ink-quiet)}
 .pocket .burnup{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);text-align:center;margin:16px 8px 0}
 
 /* ---- §11 (#453): the labelled sky, at the same scale ------------------- */
@@ -194,12 +199,17 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
 .p-pill.pk-act{color:var(--accent-text);border-color:var(--accent);min-height:var(--p-hit);padding-block:10px;
   text-align:left;justify-items:start}
 
-/* ---- the approach: the sheet lifts into the item (§1.9, #1119) --------
- * `open` runs a view transition (pocket.svelte, onNavigate). The item card
- * in the sheet and the belt's card (item/[[id]]/belt.css, #1072) carry the
- * same name, so the one morphs into the other: the sheet's card rises to
- * the card's seat and grows into it along the sheet's own curve, the two
- * faces crossfading on the way, while the dial fades and the band draws. */
+/* ---- the approach: the drawer lifts into the item (§1.9, #1119) -------
+ * `open →` runs a view transition (pocket.svelte, onNavigate). The opened
+ * manifest row's panel and the belt's card (item/[[id]]/belt.css, #1072)
+ * carry the same name, so the one morphs into the other (review round
+ * §2.1): the drawer rises to the card's seat and grows into it along the
+ * sheet's own curve, the two faces crossfading on the way, while the dial
+ * fades and the band draws. The dial's item sheet (kept for the dial alone
+ * while the owner's question 6 is open) still names its card the same
+ * way; a tap on the dial closes any open row first, so the two are never
+ * named at once. */
+.pocket .pk-list > .p-row[data-open] .p-row-open{view-transition-name:pocket-item}
 .pk-item{view-transition-name:pocket-item}
 .pk-item:has(> .pk-card){view-transition-name:none}
 .pk-card{view-transition-name:pocket-item}
