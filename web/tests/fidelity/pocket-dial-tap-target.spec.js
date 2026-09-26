@@ -13,7 +13,7 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * The fixture data's own "Gutter clearing" and "Car MOT — Volvo V60" bodies
  * are the pair #1072's design round measured (~34px centre-to-centre at
  * 390px). Both are ordinary dial bodies (not suggestion markers), so a tap
- * routes straight to the item sheet with a plain title.
+ * answers for that item alone.
  *
  * The point tapped sits 40% of the way from "Gutter clearing" toward
  * "Car MOT — Volvo V60" — nearer to Gutter, but (today) outside both bodies'
@@ -29,7 +29,8 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * and leaves the other in the manifest, so every body keeps a full 44px
  * target and no two targets touch. Gutter clearing (overdue) stays; Car MOT
  * lives in NEEDS ATTENTION only. What #1129 asked stays asked: a tap near a
- * body, outside its small drawn circle, raises that body's sheet.
+ * body, outside its small drawn circle, answers for that body -- which,
+ * since the owner's answer 6a, opens its row in the manifest.
  */
 const PHONES = [{ width: 390, height: 844 }, { width: 360, height: 780 }];
 
@@ -39,7 +40,7 @@ const PHONES = [{ width: 390, height: 844 }, { width: 360, height: 780 }];
  */
 async function dialBodies(page) {
   return page.evaluate(() =>
-    [...document.querySelectorAll(".mdial [data-sheet-title], .mdial [data-sheet-sugg]")].map((el) => {
+    [...document.querySelectorAll(".mdial [data-body]")].map((el) => {
       const r = el.getBoundingClientRect();
       return { title: el.getAttribute("aria-label") ?? "", x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
     }));
@@ -50,7 +51,7 @@ for (const phone of PHONES) {
     await page.setViewportSize(phone);
     await page.goto(`${APP}/home`, { waitUntil: "load" });
     await page.waitForFunction(() => document.body.dataset.homeReady === "true"
-      && document.querySelectorAll(".mdial [data-sheet-title]").length > 0);
+      && document.querySelectorAll(".mdial [data-body]:not([data-body-sugg])").length > 0);
     /* The dial arrives from a sixth of its size (review round §1.4): measure
        it once it has. */
     await settle(page);
@@ -76,8 +77,7 @@ for (const phone of PHONES) {
     /* 18px off the centre: outside the 7-8px drawn body, inside its target. */
     const gutter = /** @type {{ x: number, y: number }} */ (bodies.find((one) => one.title === "Gutter clearing"));
     await page.mouse.click(gutter.x + 18, gutter.y);
-    const sheet = page.getByRole("dialog");
-    await expect(sheet).toBeVisible();
-    await expect(sheet.getByRole("heading")).toHaveText("Gutter clearing");
+    await expect(page.locator(".pocket .pk-below [data-row]", { hasText: "Gutter clearing" }).first())
+      .toHaveAttribute("data-open", "");
   });
 }
