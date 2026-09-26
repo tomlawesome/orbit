@@ -234,6 +234,8 @@
  * @property {string} [message]
  * @property {Record<string, { source: string, confidence: string }>} [fieldEvidence]
  * @property {?{proposal?: string, fieldEvidence?: string}} [metadataStatus]
+ * @property {ItemProposal} [proposal]    what the review sheet pre-fills (round 3 §4)
+ * @property {number} [attachmentCount]
  */
 
 /**
@@ -739,6 +741,8 @@ function todayOf(workspace) {
  * @property {Record<string, import('./chart.js').GalaxyEntry>} galaxy
  * @property {string | null} primary           the household in the middle
  * @property {Household | null} household
+ * @property {Household[]} households        every one the reader is in: the
+ *   review sheet offers the sections of the one a suggestion files into
  * @property {ReceiptSuggestion[]} suggestions
  * @property {MailFailure[]} mailFailures
  * @property {Receipt[]} mailReading           arrived, not yet readable
@@ -769,6 +773,7 @@ export async function readHome(fetchImpl) {
       galaxy: labelledSkyOf(workspace.visibleHouseholds),
       primary: null,
       household: null,
+      households: [],
       suggestions: [],
       mailFailures: [],
       mailReading: [],
@@ -781,6 +786,7 @@ export async function readHome(fetchImpl) {
     galaxy: galaxyOf(workspace, today),
     primary,
     household: workspace.households.find((one) => one.id === primary) ?? null,
+    households: workspace.households,
     suggestions: [
       ...(workspace.suggestions ?? []),
       ...receiptSuggestionsOf(inbox.receipts),
@@ -1394,7 +1400,9 @@ export async function readItem(id) {
         metadataStatus: receipt?.metadataStatus ?? null,
         proposal: receipt?.proposal ?? {},
         attachmentCount: receipt?.attachmentCount ?? 0,
-        today: new Date().toISOString().slice(0, 10),
+        /* The workspace's date, pinned under fixtures: the pocket's review
+           card counts the days to burn-up from it (round 3 §4). */
+        today: todayOf(workspace),
       };
     }
   } catch {
@@ -2290,7 +2298,18 @@ export async function readBelt(id) {
   );
   if (!household) {
     const suggestion = await readItem(id);
-    return suggestion?.suggestion ? { kind: "suggestion", item: suggestion } : null;
+    /* The pocket's receipt page (round 3 §4) mounts the chrome, whose orb
+       wants the reader, and the review sheet, whose form offers the
+       sections of the household the item files into. */
+    return suggestion?.suggestion
+      ? {
+          kind: "suggestion",
+          item: suggestion,
+          user: session?.user ?? null,
+          households: workspace.households,
+          primary: workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null,
+        }
+      : null;
   }
 
   /** @type {Record<string, DocumentSummary[]>} */
