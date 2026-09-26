@@ -62,6 +62,18 @@
   let { household } = $props();
   const v = $derived(household);
 
+  /* round-3 §3.4: the pocket's one-line subtitle -- the desk's own
+     `v.subtitle` keeps "your system · you own it" and "in orbit"; the
+     pocket cap is 40 characters, so the role stands alone. */
+  const hhSub = $derived(
+    `${v.canManage ? "owner" : "member"} · ${v.memberCount} ${v.memberCount === 1 ? "member" : "members"} · ${entriesLabel(v.entries)}`,
+  );
+
+  /* round-3 §3.4: an invited meta drops the year -- the desk's own
+     `invitation.expires` (household.js's `shortDate`) keeps it. */
+  /** @param {string} shortDate @returns {string} */
+  const noYear = (shortDate) => shortDate.replace(/ \d{4}$/, "");
+
   /* ── the page's unsaved edits (2b) ────────────────────────────────────── */
   /** @param {HouseholdView} one */
   function identityOf(one) {
@@ -503,7 +515,7 @@
       </svg>
       <div class="hh-named">
         <h1 class="p-title">{v.name}</h1>
-        <p class="hh-sub">{v.subtitle}</p>
+        <p class="hh-sub">{hhSub}</p>
       </div>
     </header>
 
@@ -512,7 +524,7 @@
     <section class="p-card hh-flush hh-members" style:--i="1" aria-labelledby="hh-members-head" data-hh="members" data-row-group>
       {#each v.roster as person (person.id)}
         {#snippet leaveDetail()}
-          <p class="hh-moment leave">nothing you added goes with you · the entries stay with {v.name}</p>
+          <p class="p-prose">Nothing you added goes with you; the entries stay with {v.name}.</p>
         {/snippet}
         <Row title="{person.name}{person.you ? ' · you' : ''}" trail={person.role}
              trailTone={person.role === "owner" ? "var(--accent-text)" : ""} acts={personActs(person)}
@@ -543,7 +555,7 @@
         <p class="p-caps hh-sub-head">Invited</p>
         {#each v.invitations as invitation (invitation.id)}
           <Row title={invitation.email} acts={invitationActs(invitation)}
-               meta={v.canManage ? `${invitation.failed ? "not sent" : `sent ${invitation.sent}`} · expires ${invitation.expires}` : `expires ${invitation.expires}`}>
+               meta={v.canManage ? `${invitation.failed ? "not sent" : `sent ${invitation.sent}`} · expires ${noYear(invitation.expires)}` : `expires ${noYear(invitation.expires)}`}>
             {#snippet mark()}<span class="hh-seat"></span>{/snippet}
           </Row>
         {/each}
@@ -614,11 +626,8 @@
           The danger line
         </h2>
         {#if saidDoom}
-          <p class="p-prose hh-doomsaid" role="status">
-            requested · {v.name} stops now, and is gone for good in 30 days · an instance admin can turn this back until then
-          </p>
+          <p class="p-prose hh-doomsaid" role="status">requested · gone for good in 30 days</p>
         {:else}
-          <p class="p-prose hh-doomsay">Deleting stops everything in {v.name} at once. There are 30 days to change your mind.</p>
           <button class="p-pill danger wide" onclick={() => { typedName = ""; doomProblem = null; doomOpen = true; }}>delete this system</button>
         {/if}
       </section>
@@ -868,7 +877,6 @@
     font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
     color:var(--overdue-text)}
   .hh-danger-head svg{fill:none;stroke:var(--overdue-text);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-  .hh-doomsay{color:var(--ink-mid);margin:0 0 12px}
   .hh-doomsaid{color:var(--overdue-text);margin:0}
   .hh-red{color:var(--overdue-text)}
 

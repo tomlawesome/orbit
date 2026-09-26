@@ -121,7 +121,7 @@
         <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
         <span class="pc-doc-words">
           <b>add a document</b>
-          <span>photo or file · dates, amounts and references read for you</span>
+          <span>photo or file · read for you</span>
         </span>
       </button>
       <input bind:this={picker} type="file" accept="application/pdf,image/*" hidden onchange={onPick}>

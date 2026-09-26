@@ -230,7 +230,6 @@
   </div>
 
   <div role="tabpanel" id="hh-panel-out" aria-labelledby="hh-tab-out" hidden={tab !== "out"}>
-    <p class="p-prose hh-say">One encrypted file with everything in {householdName}, to keep or to bring into another Orbit.</p>
     <div class="hh-manifest">
       <div class="p-kv"><span>entries</span><b>{entries}</b></div>
       <div class="p-kv"><span>sections</span><b>{sections}</b></div>
@@ -275,7 +274,6 @@
   </div>
 
   <div role="tabpanel" id="hh-panel-in" aria-labelledby="hh-tab-in" hidden={tab !== "in"}>
-    <p class="p-prose hh-say">Brings entries in, never people. Anything already here stays as it is.</p>
     <input class="sr-only" type="file" accept=".json,application/json" tabindex="-1" aria-hidden="true"
            bind:this={picker} onchange={chose}>
     {#if inPhase === "done"}
@@ -368,7 +366,6 @@
   [role=tabpanel]{animation:hh-panel 240ms var(--p-ease) both}
   @keyframes hh-panel{from{opacity:0;transform:translateY(4px)}}
 
-  .hh-say{color:var(--ink-mid);margin:0 0 12px}
   .hh-manifest{margin:0 0 16px}
   .hh-manifest .p-kv:last-child{border-bottom:0}
   .p-kv .ended{color:var(--ink-quiet)}
