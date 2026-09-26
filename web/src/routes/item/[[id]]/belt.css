@@ -529,7 +529,7 @@
           opacity:0;transform:translateX(-16px);pointer-events:none;
           transition:opacity .55s ease .18s,transform .65s cubic-bezier(.4,.5,.15,1) .18s;
           grid-row:1;grid-column:2;justify-self:start;align-self:start;
-          margin-top:var(--rc-top);max-height:calc(100% - var(--rc-top) - var(--rc-bottom));
+          margin-top:var(--rc-y,var(--rc-top));max-height:calc(100% - var(--rc-top) - var(--rc-bottom));
           display:grid;grid-template-rows:minmax(0,1fr) auto;grid-template-columns:minmax(0,1fr);gap:6px}
 .belt-page .lanes.left .readcard{grid-column:1;justify-self:end;transform:translateX(16px)}
 .belt-page .readcard.open,.belt-page .lanes.left .readcard.open{opacity:1;transform:none;pointer-events:auto}
