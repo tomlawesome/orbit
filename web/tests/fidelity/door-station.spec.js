@@ -73,8 +73,73 @@ for (const size of SIZES) {
         if (station.card) {
           expect(r.width, "the ring over a card").toBeCloseTo(visible < 760 ? 240 : 302.4, 0);
         }
+        /* §5.1: the goodbye's second line and its pill are one column under
+           the ring -- the pill at least 24px under the line, and clear of the
+           ember rim (the limb burns at 92% of the frame). */
+        if (station.slug === "logout") {
+          const sub = await page.locator("#dusk .farewell .sub").boundingBox();
+          const gate = await page.locator("#dusk .gate-wrap a").boundingBox();
+          expect(sub && gate, "the farewell's line or the pill has no box").toBeTruthy();
+          const s = /** @type {{y:number,height:number}} */ (sub);
+          const g = /** @type {{y:number,height:number}} */ (gate);
+          console.log(`${size.width}x${size.height} /logout: line ${s.y.toFixed(1)}-${(s.y + s.height).toFixed(1)}px, pill ${g.y.toFixed(1)}-${(g.y + g.height).toFixed(1)}px`);
+          expect(g.y, "the pill is under the line by 24px").toBeGreaterThanOrEqual(s.y + s.height + 24 - 0.5);
+          expect(g.y + g.height, "the pill is above 92% of the height").toBeLessThanOrEqual(0.92 * visible);
+        }
       });
     }
+  });
+}
+
+/*
+ * §5.4: the ring travels between the stations rather than jumping. On the
+ * door with `local login`, opening the card starts the column's ring at the
+ * bare door's station (40%, 302.4px) and carries it over .5s to the card's
+ * (30%, 240px at 664). With reduced motion it simply stands at the card's.
+ */
+for (const motion of /** @type {const} */ (["no-preference", "reduce"])) {
+  test.describe(`the ring's hand-over to a card at 390x664, motion ${motion}`, () => {
+    test.use({ viewport: { width: 390, height: 664 }, hasTouch: true, isMobile: true, reducedMotion: motion });
+
+    test(motion === "reduce" ? "the ring stands at the card's station at once" : "the ring travels from the door's station to the card's", async ({ page }) => {
+      const door = DOOR_STATES.find((s) => s.slug === "login" && s.state === "mixed");
+      if (!door) throw new Error("no door state login · mixed in pocket-states.js");
+      await door.reach(page);
+      await page.locator("#localopen").waitFor();
+      await page.evaluate(() => document.fonts.ready);
+
+      /* sampled in the page, frame by frame, from the tap that opens the card */
+      const samples = await page.evaluate(async () => {
+        /** @type {{t:number,centre:number,width:number}[]} */
+        const out = [];
+        const start = performance.now();
+        /** @type {HTMLElement} */ (document.querySelector("#localopen")).click();
+        while (performance.now() - start < 800) {
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          const ring = document.querySelector(".ringcard .bigring");
+          if (!ring) continue;
+          const r = ring.getBoundingClientRect();
+          out.push({ t: performance.now() - start, centre: r.top + r.height / 2, width: r.width });
+        }
+        return out;
+      });
+      expect(samples.length, "the card's ring never appeared").toBeGreaterThan(2);
+      const first = samples[0];
+      const last = samples[samples.length - 1];
+      console.log(`390x664 motion ${motion}: ring first seen at ${first.centre.toFixed(1)}px, ${first.width.toFixed(1)}px across; after ${last.t.toFixed(0)}ms at ${last.centre.toFixed(1)}px, ${last.width.toFixed(1)}px across`);
+
+      expect(Math.abs(last.centre - 0.3 * 664)).toBeLessThanOrEqual(TOLERANCE);
+      expect(last.width).toBeCloseTo(240, 0);
+      if (motion === "reduce") {
+        expect(Math.abs(first.centre - 0.3 * 664), "the ring travelled under reduced motion").toBeLessThanOrEqual(TOLERANCE);
+      } else {
+        /* first seen at (or just leaving) the door's station, never jumping */
+        expect(first.centre, "the ring did not start from the door's station").toBeGreaterThan(0.36 * 664);
+        for (let i = 1; i < samples.length; i++) {
+          expect(Math.abs(samples[i].centre - samples[i - 1].centre), `a jump between frames at ${samples[i].t.toFixed(0)}ms`).toBeLessThan(20);
+        }
+      }
+    });
   });
 }
 
