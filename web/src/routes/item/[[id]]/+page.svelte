@@ -584,6 +584,18 @@
           ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
           : "nothing matches · the belt keeps its shape",
   );
+  /* round-3 §3.2: the phone's caps head drops "in date order" -- the belt's
+     own shape says the order, and the cap is 40 characters at rest. The
+     desk's own find note under the `.find` box keeps the fuller line. */
+  const pocketFindnote = $derived(
+    !bodies.length
+      ? "the belt is empty"
+      : !query.trim()
+        ? `${itemCount} items · sooner to later`
+        : hitList.length
+          ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
+          : "nothing matches · the belt keeps its shape",
+  );
 
   /** @param {KeyboardEvent} event */
   function onFindKey(event) {
@@ -836,7 +848,7 @@
   <!-- #1072, §2.3: on a phone the find line is the search sheet's button,
        and the count line says what order the belt is in. -->
   <button class="ip-find" aria-haspopup="dialog" onclick={() => raise("search")}>find an item</button>
-  <p class="ip-count">{findnote}</p>
+  <p class="ip-count">{pocketFindnote}</p>
 
   <!-- the band: everything at or behind the ring plane -->
   <canvas id="band" aria-hidden="true"></canvas>
@@ -1133,7 +1145,7 @@
           <!-- §2.3: the documents ride in the belt; this row lists them all. -->
           <button class="ip-docs" onclick={() => raise("docs")}>
             <span class="ip-paper" aria-hidden="true">◆</span>
-            <span class="ip-docs-title">{row.docs.length === 1 ? "1 document rides" : `${row.docs.length} documents ride`} in the belt</span>
+            <span class="ip-docs-title">{row.docs.length === 1 ? "1 document" : `${row.docs.length} documents`}</span>
             <span class="ip-chev">see {row.docs.length === 1 ? "it" : "them"} ›</span>
           </button>
         {:else if pocket}
