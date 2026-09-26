@@ -70,6 +70,8 @@
   let challengeProblem = $state(null);
   /** @type {((proof: string) => Promise<void>) | null} */
   let retry = null;
+  /** The step-up intent the held act needs (#1132): one each way, so a proof for one cannot pay for the other. */
+  let retryIntent = "archive_export";
 
   /** @param {unknown} error */
   const wordsOf = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
@@ -81,13 +83,15 @@
    * raise the callout, which runs it again with the proof.
    * @param {(proof: string) => Promise<void>} act
    * @param {(words: string) => void} fail
+   * @param {"archive_export" | "archive_import"} intent
    */
-  async function guarded(act, fail) {
+  async function guarded(act, fail, intent) {
     try {
       await act("");
     } catch (error) {
       if (!needsProof(error)) { fail(wordsOf(error)); return; }
       retry = act;
+      retryIntent = intent;
       currentPassword = "";
       challengeProblem = null;
       challengeOpen = true;
@@ -115,7 +119,7 @@
   async function toProvider() {
     challengeProblem = null;
     try {
-      await startStepUp({ intent: "portable_archive", returnTo: location.pathname });
+      await startStepUp({ intent: retryIntent, returnTo: location.pathname });
     } catch (error) {
       challengeProblem = wordsOf(error);
     }
@@ -135,7 +139,7 @@
     }, (words) => {
       outProblem = `not written — ${words}`;
       outPhase = "form";
-    }).then(() => { if (outPhase === "writing" && challengeOpen) outPhase = "form"; });
+    }, "archive_export").then(() => { if (outPhase === "writing" && challengeOpen) outPhase = "form"; });
   }
 
   /** @param {Event} event */
@@ -168,7 +172,7 @@
     }, (words) => {
       inProblem = words;
       inPhase = "chosen";
-    });
+    }, "archive_import");
     if (inPhase === "looking") inPhase = "chosen";
   }
 
@@ -188,7 +192,7 @@
     }, (words) => {
       inProblem = `not brought in — ${words}`;
       inPhase = "preview";
-    }).then(() => { if (inPhase === "bringing") inPhase = "preview"; });
+    }, "archive_import").then(() => { if (inPhase === "bringing") inPhase = "preview"; });
   }
 
   function startOver() {
