@@ -148,11 +148,12 @@
   // spacing law has it) pings, home.css's perihelion ping.
   const pinging = $derived(pocketBodies.find((b) => !b.suggestion) ?? null);
   // Twelve month ticks on the ring, 6 units long, from the top.
+  /** @type {(a: number, r: number) => number[]} */
+  const tickAt = (a, r) => [190 + Math.cos(a) * r, 190 + Math.sin(a) * r].map((v) => Math.round(v * 10) / 10);
   const TICKS = Array.from({ length: 12 }, (_, k) => {
     const a = (k * Math.PI) / 6 - Math.PI / 2;
-    const at = (r) => [190 + Math.cos(a) * r, 190 + Math.sin(a) * r].map((v) => Math.round(v * 10) / 10);
-    const [x1, y1] = at(150);
-    const [x2, y2] = at(144);
+    const [x1, y1] = tickAt(a, 150);
+    const [x2, y2] = tickAt(a, 144);
     return { x1, y1, x2, y2 };
   });
   /** @type {(row: { costMinor: number | null, currency: string, costIsEstimate: boolean }) => string | null} */
