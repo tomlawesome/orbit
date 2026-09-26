@@ -372,6 +372,11 @@
   /** @param {string} device */
   const onPhone = (device) => /iphone|android|ipad|phone/i.test(device);
 
+  /* round-3 §3.7: the pocket's linked-provider meta drops the year -- the
+     desk keeps `helm.js`'s `on()` in full. */
+  /** @param {string} iso */
+  const onNoYear = (iso) => on(iso).replace(/ \d{4}$/, "");
+
   onMount(async () => {
     const parameters = new URLSearchParams(location.search);
     if (fixtures) {
@@ -395,7 +400,7 @@
   <main class="st-column">
     <header class="st-head p-land" style:--i="0">
       <h1 class="p-title">Settings</h1>
-      <p class="st-levers p-prose">your controls, and only yours · the instance’s levers live on administration</p>
+      <p class="st-levers p-prose">your controls, and only yours</p>
     </header>
 
     <!-- YOU, with how you sign in folded in (§2.7 step 2). -->
@@ -427,7 +432,7 @@
               </Row>
             {/if}
             {#each identities as identity (identity.id)}
-              <Row title={issuerHost(identity.issuer)} meta={`identity provider · linked ${on(identity.linkedAt)}`}
+              <Row title={issuerHost(identity.issuer)} meta={`provider · linked ${onNoYear(identity.linkedAt)}`}
                    acts={[{ label: "unlink", name: `Unlink ${issuerHost(identity.issuer)}`, danger: true,
                             onact: () => openMethod(`unlink:${identity.id}`) }]}>
                 {#snippet mark()}<span class="st-glyph">⌘</span>{/snippet}
@@ -529,12 +534,12 @@
 
       <div role="tabpanel" id="st-panel-sent" aria-labelledby="st-tab-sent" hidden={tab !== "sent"}>
         {#if bothOff}
-          <p class="st-warm p-prose" role="status">both switches are off · nothing more will be sent until one is on</p>
+          <p class="st-warm p-prose" role="status">both off · nothing will be sent</p>
         {/if}
         {#if sent === null}
-          <p class="st-say p-prose">Orbit can’t show what it has sent you yet. Your reminders still go out as set on the first tab.</p>
+          <p class="st-say p-prose">Couldn’t load what’s been sent. Reminders still go out as set.</p>
         {:else if sent.length === 0}
-          <p class="p-empty">nothing sent yet · the first warning goes out {view ? beforeWord(view.reminders.firstWarningDays ?? 14) : "ahead"} closest approach, by email and by browser alert if they are on</p>
+          <p class="p-empty">nothing sent yet</p>
         {:else}
           <div class="st-rows st-sent">
             {#each sent as row (row.id)}
@@ -578,7 +583,7 @@
                trailName="{view.waiting} waiting" href={resolve("/inbox")}>
             {#snippet mark()}<span class="p-paper">◆</span>{/snippet}
           </Row>
-          <Row title="open the relay →" meta="rotate · pause · what couldn’t be read" metaFace="ui" href={resolve("/settings/mail")}>
+          <Row title="open the relay →" href={resolve("/settings/mail")}>
             {#snippet mark()}<span class="st-glyph"><svg class="st-icon" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="2" fill="currentColor" stroke="none"/><path d="M5 5a5.6 5.6 0 0 0 0 8M13 5a5.6 5.6 0 0 1 0 8M2.6 2.6a9 9 0 0 0 0 12.8M15.4 2.6a9 9 0 0 1 0 12.8"/></svg></span>{/snippet}
           </Row>
         </div>
