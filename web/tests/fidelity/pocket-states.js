@@ -251,11 +251,11 @@ export const SIGNED_IN = [
   } },
   { route: "/home", state: "suggestion-row-open", reach: async (page) => {
     await go(page, "/home");
-    await openRow(page, row(page, ".pk-sugg", "Home insurance"));
+    await openRow(page, row(page, ".pk-signals", "Home insurance"));
   } },
   { route: "/home", state: "suggestion-row-armed", reach: async (page) => {
     await go(page, "/home");
-    const catch_ = row(page, ".pk-sugg", "Home insurance");
+    const catch_ = row(page, ".pk-signals", "Home insurance");
     await openRow(page, catch_);
     await catch_.getByRole("button", { name: /^Add .* to your orbit$/ }).click();
   } },

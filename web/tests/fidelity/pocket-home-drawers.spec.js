@@ -118,3 +118,64 @@ test.describe("at 390x844", () => {
     expect(await page.evaluate(() => /** @type {any} */ (window).__pocket1118)).toBe(true);
   });
 });
+
+/* ROUND 3 (design/v19/phone-vision/round-3.md §2, §5; #1142): the signals
+   are one dashed pen below a clear gap, reading and failed mail are one
+   summary row to the inbox, and the north star rests in the dial's corner
+   until the dial has scrolled off, then floats at the thumb, hiding while
+   a row is open. */
+test("the signals are one pen under a clear gap, with mail as one summary row to the inbox", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const pen = page.locator(".pocket .pk-signals");
+  await expect(pen).toHaveCount(1);
+  await expect(pen).toHaveClass(/proposed/);
+  await expect(pen.locator(".p-caps")).toHaveText(/^Signals\s*1$/);
+  await expect(pen.locator("[data-row]")).toHaveCount(2);
+  const summary = pen.locator("[data-row]").last();
+  await expect(summary.locator(".title")).toHaveText("reading 1 · 2 couldn't be read");
+  await expect(summary.locator("a[data-row-face]")).toHaveAttribute("href", "/inbox");
+  await expect(page.locator(".pocket [data-row]", { hasText: "A message from" })).toHaveCount(0);
+  await expect(page.locator(".pocket", { hasText: "nothing is added without you" })).toHaveCount(0);
+  const gap = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll(".pocket .pk-list [data-row]")];
+    const last = rows[rows.length - 1].getBoundingClientRect();
+    return /** @type {Element} */ (document.querySelector(".pocket .pk-signals")).getBoundingClientRect().top - last.bottom;
+  });
+  expect(Math.round(gap)).toBe(32);
+});
+test("the north star rests in the dial's corner, floats once the dial has scrolled off, and comes back", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const star = page.getByRole("link", { name: "Add an item" }).last();
+  const flag = () => page.evaluate(() => "northstar" in document.body.dataset);
+  await expect(star).toHaveAttribute("data-station", "rest");
+  const corner = await page.evaluate(() => {
+    const dial = /** @type {Element} */ (document.querySelector(".pocket .mdial")).getBoundingClientRect();
+    const box = [...document.querySelectorAll(".p-northstar")].pop()?.getBoundingClientRect();
+    return box && { right: dial.right - box.right, bottom: dial.bottom - box.bottom, width: box.width };
+  });
+  expect(corner).toEqual({ right: 0, bottom: 0, width: 56 });
+  expect(await flag(), "the wake makes room for a star that is in the sky").toBe(false);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect(star).toHaveAttribute("data-station", "afloat");
+  const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await star.boundingBox());
+  expect(Math.round(box.x + box.width)).toBe(390 - 16);
+  expect(Math.round(box.y + box.height)).toBe(664 - 20);
+  expect(await flag()).toBe(true);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(star).toHaveAttribute("data-station", "rest");
+  expect(await flag()).toBe(false);
+});
+test("the north star hides while a row is open", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const star = page.getByRole("link", { name: "Add an item" }).last();
+  await expect(star).toBeVisible();
+  const catch_ = page.locator(".pocket [data-row]", { hasText: "Home insurance" }).first();
+  await openRow(page, catch_);
+  await expect(star).toBeHidden();
+  await catch_.locator("[data-row-face]").first().tap();
+  await expect(catch_).not.toHaveAttribute("data-open", "");
+  await expect(star).toBeVisible();
+});
