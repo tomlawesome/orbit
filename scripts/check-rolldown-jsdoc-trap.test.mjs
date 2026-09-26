@@ -87,6 +87,57 @@ describe("rolldown JSDoc trap check", () => {
     expect(findTraps(source)).toEqual([]);
   });
 
+  it("flags $props.id() called after an earlier top-level JSDoc comment (#1130)", () => {
+    const source = [
+      "<script>",
+      "  /** @type {{ size?: number }} */",
+      "  let { size = 30 } = $props();",
+      "  const uid = $props.id();",
+      "</script>",
+    ].join("\n");
+    expect(findTraps(source)).toEqual([
+      { line: 4, reason: "$props.id() called after an earlier top-level JSDoc comment (rolldown hoists $props.id() and fails to parse it, #1130)" },
+    ]);
+  });
+
+  it("does not flag $props.id() when it comes before any top-level JSDoc comment", () => {
+    const source = [
+      "<script>",
+      "  /* First, with no comment of its own. */",
+      "  const uid = $props.id();",
+      "  /** @type {{ size?: number }} */",
+      "  let { size = 30 } = $props();",
+      "</script>",
+    ].join("\n");
+    expect(findTraps(source)).toEqual([]);
+  });
+
+  it("flags a {#snippet} declared after an earlier top-level JSDoc comment (#1130)", () => {
+    const source = [
+      "<script>",
+      "  /** @type {{ title: string }} */",
+      "  let { title } = $props();",
+      "</script>",
+      "",
+      "{#snippet face()}",
+      "  <span>{title}</span>",
+      "{/snippet}",
+    ].join("\n");
+    expect(findTraps(source)).toEqual([
+      {
+        line: 6,
+        reason: "{#snippet} declared in the markup after a JSDoc comment (rolldown hoists the {#snippet} above the script's doc comments and fails to parse, #1130)",
+      },
+    ]);
+  });
+
+  it("does not flag a {#snippet} when the script carries no JSDoc comment", () => {
+    const source = ["<script>", "  let { title } = $props();", "</script>", "", "{#snippet face()}", "  <span>{title}</span>", "{/snippet}"].join(
+      "\n",
+    );
+    expect(findTraps(source)).toEqual([]);
+  });
+
   it("ignores lookalike text inside strings and template literals", () => {
     const source = [
       'const s = "(",',

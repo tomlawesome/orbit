@@ -52,6 +52,16 @@ export function findTraps(source) {
 
   const startsWith = (str) => source.startsWith(str, i);
   let jsdocStartLine = 0;
+  // Whether a JSDoc comment has already closed while sitting at the top
+  // level -- outside every bracket, as a plain doc comment above a
+  // declaration rather than annotating one parameter inside a list. Two
+  // more #782-family shapes (#1130) turn on this alone, not on which
+  // parameter list (if any) the comment attaches to: `$props.id()` and a
+  // `{#snippet}` declared in the markup are each hoisted by the Svelte
+  // compiler, and hoisting either one above an earlier top-level JSDoc
+  // comment is what the production build's parser cannot handle.
+  let sawTopLevelJsdoc = false;
+  const PROPS_ID_CALL_RE = /^\$props\.id\s*\(\s*\)/;
 
   /**
    * A JSDoc comment just closed at index `i` (already past the `*\/`).
@@ -88,7 +98,10 @@ export function findTraps(source) {
         const wasJsdoc = mode === "jsdoc-comment";
         mode = "code";
         i += 2;
-        if (wasJsdoc) attachJsdoc(jsdocStartLine);
+        if (wasJsdoc) {
+          attachJsdoc(jsdocStartLine);
+          if (stack.length === 0) sawTopLevelJsdoc = true;
+        }
         continue;
       }
       if (ch === "\n") line++;
@@ -168,16 +181,30 @@ export function findTraps(source) {
       continue;
     }
     if (ch === "(" || ch === "[" || ch === "{") {
+      const isSnippetParams = ch === "(" && snippetParamStarts.has(i);
+      if (isSnippetParams && sawTopLevelJsdoc) {
+        findings.push({
+          line,
+          reason:
+            "{#snippet} declared in the markup after a JSDoc comment (rolldown hoists the {#snippet} above the script's doc comments and fails to parse, #1130)",
+        });
+      }
       stack.push({
         bracket: ch,
         line,
         hasComma: false,
         hasJsdoc: false,
         jsdocLine: 0,
-        isSnippetParams: ch === "(" && snippetParamStarts.has(i),
+        isSnippetParams,
       });
       i++;
       continue;
+    }
+    if (ch === "$" && sawTopLevelJsdoc && PROPS_ID_CALL_RE.test(source.slice(i))) {
+      findings.push({
+        line,
+        reason: "$props.id() called after an earlier top-level JSDoc comment (rolldown hoists $props.id() and fails to parse it, #1130)",
+      });
     }
     if (ch === ")" || ch === "]" || ch === "}") {
       const frame = stack.pop();
