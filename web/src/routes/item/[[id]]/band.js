@@ -433,6 +433,11 @@ export const POCKET_JUMBLE = 0.35;
 /* The ambient bed's density on the pocket's plate (the desk's 2100 is for a
    1600px sky and a band four times as thick). */
 export const POCKET_RUBBLE = 900;
+/* The pocket's drift (owner, 2026-09-26: "way too fast" on a phone). The
+   desk's DRIFT is an angle, and on the pocket one MIN_GAP of angle spans
+   0.39 of the width, so the same rate crossed a phone about 2.4 times faster,
+   as a share of the screen, than the desk. A quarter of it. */
+export const POCKET_DRIFT = DRIFT / 4;
 
 /**
  * Where a seat `u` steps from the apex lands across the width: linear out to
