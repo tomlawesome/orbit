@@ -62,6 +62,12 @@
 @keyframes p-landed{from{opacity:0;transform:translateY(8px) scale(.985)}}
 :is([data-theme=dawn],[data-theme=clouds]) .p-card{
   box-shadow:inset 0 1px 0 rgba(255,255,255,.72), 0 8px 20px rgba(48,66,98,.07)}
+
+/* THE SAME LANDING, for anything that isn't a card (round 2 §6.k): a
+   page's header, a caps head, or any other non-card block that rises with
+   the rest. Unifies what used to be a screen's own hh-rise/st-rise/rl-rise
+   and the inbox receipts' entrance — one keyframe, one delay formula. */
+.p-land{animation:p-landed 600ms cubic-bezier(.3,.7,.2,1) backwards;animation-delay:calc(var(--i, 0) * 60ms)}
 .p-card-title{font:500 var(--p-type-card)/1.2 var(--display);color:var(--ink);margin:0 0 8px}
 .p-card > .p-caps:first-child{margin:0 0 12px}
 
@@ -176,5 +182,5 @@
 @keyframes p-errin{from{opacity:0;transform:translateY(-4px)}}
 
 @media (prefers-reduced-motion:reduce){
-  .p-body.breathing,.p-error,.p-card{animation:none}
+  .p-body.breathing,.p-error,.p-card,.p-land{animation:none}
 }
