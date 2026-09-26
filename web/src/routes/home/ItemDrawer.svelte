@@ -4,7 +4,8 @@
    * the desk's ItemView (ItemView.svelte) at the pocket's scale, as the
    * `detail` of the kit's Row. Key/value lines in the desk's order -- due,
    * snoozed until, section, type, orbital period, cost, provider,
-   * reference, reminders -- then the papers, then the notes. The acts and
+   * reference, reminders -- then the papers, each `name · size · added
+ * <date>` (review round §6.f), then the notes. The acts and
    * `copy link` are the row's own (pocket.svelte).
    *
    * A component rather than a snippet in pocket.svelte, for the reason
@@ -51,7 +52,7 @@
   <h3 class="p-caps">Documents</h3>
   {#each papers as paper (paper.id)}
     <!-- Not tappable here, as on the desk: the belt is where a paper opens. -->
-    <p class="paper"><span class="p-paper" aria-hidden="true">◆</span><span class="name">{paper.name}</span><span class="meta">{paper.meta}</span></p>
+    <p class="paper"><span class="p-paper" aria-hidden="true">◆</span><span class="name">{paper.name}</span>{#if paper.meta}<span class="meta">{paper.meta}</span>{/if}</p>
   {:else}
     <div class="p-unlit"></div>
   {/each}
@@ -74,6 +75,9 @@
     font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink)}
   .paper .name{min-width:0;overflow-wrap:anywhere}
   .paper .meta{color:var(--ink-quiet)}
+  /* name · size · added <date> (review round §6.f): what the data holds, no
+     more; a part it lacks is left out, never a dash. */
+  .paper .meta::before{content:"· "}
   .note{margin:0;color:var(--ink-mid)}
   .note.quiet{color:var(--ink-quiet)}
 </style>
