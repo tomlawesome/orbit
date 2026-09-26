@@ -340,6 +340,11 @@ stays; it is harmless and the owner did not object.
 
 Numbering continues the proposal's (1–5 are answered).
 
+**Answered 2026-09-26: 6a and 7b.** Tapping a body scrolls the manifest to
+its row and opens the drawer; a second tap on the lit body goes to the item.
+Reordering keeps the long-press lift alongside the `move up` / `move down`
+pills, which are the accessible route.
+
 **6** (asked on 2026-09-26 as question 2) Tapping a planet on the dial. The desk's body is a link to its row;
 the proposal had it raise the item sheet, which is now gone.
  a) The body scrolls the manifest to its row and opens the drawer; second
@@ -429,7 +434,7 @@ earlier ruling.
 ## 6. Build rulings, round 2 (2026-09-26)
 
 On Opus's build of §3 steps 1–4 (`feature/phone-review-round`, `a465bd37`).
-Questions **6** and **7** stay parked with the owner.
+Questions **6** and **7** were answered afterwards (6a, 7b; see §4).
 
 - **a. Section `edit` stays, first.** §2.5's list was short: the name and
   the "tap to swap" mark are only reachable through the edit sheet on a
