@@ -129,12 +129,12 @@
    * hands the raw text straight to V8, which doesn't: every load of a page
    * that reaches this component 500'd under `pnpm --filter orbit-web dev`
    * with "SyntaxError: Invalid destructuring assignment target", never in
-   * the production build. `part` is already `string` here regardless --
-   * inferred from `.split(/\s+/)` -- so the annotation was always redundant;
-   * home/+page.svelte's own initials logic never carried one either.
+   * the production build. The type goes on the name instead, in that cast
+   * idiom: `user` carries no declared type, so without it `part` is an
+   * implicit `any` and the type check (#624) fails.
    */
   const initials = $derived(
-    (user?.displayName ?? "")
+    /** @type {string} */ (user?.displayName ?? "")
       .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
   );
 </script>
