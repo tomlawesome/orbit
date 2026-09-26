@@ -14,6 +14,18 @@
    sentence on it.
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* #1136: this is the only screen drawn straight on `<body>` with nothing
+   else on the page to reset the browser's own 8px margin, so above 900px
+   wide the stage sat 8px in on every side and the page scrolled — nothing to
+   scroll TO, just the margin's own gutter plus, on top of it, .invite-card's
+   own padding: with no box-sizing set it defaults to content-box, so the
+   24px padding above and below is added ON TOP of the 100dvh min-height
+   rather than eating into it, another 48px past the fold before the margin
+   is even counted. The phone media query already set box-sizing:border-box
+   for itself and reset the margin, so it never showed either half; reset
+   both at every width instead of only the phone's. */
+body:has(.invite-card){margin:0}
+
 .invite-stage {
   position: fixed;
   inset: 0;
@@ -29,6 +41,7 @@
   align-items: center;
   justify-content: center;
   gap: 24px;
+  box-sizing: border-box;
   min-height: 100dvh;
   padding: 24px;
   text-align: center;
@@ -93,10 +106,9 @@
 .invite-card .pocket-only{display:none}
 
 @media (max-width: 900px), (max-height: 600px){
-  /* nothing else on this page resets the browser's 8px body margin, which
-     stood the station 8px low and scrolled the page by 16px */
-  body:has(.invite-card){margin:0}
-  .invite-card{justify-content:flex-start;gap:0;box-sizing:border-box;
+  /* the body margin reset and box-sizing above now cover every width;
+     nothing phone-only left to say about either here */
+  .invite-card{justify-content:flex-start;gap:0;
     padding:clamp(calc(env(safe-area-inset-top, 0px) + 28px), calc(40dvh - 151.2px), calc(env(safe-area-inset-top, 0px) + 200px))
       var(--p-gutter) calc(env(safe-area-inset-bottom, 0px) + 24px)}
   .invite-card .name{display:none}
