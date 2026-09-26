@@ -22,9 +22,11 @@
   import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
   import { relaunchTour } from "$lib/tour/relaunch.js";
   import { fillStarTiles } from "$lib/sky.js";
-  import { DEFAULT_THEME, THEME_PACKS } from "$lib/theme.js";
+  import { DEFAULT_THEME } from "$lib/theme.js";
   import Chrome from "$lib/Chrome.svelte";
   import SignInChallenge from "./SignInChallenge.svelte";
+  import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
+  import Pocket from "./pocket.svelte";
   import "./settings.css";
 
   /**
@@ -43,42 +45,7 @@
   /** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */
   let view = $state(null);
 
-  /*
-   * THE v1.3.0 ROSTER, FINAL (§15, owner): star-chart, after dark, CLOUDS,
-   * dawn (which now means the terminator) and retrograde — theme.js's own
-   * THEME_PACKS, in the order and membership named there (#865). Atlas,
-   * hanami, porcelain, miami and solarium are on the records shelf: their
-   * code is gone (#865 removed atlas's own, the last one still present), and
-   * what goes here is the OFFER — this card is the only place in the product
-   * that makes one in words as well as colour.
-   *
-   * Two rows changed with the roster, and both of them because the sheet
-   * ruled the picture rather than because a preference was tidied:
-   *   · CLOUDS joined, carrying the lighter end of the range (owner: "one of
-   *     Orbit's MAIN LIGHTER THEMES"). Its strip shows the cool white of a
-   *     cloud crest and its own hazy pastel bodies.
-   *   · DAWN's ground moved to the temperature story's own #d2d3d4 and its
-   *     line stopped saying "first light" — that is the pair's shared light,
-   *     and what this pack IS now is the crossing. The words are the sheet's:
-   *     design/v19/dawn-terminator.html, "night hands the sky to day".
-   * Both strips' bodies are the pastels the refresh gave the light packs, so
-   * the swatch is made of the same paint as the screen it promises.
-   */
-  /** @type {Record<string, [string, string, string, string[]]>} */
-  const META = {
-    starchart: ["star-chart", "the ratified night", "#060b1c",
-      ["radial-gradient(circle at 35% 30%,#fff6e6,#ffe9c4 45%,transparent 72%)", "#f0b429", "#4ade80", "#8fb8ff"]],
-    afterdark: ["after dark", "lights out, ink up", "#05070d",
-      ["radial-gradient(circle at 35% 30%,#ffffff,#dbe9ff 45%,transparent 72%)", "#f0b429", "#4ade80", "#7dd3fc"]],
-    clouds: ["clouds", "first light, from altitude", "#eef2f9",
-      ["radial-gradient(circle at 35% 30%,#9c4a10,#eda253 45%,transparent 72%)", "#f0c076", "#95cfab", "#9dbce6"]],
-    dawn: ["dawn", "night hands the sky to day", "#d2d3d4",
-      ["radial-gradient(circle at 35% 30%,#9c4a10,#eda253 45%,transparent 72%)", "#f0c076", "#95cfab", "#9dbce6"]],
-    retrograde: ["retrograde", "the eighties, classy", "#080a14",
-      ["radial-gradient(circle at 35% 30%,#fff0fb,#ff4fd8 45%,transparent 72%)", "#ffd23f", "#3ef2a0", "#2de2e6"]],
-  };
-  /** @type {[string, string, string, string, string[]][]} */
-  const PACKS = THEME_PACKS.map((id) => [id, ...META[id]]);
+  /* The roster and its offer live in helm.js, shared with the phone layout. */
   let active = $state(DEFAULT_THEME);
   /** @param {string} name */
   function pickPack(name) {
@@ -251,22 +218,6 @@
   const hasPassword = $derived(methods?.local.set ?? false);
   const identities = $derived(methods?.oidc ?? []);
 
-  /** The provider as a reader recognises it: its host, never the whole issuer URL. */
-  /** @param {string} issuer */
-  function issuerHost(issuer) {
-    try { return new URL(issuer).host; } catch { return issuer; }
-  }
-
-  /** A date a reader can read, in UTC so the gate photographs the same one. */
-  /** @param {?string} iso */
-  const on = (iso) =>
-    iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "";
-
-  /** The step-up intent each armed action is bound to (ADR-0023 §5). */
-  /** @param {string} action */
-  const intentOf = (action) =>
-    action.startsWith("unlink:") ? "unlink_method" : action === "password_remove" ? "unlink_method" : action;
-
   /**
    * The first tap. Somebody with a password gets the field; somebody without
    * one is handed to the provider, and comes back to this block re-armed.
@@ -288,22 +239,6 @@
     } catch (error) {
       methodProblem = methodWords(error);
     }
-  }
-
-  /** What a refusal means in this block's own words, from the bounded code. */
-  /** @param {unknown} error */
-  function methodWords(error) {
-    const code = /** @type {{ code?: string, message?: string }} */ (error)?.code;
-    if (code === "recent_authentication_required") return "that isn't your current password — nothing was changed";
-    if (code === "too_many_attempts") return "too many attempts at once; try again shortly";
-    if (code === "password_rejected") return /** @type {{ message?: string }} */ (error)?.message ?? "that password was refused";
-    if (code === "link_last_method") return "keep at least one way to sign in: add another method before removing this one";
-    if (code === "link_exists") return "that provider account already belongs to an Orbit account";
-    if (code === "step_up_failed") return "your identity provider did not re-authenticate you, so nothing was changed";
-    if (code === "provider_handover_unreadable") {
-      return "not started — Orbit could not hand you to your identity provider";
-    }
-    return /** @type {{ message?: string }} */ (error)?.message ?? "not changed — Orbit could not reach your sign-in methods";
   }
 
   /** Disarms whatever is armed, leaving the block as this reader found it. */
@@ -421,6 +356,9 @@
     }
   }
 
+  /** The armed action a step-up came back for; the phone layout reopens its sheet (#1125). */
+  let resumedMethod = $state(/** @type {string | null} */ (null));
+
   const initials = $derived(
     (/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName ?? "")
       .split(/\s+/).map((/** @type {string} */ part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
@@ -468,12 +406,19 @@
     /* Back from the provider (ADR-0023 §5): the proof is in a cookie the
        browser carries, and this is the action it was earned for. Re-arm it so
        the reader finishes where they left off rather than starting again. */
-    const resumed = parameters.get("stepup");
-    if (resumed && methods && !methods.local.set) armedMethod = resumed;
+    const back = parameters.get("stepup");
+    if (back && methods && !methods.local.set) armedMethod = resumedMethod = back;
   });
 </script>
 
 <svelte:head><title>Orbit — settings</title></svelte:head>
+
+<!-- #1125, proposal §2.7: the phone's own settings, chosen by CSS, as the
+     household's is. It shares what this page loads rather than reading it
+     twice, and hides this page's sky and cards below the switch; the chrome
+     stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
+<Pocket bind:view bind:methods bind:sessions bind:active {initials} {providerOffered} {emailApproval}
+        {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} />
 
 <div class="helm-page">
 <div class="sky" aria-hidden="true">
