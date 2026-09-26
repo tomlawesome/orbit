@@ -196,7 +196,7 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
 .pk-field::-webkit-search-cancel-button{display:none}
 /* The one accent action for the top match, arming like every act that
    cannot be taken back (§2.4); it rides in the sheet's foot. */
-.p-pill.pk-act{color:var(--accent-text);border-color:var(--accent);min-height:var(--p-hit);padding-block:10px;
+.pk-act.p-pill{color:var(--accent-text);border-color:var(--accent);min-height:var(--p-hit);padding-block:10px;
   text-align:left;justify-items:start}
 
 /* ---- the approach: the drawer lifts into the item (§1.9, #1119) -------
