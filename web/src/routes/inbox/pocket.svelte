@@ -426,12 +426,16 @@
       </form>
       {#if reviewProblem}<p class="p-error" role="alert">{reviewProblem}</p>
       {:else if reviewRefusal}<p class="pki-refusal" id="pki-refusal">{reviewRefusal}</p>{/if}
-      <button type="submit" form="pki-review-form" class="p-pill filled wide pki-go"
-              disabled={busy === reviewing.id || Boolean(reviewRefusal)}
-              aria-describedby={reviewRefusal ? "pki-refusal" : undefined}>
-        {busy === reviewing.id ? "adding…" : "add to orbit"}
-      </button>
     {/if}
+    {#snippet foot()}
+      {#if reviewing}
+        <button type="submit" form="pki-review-form" class="p-pill filled pki-go"
+                disabled={busy === reviewing.id || Boolean(reviewRefusal)}
+                aria-describedby={reviewRefusal ? "pki-refusal" : undefined}>
+          {busy === reviewing.id ? "adding…" : "add to orbit"}
+        </button>
+      {/if}
+    {/snippet}
   </Sheet>
 </div>
 
@@ -543,7 +547,6 @@
   .pki-foot{margin:28px 0 0;text-align:center;font:var(--p-type-meta)/1.7 var(--mono);color:var(--ink-quiet)}
 
   .pki-refusal{margin:12px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-mid)}
-  .pki-go{margin-top:12px}
   .pki-go:disabled{opacity:.5;cursor:default;box-shadow:none}
 
   /* The two ways out, set as the transition starts (leave()). */

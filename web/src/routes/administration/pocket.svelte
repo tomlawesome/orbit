@@ -864,7 +864,7 @@
   </main>
 
   <!-- ── sheets ─────────────────────────────────────────────────────────── -->
-  <Sheet bind:open={readingOpen} size="list" title={reading?.title ?? "What to do"}>
+  <Sheet bind:open={readingOpen} size="callout" title={reading?.title ?? "What to do"}>
     {#if reading?.id === "rotation" && view?.rotation}
       <p class="p-prose ad-sheet-say">{view.rotation.startedAt
         ? `Open ${openFor(view.rotation.startedAt)} · since ${stamp(view.rotation.startedAt)}.` : "The start time was not recorded."}</p>
@@ -902,7 +902,7 @@
   </Sheet>
 
   <Sheet bind:open={inviteOpen} size="callout" title="Invite someone">
-    <form onsubmit={(event) => { event.preventDefault(); invite(); }}>
+    <form id="ad-invite-form" onsubmit={(event) => { event.preventDefault(); invite(); }}>
       <label class="ad-label" for="ad-inv-email">email</label>
       <input id="ad-inv-email" class="ad-input" type="email" inputmode="email" autocomplete="off" enterkeyhint="next"
              placeholder="newcomer@example.com" bind:value={draft.email} required>
@@ -923,15 +923,17 @@
                bind:value={invitePassword} required>
       {/if}
       <p class="ad-note">Orbit mails them a link to choose their own password. The link is never shown here.</p>
-      <button class="p-pill filled wide ad-sheet-act" type="submit" disabled={inviteBusy}>
-        {inviteBusy ? "creating…" : inviteArmed || provenIntent === "local_user_create" ? "create and send the link" : "create"}</button>
       {#if inviteProblem}<p class="p-error" role="alert">{inviteProblem}</p>{/if}
     </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-invite-form" disabled={inviteBusy}>
+        {inviteBusy ? "creating…" : inviteArmed || provenIntent === "local_user_create" ? "create and send the link" : "create"}</button>
+    {/snippet}
   </Sheet>
 
   <Sheet bind:open={resendOpen} size="callout" title="New setup link">
     {#if resendFor}
-      <form onsubmit={(event) => { event.preventDefault(); resend(); }}>
+      <form id="ad-resend-form" onsubmit={(event) => { event.preventDefault(); resend(); }}>
         <p class="p-prose ad-sheet-say">A fresh link goes to {resendFor.email ?? resendFor.displayName}. The one before it stops working.</p>
         <p class="ad-label" id="ad-re-days">link valid for</p>
         <div class="ad-stepper" role="group" aria-labelledby="ad-re-days">
@@ -946,10 +948,14 @@
           <input id="ad-re-current" class="ad-input" type="password" autocomplete="current-password" enterkeyhint="send"
                  bind:value={resendPassword} required>
         {/if}
-        <button class="p-pill filled wide ad-sheet-act" type="submit" disabled={resendBusy}>{resendBusy ? "sending…" : "send it"}</button>
         {#if resendProblem}<p class="p-error" role="alert">{resendProblem}</p>{/if}
       </form>
     {/if}
+    {#snippet foot()}
+      {#if resendFor}
+        <button class="p-pill filled" type="submit" form="ad-resend-form" disabled={resendBusy}>{resendBusy ? "sending…" : "send it"}</button>
+      {/if}
+    {/snippet}
   </Sheet>
 
   <Sheet bind:open={placeOpen} size="list" title="Place {placing?.displayName ?? 'them'} in a system">
@@ -963,7 +969,7 @@
     </div>
   </Sheet>
 
-  <Sheet bind:open={systemOpen} size="list" title="New system">
+  <Sheet bind:open={systemOpen} size="callout" title="New system">
     <label class="ad-label" for="ad-sys-name">name</label>
     <input id="ad-sys-name" class="ad-input" autocomplete="off" enterkeyhint="next" placeholder="Seaside Cottage"
            maxlength={NAME_LIMIT} bind:value={systemName}>
@@ -986,37 +992,39 @@
   </Sheet>
 
   <Sheet bind:open={contactOpen} size="callout" title="Public contact">
-    <form onsubmit={(event) => { event.preventDefault(); contactAction({ action: "set", address: contactDraft }); }}>
+    <form id="ad-contact-form" onsubmit={(event) => { event.preventDefault(); contactAction({ action: "set", address: contactDraft }); }}>
       <label class="ad-label" for="ad-contact-field">address</label>
       <input id="ad-contact-field" class="ad-input" type="email" inputmode="email" autocomplete="off" enterkeyhint="done"
              placeholder="ops@example.com" bind:value={contactDraft} required>
       <p class="ad-note">Shown on the sign-in door if it ever can’t open safely — never a real administrator’s own mailbox.
         Anyone can read it, signed in or not.</p>
-      <div class="ad-sheet-act p-pills">
-        {#if view?.contact?.address}
-          <button class="p-pill danger" type="button" disabled={contactBusy} onclick={() => contactAction({ action: "clear" })}>clear</button>
-        {/if}
-        <button class="p-pill filled ad-grow" type="submit" disabled={contactBusy}>{contactBusy ? "saving…" : "save"}</button>
-      </div>
       {#if contactProblem}<p class="p-error" role="alert">{contactProblem}</p>{/if}
     </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-contact-form" disabled={contactBusy}>{contactBusy ? "saving…" : "save"}</button>
+      {#if view?.contact?.address}
+        <button class="p-pill danger" type="button" disabled={contactBusy} onclick={() => contactAction({ action: "clear" })}>clear</button>
+      {/if}
+    {/snippet}
   </Sheet>
 
   <Sheet bind:open={rotateOpen} size="callout" title="Rotate the mailbox password">
-    <form onsubmit={(event) => { event.preventDefault();
+    <form id="ad-rotate-form" onsubmit={(event) => { event.preventDefault();
       if (view?.mailbox) mailAction("rotate", { action: "rotate", expectedVersion: view.mailbox.version, password: mailPassword }); }}>
       <label class="ad-label" for="ad-rot-pass">new password</label>
       <input id="ad-rot-pass" class="ad-input" type="password" autocomplete="new-password" enterkeyhint="done"
              bind:value={mailPassword} required>
       <p class="ad-note">It is proven against the provider before it’s kept; a refusal leaves the old one working.</p>
-      <button class="p-pill filled wide ad-sheet-act" type="submit" disabled={mailBusy !== null}>
-        {mailBusy === "rotate" ? "verifying…" : "verify and rotate"}</button>
       {#if mailProblem}<p class="p-error" role="alert">{mailProblem}</p>{/if}
     </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-rotate-form" disabled={mailBusy !== null}>
+        {mailBusy === "rotate" ? "verifying…" : "verify and rotate"}</button>
+    {/snippet}
   </Sheet>
 
   <Sheet bind:open={editOpen} size="full" title={view?.mailbox?.configured ? "Change the mailbox" : "Set up the mailbox"}>
-    <form class="ad-form" onsubmit={(event) => { event.preventDefault();
+    <form id="ad-mailbox-form" class="ad-form" onsubmit={(event) => { event.preventDefault();
       if (view?.mailbox) mailAction("set", { action: "set", expectedVersion: view.mailbox.version, ...mailDraft, password: mailPassword }); }}>
       <label class="ad-label" for="ad-mb-host">host</label>
       <input id="ad-mb-host" class="ad-input" autocomplete="off" autocapitalize="off" bind:value={mailDraft.host} required>
@@ -1041,28 +1049,32 @@
       <input id="ad-mb-pass" class="ad-input" type="password" autocomplete="new-password" bind:value={mailPassword} required>
       <p class="ad-note">Relay addresses are plus-addresses of this account, so it has to be one the provider delivers
         sub-addressed mail to. The password is stored encrypted and never shown again.</p>
-      <button class="p-pill filled wide ad-sheet-act" type="submit" disabled={mailBusy !== null}>
-        {mailBusy === "set" ? "verifying…" : "verify and save"}</button>
       {#if mailProblem}<p class="p-error" role="alert">{mailProblem}</p>{/if}
     </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-mailbox-form" disabled={mailBusy !== null}>
+        {mailBusy === "set" ? "verifying…" : "verify and save"}</button>
+    {/snippet}
   </Sheet>
 
-  <Sheet bind:open={doomOpen} size="list" title="Delete {doomed?.name ?? 'it'} now?">
+  <Sheet bind:open={doomOpen} size="callout" title="Delete {doomed?.name ?? 'it'} now?">
     {#if doomed}
       <p class="p-prose ad-sheet-say">Deleting now skips the {count(daysLeft(doomed.deleteAfter), "day")}. Nothing comes back
         after this — not for you, not for anyone.</p>
       <label class="ad-label" for="ad-doom-name">type the system’s name exactly to wake the button</label>
       <input id="ad-doom-name" class="ad-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
              placeholder={doomed.name} bind:value={typedName}>
-      <div class="ad-sheet-act">
-        {#if nameOk}
-          <ArmButton label="delete for good" armedLabel="tap again to delete for good" wide onfire={deleteNow} />
-        {:else}
-          <button class="p-pill danger wide" disabled>delete for good</button>
-        {/if}
-      </div>
       {#if doomProblem}<p class="p-error" role="alert">{doomProblem}</p>{/if}
     {/if}
+    {#snippet foot()}
+      {#if doomed}
+        {#if nameOk}
+          <ArmButton label="delete for good" armedLabel="tap again to delete for good" onfire={deleteNow} />
+        {:else}
+          <button class="p-pill danger" disabled>delete for good</button>
+        {/if}
+      {/if}
+    {/snippet}
   </Sheet>
 
   <Sheet bind:open={aliasOpen} size="callout" title="Rotate every address">
@@ -1074,11 +1086,11 @@
       <output aria-live="polite">{count(graceDays, "day")}</output>
       <button type="button" class="p-pill" aria-label="Seven days more" disabled={graceDays >= 90} onclick={() => graceStep(7)}>+</button>
     </div>
-    <div class="ad-sheet-act">
-      <ArmButton label="rotate every address" armedLabel="tap again to rotate every address" wide
-                 onfire={() => { if (view?.mailbox) mailAction("alias", { action: "rotate_alias_key", expectedVersion: view.mailbox.version, graceDays }).then(() => { if (!mailProblem) { aliasOpen = false; wake("every address is new · the old ones keep working for " + count(graceDays, "day")); } }); }} />
-    </div>
     {#if mailProblem}<p class="p-error" role="alert">{mailProblem}</p>{/if}
+    {#snippet foot()}
+      <ArmButton label="rotate every address" armedLabel="tap again to rotate every address"
+                 onfire={() => { if (view?.mailbox) mailAction("alias", { action: "rotate_alias_key", expectedVersion: view.mailbox.version, graceDays }).then(() => { if (!mailProblem) { aliasOpen = false; wake("every address is new · the old ones keep working for " + count(graceDays, "day")); } }); }} />
+    {/snippet}
   </Sheet>
 
   <Sheet bind:open={serviceOpen} size="callout" title={service ? service[1] : "Service"}>
@@ -1216,8 +1228,6 @@
   .ad-note{margin:12px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
   .ad-sheet-say{color:var(--ink-mid);margin:4px 0 12px}
   .ad-sheet-say code{font:var(--p-type-meta) var(--mono);color:var(--ink)}
-  .ad-sheet-act{margin-top:16px}
-  .ad-grow{flex:1}
   .ad-stepper{display:flex;align-items:center;gap:12px}
   .ad-stepper .p-pill{width:var(--p-hit);padding:0;justify-content:center;font:500 1.25rem/1 var(--mono)}
   .ad-stepper output{min-width:6em;text-align:center;font:500 var(--p-type-body)/1 var(--mono);color:var(--ink)}

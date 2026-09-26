@@ -190,10 +190,10 @@
 
   <Sheet bind:open={leaveOpen} size="callout" title="Leave without adding?">
     <p class="pk-leave-why">What you typed here is not kept.</p>
-    <div class="pk-pair">
-      <button type="button" class="p-pill danger wide" onclick={leave}>leave</button>
-      <button type="button" class="p-pill wide" onclick={() => { leaveOpen = false; }}>stay</button>
-    </div>
+    {#snippet foot()}
+      <button type="button" class="p-pill" onclick={() => { leaveOpen = false; }}>stay</button>
+      <button type="button" class="p-pill danger" onclick={leave}>leave</button>
+    {/snippet}
   </Sheet>
 </div>
 
@@ -242,8 +242,6 @@
   .pk-problem{color:var(--overdue-text);animation:p-errin 200ms var(--p-ease) both}
 
   .pk-leave-why{margin:0 0 16px;font:var(--p-type-body)/1.5 var(--ui);color:var(--ink-mid)}
-  .pk-pair{display:flex;gap:var(--p-pill-gap)}
-  .pk-pair .p-pill{flex:1}
 
   @media (prefers-reduced-motion:reduce){ .pk-problem{animation:none} }
 </style>
