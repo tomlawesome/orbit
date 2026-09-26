@@ -887,10 +887,7 @@ export const DOOR_STATES = [
     });
     await page.waitForSelector(".invite-card .acts");
   } },
-  { name: "/logout", slug: "logout", state: "rest", defect: {
-    "390x664": "review round step c: with the ring at 40% (§2.7) the farewell's second line runs into Sign back in at 68dvh; where the pill goes is the design's call",
-    "360x640": "review round step c: with the ring at 40% (§2.7) the farewell's second line runs into Sign back in at 68dvh; where the pill goes is the design's call",
-  }, reach: async (page) => {
+  { name: "/logout", slug: "logout", state: "rest", reach: async (page) => {
     await doorAnswers(page);
     await page.goto(`${APP}/logout`, { waitUntil: "load" });
     await page.waitForFunction(() => document.body.classList.contains("farewell"));
