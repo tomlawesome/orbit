@@ -748,7 +748,9 @@
 .bp-field textarea{resize:vertical}
 .bp-field input:focus-visible,.bp-field textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .bp-field input:disabled,.bp-field textarea:disabled{opacity:.55}
-.bp-row2{display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:12px}
+/* 170px, not the pill rule's 150 (review round §6.c): a pair of fields sits
+   side by side at 390 and stacks at 360. */
+.bp-row2{display:grid;grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));gap:12px}
 .bp-quick{margin:0 0 14px}
 .bp-quick .p-pill[aria-pressed=true]{border-color:var(--accent);color:var(--accent-text);
   background:color-mix(in srgb, var(--accent) 14%, transparent)}
