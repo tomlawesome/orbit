@@ -467,6 +467,35 @@
     }
   }
 
+  /**
+   * The pocket's review sheet, raised in place from a suggestion's row or
+   * its hollow body on the dial (round 3 §4): approves what the reader
+   * amended into the section they chose, on the same idempotent protocol
+   * and operation id as the two-tap decision. Answers the problem, if any.
+   * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
+   * @param {import('$lib/data/workspace.js').ItemProposal} item
+   * @param {string | null} sectionId
+   * @returns {Promise<string | null>}
+   */
+  async function amendReceipt(suggestion, item, sectionId) {
+    if (!suggestion.receiptId) return "not added — try again";
+    busyReceipt = suggestion.id;
+    try {
+      if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
+      const result = await approveReceipt(suggestion, asView(view).primary, operationIds.get(suggestion.receiptId), item, sectionId);
+      if (result.outcome === "partial_success") {
+        return "The item is recorded, but its documents need another try — add it again to finish.";
+      }
+      operationIds.delete(suggestion.receiptId);
+      view = await readHome();
+      return null;
+    } catch (error) {
+      return /** @type {any} */ (error)?.message ?? String(error);
+    } finally {
+      busyReceipt = null;
+    }
+  }
+
   /* Everything below the chrome is the view-model (#451): the same transform
      the unit tests pin renders the dial, the manifest and the palette. */
   /** @type {any[]} */
@@ -738,6 +767,7 @@
 <Pocket {view} {arrive}
         onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
         ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
+        onamend={amendReceipt}
         onchanged={async () => { view = await readHome(); }} />
 
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the

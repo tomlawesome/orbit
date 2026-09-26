@@ -11,10 +11,12 @@
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import NorthStar from "$lib/pocket/NorthStar.svelte";
+  import ReviewSheet from "$lib/pocket/ReviewSheet.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import TopChrome from "$lib/pocket/TopChrome.svelte";
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
+  import { formReadingsOf, papersOf as reviewPapersOf } from "$lib/pocket/review.js";
   import { rowOf } from "$lib/pocket/row.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
@@ -43,18 +45,24 @@
    * row and wears the lit ring while the row is open, and a second tap on
    * the lit body goes to the item.
    *
-   * Home's sheets are the search sheet (#1057) and the hatch, opened from
-   * the orb; the item and suggestion sheets are gone (§2.1).
+   * Home's sheets are the search sheet (#1057), the hatch, opened from the
+   * orb, and the review sheet (round 3 §4): a suggestion's `review & amend →`
+   * and a second tap on its hollow body raise it in place, rather than
+   * going to the receipt page; the item sheet is gone (§2.1).
    * @typedef {{
    *   view?: import('$lib/data/workspace.js').HomeView | null,
    *   arrive?: boolean,
    *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
    *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
+   *   onamend?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion,
+   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | null>,
    *   onchanged?: () => Promise<unknown>,
    * }} Props
    */
   /** @type {Props} */
-  let { view = null, arrive = false, onapprove = undefined, ondismiss = undefined, onchanged = undefined } = $props();
+  let {
+    view = null, arrive = false, onapprove = undefined, ondismiss = undefined, onamend = undefined, onchanged = undefined,
+  } = $props();
   let sheetOpen = $state(false);
   let hatchOpen = $state(false);
 
@@ -254,6 +262,40 @@
     }
   }
 
+  /* ---- review & amend, raised in place (round 3 §4): the sheet the inbox
+     and the receipt page raise too (ReviewSheet.svelte) ---- */
+  let reviewOpen = $state(false);
+  /** @type {import('$lib/data/workspace.js').ReceiptSuggestion | null} */
+  let reviewing = $state(null);
+  /** @type {string | null} */
+  let reviewProblem = $state(null);
+
+  /** @param {import('$lib/data/workspace.js').ReceiptSuggestion} s */
+  function openReview(s) {
+    reviewing = s;
+    reviewProblem = null;
+    reviewOpen = true;
+  }
+
+  /**
+   * @param {import('$lib/data/workspace.js').ItemProposal} item
+   * @param {string | null} sectionId
+   */
+  async function saveReview(item, sectionId) {
+    const target = reviewing;
+    if (!target || !onamend || busy) return false;
+    busy = true;
+    reviewProblem = null;
+    try {
+      const failed = await onamend(target, item, sectionId);
+      if (failed) { reviewProblem = failed; return false; }
+      wake(`${item.title ?? target.title} added to your orbit`);
+      return true;
+    } finally {
+      busy = false;
+    }
+  }
+
   // ---- the search sheet (#1057, §2.4) -------------------------------------
 
   let query = $state("");
@@ -371,7 +413,7 @@
   let lit = $state(null);
   /* The star hides while a sheet is up and while any row is open (round 3
      §5): it stood over the open suggestion's `Dismiss`. */
-  const starHidden = $derived(sheetOpen || hatchOpen || lit !== null);
+  const starHidden = $derived(sheetOpen || hatchOpen || reviewOpen || lit !== null);
   /** @param {string} id */
   const onRowToggle = (id) => /** @type {(open: boolean) => void} */ ((open) => {
     if (open) { lit = id; loadSearchDocuments(); } else if (lit === id) lit = null;
@@ -383,14 +425,19 @@
    * lighting while the row is open; a tap on the lit body goes to the item,
    * the open drawer lifting into it. A body the manifest draws no row for
    * goes straight to the item, as a search result does (§6.e). The relay's
-   * catch goes where its row's `review & amend →` does.
+   * catch does what its row's `review & amend →` does: raises the review
+   * sheet in place (round 3 §4).
    * @param {DialBody} b
    */
   async function tapBody(b) {
     if (lit !== b.id && (await openRow(b.id))) return;
-    const suggested = b.suggestion ? view?.suggestions.find((one) => one.id === b.id) : null;
-    morphing = lit === b.id && !b.suggestion;
-    goto(resolve("/item/[[id]]", { id: encodeURIComponent(suggested?.receiptId ?? b.id) }));
+    if (b.suggestion) {
+      const suggested = view?.suggestions.find((one) => one.id === b.id);
+      if (suggested?.receiptId) openReview(suggested);
+      return;
+    }
+    morphing = lit === b.id;
+    goto(resolve("/item/[[id]]", { id: encodeURIComponent(b.id) }));
   }
   /* A press on the lit body must not close its row on the way down (row.js
      closes an open row on any press outside it), or the drawer would be gone
@@ -802,7 +849,7 @@
        suggestion row opens in place with its readings and its two
        decisions. Reading and failed mail are the inbox's matter: at most
        one summary row, last in the pen, goes there (owner's answer 12a). -->
-  {#if view?.suggestions?.length || mailSummary}
+  {#if view && (view.suggestions.length || mailSummary)}
     <section class="p-card proposed pk-signals" aria-labelledby="pk-signals-h">
       <h2 class="p-caps" id="pk-signals-h">Signals{#if view.suggestions.length}<span class="p-count">{view.suggestions.length}</span>{/if}</h2>
       <div class="pk-pen" data-row-group>
@@ -815,7 +862,9 @@
             {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
             {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null} />{/snippet}
             {#snippet after()}
-              <a class="p-quiet" href={resolve("/item/[[id]]", { id: encodeURIComponent(s.receiptId ?? s.id) })}>review &amp; amend →</a>
+              {#if s.receiptId}
+                <button class="p-quiet" aria-haspopup="dialog" onclick={() => openReview(s)}>review &amp; amend →</button>
+              {/if}
             {/snippet}
           </Row>
         {/each}
@@ -888,3 +937,8 @@
 
 <Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}
        inboxCount={waiting || null} />
+
+<ReviewSheet bind:open={reviewOpen} title={reviewing?.title ?? ""} proposal={reviewing?.proposal}
+             householdId={reviewing ? (reviewing.householdId ?? view?.primary ?? null) : null}
+             households={view?.households ?? []} readings={reviewing ? formReadingsOf(reviewing) : []}
+             papers={reviewing ? reviewPapersOf(reviewing) : []} {busy} problem={reviewProblem} onsave={saveReview} />

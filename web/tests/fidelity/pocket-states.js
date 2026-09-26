@@ -259,11 +259,25 @@ export const SIGNED_IN = [
     await openRow(page, catch_);
     await catch_.getByRole("button", { name: /^Add .* to your orbit$/ }).click();
   } },
+  { route: "/home", state: "review-sheet", reach: async (page) => {
+    await go(page, "/home");
+    const catch_ = row(page, ".pk-signals", "Home insurance");
+    await openRow(page, catch_);
+    await catch_.getByRole("button", { name: "review & amend →" }).click();
+    await sheetUp(page);
+  } },
   { route: "/home", state: "manifest-bottom", reach: async (page) => {
     await go(page, "/home");
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   } },
 
+  /* /item/<receiptId>: the receipt page (round 3 §4, #1140) */
+  { route: "/item/r-insurance", state: "rest", reach: (page) => go(page, "/item/r-insurance") },
+  { route: "/item/r-insurance", state: "review-sheet", reach: async (page) => {
+    await go(page, "/item/r-insurance");
+    await page.locator(".rv-amend").first().click();
+    await sheetUp(page);
+  } },
   /* /item: the belt and its sheets */
   { route: "/item", state: "rest", reach: (page) => go(page, "/item") },
   { route: "/item/i-mot", state: "rest", reach: (page) => go(page, "/item/i-mot") },
@@ -339,15 +353,15 @@ export const SIGNED_IN = [
   { route: "/inbox", state: "rest", reach: (page) => go(page, "/inbox") },
   { route: "/inbox", state: "add-armed", reach: async (page) => {
     await go(page, "/inbox");
-    await page.locator(".pki-yes").first().click();
+    await page.locator(".rv-yes").first().click();
   } },
   { route: "/inbox", state: "dismiss-armed", reach: async (page) => {
     await go(page, "/inbox");
-    await page.locator(".pki-no").first().click();
+    await page.locator(".rv-no").first().click();
   } },
   { route: "/inbox", state: "review-sheet", reach: async (page) => {
     await go(page, "/inbox");
-    await page.locator(".pki-amend").first().click();
+    await page.locator(".rv-amend").first().click();
     await sheetUp(page);
   } },
   { route: "/inbox", state: "failed-open", reach: async (page) => {
