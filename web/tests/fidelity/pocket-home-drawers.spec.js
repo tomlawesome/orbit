@@ -98,3 +98,23 @@ test("the dial arrives on a forward arrival, never on Back", async ({ page }) =>
   await expect(dial).toHaveClass(/arrive/);
   expect(await arriving(), "a second forward arrival did not arrive").toBe(true);
 });
+
+/* A chip in "other skies" flies to that household, as the desk does (#1118,
+   owner 2026-09-25, 7a). */
+test.describe("at 390x844", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test("a chip in other skies flies to that household", async ({ page }) => {
+    await page.goto(`${APP}/home`, { waitUntil: "load" });
+    await settle(page);
+    /* Marks this document so a real (non-SPA) browser navigation, which the
+       chip's plain href would still complete on its own, is told apart from
+       the fly() handler actually taking the tap: only a client-routed
+       goto() carries this flag through to the destination. */
+    await page.evaluate(() => { /** @type {any} */ (window).__pocket1118 = true; });
+    const chip = page.locator(".skies .msys", { hasText: "Seaside Cottage" });
+    await chip.click();
+    await expect(page).toHaveURL(/\/household\/hh-seaside-4551$/);
+    await expect(page.getByRole("heading", { name: "Seaside Cottage" })).toBeVisible();
+    expect(await page.evaluate(() => /** @type {any} */ (window).__pocket1118)).toBe(true);
+  });
+});
