@@ -105,11 +105,12 @@ test("a failed document job says why and offers retry, with no interaction", asy
   const card = page.locator(".ad-pocket [data-ad=documents]");
   const failed = card.locator(".p-row").filter({ hasText: "FAILED" });
   await expect(failed).toContainText("Virus scan");
-  /* Round 3 §3.9: the reason's first words and when, at rest; the tries are the panel's. */
-  await expect(failed.locator(".meta")).toHaveText("couldn’t reach the scanner · 6m ago");
+  /* Round 3 §3.9 and §8: the reason alone at rest; the tries and when it was last tried are the panel's. */
+  await expect(failed.locator(".meta")).toHaveText("couldn’t reach the scanner");
   await expect(page.getByRole("button", { name: "Retry the virus scan" })).toBeVisible();
   await openRow(page, failed);
   await expect(failed.locator("[data-row-panel] .p-kv").first()).toHaveText(/tries\s*5/);
+  await expect(failed.locator("[data-row-panel] .p-kv").nth(1)).toHaveText(/last tried\s*6m ago/);
   /* Kind only, never a document's name (owner, 2026-09-19); one retry, on the failed row only. */
   await expect(card.getByRole("button", { name: /^Retry/ })).toHaveCount(1);
   /* And it is told at the top of the page. */

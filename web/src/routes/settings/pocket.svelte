@@ -215,7 +215,9 @@
   }
   /** @param {SentRow} row */
   const sentMeta = (row) =>
-    `${row.channel === "email" ? "email" : "browser alert"} · ${beforeWord(row.daysBefore)}`;
+    /* Round 3 §8: `alert · 14 days` beside the date; `before` is the reminders
+       tab's own grammar, and `browser alert` took the value's room. */
+    `${row.channel === "email" ? "email" : "alert"} · ${daysWord(row.daysBefore)}`;
 
   const bothOff = $derived(view !== null && !emailOn && !browserAlerts);
 
@@ -447,7 +449,7 @@
             <!-- #1033: nobody chooses the second factor, so this row carries a
                  value, not a switch. The instance's relay decides it. -->
             <Row title="email approval" metaFace="ui"
-                 meta={emailApproval ? "every password sign-in" : "this instance has no mail relay configured"}
+                 meta={emailApproval ? "every password sign-in" : "no mail relay set up"}
                  trail={emailApproval ? "on" : "off"} trailTone={emailApproval ? "var(--ok-text)" : ""}>
               {#snippet mark()}<span class="st-glyph">✉</span>{/snippet}
             </Row>
@@ -509,17 +511,17 @@
                         aria-label="Browser alerts on this device" disabled={!alertsAvailable} onclick={toggleAlerts}><i></i></button>
               {/snippet}
             </Row>
-            <Row title="first warning" meta="before closest approach"
+            <Row title="first warning" meta="before it’s due"
                  trail={timingSaving === "first" ? "saving…" : daysWord(view.reminders.firstWarningDays ?? 0)}
                  trailTone="var(--accent-text)" onactivate={() => openPicker("first")}>
               {#snippet mark()}<span class="p-body soon"></span>{/snippet}
             </Row>
-            <Row title="final warning" meta={view.reminders.finalWarningDays === 0 ? "the day itself" : "before closest approach"}
+            <Row title="final warning" meta={view.reminders.finalWarningDays === 0 ? "the day itself" : "before it’s due"}
                  trail={timingSaving === "final" ? "saving…" : daysWord(view.reminders.finalWarningDays ?? 0)}
                  trailTone="var(--accent-text)" onactivate={() => openPicker("final")}>
               {#snippet mark()}<span class="p-body over"></span>{/snippet}
             </Row>
-            <Row title="outbound mail" meta="set by your administrator" metaFace="ui"
+            <Row title="outbound mail" meta="administrator’s setting" metaFace="ui"
                  trail={view.reminders.outboundMail}
                  trailTone={view.reminders.outboundMail === "configured" ? "var(--ok-text)" : "var(--warm-text)"}>
               {#snippet mark()}<span class="st-glyph">↗</span>{/snippet}
@@ -579,7 +581,7 @@
           <Row title="status" metaFace="ui" meta={view.relay.status}>
             {#snippet mark()}<span class="p-body ok breathing"></span>{/snippet}
           </Row>
-          <Row title="waiting for review" meta="arrivals in your inbox" trail={String(view.waiting)} bead={view.waiting > 0}
+          <Row title="waiting for review" meta="in your inbox" trail={String(view.waiting)} bead={view.waiting > 0}
                trailName="{view.waiting} waiting" href={resolve("/inbox")}>
             {#snippet mark()}<span class="p-paper">◆</span>{/snippet}
           </Row>

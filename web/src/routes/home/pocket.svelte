@@ -917,7 +917,8 @@
         </Row>
       {/each}
       {#each results.documents as doc (doc.id)}
-        <Row title={doc.name} meta={`${doc.itemTitle} · ${doc.meta}`} onactivate={() => openPaper(doc)}>
+        <!-- Round 3 §8: the item alone; the paper's date is its own sheet's. -->
+        <Row title={doc.name} meta={doc.itemTitle} onactivate={() => openPaper(doc)}>
           {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
         </Row>
       {/each}
