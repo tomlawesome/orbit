@@ -27,25 +27,8 @@ async function open(page) {
   await page.evaluate(() => document.fonts.ready);
 }
 
-/**
- * A real touch swipe (Chromium's touch pipeline, so touch-action applies).
- * @param {import('@playwright/test').Page} page
- * @param {{ x: number, y: number }} from
- * @param {number} dx
- */
-async function swipe(page, from, dx) {
-  const cdp = await page.context().newCDPSession(page);
-  const steps = 8;
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: from.x, y: from.y }] });
-  for (let i = 1; i <= steps; i++) {
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchMove", touchPoints: [{ x: from.x + (dx * i) / steps, y: from.y }],
-    });
-    await page.waitForTimeout(16);
-  }
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await cdp.detach();
-}
+/** A member row's face, the button that opens it. @param {import('@playwright/test').Page} page @param {string} name */
+const memberFace = (page, name) => page.locator("[data-kit=members] [data-row-face]", { hasText: name });
 
 /** Visible violations of the pocket floors under a selector (see pocket-measure.spec.js). */
 /** @param {import('@playwright/test').Page} page @param {string} scope */
@@ -68,32 +51,29 @@ test("the kit at rest", async ({ page }) => {
   await shot(page, "01-kit-rest");
   await page.locator("[data-kit=members]").scrollIntoViewIfNeeded();
   await shot(page, "02-rows-rest");
-  /* No act is visible at rest: every act button is off its row (clipped,
-     or off the screen, where nothing is hit at all) or covered. */
-  const covered = await page.evaluate(() =>
-    [...document.querySelectorAll("[data-row-acts] button")].every((b) => {
-      const r = b.getBoundingClientRect();
-      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return !(hit && b.contains(hit));
-    }));
-  expect(covered, "a row act is visible without a swipe").toBe(true);
+  /* No act shows at rest: every row's panel is shut (review round §1.1). */
+  const shut = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-row-panel]")].every((panel) => panel instanceof HTMLElement && panel.hidden));
+  expect(shut, "a row's panel is open without a tap").toBe(true);
 });
 
-test("row acts: hidden buttons, named with their object, out of the Tab order", async ({ page }) => {
+test("row acts: shut rows keep their acts out of the page; the face says so", async ({ page }) => {
   await open(page);
-  const remove = page.getByRole("button", { name: "Remove Rob Lawson" });
-  await expect(remove).toHaveCount(1);
-  await expect(remove).toHaveAttribute("tabindex", "-1");
-  await expect(page.getByRole("button", { name: "Hand over to Ada Lawson" })).toHaveAttribute("tabindex", "-1");
+  const face = memberFace(page, "Rob Lawson");
+  await expect(face).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: "Remove Rob Lawson" })).toHaveCount(0);
+  const panel = await face.getAttribute("aria-controls");
+  await expect(page.locator(`#${panel}`)).toBeHidden();
 });
 
-test("row acts: keyboard reveals with an arrow, Tab walks them, Escape hides", async ({ page }) => {
+test("row acts: Enter opens, Tab walks the pills, Escape closes and returns to the face", async ({ page }) => {
   await open(page);
-  const face = page.getByRole("group", { name: "Rob Lawson" });
+  const face = memberFace(page, "Rob Lawson");
   await face.focus();
-  await page.keyboard.press("ArrowLeft");
-  const row = page.locator("[data-row]", { has: face });
+  await page.keyboard.press("Enter");
+  const row = face.locator("xpath=ancestor::*[@data-row][1]");
   await expect(row).toHaveAttribute("data-open", "");
+  await expect(face).toHaveAttribute("aria-expanded", "true");
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Hand over to Rob Lawson" })).toBeFocused();
   await page.keyboard.press("Tab");
@@ -103,49 +83,51 @@ test("row acts: keyboard reveals with an arrow, Tab walks them, Escape hides", a
   await expect(face).toBeFocused();
 });
 
+test("row acts: one open per list, and a tap outside closes it", async ({ page }) => {
+  await open(page);
+  const rob = page.locator("[data-kit=members] [data-row]", { hasText: "Rob Lawson" });
+  const ada = page.locator("[data-kit=members] [data-row]", { hasText: "Ada Lawson" });
+  await rob.locator("[data-row-face]").tap();
+  await expect(rob).toHaveAttribute("data-open", "");
+  await ada.locator("[data-row-face]").tap();
+  await expect(ada).toHaveAttribute("data-open", "");
+  await expect(rob).not.toHaveAttribute("data-open", "");
+  await page.mouse.click(195, 120);
+  await expect(ada).not.toHaveAttribute("data-open", "");
+});
+
 /**
- * The swiped row's layout (Fable, #1120): the face has not moved, the tray
- * sits inside the row on its trailing side, the mark and at least 56px of
- * the title show left of it, and every pill is 44 tall with a 13px+ label.
- * @param {import('@playwright/test').Page} page
+ * The opened row's layout (review round §1.1): the panel sits directly
+ * under the face, as wide as it, its text edge the row's text edge; the
+ * trail and meta still show; every pill is 44 tall with a 13px+ label.
  * @param {import('@playwright/test').Locator} row
- * @param {{ x: number }} rest the face's box before the swipe
  */
-async function expectSwipedLayout(page, row, rest) {
+async function expectOpenLayout(row) {
   const m = await row.evaluate((el) => {
     const box = (/** @type {Element | null} */ n) => {
       const r = /** @type {Element} */ (n).getBoundingClientRect();
       return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
     };
-    const face = /** @type {HTMLElement} */ (el.querySelector("[data-row-face]"));
-    const title = /** @type {HTMLElement} */ (el.querySelector(".title"));
-    const t = title.getBoundingClientRect();
-    const hit = document.elementFromPoint(t.left + 8, t.top + t.height / 2);
+    const inner = /** @type {Element} */ (el.querySelector(".p-row-in"));
     return {
       width: innerWidth,
-      row: box(el),
-      face: box(face),
-      faceTransform: getComputedStyle(face).transform,
-      mark: box(el.querySelector(".mark")),
-      title: box(title),
-      titleHit: Boolean(hit && title.contains(hit)),
-      tray: box(el.querySelector("[data-row-acts]")),
-      pills: [...el.querySelectorAll("[data-row-acts] button")].map((b) => {
+      face: box(el.querySelector(".face")),
+      panel: box(el.querySelector("[data-row-panel]")),
+      title: box(el.querySelector(".title")),
+      text: inner.getBoundingClientRect().left + parseFloat(getComputedStyle(inner).paddingLeft),
+      meta: /** @type {HTMLElement} */ (el.querySelector(".meta"))?.checkVisibility() ?? true,
+      pills: [...el.querySelectorAll("[data-row-acts] > *")].map((b) => {
         const label = [...b.querySelectorAll("span")].find((s) => getComputedStyle(s).opacity !== "0") ?? b;
         return { height: b.getBoundingClientRect().height, font: parseFloat(getComputedStyle(label).fontSize) };
       }),
     };
   });
-  expect(m.faceTransform, "the face moved").toBe("none");
-  expect(Math.abs(m.face.left - rest.x), "the face moved").toBeLessThan(0.5);
-  expect(m.tray.right).toBeLessThanOrEqual(m.row.right + 0.5);
-  expect(m.tray.right).toBeLessThanOrEqual(m.width);
-  expect(m.tray.width, "the tray is over its cap").toBeLessThanOrEqual(m.row.width - 120 + 0.5);
-  expect(m.mark.left).toBeGreaterThanOrEqual(0);
-  expect(m.mark.right, "the tray covers the mark").toBeLessThanOrEqual(m.tray.left);
-  expect(m.title.left).toBeGreaterThanOrEqual(0);
-  expect(m.tray.left - m.title.left, "less than 56px of the title shows").toBeGreaterThanOrEqual(56);
-  expect(m.titleHit, "the title's start is covered").toBe(true);
+  expect(Math.abs(m.panel.top - m.face.bottom), "the panel is not under the face").toBeLessThan(0.5);
+  expect(Math.abs(m.panel.left - m.face.left)).toBeLessThan(0.5);
+  expect(Math.abs(m.panel.width - m.face.width)).toBeLessThan(0.5);
+  expect(m.panel.right).toBeLessThanOrEqual(m.width);
+  expect(Math.abs(m.text - m.title.left), "the panel's text edge is not the row's").toBeLessThan(0.5);
+  expect(m.meta, "the meta went while open").toBe(true);
   expect(m.pills.length).toBe(2);
   for (const pill of m.pills) {
     expect(pill.height).toBeGreaterThanOrEqual(44);
@@ -157,32 +139,32 @@ for (const width of [390, 360]) {
   test.describe(`at ${width}`, () => {
     test.use({ viewport: { width, height: 844 } });
 
-    test("row acts: a touch swipe slides the tray over a still face, the danger act arms then fires, the wake undoes", async ({ page }) => {
+    test("row acts: a tap opens the row in place, the danger act arms then fires, the wake undoes", async ({ page }) => {
       await open(page);
-      const face = page.getByRole("group", { name: "Ada Lawson" });
+      const face = memberFace(page, "Ada Lawson");
       await face.scrollIntoViewIfNeeded();
-      const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await face.boundingBox());
-      await swipe(page, { x: box.x + box.width - 30, y: box.y + box.height / 2 }, -200);
-      const row = page.locator("[data-row]", { has: face });
+      await face.tap();
+      const row = face.locator("xpath=ancestor::*[@data-row][1]");
       await expect(row).toHaveAttribute("data-open", "");
-      await page.waitForTimeout(300);
-      await expectSwipedLayout(page, row, box);
-      await expect(row.locator(".meta")).toBeHidden();
-      await shot(page, `03-row-swiped-${width}`);
+      await page.waitForTimeout(350);
+      await expectOpenLayout(row);
+      await shot(page, `03-row-open-${width}`);
 
       const remove = page.getByRole("button", { name: "Remove Ada Lawson" });
       await remove.tap();
       await expect(page.getByRole("button", { name: "tap again to remove Ada Lawson" })).toBeVisible();
+      await expect(row.getByText("tap again to remove", { exact: true })).toBeVisible();
+      await expect(row, "arming closed the row").toHaveAttribute("data-open", "");
       await page.waitForTimeout(200);
-      await expectSwipedLayout(page, row, box);
+      await expectOpenLayout(row);
       await shot(page, `04-row-armed-${width}`);
       await page.getByRole("button", { name: "tap again to remove Ada Lawson" }).tap();
-      await expect(page.getByRole("group", { name: "Ada Lawson" })).toHaveCount(0);
+      await expect(memberFace(page, "Ada Lawson")).toHaveCount(0);
       await expect(page.locator(".p-wake-host [role=status]")).toHaveText("Ada Lawson removed");
       await page.waitForTimeout(300);
       await shot(page, `05-wake-undo-${width}`);
       await page.getByRole("button", { name: "undo" }).tap();
-      await expect(page.getByRole("group", { name: "Ada Lawson" })).toHaveCount(1);
+      await expect(memberFace(page, "Ada Lawson")).toHaveCount(1);
     });
   });
 }
@@ -299,15 +281,25 @@ test("the top chrome retracts on scroll down and returns on scroll up", async ({
   await shot(page, "12-chrome-returned");
 });
 
-test("reorder: Alt-arrow moves a row; long-press lifts and drops it", async ({ page }) => {
+test("reorder: Alt-arrow and the move pills move a row; long-press lifts and drops it", async ({ page }) => {
   await open(page);
   const order = () => page.locator("[data-kit=sections] [data-row] .title").allTextContents();
-  const home = page.getByRole("group", { name: "Home" });
-  await home.focus();
+  const face = (/** @type {string} */ name) => page.locator("[data-kit=sections] [data-row-face]", { hasText: name });
+  await face("Home").focus();
   await page.keyboard.press("Alt+ArrowDown");
   expect(await order()).toEqual(["Car", "Home", "Health", "Money"]);
+  await face("Home").click();
+  await page.getByRole("button", { name: "Move Home down" }).click();
+  expect(await order()).toEqual(["Car", "Health", "Home", "Money"]);
+  await face("Home").click();
+  await page.getByRole("button", { name: "Move Home up" }).click();
+  expect(await order()).toEqual(["Car", "Home", "Health", "Money"]);
+  await expect(face("Car")).toHaveAttribute("aria-expanded", "false");
+  await face("Car").click();
+  await expect(page.getByRole("button", { name: "Move Car up" }), "the first row offers a move up").toHaveCount(0);
+  await face("Car").click();
 
-  const car = page.getByRole("group", { name: "Car" });
+  const car = face("Car");
   await car.scrollIntoViewIfNeeded();
   const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await car.boundingBox());
   await page.mouse.move(box.x + 60, box.y + box.height / 2);

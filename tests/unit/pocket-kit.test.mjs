@@ -4,15 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ARM_MS, createArm, disarmOnElsewhere } from "$lib/pocket/arm.js";
 import { inertPage, tabbables, trapTab } from "$lib/pocket/focus.js";
 import {
-  chromeHidden, dragAxis, reorderTarget, sheetRelease, swipeOffset, swipeSettles,
+  chromeHidden, dragAxis, reorderTarget, sheetRelease,
 } from "$lib/pocket/gesture.js";
-import { mountRow } from "$lib/pocket/row.js";
+import { mountRow, rowOf } from "$lib/pocket/row.js";
 import { holdSheet } from "$lib/pocket/sheet.js";
 import { dismissWake, subscribeWake, undoWake, wake } from "$lib/pocket/wake.js";
 
 /*
- * The pocket kit's behaviour without a browser (#1120): the row's swipe,
- * keyboard and hidden-button contract (owner decision §25), the sheet's
+ * The pocket kit's behaviour without a browser (#1120): the row that opens
+ * on a tap (review round §1.1), its keyboard and one-open-per-group, the sheet's
  * focus handling, arm-then-fire, and the wake. The same modules drive the
  * Svelte components; web/tests/fidelity/pocket-kit.spec.js proves the
  * layout-dependent half in a real browser.
@@ -31,18 +31,6 @@ describe("gesture arithmetic", () => {
     expect(dragAxis(3, 2)).toBe(null);
     expect(dragAxis(-20, 4)).toBe("x");
     expect(dragAxis(4, 20)).toBe("y");
-  });
-  it("lets the tray follow the finger toward the trailing side, never the other way", () => {
-    expect(swipeOffset({ dx: 30, reveal: 150, open: false })).toBe(0);
-    expect(swipeOffset({ dx: -60, reveal: 150, open: false })).toBe(-60);
-    expect(swipeOffset({ dx: -250, reveal: 150, open: false })).toBeGreaterThan(-250);
-    expect(swipeOffset({ dx: 50, reveal: 150, open: true })).toBe(-100);
-  });
-  it("settles open past a third, or on a flick", () => {
-    expect(swipeSettles({ dx: -60, reveal: 150, open: false })).toBe(true);
-    expect(swipeSettles({ dx: -40, reveal: 150, open: false })).toBe(false);
-    expect(swipeSettles({ dx: -10, reveal: 150, open: false, velocity: -0.8 })).toBe(true);
-    expect(swipeSettles({ dx: 60, reveal: 150, open: true })).toBe(false);
   });
   it("closes a sheet dragged a quarter down, grows a list sheet dragged up", () => {
     expect(sheetRelease({ dy: 120, height: 400, size: "list" })).toBe("close");
@@ -164,107 +152,113 @@ describe("the wake", () => {
   });
 });
 
-/** Row.svelte's DOM, by hand. */
+/** Row.svelte's DOM, by hand: two rows in one group, a third outside it. */
 function rowFixture() {
   document.body.innerHTML = `
-    <div data-row>
-      <div data-row-face role="group" aria-label="Emma Lawson" tabindex="0">Emma Lawson</div>
-      <div data-row-acts>
-        <button aria-label="Hand over to Emma Lawson">hand over</button>
-        <button aria-label="Remove Emma Lawson">remove</button>
+    <div data-row-group>
+      <div data-row id="emma">
+        <div class="face"><button data-row-face aria-controls="emma-panel">Emma Lawson</button></div>
+        <div data-row-panel id="emma-panel">
+          <button aria-label="Hand over to Emma Lawson">hand over</button>
+          <button aria-label="Remove Emma Lawson">remove</button>
+        </div>
+      </div>
+      <div data-row id="rob">
+        <div class="face"><button data-row-face>Rob Lawson</button></div>
+        <div data-row-panel><button aria-label="Remove Rob Lawson">remove</button></div>
+      </div>
+    </div>
+    <div data-row-group>
+      <div data-row id="ada">
+        <div class="face"><button data-row-face>Ada Lawson</button></div>
+        <div data-row-panel><button aria-label="Remove Ada Lawson">remove</button></div>
       </div>
     </div>
     <button id="elsewhere">elsewhere</button>`;
-  const row = /** @type {HTMLElement} */ (document.querySelector("[data-row]"));
-  const face = /** @type {HTMLElement} */ (row.querySelector("[data-row-face]"));
-  const [handOver, remove] = /** @type {HTMLButtonElement[]} */ ([...row.querySelectorAll("[data-row-acts] button")]);
-  return { row, face, handOver, remove, control: mountRow(row) };
+  /** @param {string} id */
+  const one = (id) => {
+    const row = /** @type {HTMLElement} */ (document.getElementById(id));
+    const face = /** @type {HTMLElement} */ (row.querySelector("[data-row-face]"));
+    const panel = /** @type {HTMLElement} */ (row.querySelector("[data-row-panel]"));
+    const [first, last] = /** @type {HTMLButtonElement[]} */ ([...panel.querySelectorAll("button")]);
+    return { row, face, panel, first, last, control: mountRow(row, { closeMs: 0 }) };
+  };
+  return { emma: one("emma"), rob: one("rob"), ada: one("ada") };
 }
 
-describe("the row's acts (owner decision §25)", () => {
-  it("keeps every act a real named button, out of the Tab order, until revealed", () => {
-    const { handOver, remove, control } = rowFixture();
-    expect(remove.getAttribute("aria-label")).toBe("Remove Emma Lawson");
-    expect(handOver.tabIndex).toBe(-1);
-    expect(remove.tabIndex).toBe(-1);
-    expect(tabbables(document.body).map((el) => el.textContent)).not.toContain("remove");
-    control.destroy();
+describe("the row opens on a tap (review round §1.1)", () => {
+  it("is shut at rest: its acts are hidden, out of the Tab order, the face says collapsed", () => {
+    const { emma } = rowFixture();
+    expect(emma.panel.hidden).toBe(true);
+    expect(emma.face.getAttribute("aria-expanded")).toBe("false");
+    expect(tabbables(document.body).map((el) => el.textContent)).not.toContain("hand over");
+    expect(emma.last.getAttribute("aria-label")).toBe("Remove Emma Lawson");
   });
-  it("reveals on ← or → from the focused row, puts the acts in the Tab order, and Escape hides", () => {
-    const { row, face, remove, control } = rowFixture();
-    face.focus();
-    face.dispatchEvent(key("ArrowLeft"));
-    expect(control.isOpen).toBe(true);
-    expect(row.hasAttribute("data-open")).toBe(true);
-    expect(remove.tabIndex).toBe(0);
-    remove.focus();
-    remove.dispatchEvent(key("Escape"));
-    expect(control.isOpen).toBe(false);
-    expect(remove.tabIndex).toBe(-1);
-    expect(document.activeElement).toBe(face);
-    face.dispatchEvent(key("ArrowRight"));
-    expect(control.isOpen).toBe(true);
-    face.dispatchEvent(key("ArrowRight"));
-    expect(control.isOpen).toBe(false);
-    control.destroy();
+  it("opens on a tap on the face and closes on the next, keeping its acts named", () => {
+    const { emma } = rowFixture();
+    emma.face.click();
+    expect(emma.control.isOpen).toBe(true);
+    expect(emma.row.hasAttribute("data-open")).toBe(true);
+    expect(emma.panel.hidden).toBe(false);
+    expect(emma.face.getAttribute("aria-expanded")).toBe("true");
+    expect(tabbables(document.body).map((el) => el.getAttribute("aria-label")))
+      .toEqual(expect.arrayContaining(["Hand over to Emma Lawson", "Remove Emma Lawson"]));
+    emma.face.click();
+    expect(emma.control.isOpen).toBe(false);
+    expect(emma.panel.hidden).toBe(true);
+    expect(emma.face.getAttribute("aria-expanded")).toBe("false");
   });
-  it("uncovers the row when a screen reader lands on a covered act", () => {
-    const { remove, control } = rowFixture();
-    remove.focus();
-    expect(control.isOpen).toBe(true);
-    control.destroy();
+  it("closes on Escape from its panel and hands focus back to the face", () => {
+    const { emma } = rowFixture();
+    emma.face.click();
+    emma.last.focus();
+    emma.last.dispatchEvent(key("Escape"));
+    expect(emma.control.isOpen).toBe(false);
+    expect(document.activeElement).toBe(emma.face);
   });
-  it("springs back on a tap elsewhere, on scroll, and after 6s, but not from under focus", () => {
+  it("closes on a tap outside, but not on scroll, and never on a timer", () => {
     vi.useFakeTimers();
-    const { face, remove, control } = rowFixture();
+    const { emma } = rowFixture();
     const elsewhere = /** @type {HTMLElement} */ (document.getElementById("elsewhere"));
-    control.open();
-    elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-    expect(control.isOpen).toBe(false);
-    control.open();
+    emma.control.open();
+    emma.last.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    expect(emma.control.isOpen).toBe(true);
     window.dispatchEvent(new Event("scroll"));
-    expect(control.isOpen).toBe(false);
-    control.open();
-    face.focus();
-    vi.advanceTimersByTime(6000);
-    expect(control.isOpen).toBe(false);
-    control.open();
-    remove.focus();
-    vi.advanceTimersByTime(6000);
-    expect(control.isOpen).toBe(true);
-    control.destroy();
+    vi.advanceTimersByTime(60_000);
+    expect(emma.control.isOpen).toBe(true);
+    elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    expect(emma.control.isOpen).toBe(false);
   });
-  it("slides the tray over a face that never moves, and makes room for it (Fable, #1120)", () => {
-    const { row, face, control } = rowFixture();
-    const tray = /** @type {HTMLElement} */ (row.querySelector("[data-row-acts]"));
-    /* happy-dom has no layout: give the tray the width two pills make. */
-    Object.defineProperty(tray, "offsetWidth", { value: 204 });
-    /** @param {string} type @param {number} x */
-    const pointer = (type, x) => face.dispatchEvent(
-      new PointerEvent(type, { bubbles: true, pointerId: 1, clientX: x, clientY: 20, button: 0 }));
-    pointer("pointerdown", 300);
-    pointer("pointermove", 280);
-    pointer("pointermove", 200);
-    expect(row.hasAttribute("data-swiping")).toBe(true);
-    expect(tray.style.transform).toBe("translateX(104px)");
-    expect(face.style.transform).toBe("");
-    expect(row.style.getPropertyValue("--p-row-tray")).toBe("204px");
-    pointer("pointerup", 200);
-    expect(control.isOpen).toBe(true);
-    expect(row.hasAttribute("data-swiping")).toBe(false);
-    /* Settled: the tray is the CSS's again ([data-open] places it). */
-    expect(tray.style.transform).toBe("");
-    expect(face.style.transform).toBe("");
+  it("keeps one open per group: opening another row in the list closes the first", () => {
+    const { emma, rob, ada } = rowFixture();
+    emma.control.open();
+    rob.control.open();
+    expect(emma.control.isOpen).toBe(false);
+    expect(rob.control.isOpen).toBe(true);
+    ada.control.open();
+    expect(rob.control.isOpen).toBe(true);
+    expect(ada.control.isOpen).toBe(true);
+  });
+  it("keeps the panel in the page until the close has played", () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `<div data-row><button data-row-face>Tom</button><div data-row-panel><button>remove</button></div></div>`;
+    const row = /** @type {HTMLElement} */ (document.querySelector("[data-row]"));
+    const panel = /** @type {HTMLElement} */ (row.querySelector("[data-row-panel]"));
+    const control = mountRow(row, { closeMs: 200 });
+    control.open();
     control.close();
-    expect(tray.style.transform).toBe("");
-    expect(face.style.transform).toBe("");
+    expect(row.hasAttribute("data-open")).toBe(false);
+    expect(panel.hidden).toBe(false);
+    vi.advanceTimersByTime(200);
+    expect(panel.hidden).toBe(true);
     control.destroy();
   });
-  it("never opens from a tap: only a swipe or a key does", () => {
-    const { face, control } = rowFixture();
-    face.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    expect(control.isOpen).toBe(false);
-    control.destroy();
+  it("is found by any element inside it, so a screen can open it from elsewhere", () => {
+    const { emma } = rowFixture();
+    expect(rowOf(emma.last)).toBe(emma.control);
+    rowOf(document.getElementById("emma"))?.open();
+    expect(emma.control.isOpen).toBe(true);
+    expect(rowOf(document.getElementById("elsewhere"))).toBe(null);
   });
 });
 

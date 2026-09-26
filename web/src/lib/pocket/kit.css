@@ -123,6 +123,21 @@
 .p-kv :is(.ok,.clean){color:var(--ok-text)}
 .p-kv .ended{color:var(--ink-quiet)}
 
+/* THE OPENED ROW'S PANEL (review round §1.1; Row.svelte unfolds it): the
+   raised plane under the face, the same accent rail, the bottom corners.
+   Its text edge is the row's text edge. Inside, in order: the screen's
+   detail (.p-kv lines), the acts as pills (two share a line when each gets
+   150px, else they stack), then a quiet link line. */
+.p-row-open{background:var(--panel-raised);box-shadow:inset 2px 0 0 var(--accent);border-radius:0 0 12px 12px}
+.p-row-in{padding:4px var(--p-gutter) 12px calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap))}
+.p-row-in > .p-pills:not(:first-child){margin-top:12px}
+.p-row-in > .p-pills > *{flex:1 1 150px}
+/* The quiet link line (review round §1.2, §2.1): 44px to hit, 13px mono. */
+.p-quiet{display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;
+  font:var(--p-type-meta)/1.2 var(--mono);color:var(--accent-text);text-decoration:none;
+  background:none;border:0;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.p-quiet:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+
 /* Loading (§1.13, §5.2): three unlit rows at row height instead of a
    spinner, their mark a hollow body where the lit row's sits. */
 .p-unlit{height:var(--p-row-min);display:flex;align-items:center;gap:var(--p-row-gap)}

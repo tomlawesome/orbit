@@ -5,7 +5,7 @@ import { APP, DOOR_STATES, PHONES, SIGNED_IN, settle } from "./pocket-states.js"
  * THE PHONE MEASUREMENT CHECK (#1120, proposal §1.6, §1.7, §3).
  *
  * Opens every state a phone reader can reach -- each route at rest, and
- * every sheet, menu, search, swiped row, armed act, expanded section and
+ * every sheet, menu, search, opened row, armed act, expanded section and
  * refusal the fixture data reaches (pocket-states.js lists them and how to
  * get there) -- with touch on, at the two widths the proposal draws for
  * (390x844 and 360x780) and at the height a phone browser leaves them
@@ -362,9 +362,6 @@ function covered({ scope, only = -1 }) {
     for (const [x, y] of points) {
       const hit = document.elementFromPoint(x, y);
       if (!hit || hit === el || el.contains(hit) || hit.contains(el)) continue;
-      /* A row's revealed acts sit over its own face by design (Row.svelte). */
-      const tray = hit.closest("[data-row-acts]");
-      if (tray && tray.closest("[data-row]") === el.closest("[data-row]")) continue;
       /* A control drawn inside a field (a password's `show`) is the
          field's own adornment, not something over it. */
       const control = hit.closest(TAPPABLE);
