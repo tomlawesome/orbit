@@ -9,7 +9,7 @@ export const SLOP = 8;
 
 /**
  * Which way a pointer drag is going, once it has gone far enough to say.
- * Rows only take horizontal drags so a vertical one still scrolls the page.
+ * The belt only takes horizontal drags so a vertical one still scrolls the page.
  * @param {number} dx
  * @param {number} dy
  * @returns {"x" | "y" | null}
@@ -17,33 +17,6 @@ export const SLOP = 8;
 export function dragAxis(dx, dy) {
   if (Math.hypot(dx, dy) < SLOP) return null;
   return Math.abs(dx) > Math.abs(dy) ? "x" : "y";
-}
-
-/**
- * How far a swipe has pulled a row's act tray open while the finger is down
- * (§1.5): it follows the finger toward the trailing side, never past the
- * tray's full width, and resists a little past it rather than stopping dead.
- * `open` is where the swipe started from.
- * @param {{ dx: number, reveal: number, open: boolean }} p
- * @returns {number} 0 (shut) to -reveal (fully open), a little beyond past it
- */
-export function swipeOffset({ dx, reveal, open }) {
-  const raw = (open ? -reveal : 0) + dx;
-  if (raw > 0) return 0;
-  if (raw < -reveal) return -reveal - (-reveal - raw) * 0.2;
-  return raw;
-}
-
-/**
- * Whether a released swipe leaves the row open (acts showing) or closed. A
- * third of the way is enough in either direction, or a quick flick.
- * @param {{ dx: number, reveal: number, open: boolean, velocity?: number }} p
- *   velocity in px/ms, negative toward the trailing side
- */
-export function swipeSettles({ dx, reveal, open, velocity = 0 }) {
-  if (velocity < -0.5) return true;
-  if (velocity > 0.5) return false;
-  return open ? dx < reveal / 3 : dx < -reveal / 3;
 }
 
 /**

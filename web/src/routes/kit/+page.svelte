@@ -78,8 +78,8 @@
     <ArmButton label="sign out →" armedLabel="tap again to sign out" wide onfire={() => wake("signed out (kit)")} />
   </section>
 
-  <h2 class="p-caps">Rows · swipe for acts</h2>
-  <section class="p-card flushcard" data-kit="members">
+  <h2 class="p-caps">Rows · tap for acts</h2>
+  <section class="p-card flushcard" data-kit="members" data-row-group>
     {#each members as m (m.id)}
       <Row title={m.name} meta={m.role} trail={m.role === "owner" ? "OWNER" : ""}
            acts={[
@@ -115,9 +115,13 @@
   </section>
 
   <h2 class="p-caps">Rows · long-press to reorder</h2>
-  <section class="p-card flushcard" data-kit="sections" use:mountReorder={{ onreorder: reorder }}>
+  <section class="p-card flushcard" data-kit="sections" data-row-group use:mountReorder={{ onreorder: reorder }}>
     {#each sections as name, index (name)}
-      <Row title={name} meta="section" onmove={(direction) => move(index, direction)}>
+      <Row title={name} meta="section" onmove={(direction) => move(index, direction)}
+           acts={[
+             ...(index > 0 ? [{ label: "move up", name: `Move ${name} up`, onact: () => move(index, -1) }] : []),
+             ...(index < sections.length - 1 ? [{ label: "move down", name: `Move ${name} down`, onact: () => move(index, 1) }] : []),
+           ]}>
         {#snippet mark()}<span class="p-aster" aria-hidden="true">✦</span>{/snippet}
       </Row>
     {/each}

@@ -6,8 +6,9 @@ import { LONG_PRESS_MS, SLOP, reorderTarget } from "./gesture.js";
  * and letting go drops it and reports `onreorder(from, to)`. The caller owns
  * the order and re-renders; nothing here moves DOM nodes.
  *
- * Keyboard and screen-reader users reorder through the row itself (Alt-↑/↓
- * and the hidden move buttons in Row.svelte), not through this.
+ * Keyboard and screen-reader users reorder through the row itself: Alt-↑/↓
+ * on its face, or the `move up` / `move down` pills in its opened panel
+ * (review round §1.1), not through this.
  *
  * @param {HTMLElement} list - holds the rows, each [data-row]
  * @param {{ onreorder: (from: number, to: number) => void, pressMs?: number }} options
@@ -26,7 +27,7 @@ export function mountReorder(list, { onreorder, pressMs = LONG_PRESS_MS }) {
   const onDown = (event) => {
     const target = /** @type {Element} */ (event.target);
     const row = /** @type {HTMLElement | null} */ (target.closest("[data-row]"));
-    if (!row || !list.contains(row) || event.button > 0 || target.closest("[data-row-acts]")) return;
+    if (!row || !list.contains(row) || event.button > 0 || target.closest("[data-row-panel]")) return;
     const rows = rowsOf();
     const from = rows.indexOf(row);
     if (from < 0 || rows.length < 2) return;
@@ -48,7 +49,7 @@ export function mountReorder(list, { onreorder, pressMs = LONG_PRESS_MS }) {
     if (!press || event.pointerId !== press.id) return;
     const dy = event.clientY - press.y;
     if (!press.lifted) {
-      /* Moving before the press matures is a scroll or a swipe, not a lift. */
+      /* Moving before the press matures is a scroll, not a lift. */
       if (Math.hypot(event.clientX - press.x, dy) > SLOP) end();
       return;
     }
