@@ -181,6 +181,33 @@ for (const { width, height } of VIEWPORTS) {
   });
 }
 
+/** Two desk widths (owner decision §26, 2026-09-26): on a desk the end-caps
+    stand at the screen's own vertical middle, whatever height the band
+    leaves at — not held above its upper edge, as #1010 first had it. */
+const DESK_VIEWPORTS = [
+  { width: 1600, height: 1000 },
+  { width: 1280, height: 800 },
+];
+
+for (const { width, height } of DESK_VIEWPORTS) {
+  test(`the desk end-caps sit at the screen's vertical middle at ${width}x${height}`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await openBelt(page);
+
+    const boxes = await page.evaluate(() =>
+      [...document.querySelectorAll(".endcap")].map((el) => el.getBoundingClientRect()));
+
+    expect(boxes.length, "the belt has no end-cap text to measure").toBe(2);
+    const mid = height / 2;
+    for (const box of boxes) {
+      const middle = box.top + box.height / 2;
+      expect(Math.abs(middle - mid),
+        `end-cap middle ${middle} is not within 2px of the viewport's middle ${mid}`)
+        .toBeLessThanOrEqual(2);
+    }
+  });
+}
+
 test("a phone traverses the whole belt with no keyboard, and a spent end says so", async ({ page }) => {
   test.slow();   /* one roll per press, the length of the belt, twice */
   await page.setViewportSize({ width: 390, height: 844 });
