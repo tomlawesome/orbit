@@ -43,11 +43,11 @@
    *   THE ARCHIVE (owner): PocketArchive.svelte
    *   THE DANGER LINE (owner): delete, with the name typed exactly
    *
-   * Row acts are revealed only by a left/right swipe (§25): no tap opens
-   * them and nothing extra shows at rest. Keyboard: focus the row, ← or →.
-   * Screen readers: each act is a real, visually hidden button named with
-   * its object ("Remove Emma Lawson"). Knocks keep approve and decline on
-   * show: they are the point of the row.
+   * A row with acts opens in place on a tap (review round §1.1): the panel
+   * holds its `detail`, then the acts as pills, primary first and danger
+   * last. Keyboard: Enter/Space on the face opens it, Tab walks the pills,
+   * Escape closes and returns focus to the face. Knocks keep approve and
+   * decline on show: they are the point of the row.
    *
    * Every edit to the system and its sections collects into one save bar
    * that rises from the foot while something is unsaved (2b, a trial):
@@ -380,11 +380,16 @@
   }
 
   /**
-   * @param {EditorRow} row
+   * The escalated departure from review round §2.5's list (which gives only
+   * `move up`/`move down`/`remove`): `edit` stays first, because there is no
+   * other way to reach it on a phone.
+   * @param {EditorRow} row @param {number} index @param {number} total
    * @returns {import('$lib/pocket/row.js').RowAct[]}
    */
-  const sectionActs = (row) => [
+  const sectionActs = (row, index, total) => [
     { label: "edit", name: `Edit ${sectionName(row)}`, tone: /** @type {const} */ ("accent"), onact: () => editSection(row) },
+    ...(index > 0 ? [{ label: "move up", name: `Move ${sectionName(row)} up`, onact: () => moveBy(index, -1) }] : []),
+    ...(index < total - 1 ? [{ label: "move down", name: `Move ${sectionName(row)} down`, onact: () => moveBy(index, 1) }] : []),
     /* The hidden-not-removed law: only an empty section can go. */
     ...(row.removable ? [{ label: "remove", name: `Remove ${sectionName(row)}`, danger: true,
       onact: () => { row.removed = true; } }] : []),
@@ -504,16 +509,18 @@
 
     <!-- MEMBERS FIRST (3b, a trial): on a phone the likely errand is a person. -->
     <h2 class="p-caps hh-rise" style:--i="1" id="hh-members-head">Members · {v.memberCount}</h2>
-    <section class="p-card hh-flush hh-members hh-rise" style:--i="1" aria-labelledby="hh-members-head" data-hh="members">
+    <section class="p-card hh-flush hh-members hh-rise" style:--i="1" aria-labelledby="hh-members-head" data-hh="members" data-row-group>
       {#each v.roster as person (person.id)}
+        {#snippet leaveDetail()}
+          <p class="hh-moment leave">nothing you added goes with you · the entries stay with {v.name}</p>
+        {/snippet}
         <Row title="{person.name}{person.you ? ' · you' : ''}" trail={person.role}
-             trailTone={person.role === "owner" ? "var(--accent-text)" : ""} acts={personActs(person)}>
+             trailTone={person.role === "owner" ? "var(--accent-text)" : ""} acts={personActs(person)}
+             detail={person.you && person.role !== "owner" ? leaveDetail : undefined}>
           {#snippet mark()}<span class="p-avatar" class:owner={person.role === "owner"}>{person.initials}</span>{/snippet}
           {#snippet below()}
             {#if person.you && person.role === "owner" && ownerRefused}
               <p class="hh-moment warn" role="status">an owner can’t leave · hand the system over first</p>
-            {:else if person.you && person.role !== "owner"}
-              <p class="hh-moment leave">nothing you added goes with you · the entries stay with {v.name}</p>
             {/if}
           {/snippet}
         </Row>
@@ -576,10 +583,10 @@
     {#if v.canManage}
       <h2 class="p-caps hh-rise" style:--i="3" id="hh-sections-head">Sections · {shown.length} of {MAX_SECTIONS}</h2>
       <section class="p-card hh-flush hh-sections hh-rise" style:--i="3" aria-labelledby="hh-sections-head" data-hh="sections">
-        <div class="hh-seclist" use:mountReorder={{ onreorder: reorder }}>
+        <div class="hh-seclist" use:mountReorder={{ onreorder: reorder }} data-row-group>
           {#each shown as row, index (row.id)}
             <Row title={row.name || "unnamed section"} meta="{entriesLabel(row.count)} · {row.visible ? 'shown' : 'hidden'}"
-                 acts={sectionActs(row)} onmove={(direction) => moveBy(index, direction)}>
+                 acts={sectionActs(row, index, shown.length)} onmove={(direction) => moveBy(index, direction)}>
               {#snippet mark()}<span class="hh-secmark" class:off={!row.visible}><Mark icon={row.icon} accent={row.accent} size={20} /></span>{/snippet}
               {#snippet end()}
                 <button class="hh-switch" role="switch" aria-checked={row.visible}
@@ -803,13 +810,12 @@
   .hh-seat{box-sizing:border-box;width:24px;height:24px;border-radius:50%;border:1.5px dashed var(--line)}
   .hh-kmark{font:var(--p-type-body)/1 var(--mono);color:var(--ink-quiet)}
 
-  /* The two lines the members card says only when they apply (#481): the
-     owner's refusal, and a member's consequence while their leave is armed. */
+  /* The owner's refusal (#481), the only line the members card still says
+     outside a row's own panel. A member's own "nothing you added goes with
+     you" now lives in their row's `detail` (review round §1.1). */
   .hh-moment{margin:0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid);flex:1 1 100%}
   .hh-moment.warn{color:var(--warm-text);animation:p-errin 200ms var(--p-ease) both}
   .hh-members :global(.p-row-below:not(:has(*))){display:none}
-  .hh-members :global(.p-row:not(:has(.armed)) + .p-row-below:has(.hh-moment.leave)){display:none}
-  .hh-members :global(.p-row:has(.armed) + .p-row-below .hh-moment.leave){animation:p-errin 200ms var(--p-ease) both}
 
   /* The system card. */
   .hh-label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);

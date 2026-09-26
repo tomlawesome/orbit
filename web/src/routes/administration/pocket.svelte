@@ -31,14 +31,14 @@
    *   the title, its one line, and a tell for anything failing further down
    *   the jump strip: plain anchors to each card, not tabs
    *   ALERTS first, when there are any: one sentence and one pill each
-   *   PEOPLE: invite someone is a sheet; row acts behind a swipe (§25)
+   *   PEOPLE: invite someone is a sheet; a tap opens a person's row (§1.1)
    *   SYSTEMS: new system is a sheet; a system on the clock (§2.11, §19)
-   *     keeps `restore` on show and `delete now` behind the swipe
+   *     keeps `restore` on show and `delete now` in its opened row
    *   PUBLIC CONTACT; MAIL MACHINERY with its two tests (#1071)
    *   OPERATIONS; DOCUMENT JOBS (#1071), then the version line
    *
-   * Row acts are revealed only by a left/right swipe (§25): nothing extra at
-   * rest. The setup link is never shown on this screen, on either dialect
+   * A row's acts open in place on a tap (review round §1.1), not behind a
+   * swipe. The setup link is never shown on this screen, on either dialect
    * (owner, 2026-09-09): what it reports is where the link went and when it
    * lapses.
    */
@@ -253,10 +253,8 @@
   }
 
   /**
-   * The acts behind a person's row (§2.12, §25). None on your own row.
-   * The words are short on purpose: the kit's tray leaves the name 120px,
-   * and §2.12's "place in a system · new setup link · disable" needs 370px
-   * where a 360 screen has 186. Each keeps its full accessible name.
+   * The acts behind a person's row (§2.12, review round §2.6): a tap opens
+   * it. None on your own row. Each keeps its full accessible name.
    * @param {Person} person
    * @returns {import('$lib/pocket/row.js').RowAct[]}
    */
@@ -267,9 +265,9 @@
       onact: () => openResend(person) },
     person.disabledAt
       ? { label: "enable", name: `Enable ${person.displayName}`, tone: "ok", onact: () => disable(person, false) }
-      /* Reversible, so it acts at once and the wake offers undo (§1.13),
-         rather than arming like an act that cannot be taken back. */
-      : { label: "disable", name: `Disable ${person.displayName}`, tone: "warm", onact: () => disable(person, true) },
+      /* §2.6: disable arms. The wake still offers undo (§1.13) once it has
+         fired. */
+      : { label: "disable", name: `Disable ${person.displayName}`, arms: true, onact: () => disable(person, true) },
   ];
 
   /** @param {Person} person @param {boolean} off */
@@ -645,7 +643,7 @@
 
       <!-- PEOPLE (§2.12 4). -->
       <section class="p-card ad-card ad-flush ad-rise" class:proposed={people.length <= 1} style:--i="3"
-               id="ad-people" tabindex="-1" aria-labelledby="ad-people-head" data-ad="people">
+               id="ad-people" tabindex="-1" aria-labelledby="ad-people-head" data-ad="people" data-row-group>
         <div class="ad-cardhead">
           <h2 class="p-caps" id="ad-people-head">People · {people.length}</h2>
           <button class="p-pill act-accent" onclick={openInvite}>invite someone</button>
@@ -675,7 +673,7 @@
 
       <!-- SYSTEMS (§2.12 5). -->
       <section class="p-card ad-card ad-flush ad-rise" class:proposed={systems.length === 0} style:--i="4"
-               id="ad-systems" tabindex="-1" aria-labelledby="ad-systems-head" data-ad="systems">
+               id="ad-systems" tabindex="-1" aria-labelledby="ad-systems-head" data-ad="systems" data-row-group>
         <div class="ad-cardhead">
           <h2 class="p-caps" id="ad-systems-head">Systems · {systems.length}</h2>
           <button class="p-pill act-accent" onclick={openNewSystem}>new system</button>
@@ -700,7 +698,8 @@
         {/each}
         <!-- ON THE CLOCK (§2.11, §19): the system's own row carries the state;
              `restore` stays on show because it is the point of the row, and
-             `delete now` sits behind the swipe. Never on the household page. -->
+             `delete now` sits in the row's opened panel (§1.1). Never on the
+             household page. -->
         {#each recoverable.filter((row) => !gone.some((line) => line.id === row.id)) as row (row.id)}
           <Row title={row.name} metaFace="ui"
                meta={expired(row) ? "past its window · waiting to be removed for good"
@@ -1248,7 +1247,7 @@
   .ad-headpills{flex:1 1 100%}
   .ad-jobsfoot{margin:12px var(--p-gutter)}
 
-  /* A disabled person dims; their row still swipes to enable. */
+  /* A disabled person dims; their row still opens to enable. */
   .ad-off{opacity:.45;border-style:dashed}
 
   /* On the clock (§2.11, #1001): a dashed red ring, a red sun. */
