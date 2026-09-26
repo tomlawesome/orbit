@@ -28,7 +28,7 @@ import {
   AMBIENT_SEED, BAND_MARGIN, BERTH_NARROW, COS_I, DRIFT, GLIDE, HFRAC, RAD, RADIAL,
   SIN_I, SWEEP, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, clamp01, ease,
   geometryOf, lehmer, phiAtX, pocketPapersOf, rollRangeOf, seatOf, spawnInto, stepFrom,
-  POCKET_CREST, POCKET_PLATE,
+  POCKET_CREST, POCKET_DRIFT, POCKET_PLATE,
 } from "./band.js";
 import { isPocket } from "$lib/pocket/media.js";
 import { dragAxis } from "$lib/pocket/gesture.js";
@@ -1151,7 +1151,7 @@ export function mountBelt(root, options) {
       paintMembers(p);
       if (p >= 1) { rollT0 = -1; bloomFrom = bloom.slice(); }
     }
-    drift += DRIFT * dt;
+    drift += (geom.pocket ? POCKET_DRIFT : DRIFT) * dt;
     /* The roll gets every frame it can have. The idle drift is fifteen pixels
        a second and does not: repainting a full-width plate under the card's
        backdrop blur sixty times a second to move it a quarter of a pixel is
