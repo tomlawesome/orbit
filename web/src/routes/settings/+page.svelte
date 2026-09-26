@@ -361,7 +361,7 @@
 
   const initials = $derived(
     (/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName ?? "")
-      .split(/\s+/).map((/** @type {string} */ part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
+      .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
   );
 
   onMount(async () => {
