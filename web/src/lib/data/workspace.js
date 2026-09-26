@@ -222,6 +222,7 @@
  * @property {string} title
  * @property {string} currency
  * @property {string} sourceDocument
+ * @property {?{ displayName?: string, sizeBytes?: number }[]} [attachments]  named papers, where the list names them (#467)
  * @property {number} [draftVersion]
  * @property {?string} [renewsOn]
  * @property {?string} [scheduleKind]   renewal / service / expiry (#1005)

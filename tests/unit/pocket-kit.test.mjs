@@ -9,6 +9,7 @@ import {
 import { mountRow, rowOf } from "$lib/pocket/row.js";
 import { holdSheet } from "$lib/pocket/sheet.js";
 import { dismissWake, subscribeWake, undoWake, wake } from "$lib/pocket/wake.js";
+import { firstClause } from "$lib/pocket/words.js";
 
 /*
  * The pocket kit's behaviour without a browser (#1120): the row that opens
@@ -50,6 +51,19 @@ describe("gesture arithmetic", () => {
     expect(reorderTarget({ from: 0, dy: 120, rowHeight: 56, count: 4 })).toBe(2);
     expect(reorderTarget({ from: 1, dy: -400, rowHeight: 56, count: 4 })).toBe(0);
     expect(reorderTarget({ from: 2, dy: 900, rowHeight: 56, count: 4 })).toBe(3);
+  });
+});
+
+describe("a failure's first clause (round 3 §1, R6)", () => {
+  it("rests on the words before the first comma, dash, full stop or aside", () => {
+    expect(firstClause("Its attachment is a picture-only scan, and Orbit couldn’t read any text from it."))
+      .toBe("Its attachment is a picture-only scan");
+    expect(firstClause("It carried no document Orbit can read (PDFs work best). Nothing was kept."))
+      .toBe("It carried no document Orbit can read");
+    expect(firstClause("Its document could not be prepared.")).toBe("Its document could not be prepared");
+    expect(firstClause("The scanner is away — try later")).toBe("The scanner is away");
+    expect(firstClause("Version 1.2 is too old")).toBe("Version 1.2 is too old");
+    expect(firstClause("")).toBe("");
   });
 });
 

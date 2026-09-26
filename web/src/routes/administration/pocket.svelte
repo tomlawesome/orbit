@@ -14,8 +14,8 @@
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, initialsOf, lapses, openFor, plainly, sendWords,
-    setupWords, stamp, testVerdict,
+    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, initialsOf, lapsesShort, openFor, plainly, sendWords,
+    setupWords, stamp, testVerdict, versionLine,
   } from "./words.js";
 
   /*
@@ -175,7 +175,7 @@
       if (answer.sendError) {
         wake(`${answer.sentTo} was created, but ${sendWords(answer.sendError)}`, { failure: true });
       } else {
-        wake(`setup link sent to ${answer.sentTo} · valid until ${lapses(answer.expiresAt)}`);
+        wake(`setup link sent · lapses ${lapsesShort(answer.expiresAt)}`);
         draft = { email: "", displayName: "", expiresInDays: SETUP_LINK_DAYS.fallback };
       }
       await reread();
@@ -224,7 +224,7 @@
       spent();
       if (delivery?.userId === person.id) delivery = { ...answer, userId: person.id };
       if (answer.sendError) wake(sendWords(answer.sendError), { failure: true });
-      else wake(`setup link sent to ${answer.sentTo} · valid until ${lapses(answer.expiresAt)}`);
+      else wake(`setup link sent · lapses ${lapsesShort(answer.expiresAt)}`);
     } catch (error) {
       resendProblem = setupWords(error);
     } finally {
@@ -338,12 +338,10 @@
       cx: 17 + x / 6, cy: 17 + y / 6, r: 1 + r / 4, tone: TONE[tone] ?? "--ok",
     }))
     : [];
+  /* Round 3 §3.9: members and items at rest; the owner is the panel's. */
   /** @param {System} system */
-  const systemMeta = (system) => [
-    count(system.memberCount ?? 0, "member"),
-    view?.owners[system.id] ? `owner ${view.owners[system.id]}` : null,
-    count((system.items ?? []).length, "item"),
-  ].filter(Boolean).join(" · ");
+  const systemMeta = (system) =>
+    `${count(system.memberCount ?? 0, "member")} · ${count((system.items ?? []).length, "item")}`;
 
   /* A system on the clock (§2.11, §19 "56 b the row", "57 admin only"). */
   const recoverable = $derived(view?.recoverable ?? []);
@@ -536,9 +534,9 @@
   const clock = $derived(view?.now ?? new Date().toISOString());
   /** @param {(typeof jobs)[number]} job */
   const jobMeta = (job) => {
-    const tries = count(job.attempts, "try", "tries");
-    if (job.status === "failed") return `${JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown} · ${tries} · last tried ${ago(job.updatedAt, clock)}`;
-    if (job.status === "retry") return `${job.lastErrorCode ? `${JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown} · ` : ""}${tries} · last tried ${ago(job.updatedAt, clock)}`;
+    /* Round 3 §3.9: the reason and when, at rest; the tries are the panel's. */
+    if (job.status === "failed") return `${JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown} · ${ago(job.updatedAt, clock)}`;
+    if (job.status === "retry") return `${job.lastErrorCode ? `${JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown} · ` : "last tried "}${ago(job.updatedAt, clock)}`;
     if (job.status === "pending") return retried[job.id] ? "attempt 1 · queued just now" : `queued ${ago(job.createdAt, clock)}`;
     if (job.status === "processing") return `started ${ago(job.updatedAt, clock)}`;
     return `${JOB_STATES[job.status]?.word ?? job.status} ${ago(job.updatedAt, clock)}`;
@@ -600,7 +598,7 @@
       </svg>
       <div class="ad-named">
         <h1 class="p-title">Administration</h1>
-        <p class="ad-sub">the instance from above{view ? ` · ${count(people.length, "person", "people")} · ${count(systems.length, "system")}` : ""}</p>
+        <p class="ad-sub">{view ? `${count(people.length, "person", "people")} · ${count(systems.length, "system")}` : ""}</p>
       </div>
     </header>
 
@@ -657,13 +655,18 @@
             {/if}
           </div>
         {:else if delivery}
-          <p class="ad-said ok" role="status">setup link sent to {delivery.sentTo} · valid until {lapses(delivery.expiresAt)}</p>
+          <p class="ad-said ok" role="status">setup link sent · lapses {lapsesShort(delivery.expiresAt)}</p>
         {/if}
         {#each people as person (person.id)}
+          {@const standing = person.disabledAt ? "disabled" : view.peopleMeta[person.id]}
+          <!-- Round 3 §3.9: the email alone at rest (R5's one exception);
+               the systems they are in are the panel's first line. -->
+          {#snippet personDetail()}<div class="p-kv"><span>{standing}</span></div>{/snippet}
           <Row title="{person.displayName}{person.id === meId ? ' · you' : ''}"
-               meta={[person.email, person.disabledAt ? "disabled" : view.peopleMeta[person.id]].filter(Boolean).join(" · ")}
+               meta={person.email}
                trail={person.isInstanceAdmin ? "admin" : "user"}
-               trailTone={person.isInstanceAdmin ? "var(--accent-text)" : ""} acts={personActs(person)}>
+               trailTone={person.isInstanceAdmin ? "var(--accent-text)" : ""} acts={personActs(person)}
+               detail={standing ? personDetail : undefined}>
             {#snippet mark()}<span class="p-avatar" class:owner={person.isInstanceAdmin} class:ad-off={person.disabledAt}>{initialsOf(person.displayName)}</span>{/snippet}
           </Row>
         {/each}
@@ -679,7 +682,9 @@
           <button class="p-pill act-accent" onclick={openNewSystem}>new system</button>
         </div>
         {#each systems as system (system.id)}
-          <Row title={system.name} meta={systemMeta(system)}>
+          {#snippet systemDetail()}<div class="p-kv"><span>owner</span><b>{view?.owners[system.id]}</b></div>{/snippet}
+          <Row title={system.name} meta={systemMeta(system)}
+               detail={view.owners[system.id] ? systemDetail : undefined}>
             {#snippet mark()}
               <svg class="ad-ring" width="30" height="30" viewBox="0 0 34 34" aria-hidden="true">
                 <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
@@ -701,10 +706,13 @@
              `delete now` sits in the row's opened panel (§1.1). Never on the
              household page. -->
         {#each recoverable.filter((row) => !gone.some((line) => line.id === row.id)) as row (row.id)}
+          <!-- Round 3 §3.9: the state and the days at rest; the date sits in
+               the panel beside `delete now`. -->
+          {#snippet clockDetail()}<div class="p-kv"><span>gone for good</span><b>{goneOn(row.deleteAfter)}</b></div>{/snippet}
           <Row title={row.name} metaFace="ui"
-               meta={expired(row) ? "past its window · waiting to be removed for good"
-                 : `on the clock · ${count(daysLeft(row.deleteAfter), "day")} left · gone for good ${goneOn(row.deleteAfter)}`}
-               acts={expired(row) ? [] : clockActs(row)}>
+               meta={expired(row) ? "past its window · removing"
+                 : `deleted · ${count(daysLeft(row.deleteAfter), "day")} left`}
+               acts={expired(row) ? [] : clockActs(row)} detail={expired(row) ? undefined : clockDetail}>
             {#snippet mark()}
               <svg class="ad-ring ad-clockring" width="30" height="30" viewBox="0 0 34 34" aria-hidden="true">
                 <circle cx="17" cy="17" r="13" fill="none"/>
@@ -730,8 +738,7 @@
                aria-labelledby="ad-contact-head" data-ad="contact">
         <div class="ad-cardhead"><h2 class="p-caps" id="ad-contact-head">Public contact</h2></div>
         {#if view.contact}
-          <Row title={view.contact.address ?? "not set"} metaFace="ui"
-               meta="shown on the sign-in door if it can’t open safely"
+          <Row title={view.contact.address ?? "not set"}
                trail={view.contact.address ? "change" : "set"} trailTone="var(--accent-text)"
                trailName={view.contact.address ? "change the public contact" : "set the public contact"}
                onactivate={openContact}>
@@ -769,7 +776,7 @@
           </Row>
         {/each}
         {#if view.mailbox?.configured}
-          <Row title="every address" metaFace="ui" meta="issue every member a new relay address; the old ones keep working for a while"
+          <Row title="every address"
                trail="rotate" trailTone="var(--warm-text)" trailName="rotate every address"
                onactivate={() => { graceDays = STANDARD_GRACE_DAYS; mailProblem = null; aliasOpen = true; }}>
             {#snippet mark()}<span class="ad-kmark">↻</span>{/snippet}
@@ -840,7 +847,9 @@
           </div>
           {#each jobs as job (job.id)}
             {@const state = JOB_STATES[job.status] ?? { word: job.status, tone: "" }}
-            <Row title={JOB_KINDS[job.kind] ?? job.kind} metaFace="ui" meta={jobMeta(job)}>
+            {#snippet jobDetail()}<div class="p-kv"><span>tries</span><b>{job.attempts}</b></div>{/snippet}
+            <Row title={JOB_KINDS[job.kind] ?? job.kind} metaFace="ui" meta={jobMeta(job)}
+                 detail={job.status === "failed" || job.status === "retry" ? jobDetail : undefined}>
               {#snippet mark()}<span class="p-body {state.tone || 'ended'}" class:failed={job.status === "failed"}></span>{/snippet}
               {#snippet end()}<span class="ad-state {state.tone}">{state.word}</span>{/snippet}
               {#snippet below()}
@@ -854,11 +863,10 @@
             <p class="p-empty ad-inset">no document jobs yet</p>
           {/each}
           {#if jobsProblem}<p class="p-error ad-inset" role="alert">{jobsProblem}</p>{/if}
-          <p class="ad-note ad-jobsfoot">the 25 most recently touched jobs are kept; older ones are not</p>
         </section>
       {/if}
 
-      <p class="ad-strip">{view.instance}</p>
+      <p class="ad-strip">{versionLine(view.instance)}</p>
     {/if}
   </main>
 
@@ -1246,7 +1254,6 @@
   .ad-checking{animation:p-breathe 2.4s ease-in-out infinite}
   .ad-count{margin:0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);flex:1 1 100%}
   .ad-headpills{flex:1 1 100%}
-  .ad-jobsfoot{margin:12px var(--p-gutter)}
 
   /* A disabled person dims; their row still opens to enable. */
   .ad-off{opacity:.45;border-style:dashed}

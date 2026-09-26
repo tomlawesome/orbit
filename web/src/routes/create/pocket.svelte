@@ -160,7 +160,7 @@
       </div>
     {:else if phase === "none"}
       <div class="p-card proposed">
-        <p class="p-empty">you are not in a household yet · an entry needs one to live in</p>
+        <p class="p-empty">no household yet · an entry needs one</p>
         <a class="p-pill act-accent" href={resolve("/home")}>find a household →</a>
       </div>
     {:else}

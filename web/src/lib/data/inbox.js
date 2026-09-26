@@ -36,6 +36,10 @@ export function receiptSuggestionsOf(receipts = []) {
           ? `${receipt.attachmentCount} forwarded document${receipt.attachmentCount === 1 ? "" : "s"}`
           : "forwarded email",
       fieldEvidence: receipt.fieldEvidence ?? {},
+      /* The papers by name where the list names them (fixtures today, #467
+         for live data): the pocket prints the paper's name, not a count
+         (review round §6.f, round 3 §2). */
+      attachments: receipt.attachments ?? null,
       /* #941: a suggestion Orbit cannot read has to say so where it is
          reviewed, not arrive looking like one nobody filled in. */
       metadataStatus: receipt.metadataStatus ?? null,
