@@ -364,8 +364,9 @@ export function mountBelt(root, options) {
       /* #1072: on a phone every seat's target is the pocket's 44px, and no
          wider — the neighbours sit 40px in from the screen's edge. */
       hit.appendChild(el("circle", { r: geom.pocket ? 22 : b.r * 1.8, fill: "transparent" }));
-      hit.appendChild(el("circle", { class: "fring", r: b.r + 13, fill: "none",
-        stroke: "var(--accent)", "stroke-width": "1.4", "stroke-dasharray": "3 3" }));
+      /* #1065: no .fring child here any more -- belt.css puts the focus ring
+         on `hit` itself as an outline, the same fix #1062 gave the end-caps
+         and for the same reason (belt.css has it). */
       b.mark = drawMark(hit, b.r);
       /* CON-1's belt ellipse: this item has documents attached. On this screen
          it is also a promise — centre it and they come out into the band. */
