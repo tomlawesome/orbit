@@ -85,17 +85,15 @@
 
   let { data } = $props();
 
-  /* #434: an id that is a mail-in receipt is not an item and has no seat in
-     the band. It forks to its own component, imported lazily so the belt
-     does not run its code — see Suggestion.svelte. Its item.css still lands
-     in this route's CSS bundle, so every rule in it is scoped to the card. */
-  const suggestionView =
-    data.kind === "suggestion" ? import("./Suggestion.svelte").then((m) => m.default) : null;
   /* readBelt only ever sets `item` alongside kind: "suggestion" (workspace.js);
      the union isn't discriminated at the type level because its `kind` values
      come back as plain `string`, so this only asserts what data.kind === "suggestion"
-     already guarantees at runtime. */
+     already guarantees at runtime. The same goes for the reader, the
+     households and the primary household it carries beside the item for
+     the pocket's receipt page (round 3 §4). */
   const suggestionItem = /** @type {import('$lib/data/workspace.js').ItemView} */ (data.item);
+  const suggestionData = $derived(/** @type {{ user?: import('$lib/data/workspace.js').SessionUser | null,
+    households?: import('../../create/entry.js').FormHousehold[], primary?: string | null }} */ (data));
 
   /** @type {HTMLDivElement | null} */
   let root = $state(null);
@@ -147,6 +145,17 @@
     query.addEventListener("change", follow);
     return () => query.removeEventListener("change", follow);
   });
+
+  /* #434: an id that is a mail-in receipt is not an item and has no seat in
+     the band. It forks to its own component, imported lazily so the belt
+     does not run its code — see Suggestion.svelte. Its item.css still lands
+     in this route's CSS bundle, so every rule in it is scoped to the card.
+     Round 3 §4 (#1140): on a phone it is the kit's review card under the
+     top chrome instead (ReceiptPocket.svelte); the desk keeps its card. */
+  const suggestionView = $derived(
+    data.kind === "suggestion" && !pocket ? import("./Suggestion.svelte").then((m) => m.default) : null);
+  const receiptView = $derived(
+    data.kind === "suggestion" && pocket ? import("./ReceiptPocket.svelte").then((m) => m.default) : null);
 
   /** @typedef {PanelName | "docs" | "preview" | "search"} Face */
   /** @type {Record<Face, "callout" | "list" | "full">} */
@@ -656,6 +665,9 @@
 
   /** @param {KeyboardEvent} event */
   function onKeydown(event) {
+    /* A receipt has no belt to step or search (round 3 §4): its page's
+       sheet holds its own keys. */
+    if (data.kind === "suggestion") return;
     /* #1072: on a phone the sheets hold their own keys; the belt behind one
        must not step while it is up. */
     if (pocket && (sheetOpen || readerOpen)) return;
@@ -828,9 +840,19 @@
 </svelte:head>
 
 {#if data.kind === "suggestion"}
-  {#await suggestionView then Suggestion}
-    <Suggestion item={suggestionItem} />
-  {/await}
+  {#if pocket}
+    <!-- Round 3 §4 rule 1: the top chrome is on every hop screen, the
+         review page too, with the orb; `← your sky` goes home. -->
+    <Chrome user={suggestionData.user ?? null} />
+    {#await receiptView then ReceiptPocket}
+      <ReceiptPocket item={suggestionItem} households={suggestionData.households ?? []}
+                     primary={suggestionData.primary ?? null} />
+    {/await}
+  {:else}
+    {#await suggestionView then Suggestion}
+      <Suggestion item={suggestionItem} />
+    {/await}
+  {/if}
 {:else}
 <!-- The shared chrome (#1010): the way back to the sky and the account menu.
      A sibling of the belt, not a child, so belt.css's own `.belt-page .back`
