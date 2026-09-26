@@ -330,18 +330,22 @@
 
 <Sheet bind:open={challengeOpen} size="callout" title="Confirm it’s you" onclose={() => { retry = null; }}>
   <p class="p-prose hh-sheet-say">The archive carries everything in {householdName}, so Orbit asks you to sign in again first.</p>
-  {#if hasPassword === false}
-    <button class="p-pill filled wide" onclick={toProvider}>confirm with your identity provider →</button>
-  {:else}
-    <form onsubmit={(event) => { event.preventDefault(); prove(); }}>
+  {#if hasPassword !== false}
+    <form id="hh-challenge-form" onsubmit={(event) => { event.preventDefault(); prove(); }}>
       <label class="hh-label" for="hh-proof">your password</label>
       <input id="hh-proof" class="hh-input" type="password" autocomplete="current-password" enterkeyhint="done"
              bind:value={currentPassword}>
-      <button class="p-pill filled wide hh-confirm" type="submit" disabled={!currentPassword || proving}>
-        {proving ? "confirming…" : "confirm and carry on"}</button>
     </form>
   {/if}
   {#if challengeProblem}<p class="p-error" role="alert">{challengeProblem}</p>{/if}
+  {#snippet foot()}
+    {#if hasPassword === false}
+      <button class="p-pill filled" onclick={toProvider}>confirm with your identity provider →</button>
+    {:else}
+      <button class="p-pill filled" type="submit" form="hh-challenge-form" disabled={!currentPassword || proving}>
+        {proving ? "confirming…" : "confirm and carry on"}</button>
+    {/if}
+  {/snippet}
 </Sheet>
 
 <style>
@@ -397,7 +401,6 @@
   .hh-pair .p-pill{flex:1}
   .hh-again{margin-top:8px}
   .hh-sheet-say{color:var(--ink-mid);margin:4px 0 16px}
-  .hh-confirm{margin-top:16px}
 
   @media (prefers-reduced-motion:reduce){
     [role=tabpanel],.hh-progress i{animation:none}
