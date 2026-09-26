@@ -121,11 +121,12 @@
     text-transform:uppercase;color:var(--ok-text)}
   .rv-reads i.unsure{color:var(--warm-text)}
 
-  /* The attachment line: the paper's name, no size (review round §6.f). */
-  .rv-paper{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;margin:8px 0 0;padding:10px 12px;
+  /* The attachment line: the paper's name, no size (review round §6.f), on
+     one line (round 3 §3.5); a long name is the part the guard trims (R5). */
+  .rv-paper{display:flex;align-items:baseline;gap:8px;margin:8px 0 0;padding:10px 12px;
     border:1px solid var(--line-soft);border-radius:12px;font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-mid)}
-  .rv-pname{min-width:0;color:var(--ink);overflow-wrap:anywhere}
-  .rv-paper .clean{color:var(--ok-text)}
+  .rv-pname{min-width:0;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rv-paper .clean{flex:none;white-space:nowrap;color:var(--ok-text)}
   .rv-paper .clean::before{content:"· ";color:var(--ink-quiet)}
   .rv-unread{margin:10px 0 0;color:var(--ink-mid)}
 
