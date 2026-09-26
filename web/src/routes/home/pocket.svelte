@@ -7,7 +7,7 @@
   import { applyCommand, readItemDocuments } from "$lib/data/workspace.js";
   import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, money } from "$lib/format.js";
+  import { money } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import NorthStar from "$lib/pocket/NorthStar.svelte";
@@ -26,7 +26,7 @@
   /**
    * HOME ON A PHONE: the pocket sky (CON-10, #430; lifted to the kit in #1120,
    * proposal §2.1). Wordmark and orb, the dial, the other skies, the search
-   * line, NEEDS ATTENTION, SIGNALS, and the north star.
+   * line, NEEDS ATTENTION, the SIGNALS pen, and the north star.
    *
    * Both dialects are server-rendered and CSS picks one (pocket.css), so no
    * flash of the wrong one and no-JS still gets a page. This dialect's own
@@ -160,8 +160,16 @@
   const cost = (row) => (row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null);
   /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => number | null} */
   const burnsIn = (s) => (s.expiresAt && view ? daysUntil(s.expiresAt.slice(0, 10), view.today) : null);
-  /** @type {(iso: string | null | undefined) => string} */
-  const agoShort = (iso) => (iso && view ? ago(iso, view.now ?? new Date().toISOString()) : "");
+
+  /* Reading and failed mail on home: one summary row (round 3 §2, 12a). */
+  const mailSummary = $derived.by(() => {
+    const reading = view?.mailReading?.length ?? 0;
+    const failed = view?.mailFailures?.length ?? 0;
+    const unread = `${failed} message${failed === 1 ? "" : "s"} couldn't be read`;
+    if (reading && failed) return `reading ${reading} · ${failed} couldn't be read`;
+    if (reading) return reading === 1 ? "reading a message" : `reading ${reading} messages`;
+    return failed ? unread : "";
+  });
 
   // ---- the search sheet's state ------------------------------------------
 
@@ -361,6 +369,9 @@
      id is what lights its body on the dial. */
   /** @type {string | null} */
   let lit = $state(null);
+  /* The star hides while a sheet is up and while any row is open (round 3
+     §5): it stood over the open suggestion's `Dismiss`. */
+  const starHidden = $derived(sheetOpen || hatchOpen || lit !== null);
   /** @param {string} id */
   const onRowToggle = (id) => /** @type {(open: boolean) => void} */ ((open) => {
     if (open) { lit = id; loadSearchDocuments(); } else if (lit === id) lit = null;
@@ -525,6 +536,8 @@
   let flight = $state({ x: 0, y: 0 });
   /** @type {HTMLElement | undefined} */
   let dialEl = $state();
+  /** The dial square the north star rests in (round 3 §5). @type {HTMLElement | null} */
+  let dialBox = $state(null);
   // As the desk does: the sky streams toward the other household and you
   // arrive at it, through the sun's door, so its way back reads "← your sky".
   /**
@@ -641,11 +654,16 @@
     <!-- #840: the create card this leads to only ever appears at / (the
          arrival), not on /create's full form -- there is no household yet
          for that form to write into while the sky is empty. -->
-    <div class="burnup">the systems around you are labels until someone lets you in<br><a href={resolve("/")}>— or start your own system →</a></div>
+    <!-- Round 3 §3.1: the rows already say "tap to ask to join". -->
+    <div class="pk-own"><a href={resolve("/")}>— or start your own system →</a></div>
   </div>
   {:else}
   <!-- `arrive` is the desk's own arrival flag (+page.svelte): a forward
        arrival, never a Back, and never under the launch's own landing. -->
+  <!-- The dial square, and in its bottom-right corner the north star's rest
+       station (round 3 §5). A wrapper, so the dial's own arrival and flight
+       transforms never carry the star. -->
+  <div class="pk-dialbox" bind:this={dialBox}>
   <div class="mdial" class:arrive bind:this={dialEl} style:--fx="{flight.x}px" style:--fy="{flight.y}px">
     <svg viewBox="0 0 380 380">
       <!-- The desk's spheres and danger wash (+page.svelte's dial defs),
@@ -724,6 +742,8 @@
       {/each}
     </svg>
   </div>
+  <NorthStar docked anchor={dialBox} hidden={starHidden} />
+  </div>
   {#if others.length}
   <!-- #845: the strip scrolls sideways, so it must be reachable to scroll by
        keyboard (WCAG 2.1.1): a focusable, named region. The rule below cannot
@@ -777,16 +797,18 @@
       </Row>
     </div>
   {/if}
-  <!-- #466: the pocket's signals — what the relay caught. A suggestion row
-       opens in place with its readings and its two decisions (§2.1);
-       failures speak the server's words. -->
-  {#if view?.suggestions?.length || view?.mailReading?.length || view?.mailFailures?.length}
-    <h2 class="p-caps">Signals — your relay caught</h2>
-    <div class="pk-list" data-row-group>
-      {#each view.suggestions as s (s.id)}
-        <div class="pk-sugg">
+  <!-- #466; round 3 §2 (#1142): the signals are a pen, the dashed card of
+       what Orbit proposes, 32px of clear sky below the manifest. A
+       suggestion row opens in place with its readings and its two
+       decisions. Reading and failed mail are the inbox's matter: at most
+       one summary row, last in the pen, goes there (owner's answer 12a). -->
+  {#if view?.suggestions?.length || mailSummary}
+    <section class="p-card proposed pk-signals" aria-labelledby="pk-signals-h">
+      <h2 class="p-caps" id="pk-signals-h">Signals{#if view.suggestions.length}<span class="p-count">{view.suggestions.length}</span>{/if}</h2>
+      <div class="pk-pen" data-row-group>
+        {#each view.suggestions as s (s.id)}
           <Row title={s.title} key={s.id}
-               meta={[`from ${s.sourceDocument}`, burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : null].filter(Boolean).join(" · ")}
+               meta={burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : ""}
                trail={s.costMinor ? money(s.costMinor, s.currency, true) : ""}
                trailSub={s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
                acts={suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
@@ -796,27 +818,18 @@
               <a class="p-quiet" href={resolve("/item/[[id]]", { id: encodeURIComponent(s.receiptId ?? s.id) })}>review &amp; amend →</a>
             {/snippet}
           </Row>
-        </div>
-      {/each}
-      {#each view.mailReading as r (r.id)}
-        <div class="pk-reading">
-          <Row title={`A message arrived ${agoShort(r.receivedAt)}`} meta="still reading its document" metaFace="ui">
-            {#snippet mark()}<span class="pk-dot breathing"></span>{/snippet}
+        {/each}
+        {#if mailSummary}
+          <Row title={mailSummary} meta="inbox →" href={resolve("/inbox")} key="mail">
+            {#snippet mark()}<span class="pk-dot {view.mailReading.length ? 'breathing' : 'failed'}"></span>{/snippet}
           </Row>
-        </div>
-      {/each}
-      {#each view.mailFailures as f (f.id)}
-        <Row title={`A message from ${short(f.receivedAt.slice(0, 10))}`} meta={f.message} metaFace="ui">
-          {#snippet mark()}<span class="pk-dot failed"></span>{/snippet}
-        </Row>
-      {/each}
-    </div>
-    <p class="burnup">unreviewed arrivals burn up after 45 days · nothing is added without you</p>
+        {/if}
+      </div>
+    </section>
   {/if}
   </div>
   {/if}
 </main>
-{#if !view?.emptySky}<NorthStar />{/if}
 </div>
 
 <Sheet bind:open={sheetOpen} size="list" title="Search your orbit" hideTitle>

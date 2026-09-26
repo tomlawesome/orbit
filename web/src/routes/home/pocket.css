@@ -61,7 +61,8 @@
  * Under the kit's top chrome, in the kit's column, and clear of the north
  * star at the foot. */
 .pocket .mpage{position:relative;z-index:2;max-width:var(--p-column);margin:0 auto;box-sizing:border-box;
-  padding:calc(var(--p-chrome) + env(safe-area-inset-top)) var(--p-gutter) calc(104px + env(safe-area-inset-bottom))}
+  padding:calc(var(--p-chrome) + env(safe-area-inset-top)) var(--p-gutter)
+    calc(20px + 56px + 20px + env(safe-area-inset-bottom))}
 .pocket .p-caps{margin:var(--p-group-above) 4px var(--p-group-below)}
 
 /* The orb: drawn 36px, hit 44px (§1.3). Arrivals waiting in the inbox give
@@ -78,7 +79,10 @@
 .pocket .porb:focus-visible{outline:none}
 .pocket .porb:focus-visible .disc{outline:2px solid var(--accent);outline-offset:2px}
 
-/* ---- the dial: it owns the width (§2.1) ------------------------------- */
+/* ---- the dial: it owns the width (§2.1) -------------------------------
+ * Its square is also the north star's rest station (round 3 §5): the star
+ * sits in the bottom-right corner, NorthStar.svelte. */
+.pocket .pk-dialbox{position:relative}
 .pocket .mdial{width:100%;aspect-ratio:1;position:relative;
   transition:transform 600ms cubic-bezier(.5,0,.75,0),opacity 600ms ease-in}
 .pocket .mdial svg{display:block;width:100%;height:100%}
@@ -144,16 +148,21 @@
 @keyframes pocket-breathe{0%,100%{opacity:1}50%{opacity:.4}}
 .pk-paper{font:.875rem/1 var(--mono);color:var(--accent-text)}
 .pk-plus{font:var(--p-type-body)/1 var(--mono);color:var(--accent-text)}
-/* #466: the relay's catch, dashed and in the accent, as the desk draws it. */
-.pocket .pk-sugg .p-row{border-style:dashed;border-color:color-mix(in srgb, var(--accent) 45%, var(--line-soft))}
-.pocket .pk-sugg .meta{color:var(--accent-text)}
-.pocket .pk-reading .title{color:var(--ink-mid);font-weight:400}
+/* THE SIGNALS PEN (round 3 §2): the kit's dashed card of what Orbit
+   proposes, 32px of clear sky under the manifest's last row, its caps head
+   inside. Its rows are card rows: transparent faces, the hairline between
+   them at the text edge (Row.svelte); the hollow mark and the pen say
+   "proposed", and an open row keeps its accent rail. The summary row's
+   way on is the accent. */
+.pocket .pk-signals{margin:32px 0 0;padding:16px 0 4px;overflow:hidden}
+.pocket .pk-signals > .p-caps:first-child{margin:0 var(--p-gutter) 12px}
+.pocket .pk-pen{display:flex;flex-direction:column}
+.pocket .pk-pen [data-row-key=mail] .meta{color:var(--accent-text)}
 /* An opened row (review round §2.1, the desk's .item.open): its own glass
    takes the accent's edge, its bottom corners handed to the panel. The
    drawer's `copy link` is the desk's quiet .ivcopy. */
 .pocket .pk-list .p-row[data-open]{border-color:var(--accent)}
 .pocket .pk-copy{color:var(--ink-quiet)}
-.pocket .burnup{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);text-align:center;margin:16px 8px 0}
 
 /* ---- §11 (#453): the labelled sky, at the same scale ------------------- */
 .pocket .adrift{margin-top:8px}
@@ -166,11 +175,13 @@
 .pocket .askrow{cursor:pointer}
 .pocket .askrow[data-ask-requested="true"]{border-style:dashed;cursor:default}
 .pocket .askrow[data-ask-requested="true"] span{color:var(--accent-text)}
-.pocket .adrift .burnup a{display:inline-flex;align-items:center;min-height:var(--p-hit);
-  color:var(--ink-mid);text-decoration:none}
-.pocket .adrift .burnup a:hover{color:var(--accent-text)}
+.pocket .pk-own{text-align:center;margin:16px 8px 0}
+.pocket .pk-own a{display:inline-flex;align-items:center;min-height:var(--p-hit);
+  font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-mid);text-decoration:none}
+.pocket .pk-own a:hover{color:var(--accent-text)}
 
-/* ---- the north star hides while the film plays (§2.1) ----------------- */
+/* ---- the north star hides while the film plays (§2.1); while a sheet is
+   up or a row is open, pocket.svelte hides it (round 3 §5) ------------ */
 body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
 
 /* ---- inside the search sheet (portalled, so pk- classes, not .pocket) --
