@@ -175,10 +175,10 @@
 
 <Sheet bind:open={callout} size="callout" title="Boiler service">
   <p class="t-meta">T−16d · 29 Aug · £84 · ◆ 2 documents</p>
-  <div class="p-pills sheet-acts">
+  {#snippet foot()}
     <button class="p-pill filled">open →</button>
     <button class="p-pill">documents</button>
-  </div>
+  {/snippet}
 </Sheet>
 <Sheet bind:open={list} size="list" title="Documents">
   {#each ["invoice-2025.pdf", "certificate.pdf", "manual.pdf", "photo-plate.jpg", "warranty.pdf", "quote-2026.pdf"] as doc (doc)}
@@ -193,7 +193,7 @@
   </div>
   <label class="field">Name<input value="Boiler service" enterkeyhint="done"></label>
   <label class="field">Cost<input value="84.00" inputmode="decimal" enterkeyhint="done"></label>
-  <button class="p-pill filled wide">Save</button>
+  {#snippet foot()}<button class="p-pill filled">Save</button>{/snippet}
 </Sheet>
 
 <NorthStar />
@@ -209,8 +209,6 @@
   .flushcard{padding:4px 0;overflow:hidden;display:flex;flex-direction:column}
   .marks{display:flex;flex-wrap:wrap;align-items:center;gap:18px}
   .kvs{margin-bottom:16px}
-  .sheet-acts{margin-top:12px}
-  .sheet-acts > :global(*){flex:1}
   .field{display:flex;flex-direction:column;gap:6px;font:var(--p-type-meta) var(--mono);color:var(--ink-quiet);margin-bottom:16px}
   .field input{font:var(--p-type-body) var(--ui);min-height:var(--p-hit);padding:0 12px;border-radius:10px;
     border:1px solid var(--line);background:var(--panel);color:var(--ink)}
