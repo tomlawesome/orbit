@@ -100,12 +100,12 @@
   </div>
 
   <main class="rl-column">
-    <header class="rl-head rl-rise" style:--i="0">
+    <header class="rl-head p-land" style:--i="0">
       <h1 class="p-card-title rl-title">Your relay</h1>
       <p class="p-prose rl-sentence">Forward a document to your private address and it arrives in your review queue.</p>
     </header>
 
-    <section class="p-card rl-rise" style:--i="1" aria-label="Your address">
+    <section class="p-card" style:--i="1" aria-label="Your address">
       <button class="rl-address" disabled={!usable} onclick={copy} aria-label="Copy your relay address, {shown.address}">
         <span class="rl-addr">{shown.address}</span>
         <span class="rl-copy" aria-hidden="true">{usable ? "tap to copy" : ""}</span>
@@ -145,7 +145,7 @@
 
     {#if failures.length}
       <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
-      <section class="p-card rl-rise" style:--i="2" aria-labelledby="rl-failed">
+      <section class="p-card" style:--i="2" aria-labelledby="rl-failed">
         <h2 class="p-caps" id="rl-failed">Arrived, but could not be read</h2>
         {#each failures as failure (failure.id)}
           <div class="rl-failure">
@@ -156,7 +156,7 @@
       </section>
     {/if}
 
-    <footer class="rl-notes rl-rise p-prose" style:--i="3">
+    <footer class="rl-notes p-land p-prose" style:--i="3">
       <p>Every person gets their own relay. Nothing is created without your review.</p>
       <p>Outbound reminder email is set by your administrator.</p>
     </footer>
@@ -201,9 +201,6 @@
   .rl-title{margin:0 0 6px}
   .rl-sentence{margin:0 auto;max-width:30ch;color:var(--ink-mid)}
 
-  .rl-rise{animation:rl-rise 420ms var(--p-ease) both;animation-delay:calc(var(--i, 0) * 70ms + 60ms)}
-  @keyframes rl-rise{from{opacity:0;transform:translateY(10px)}}
-
   /* The address: the desk's dashed alias, full width, 14px mono. */
   .rl-address{appearance:none;box-sizing:border-box;width:100%;min-height:64px;padding:10px 16px;margin:0 0 8px;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;
@@ -242,6 +239,6 @@
   .rl-notes p{margin:0 0 4px}
 
   @media (prefers-reduced-motion:reduce){
-    .rl-rise,.rl-waves circle,.rl-craft,.rl-core{animation:none}
+    .rl-waves circle,.rl-craft,.rl-core{animation:none}
   }
 </style>

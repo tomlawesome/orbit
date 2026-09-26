@@ -288,7 +288,7 @@
           {#each view.review as receipt, index (receipt.id)}
             {@const days = burnsIn(receipt)}
             {@const unreadable = receiptWords(receipt.metadataStatus)}
-            <article class="p-card proposed pki-receipt" style:--i={index} aria-labelledby="pki-r-{receipt.id}"
+            <article class="p-card proposed" style:--i={index} aria-labelledby="pki-r-{receipt.id}"
                      animate:flip={{ duration: 300 }} out:leave={{ id: receipt.id }}>
               <div class="pki-rhead">
                 <span class="pki-touch" aria-hidden="true"><span class="p-body sug"></span></span>
@@ -476,8 +476,9 @@
      because this dialect is drawn inside .inbox-page. */
   :global(.p-body.pki-failmark){color:var(--degraded)}
 
-  /* A REVIEW: the dashed pen of "not yet in orbit" (.p-card.proposed). */
-  .pki-receipt{animation:pki-land 460ms var(--p-ease) both;animation-delay:calc(var(--i, 0) * 70ms)}
+  /* A REVIEW: the dashed pen of "not yet in orbit" (.p-card.proposed). The
+     card lands by the kit's own p-landed (kit.css .p-card), same as every
+     other card on the kit's landing (round 2 §6.k). */
   .pki-rhead{display:flex;align-items:flex-start;gap:var(--p-row-gap)}
   .pki-touch{position:relative;flex:none;width:var(--p-row-mark);height:24px;display:grid;place-items:center}
   /* The mark touches down: one ring going out as the card lands. */
@@ -558,6 +559,6 @@
   @keyframes pki-touchdown{0%{opacity:.9;transform:scale(1)}100%{opacity:0;transform:scale(3.2)}}
 
   @media (prefers-reduced-motion:reduce){
-    .pki-dish span,.pki-receipt,.pki-slot,.pki-touch::after{animation:none}
+    .pki-dish span,.pki-slot,.pki-touch::after{animation:none}
   }
 </style>
