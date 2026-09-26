@@ -95,7 +95,8 @@
     if (reading.field === "cost") entry.cost = reading.value.replace(/[^\d.]/g, "");
     else entry[reading.field] = reading.value;
   }
-  const size = (/** @type {number} */ bytes) =>
+  /** @type {(bytes: number) => string} */
+  const size = (bytes) =>
     bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 </script>
 

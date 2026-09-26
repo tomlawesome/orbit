@@ -44,7 +44,8 @@
   });
   $effect(() => () => arm.disarm());
 
-  const lower = (/** @type {string} */ text) => text.charAt(0).toLowerCase() + text.slice(1);
+  /** @type {(text: string) => string} */
+  const lower = (text) => text.charAt(0).toLowerCase() + text.slice(1);
   const accessibleName = $derived(
     name === undefined ? undefined : armed ? `tap again to ${lower(name)}` : name,
   );

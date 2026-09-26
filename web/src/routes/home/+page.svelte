@@ -514,7 +514,7 @@
   const initials = $derived(
     (view ? (asView(view).user?.displayName ?? "") : "")
       .split(/\s+/)
-      .map((/** @type {string} */ word) => word[0] ?? "")
+      .map((word) => word[0] ?? "")
       .join("")
       .slice(0, 2)
       .toUpperCase(),

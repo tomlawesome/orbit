@@ -150,7 +150,7 @@
   // Twelve month ticks on the ring, 6 units long, from the top.
   const TICKS = Array.from({ length: 12 }, (_, k) => {
     const a = (k * Math.PI) / 6 - Math.PI / 2;
-    const at = (/** @type {number} */ r) => [190 + Math.cos(a) * r, 190 + Math.sin(a) * r].map((v) => Math.round(v * 10) / 10);
+    const at = (r) => [190 + Math.cos(a) * r, 190 + Math.sin(a) * r].map((v) => Math.round(v * 10) / 10);
     const [x1, y1] = at(150);
     const [x2, y2] = at(144);
     return { x1, y1, x2, y2 };
@@ -361,9 +361,9 @@
   /** @type {string | null} */
   let lit = $state(null);
   /** @param {string} id */
-  const onRowToggle = (id) => (/** @type {boolean} */ open) => {
+  const onRowToggle = (id) => /** @type {(open: boolean) => void} */ ((open) => {
     if (open) { lit = id; loadSearchDocuments(); } else if (lit === id) lit = null;
-  };
+  });
 
   /**
    * A planet on the dial (owner's answer 6a, the desk's `.body-link`): the
@@ -393,7 +393,8 @@
     addEventListener("pointerdown", onpress, true);
     return () => removeEventListener("pointerdown", onpress, true);
   });
-  const papersOf = (/** @type {string} */ id) => searchDocuments.filter((doc) => doc.itemId === id);
+  /** @type {(id: string) => typeof searchDocuments} */
+  const papersOf = (id) => searchDocuments.filter((doc) => doc.itemId === id);
 
   /* `complete` from a drawer, as the belt does it (item/[[id]]/+page.svelte,
      tapComplete): an item with a cost to confirm goes to its belt with the
