@@ -290,7 +290,8 @@ The ring moves to the upper-middle. In `door-phone.css`:
   + 200px))`. At 844 the top is 187px (was 44); at 664 it is 115px.
 - Card modes (sign in, local, claim, first administrator, waiting, approve,
   setup): centre at 30% — `calc(30dvh - var(--door-ring) / 2)` in the same
-  clamp. At 664 the ring bottom is 350px and the card starts at 370px.
+  clamp. At 664 (a 240px ring, next rule) the top is 79px, the bottom
+  319px and the card starts at 339px.
 - `--door-ring` is 302.4px at ≥760px visible and 240px below it on card
   modes only (the bare door keeps 302.4). At 640 tall with the 240 ring the
   first administrator's card (the tallest, 326px) ends at 652px; the
@@ -353,3 +354,72 @@ the proposal had it raise the item sheet, which is now gone.
     accessible by default, and one less gesture to teach).
  b) Keep the long-press lift as well, with the pills as the accessible
     route.
+
+---
+
+## 5. Build rulings (2026-09-26)
+
+On Opus's build of §2.7/§2.8 (`feature/phone-review-door`, `ed10d549`).
+Numbers are at 390×664 and 360×640 unless said; `--door-top` is the ring's
+top edge as `door-phone.css` defines it.
+
+**5.1 Sign-out: the pill goes into the flow under the line.** At 664 the
+line under the ring runs 443–487px and the pill's fixed 68% station is
+452px, so they meet. Stop fixing the pill to a share of the height: the
+farewell's `.sub` and the gate stand in one column under the ring, on the
+axis. `.sub` keeps `margin-top:26px`; the gate takes `margin-top:max(24px,
+calc(68dvh - var(--door-top) - var(--door-ring) - 70px))` (70 = the line's
+26px gap plus its two 13px/1.7 lines). That leaves the pill at 68% wherever
+there is room (at 844 it lands at 583px, 9px under today's 574) and 24px
+under the line where there is not: 511–555px at 664, 501–545px at 640,
+both clear of the ember rim (the limb burns at 92% of the frame: 611px and
+589px). Three lines of text on a large-text setting still cannot collide,
+because the pill is in flow. The `/logout` known defect in
+`door-station.spec.js` flips to a pass; add to it: gate top ≥ line bottom
++ 24px, gate bottom ≤ 92% of the visible height.
+
+**5.2 The rule stands; the example was wrong.** Below 760px visible a card
+mode's ring is 240px, so at 664 the top is 79px, the bottom 319px, the
+card starts at 339px — Opus's numbers. §2.7's example is corrected above.
+Two things follow for the 240 ring: it keeps the glyph's proportion, so
+its stroke is 3.4px and its orb 23.4px (302.4 : 4.2 : 29.4, as the 96px
+typing ring already does at 1.5/9.4); and the question inside it (`.ask`)
+is 200px wide at 20px, so a two-line heading sits inside the chord.
+
+**5.3 The well: 459px is right.** The scene stays centred at 50% as built;
+my "482" was a slip. At 664 the glow's bottom is 459px against the
+heading's top at 490px; at 640, 439px against 466px. The spec's
+`glowBottom < headingTop` is the gate; nothing changes.
+
+**5.4 The ring travels between stations; it never jumps.** A jump is not
+wanted; a ring that closes and moves is the desk's own hand-over grammar
+(#873, the 500px ring closing to 302.4 over 500ms). So:
+
+- `.ringcard .bigring` rests at the bare door's station while no card
+  shows — 302.4px with its top at the 40% `--door-top` — even though it
+  is invisible there. `body.showform` moves it to the card's station
+  (30%, and 240px under 760px). `margin-top`, `width` and `height` already
+  transition at `.5s cubic-bezier(.55,0,.2,1)` on that element; the
+  opacity crossfade with the lockup (.16s out, .8s in after .46s) is as
+  built. The card's `#formlayer` rides the same 500ms `margin-top`
+  transition it already has, so it arrives under the ring, not before it.
+- On launch (`body.launching`) the ring goes back the same way: station
+  40%, 302.4px, over 500ms on the same curve, while its opacity leaves;
+  the lockup's return waits for it (delay its opacity-in by .5s in the
+  launch's first beat). If `timeline.js`'s first beat is shorter than
+  500ms, the return runs at the beat's length and never longer; the ring
+  must be at the 40% station before the lockup flies.
+- The word→question swap inside the ring is the crossfade as built.
+- Reduced motion: no travel — each ring appears at its own station, as
+  the existing reduced-motion block already forces.
+
+**5.5 Side bleed is acceptable; the well itself must stay whole.** The
+glow (r 520 scene units → 245px at 390) and the falling bands and labels
+are sky, and sky bleeds — the desk's own `slice` crops the scene on a
+1440-wide screen. The rule: the two 4s and the disc's rings (out to r 288
+→ 136px at 390, 127px at 360) stay wholly on screen and centred, which the
+spec's well-box check already holds; `.world{overflow:hidden}` stays so
+nothing bleeding makes a horizontal scroll. No change.
+
+No new owner question: every point above is settled by the desk or by an
+earlier ruling.
