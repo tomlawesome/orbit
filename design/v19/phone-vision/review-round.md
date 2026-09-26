@@ -423,3 +423,54 @@ nothing bleeding makes a horizontal scroll. No change.
 
 No new owner question: every point above is settled by the desk or by an
 earlier ruling.
+
+---
+
+## 6. Build rulings, round 2 (2026-09-26)
+
+On Opus's build of §3 steps 1–4 (`feature/phone-review-round`, `a465bd37`).
+Questions **6** and **7** stay parked with the owner.
+
+- **a. Section `edit` stays, first.** §2.5's list was short: the name and
+  the "tap to swap" mark are only reachable through the edit sheet on a
+  phone. Order in the panel: `edit` (act-accent) · `move up` · `move
+  down` · `remove` (arms, empty custom sections only).
+- **b. New system is a list sheet.** It is a picker (the owner-to-be is
+  the row you tap), and §1.2 puts pickers in list sheets. Keep it; the
+  name and password fields ride at the top of the body as built.
+- **c. Stack at 360: use `minmax(170px, 1fr)`.** At 390 the body is 358px
+  and two 170px columns plus the 8px gap (348px) fit; at 360 the body is
+  336px and they do not, so the pair stacks. 150px was the pill rule
+  (§1.2 foot) applied to fields by mistake.
+- **d. `scroll-padding-bottom:12px`.** The foot sits outside the scroller,
+  so the scroller already ends at the foot's top; padding by the foot's
+  height double-counts it. Drop `--p-foot`.
+- **e. A result with no row approaches.** The manifest lists what needs
+  attention, so a result off it goes straight to `/item/<id>`, as it does
+  from the belt. The item-sheet face is deleted, not kept as a fallback:
+  the owner rejected that card. Searching is the reader's intent; one tap
+  to the item is the right cost.
+- **f. Print only what the data holds.** `name · size · added <date>` for a
+  paper; the suggestion's attachment as `◆ name · scanned clean` without a
+  size. Never a dash or "?" for a missing value; the line just omits it.
+  §2.1's "size · pages" was wrong about the data.
+- **g. The dial arrives on every forward arrival, never on Back.** That is
+  the desk's own flag and rule (`+page.svelte`, `arrive`), and the desk is
+  the reference; §1.4's "once per session" is withdrawn.
+- **h. "nothing needs you" opens as the next item up.** Intended: it is
+  that item's row in quiet dress, and its panel shows where `open →`
+  leads. Keep.
+- **i. `pk-*` gradient ids.** Fine.
+- **j. `disable` arms, and the wake still offers undo.** §1.8 arms every
+  act that shuts someone out; the undo (§1.13) is the second guard, not a
+  reason to drop the first. Keep as built. `enable` acts at once.
+- **k. Unify on the kit's landing.** `hh-rise`, `st-rise`, `rl-rise` and
+  the inbox receipts' entrance are the same idea at slightly different
+  numbers. Replace them with the kit's `p-landed` (600ms, `cubic-bezier(.3,
+  .7,.2,1)`, `--i` × 60ms): `.p-card` lands by itself; add a `.p-land`
+  utility in `kit.css` with the same keyframe for a page's header, caps
+  heads and any non-card block that rises, taking `--i` the same way. The
+  screens keep their own art (the household glyph's land and chip orbit,
+  the relay's waves and craft) — those are personality, not entrance.
+
+No new owner question.
