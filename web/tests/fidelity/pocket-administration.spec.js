@@ -1,17 +1,18 @@
 import { expect, test } from "@playwright/test";
+import { openRow, settle } from "./pocket-states.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
  * ADMINISTRATION ON A PHONE (#1123, proposal §2.12 and §2.11; owner decisions
- * §25 and §19), in a real browser at 390x844 with touch on. The fixture
- * harness answers people, systems and the mockup's machinery rows; the
- * states it cannot reach (a system on the clock, document jobs, alerts) are
- * given here as the routes would answer them.
- *   · row acts are revealed only by a swipe, and are real named buttons
- *   · a system on the clock keeps `restore` on show; `delete now` is behind
- *     the swipe and wakes only for the name typed exactly
+ * §25 and §19; review round §1.1, §2.6), in a real browser at 390x844 with
+ * touch on. The fixture harness answers people, systems and the mockup's
+ * machinery rows; the states it cannot reach (a system on the clock, document
+ * jobs, alerts) are given here as the routes would answer them.
+ *   · a tap opens a row's acts in place, and they are real named buttons
+ *   · a system on the clock keeps `restore` on show; `delete now` sits in
+ *     its opened row and wakes only for the name typed exactly
  *   · a failed document job says why, and offers retry, with no interaction
  *   · alerts stand first; the jump strip is plain links, not tabs
  */
@@ -43,68 +44,45 @@ async function open(page, { alerts = false } = {}) {
       route.fulfill({ json: { recoveryBundle: { exported: false, exportedAt: null } } }));
   }
   await page.goto(`${APP}/administration`, { waitUntil: "load" });
-  await page.waitForLoadState("networkidle");
   await page.waitForSelector(".ad-pocket [data-ad=people] .p-row");
-  await page.evaluate(() => document.fonts.ready);
+  await settle(page);
 }
 
-/**
- * A real touch swipe (Chromium's touch pipeline, so touch-action applies).
- * @param {import("@playwright/test").Page} page
- * @param {import("@playwright/test").Locator} row
- * @param {number} dx
- */
-async function swipe(page, row, dx) {
-  await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
-  await page.waitForTimeout(300);
-  const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await row.boundingBox());
-  const from = { x: box.x + box.width - 60, y: box.y + Math.min(box.height / 2, 28) };
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [from] });
-  for (let i = 1; i <= 8; i++) {
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + (dx * i) / 8, y: from.y }] });
-    await page.waitForTimeout(16);
-  }
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await cdp.detach();
-}
+/** @param {import("@playwright/test").Page} page @param {string} scope @param {string} text */
+const row = (page, scope, text) => page.locator(`${scope} .p-row`, { hasText: text }).first();
 
-/** Every act button a finger could hit at its centre right now. @param {import("@playwright/test").Page} page */
-const hittableActs = (page) => page.evaluate(() =>
-  [...document.querySelectorAll(".ad-pocket [data-row-acts] button")].filter((b) => {
-    const r = b.getBoundingClientRect();
-    if (r.width <= 1 || r.bottom < 0 || r.top > innerHeight) return false;
-    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return Boolean(hit && b.contains(hit));
-  }).map((b) => b.getAttribute("aria-label")));
-
-test("people's acts are behind a swipe, named with their object", async ({ page }) => {
+test("a tap opens a person's row, naming its acts; your own row has none", async ({ page }) => {
   await open(page);
-  expect(await hittableActs(page)).toEqual([]);
-  const emma = page.locator(".ad-pocket [data-ad=people] .p-row").filter({ hasText: "Emma Lawson" });
-  await swipe(page, emma, -200);
-  await page.waitForTimeout(300);
-  expect(await hittableActs(page)).toEqual([
-    "Place Emma Lawson in a system", "Send Emma Lawson a new setup link", "Disable Emma Lawson",
-  ]);
+  await expect(page.locator(".ad-pocket [data-row-acts] button")).toHaveCount(0);
+  const emma = row(page, "[data-ad=people]", "Emma Lawson");
+  await openRow(page, emma);
+  await expect(emma.getByRole("button", { name: "Place Emma Lawson in a system" })).toBeVisible();
+  await expect(emma.getByRole("button", { name: "Send Emma Lawson a new setup link" })).toBeVisible();
+  await expect(emma.getByRole("button", { name: "Disable Emma Lawson" })).toBeVisible();
   /* Your own row has none. */
-  await expect(page.locator(".ad-pocket [data-ad=people] .p-row").filter({ hasText: "· you" })
-    .locator("[data-row-acts]")).toHaveCount(0);
+  await expect(row(page, "[data-ad=people]", "· you").locator("[data-row-acts]")).toHaveCount(0);
 });
 
-test("a system on the clock keeps restore on show and delete now behind the swipe", async ({ page }) => {
+test("disable arms before it fires", async ({ page }) => {
   await open(page);
-  const clock = page.locator(".ad-pocket [data-ad=systems] .p-row").filter({ hasText: "Aunt May" });
+  const emma = row(page, "[data-ad=people]", "Emma Lawson");
+  await openRow(page, emma);
+  await emma.getByRole("button", { name: "Disable Emma Lawson" }).click();
+  await expect(emma.getByRole("button", { name: "tap again to disable Emma Lawson" })).toBeVisible();
+  await emma.getByRole("button", { name: "tap again to disable Emma Lawson" }).click();
+  await expect(page.locator(".p-wake-host [role=status]")).toContainText("Emma Lawson is disabled");
+});
+
+test("a system on the clock keeps restore on show; delete now sits in its opened row", async ({ page }) => {
+  await open(page);
+  const clock = row(page, "[data-ad=systems]", "Aunt May");
   await expect(clock).toContainText("on the clock · 13 days left · gone for good 26 Aug");
   await expect(page.getByRole("button", { name: "Restore Aunt May’s Cottage" })).toBeVisible();
-  expect(await hittableActs(page)).toEqual([]);
+  await expect(page.getByRole("button", { name: "Delete Aunt May’s Cottage now, for good" })).toHaveCount(0);
 
-  await swipe(page, clock, -160);
-  await page.waitForTimeout(300);
-  expect(await hittableActs(page)).toEqual(["Delete Aunt May’s Cottage now, for good"]);
-  const act = page.getByRole("button", { name: "Delete Aunt May’s Cottage now, for good" });
-  await act.click();
-  await act.click();
+  await openRow(page, clock);
+  await clock.getByRole("button", { name: "Delete Aunt May’s Cottage now, for good" }).click();
+  await clock.getByRole("button", { name: "tap again to delete Aunt May’s Cottage now, for good" }).click();
   const sheet = page.getByRole("dialog", { name: /Delete Aunt May’s Cottage now/ });
   await expect(sheet).toBeVisible();
   await expect(sheet).toContainText("Nothing comes back after this");
@@ -154,21 +132,20 @@ test("invite someone is a sheet, and never shows a link", async ({ page }) => {
   await expect(sheet.locator("a[href*='setup']")).toHaveCount(0);
 });
 
-/* The tray is tightest at 360: three acts must still sit wholly off the row
-   at rest, and wholly on it once revealed. */
+/* The panel is tightest at 360: three acts must still sit wholly on the row
+   once opened, none spilling past its edge. */
 test.describe("at 360", () => {
   test.use({ viewport: { width: 360, height: 780 } });
-  test("people's three acts fit the tray", async ({ page }) => {
+  test("people's three acts fit the opened row", async ({ page }) => {
     await open(page);
-    expect(await hittableActs(page)).toEqual([]);
-    const emma = page.locator(".ad-pocket [data-ad=people] .p-row").filter({ hasText: "Emma Lawson" });
-    await swipe(page, emma, -200);
-    await page.waitForTimeout(300);
-    expect(await hittableActs(page)).toEqual([
-      "Place Emma Lawson in a system", "Send Emma Lawson a new setup link", "Disable Emma Lawson",
-    ]);
+    await expect(page.locator(".ad-pocket [data-row-acts] button")).toHaveCount(0);
+    const emma = row(page, "[data-ad=people]", "Emma Lawson");
+    await openRow(page, emma);
+    await expect(emma.getByRole("button", { name: "Place Emma Lawson in a system" })).toBeVisible();
+    await expect(emma.getByRole("button", { name: "Send Emma Lawson a new setup link" })).toBeVisible();
+    await expect(emma.getByRole("button", { name: "Disable Emma Lawson" })).toBeVisible();
     const spill = await emma.locator("[data-row-acts]").evaluate((tray) =>
-      [...tray.querySelectorAll("button")].some((b) => b.getBoundingClientRect().left < tray.getBoundingClientRect().left - 0.5));
+      [...tray.querySelectorAll("button")].some((b) => b.getBoundingClientRect().right > tray.getBoundingClientRect().right + 0.5));
     expect(spill).toBe(false);
   });
 });

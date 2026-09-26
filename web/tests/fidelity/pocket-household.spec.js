@@ -1,18 +1,19 @@
 import { expect, test } from "@playwright/test";
+import { openRow, settle } from "./pocket-states.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
  * THE HOUSEHOLD ON A PHONE (#1122, proposal §2.10; owner decisions on #1122
- * and design/owner-decisions.md §25), driven in a real browser at 390x844
- * with touch on:
- *   · row acts are revealed only by a left/right swipe: nothing shows at
- *     rest and a tap on the row opens nothing
- *   · keyboard: focus the row, ← or → reveals, Tab walks the acts, Escape
- *     hides and returns to the row
- *   · screen readers: each act is a real button named with its object,
- *     out of the sighted Tab order until revealed
+ * and design/owner-decisions.md §25; review round §1.1, §2.5), driven in a
+ * real browser at 390x844 with touch on:
+ *   · a tap opens a row's acts in place: nothing shows at rest and only one
+ *     row in a list is open at a time
+ *   · keyboard: Enter/Space on the face opens it, Tab walks the pills,
+ *     Escape closes it and returns focus to the face
+ *   · screen readers: each act is a real named button, out of the page
+ *     (aria-expanded, aria-controls, `hidden`) until its row opens
  *   · the save bar rises when something is unsaved, undo puts it away, and
  *     a failed save stays on it in red (2b)
  */
@@ -23,98 +24,63 @@ const HOUSEHOLD = "/household/hh-lawson-1";
 /** @param {import("@playwright/test").Page} page */
 async function open(page) {
   await page.goto(`${APP}${HOUSEHOLD}`, { waitUntil: "load" });
-  await page.waitForLoadState("networkidle");
-  await page.evaluate(() => document.fonts.ready);
+  await settle(page);
 }
 
-/**
- * A real touch swipe (Chromium's touch pipeline, so touch-action applies).
- * @param {import("@playwright/test").Page} page
- * @param {import("@playwright/test").Locator} row
- * @param {number} dx
- */
-async function swipe(page, row, dx) {
-  const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await row.boundingBox());
-  const from = { x: box.x + box.width - 60, y: box.y + box.height / 2 };
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [from] });
-  for (let i = 1; i <= 8; i++) {
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + (dx * i) / 8, y: from.y }] });
-    await page.waitForTimeout(16);
+/** @param {import("@playwright/test").Page} page @param {string} scope @param {string} text */
+const row = (page, scope, text) => page.locator(`${scope} [data-row]`, { hasText: text }).first();
+
+test("every row's panel is shut at rest, and its acts are out of the page", async ({ page }) => {
+  await open(page);
+  const shut = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-row-panel]")].every((panel) => panel instanceof HTMLElement && panel.hidden));
+  expect(shut, "a row's panel is open without a tap").toBe(true);
+  for (const name of [
+    "Remove Emma Lawson", "Hand Lawson Home over to Gran", "Leave Lawson Home",
+    "Withdraw the invitation to daniel.lawson@example.com", "Remove Services",
+  ]) {
+    await expect(page.getByRole("button", { name }), name).toHaveCount(0);
   }
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await cdp.detach();
-}
-
-/** Every act button on the page that a finger could hit at its centre right now. @param {import("@playwright/test").Page} page */
-const hittableActs = (page) => page.evaluate(() =>
-  [...document.querySelectorAll(".hh-pocket [data-row-acts] button")].filter((b) => {
-    const r = b.getBoundingClientRect();
-    if (r.width <= 1 || r.bottom < 0 || r.top > innerHeight) return false;
-    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return Boolean(hit && b.contains(hit));
-  }).map((b) => b.getAttribute("aria-label")));
-
-test("no row act is visible at rest, and a tap on a row opens none", async ({ page }) => {
-  await open(page);
-  expect(await hittableActs(page)).toEqual([]);
-  const emma = page.locator(".hh-members [data-row]", { hasText: "Emma Lawson" });
-  await emma.locator("[data-row-face]").tap();
-  await page.waitForTimeout(300);
-  await expect(emma).not.toHaveAttribute("data-open", "");
-  expect(await hittableActs(page)).toEqual([]);
 });
 
-test("a left swipe reveals a member's acts, and only that row's", async ({ page }) => {
+test("a tap opens a member's row, and only that row's acts show", async ({ page }) => {
   await open(page);
-  const emma = page.locator(".hh-members [data-row]", { hasText: "Emma Lawson" });
-  await swipe(page, emma, -200);
+  const emma = row(page, ".hh-members", "Emma Lawson");
+  await openRow(page, emma);
   await expect(emma).toHaveAttribute("data-open", "");
-  await page.waitForTimeout(300);
-  expect((await hittableActs(page)).sort()).toEqual(["Hand Lawson Home over to Emma Lawson", "Remove Emma Lawson"]);
+  await expect(emma.getByRole("button", { name: "Hand Lawson Home over to Emma Lawson" })).toBeVisible();
+  await expect(emma.getByRole("button", { name: "Remove Emma Lawson" })).toBeVisible();
+  await expect(row(page, ".hh-members", "Rob Lawson")).not.toHaveAttribute("data-open", "");
 });
 
-test("an invitation's acts are behind the same swipe", async ({ page }) => {
+test("an invitation's acts are in its opened row", async ({ page }) => {
   await open(page);
-  const invite = page.locator(".hh-members [data-row]", { hasText: "daniel.lawson@example.com" });
-  await invite.scrollIntoViewIfNeeded();
-  await swipe(page, invite, -200);
+  const invite = row(page, ".hh-members", "daniel.lawson@example.com");
+  await openRow(page, invite);
   await expect(invite).toHaveAttribute("data-open", "");
-  await page.waitForTimeout(300);
-  expect((await hittableActs(page)).sort()).toEqual([
-    "Resend the invitation to daniel.lawson@example.com",
-    "Withdraw the invitation to daniel.lawson@example.com",
-  ]);
+  await expect(invite.getByRole("button", { name: "Resend the invitation to daniel.lawson@example.com" })).toBeVisible();
+  await expect(invite.getByRole("button", { name: "Withdraw the invitation to daniel.lawson@example.com" })).toBeVisible();
 });
 
-test("keyboard: focus the row, an arrow reveals, Tab walks the acts, Escape hides", async ({ page }) => {
+test("keyboard: Enter opens the face, Tab walks the acts, Escape hides and returns focus", async ({ page }) => {
   await open(page);
-  const face = page.getByRole("group", { name: "Rob Lawson" });
+  const face = row(page, ".hh-members", "Rob Lawson").locator("[data-row-face]");
   await face.focus();
-  await page.keyboard.press("ArrowRight");
-  const row = page.locator("[data-row]", { has: face });
-  await expect(row).toHaveAttribute("data-open", "");
+  await page.keyboard.press("Enter");
+  const rob = row(page, ".hh-members", "Rob Lawson");
+  await expect(rob).toHaveAttribute("data-open", "");
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Hand Lawson Home over to Rob Lawson" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Remove Rob Lawson" })).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(row).not.toHaveAttribute("data-open", "");
+  await expect(rob).not.toHaveAttribute("data-open", "");
   await expect(face).toBeFocused();
 });
 
-test("screen readers: every act is a named button, out of the Tab order at rest", async ({ page }) => {
+test("tabbing across a shut row's face never reaches its acts", async ({ page }) => {
   await open(page);
-  for (const name of [
-    "Remove Emma Lawson", "Hand Lawson Home over to Gran", "Leave Lawson Home",
-    "Withdraw the invitation to daniel.lawson@example.com", "Remove Services",
-  ]) {
-    const button = page.getByRole("button", { name });
-    await expect(button, name).toHaveCount(1);
-    await expect(button, name).toHaveAttribute("tabindex", "-1");
-  }
-  /* Tabbing through the members card never lands on an act. */
-  await page.getByRole("group", { name: "Tom Lawson · you" }).focus();
+  await row(page, ".hh-members", "Tom Lawson").locator("[data-row-face]").focus();
   for (let i = 0; i < 4; i++) {
     await page.keyboard.press("Tab");
     const inTray = await page.evaluate(() => Boolean(document.activeElement?.closest("[data-row-acts]")));
@@ -171,9 +137,27 @@ test("sections reorder from the keyboard (Alt-↓), and the move collects into t
   await open(page);
   const titles = () => page.locator(".hh-sections [data-row] .title").allTextContents();
   const before = await titles();
-  const face = page.getByRole("group", { name: "Home" });
+  const face = row(page, ".hh-sections", "Home").locator("[data-row-face]");
   await face.focus();
   await page.keyboard.press("Alt+ArrowDown");
   expect(await titles()).toEqual([before[1], before[0], ...before.slice(2)]);
   await expect(page.locator("[data-hh=savebar]")).toContainText("1 change");
+});
+
+test("a section's acts open with edit first, then move up/down, then remove", async ({ page }) => {
+  await open(page);
+  const services = row(page, ".hh-sections", "Services");
+  await openRow(page, services);
+  const names = await services.locator("[data-row-acts] > *").evaluateAll(
+    (pills) => pills.map((el) => el.getAttribute("aria-label")));
+  expect(names).toEqual([
+    "Edit Services", "Move Services up", "Move Services down", "Remove Services",
+  ]);
+  /* The first row offers no move up; the last offers no move down. */
+  const home = row(page, ".hh-sections", "Home");
+  await openRow(page, home);
+  await expect(home.getByRole("button", { name: "Move Home up" })).toHaveCount(0);
+  const dates = row(page, ".hh-sections", "Dates & renewals");
+  await openRow(page, dates);
+  await expect(dates.getByRole("button", { name: "Move Dates & renewals down" })).toHaveCount(0);
 });
