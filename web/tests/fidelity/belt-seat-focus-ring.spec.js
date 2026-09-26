@@ -67,7 +67,7 @@ for (const { width, height } of VIEWPORTS) {
         };
       });
     }
-    expect(seat, "Tab never reached a belt seat").not.toBeNull();
+    if (!seat) throw new Error("Tab never reached a belt seat");
 
     /* Read the way the e2e keyboard audit reads it: the computed style of
        THE ELEMENT THAT HAS FOCUS — an outline, or a box-shadow. The first
