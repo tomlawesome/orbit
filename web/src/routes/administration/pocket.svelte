@@ -588,7 +588,7 @@
 
 <div class="ad-pocket">
   <main class="ad-column">
-    <header class="ad-head ad-rise" style:--i="0">
+    <header class="ad-head p-land" style:--i="0">
       <svg class="ad-glyph" width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">
         <circle class="ad-orbit" cx="28" cy="28" r="22" fill="none"/>
         <circle class="ad-orbit soft" cx="28" cy="28" r="14" fill="none"/>
@@ -605,7 +605,7 @@
     </header>
 
     {#if tells.length}
-      <nav class="ad-tells ad-rise" style:--i="0" aria-label="Needs you">
+      <nav class="ad-tells p-land" style:--i="0" aria-label="Needs you">
         {#each tells as tell (tell.word)}
           <a class="ad-tell" href="#{tell.id}" onclick={(event) => jump(event, tell.id)}>{tell.word}</a>
         {/each}
@@ -615,7 +615,7 @@
     <!-- THE JUMP STRIP (§2.12): the one page that has one, because it is the
          longest screen. Anchors, not tabs: nothing is selected, and each is a
          plain link that works without script. -->
-    <nav class="ad-jump ad-rise" style:--i="1" aria-label="Jump to a card">
+    <nav class="ad-jump p-land" style:--i="1" aria-label="Jump to a card">
       {#each JUMPS as [word, id], i (id)}
         <a class="ad-chip" href="#{id}" style:--j={i} onclick={(event) => jump(event, id)}><span>{word}</span></a>
       {/each}
@@ -629,7 +629,7 @@
       {#if alerts.length}
         <section class="ad-alerts" aria-label="Alerts" data-ad="alerts">
           {#each alerts as alert, i (alert.id)}
-            <article class="p-card ad-alert ad-rise" style:--i={2 + i} aria-labelledby="ad-alert-{alert.id}">
+            <article class="p-card ad-alert" style:--i={2 + i} aria-labelledby="ad-alert-{alert.id}">
               <h2 class="ad-alert-head" id="ad-alert-{alert.id}">
                 <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden="true">
                   <path d="M9 2.2 16.4 15H1.6L9 2.2Z"/><path d="M9 6.6v4.1"/><path d="M9 12.8v.05"/>
@@ -642,7 +642,7 @@
       {/if}
 
       <!-- PEOPLE (§2.12 4). -->
-      <section class="p-card ad-card ad-flush ad-rise" class:proposed={people.length <= 1} style:--i="3"
+      <section class="p-card ad-card ad-flush" class:proposed={people.length <= 1} style:--i="3"
                id="ad-people" tabindex="-1" aria-labelledby="ad-people-head" data-ad="people" data-row-group>
         <div class="ad-cardhead">
           <h2 class="p-caps" id="ad-people-head">People<span class="p-count">{people.length}</span></h2>
@@ -672,7 +672,7 @@
       </section>
 
       <!-- SYSTEMS (§2.12 5). -->
-      <section class="p-card ad-card ad-flush ad-rise" class:proposed={systems.length === 0} style:--i="4"
+      <section class="p-card ad-card ad-flush" class:proposed={systems.length === 0} style:--i="4"
                id="ad-systems" tabindex="-1" aria-labelledby="ad-systems-head" data-ad="systems" data-row-group>
         <div class="ad-cardhead">
           <h2 class="p-caps" id="ad-systems-head">Systems<span class="p-count">{systems.length}</span></h2>
@@ -726,7 +726,7 @@
       </section>
 
       <!-- PUBLIC CONTACT (§2.12 6, #860). -->
-      <section class="p-card ad-card ad-flush ad-rise" style:--i="5" id="ad-contact" tabindex="-1"
+      <section class="p-card ad-card ad-flush" style:--i="5" id="ad-contact" tabindex="-1"
                aria-labelledby="ad-contact-head" data-ad="contact">
         <div class="ad-cardhead"><h2 class="p-caps" id="ad-contact-head">Public contact</h2></div>
         {#if view.contact}
@@ -743,7 +743,7 @@
       </section>
 
       <!-- MAIL MACHINERY (§2.12 7, §15, #743). -->
-      <section class="p-card ad-card ad-flush ad-rise" style:--i="6" id="ad-mail" tabindex="-1"
+      <section class="p-card ad-card ad-flush" style:--i="6" id="ad-mail" tabindex="-1"
                aria-labelledby="ad-mail-head" data-ad="mail">
         <div class="ad-cardhead">
           <h2 class="p-caps" id="ad-mail-head">Mail machinery</h2>
@@ -817,7 +817,7 @@
       </section>
 
       <!-- OPERATIONS (§2.12 8, #1000): tap a row for its last check. -->
-      <section class="p-card ad-card ad-flush ad-rise" style:--i="7" id="ad-operations" tabindex="-1"
+      <section class="p-card ad-card ad-flush" style:--i="7" id="ad-operations" tabindex="-1"
                aria-labelledby="ad-ops-head" data-ad="operations">
         <div class="ad-cardhead"><h2 class="p-caps" id="ad-ops-head">Operations</h2></div>
         {#each view.services as [tone, name, detail], at (name)}
@@ -832,7 +832,7 @@
       <!-- DOCUMENT JOBS (#1071, #1055 round 2): one row per job, kind only,
            the reason on the row for good, `retry` on show on a failed row. -->
       {#if view.operations}
-        <section class="p-card ad-card ad-flush ad-rise" class:proposed={jobs.length === 0} style:--i="8"
+        <section class="p-card ad-card ad-flush" class:proposed={jobs.length === 0} style:--i="8"
                  id="ad-documents" tabindex="-1" aria-labelledby="ad-docs-head" data-ad="documents">
           <div class="ad-cardhead">
             <h2 class="p-caps" id="ad-docs-head">Document jobs</h2>
@@ -1173,8 +1173,6 @@
   @keyframes ad-chip{from{opacity:0;transform:translateX(12px)}}
 
   /* Cards arrive in turn, never in sync (§1.9). */
-  .ad-rise{animation:ad-rise 420ms var(--p-ease) both;animation-delay:calc(var(--i, 0) * 60ms + 80ms)}
-  @keyframes ad-rise{from{opacity:0;transform:translateY(10px)}}
 
   .ad-card{margin-top:var(--p-card-gap);scroll-margin-top:16px}
   .ad-card:focus{outline:none}
@@ -1263,6 +1261,6 @@
   .ad-clocksaid.bad{color:var(--overdue-text)}
 
   @media (prefers-reduced-motion:reduce){
-    .ad-craft,.ad-rise,.ad-chip,.ad-said,.ad-checking,.ad-clockring circle,.ad-clocksaid{animation:none}
+    .ad-craft,.ad-chip,.ad-said,.ad-checking,.ad-clockring circle,.ad-clocksaid{animation:none}
   }
 </style>
