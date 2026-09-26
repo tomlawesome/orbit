@@ -171,6 +171,18 @@
    what the words are, not how long they happen to be. */
 .p-prose{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
 
+/* ONE LINE UNDER A TITLE, ONE UNDER A LIST, ONE AT THE FOOT (round 3 §1,
+   R3, R8): a page's subtitle (.p-sub), a hint under a list (.p-hint, at
+   the rows' text edge) and a footnote (.p-foot, a screen has at most one).
+   13px mono, quiet, one line of at most 40 characters that never wraps.
+   The guard is CSS and the fix is the words: a line that ellipsises in the
+   fixtures is a defect in its words (pocket-measure.spec.js fails it). */
+.p-sub,.p-hint,.p-foot{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.p-sub{margin:4px 0 0}
+.p-hint{margin:8px 0 0 calc(var(--p-row-mark) + var(--p-row-gap))}
+.p-foot{margin:16px 8px 0;text-align:center}
+
 /* Empty (§1.13): one quiet mono line, short by design. */
 .p-empty{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:0 0 12px}
 
