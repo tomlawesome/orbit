@@ -91,6 +91,7 @@ if command -v pnpm >/dev/null 2>&1; then
   pnpm typecheck
   pnpm lint
   node scripts/check-rolldown-jsdoc-trap.mjs
+  node scripts/check-svelte-server-parse.mjs
   # Only when there is not already a build of these exact sources (#1061). The
   # web app used to be built three times in one pipeline; it is now built once
   # and shared. Locally this is still a plain rebuild, because a clean checkout
@@ -117,6 +118,7 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
   node node_modules/typescript/bin/tsc --noEmit
   node node_modules/eslint/bin/eslint.js . --concurrency auto
   node scripts/check-rolldown-jsdoc-trap.mjs
+  node scripts/check-svelte-server-parse.mjs
   # Mirrors web/package.json's own `build`: the licence collector writes
   # static/licenses, which the SvelteKit build then bundles, and the stamp
   # records what it was built from (#1061).
