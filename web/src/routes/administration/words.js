@@ -11,6 +11,25 @@ export const initialsOf = (name) =>
 export const lapses = (iso) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
+/**
+ * The lapse date on the pocket, day and month only (round 3 §3.9): the
+ * setup-link line is `setup link sent · lapses 3 Oct`. @param {string} iso
+ */
+export const lapsesShort = (iso) =>
+  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/**
+ * The instance line on the pocket (round 3 §3.9, owner answer 10b): one line
+ * of caps, `ORBIT 1.3.0 · PREVIEW · FD6A7E6`, read off the desk's own line
+ * (workspace.js's instanceLineOf, or the fixture's) with its labels and the
+ * self-hosted promise dropped. @param {string} line
+ */
+export const versionLine = (line) =>
+  line.split(" · ")
+    .filter((part) => !/^self-hosted/i.test(part))
+    .map((part) => part.replace(/^(CHANNEL|REVISION) /, "").replace(/^ORBIT v/, "ORBIT ").toUpperCase())
+    .join(" · ");
+
 /** The mailer's bounded word, said plainly. @param {string} reason */
 export const sendWords = (reason) =>
   reason === "smtp_unconfigured"
@@ -69,10 +88,10 @@ export const JOB_REASONS = /** @type {Record<string, string>} */ ({
   purge_failed: "the stored file couldn’t be removed",
   processing_interrupted: "processing was interrupted",
   storage_object_missing: "the stored file is missing",
-  scanner_unavailable: "couldn’t reach the virus scanner",
-  scanner_timeout: "the virus scanner took too long",
-  scanner_protocol: "the virus scanner’s answer couldn’t be read",
-  scanner_failed: "the virus scanner failed",
+  scanner_unavailable: "couldn’t reach the scanner",
+  scanner_timeout: "the scanner took too long",
+  scanner_protocol: "the scanner’s answer couldn’t be read",
+  scanner_failed: "the scanner failed",
   stage_purge_failed: "the upload’s staging copy couldn’t be removed",
   scan_recovery_expired: "the scan couldn’t be recovered in time",
   staging_object_invalid: "the uploaded file couldn’t be read",

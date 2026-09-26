@@ -70,9 +70,11 @@
   /* On the light packs the fade alone is too soft an edge. */
   :global(:is([data-theme=dawn],[data-theme=clouds])) .p-chrome.scrolled{border-bottom-color:var(--line-soft)}
   .p-chrome.hidden{transform:translateY(-100%)}
+  /* The way back reads as a control, not a label (round 3 §4): --ink-mid,
+     one grade up from the quiet ink. */
   .back{display:inline-flex;align-items:center;min-height:var(--p-hit);padding:0 8px;
     font:var(--p-type-meta)/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
-    color:var(--ink-quiet);text-decoration:none;
+    color:var(--ink-mid);text-decoration:none;
     text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
   .back:hover{color:var(--accent-text)}
   .back:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
