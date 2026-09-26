@@ -735,7 +735,7 @@
 <!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
      approve protocol the desk rows use (one operation id per receipt), and
      answer with the problem, if any, for the sheet to show. -->
-<Pocket {view}
+<Pocket {view} {arrive}
         onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
         ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
         onchanged={async () => { view = await readHome(); }} />

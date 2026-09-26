@@ -283,7 +283,7 @@
       {#if view.review.length}
         <section class="pki-lane" aria-labelledby="pki-review-h">
           <h2 class="p-caps pki-lanehead" id="pki-review-h">
-            <span class="p-body sug" aria-hidden="true"></span>for your review<span class="pki-count">{view.review.length}</span>
+            <span class="p-body sug" aria-hidden="true"></span>for your review<span class="p-count">{view.review.length}</span>
           </h2>
           {#each view.review as receipt, index (receipt.id)}
             {@const days = burnsIn(receipt)}
@@ -348,7 +348,7 @@
       {#if view.reading.length}
         <section class="pki-lane" aria-labelledby="pki-reading-h">
           <h2 class="p-caps pki-lanehead" id="pki-reading-h">
-            <span class="p-body up breathing" aria-hidden="true"></span>still reading<span class="pki-count">{view.reading.length}</span>
+            <span class="p-body up breathing" aria-hidden="true"></span>still reading<span class="p-count">{view.reading.length}</span>
           </h2>
           <div class="p-card pki-rows">
             {#each view.reading as receipt, index (receipt.id)}
@@ -366,7 +366,7 @@
       {#if view.failed.length}
         <section class="pki-lane" aria-labelledby="pki-failed-h">
           <h2 class="p-caps pki-lanehead" id="pki-failed-h">
-            <span class="p-body pki-failmark" aria-hidden="true"></span>failed to process<span class="pki-count">{view.failed.length}</span>
+            <span class="p-body pki-failmark" aria-hidden="true"></span>failed to process<span class="p-count">{view.failed.length}</span>
           </h2>
           <div class="p-card pki-rows" data-row-group>
             {#each view.failed as failure, index (failure.id)}
@@ -390,7 +390,7 @@
 
       <section class="pki-lane" aria-labelledby="pki-filed-h">
         <h2 class="p-caps pki-lanehead" id="pki-filed-h">
-          <span class="p-body ok" aria-hidden="true"></span>filed{#if view.filed.length}<span class="pki-count">{view.filed.length}</span>{/if}
+          <span class="p-body ok" aria-hidden="true"></span>filed{#if view.filed.length}<span class="p-count">{view.filed.length}</span>{/if}
         </h2>
         {#if view.filed.length}
           <div class="p-card pki-rows">
@@ -467,15 +467,14 @@
   @keyframes pki-signal{from{opacity:.7;transform:scale(.3)}to{opacity:0;transform:scale(1.4)}}
 
   /* LANES (§2.6): stacked in priority order, each head carrying its mark,
-     the lane's own body in the desk's key, and a count bead. */
+     the lane's own body in the desk's key, and the kit's count bead
+     (kit.css .p-count, the one bead style, review round §1.6). */
   .pki-lane{margin-top:var(--p-group-above)}
   .pki-lanehead{display:flex;align-items:center;gap:10px;margin:0 0 var(--p-group-below);padding:0 2px}
   /* The kit's .p-body.failed, under another name: the desk's own
      `.inbox-page .failed` (a whole card) would match the kit's class here,
      because this dialect is drawn inside .inbox-page. */
   :global(.p-body.pki-failmark){color:var(--degraded)}
-  .pki-count{margin-left:auto;min-width:22px;height:22px;padding:0 7px;box-sizing:border-box;border-radius:11px;
-    display:grid;place-items:center;border:1px solid var(--line);color:var(--ink-mid);letter-spacing:0}
 
   /* A REVIEW: the dashed pen of "not yet in orbit" (.p-card.proposed). */
   .pki-receipt{animation:pki-land 460ms var(--p-ease) both;animation-delay:calc(var(--i, 0) * 70ms)}

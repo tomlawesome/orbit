@@ -48,13 +48,14 @@
    * own sheet, opened from the orb.
    * @typedef {{
    *   view?: import('$lib/data/workspace.js').HomeView | null,
+   *   arrive?: boolean,
    *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
    *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
    *   onchanged?: () => Promise<unknown>,
    * }} Props
    */
   /** @type {Props} */
-  let { view = null, onapprove = undefined, ondismiss = undefined, onchanged = undefined } = $props();
+  let { view = null, arrive = false, onapprove = undefined, ondismiss = undefined, onchanged = undefined } = $props();
   let sheetOpen = $state(false);
   let hatchOpen = $state(false);
 
@@ -145,6 +146,22 @@
   const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {(b: DialBody) => number} */
   const bodyR = (b) => (b.overdue ? 8 : b.closest ? 7 : 7.5);
+  // The desk's spheres (review round §2.1): a body wears its paint's
+  // gradient; the ended expiry keeps its quiet flat ink.
+  const SPHERES = new Set(["ruby", "jade", "amber", "sky"]);
+  /** @type {(b: DialBody) => string} */
+  const bodyFill = (b) => (SPHERES.has(b.paint) ? `url(#pk-${b.paint})` : bodyColour(b));
+  // The body due soonest (an overdue one is the soonest of all, as the
+  // spacing law has it) pings, home.css's perihelion ping.
+  const pinging = $derived(pocketBodies.find((b) => !b.suggestion) ?? null);
+  // Twelve month ticks on the ring, 6 units long, from the top.
+  const TICKS = Array.from({ length: 12 }, (_, k) => {
+    const a = (k * Math.PI) / 6 - Math.PI / 2;
+    const at = (/** @type {number} */ r) => [190 + Math.cos(a) * r, 190 + Math.sin(a) * r].map((v) => Math.round(v * 10) / 10);
+    const [x1, y1] = at(150);
+    const [x2, y2] = at(144);
+    return { x1, y1, x2, y2 };
+  });
   /** @type {(row: { costMinor: number | null, currency: string, costIsEstimate: boolean }) => string | null} */
   const cost = (row) => (row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null);
   /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => number | null} */
@@ -670,16 +687,55 @@
     <div class="burnup">the systems around you are labels until someone lets you in<br><a href={resolve("/")}>— or start your own system →</a></div>
   </div>
   {:else}
-  <div class="mdial" bind:this={dialEl} style:--fx="{flight.x}px" style:--fy="{flight.y}px">
+  <!-- `arrive` is the desk's own arrival flag (+page.svelte): a forward
+       arrival, never a Back, and never under the launch's own landing. -->
+  <div class="mdial" class:arrive bind:this={dialEl} style:--fx="{flight.x}px" style:--fy="{flight.y}px">
     <svg viewBox="0 0 380 380">
+      <!-- The desk's spheres and danger wash (+page.svelte's dial defs),
+           named for the pocket: the desk's own defs share this document. -->
+      <defs aria-hidden="true">
+        <filter id="pk-sun" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="5"/></filter>
+        <radialGradient id="pk-ruby" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
+          <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
+        </radialGradient>
+        <radialGradient id="pk-jade" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
+          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
+        </radialGradient>
+        <radialGradient id="pk-amber" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
+          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
+        </radialGradient>
+        <radialGradient id="pk-sky" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-sky-1, #cfe4ff)"/><stop offset="45%" stop-color="var(--p-sky-2, #6fa3ef)"/>
+          <stop offset="100%" stop-color="var(--p-sky-3, #2a4f8f)"/>
+        </radialGradient>
+        <radialGradient id="pk-danger4" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#f87171" stop-opacity=".10"/>
+          <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>
+          <stop offset="85%" stop-color="#f87171" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
       <circle cx="190" cy="190" r="150" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+      <g stroke="var(--line)" stroke-width="1.5" aria-hidden="true">
+        {#each TICKS as t, k (k)}<line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}/>{/each}</g>
+      <circle cx="190" cy="190" r="62" fill="url(#pk-danger4)"/>
       <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3"
               stroke-width="1" stroke-dasharray="3 5"/>
       <!-- Quarter labels at 15 units: 13px at the narrowest dial (§2.1). -->
       <g font-size="15" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
         {#each quarters as q, k (k)}<text x={q.x} y={q.y}>{q.label}</text>{/each}</g>
       <path d="M190 38 l6 10 h-12 Z" style="fill:var(--accent)"/>
+      <!-- The sun (the desk's #sun, scaled): a soft glow that breathes under
+           the core, and the household's name beneath it. -->
+      <circle class="pk-glow" cx="190" cy="190" r="16" style="fill:#fff6e6" fill-opacity=".28" filter="url(#pk-sun)"/>
       <circle cx="190" cy="190" r="8" style="fill:#fff6e6"/>
+      <text x="190" y="218" font-size="15" text-anchor="middle" style="fill:var(--ink-mid);font-family:var(--ui)">{view?.household?.name ?? ""}</text>
+      {#if pinging}
+        <circle class="pk-ping" cx={pinging.placement.x} cy={pinging.placement.y} r={bodyR(pinging) + 3} fill="none"
+                stroke="currentColor" stroke-opacity=".7" style:color={bodyColour(pinging)} aria-hidden="true"/>
+      {/if}
       {#each pocketBodies as b (b.id)}
         <!-- #1129/§1.7: the drawn body keeps its size; an invisible 44px
              circle round it takes the tap, and the spacing law keeps every
@@ -696,7 +752,7 @@
         {:else}
           <g class="pk-body" data-sheet-title={b.title} tabindex="0" role="button" aria-label={b.title}
              onclick={() => openItem(b.id)} onkeydown={(event) => onKeyActivate(event, () => openItem(b.id))}>
-            <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}"/>
+            <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyFill(b)}"/>
             {#if b.documentCount > 0 && b.paint === "jade"}
               <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
                        transform="rotate(-24 {b.placement.x} {b.placement.y})"

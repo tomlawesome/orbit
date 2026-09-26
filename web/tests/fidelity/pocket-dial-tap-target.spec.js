@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { settle } from "./pocket-states.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
@@ -50,6 +51,9 @@ for (const phone of PHONES) {
     await page.goto(`${APP}/home`, { waitUntil: "load" });
     await page.waitForFunction(() => document.body.dataset.homeReady === "true"
       && document.querySelectorAll(".mdial [data-sheet-title]").length > 0);
+    /* The dial arrives from a sixth of its size (review round §1.4): measure
+       it once it has. */
+    await settle(page);
 
     const bodies = await dialBodies(page);
     for (const body of bodies) {

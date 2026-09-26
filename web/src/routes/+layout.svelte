@@ -50,3 +50,11 @@
 {@render children()}
 <Tour />
 <Wake />
+
+<style>
+  /* A theme change crossfades rather than snapping, on every screen (review
+     round §1.4): the desk's own body transition, which several screens set
+     for themselves, held here once for the ones that do not. */
+  :global(body){transition:background .4s,color .4s}
+  @media (prefers-reduced-motion:reduce){ :global(body){transition:none} }
+</style>
