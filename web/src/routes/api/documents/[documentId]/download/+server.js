@@ -40,7 +40,7 @@ export const GET = read(
        generated sample file rather than a reach into the (absent) engine. */
     fixture: (event) => {
       const doc = requireFixtureDocument(/** @type {string} */ (event.params.documentId));
-      const body = placeholderDownloadBytes(doc);
+      const body = Uint8Array.from(placeholderDownloadBytes(doc));
       return new Response(body, {
         status: 200,
         headers: {
