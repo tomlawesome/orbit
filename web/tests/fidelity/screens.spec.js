@@ -445,8 +445,11 @@ const SCREENS = [
        (#430). What selects between them is the viewport below, which is why
        the gate having per-screen frames is what makes one URL possible. */
     path: "/home",
-    stage: "porting",
-    mockup: "/design/family/mobile-home.html",
+    /* Accepted by the owner after the #1120 review round, 2026-09-26: the
+       phone home is done, not still being ported, so `/design/family/
+       mobile-home.html` is now a historical record rather than a live
+       comparison target. */
+    stage: "owned",
     /* The dialect's own frame: `.mpage` is drawn at max-width 400 and the sky
        behind it at a 400×850 viewBox, so that is the sheet of glass to
        compare, not a desk viewport with a narrow column down the middle. */
