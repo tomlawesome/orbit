@@ -295,7 +295,9 @@
   {#if !nested}
     <Sheet bind:open={remindOpen} size="callout" title="Reminders">
       {@render remindChoices()}
-      <button type="button" class="p-pill filled wide pc-done" onclick={() => { remindOpen = false; }}>done</button>
+      {#snippet foot()}
+        <button type="button" class="p-pill filled" onclick={() => { remindOpen = false; }}>done</button>
+      {/snippet}
     </Sheet>
   {/if}
 </div>
@@ -387,7 +389,6 @@
   .pc-change{margin-left:auto;font:var(--p-type-meta)/1 var(--mono);color:var(--accent-text)}
   .pc-remind-pick{margin-top:10px}
   .pc-remind-choices{flex-wrap:wrap;overflow:visible;margin:0;padding:0}
-  .pc-done{margin-top:16px}
 
   /* The reading card: something Orbit proposes, so the desk's dashed pen. */
   .pc-paper{display:flex;align-items:center;gap:var(--p-row-gap);min-height:var(--p-row-min)}

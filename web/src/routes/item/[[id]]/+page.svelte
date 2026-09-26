@@ -1301,19 +1301,6 @@
     <div class="bp-field"><label for="p-cnotes">note</label>
       <input id="p-cnotes" bind:value={form.notes} placeholder="optional" enterkeyhint="done"></div>
     {#if locked}<p class="bp-note">{COST_LOCKED}</p>{/if}
-    <button class="p-pill filled wide bp-go" style="--act:var(--ok);--act-text:var(--ok-text)"
-            disabled={busy || !form.completedDate}
-            onclick={() => {
-              const fields = {
-                completedDate: /** @type {string} */ (form.completedDate),
-                nextDate: form.nextDate || undefined,
-                costMinor: minorOf(form.cost),
-                notes: (form.notes ?? "").trim() || undefined,
-              };
-              const item = record;
-              sheetOpen = false;
-              holdCompletion(item, fields);
-            }}>record</button>
   {:else if face === "reschedule" && record}
     <p class="bp-lede">{row?.title} · due {row?.longWhen}</p>
     <div class="bp-field"><label for="p-due">new due date</label>
@@ -1324,8 +1311,6 @@
                 onclick={() => { form.dueDate = monthsOn(record.dueDate ?? todayISO(), Number(months)); }}>{word}</button>
       {/each}
     </div>
-    <button class="p-pill filled wide bp-go" style="--act:var(--upcoming)" disabled={busy || !form.dueDate}
-            onclick={() => { const item = record, due = form.dueDate; sheetOpen = false; run(() => rescheduleCommand(item, due)); }}>reschedule</button>
   {:else if face === "snooze" && record}
     <p class="bp-lede">{row?.title} · due {row?.longWhen}</p>
     <div class="p-pills bp-quick" role="group" aria-label="Snooze for">
@@ -1336,8 +1321,6 @@
     </div>
     <div class="bp-field"><label for="p-until">or until</label>
       <input id="p-until" type="date" bind:value={form.until}></div>
-    <button class="p-pill filled wide bp-go" style="--act:var(--warm)" disabled={busy || !form.until}
-            onclick={() => { const item = record, until = form.until; sheetOpen = false; run(() => snoozeCommand(item, until)); }}>snooze</button>
   {:else if face === "edit" && record && editEntry}
     <!-- §2.3/§2.5: edit is create's form in edit mode (EntryForm.svelte):
          type locked, no household or document row, `save` at the sheet's
@@ -1349,16 +1332,8 @@
     {#if locked}<p class="bp-note">{PANEL_LOCKED}</p>{/if}
     {#if problem}<p class="p-error" role="alert">{problem}</p>
     {:else if editRefusal}<p class="bp-note" id="pe-refusal">{editRefusal}</p>{/if}
-    <button class="p-pill filled wide bp-go" disabled={busy || locked || Boolean(editRefusal)}
-            aria-describedby={editRefusal ? "pe-refusal" : undefined}
-            onclick={saveEdit}>{busy ? "saving…" : "save"}</button>
   {:else if face === "retire" && record}
     <p class="bp-lede prose">It leaves the belt and the dial. Its history and its documents are kept.</p>
-    <div class="bp-pair">
-      <button class="p-pill wide bp-danger" disabled={busy}
-              onclick={() => { const item = record; sheetOpen = false; run(() => archiveCommand(item), { leave: true }); }}>retire</button>
-      <button class="p-pill wide" onclick={() => { sheetOpen = false; }}>keep</button>
-    </div>
   {:else if face === "docs" && row}
     <div class="bp-list">
       {#each row.docs as doc (doc.id)}
@@ -1395,7 +1370,6 @@
         {:else if state === "removed"}
           <p class="bp-line">Removed</p>
           <p class="bp-why">kept {previewDoc.deleteAfter ? `until ${previewDoc.deleteAfter}` : "for 30 days"}, then gone for good</p>
-          <button class="p-pill bp-restore" disabled={previewRestoring} onclick={restorePreviewDoc}>restore</button>
           {#if previewProblem}<p class="p-error" role="alert">{previewProblem}</p>{/if}
         {:else if state === "refused"}
           <p class="bp-line">Orbit refused this file.</p>
@@ -1403,7 +1377,6 @@
         {:else}
           <p class="bp-line">Orbit could not draw a picture of this document.</p>
           <p class="bp-why">the file is fine and yours to download</p>
-          <a class="p-pill bp-restore" href={resolve(/** @type {"/home"} */ (previewDoc.href))} download>download</a>
         {/if}
       </div>
     {/if}
@@ -1432,6 +1405,43 @@
     </div>
   {/if}
   </div>
+  {#snippet foot()}
+    {#if face === "complete" && record}
+      <button class="p-pill filled bp-go" style="--act:var(--ok);--act-text:var(--ok-text)"
+              disabled={busy || !form.completedDate}
+              onclick={() => {
+                const fields = {
+                  completedDate: /** @type {string} */ (form.completedDate),
+                  nextDate: form.nextDate || undefined,
+                  costMinor: minorOf(form.cost),
+                  notes: (form.notes ?? "").trim() || undefined,
+                };
+                const item = record;
+                sheetOpen = false;
+                holdCompletion(item, fields);
+              }}>record</button>
+    {:else if face === "reschedule" && record}
+      <button class="p-pill filled bp-go" style="--act:var(--upcoming)" disabled={busy || !form.dueDate}
+              onclick={() => { const item = record, due = form.dueDate; sheetOpen = false; run(() => rescheduleCommand(item, due)); }}>reschedule</button>
+    {:else if face === "snooze" && record}
+      <button class="p-pill filled bp-go" style="--act:var(--warm)" disabled={busy || !form.until}
+              onclick={() => { const item = record, until = form.until; sheetOpen = false; run(() => snoozeCommand(item, until)); }}>snooze</button>
+    {:else if face === "edit" && record && editEntry}
+      <button class="p-pill filled bp-go" disabled={busy || locked || Boolean(editRefusal)}
+              aria-describedby={editRefusal ? "pe-refusal" : undefined}
+              onclick={saveEdit}>{busy ? "saving…" : "save"}</button>
+    {:else if face === "retire" && record}
+      <button class="p-pill" onclick={() => { sheetOpen = false; }}>keep</button>
+      <button class="p-pill bp-danger" disabled={busy}
+              onclick={() => { const item = record; sheetOpen = false; run(() => archiveCommand(item), { leave: true }); }}>retire</button>
+    {:else if face === "preview" && previewDoc}
+      {#if previewState === "removed"}
+        <button class="p-pill bp-restore" disabled={previewRestoring} onclick={restorePreviewDoc}>restore</button>
+      {:else if previewState === "undrawable"}
+        <a class="p-pill bp-restore" href={resolve(/** @type {"/home"} */ (previewDoc.href))} download>download</a>
+      {/if}
+    {/if}
+  {/snippet}
 </Sheet>
 
 {#if previewDoc && previewShowing && row}

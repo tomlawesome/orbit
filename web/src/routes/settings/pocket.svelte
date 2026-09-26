@@ -644,7 +644,7 @@
   </main>
 
   <!-- The warning picker (§2.7 step 4): a callout, one tap chooses. -->
-  <Sheet bind:open={pickerOpen} size="callout" title={picking === "final" ? "Final warning" : "First warning"}>
+  <Sheet bind:open={pickerOpen} size="list" title={picking === "final" ? "Final warning" : "First warning"}>
     <p class="st-say p-prose">
       {picking === "final" ? "How close to the date the last reminder lands." : "How far ahead Orbit first tells you."}
       Items with their own timing keep it.
@@ -670,7 +670,7 @@
       <p class="st-say p-prose">Orbit asks you to confirm it’s you before a way in changes.</p>
     {/if}
     {#if hasPassword || proven}
-      <form class="st-form" onsubmit={(event) => { event.preventDefault(); confirmMethod(); }}>
+      <form id="st-method-form" class="st-form" onsubmit={(event) => { event.preventDefault(); confirmMethod(); }}>
         {#if hasPassword}
           <label class="st-label" for="st-current">your current password</label>
           <input id="st-current" class="st-input" type="password" autocomplete="current-password"
@@ -683,14 +683,18 @@
           <input id="st-new" class="st-input" type="password" autocomplete="new-password" minlength="12"
                  enterkeyhint="done" bind:value={newPassword}>
         {/if}
-        <button class="p-pill filled wide st-confirm" type="submit"
-                disabled={methodBusy || (hasPassword && !currentPassword) || (wantsNew && !newPassword)}>
-          {methodBusy ? "saving…" : confirmLabel}</button>
       </form>
-    {:else}
-      <button class="p-pill filled wide" onclick={toProvider}>confirm with your identity provider →</button>
     {/if}
     {#if methodProblem}<p class="p-error" role="alert">{methodProblem}</p>{/if}
+    {#snippet foot()}
+      {#if hasPassword || proven}
+        <button class="p-pill filled" type="submit" form="st-method-form"
+                disabled={methodBusy || (hasPassword && !currentPassword) || (wantsNew && !newPassword)}>
+          {methodBusy ? "saving…" : confirmLabel}</button>
+      {:else}
+        <button class="p-pill filled" onclick={toProvider}>confirm with your identity provider →</button>
+      {/if}
+    {/snippet}
   </Sheet>
 </div>
 
@@ -854,7 +858,6 @@
     font:var(--p-type-body)/1.2 var(--ui)}
   .st-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
   .st-proven{margin:0 0 12px;color:var(--ok-text)}
-  .st-confirm{margin-top:4px}
 
   @media (prefers-reduced-motion:reduce){
     .st-rise,[role=tabpanel],.st-avatar::after,.st-swatch .st-sun,.st-dish span{animation:none}

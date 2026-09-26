@@ -637,15 +637,17 @@
   </div>
 
   <Sheet bind:open={inviteOpen} size="callout" title="Invite someone">
-    <form onsubmit={(event) => { event.preventDefault(); invite(); }}>
+    <form id="hh-invite-form" onsubmit={(event) => { event.preventDefault(); invite(); }}>
       <label class="hh-label" for="hh-invite">their email address</label>
       <input id="hh-invite" class="hh-input" type="email" inputmode="email" autocomplete="email" enterkeyhint="send"
              placeholder="name@example.com" bind:value={inviteEmail}>
       <p class="hh-note">the link admits only someone signed in with this exact address</p>
-      <button class="p-pill filled wide hh-sheet-act" type="submit" disabled={!inviteEmail.trim() || inviting}>
-        {inviting ? "sending…" : "send"}</button>
       {#if inviteProblem}<p class="p-error" role="alert">{inviteProblem}</p>{/if}
     </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="hh-invite-form" disabled={!inviteEmail.trim() || inviting}>
+        {inviting ? "sending…" : "send"}</button>
+    {/snippet}
   </Sheet>
 
   <Sheet bind:open={addOpen} size="list" title="Add an existing account">
@@ -666,9 +668,13 @@
   <Sheet bind:open={handoverOpen} size="callout" title="Hand {v.name} over?">
     {#if heir}
       <p class="p-prose hh-sheet-say">{heir.name} becomes its owner. You stay a member and keep everything you added.</p>
-      <ArmButton label="hand over to {heir.name}" armedLabel="tap again to hand over" danger={false} wide
-                 class="act-accent" onfire={handOver} />
     {/if}
+    {#snippet foot()}
+      {#if heir}
+        <ArmButton label="hand over to {heir.name}" armedLabel="tap again to hand over" danger={false}
+                   class="act-accent" onfire={handOver} />
+      {/if}
+    {/snippet}
   </Sheet>
 
   <Sheet bind:open={pickOpen} size="list" title={picking === "currency" ? "Currency" : "Time zone"}>
@@ -685,9 +691,9 @@
     </div>
   </Sheet>
 
-  <Sheet bind:open={editOpen} size="list" title={editing?.id ? `Edit ${editing.name.trim() || "section"}` : "Add a section"}>
+  <Sheet bind:open={editOpen} size="callout" title={editing?.id ? `Edit ${editing.name.trim() || "section"}` : "Add a section"}>
     {#if editing}
-      <form onsubmit={(event) => { event.preventDefault(); keepSection(); }}>
+      <form id="hh-section-form" onsubmit={(event) => { event.preventDefault(); keepSection(); }}>
         <label class="hh-label" for="hh-secname">name</label>
         <input id="hh-secname" class="hh-input" maxlength="30" autocomplete="off" enterkeyhint="done"
                placeholder="name it" bind:value={editing.name}>
@@ -703,14 +709,18 @@
         {:else}
           <p class="hh-note">a shipped section keeps its mark</p>
         {/if}
-        <button class="p-pill filled wide hh-sheet-act" type="submit" disabled={!editing.name.trim()}>
-          {editing.id ? "done" : "add"}</button>
         <p class="hh-note">saved with the rest of your changes</p>
       </form>
     {/if}
+    {#snippet foot()}
+      {#if editing}
+        <button class="p-pill filled" type="submit" form="hh-section-form" disabled={!editing.name.trim()}>
+          {editing.id ? "done" : "add"}</button>
+      {/if}
+    {/snippet}
   </Sheet>
 
-  <Sheet bind:open={doomOpen} size="list" title="Delete {v.name}?">
+  <Sheet bind:open={doomOpen} size="callout" title="Delete {v.name}?">
     <p class="p-prose hh-sheet-say">
       Everything in {v.name} — {v.entries} {v.entries === 1 ? "entry" : "entries"}, their documents, their history
       and every reminder still queued — stops the moment you ask. You have <b class="hh-red">30 days</b> to change
@@ -719,14 +729,14 @@
     <label class="hh-label" for="hh-delname">type the system’s name exactly</label>
     <input id="hh-delname" class="hh-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
            placeholder={v.name} bind:value={typedName}>
-    <div class="hh-sheet-act">
-      {#if nameOk}
-        <ArmButton label="delete" armedLabel="tap again to delete {v.name}" wide onfire={requestDeletion} />
-      {:else}
-        <button class="p-pill danger wide" disabled>delete</button>
-      {/if}
-    </div>
     {#if doomProblem}<p class="p-error" role="alert">{doomProblem}</p>{/if}
+    {#snippet foot()}
+      {#if nameOk}
+        <ArmButton label="delete" armedLabel="tap again to delete {v.name}" onfire={requestDeletion} />
+      {:else}
+        <button class="p-pill danger" disabled>delete</button>
+      {/if}
+    {/snippet}
   </Sheet>
 </div>
 
@@ -862,7 +872,6 @@
 
   /* Sheets' insides. */
   .hh-sheet-say{color:var(--ink-mid);margin:4px 0 16px}
-  .hh-sheet-act{margin-top:16px}
   .hh-filter{margin:4px 0 8px}
   .hh-options{display:flex;flex-direction:column}
   .hh-option{appearance:none;min-height:var(--p-row-min);padding:0 4px;border:0;border-bottom:1px solid var(--line-soft);
