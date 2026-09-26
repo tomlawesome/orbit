@@ -187,7 +187,7 @@
       <button class="p-pill close" data-sheet-close onclick={dismiss}>close</button>
     </div>
     <div class="body">{@render children?.()}</div>
-    {#if foot}<div class="foot" bind:clientHeight={footHeight}>{@render foot()}</div>{/if}
+    {#if foot}<div class="p-sheet-foot" bind:clientHeight={footHeight}>{@render foot()}</div>{/if}
   </div>
 </div>
 
@@ -241,13 +241,15 @@
   /* THE FOOT (§1.2): pinned under the body, outside the scroller, edge to
      edge across the panel and down over its bottom padding, on the raised
      glass with a hairline above. */
-  .foot{flex:none;display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);
+  /* Named for the kit: family.css, which some screens link, owns a fixed
+     `.foot` of its own. */
+  .p-sheet-foot{flex:none;display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);
     margin:0 calc(var(--p-gutter) * -1) calc(-16px - env(safe-area-inset-bottom));
     padding:12px var(--p-gutter) calc(16px + env(safe-area-inset-bottom));
     border-top:1px solid var(--line-soft);background:var(--panel-raised)}
-  .foot > :global(*){flex:1 1 150px}
+  .p-sheet-foot > :global(*){flex:1 1 150px}
   /* A sheet whose face has no act this time draws no foot. */
-  .foot:not(:has(*)){display:none}
+  .p-sheet-foot:not(:has(*)){display:none}
 
   @media (prefers-reduced-motion:reduce){
     .scrim,.p-sheet-panel{transition:none}
