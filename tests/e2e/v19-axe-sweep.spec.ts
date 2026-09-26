@@ -342,8 +342,26 @@ test.describe("the signed-in v19 sweep", () => {
        or on a phone the pocket's own form (proposal §2.5), whose fields only
        draw once the households have loaded; the other dialect's is hidden. */
     { path: "/create", ready: (page) => expect(page.getByRole("textbox", { name: "name", exact: true })).toBeVisible() },
-    { path: "/settings", ready: (page) => expect(page.getByRole("heading", { name: "Settings" })).toBeVisible() },
-    { path: "/settings/mail", ready: (page) => expect(page.locator(".relay-card")).toBeVisible() },
+    /* #1120: on a phone, settings and its relay draw their own pocket
+       screens, whose cards rise in (st-rise, rl-rise); measure them drawn,
+       not through the entrance's fading opacity. On the desk those roots
+       are display:none and hold no animations. */
+    {
+      path: "/settings",
+      ready: async (page) => {
+        await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+        await entrancesSettled(page.locator(".st-pocket"));
+      },
+    },
+    /* The desk's `.relay-card` never shows on a phone; the relay's h1 is
+       drawn by whichever dialect is showing (the other is hidden). */
+    {
+      path: "/settings/mail",
+      ready: async (page) => {
+        await expect(page.getByRole("heading", { name: "Your relay", level: 1 })).toBeVisible();
+        await entrancesSettled(page.locator(".rl-pocket"));
+      },
+    },
     {
       path: "/administration",
       ready: (page) => expect(page.getByRole("heading", { name: "Administration" })).toBeVisible(),
