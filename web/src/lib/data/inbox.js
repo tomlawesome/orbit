@@ -45,6 +45,10 @@ export function receiptSuggestionsOf(receipts = []) {
       metadataStatus: receipt.metadataStatus ?? null,
       classification: receipt.classification,
       message: receipt.message,
+      /* What the review sheet pre-fills, where home raises it in place
+         (round 3 §4). */
+      proposal: receipt.proposal ?? {},
+      attachmentCount: receipt.attachmentCount ?? 0,
     }));
 }
 
