@@ -82,7 +82,20 @@
 .pocket .mdial{width:100%;aspect-ratio:1;position:relative;
   transition:transform 600ms cubic-bezier(.5,0,.75,0),opacity 600ms ease-in}
 .pocket .mdial svg{display:block;width:100%;height:100%}
+/* The dial arrives (review round §1.4, home.css's POL-1 arrive): on a
+   forward arrival only, the desk's own flag (pocket.svelte). */
+.pocket .mdial.arrive{animation:pocket-arrive 1s cubic-bezier(.2,.7,.2,1) 1}
+@keyframes pocket-arrive{from{transform:scale(.16);opacity:0}60%{opacity:1}to{transform:scale(1)}}
+/* The sun breathes; the body due soonest pings (home.css .breathe, .ping). */
+.pocket .pk-glow{animation:pocket-sun 4.2s ease-in-out infinite}
+@keyframes pocket-sun{0%,100%{opacity:1}50%{opacity:.55}}
+.pocket .pk-ping{pointer-events:none;transform-origin:center;transform-box:fill-box;
+  animation:pocket-ping 3.4s ease-out infinite}
+@keyframes pocket-ping{0%{transform:scale(.6);opacity:1}70%{transform:scale(3.2);opacity:0}100%{opacity:0}}
 .pocket .pk-body{cursor:pointer;outline:none;-webkit-tap-highlight-color:transparent}
+/* A body pressed swells, as the desk's does under the pointer. */
+.pocket .pk-body > circle:first-of-type{transition:transform 120ms;transform-box:fill-box;transform-origin:center}
+.pocket .pk-body:active > circle:first-of-type{transform:scale(1.18)}
 .pocket .pk-body .hit{fill:transparent;pointer-events:all}
 .pocket .pk-body:focus-visible .hit{stroke:var(--accent);stroke-width:1.5}
 
@@ -218,6 +231,9 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
   animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
 
 @media (prefers-reduced-motion:reduce){
-  .pocket .sky g,.pk-dot.breathing{animation:none}
+  .pocket .sky g,.pk-dot.breathing,.pocket .mdial.arrive,.pocket .pk-glow{animation:none}
+  .pocket .pk-ping{display:none}
+  .pocket .pk-body > circle:first-of-type{transition:none}
+  .pocket .pk-body:active > circle:first-of-type{transform:none}
   .pocket .mdial,.pocket .msearch,.pocket .pk-below{transition:none}
 }

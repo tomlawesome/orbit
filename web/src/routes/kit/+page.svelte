@@ -62,7 +62,7 @@
   <h1 class="p-title">Pocket kit</h1>
 
   <h2 class="p-caps">Type scale</h2>
-  <section class="p-card" data-kit="type">
+  <section class="p-card" data-kit="type" style:--i="0">
     <p class="p-card-title">Card title, item name, 21px</p>
     <p class="t-sheet">Sheet title, 18px</p>
     <p class="t-body">Body, row title and inputs, 16px</p>
@@ -71,7 +71,7 @@
   </section>
 
   <h2 class="p-caps">Pills</h2>
-  <section class="p-card p-pills" data-kit="pills">
+  <section class="p-card p-pills" data-kit="pills" style:--i="1">
     <button class="p-pill filled">Add to orbit</button>
     <button class="p-pill">documents</button>
     <ArmButton label="remove" name="Remove the boiler service" onfire={() => wake("The boiler service removed")} />
@@ -79,7 +79,7 @@
   </section>
 
   <h2 class="p-caps">Rows · tap for acts</h2>
-  <section class="p-card flushcard" data-kit="members" data-row-group>
+  <section class="p-card flushcard" data-kit="members" data-row-group style:--i="2">
     {#each members as m (m.id)}
       <Row title={m.name} meta={m.role} trail={m.role === "owner" ? "OWNER" : ""}
            acts={[
@@ -92,7 +92,7 @@
   </section>
 
   <h2 class="p-caps">Rows · navigate, and acts that are the point</h2>
-  <section class="p-card flushcard" data-kit="rows">
+  <section class="p-card flushcard" data-kit="rows" style:--i="3">
     <Row title="Boiler service with a long name that ellipses" meta="Home · £84" trail="T−16d" trailSub="29 Aug"
          trailTone="var(--warm-text)" onactivate={() => (callout = true)}>
       {#snippet mark()}<span class="p-body soon ter"></span>{/snippet}
@@ -115,7 +115,7 @@
   </section>
 
   <h2 class="p-caps">Rows · long-press to reorder</h2>
-  <section class="p-card flushcard" data-kit="sections" data-row-group use:mountReorder={{ onreorder: reorder }}>
+  <section class="p-card flushcard" data-kit="sections" data-row-group use:mountReorder={{ onreorder: reorder }} style:--i="4">
     {#each sections as name, index (name)}
       <Row title={name} meta="section" onmove={(direction) => move(index, direction)}
            acts={[

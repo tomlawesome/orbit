@@ -49,10 +49,17 @@
 .p-pill:focus-visible,.p-focus:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .p-pills{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap)}
 
-/* CARDS (§1.7, §5.2): glass on the sky, with the desk's edge light. */
+/* CARDS (§1.7, §5.2): glass on the sky, with the desk's edge light, and on
+   the dark packs the belt's lift off the sky, cut down for a stack of cards
+   (review round §1.5). They land as the belt's card does (belt.css
+   belt-landed, verbatim, review round §1.4): a screen sets --i 0-4 on its
+   first five cards in DOM order and the rest land at once. Keyed blocks
+   keep their nodes, so a re-render never lands a card twice. */
 .p-card{position:relative;background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
   border-radius:var(--p-card-radius);padding:var(--p-card-pad);margin-bottom:var(--p-card-gap);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 10px 30px -18px rgba(0,0,0,.6);
+  animation:p-landed 600ms cubic-bezier(.3,.7,.2,1) backwards;animation-delay:calc(var(--i, 0) * 60ms)}
+@keyframes p-landed{from{opacity:0;transform:translateY(8px) scale(.985)}}
 :is([data-theme=dawn],[data-theme=clouds]) .p-card{
   box-shadow:inset 0 1px 0 rgba(255,255,255,.72), 0 8px 20px rgba(48,66,98,.07)}
 .p-card-title{font:500 var(--p-type-card)/1.2 var(--display);color:var(--ink);margin:0 0 8px}
@@ -75,6 +82,12 @@
 /* Caps labels: the floor, 12px, tracked .18em like the desk's card heads. */
 .p-caps{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
   text-transform:uppercase;color:var(--ink-quiet);margin:var(--p-group-above) 0 var(--p-group-below)}
+
+/* The count on a caps head (review round §1.6): one bead style everywhere,
+   the inbox lane's ring bead (FOR YOUR REVIEW · 1), trailing the head. */
+.p-count{margin-left:auto;min-width:22px;height:22px;padding:0 7px;box-sizing:border-box;border-radius:11px;
+  display:grid;place-items:center;border:1px solid var(--line);color:var(--ink-mid);letter-spacing:0}
+.p-caps:has(> .p-count){display:flex;align-items:center;gap:10px}
 
 /* Page title (§1.6): one per page. */
 .p-title{font:600 var(--p-type-title)/var(--p-type-title-lh) var(--display);color:var(--ink);margin:0}
@@ -163,5 +176,5 @@
 @keyframes p-errin{from{opacity:0;transform:translateY(-4px)}}
 
 @media (prefers-reduced-motion:reduce){
-  .p-body.breathing,.p-error{animation:none}
+  .p-body.breathing,.p-error,.p-card{animation:none}
 }

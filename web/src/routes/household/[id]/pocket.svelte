@@ -508,7 +508,7 @@
     </header>
 
     <!-- MEMBERS FIRST (3b, a trial): on a phone the likely errand is a person. -->
-    <h2 class="p-caps hh-rise" style:--i="1" id="hh-members-head">Members · {v.memberCount}</h2>
+    <h2 class="p-caps hh-rise" style:--i="1" id="hh-members-head">Members<span class="p-count">{v.memberCount}</span></h2>
     <section class="p-card hh-flush hh-members hh-rise" style:--i="1" aria-labelledby="hh-members-head" data-hh="members" data-row-group>
       {#each v.roster as person (person.id)}
         {#snippet leaveDetail()}

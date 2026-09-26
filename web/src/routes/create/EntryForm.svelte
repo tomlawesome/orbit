@@ -100,7 +100,7 @@
 </script>
 
 <div class="pc-form">
-  <section class="p-card pc-card" aria-labelledby="{uid}-type">
+  <section class="p-card pc-card" style:--i="0" aria-labelledby="{uid}-type">
     <h2 class="p-caps" id="{uid}-type">type</h2>
     <div class="pc-kinds" role="group" aria-labelledby="{uid}-type">
       {#each KINDS as kind (kind.id)}
@@ -127,7 +127,7 @@
     {/if}
   </section>
 
-  <section class="p-card pc-card" aria-labelledby="{uid}-details">
+  <section class="p-card pc-card" style:--i="1" aria-labelledby="{uid}-details">
     <h2 class="p-caps" id="{uid}-details">details</h2>
 
     <div class="pc-field">
@@ -242,7 +242,7 @@
 
   {#if mode === "review" && (papers.length || readings.length)}
     <!-- Review mode: what the relay read, below the fields (§2.5, §2.6). -->
-    <section class="p-card proposed pc-card pc-reading" aria-labelledby="{uid}-reading">
+    <section class="p-card proposed pc-card pc-reading" style:--i="2" aria-labelledby="{uid}-reading">
       <h2 class="p-caps" id="{uid}-reading">what the relay read</h2>
       {#each papers as paper (paper.name)}
         <div class="pc-paper">
@@ -254,7 +254,7 @@
     </section>
   {:else if attachment}
     <!-- The reading card, below the fields (§2.5). -->
-    <section class="p-card proposed pc-card pc-reading" aria-labelledby="{uid}-reading" aria-live="polite">
+    <section class="p-card proposed pc-card pc-reading" style:--i="2" aria-labelledby="{uid}-reading" aria-live="polite">
       <h2 class="p-caps" id="{uid}-reading">the document</h2>
       <div class="pc-paper">
         <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
