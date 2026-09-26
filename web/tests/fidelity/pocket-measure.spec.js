@@ -8,7 +8,8 @@ import { APP, DOOR_STATES, PHONES, SIGNED_IN, settle } from "./pocket-states.js"
  * every sheet, menu, search, swiped row, armed act, expanded section and
  * refusal the fixture data reaches (pocket-states.js lists them and how to
  * get there) -- with touch on, at the two widths the proposal draws for
- * (390x844 and 360x780), and fails if anything visible breaks the pocket's
+ * (390x844 and 360x780) and at the height a phone browser leaves them
+ * (390x664, 360x640), and fails if anything visible breaks the pocket's
  * three hard floors:
  *   · a tappable element smaller than 44x44px
  *   · text smaller than 12px
@@ -33,6 +34,20 @@ import { APP, DOOR_STATES, PHONES, SIGNED_IN, settle } from "./pocket-states.js"
  * the mark. Each is listed on its state in pocket-states.js as
  * `review round step c: <what>`, the step that fixes it.
  */
+
+/*
+ * The two design widths at full height, and the same two phones as a
+ * browser actually leaves them: the visible area under iPhone Safari's
+ * bottom toolbar (390x664) and under Android Chrome's address bar
+ * (360x640). A callout sized to 45% of the screen, or a bar pinned to its
+ * foot, meets its first real test at these heights. A state's `defect` is
+ * keyed by these names ("390", "360", "390x664", "360x640") or "*" for all.
+ */
+const MEASURED = [
+  ...PHONES,
+  { name: "390x664", viewport: { width: 390, height: 664 } },
+  { name: "360x640", viewport: { width: 360, height: 640 } },
+];
 
 /**
  * The selector the checks scope to: the sheet or dialog that is up, when
@@ -417,7 +432,7 @@ async function inspect(page) {
   return [...floors, ...reached, ...cover];
 }
 
-for (const phone of PHONES) {
+for (const phone of MEASURED) {
   test.describe(`pocket measurement at ${phone.name}`, () => {
     test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true });
 
@@ -433,7 +448,7 @@ for (const phone of PHONES) {
   });
 }
 
-for (const phone of PHONES) {
+for (const phone of MEASURED) {
   test.describe(`pocket measurement at ${phone.name}: the door family`, () => {
     test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true, reducedMotion: "reduce" });
 
@@ -488,7 +503,7 @@ function wellOverflow() {
   return [...out.values()];
 }
 
-for (const phone of PHONES) {
+for (const phone of MEASURED) {
   test.describe(`pocket measurement at ${phone.name}: the error page's graphic`, () => {
     test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true });
 
