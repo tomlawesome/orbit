@@ -645,7 +645,7 @@
       <section class="p-card ad-card ad-flush ad-rise" class:proposed={people.length <= 1} style:--i="3"
                id="ad-people" tabindex="-1" aria-labelledby="ad-people-head" data-ad="people" data-row-group>
         <div class="ad-cardhead">
-          <h2 class="p-caps" id="ad-people-head">People · {people.length}</h2>
+          <h2 class="p-caps" id="ad-people-head">People<span class="p-count">{people.length}</span></h2>
           <button class="p-pill act-accent" onclick={openInvite}>invite someone</button>
         </div>
         {#if delivery?.sendError}
@@ -675,7 +675,7 @@
       <section class="p-card ad-card ad-flush ad-rise" class:proposed={systems.length === 0} style:--i="4"
                id="ad-systems" tabindex="-1" aria-labelledby="ad-systems-head" data-ad="systems" data-row-group>
         <div class="ad-cardhead">
-          <h2 class="p-caps" id="ad-systems-head">Systems · {systems.length}</h2>
+          <h2 class="p-caps" id="ad-systems-head">Systems<span class="p-count">{systems.length}</span></h2>
           <button class="p-pill act-accent" onclick={openNewSystem}>new system</button>
         </div>
         {#each systems as system (system.id)}

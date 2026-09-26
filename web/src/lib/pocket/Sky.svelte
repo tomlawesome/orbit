@@ -7,8 +7,10 @@
    * star field and vignette as a kit part, so no pocket screen arrives on a
    * flat colour. Glass needs something behind it to read as glass.
    *
-   * A 400x850 tile (the phone's shape) of the desk's own two layers, counts
-   * scaled to the tile (40 far, 20 near), seeded so every load and the
+   * A 400x850 tile (the phone's shape) of the desk's own two layers, 60 far
+   * and 30 near, and 5 bright near stars (r 1.8-2.4, opacity .95) so the
+   * sky reads as dense as the desk's beside it (review round §1.5), seeded
+   * so every load and the
    * fidelity gate draw the same sky. Each layer drifts on the desk's period
    * (far 400s, near 195s) by transform only, over a copy of itself one tile
    * to the right, so the wrap is seamless. Opacity is the pack's --stars.
@@ -35,10 +37,17 @@
       o: (oMin + rng() * oSpan).toFixed(2),
     }));
   }
-  /* One rng, far then near: the call order is what keeps the seed stable. */
+  /* One rng, far then near then bright: the call order is what keeps the
+     seed stable. */
   const rng = seededRng(TILED_SEED);
-  const far = stars(0, 40, rng);
-  const near = stars(1, 20, rng);
+  const far = stars(0, 60, rng);
+  const near = stars(1, 30, rng);
+  const bright = Array.from({ length: 5 }, () => ({
+    cx: (rng() * 400).toFixed(1),
+    cy: (rng() * 850).toFixed(1),
+    r: (1.8 + rng() * 0.6).toFixed(2),
+    o: "0.95",
+  }));
 </script>
 
 <div class="p-sky" aria-hidden="true">
@@ -48,7 +57,7 @@
       <use href="#p-sky-far" x="400" />
     </g>
     <g class="near" fill="var(--star-near, #f4f0ff)">
-      <g id="p-sky-near">{#each near as s, i (i)}<circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.o} />{/each}</g>
+      <g id="p-sky-near">{#each near as s, i (i)}<circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.o} />{/each}{#each bright as s, i (i)}<circle class="bright" cx={s.cx} cy={s.cy} r={s.r} opacity={s.o} />{/each}</g>
       <use href="#p-sky-near" x="400" />
     </g>
   </svg>
