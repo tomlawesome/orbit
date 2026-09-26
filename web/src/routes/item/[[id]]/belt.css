@@ -198,6 +198,12 @@
   .belt-page .hit .fring{opacity:0}
   .belt-page .hit:focus-visible{outline:none}
   .belt-page .hit:focus-visible .fring{opacity:1}
+  /* #1065: a seat's ring is an OUTLINE on the seat's own <g>, the same fix
+     #1062 gave the end-caps and for the same reason -- see the comment on
+     .endcap-hit below. `.seat .hit` rather than `.hit` alone, so this leaves
+     the pocket's document clump (buildClump, not wrapped in `.seat`) painting
+     its ring on a child exactly as before: #1065 is scoped to seats. */
+  .belt-page .seat .hit:focus-visible{outline:2px dashed var(--accent);outline-offset:3px}
   .belt-page .hit:hover .rim{opacity:.9}
   .belt-page .rim{transition:opacity .25s ease}
   .belt-page .cap-name{font:11.5px var(--mono);fill:var(--ink-mid);text-anchor:middle}
@@ -218,18 +224,18 @@
      and be told it is spent.
 
      The ring is an OUTLINE on the control itself, not a dashed shape drawn
-     inside it. The seats above do it the other way -- a .fring circle that
-     opens at :focus-visible while the seat itself is outline:none -- and that
-     is not the screen's proven answer, only its untested one: paintMembers
-     drops a seat nobody can see to tabindex="-1", the keyboard audit's
-     household holds one item, and that item is the card, so no seat has ever
-     been focused by tests/e2e/support/keyboard.ts. The audit reads the
-     computed style of THE ELEMENT THAT HAS FOCUS, so a ring painted by a
-     child leaves the focused <g> carrying nothing -- which is what pipeline
-     1281 caught, and it was right to. Chromium paints outline on an SVG
-     element around its bounding box, so this is one ring, on the thing the
-     focus is actually on. 2px and offset, not a hairline: it has to read
-     against the band on a phone as well as on a desk. */
+     inside it, because Chromium paints outline on an SVG element around its
+     bounding box, so this is one ring, on the thing the focus is actually
+     on -- a keyboard audit reading the focused element's own computed style
+     finds it, where a ring painted by a child leaves that element carrying
+     nothing (pipeline 1281). The seats above now do it the same way (#1065);
+     paintMembers still drops a seat nobody can see to tabindex="-1", and the
+     e2e keyboard audit's household still holds one item -- the card -- so it
+     still never focuses a seat itself, which is why that fix is proved by a
+     fidelity check on the fixture household instead. Only the pocket's
+     document clump below still paints its ring on a child, because #1065 was
+     scoped to seats. 2px and offset, not a hairline: it has to read against
+     the band on a phone as well as on a desk. */
   .belt-page .endcap-hit{pointer-events:auto;cursor:pointer}
   .belt-page .endcap-hit:focus-visible{outline:2px dashed var(--accent);outline-offset:3px}
   .belt-page .endcap-hit:hover .endcap{fill:var(--ink-mid)}
