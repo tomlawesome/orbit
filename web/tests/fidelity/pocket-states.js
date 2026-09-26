@@ -216,9 +216,8 @@ export const SIGNED_IN = [
     await page.locator(".p-wake").first().waitFor();
   } },
 
-  /* /home: the dial, the manifest's drawers, and every sheet home raises.
-     The item and suggestion sheets are the dial's alone while the owner's
-     question 6 (review-round.md §4) is open. */
+  /* /home: the dial, the manifest's drawers, and every sheet home raises:
+     the search and the hatch. A planet opens its row (owner's answer 6a). */
   { route: "/home", state: "rest", reach: (page) => go(page, "/home") },
   { route: "/home", state: "hatch", reach: async (page) => { await go(page, "/home"); await hatch(page); } },
   { route: "/home", state: "search", reach: async (page) => {
@@ -238,18 +237,11 @@ export const SIGNED_IN = [
     await sheetUp(page);
     await sheet(page).locator(".pk-field").fill("xyzxyz");
   } },
-  { route: "/home", state: "item-sheet", reach: async (page) => {
+  { route: "/home", state: "dial-lit", reach: async (page) => {
     await go(page, "/home");
-    await page.locator(".pk-body[data-sheet-title]").first().click();
-    await sheetUp(page);
-  } },
-  { route: "/home", state: "item-sheet-documents", reach: async (page) => {
-    await go(page, "/home");
-    await page.locator(".pk-body[data-sheet-title='Car full service']").click();
-    await sheetUp(page);
+    await page.locator(".mdial .pk-body[aria-label='Gutter clearing']").click();
+    await row(page, ".pk-below", "Gutter clearing").locator("[data-row-panel]:not([hidden])").waitFor();
     await settle(page);
-    await sheet(page).getByRole("button", { name: "documents" }).click();
-    await sheet(page).locator(".pk-list.flat [data-row]").first().waitFor();
   } },
   { route: "/home", state: "row-open", reach: async (page) => {
     await go(page, "/home");
@@ -266,18 +258,6 @@ export const SIGNED_IN = [
     const catch_ = row(page, ".pk-sugg", "Home insurance");
     await openRow(page, catch_);
     await catch_.getByRole("button", { name: /^Add .* to your orbit$/ }).click();
-  } },
-  { route: "/home", state: "suggestion-sheet", reach: async (page) => {
-    await go(page, "/home");
-    await page.locator(".pk-body[data-sheet-sugg]").first().click();
-    await sheetUp(page);
-  } },
-  { route: "/home", state: "suggestion-armed", reach: async (page) => {
-    await go(page, "/home");
-    await page.locator(".pk-body[data-sheet-sugg]").first().click();
-    await sheetUp(page);
-    await settle(page);
-    await sheet(page).getByRole("button", { name: "Add to orbit" }).click();
   } },
   { route: "/home", state: "manifest-bottom", reach: async (page) => {
     await go(page, "/home");
