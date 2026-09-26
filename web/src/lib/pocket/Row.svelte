@@ -44,9 +44,13 @@
    * that opens the row, so its own tap never opens the row.
    *
    * `meta` speaks mono, the desk's face for data (section · amount, date,
-   * role). Set `metaFace="ui"` wherever the meta is a sentence or
-   * descriptive prose (a failure's reason, a status in words): it then
-   * reads in the body face, untracked, as kit.css's `.p-prose` (§5.2).
+   * role). Set `metaFace="ui"` wherever the meta is words rather than data
+   * (a failure's first clause): it then reads in the body face, untracked,
+   * as kit.css's `.p-prose` (§5.2). Either way it is ONE line (round 3 §1,
+   * R5, R8): at most 20 characters beside a trail, 34 without, fixed data
+   * first and the elastic part (a file name, a person's name) last, so the
+   * ellipsis guard trims the name and never the number. The one exception
+   * is an email address alone (proposal §2.12), which may wrap once.
    *
    * `below` draws a line under the row that is always there, not behind a
    * tap (a knock's approve and decline, which are the point of the row).
@@ -132,6 +136,8 @@
   /** @param {import("./row.js").RowAct} act */
   const tone = (act) => (act.tone === "filled" ? "filled" : act.tone ? `act-${act.tone}` : "");
   const tag = $derived(href ? "a" : opens || onactivate ? "button" : "div");
+  /* An email address alone: the meta line's one exception (R5). */
+  const EMAIL = /^[^\s@]+@[^\s@]+$/;
 </script>
 
 <div class="p-row" class:current class:opens data-row data-row-key={key} bind:this={row}>
@@ -156,7 +162,7 @@
       <span class="mark" aria-hidden="true">{@render mark?.()}</span>
       <span class="text">
         <span class="title">{title}</span>
-        {#if meta}<span class="meta" class:ui={metaFace === "ui"}>{meta}</span>{/if}
+        {#if meta}<span class="meta" class:ui={metaFace === "ui"} class:email={EMAIL.test(meta)}>{meta}</span>{/if}
       </span>
       {#if trail || trailSub}
         <span class="trail" class:bead style:color={trailTone || undefined}><span aria-hidden={trailName ? "true" : undefined}>{trail}</span>{#if trailName}<span class="sr-only">{trailName}</span>{/if}{#if trailSub}<small>{trailSub}</small>{/if}</span>
@@ -217,8 +223,13 @@
   .title{font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .current .title{color:var(--accent-text)}
-  .meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  /* One line, guarded (R8): the words are the fix, the ellipsis only the
+     guard. An address may wrap once, anywhere, and no further. */
+  .meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .meta.ui{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
+  .meta.email{white-space:normal;overflow-wrap:anywhere;display:-webkit-box;
+    -webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
   .trail{flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(--ink-mid)}
   .trail.bead{min-width:22px;height:22px;padding:0 6px;box-sizing:border-box;border-radius:11px;
     display:grid;place-items:center;background:var(--accent);color:var(--bg);font-weight:600}

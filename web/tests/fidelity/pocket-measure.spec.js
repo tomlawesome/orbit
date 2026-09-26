@@ -28,6 +28,13 @@ import { APP, DOOR_STATES, PHONES, SIGNED_IN, settle } from "./pocket-states.js"
  *   · covered: a fixed or sticky bar (the top chrome, a save bar, the orb,
  *     the add button) or anything else lies over part of it, at every
  *     scroll position that could show it
+ * or if the words break round 3's rules for prose on the pocket
+ * (design/v19/phone-vision/round-3.md §1):
+ *   · a visible ellipsis outside a title or a file name (R8): the guard on
+ *     a line is CSS, but a line that needs it is a defect in its words
+ *   · a sentence at rest (R1, R3, R5): at rest, a row's meta over its cap
+ *     (20 characters beside a trailing value, 34 without; an email address
+ *     alone is exempt) or a .p-sub, .p-hint or .p-foot over 40
  *
  * A known defect is an EXPECTED failure (test.fail), not a skip: it still
  * runs, and the day it passes Playwright says so, which is the cue to drop
@@ -417,16 +424,107 @@ async function coveredEverywhere(page, scope) {
 }
 
 /**
- * Every check on the state the page is in now.
- * @param {import("@playwright/test").Page} page
+ * Runs in the page. Every visible ellipsis under `scope` that is not a
+ * title's or a file name's (round 3 §1, R8): an element that cuts its own
+ * text with `text-overflow: ellipsis` and is cut now. A cut is a file
+ * name's when everything it hides is the line's trailing file name (and
+ * the `·` before it), as a row's meta puts the elastic part last (R5).
+ * @param {string} scope
  */
-async function inspect(page) {
+function ellipses(scope) {
+  const roots = scope ? [...document.querySelectorAll(scope)] : [document.body];
+  const FILE = /[^\s·]+\.[a-z0-9]{2,5}$/i;
+  /** @param {Element} el */
+  const label = (el) => {
+    const text = (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 40);
+    return `${el.tagName.toLowerCase()}${el.classList[0] ? `.${el.classList[0]}` : ""} "${text}"`;
+  };
+  const out = new Set();
+  for (const root of roots) {
+    for (const el of [root, ...root.querySelectorAll("*")]) {
+      const cs = getComputedStyle(el);
+      if (cs.textOverflow !== "ellipsis" || !/hidden|clip/.test(cs.overflowX) || cs.whiteSpace !== "nowrap") continue;
+      if (el.scrollWidth <= el.clientWidth + 1) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 1 || r.height <= 1 || !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
+      if (el.closest("[class*=title]")) continue;
+      /* Where the cut falls: the first character past the content edge. */
+      const edge = r.left + el.clientLeft + el.clientWidth - parseFloat(cs.paddingRight);
+      const text = el.textContent ?? "";
+      let at = -1;
+      let offset = 0;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      seek: for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const length = node.nodeValue?.length ?? 0;
+        for (let i = 0; i < length; i++) {
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const box = range.getBoundingClientRect();
+          if (box.width && box.right > edge + 0.5) { at = offset + i; break seek; }
+        }
+        offset += length;
+      }
+      const file = FILE.exec(text.trimEnd());
+      /* The ellipsis itself takes a character's room before the cut. */
+      if (file && at >= 0 && at - 1 >= file.index - 3) continue;
+      out.add(`ellipsis outside a title or file name: ${label(el)}`);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Runs in the page, on a state at rest. Every line under `scope` that is
+ * a sentence where the pocket keeps data (round 3 §1, R3, R5): a row's
+ * meta over 20 characters beside a trailing value or 34 without, or a
+ * `.p-sub`, `.p-hint` or `.p-foot` over 40. Those caps are set in 13px
+ * mono at 7.8px a character; a meta in the body face (`metaFace="ui"`,
+ * about 6.3px a character at 13px, §1's own measurements) gets the same
+ * width in its own characters. An email address alone is R5's exception.
+ * @param {string} scope
+ */
+function sentences(scope) {
+  const roots = scope ? [...document.querySelectorAll(scope)] : [document.body];
+  const UI = 7.8 / 6.3;
+  const out = new Set();
+  /** @param {Element} el */
+  const shown = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 1 && r.height > 1 && el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+  };
+  for (const root of roots) {
+    for (const el of root.querySelectorAll("[data-row] .meta, .p-sub, .p-hint, .p-foot")) {
+      if (!shown(el)) continue;
+      const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+      let cap = 40;
+      if (el.classList.contains("meta")) {
+        if (el.classList.contains("email")) continue;
+        const row = el.closest("[data-row]");
+        cap = row?.querySelector(".trail") ? 20 : 34;
+        if (el.classList.contains("ui")) cap = Math.floor(cap * UI);
+      }
+      if (text.length > cap)
+        out.add(`sentence at rest (${text.length} > ${cap}): ${el.classList[0]} "${text.slice(0, 60)}"`);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Every check on the state the page is in now. `rest` adds the check for
+ * sentences, which the pocket allows once something is opened (R2).
+ * @param {import("@playwright/test").Page} page
+ * @param {{ rest?: boolean }} [options]
+ */
+async function inspect(page, { rest = false } = {}) {
   await settle(page);
   const scope = await scopeOf(page);
   const floors = await page.evaluate(measure, scope);
   const reached = await page.evaluate(reach, scope);
   const cover = await coveredEverywhere(page, scope);
-  return [...floors, ...reached, ...cover];
+  const words = [...await page.evaluate(ellipses, scope), ...(rest ? await page.evaluate(sentences, scope) : [])];
+  return [...floors, ...reached, ...cover, ...words];
 }
 
 for (const phone of MEASURED) {
@@ -438,7 +536,7 @@ for (const phone of MEASURED) {
         const defect = state.defect?.[phone.name] ?? state.defect?.["*"];
         test.fail(Boolean(defect), defect);
         await state.reach(page);
-        const problems = await inspect(page);
+        const problems = await inspect(page, { rest: state.state === "rest" });
         expect(problems, problems.join("\n")).toEqual([]);
       });
     }
@@ -457,7 +555,7 @@ for (const phone of MEASURED) {
         await page.evaluate(() => document.fonts.ready);
         /* reduced motion still crossfades the card in over .7s (ringcard.css) */
         await page.waitForTimeout(900);
-        const problems = await inspect(page);
+        const problems = await inspect(page, { rest: state.state === "rest" });
         expect(problems, problems.join("\n")).toEqual([]);
       });
     }
