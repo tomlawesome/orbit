@@ -141,6 +141,9 @@
          element rather than three branches sharing a snippet: a snippet
          here is hoisted by the compiler and drags the script's doc comments
          into a declaration the production bundler cannot parse. -->
+    <!-- The key handler only ever acts on a row with `onmove`, and every
+         row that moves opens, so its face is a button then. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <svelte:element this={tag} class="hit" data-row-face
         href={href || undefined}
         type={tag === "button" ? "button" : undefined}
