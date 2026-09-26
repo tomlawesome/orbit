@@ -45,6 +45,22 @@ async function requireHouseholdAccess(userId: string, householdId: string, owner
   return access;
 }
 
+/**
+ * Whether this person may write the household out or bring an archive in,
+ * answered before anyone is asked to prove it is them (#1132): a person who
+ * may not do the act at all is told that, rather than being challenged and
+ * then refused. Export is the owner's act (#1049); import is open to any
+ * member. `createPortableArchive` and `importPortableArchive` check again, so
+ * nothing relies on a route having called this.
+ */
+export async function requirePortableArchiveAccess(
+  userId: string,
+  householdId: string,
+  act: "export" | "import",
+): Promise<void> {
+  await requireHouseholdAccess(userId, householdId, act === "export");
+}
+
 function jsonBuffer(value: unknown): Buffer {
   return Buffer.from(JSON.stringify(value));
 }
