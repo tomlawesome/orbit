@@ -8,6 +8,7 @@
   import Sky from "$lib/pocket/Sky.svelte";
   import { mountReorder } from "$lib/pocket/reorder.js";
   import { wake } from "$lib/pocket/wake.js";
+  import { firstClause } from "$lib/pocket/words.js";
 
   /*
    * The kit (#1120): every pocket part at rest, on one fixtures-only page,
@@ -100,16 +101,17 @@
     <Row title="Car insurance" meta="Car · £412" trail="T−41d" trailSub="23 Oct" href="/kit#rows">
       {#snippet mark()}<span class="p-body ok con"></span>{/snippet}
     </Row>
-    <Row title="Energy bill, caught by your relay" meta="from bill-sept.pdf · burns up in 12d">
+    <Row title="Energy bill, caught by your relay" meta="burns up in 12d · bill-sept.pdf">
       {#snippet mark()}<span class="p-body sug"></span>{/snippet}
       {#snippet below()}
         <button class="p-pill filled">Add to orbit</button>
         <button class="p-pill">Dismiss</button>
       {/snippet}
     </Row>
-    <!-- Meta that is a sentence speaks the body face (metaFace="ui"). -->
+    <!-- Meta that is a sentence speaks the body face (metaFace="ui"), and at
+         rest only its first clause (round 3 §1 R6, words.js). -->
     <Row title="A message from 09 Aug" metaFace="ui"
-         meta="Its attachment is a picture-only scan, and Orbit couldn't read any text from it. You can add the item yourself and attach the file from Documents.">
+         meta={firstClause("Its attachment is a picture-only scan, and Orbit couldn’t read any text from it. You can add the item yourself and attach the file from Documents.")}>
       {#snippet mark()}<span class="p-body"></span>{/snippet}
     </Row>
   </section>

@@ -450,3 +450,59 @@ rows under Signals; they carry the sentences that crowded the manifest.
     the rows themselves live in the inbox (my recommendation: home shows
     decisions; a message that failed needs none).
  b) Keep them as rows on home, cut to one meta line each under §1.
+
+---
+
+## 8. Caps: the lines that broke them (decided 2026-09-26)
+
+Built to §1 and 10b, these lines still broke §1's own caps in the fixtures
+(the gate, `pocket-measure.spec.js`, is right; the words give). One line
+each: the words as built → the treatment, and why. A row that navigates or
+raises a sheet has no panel (`Row.svelte`), so its meta is rewritten, not
+moved.
+
+- Settings `first warning` / `final warning` meta `before closest approach`
+  → `before it’s due`; 23 beside a value, and the row opens a picker, so
+  there is no panel to move it to. `the day itself` stands.
+- Settings `outbound mail` meta `set by your administrator` →
+  `administrator’s setting`; 25 in the body face beside `configured`, and
+  the reader only needs to know the switch is not theirs.
+- Settings `waiting for review` meta `arrivals in your inbox` →
+  `in your inbox`; 22 beside the count, and the row already leads there.
+- Settings `email approval` meta `this instance has no mail relay
+  configured` → `no mail relay set up`; 41 beside `off`.
+- Settings › sent meta `browser alert · 14 days before` → `alert · 14 days`
+  (`email · on the day`); 30 beside the date, and the reminders tab's own
+  trail already says days that way, so `before` is understood.
+- Administration `ingest` meta `enabled · polling every 30s` →
+  `every 30s` on the pocket only (`words.js`); 27 beside `on`, and `on`
+  already says enabled. The desk keeps its words: they sit in its mockup.
+- Administration `verification` meta `verified · 12/08/2026, 09:00:00` →
+  `verified · 12 Aug`, and `credential set` `01/08/2026, 09:00:00 · Tom
+  Lawson` → `1 Aug · Tom Lawson`; the pocket's date is day and month
+  (§3.9's `lapses 3 Oct`), and the name goes last for the guard (R5).
+- Administration document job `couldn’t reach the scanner · 6m ago` →
+  the reason alone at rest, `last tried · 6m ago` a `.p-kv` in the panel
+  beside `tries`; the state pill takes the width the time needed, and the
+  reason is what R6 puts at rest. The reason words (`JOB_REASONS`, pocket
+  only) are each cut to at most 26 characters so every one fits beside
+  `retrying`.
+- Administration service sheet `Checked by this instance itself; nothing
+  here leaves the machine.` → cut; 10b reaches sheets — a promise is the
+  same sentence wherever it sits, and the sheet's `.p-kv` lines are the
+  check.
+- Inbox footnote `unreviewed arrivals burn up after 45 days` → `unreviewed
+  arrivals burn up after 45d`; 41, and the review card already counts in
+  `43d`.
+- Inbox dismiss wake `dismissed · <title> · the original stays in your
+  mailbox` → `dismissed · <title>`; a promise line (10b).
+- Home search, a paper's meta `Car MOT — Volvo V60 · 88 KB · added 12 Jun`
+  → the item's title alone; the size went in §3.5, the date is the paper's
+  own sheet's, and an item title is elastic but not a file name, so it
+  cannot be the trimmed tail.
+- Kit `from bill-sept.pdf · burns up in 12d` → `burns up in 12d ·
+  bill-sept.pdf`; 36, and the file name goes last (R5). Kit `Its attachment
+  is a picture-only scan, and Orbit couldn't read …` → the first clause
+  through `firstClause()` (R6); the specimen shows the rule it names.
+
+No exemption was needed: no cap was wrong for its case.

@@ -14,8 +14,8 @@
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, initialsOf, lapsesShort, openFor, plainly, sendWords,
-    setupWords, stamp, testVerdict, versionLine,
+    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, ingestShort, initialsOf, lapsesShort, openFor, plainly,
+    sendWords, setupWords, shortDay, stamp, testVerdict, versionLine,
   } from "./words.js";
 
   /*
@@ -534,9 +534,11 @@
   const clock = $derived(view?.now ?? new Date().toISOString());
   /** @param {(typeof jobs)[number]} job */
   const jobMeta = (job) => {
-    /* Round 3 §3.9: the reason and when, at rest; the tries are the panel's. */
-    if (job.status === "failed") return `${JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown} · ${ago(job.updatedAt, clock)}`;
-    if (job.status === "retry") return `${job.lastErrorCode ? `${JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown} · ` : "last tried "}${ago(job.updatedAt, clock)}`;
+    /* Round 3 §3.9 and §8: the reason alone at rest (R6); when it was last
+       tried, and the tries, are the panel's — the state pill takes the room
+       the time needed. */
+    if (job.status === "failed") return JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown;
+    if (job.status === "retry") return job.lastErrorCode ? JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown : `last tried ${ago(job.updatedAt, clock)}`;
     if (job.status === "pending") return retried[job.id] ? "attempt 1 · queued just now" : `queued ${ago(job.createdAt, clock)}`;
     if (job.status === "processing") return `started ${ago(job.updatedAt, clock)}`;
     return `${JOB_STATES[job.status]?.word ?? job.status} ${ago(job.updatedAt, clock)}`;
@@ -771,7 +773,7 @@
           {/if}
         {/each}
         {#each view.relay as [label, value, extra] (label)}
-          <Row title={label} meta={value} trail={extra === "on" ? "on" : ""} trailTone="var(--ok-text)">
+          <Row title={label} meta={label === "ingest" ? ingestShort(value) : value} trail={extra === "on" ? "on" : ""} trailTone="var(--ok-text)">
             {#snippet mark()}<span class="p-body {extra === 'on' ? 'ok' : 'ended'}"></span>{/snippet}
           </Row>
         {/each}
@@ -784,14 +786,14 @@
         {/if}
         {#if view.mailbox}
           {@const mailbox = view.mailbox}
-          <Row title="verification" meta="{plainly(mailbox.verificationState)} · {stamp(mailbox.verifiedAt)}"
+          <Row title="verification" meta="{plainly(mailbox.verificationState)} · {shortDay(mailbox.verifiedAt)}"
                trail={mailbox.verificationState === "verified" ? "passed" : mailbox.verificationState === "failed" ? "failed" : ""}
                trailTone={mailbox.verificationState === "failed" ? "var(--overdue-text)" : "var(--ok-text)"}>
             {#snippet mark()}<span class="p-body {mailbox.verificationState === 'verified' ? 'ok' : mailbox.verificationState === 'failed' ? 'over' : 'ended'}"></span>{/snippet}
           </Row>
           {#if mailbox.configured}
             {#each [
-              ["credential set", `${stamp(mailbox.credentialSetAt)}${mailbox.credentialSetBy ? ` · ${mailbox.credentialSetBy}` : ""}`],
+              ["credential set", `${shortDay(mailbox.credentialSetAt)}${mailbox.credentialSetBy ? ` · ${mailbox.credentialSetBy}` : ""}`],
               ["address shape", mailbox.aliasPattern ?? "—"],
               ["envelope header", mailbox.trustedRecipientHeader || "not set"],
               ["provider profile", mailbox.providerProfile],
@@ -847,7 +849,10 @@
           </div>
           {#each jobs as job (job.id)}
             {@const state = JOB_STATES[job.status] ?? { word: job.status, tone: "" }}
-            {#snippet jobDetail()}<div class="p-kv"><span>tries</span><b>{job.attempts}</b></div>{/snippet}
+            {#snippet jobDetail()}
+              <div class="p-kv"><span>tries</span><b>{job.attempts}</b></div>
+              <div class="p-kv"><span>last tried</span><b>{ago(job.updatedAt, clock)}</b></div>
+            {/snippet}
             <Row title={JOB_KINDS[job.kind] ?? job.kind} metaFace="ui" meta={jobMeta(job)}
                  detail={job.status === "failed" || job.status === "retry" ? jobDetail : undefined}>
               {#snippet mark()}<span class="p-body {state.tone || 'ended'}" class:failed={job.status === "failed"}></span>{/snippet}
@@ -1113,7 +1118,6 @@
       {:else}
         <div class="p-kv"><span>last check</span><b>{split(service[2]).rest || "as shown"}</b></div>
       {/if}
-      <p class="ad-note">Checked by this instance itself; nothing here leaves the machine.</p>
     {/if}
   </Sheet>
 </div>

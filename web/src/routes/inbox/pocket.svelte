@@ -118,7 +118,7 @@
     try {
       await dismissReceipt(receipt.id);
       exits.set(receipt.id, "burn");
-      wake(`dismissed · ${titleOf(receipt)} · the original stays in your mailbox`);
+      wake(`dismissed · ${titleOf(receipt)}`);
       await reload();
     } catch (error) {
       problems.set(receipt.id, /** @type {{ message?: string }} */ (error)?.message ?? String(error));
@@ -300,7 +300,7 @@
       </section>
 
       {#if !emptyQueue}
-        <p class="p-foot pki-foot">unreviewed arrivals burn up after 45 days</p>
+        <p class="p-foot pki-foot">unreviewed arrivals burn up after 45d</p>
       {/if}
     {/if}
   </main>
