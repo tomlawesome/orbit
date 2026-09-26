@@ -97,6 +97,9 @@
 .pocket .pk-body > circle:first-of-type{transition:transform 120ms;transform-box:fill-box;transform-origin:center}
 .pocket .pk-body:active > circle:first-of-type{transform:scale(1.18)}
 .pocket .pk-body .hit{fill:transparent;pointer-events:all}
+/* Lit while its row is open (the desk's .lit, owner's answer 6a): an accent
+   ring at r+4, 1.5 wide. */
+.pocket .pk-body .pk-lit{fill:none;stroke:var(--accent);stroke-width:1.5;pointer-events:none}
 .pocket .pk-body:focus-visible .hit{stroke:var(--accent);stroke-width:1.5}
 
 /* ---- other skies: a chip flies there (#1118) --------------------------
@@ -170,34 +173,10 @@
 /* ---- the north star hides while the film plays (§2.1) ----------------- */
 body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
 
-/* ---- inside the sheet (portalled, so pk- classes, not .pocket) ---------
- * The item sheet (#1119), its documents, the suggestion sheet (#466) and
- * the search sheet (#1057). Rows in a sheet sit on the sheet's glass. */
-.pk-meta{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:-4px 0 12px}
-/* The item sheet's card (#1120): the item card's phone face
-   (item/[[id]]/belt.css .item-card.ip) at sheet scale, so `open` reads as
-   this card growing into that one. */
-/* its name rides in the card, so `close` keeps the head's right edge */
-.p-sheet-layer:has(.pk-card) [data-sheet-close]{margin-left:auto}
-.pk-card{margin:0;background:var(--panel-raised);border-color:var(--line)}
-.pk-card-head{display:flex;align-items:center;gap:12px}
-.pk-mark{width:14px;height:14px}
-.pk-name{min-width:0;font:600 var(--p-type-card)/1.2 var(--display);color:var(--ink);overflow-wrap:anywhere}
-.pk-sub{font:var(--p-type-meta)/1.4 var(--mono);letter-spacing:.02em;color:var(--ink-quiet);margin:6px 0 6px 26px}
-.pk-card .p-kv{align-items:baseline;color:var(--ink-quiet)}
-.pk-card .p-kv span{flex:none}
-.pk-card .p-kv b{min-width:0;text-align:right;overflow-wrap:anywhere}
-.pk-card .p-kv:last-child{border-bottom:0;padding-bottom:0}
-.p-sheet-layer .pk-list{display:flex;flex-direction:column;gap:2px}
-.p-sheet-layer .pk-list .face,.p-sheet-layer .pk-results .face{background:transparent;padding-left:4px;padding-right:4px}
-.p-sheet-layer .pk-list a.face:active,.p-sheet-layer .pk-list [role=button].face:active,
+/* ---- inside the search sheet (portalled, so pk- classes, not .pocket) --
+ * Rows in a sheet sit on the sheet's glass. */
+.p-sheet-layer .pk-results .face{background:transparent;padding-left:4px;padding-right:4px}
 .p-sheet-layer .pk-results a.face:active,.p-sheet-layer .pk-results [role=button].face:active{background:var(--panel-raised)}
-/* The quiet link row (review round §1.2): the body's last line, 44px,
-   13px mono in the accent's text ink. */
-.pk-amend{display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;
-  font:var(--p-type-meta) var(--mono);color:var(--accent-text);text-decoration:none}
-.pk-amend:hover{color:var(--accent-text)}
-.pk-amend:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
 /* The search field rides at the top of its sheet, 16px so iOS does not zoom. */
 .pk-field{flex:1;min-width:0;box-sizing:border-box;min-height:var(--p-hit);padding:0 4px;margin:0;
   background:none;border:0;border-bottom:1px solid var(--line);border-radius:0;outline:none;-webkit-appearance:none;
@@ -218,14 +197,9 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
  * carry the same name, so the one morphs into the other (review round
  * §2.1): the drawer rises to the card's seat and grows into it along the
  * sheet's own curve, the two faces crossfading on the way, while the dial
- * fades and the band draws. The dial's item sheet (kept for the dial alone
- * while the owner's question 6 is open) still names its card the same
- * way; a tap on the dial closes any open row first, so the two are never
- * named at once. */
+ * fades and the band draws. A second tap on a lit dial body (owner's
+ * answer 6a) makes the same approach from the same open row. */
 .pocket .pk-list > .p-row[data-open] .p-row-open{view-transition-name:pocket-item}
-.pk-item{view-transition-name:pocket-item}
-.pk-item:has(> .pk-card){view-transition-name:none}
-.pk-card{view-transition-name:pocket-item}
 ::view-transition-group(pocket-item){animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
 ::view-transition-old(pocket-item),::view-transition-new(pocket-item){
   animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}

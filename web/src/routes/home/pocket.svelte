@@ -7,7 +7,7 @@
   import { applyCommand, readItemDocuments } from "$lib/data/workspace.js";
   import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, every, longDate, money } from "$lib/format.js";
+  import { ago, money } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import NorthStar from "$lib/pocket/NorthStar.svelte";
@@ -37,15 +37,14 @@
    * a manifest row opens in place into a drawer holding the item's detail,
    * `open →` onward to its belt, `complete`, and `copy link`; the relay's
    * catch opens the same way with its readings and its two decisions. A
-   * search result closes the search and opens its row.
+   * search result closes the search and opens its row; one the manifest
+   * does not draw goes straight to the item (review round §6.e). A planet
+   * on the dial does what the desk's does (owner's answer 6a): it opens its
+   * row and wears the lit ring while the row is open, and a second tap on
+   * the lit body goes to the item.
    *
-   * One sheet, several faces: the search sheet (#1057), and, for the dial
-   * only, the item sheet (#1119) with its documents and the suggestion
-   * sheet (#466). What a planet on the dial does is the owner's open
-   * question 6 on #1120 (review-round.md §4), so the dial keeps raising
-   * those sheets until it is answered; nothing else raises them. One
-   * history entry, so Back always closes whatever is up. The hatch is its
-   * own sheet, opened from the orb.
+   * Home's sheets are the search sheet (#1057) and the hatch, opened from
+   * the orb; the item and suggestion sheets are gone (§2.1).
    * @typedef {{
    *   view?: import('$lib/data/workspace.js').HomeView | null,
    *   arrive?: boolean,
@@ -128,12 +127,6 @@
   // `ended` is the expiry past its date (#1005): quiet ink, never the alarm.
   /** @type {Record<string, string>} */
   const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", ended: "--ink-mid" };
-  // The kit's mark and value tones (kit.css .p-body, .p-kv) for a band, and
-  // the mark's face for a kind, the dial's chart key (chart.js dialBodiesOf).
-  /** @type {Record<string, string>} */
-  const TONE_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok", ended: "ended" };
-  /** @type {Record<string, string>} */
-  const FACE_CLASS = { inspection: "ter", renewal: "con", expiry: "exp" };
   /** @type {(b: { days: number | null }) => string} */
   const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
   /** @type {(iso: string) => string} */
@@ -169,53 +162,13 @@
   /** @type {(iso: string | null | undefined) => string} */
   const agoShort = (iso) => (iso && view ? ago(iso, view.now ?? new Date().toISOString()) : "");
 
-  // ---- the one sheet ------------------------------------------------------
+  // ---- the search sheet's state ------------------------------------------
 
-  let face = $state(/** @type {"search" | "item" | "docs" | "sugg"} */ ("item"));
-  /** @type {string | null} */
-  let itemId = $state(null);
-  /** @type {string | null} */
-  let suggId = $state(null);
   /** @type {string | null} */
   let problem = $state(null);
   let busy = $state(false);
 
-  const row = $derived(itemId ? rows.find((one) => one.id === itemId) ?? null : null);
-  const documentCount = $derived(itemId ? rawItems.get(itemId)?.documentCount ?? 0 : 0);
-  const suggestion = $derived(suggId ? view?.suggestions.find((one) => one.id === suggId) ?? null : null);
-  const itemMeta = $derived(
-    row
-      ? [
-          tlabel(row),
-          row.dueDate ? short(row.dueDate) : null,
-          cost(row),
-          documentCount > 0 ? `◆ ${documentCount} document${documentCount === 1 ? "" : "s"}` : null,
-        ].filter(Boolean).join(" · ")
-      : "",
-  );
-  const sheetSize = $derived(face === "sugg" ? "callout" : "list");
-  const sheetTitle = $derived(
-    face === "search" ? "Search your orbit"
-      : face === "sugg" ? suggestion?.title ?? ""
-      : row?.title ?? "",
-  );
-
-  /** @param {string} id */
-  function openItem(id) {
-    itemId = id;
-    face = "item";
-    problem = null;
-    sheetOpen = true;
-  }
-  /** @param {string} id */
-  function openSuggestion(id) {
-    suggId = id;
-    face = "sugg";
-    problem = null;
-    sheetOpen = true;
-  }
   function openSearch() {
-    face = "search";
     problem = null;
     query = "";
     sheetOpen = true;
@@ -241,32 +194,9 @@
     return () => media.removeEventListener("change", onchange);
   });
 
-  // ---- documents: the sheet grows (#1119) ---------------------------------
-
-  /** @type {{ id: string, itemId: string, name: string, meta: string }[] | null} */
-  let documents = $state(null);
-  /** @type {string | null} */
-  let documentsFor = null;
-
-  async function showDocuments() {
-    const id = itemId;
-    if (!id || !view?.primary) return;
-    face = "docs";
-    if (documentsFor === id && documents) return;
-    documents = null;
-    documentsFor = id;
-    problem = null;
-    try {
-      const found = await readItemDocuments(view.primary, id);
-      if (documentsFor === id) documents = found;
-    } catch (error) {
-      if (documentsFor === id) problem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't read the documents — try again";
-    }
-  }
-
-  // The approach (§1.2, §1.9): `open` goes to the item's own screen and the
-  // sheet lifts into it. The morph is a view transition; pocket.css names the
-  // sheet's card and says how it lifts. Reduced motion, or a browser without
+  // The approach (§1.2, §1.9): `open →` goes to the item's own screen and the
+  // opened drawer lifts into it. The morph is a view transition; pocket.css
+  // names the open row's panel and says how it lifts. Reduced motion, or a browser without
   // view transitions, simply navigates.
   let morphing = false;
   onNavigate((navigation) => {
@@ -293,40 +223,27 @@
     });
   }
 
-  // ---- the suggestion sheet (#466) ----------------------------------------
+  // ---- the relay's catch (#466) ---------------------------------------------
 
   /**
-   * The relay's catch, decided: from the dial's suggestion sheet, or from
-   * its row in the signals (where a refusal stays under the row's readings).
+   * The relay's catch, decided from its row in the signals, where a refusal
+   * stays under the row's readings.
    * @param {"approve" | "dismiss"} act
-   * @param {import('$lib/data/workspace.js').ReceiptSuggestion | null} [target]
+   * @param {import('$lib/data/workspace.js').ReceiptSuggestion} target
    */
-  async function decide(act, target = suggestion) {
+  async function decide(act, target) {
     const handler = act === "approve" ? onapprove : ondismiss;
-    if (!target || !handler || busy) return;
+    if (!handler || busy) return;
     busy = true;
-    problem = null;
     delete rowProblem[target.id];
     try {
       const failed = await handler(target);
-      if (failed) {
-        if (sheetOpen) problem = failed;
-        else rowProblem[target.id] = failed;
-        return;
-      }
-      sheetOpen = false;
+      if (failed) { rowProblem[target.id] = failed; return; }
       wake(act === "approve" ? `${target.title} added to your orbit` : `${target.title} dismissed`);
     } finally {
       busy = false;
     }
   }
-  /** @type {Record<string, string>} */
-  const EVIDENCE = { provider: "provider", renewsOn: "dueDate", costMinor: "costMinor" };
-  /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion, field: string) => string} */
-  const sureness = (s, field) => {
-    const evidence = s.fieldEvidence?.[EVIDENCE[field]];
-    return evidence ? (evidence.confidence === "low" ? "unsure" : "sure") : "";
-  };
 
   // ---- the search sheet (#1057, §2.4) -------------------------------------
 
@@ -415,11 +332,15 @@
   /**
    * A search result closes the search and opens its row (§2.1). An item the
    * manifest does not draw (it lists what needs attention) has no row to
-   * open, so it still raises its sheet.
+   * open, so it goes straight to the item, as it does from the belt
+   * (review round §6.e), taking the search's history entry as a paper does.
    * @param {string} id
    */
   async function openResult(id) {
-    if (!manifestRow(id)) { openItem(id); return; }
+    if (!manifestRow(id)) {
+      goto(resolve("/item/[[id]]", { id: encodeURIComponent(id) }), { replaceState: true });
+      return;
+    }
     sheetOpen = false;
     await tick();
     await openRow(id, { focus: true });
@@ -435,9 +356,43 @@
   });
 
   /* The papers in a drawer ride on the search's own read of them, made the
-     first time any row opens rather than on every arrival. */
-  /** @param {boolean} open */
-  const onRowToggle = (open) => { if (open) loadSearchDocuments(); };
+     first time any row opens rather than on every arrival. The open row's
+     id is what lights its body on the dial. */
+  /** @type {string | null} */
+  let lit = $state(null);
+  /** @param {string} id */
+  const onRowToggle = (id) => (/** @type {boolean} */ open) => {
+    if (open) { lit = id; loadSearchDocuments(); } else if (lit === id) lit = null;
+  };
+
+  /**
+   * A planet on the dial (owner's answer 6a, the desk's `.body-link`): the
+   * first tap scrolls the manifest to its row and opens it, the body
+   * lighting while the row is open; a tap on the lit body goes to the item,
+   * the open drawer lifting into it. A body the manifest draws no row for
+   * goes straight to the item, as a search result does (§6.e). The relay's
+   * catch goes where its row's `review & amend →` does.
+   * @param {DialBody} b
+   */
+  async function tapBody(b) {
+    if (lit !== b.id && (await openRow(b.id))) return;
+    const suggested = b.suggestion ? view?.suggestions.find((one) => one.id === b.id) : null;
+    morphing = lit === b.id && !b.suggestion;
+    goto(resolve("/item/[[id]]", { id: encodeURIComponent(suggested?.receiptId ?? b.id) }));
+  }
+  /* A press on the lit body must not close its row on the way down (row.js
+     closes an open row on any press outside it), or the drawer would be gone
+     before the tap could lift it into the item. Registered before any row
+     opens, so it hears the press first. */
+  $effect(() => {
+    /** @param {PointerEvent} event */
+    const onpress = (event) => {
+      const body = event.target instanceof Element ? event.target.closest(".pocket .mdial [data-body]") : null;
+      if (body && lit && body.getAttribute("data-body") === lit) event.stopImmediatePropagation();
+    };
+    addEventListener("pointerdown", onpress, true);
+    return () => removeEventListener("pointerdown", onpress, true);
+  });
   const papersOf = (/** @type {string} */ id) => searchDocuments.filter((doc) => doc.itemId === id);
 
   /* `complete` from a drawer, as the belt does it (item/[[id]]/+page.svelte,
@@ -743,16 +698,19 @@
         {#if b.suggestion}
           <!-- #466: the relay's catch is ON the dial at its law position —
                the same hollow accent body the desk shows (§12). -->
-          <g class="pk-body" data-sheet-sugg={b.id} tabindex="0" role="button" aria-label={`caught receipt: ${b.title}`}
-             onclick={() => openSuggestion(b.id)} onkeydown={(event) => onKeyActivate(event, () => openSuggestion(b.id))}>
+          <g class="pk-body" class:lit={lit === b.id} data-body={b.id} data-body-sugg tabindex="0" role="button"
+             aria-label={`caught receipt: ${b.title}`}
+             onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
             <circle cx={b.placement.x} cy={b.placement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
             <circle cx={b.placement.x} cy={b.placement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
+            {#if lit === b.id}<circle class="pk-lit" cx={b.placement.x} cy={b.placement.y} r="12.5"/>{/if}
             <circle class="hit" cx={b.placement.x} cy={b.placement.y} r={HIT_R}/>
           </g>
         {:else}
-          <g class="pk-body" data-sheet-title={b.title} tabindex="0" role="button" aria-label={b.title}
-             onclick={() => openItem(b.id)} onkeydown={(event) => onKeyActivate(event, () => openItem(b.id))}>
+          <g class="pk-body" class:lit={lit === b.id} data-body={b.id} tabindex="0" role="button" aria-label={b.title}
+             onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
             <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyFill(b)}"/>
+            {#if lit === b.id}<circle class="pk-lit" cx={b.placement.x} cy={b.placement.y} r={bodyR(b) + 4}/>{/if}
             {#if b.documentCount > 0 && b.paint === "jade"}
               <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
                        transform="rotate(-24 {b.placement.x} {b.placement.y})"
@@ -787,7 +745,7 @@
       {#each groups.attention as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
              trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-             acts={itemActs(one)} ontoggle={onRowToggle}>
+             acts={itemActs(one)} ontoggle={onRowToggle(one.id)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
           {#snippet detail()}
             <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
@@ -805,7 +763,7 @@
     <!-- Nothing needs you: the one row is the next item up, and opens as it. -->
     <div class="pk-list" data-row-group>
       <Row title="nothing needs you" meta={`next up ${next.title}${next.days !== null ? `, ${tlabel(next)}` : ""}`} key={next.id}
-           acts={itemActs(next)} ontoggle={onRowToggle}>
+           acts={itemActs(next)} ontoggle={onRowToggle(next.id)}>
         {#snippet mark()}<span class="pk-dot quiet"></span>{/snippet}
         {#snippet detail()}
           <ItemDrawer one={next} raw={rawItems.get(next.id)} papers={papersOf(next.id)} problem={rowProblem[next.id] ?? null}
@@ -829,7 +787,7 @@
                meta={[`from ${s.sourceDocument}`, burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : null].filter(Boolean).join(" · ")}
                trail={s.costMinor ? money(s.costMinor, s.currency, true) : ""}
                trailSub={s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
-               acts={suggestionActs(s)}>
+               acts={suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
             {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
             {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null} />{/snippet}
             {#snippet after()}
@@ -859,127 +817,52 @@
 {#if !view?.emptySky}<NorthStar />{/if}
 </div>
 
-<Sheet bind:open={sheetOpen} size={sheetSize} title={sheetTitle} hideTitle={face === "search" || face === "item"}>
+<Sheet bind:open={sheetOpen} size="list" title="Search your orbit" hideTitle>
   <!-- The search field rides in the sheet's head (§2.4). Declared in here
        rather than at the top of the markup: a top-level snippet trips the
        production bundler (#1130). -->
   {#snippet head()}
-    {#if face === "search"}
-      <input class="pk-field" type="search" placeholder="explore your world" aria-label="Search your orbit"
-             autocomplete="off" enterkeyhint="go" bind:value={query} onkeydown={fieldKey}>
-    {/if}
+    <input class="pk-field" type="search" placeholder="explore your world" aria-label="Search your orbit"
+           autocomplete="off" enterkeyhint="go" bind:value={query} onkeydown={fieldKey}>
   {/snippet}
-  {#if face === "item" && row}
-    <!-- The item sheet (#1119, §2.1): a preview of the item's own card
-         (item/[[id]]/+page.svelte), which `open` grows it into. The dialog's
-         hidden title names it for a screen reader, so the visible name here
-         is not read twice. -->
-    <div class="pk-item">
-      <div class="p-card pk-card">
-        <div class="pk-card-head" aria-hidden="true">
-          <span class="p-body pk-mark {TONE_CLASS[row.band] ?? ''} {FACE_CLASS[row.kind] ?? ''}"></span>
-          <span class="pk-name">{row.title}</span>
-        </div>
-        <div class="pk-sub">{[row.section, row.kind].filter(Boolean).join(" · ")}</div>
-        {#if row.dueDate}
-          <div class="p-kv"><span>{row.kind === "expiry" ? "ends" : "due"}</span>
-            <b class={TONE_CLASS[row.band] ?? ""}>{tlabel(row)} · {longDate(row.dueDate)}</b></div>
-        {/if}
-        {#if row.kind === "expiry"}
-          <div class="p-kv"><span>orbital period</span><b>one-off — does not come round</b></div>
-        {:else if row.recurrenceMonths}
-          <div class="p-kv"><span>orbital period</span><b>{every(row.recurrenceMonths)}</b></div>
-        {/if}
-        <div class="p-kv"><span>cost</span><b>{money(row.costMinor, row.currency, row.costIsEstimate)}</b></div>
-        <div class="p-kv"><span>documents</span><b>{documentCount > 0 ? documentCount : "none yet"}</b></div>
-      </div>
-    </div>
-  {:else if face === "docs" && row}
-    <!-- `documents` grows the sheet into the item's papers (§2.1, #1119). -->
-    <div class="pk-item">
-      <p class="pk-meta">{itemMeta}</p>
-      <div class="pk-list flat">
-        {#if documents}
-          {#each documents as doc (doc.id)}
-            <Row title={doc.name} meta={doc.meta} onactivate={() => openPaper(doc)}>
-              {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
-            </Row>
-          {:else}
-            <p class="p-empty">no documents ride with this item yet</p>
-          {/each}
-        {:else if !problem}
-          <div class="p-unlit"></div><div class="p-unlit"></div>
-        {/if}
-      </div>
-      {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
-    </div>
-  {:else if face === "sugg" && suggestion}
-    <!-- The suggestion sheet (#466, §2.1): what the relay read, how sure it
-         was, and the two decisions, each arming before it acts. -->
-    <p class="pk-meta">{[
-      suggestion.receivedAt ? `caught ${short(suggestion.receivedAt.slice(0, 10))}` : null,
-      burnsIn(suggestion) !== null ? `burns up in ${burnsIn(suggestion)}d` : null,
-    ].filter(Boolean).join(" · ")}</p>
-    <div class="pk-list flat">
-      {#if suggestion.provider}<Row title={suggestion.provider} meta="provider" trail={sureness(suggestion, "provider")} />{/if}
-      {#if suggestion.renewsOn}<Row title={`${short(suggestion.renewsOn)} ${suggestion.renewsOn.slice(0, 4)}`} meta={dateWord(suggestion)}
-                                     trail={sureness(suggestion, "renewsOn")} />{/if}
-      {#if suggestion.costMinor}<Row title={money(suggestion.costMinor, suggestion.currency, true)} meta="cost"
-                                      trail={sureness(suggestion, "costMinor")} />{/if}
-      <Row title={suggestion.sourceDocument} meta="scanned clean">
-        {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
-      </Row>
-    </div>
-    {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
-    <a class="pk-amend" href={resolve("/item/[[id]]", { id: encodeURIComponent(suggestion.receiptId ?? suggestion.id) })}>review &amp; amend →</a>
-  {:else if face === "search"}
-    <!-- #1057's phone half (§2.4; phone-search round 1, B). -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="pk-results" bind:this={resultList} onkeydown={listKey}>
-      {#if !results.query}
-        {#each results.items as one (one.id)}
-          <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-               trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-               onactivate={() => openResult(one.id)}>
-            {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
-          </Row>
-        {/each}
-        <Row title="→ add an item" href={resolve("/create")} />
-      {:else if results.nothing}
-        <p class="p-empty">nothing in your orbit is called “{results.query}”</p>
-        <!-- #1120: the name rides along; /create's pocket reads ?name= (§2.5). -->
-        <Row title={`add “${results.query}” as an item`}
-             href={`${resolve("/create")}?${new URLSearchParams({ name: results.query })}`}>
-          {#snippet mark()}<span class="pk-plus" aria-hidden="true">+</span>{/snippet}
+  <!-- #1057's phone half (§2.4; phone-search round 1, B). -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="pk-results" bind:this={resultList} onkeydown={listKey}>
+    {#if !results.query}
+      {#each results.items as one (one.id)}
+        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
+             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             onactivate={() => openResult(one.id)}>
+          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
         </Row>
-      {:else}
-        {#each results.items as one (one.id)}
-          <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-               trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-               onactivate={() => openResult(one.id)}>
-            {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
-          </Row>
-        {/each}
-        {#each results.documents as doc (doc.id)}
-          <Row title={doc.name} meta={`${doc.itemTitle} · ${doc.meta}`} onactivate={() => openPaper(doc)}>
-            {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
-          </Row>
-        {/each}
-      {/if}
-      {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
-    </div>
-  {/if}
+      {/each}
+      <Row title="→ add an item" href={resolve("/create")} />
+    {:else if results.nothing}
+      <p class="p-empty">nothing in your orbit is called “{results.query}”</p>
+      <!-- #1120: the name rides along; /create's pocket reads ?name= (§2.5). -->
+      <Row title={`add “${results.query}” as an item`}
+           href={`${resolve("/create")}?${new URLSearchParams({ name: results.query })}`}>
+        {#snippet mark()}<span class="pk-plus" aria-hidden="true">+</span>{/snippet}
+      </Row>
+    {:else}
+      {#each results.items as one (one.id)}
+        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
+             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             onactivate={() => openResult(one.id)}>
+          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
+        </Row>
+      {/each}
+      {#each results.documents as doc (doc.id)}
+        <Row title={doc.name} meta={`${doc.itemTitle} · ${doc.meta}`} onactivate={() => openPaper(doc)}>
+          {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
+        </Row>
+      {/each}
+    {/if}
+    {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+  </div>
   <!-- Every act in the sheet's pinned foot (review round §1.2). -->
   {#snippet foot()}
-    {#if (face === "item" || face === "docs") && row}
-      <a class="p-pill filled" href={resolve("/item/[[id]]", { id: encodeURIComponent(row.id) })}
-         onclick={() => (morphing = true)}>open</a>
-      {#if face === "item" && documentCount > 0}<button class="p-pill" onclick={showDocuments}>documents</button>{/if}
-    {:else if face === "sugg" && suggestion}
-      <ArmButton label="Add to orbit" armedLabel="tap again to add" danger={false} class="filled"
-                 onfire={() => decide("approve")} />
-      <ArmButton label="Dismiss" armedLabel="tap again to dismiss" danger={false} onfire={() => decide("dismiss")} />
-    {:else if face === "search" && results.query && !results.nothing && results.complete}
+    {#if results.query && !results.nothing && results.complete}
       {@const top = results.complete}
       <!-- The one accent action for the top match (§2.4). -->
       <ArmButton label={`→ complete “${top.title}”`} armedLabel="tap again to complete" danger={false} wide
