@@ -110,11 +110,11 @@ test.describe("at 390x844", () => {
        chip's plain href would still complete on its own, is told apart from
        the fly() handler actually taking the tap: only a client-routed
        goto() carries this flag through to the destination. */
-    await page.evaluate(() => { window.__pocket1118 = true; });
+    await page.evaluate(() => { /** @type {any} */ (window).__pocket1118 = true; });
     const chip = page.locator(".skies .msys", { hasText: "Seaside Cottage" });
     await chip.click();
     await expect(page).toHaveURL(/\/household\/hh-seaside-4551$/);
     await expect(page.getByRole("heading", { name: "Seaside Cottage" })).toBeVisible();
-    expect(await page.evaluate(() => window.__pocket1118)).toBe(true);
+    expect(await page.evaluate(() => /** @type {any} */ (window).__pocket1118)).toBe(true);
   });
 });
