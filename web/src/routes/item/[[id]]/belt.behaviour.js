@@ -617,7 +617,12 @@ export function mountBelt(root, options) {
          lower than eight above the topmost ink a body at this x can reach,
          which is the clearance this whole placement exists to keep. */
       const bodyTop = line - half - 25 - 6;
-      let y = Math.min(bodyTop - 8, Math.max(20, line - clear));
+      /* On a desk they stand at the screen's own middle, whatever height the
+         band leaves at (owner, 2026-09-26, overturning #1010's "held above
+         its upper edge"): 3.5 is half the capitals' height, so the ink, not
+         the baseline, is what is centred. The pocket's band is a plate at
+         the top of a page that scrolls, so it keeps #1035's rule. */
+      let y = geom.pocket ? Math.min(bodyTop - 8, Math.max(20, line - clear)) : geom.H / 2 + 3.5;
       /* Drawn before it is placed, because only the laid-out text knows how
          wide it is, and how wide it is decides whether it shares a column
          with the search field. */

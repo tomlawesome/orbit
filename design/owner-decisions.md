@@ -1182,3 +1182,13 @@ in the meantime. Asked as three options; answered **"3c"**.
 The cut is the desk dialect's own, `(min-width: 901px)` — the same one home
 uses to choose between its two dialects (CON-10) — so "desk" means exactly
 what it already means everywhere else in v19.
+
+## 26. The belt's end-caps stand at the screen's middle (owner, 2026-09-26)
+
+Asked whether "sooner" and "later" should be centred on the band where it
+leaves the frame or on the screen, the owner chose **the screen's vertical
+middle** ("Centred in the screen"), on the desk, whatever height the band
+is at on that side. This overturns #1010's placement (held above the band's
+upper edge) for the desk only. The pocket keeps #1035's rule, because its
+band is a plate at the top of a page that scrolls, not the whole screen.
+(Numbered 26 because `fix/m14-server-bugs` already holds a §25.)
