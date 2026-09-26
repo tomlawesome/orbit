@@ -393,13 +393,13 @@
 <div class="st-pocket">
   <Sky />
   <main class="st-column">
-    <header class="st-head st-rise" style:--i="0">
+    <header class="st-head p-land" style:--i="0">
       <h1 class="p-title">Settings</h1>
       <p class="st-levers p-prose">your controls, and only yours · the instance’s levers live on administration</p>
     </header>
 
     <!-- YOU, with how you sign in folded in (§2.7 step 2). -->
-    <section class="p-card st-rise" style:--i="1" aria-labelledby="st-you">
+    <section class="p-card" style:--i="1" aria-labelledby="st-you">
       <h2 class="p-caps" id="st-you">You</h2>
       {#if view}
         <div class="st-id">
@@ -457,7 +457,7 @@
     </section>
 
     <!-- YOUR SKY: five tiles, the chosen one ringed (§2.7 step 3). -->
-    <section class="p-card st-rise" style:--i="2" aria-labelledby="st-sky">
+    <section class="p-card" style:--i="2" aria-labelledby="st-sky">
       <h2 class="p-caps" id="st-sky">Your sky</h2>
       <div class="st-packs" role="group" aria-labelledby="st-sky">
         {#each PACKS as [name, title, line, ground, [sun, warm, ok, upcoming]] (name)}
@@ -475,7 +475,7 @@
     </section>
 
     <!-- REMINDERS, two tabs (§20, §22 under 560px). -->
-    <section class="p-card st-rise" style:--i="3" aria-labelledby="st-reminders" data-st="reminders">
+    <section class="p-card" style:--i="3" aria-labelledby="st-reminders" data-st="reminders">
       <div class="st-cardhead">
         <h2 class="p-caps" id="st-reminders">Reminders</h2>
         <div class="st-tabs" role="tablist" aria-labelledby="st-reminders">
@@ -561,7 +561,7 @@
     </section>
 
     <!-- YOUR RELAY (§2.7 step 5): the address is the thing to take away. -->
-    <section class="p-card st-rise" style:--i="4" aria-labelledby="st-relay">
+    <section class="p-card" style:--i="4" aria-labelledby="st-relay">
       <h2 class="p-caps" id="st-relay">Your relay</h2>
       {#if view}
         <button class="st-address" onclick={copyAddress} disabled={view.relay.address === "no address yet"}
@@ -588,7 +588,7 @@
     </section>
 
     <!-- YOUR SYSTEMS (§2.7 step 6): each row is the way into one. -->
-    <section class="p-card st-rise" style:--i="5" aria-labelledby="st-systems">
+    <section class="p-card" style:--i="5" aria-labelledby="st-systems">
       <h2 class="p-caps" id="st-systems">Your systems</h2>
       {#if view}
         <div class="st-rows st-flush">
@@ -610,7 +610,7 @@
 
     <!-- WHERE YOU'RE SIGNED IN (§2.7 step 7): sign out is management, so a
          tap opens the row (review round §1.1); every device at once arms. -->
-    <section class="p-card danger st-rise st-sessions" style:--i="6" aria-labelledby="st-signedin">
+    <section class="p-card danger st-sessions" style:--i="6" aria-labelledby="st-signedin">
       <h2 class="p-caps" id="st-signedin">Where you’re signed in</h2>
       <div class="st-rows st-flush" data-row-group>
         {#each sessions as row (row.id)}
@@ -714,10 +714,6 @@
       calc(96px + env(safe-area-inset-bottom))}
   .st-head{margin:4px 0 20px}
   .st-levers{margin:8px 0 0;color:var(--ink-quiet)}
-
-  /* Cards arrive in turn, never in sync (§1.9). */
-  .st-rise{animation:st-rise 420ms var(--p-ease) both;animation-delay:calc(var(--i, 0) * 60ms + 60ms)}
-  @keyframes st-rise{from{opacity:0;transform:translateY(10px)}}
 
   /* Rows run to the card's edge, as the household's do. */
   .st-rows{margin:0 calc(var(--p-card-pad) * -1)}
@@ -860,7 +856,7 @@
   .st-proven{margin:0 0 12px;color:var(--ok-text)}
 
   @media (prefers-reduced-motion:reduce){
-    .st-rise,[role=tabpanel],.st-avatar::after,.st-swatch .st-sun,.st-dish span{animation:none}
+    [role=tabpanel],.st-avatar::after,.st-swatch .st-sun,.st-dish span{animation:none}
     .st-dish span{opacity:.5}
   }
 </style>
