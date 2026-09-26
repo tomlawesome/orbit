@@ -53,7 +53,9 @@ const row = (page, scope, text) => page.locator(`${scope} .p-row`, { hasText: te
 
 test("a tap opens a person's row, naming its acts; your own row has none", async ({ page }) => {
   await open(page);
-  await expect(page.locator(".ad-pocket [data-row-acts] button")).toHaveCount(0);
+  /* At rest every row is shut: its acts are hidden, out of the page. */
+  await expect(page.locator(".ad-pocket [data-row-panel]:not([hidden])")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Disable Emma Lawson" })).toHaveCount(0);
   const emma = row(page, "[data-ad=people]", "Emma Lawson");
   await openRow(page, emma);
   await expect(emma.getByRole("button", { name: "Place Emma Lawson in a system" })).toBeVisible();
@@ -64,6 +66,9 @@ test("a tap opens a person's row, naming its acts; your own row has none", async
 });
 
 test("disable arms before it fires", async ({ page }) => {
+  /* The fixture instance has no database to write to: answer the write. */
+  await page.route(`${APP}/api/admin/users`, (route) =>
+    route.request().method() === "PATCH" ? route.fulfill({ json: { ok: true } }) : route.fallback());
   await open(page);
   const emma = row(page, "[data-ad=people]", "Emma Lawson");
   await openRow(page, emma);
@@ -71,6 +76,8 @@ test("disable arms before it fires", async ({ page }) => {
   await expect(emma.getByRole("button", { name: "tap again to disable Emma Lawson" })).toBeVisible();
   await emma.getByRole("button", { name: "tap again to disable Emma Lawson" }).click();
   await expect(page.locator(".p-wake-host [role=status]")).toContainText("Emma Lawson is disabled");
+  /* The screen re-reads after the write; let that settle before the page goes. */
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("a system on the clock keeps restore on show; delete now sits in its opened row", async ({ page }) => {
@@ -138,7 +145,7 @@ test.describe("at 360", () => {
   test.use({ viewport: { width: 360, height: 780 } });
   test("people's three acts fit the opened row", async ({ page }) => {
     await open(page);
-    await expect(page.locator(".ad-pocket [data-row-acts] button")).toHaveCount(0);
+    await expect(page.locator(".ad-pocket [data-row-panel]:not([hidden])")).toHaveCount(0);
     const emma = row(page, "[data-ad=people]", "Emma Lawson");
     await openRow(page, emma);
     await expect(emma.getByRole("button", { name: "Place Emma Lawson in a system" })).toBeVisible();

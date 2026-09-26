@@ -968,7 +968,10 @@
     </div>
   </Sheet>
 
-  <Sheet bind:open={systemOpen} size="callout" title="New system">
+  <!-- A list, not the review round's callout (§1.2 names "new system" a
+       callout): its owner is picked from a row per person, which can run
+       past a callout's fold, so it stays a list until the design says which. -->
+  <Sheet bind:open={systemOpen} size="list" title="New system">
     <label class="ad-label" for="ad-sys-name">name</label>
     <input id="ad-sys-name" class="ad-input" autocomplete="off" enterkeyhint="next" placeholder="Seaside Cottage"
            maxlength={NAME_LIMIT} bind:value={systemName}>
