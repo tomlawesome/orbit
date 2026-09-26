@@ -12,6 +12,14 @@
    */
   /** @type {Props} */
   let { label = "Add an item" } = $props();
+
+  /* The wake rises above the star, never over it (review round §1.3):
+     while the star is on the page, <body> says so and the wake's host
+     (Wake.svelte) lifts its foot clear of it. */
+  $effect(() => {
+    document.body.dataset.northstar = "";
+    return () => { delete document.body.dataset.northstar; };
+  });
 </script>
 
 <a class="p-northstar" href={resolve("/create")} aria-label={label} title={label}>

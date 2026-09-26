@@ -12,9 +12,20 @@
    * THE SHEET (#1120, proposal §1.4): one component, three sizes, used
    * wherever the desk has a callout, drawer, panel or dialog.
    *
-   *   callout  content height, at most 45% of the screen
+   *   callout  content height, never taller than the screen less the top
+   *            chrome's height, so the page above still shows (review
+   *            round §1.2: the 45% cap cut acts off at a phone's real height)
    *   list     60% of the screen; dragging the handle up grows it to full
    *   full     the whole screen under the top safe area
+   *
+   * THE FOOT (review round §1.2): every button in a sheet goes in `foot`,
+   * pinned under the scrolling body, so no act is ever cut or below a fold.
+   * The only exceptions stay in the body: a list sheet's picker rows (the
+   * rows are the choice), a stepper's − and +, and a quiet link row
+   * (`review & amend →`) as the body's last line. Primary first in the
+   * foot's DOM; each pill takes `flex:1 1 150px`, so two share a line at
+   * 360 and 390 and three stack. A form whose submit sits in the foot names
+   * it with the button's `form` attribute.
    *
    * It is a real dialog (sheet.js): focus in on open and back to the opener
    * on close, Tab held inside, the page behind inert. Every dismiss always
@@ -34,6 +45,7 @@
    *   history?: boolean,
    *   children?: import('svelte').Snippet,
    *   head?: import('svelte').Snippet,
+   *   foot?: import('svelte').Snippet,
    * }} Props
    */
   /** @type {Props} */
@@ -46,6 +58,7 @@
     history = true,
     children = undefined,
     head = undefined,
+    foot = undefined,
   } = $props();
 
   /** @type {HTMLElement | undefined} */
@@ -55,6 +68,9 @@
   let grown = $state(false);
   let drag = $state(0);
   let dragging = $state(false);
+  /* The foot's height, for the body's scroll padding (§1.2: a focused field
+     lands clear of the foot, which stands on the keyboard). */
+  let footHeight = $state(0);
 
   function dismiss() {
     if (!open) return;
@@ -162,7 +178,7 @@
        keyboard's, so it needs no key handler of its own. -->
   <div class="scrim" aria-hidden="true" onclick={dismiss}></div>
   <div class="p-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="{uid}-title" tabindex="-1"
-       bind:this={panel} class:dragging style:--p-drag="{drag}px"
+       bind:this={panel} class:dragging style:--p-drag="{drag}px" style:--p-foot={foot ? `${footHeight}px` : undefined}
        onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={cancel}>
     <div class="grab" aria-hidden="true"><span></span></div>
     <div class="head">
@@ -171,6 +187,7 @@
       <button class="p-pill close" data-sheet-close onclick={dismiss}>close</button>
     </div>
     <div class="body">{@render children?.()}</div>
+    {#if foot}<div class="foot" bind:clientHeight={footHeight}>{@render foot()}</div>{/if}
   </div>
 </div>
 
@@ -202,7 +219,9 @@
     box-shadow:inset 0 1px 0 rgba(255,255,255,.78), 0 -16px 36px rgba(48,66,98,.10)}
   .open .p-sheet-panel{transform:translateY(max(var(--p-drag, 0px), -20px))}
   .p-sheet-panel.dragging{transition:none}
-  [data-size=callout] .p-sheet-panel{max-height:calc(var(--h) * .45)}
+  /* A callout is its content's height, and never so tall that the top
+     chrome's height of page stops showing above it (§1.2). */
+  [data-size=callout] .p-sheet-panel{max-height:calc(var(--h) - env(safe-area-inset-top) - 56px)}
   [data-size=list] .p-sheet-panel{height:calc(var(--h) * .6)}
   [data-size=list].grown .p-sheet-panel,[data-size=full] .p-sheet-panel{height:calc(var(--h) - env(safe-area-inset-top) - 8px)}
 
@@ -217,7 +236,18 @@
     margin:0 calc(var(--p-gutter) * -1) 8px;padding:0 var(--p-gutter) 8px;border-bottom:1px solid var(--line-soft)}
   .title{flex:1;min-width:0;margin:0;font:600 var(--p-type-sheet)/1.3 var(--display);color:var(--ink)}
   .head .close{border-color:transparent;background:none;margin-right:calc(var(--p-pill-pad) * -1 + 4px)}
-  .body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+  .body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+    scroll-padding-bottom:calc(var(--p-foot, 80px) + 12px)}
+  /* THE FOOT (§1.2): pinned under the body, outside the scroller, edge to
+     edge across the panel and down over its bottom padding, on the raised
+     glass with a hairline above. */
+  .foot{flex:none;display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);
+    margin:0 calc(var(--p-gutter) * -1) calc(-16px - env(safe-area-inset-bottom));
+    padding:12px var(--p-gutter) calc(16px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line-soft);background:var(--panel-raised)}
+  .foot > :global(*){flex:1 1 150px}
+  /* A sheet whose face has no act this time draws no foot. */
+  .foot:not(:has(*)){display:none}
 
   @media (prefers-reduced-motion:reduce){
     .scrim,.p-sheet-panel{transition:none}

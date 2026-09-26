@@ -156,7 +156,6 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
  * The item sheet (#1119), its documents, the suggestion sheet (#466) and
  * the search sheet (#1057). Rows in a sheet sit on the sheet's glass. */
 .pk-meta{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:-4px 0 12px}
-.pk-acts{margin-top:16px}
 /* The item sheet's card (#1120): the item card's phone face
    (item/[[id]]/belt.css .item-card.ip) at sheet scale, so `open` reads as
    this card growing into that one. */
@@ -171,13 +170,14 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
 .pk-card .p-kv span{flex:none}
 .pk-card .p-kv b{min-width:0;text-align:right;overflow-wrap:anywhere}
 .pk-card .p-kv:last-child{border-bottom:0;padding-bottom:0}
-.pk-acts > *{flex:1 1 0}
 .p-sheet-layer .pk-list{display:flex;flex-direction:column;gap:2px}
 .p-sheet-layer .pk-list .face,.p-sheet-layer .pk-results .face{background:transparent;padding-left:4px;padding-right:4px}
 .p-sheet-layer .pk-list a.face:active,.p-sheet-layer .pk-list [role=button].face:active,
 .p-sheet-layer .pk-results a.face:active,.p-sheet-layer .pk-results [role=button].face:active{background:var(--panel-raised)}
-.pk-amend{display:flex;align-items:center;justify-content:center;min-height:var(--p-hit);margin-top:8px;
-  font:var(--p-type-meta) var(--mono);color:var(--ink-mid);text-decoration:none}
+/* The quiet link row (review round §1.2): the body's last line, 44px,
+   13px mono in the accent's text ink. */
+.pk-amend{display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;
+  font:var(--p-type-meta) var(--mono);color:var(--accent-text);text-decoration:none}
 .pk-amend:hover{color:var(--accent-text)}
 .pk-amend:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
 /* The search field rides at the top of its sheet, 16px so iOS does not zoom. */
@@ -190,9 +190,8 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
 .pk-field:focus{border-bottom-color:var(--accent)}
 .pk-field::-webkit-search-cancel-button{display:none}
 /* The one accent action for the top match, arming like every act that
-   cannot be taken back (§2.4). */
-.pk-top{margin-top:12px}
-.pk-top .p-pill{color:var(--accent-text);border-color:var(--accent);min-height:var(--p-hit);padding-block:10px;
+   cannot be taken back (§2.4); it rides in the sheet's foot. */
+.p-pill.pk-act{color:var(--accent-text);border-color:var(--accent);min-height:var(--p-hit);padding-block:10px;
   text-align:left;justify-items:start}
 
 /* ---- the approach: the sheet lifts into the item (§1.9, #1119) --------
