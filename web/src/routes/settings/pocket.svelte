@@ -817,8 +817,12 @@
   .st-address:disabled :is(.st-addr, .st-copy){color:var(--ink-quiet)}
   .st-addr{flex:1;min-width:0;text-align:left;font:var(--p-type-meta)/1.35 var(--mono);color:var(--accent-text);
     overflow-wrap:anywhere}
+  /* #1137: --ink-quiet reads 4.49:1 here on after dark (the accent-tinted
+     dashed pill lightens the card's own ground), under the 4.5:1 floor — the
+     same step up .st-packname (below) already uses for a quiet label on
+     this screen. --ink-mid clears the law on every pack with room to spare. */
   .st-copy{flex:none;font:var(--p-type-caps)/1 var(--mono);letter-spacing:var(--p-type-caps-track);
-    text-transform:uppercase;color:var(--ink-quiet)}
+    text-transform:uppercase;color:var(--ink-mid)}
   .st-dish{position:relative;flex:none;width:28px;height:28px}
   .st-dish i{position:absolute;inset:11px;border-radius:50%;background:var(--ok)}
   .st-dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;opacity:0;
