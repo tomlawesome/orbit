@@ -260,6 +260,11 @@
      openPaper) and opens here as soon as the belt has seated its item. */
   let arrivalPaper = /** @type {string | null} */ (
     (/** @type {Record<string, unknown>} */ (page.state ?? {})).pocketPaper ?? null);
+  /* Home's drawer `complete` on an item with a cost to confirm arrives here
+     asking for the record sheet (home's pocket.svelte, completeRow; review
+     round §2.1): it rises as soon as the belt has seated the item. */
+  let arrivalAct = /** @type {string | null} */ (
+    (/** @type {Record<string, unknown>} */ (page.state ?? {})).pocketAct ?? null);
   /** @param {import("./band.js").BeltDoc} doc */
   function showPaper(doc) {
     const i = bodies.findIndex((b) => b.kind === "doc" && b.id === doc.id);
@@ -517,6 +522,10 @@
           const id = arrivalPaper;
           arrivalPaper = null;
           showPaperById(id);
+        }
+        if (arrivalAct === "complete" && pocket && record) {
+          arrivalAct = null;
+          act("complete", record);
         }
       },
     });
