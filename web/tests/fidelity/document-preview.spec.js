@@ -75,3 +75,66 @@ test(`a paper's page loads on the fixture item page on a phone (${PHONE.width}x$
     "the phone sheet never showed the loaded page -- it is stuck on an honest state (see .bp-honest)",
   ).toBeVisible({ timeout: 5000 });
 });
+
+/*
+ * Commit 4a314ac6 gave `.readcard` `margin-top:var(--rc-y,var(--rc-top))`
+ * (belt.css) so belt.behaviour.js's `levelReadcard` — the desk-only
+ * levelling this file's own header describes — can actually move it: the
+ * desk reading card lands level with `#cardwrap`'s own vertical middle
+ * (owner-decisions.md §18's "the pair centred together"), held inside the
+ * screen's `--rc-top`/`--rc-bottom` margins rather than spilling past them.
+ */
+test(`the desk reading card lands level with the item card's middle (${DESK.width}x${DESK.height})`, async ({ page }) => {
+  await page.setViewportSize(DESK);
+  await openDeskPaper(page);
+  await expect(page.locator("#readcard.snap")).toBeVisible({ timeout: 5000 });
+  /* The card's own opacity/transform transition (belt.css, .55s/.65s with an
+     .18s delay) and the remeasure the page's own $effect runs once the page
+     has actually loaded (+page.svelte) both have to finish before the
+     reading card's height, and so its level, is the one it lands on. */
+  await page.waitForFunction(
+    () => document.getAnimations().every((a) => a.playState !== "running"),
+    null,
+    { timeout: 3000 },
+  ).catch(() => {});
+
+  const level = await page.evaluate(() => {
+    const rc = /** @type {HTMLElement} */ (document.querySelector("#readcard"));
+    const cardwrap = /** @type {HTMLElement} */ (document.querySelector("#cardwrap"));
+    const lanes = /** @type {HTMLElement} */ (document.querySelector("#lanes"));
+    const rcRect = rc.getBoundingClientRect();
+    const cardRect = cardwrap.getBoundingClientRect();
+    const cs = getComputedStyle(lanes);
+    /* belt.behaviour.js's own levelReadcard, read back rather than
+       reimplemented: the same custom properties, the same fallbacks. */
+    const top = parseFloat(cs.getPropertyValue("--rc-top")) || 84;
+    const bottom = parseFloat(cs.getPropertyValue("--rc-bottom")) || 16;
+    const avail = lanes.clientHeight - top - bottom;
+    return {
+      rcTop: rcRect.top, rcBottom: rcRect.bottom,
+      rcMid: (rcRect.top + rcRect.bottom) / 2,
+      cardMid: (cardRect.top + cardRect.bottom) / 2,
+      marginTop: top, marginBottom: top + avail,
+    };
+  });
+
+  const atTop = Math.abs(level.rcTop - level.marginTop) <= 1;
+  const atBottom = Math.abs(level.rcBottom - level.marginBottom) <= 1;
+  if (atTop || atBottom) {
+    /* Clamped by the screen's own margin rather than free to centre on the
+       item card -- an honest, expected outcome at a short enough screen,
+       not a failure, but it is a different guarantee than "level", so it is
+       named rather than silently accepted. */
+    test.info().annotations.push({
+      type: "clamped",
+      description: `the reading card is pinned to the screen's ${atTop ? "top" : "bottom"} margin, not centred on the item card`,
+    });
+    if (atTop) expect(level.rcTop, "pinned to the top margin").toBeCloseTo(level.marginTop, 0);
+    else expect(level.rcBottom, "pinned to the bottom margin").toBeCloseTo(level.marginBottom, 0);
+  } else {
+    expect(
+      Math.abs(level.rcMid - level.cardMid),
+      `the reading card's middle (${level.rcMid}) strayed more than 4px from the item card's (${level.cardMid})`,
+    ).toBeLessThanOrEqual(4);
+  }
+});
