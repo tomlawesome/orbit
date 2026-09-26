@@ -38,8 +38,8 @@
    *     each warning opening a picker · what Orbit sent you lately.
    *   YOUR RELAY: the address (tap copies), whether it listens, what waits.
    *   YOUR SYSTEMS: a row per household, each the way in.
-   *   WHERE YOU'RE SIGNED IN: a row per device, sign out behind a swipe
-   *     (owner decision §25), then sign out of every device, which arms.
+   *   WHERE YOU'RE SIGNED IN: a row per device, tap to open · sign out
+   *     (review round §1.1), then sign out of every device, which arms.
    *
    * States, one grammar (§1.13): a save shows on its control while it is
    * out, a saved change raises the wake, a failure is a red line under the
@@ -410,7 +410,7 @@
           </div>
         </div>
         <h3 class="st-sub p-caps" id="st-methods">Sign-in methods</h3>
-        <div class="st-rows">
+        <div class="st-rows" data-row-group>
           {#if methods}
             {#if hasPassword}
               <Row title="password" meta={`set${methods.local.changedAt ? ` · changed ${on(methods.local.changedAt)}` : ""}`}
@@ -608,11 +608,11 @@
       {/if}
     </section>
 
-    <!-- WHERE YOU'RE SIGNED IN (§2.7 step 7): sign out is management, so it
-         sits behind the swipe (§25); every device at once arms. -->
+    <!-- WHERE YOU'RE SIGNED IN (§2.7 step 7): sign out is management, so a
+         tap opens the row (review round §1.1); every device at once arms. -->
     <section class="p-card danger st-rise st-sessions" style:--i="6" aria-labelledby="st-signedin">
       <h2 class="p-caps" id="st-signedin">Where you’re signed in</h2>
-      <div class="st-rows st-flush">
+      <div class="st-rows st-flush" data-row-group>
         {#each sessions as row (row.id)}
           <Row title={row.device}
                meta={row.current ? "this device" : row.lastSeenAt ? `last seen ${agoLong(row.lastSeenAt, now)}` : "never used"}
@@ -634,7 +634,7 @@
       </div>
       {#if sessionProblem}<p class="p-error" role="alert">{sessionProblem}</p>{/if}
       {#if sessionsProblem}<p class="p-error" role="alert">{sessionsProblem}</p>{/if}
-      <p class="st-hint p-prose" aria-hidden="true">swipe a device to sign it out</p>
+      <p class="st-hint p-prose" aria-hidden="true">tap a device to sign it out</p>
       <div class="st-foot">
         <ArmButton label="sign out of every device →" armedLabel="tap again to sign out everywhere" wide
                    onfire={signOutEverywhereNow} />

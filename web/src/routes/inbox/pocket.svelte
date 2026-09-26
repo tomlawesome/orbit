@@ -26,7 +26,7 @@
    * `review & amend →` raises create's form in review mode in a full sheet
    * (§1.4), pre-filled with the readings, and approves what was amended.
    * Readings, failures and filed items are rows. A failure the server lets
-   * go (`canDiscard`) has `remove` behind a swipe (§1.5, owner decision §25);
+   * go (`canDiscard`) opens on a tap to `remove` (arms; review round §1.1);
    * one it keeps (still unavailable, or waiting on cleanup) has no act.
    *
    * Motion (§5): arrivals land (the card drops in and its mark touches down);
@@ -368,7 +368,7 @@
           <h2 class="p-caps pki-lanehead" id="pki-failed-h">
             <span class="p-body pki-failmark" aria-hidden="true"></span>failed to process<span class="pki-count">{view.failed.length}</span>
           </h2>
-          <div class="p-card pki-rows">
+          <div class="p-card pki-rows" data-row-group>
             {#each view.failed as failure, index (failure.id)}
               <div class="pki-slot" style:--i={index} animate:flip={{ duration: 300 }} out:leave={{ id: failure.id }}>
                 <Row title="A message from {short(failure.receivedAt)}" metaFace="ui"
@@ -383,7 +383,7 @@
             {/each}
           </div>
           {#if view.failed.some((one) => one.canDiscard)}
-            <p class="pki-hint">swipe a message to remove it · the original stays in your mailbox</p>
+            <p class="pki-hint">tap a message to remove it · the original stays in your mailbox</p>
           {/if}
         </section>
       {/if}

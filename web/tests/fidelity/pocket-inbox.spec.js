@@ -81,7 +81,7 @@ test("review & amend opens create's form pre-filled, and approves the amended va
   await expect(sheet).toBeHidden();
 });
 
-test("a failed arrival the server lets go has remove behind the swipe; one it keeps has none", async ({ page }) => {
+test("a failed arrival the server lets go opens on a tap to remove; one it keeps has none", async ({ page }) => {
   const seen = await answerApproval(page);
   await page.route("**/api/imap-inbox", (route) => route.fulfill({
     json: {
@@ -95,14 +95,15 @@ test("a failed arrival the server lets go has remove behind the swipe; one it ke
     },
   }));
   await page.goto(`${APP}/inbox`, { waitUntil: "networkidle" });
-  /* Real buttons in the accessible tree (owner decision §25), out of the
-     sighted Tab order until revealed. */
-  const remove = page.getByRole("button", { name: "Remove the message from 09 Aug" });
-  await expect(remove).toHaveCount(1);
+  /* Real buttons in the accessible tree (review round §1.1), out of the
+     page until their row opens. */
+  await expect(page.getByRole("button", { name: "Remove the message from 09 Aug" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Remove the message from 06 Aug" })).toHaveCount(0);
-  await page.getByRole("group", { name: "A message from 09 Aug" }).focus();
-  await page.keyboard.press("ArrowLeft");
-  await expect(page.locator(".p-row", { hasText: "A message from 09 Aug" })).toHaveAttribute("data-open", /.*/);
+  const gone = page.locator(".p-row", { hasText: "A message from 09 Aug" });
+  await gone.locator("[data-row-face]").click();
+  await expect(gone).toHaveAttribute("data-open", "");
+  const remove = page.getByRole("button", { name: "Remove the message from 09 Aug" });
+  await expect(remove).toBeVisible();
   await remove.click();
   await page.getByRole("button", { name: "tap again to remove the message from 09 Aug" }).click();
   await expect.poll(() => seen.discards).toEqual(["r-gone"]);
