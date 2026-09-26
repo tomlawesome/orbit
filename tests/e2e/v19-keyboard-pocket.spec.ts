@@ -438,24 +438,34 @@ test("household page (pocket): fully reachable by keyboard", async ({ page }) =>
        someone" lists every account on this shared acceptance instance not
        yet in the household, genuinely unbounded and not part of what this
        test proves. */
-    /* #1122: two kinds of control on the pocket household are out of the
-       Tab order by design and reached another way, proved below rather
-       than by Tab: the archive's unselected tab (§22's tabs, the WAI-ARIA
-       tabs pattern: the tablist is one Tab stop and ← → move between its
-       tabs), and a section row's "Move … up/down" buttons, visually hidden
-       for a screen reader, whose keyboard way is Alt-↑/↓ on the row itself
-       (Row.svelte). */
+    /* #1122: the archive's unselected tab is out of the Tab order by
+       design and reached another way, proved below rather than by Tab
+       (§22's tabs, the WAI-ARIA tabs pattern: the tablist is one Tab stop
+       and ← → move between its tabs). A row's acts are in its panel, which
+       is `hidden` until the row is opened (review round §1.1), so a shut
+       row offers only its face to Tab. */
     await auditTabOrder(page, "household page (pocket)", {
-      exclude: '.cand, [role="tab"][aria-selected="false"], .p-row .move',
+      exclude: '.cand, [role="tab"][aria-selected="false"]',
     });
     const archive = page.getByRole("tablist", { name: "The archive" });
     await tabTo(page, { selector: '[role="tab"][aria-selected="true"]' }, { screen: "household page (pocket) archive" });
     await page.keyboard.press("ArrowRight");
     await expect(archive.getByRole("tab", { name: "bring one in" })).toBeFocused();
     await expect(archive.getByRole("tab", { name: "bring one in" })).toHaveAttribute("aria-selected", "true");
+    /* A section row's face is the button that opens it; Alt-↑/↓ on it
+       moves the section, and its opened panel holds `move up` / `move
+       down` (review round §1.1). */
     const section = page.locator(".hh-sections .p-row [data-row-face]").first();
-    await expect(section).toHaveAttribute("tabindex", "0");
+    await expect(section).toHaveJSProperty("tagName", "BUTTON");
+    await expect(section).toHaveAttribute("aria-expanded", "false");
     await expect(section).toHaveAttribute("aria-keyshortcuts", /Alt\+ArrowUp Alt\+ArrowDown/);
+    await section.focus();
+    await page.keyboard.press("Enter");
+    await expect(section).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".hh-sections [data-row-panel]:not([hidden])").getByRole("button", { name: /^Move .* down$/ }))
+      .toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(section).toHaveAttribute("aria-expanded", "false");
   } finally {
     await cleanup(page, household);
   }

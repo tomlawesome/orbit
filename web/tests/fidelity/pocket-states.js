@@ -6,7 +6,7 @@
  * always walk the same states. Not a spec: nothing here runs on its own.
  *
  * Each state says how a reader gets there from a fresh page load: the route,
- * then the taps, typing and swipes. `settle()` is called after `reach`, so
+ * then the taps and typing. `settle()` is called after `reach`, so
  * `reach` only has to wait for its own state to exist.
  */
 
@@ -49,26 +49,17 @@ export async function settle(page) {
 }
 
 /**
- * A real touch swipe (Chromium's touch pipeline, so touch-action applies),
- * the one the household and administration specs use.
+ * Opens a row in place (review round §1.1): a tap on its face, then the
+ * panel's unfold. The household and administration specs open rows the
+ * same way.
  * @param {Page} page
  * @param {Locator} row
- * @param {number} dx
  */
-export async function swipe(page, row, dx) {
+export async function openRow(page, row) {
   await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
-  await page.waitForTimeout(300);
-  const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await row.boundingBox());
-  const from = { x: box.x + box.width - 60, y: box.y + Math.min(box.height / 2, 28) };
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [from] });
-  for (let i = 1; i <= 8; i++) {
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + (dx * i) / 8, y: from.y }] });
-    await page.waitForTimeout(16);
-  }
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await cdp.detach();
-  await page.waitForTimeout(300);
+  await row.locator("[data-row-face]").first().tap();
+  await row.locator("[data-row-panel]:not([hidden])").first().waitFor();
+  await settle(page);
 }
 
 /**
@@ -192,9 +183,9 @@ export const SIGNED_IN = [
     await go(page, "/kit");
     await page.getByRole("button", { name: "Remove the boiler service" }).click();
   } },
-  { route: "/kit", state: "row-swiped", reach: async (page) => {
+  { route: "/kit", state: "row-open", reach: async (page) => {
     await go(page, "/kit");
-    await swipe(page, row(page, "[data-kit=members]", "Rob Lawson"), -200);
+    await openRow(page, row(page, "[data-kit=members]", "Rob Lawson"));
   } },
   { route: "/kit", state: "sheet-callout", reach: async (page) => {
     await go(page, "/kit");
@@ -372,32 +363,32 @@ export const SIGNED_IN = [
     await page.locator(".pki-amend").first().click();
     await sheetUp(page);
   } },
-  { route: "/inbox", state: "failed-swiped", reach: async (page) => {
+  { route: "/inbox", state: "failed-open", reach: async (page) => {
     await go(page, "/inbox");
-    await swipe(page, row(page, "[aria-labelledby=pki-failed-h]", "A message"), -200);
+    await openRow(page, row(page, "[aria-labelledby=pki-failed-h]", "A message"));
   } },
 
   /* /household: the owner's system and a member's */
   { route: HH, state: "rest", reach: (page) => household(page) },
-  { route: HH, state: "member-swiped", reach: async (page) => {
+  { route: HH, state: "member-open", reach: async (page) => {
     await household(page);
-    await swipe(page, row(page, ".hh-members", "Emma Lawson"), -200);
+    await openRow(page, row(page, ".hh-members", "Emma Lawson"));
   } },
   { route: HH, state: "member-remove-armed", reach: async (page) => {
     await household(page);
     const emma = row(page, ".hh-members", "Emma Lawson");
-    await swipe(page, emma, -200);
+    await openRow(page, emma);
     await emma.getByRole("button", { name: "Remove Emma Lawson" }).click();
   } },
   { route: HH, state: "leave-armed", reach: async (page) => {
     await household(page);
     const gran = row(page, ".hh-members", "Gran");
-    await swipe(page, gran, -200);
+    await openRow(page, gran);
     await gran.locator("[data-row-acts] button").last().click();
   } },
-  { route: HH, state: "invitation-swiped", reach: async (page) => {
+  { route: HH, state: "invitation-open", reach: async (page) => {
     await household(page);
-    await swipe(page, row(page, ".hh-members", "daniel.lawson@example.com"), -200);
+    await openRow(page, row(page, ".hh-members", "daniel.lawson@example.com"));
   } },
   { route: HH, state: "knocking", reach: async (page) => {
     await page.route("**/api/join-requests*", (route) => route.fulfill({ json: { requests: [
@@ -428,14 +419,14 @@ export const SIGNED_IN = [
   { route: HH, state: "handover-sheet", reach: async (page) => {
     await household(page);
     const emma = row(page, ".hh-members", "Emma Lawson");
-    await swipe(page, emma, -200);
+    await openRow(page, emma);
     await emma.getByRole("button", { name: /Hand .* over to Emma/ }).click();
     await sheetUp(page);
   } },
   { route: HH, state: "handover-armed", reach: async (page) => {
     await household(page);
     const emma = row(page, ".hh-members", "Emma Lawson");
-    await swipe(page, emma, -200);
+    await openRow(page, emma);
     await emma.getByRole("button", { name: /Hand .* over to Emma/ }).click();
     await sheetUp(page);
     await settle(page);
@@ -461,9 +452,9 @@ export const SIGNED_IN = [
     await page.locator("#hh-name").fill("");
     await page.locator("[data-hh=savebar].up").waitFor();
   } },
-  { route: HH, state: "section-swiped", reach: async (page) => {
+  { route: HH, state: "section-open", reach: async (page) => {
     await household(page);
-    await swipe(page, row(page, ".hh-sections", "Vehicles"), -200);
+    await openRow(page, row(page, ".hh-sections", "Vehicles"));
   } },
   { route: HH, state: "add-section-sheet", reach: async (page) => {
     await household(page);
@@ -473,7 +464,7 @@ export const SIGNED_IN = [
   { route: HH, state: "edit-section-sheet", reach: async (page) => {
     await household(page);
     const vehicles = row(page, ".hh-sections", "Vehicles");
-    await swipe(page, vehicles, -200);
+    await openRow(page, vehicles);
     await vehicles.locator("[data-row-acts] button").first().click();
     await sheetUp(page);
   } },
@@ -506,40 +497,40 @@ export const SIGNED_IN = [
   { route: SEASIDE, state: "leave-armed", reach: async (page) => {
     await household(page, SEASIDE);
     const me = row(page, ".hh-members", "Tom Lawson");
-    await swipe(page, me, -200);
+    await openRow(page, me);
     await me.locator("[data-row-acts] button").last().click();
   } },
 
   /* /settings: every card, its sheets and its swipes */
   { route: "/settings", state: "rest", reach: (page) => go(page, "/settings") },
   { route: "/settings", state: "hatch", reach: async (page) => { await go(page, "/settings"); await hatch(page); } },
-  { route: "/settings", state: "password-swiped", reach: async (page) => {
+  { route: "/settings", state: "password-open", reach: async (page) => {
     await go(page, "/settings");
-    await swipe(page, row(page, ".st-pocket", "password"), -200);
+    await openRow(page, row(page, ".st-pocket", "password"));
   } },
   { route: "/settings", state: "change-password-sheet", defect: { "*": "review round step c: save it is cut at the foot of the change-password callout" }, reach: async (page) => {
     await go(page, "/settings");
     const password = row(page, ".st-pocket", "password");
-    await swipe(page, password, -200);
+    await openRow(page, password);
     await password.locator("[data-row-acts] button", { hasText: "change" }).click();
     await sheetUp(page);
   } },
   { route: "/settings", state: "remove-password-sheet", reach: async (page) => {
     await go(page, "/settings");
     const password = row(page, ".st-pocket", "password");
-    await swipe(page, password, -200);
+    await openRow(page, password);
     await password.getByRole("button", { name: "Remove your password" }).click();
     await password.getByRole("button", { name: "Remove your password" }).click();
     await sheetUp(page);
   } },
-  { route: "/settings", state: "provider-swiped", reach: async (page) => {
+  { route: "/settings", state: "provider-open", reach: async (page) => {
     await go(page, "/settings");
-    await swipe(page, row(page, ".st-pocket", "id.lawson-home.example"), -200);
+    await openRow(page, row(page, ".st-pocket", "id.lawson-home.example"));
   } },
   { route: "/settings", state: "unlink-sheet", reach: async (page) => {
     await go(page, "/settings");
     const provider = row(page, ".st-pocket", "id.lawson-home.example");
-    await swipe(page, provider, -200);
+    await openRow(page, provider);
     await provider.locator("[data-row-acts] .arm").click();
     await provider.locator("[data-row-acts] .arm").click();
     await sheetUp(page);
@@ -563,9 +554,9 @@ export const SIGNED_IN = [
     await row(page, ".st-pocket", "final warning").locator("[data-row-face]").click();
     await sheetUp(page);
   } },
-  { route: "/settings", state: "session-swiped", reach: async (page) => {
+  { route: "/settings", state: "session-open", reach: async (page) => {
     await go(page, "/settings");
-    await swipe(page, row(page, ".st-pocket", "Safari"), -200);
+    await openRow(page, row(page, ".st-pocket", "Safari"));
   } },
   { route: "/settings", state: "sign-out-everywhere-armed", reach: async (page) => {
     await go(page, "/settings");
@@ -588,9 +579,9 @@ export const SIGNED_IN = [
   /* /administration: every card, its sheets and its swipes */
   { route: "/administration", state: "rest", reach: administration },
   { route: "/administration", state: "hatch", reach: async (page) => { await administration(page); await hatch(page); } },
-  { route: "/administration", state: "person-swiped", reach: async (page) => {
+  { route: "/administration", state: "person-open", reach: async (page) => {
     await administration(page);
-    await swipe(page, row(page, "[data-ad=people]", "Emma Lawson"), -200);
+    await openRow(page, row(page, "[data-ad=people]", "Emma Lawson"));
   } },
   { route: "/administration", state: "invite-sheet", defect: { "*": "review round step c: create is below the invite callout's fold (at 360 the days stepper is cut too)" }, reach: async (page) => {
     await administration(page);
@@ -600,14 +591,14 @@ export const SIGNED_IN = [
   { route: "/administration", state: "setup-link-sheet", defect: { "*": "review round step c: send it is cut at the foot of the setup-link callout" }, reach: async (page) => {
     await administration(page);
     const emma = row(page, "[data-ad=people]", "Emma Lawson");
-    await swipe(page, emma, -200);
+    await openRow(page, emma);
     await emma.getByRole("button", { name: /setup link/ }).click();
     await sheetUp(page);
   } },
   { route: "/administration", state: "place-sheet", reach: async (page) => {
     await administration(page);
     const emma = row(page, "[data-ad=people]", "Emma Lawson");
-    await swipe(page, emma, -200);
+    await openRow(page, emma);
     await emma.getByRole("button", { name: /^Place/ }).click();
     await sheetUp(page);
   } },
@@ -616,14 +607,14 @@ export const SIGNED_IN = [
     await adButton(page, "new system").click();
     await sheetUp(page);
   } },
-  { route: "/administration", state: "clock-swiped", reach: async (page) => {
+  { route: "/administration", state: "clock-open", reach: async (page) => {
     await administration(page);
-    await swipe(page, row(page, "[data-ad=systems]", "Aunt May"), -200);
+    await openRow(page, row(page, "[data-ad=systems]", "Aunt May"));
   } },
   { route: "/administration", state: "delete-system-sheet", reach: async (page) => {
     await administration(page);
     const gone = row(page, "[data-ad=systems]", "Aunt May");
-    await swipe(page, gone, -200);
+    await openRow(page, gone);
     await gone.locator("[data-row-acts] .arm").click();
     await gone.locator("[data-row-acts] .arm").click();
     await sheetUp(page);

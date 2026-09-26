@@ -1,234 +1,145 @@
-import { dragAxis, swipeOffset, swipeSettles } from "./gesture.js";
-
 /**
  * One management act on a row. `name` is the full accessible name, object
  * included ("Remove Emma Lawson"); `label` is what the pill says ("remove").
- * @typedef {{ label: string, name: string, onact: () => unknown, danger?: boolean, tone?: "ok" | "up" | "warm" | "accent" }} RowAct
+ * A `danger` act arms on its first tap and fires on its second; `arms` does
+ * the same for an act that is not red (the relay's `Add to orbit`). With
+ * `href` the act is a way onward (`open →`) rather than something done here.
+ * `tone` colours the pill the desk way, or `filled` for the one primary.
+ * @typedef {{ label: string, name: string, onact?: () => unknown, href?: string, danger?: boolean, arms?: boolean, tone?: "ok" | "up" | "warm" | "accent" | "filled" }} RowAct
  */
 
+/** The unfold's close, in ms: the panel stays in the page until it is shut. */
+export const CLOSE_MS = 200;
+
+/** The rows mounted now, by element, so a screen can open one by address. */
+const mounted = new WeakMap();
+/** The open row in each group ([data-row-group] on the list, or the page). */
+const openIn = new WeakMap();
+
 /**
- * ROW ACTS, BEHIND A SWIPE (#1120, proposal §1.5; owner decision §25 and
- * #1122). The acts on a management row (remove, hand over, resend, ...) are
- * revealed only by a horizontal swipe: no tap opens them and no extra button
- * shows at rest. The row's face never moves: the act tray slides over it
- * from the trailing edge (Fable, #1120), and the face's text column shrinks
- * to the tray's width. The tray goes back on a tap elsewhere, on scroll, or
- * after 6s. A swipe never performs an act.
+ * THE ROW OPENS ON A TAP (#1120, review round §1.1; the desk's own grammar,
+ * home.css "THE ROW IS THE ITEM", #424). Tapping the face grows the row in
+ * place into a panel under it holding the row's detail and its acts; tapping
+ * the face again closes it. A tap outside the row closes it, Escape closes it
+ * and hands focus back to the face, and opening another row in the same
+ * group (`data-row-group` on the list) closes the first. Scrolling does not
+ * close it and there is no timer.
  *
- *   keyboard       focus the row, ← or → reveals, Tab walks the acts,
- *                  Escape hides and returns to the row
- *   screen reader  every act is a real button in the accessibility tree,
- *                  named with its object ("Remove Emma Lawson"), out of the
- *                  sighted Tab order (tabindex -1) until revealed; reaching
- *                  one by swipe-navigation reveals the row so it is on top
+ *   keyboard       the face is a button: Enter or Space toggles; the
+ *                  panel's pills are in the Tab order only while open (the
+ *                  `hidden` attribute when shut); Escape closes
+ *   screen reader  the face carries aria-expanded and aria-controls
  *
  * The DOM this drives (Row.svelte draws it):
- *   [data-row]            the row
- *     [data-row-face]     what the row shows; stays put
- *     [data-row-acts]     the act tray, over the face, off the trailing side
- *                         at rest; CSS places it open or shut from
- *                         [data-open], this only moves it with a finger
- *       button...
+ *   [data-row]               the row; [data-open] while open
+ *     [data-row-face]        the button that toggles it
+ *     [data-row-panel]       the panel, `hidden` while shut
  *
+ * The unfold itself is CSS keyed on [data-open]; this only keeps the panel
+ * in the page until the close has played (`closeMs`, 0 under reduced motion).
  * @param {HTMLElement} row
- * @param {{ holdMs?: number }} [options]
- * @returns {{ open: () => void, close: (focusFace?: boolean) => void, readonly isOpen: boolean, destroy: () => void }}
+ * `onchange` hears every open and close.
+ * @param {{ closeMs?: number, onchange?: (open: boolean) => void }} [options]
+ * @returns {{ open: () => void, close: (focusFace?: boolean) => void, toggle: () => void, readonly isOpen: boolean, destroy: () => void }}
  */
-export function mountRow(row, { holdMs = 6000 } = {}) {
+export function mountRow(row, { closeMs, onchange } = {}) {
   const face = /** @type {HTMLElement} */ (row.querySelector("[data-row-face]"));
-  const acts = /** @type {HTMLElement | null} */ (row.querySelector("[data-row-acts]"));
+  const panel = /** @type {HTMLElement | null} */ (row.querySelector("[data-row-panel]"));
   const doc = row.ownerDocument;
   const win = /** @type {Window} */ (doc.defaultView);
-  const buttons = () => /** @type {HTMLElement[]} */ (acts ? Array.from(acts.querySelectorAll("button")) : []);
-  const reveal = () => acts?.offsetWidth || 0;
+  const still = () => typeof win.matchMedia === "function" && win.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const group = () => row.closest("[data-row-group]") ?? doc;
 
   let isOpen = false;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let timer;
-
-  /* `x` is swipeOffset's answer, how far open (negative) the finger has
-     pulled the tray; the tray sits `reveal + x` from its open place. With
-     `settle`, hand the tray back to the CSS, which slides it home. */
-  const place = (/** @type {number} */ x, /** @type {boolean} */ settle) => {
-    if (!acts) return;
-    if (settle) {
-      acts.style.transition = "";
-      acts.style.transform = "";
-      return;
-    }
-    acts.style.transition = "none";
-    acts.style.transform = `translateX(${Math.max(0, reveal() + x)}px)`;
-  };
-  /* The face's text column makes room for the whole tray at once. */
-  const makeRoom = () => row.style.setProperty("--p-row-tray", `${reveal()}px`);
-  const setTabStops = (/** @type {boolean} */ on) => {
-    for (const button of buttons()) button.tabIndex = on ? 0 : -1;
-  };
-  const armTimer = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      /* Never pull the acts out from under someone using them. */
-      if (acts && acts.contains(doc.activeElement)) return armTimer();
-      close();
-    }, holdMs);
-  };
+  let hiding;
 
   /** @param {Event} event */
   const onOutside = (event) => {
     if (event.target instanceof Node && row.contains(event.target)) return;
     close();
   };
-  const onScroll = () => close();
 
   function open() {
-    if (!acts) return;
-    if (!isOpen) {
-      isOpen = true;
-      makeRoom();
-      row.dataset.open = "";
-      setTabStops(true);
-      win.addEventListener("pointerdown", onOutside, true);
-      win.addEventListener("scroll", onScroll, { capture: true, passive: true });
-    }
-    place(-reveal(), true);
-    armTimer();
+    if (!panel || isOpen) return;
+    const other = openIn.get(group());
+    if (other && other !== control) other.close();
+    isOpen = true;
+    openIn.set(group(), control);
+    clearTimeout(hiding);
+    panel.hidden = false;
+    /* Laid out shut first, so the unfold has somewhere to grow from. */
+    void panel.offsetHeight;
+    row.dataset.open = "";
+    face.setAttribute("aria-expanded", "true");
+    win.addEventListener("pointerdown", onOutside, true);
+    onchange?.(true);
   }
 
   /** @param {boolean} [focusFace] */
   function close(focusFace = false) {
-    clearTimeout(timer);
-    const hadFocus = acts?.contains(doc.activeElement) ?? false;
-    place(0, true);
-    if (!isOpen) return;
+    if (!panel || !isOpen) return;
+    const hadFocus = panel.contains(doc.activeElement);
     isOpen = false;
+    if (openIn.get(group()) === control) openIn.delete(group());
     delete row.dataset.open;
-    setTabStops(false);
+    face.setAttribute("aria-expanded", "false");
     win.removeEventListener("pointerdown", onOutside, true);
-    win.removeEventListener("scroll", onScroll, { capture: true });
+    const ms = closeMs ?? (still() ? 0 : CLOSE_MS);
+    clearTimeout(hiding);
+    if (ms > 0) hiding = setTimeout(() => { if (!isOpen) panel.hidden = true; }, ms);
+    else panel.hidden = true;
     if (focusFace || hadFocus) face.focus({ preventScroll: true });
+    onchange?.(false);
   }
 
-  /* Keyboard: the row's own keys, only while focus is on the face. */
+  function toggle() {
+    if (isOpen) close();
+    else open();
+  }
+
+  /* A control inside the face (`end`, the section switch) sits beside the
+     button in Row.svelte, so its tap never reaches here. */
+  const onClick = () => toggle();
   /** @param {KeyboardEvent} event */
-  const onFaceKey = (event) => {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
-    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      if (!acts) return;
-      event.preventDefault();
-      if (isOpen) close(true);
-      else open();
-    } else if (event.key === "Escape" && isOpen) {
-      event.preventDefault();
-      close(true);
-    }
-  };
-  /** @param {KeyboardEvent} event */
-  const onActsKey = (event) => {
-    if (event.key !== "Escape") return;
+  const onKey = (event) => {
+    if (event.key !== "Escape" || !isOpen) return;
     event.preventDefault();
     event.stopPropagation();
     close(true);
   };
-  /* A screen reader landing on a covered act uncovers the row. */
-  const onActsFocus = () => {
-    if (!isOpen) open();
-    else armTimer();
-  };
 
-  /* The swipe. touch-action:pan-y on the face (Row.svelte) leaves vertical
-     drags to the page, so a horizontal one arrives here. */
-  /** @type {{ id: number, x: number, y: number, axis: "x" | "y" | null, lastX: number, lastT: number, v: number } | null} */
-  let track = null;
-  let swallowClick = false;
-  /** @param {PointerEvent} event */
-  const onDown = (event) => {
-    if (!acts || event.button > 0 || row.dataset.lifted !== undefined) return;
-    track = { id: event.pointerId, x: event.clientX, y: event.clientY, axis: null, lastX: event.clientX, lastT: event.timeStamp, v: 0 };
-  };
-  /** @param {PointerEvent} event */
-  const onMove = (event) => {
-    if (!track || event.pointerId !== track.id) return;
-    if (row.dataset.lifted !== undefined) { track = null; return; }
-    const dx = event.clientX - track.x;
-    if (track.axis === null) {
-      track.axis = dragAxis(dx, event.clientY - track.y);
-      if (track.axis === "y") { track = null; return; }
-      if (track.axis === "x") {
-        makeRoom();
-        row.dataset.swiping = "";
-        face.setPointerCapture?.(event.pointerId);
-      }
-    }
-    if (track.axis !== "x") return;
-    const dt = Math.max(1, event.timeStamp - track.lastT);
-    track.v = (event.clientX - track.lastX) / dt;
-    track.lastX = event.clientX;
-    track.lastT = event.timeStamp;
-    place(swipeOffset({ dx, reveal: reveal(), open: isOpen }), false);
-  };
-  /** @param {PointerEvent} event */
-  const onUp = (event) => {
-    if (!track || event.pointerId !== track.id) return;
-    const moved = track.axis === "x";
-    const dx = event.clientX - track.x;
-    const velocity = track.v;
-    track = null;
-    delete row.dataset.swiping;
-    if (!moved) return;
-    swallowClick = true;
-    if (swipeSettles({ dx, reveal: reveal(), open: isOpen, velocity })) open();
-    else close();
-  };
-  const onCancel = () => {
-    if (!track) return;
-    track = null;
-    delete row.dataset.swiping;
-    if (isOpen) open();
-    else close();
-  };
-  /* A swipe that ends over a link must not follow it. */
-  /** @param {MouseEvent} event */
-  const onClick = (event) => {
-    if (swallowClick) {
-      swallowClick = false;
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-    /* Tapping an open row's face puts the acts away rather than acting. */
-    if (isOpen) {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-    }
-  };
-
-  face.addEventListener("keydown", onFaceKey);
-  face.addEventListener("pointerdown", onDown);
-  face.addEventListener("pointermove", onMove);
-  face.addEventListener("pointerup", onUp);
-  face.addEventListener("pointercancel", onCancel);
-  face.addEventListener("click", onClick, true);
-  acts?.addEventListener("keydown", onActsKey);
-  acts?.addEventListener("focusin", onActsFocus);
-  setTabStops(false);
-
-  return {
+  const control = {
     open,
     close,
+    toggle,
     get isOpen() { return isOpen; },
     destroy() {
-      clearTimeout(timer);
+      clearTimeout(hiding);
+      if (openIn.get(group()) === control) openIn.delete(group());
       win.removeEventListener("pointerdown", onOutside, true);
-      win.removeEventListener("scroll", onScroll, { capture: true });
-      face.removeEventListener("keydown", onFaceKey);
-      face.removeEventListener("pointerdown", onDown);
-      face.removeEventListener("pointermove", onMove);
-      face.removeEventListener("pointerup", onUp);
-      face.removeEventListener("pointercancel", onCancel);
-      face.removeEventListener("click", onClick, true);
-      acts?.removeEventListener("keydown", onActsKey);
-      acts?.removeEventListener("focusin", onActsFocus);
+      face.removeEventListener("click", onClick);
+      row.removeEventListener("keydown", onKey);
+      mounted.delete(row);
     },
   };
+
+  if (panel) {
+    face.addEventListener("click", onClick);
+    row.addEventListener("keydown", onKey);
+    face.setAttribute("aria-expanded", "false");
+    panel.hidden = true;
+  }
+  mounted.set(row, control);
+  return control;
+}
+
+/**
+ * The mounted row an element belongs to, so a screen can open a row from
+ * elsewhere (home's search result opens the item's row in the manifest).
+ * @param {Element | null | undefined} el
+ */
+export function rowOf(el) {
+  const row = el?.closest("[data-row]");
+  return row ? mounted.get(row) ?? null : null;
 }
