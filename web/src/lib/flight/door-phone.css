@@ -6,10 +6,11 @@
    390 or 360, and no card fits inside a ring that fits the phone, so on a
    phone the ring cannot be the card. It is still the door:
 
-     · the ring RIDES HIGH -- the login ring at its own size (302.4px, a
-       4.2px line, the 29.4px orb), its top edge 44px under the safe area, in
-       the same station on every door screen, so nothing travels when a card
-       opens or the launch begins;
+     · the ring STANDS AT THE UPPER-MIDDLE (review round §2.7, #1127) -- the
+       login ring at its own size (302.4px, a 4.2px line, the 29.4px orb),
+       its centre at 40% of the visible height on the bare door, the held
+       dawn and the goodbye; at 30% over a card, where it closes to 240px
+       under 760px of visible height so the card below it fits;
      · the ring HOLDS THE QUESTION -- where `orbit` stands on the door, a card
        puts its own heading, 22px in the display face; the answers stand in
        the column beneath and the act is the pill;
@@ -38,18 +39,36 @@
 :where(.ringcard) .bigring .pocketstroke{display:none}
 
 @media (max-width: 900px), (max-height: 600px){
+  /* THE STATION (review round §2.7). The ring's top edge is placed so its
+     centre sits at a share of the visible height (dvh, so the browser's
+     own bars are already taken off), held between 28px and 200px under
+     the safe area. At 844 the bare door's top is 187px, at 664 it is 115px. */
   :root{
     --door-ring:302.4px;
-    --door-top:calc(env(safe-area-inset-top, 0px) + 44px);
+    --door-top:clamp(calc(env(safe-area-inset-top, 0px) + 28px),
+                     calc(40dvh - var(--door-ring) / 2),
+                     calc(env(safe-area-inset-top, 0px) + 200px));
     /* the login glyph is a 420px box around its 302.4px ring */
     --door-glyph-inset:58.8px;
     --door-gap:28px;
   }
-  /* A short phone (360x780 and the like) stands the ring a little higher
-     and the card a little closer, on every door screen alike, so the
-     tallest card -- the first administrator's -- ends above the horizon. */
+  /* A short phone (360x780 and the like) stands the card a little closer
+     to the ring, so the tallest card -- the first administrator's -- ends
+     above the horizon. */
   @media (max-height: 800px){
-    :root{--door-top:calc(env(safe-area-inset-top, 0px) + 28px);--door-gap:20px}
+    :root{--door-gap:20px}
+  }
+  /* A card on the door: the ring's centre at 30%, and under 760px of
+     visible height the ring closes to 240px (the bare door keeps 302.4).
+     Both are re-declared here, on the column, because a custom property
+     resolves its var()s where it is declared. */
+  .ringcard{
+    --door-top:clamp(calc(env(safe-area-inset-top, 0px) + 28px),
+                     calc(30dvh - var(--door-ring) / 2),
+                     calc(env(safe-area-inset-top, 0px) + 200px));
+  }
+  @media (height < 760px){
+    .ringcard{--door-ring:240px}
   }
 
   /* ══ THE BARE DOOR, THE HELD DAWN, THE GOODBYE ═══════════════════════════
