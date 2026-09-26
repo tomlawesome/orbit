@@ -424,6 +424,8 @@ document-job failures (§3.5).
 
 Numbering continues the session's (9 upward).
 
+**Answered by the owner, 2026-09-26: 10b, 11a, 12a.** Question 10 went against the recommendation: every promise line is cut from the pocket, and the acts carry the promise. Wherever the per-screen lists above say a promise line is kept or moved "per question **10**", read it as cut.
+
 **10** The promise lines — "nothing is added without you", "originals stay
 in your mailbox, Orbit only reads copies", "self-hosted — nothing leaves
 this machine". The desk says them at the foot of several pages.
