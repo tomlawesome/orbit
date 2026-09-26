@@ -292,9 +292,17 @@ export const SIGNED_IN = [
   } },
   ...["complete", "reschedule", "snooze", "edit"].map((act) => ({
     route: "/item/i-mot", state: act,
-    defect: act === "complete"
-      ? { "*": "review round step c: record, the complete callout's act, is below its fold (at 360 the note field is cut too)" }
-      : undefined,
+    defect: /** @type {Record<string, Record<string, string>>} */ ({
+      complete: { "*": "review round step c: record, the complete callout's act, is below its fold (at 360 the note field is cut too)" },
+      reschedule: {
+        "390x664": "review round step c: reschedule, the callout's act, is cut at its foot in a phone browser",
+        "360x640": "review round step c: reschedule, the callout's act, is cut at its foot in a phone browser",
+      },
+      snooze: {
+        "390x664": "review round step c: snooze, the callout's act, is cut at its foot in a phone browser",
+        "360x640": "review round step c: snooze, the callout's act, is cut at its foot in a phone browser",
+      },
+    })[act],
     reach: async (/** @type {Page} */ page) => {
       await go(page, "/item/i-mot");
       await page.locator(".ip-acts button:visible", { hasText: act }).first().click();
@@ -324,7 +332,7 @@ export const SIGNED_IN = [
     await go(page, "/create");
     await page.locator("#pocket-entry").waitFor();
   } },
-  { route: "/create", state: "reminders-sheet", reach: async (page) => {
+  { route: "/create", state: "reminders-sheet", defect: { "390x664": "review round step c: done is cut at the foot of the reminders callout in a phone browser", "360x640": "review round step c: done is cut at the foot of the reminders callout in a phone browser" }, reach: async (page) => {
     await go(page, "/create");
     await page.locator(".pc-remind").click();
     await sheetUp(page);
@@ -546,7 +554,11 @@ export const SIGNED_IN = [
     await row(page, ".st-pocket", "first warning").locator("[data-row-face]").click();
     await sheetUp(page);
   } },
-  { route: "/settings", state: "final-warning-sheet", defect: { 360: "review round step c: the last warning choice is cut at the foot of the final-warning callout" }, reach: async (page) => {
+  { route: "/settings", state: "final-warning-sheet", defect: {
+    360: "review round step c: the last warning choice is cut at the foot of the final-warning callout",
+    "390x664": "review round step c: the last two warning choices are cut at the foot of the final-warning callout in a phone browser",
+    "360x640": "review round step c: the last two warning choices are cut at the foot of the final-warning callout in a phone browser",
+  }, reach: async (page) => {
     await go(page, "/settings");
     await row(page, ".st-pocket", "final warning").locator("[data-row-face]").click();
     await sheetUp(page);
@@ -616,7 +628,7 @@ export const SIGNED_IN = [
     await gone.locator("[data-row-acts] .arm").click();
     await sheetUp(page);
   } },
-  { route: "/administration", state: "contact-sheet", reach: async (page) => {
+  { route: "/administration", state: "contact-sheet", defect: { "390x664": "review round step c: save is cut at the foot of the public-contact callout in a phone browser", "360x640": "review round step c: save is cut at the foot of the public-contact callout in a phone browser" }, reach: async (page) => {
     await administration(page);
     await row(page, "[data-ad=contact]", "").locator("[data-row-face]").click();
     await sheetUp(page);
@@ -629,12 +641,12 @@ export const SIGNED_IN = [
     await administration(page, { mailbox: true });
     await adButton(page, "remove credential").click();
   } },
-  { route: "/administration", state: "rotate-addresses-sheet", reach: async (page) => {
+  { route: "/administration", state: "rotate-addresses-sheet", defect: { "360x640": "review round step c: rotate every address is cut at the foot of its callout under Android Chrome's address bar" }, reach: async (page) => {
     await administration(page, { mailbox: true });
     await row(page, "[data-ad=mail]", "every address").locator("[data-row-face]").click();
     await sheetUp(page);
   } },
-  { route: "/administration", state: "rotate-password-sheet", reach: async (page) => {
+  { route: "/administration", state: "rotate-password-sheet", defect: { "360x640": "review round step c: verify and rotate is cut at the foot of its callout under Android Chrome's address bar" }, reach: async (page) => {
     await administration(page, { mailbox: true });
     await adButton(page, "rotate password").click();
     await sheetUp(page);
