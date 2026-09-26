@@ -12,11 +12,20 @@ export const lapses = (iso) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 /**
- * The lapse date on the pocket, day and month only (round 3 §3.9): the
- * setup-link line is `setup link sent · lapses 3 Oct`. @param {string} iso
+ * A date on the pocket, day and month only (round 3 §3.9, §8): the
+ * setup-link line is `setup link sent · lapses 3 Oct`, the mailbox rows
+ * `verified · 12 Aug` and `1 Aug · Tom Lawson`. @param {?string} iso
  */
-export const lapsesShort = (iso) =>
-  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+export const shortDay = (iso) =>
+  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }) : "never";
+export const lapsesShort = shortDay;
+
+/**
+ * The ingest row's meta on the pocket (round 3 §8): `every 30s` beside the
+ * `on` trail, which already says enabled; the desk keeps `enabled · polling
+ * every 30s`. @param {string} value
+ */
+export const ingestShort = (value) => value.replace(/^enabled · polling every /, "every ");
 
 /**
  * The instance line on the pocket (round 3 §3.9, owner answer 10b): one line
@@ -82,20 +91,24 @@ export const JOB_KINDS = /** @type {Record<string, string>} */ ({
   scan: "Virus scan", encrypt: "Encryption", purge: "Purge", reconcile: "Reconcile", rewrap: "Re-key",
 });
 
-/** The server's bounded failure codes, in plain words. */
+/**
+ * The server's bounded failure codes, in plain words. Each is at most 26
+ * characters (round 3 §8): it is the row's whole meta at rest, in the body
+ * face beside the `failed` or `retrying` pill, and must fit at 360.
+ */
 export const JOB_REASONS = /** @type {Record<string, string>} */ ({
-  key_unavailable: "the encryption key wasn’t available",
-  purge_failed: "the stored file couldn’t be removed",
+  key_unavailable: "no encryption key",
+  purge_failed: "stored file not removed",
   processing_interrupted: "processing was interrupted",
   storage_object_missing: "the stored file is missing",
   scanner_unavailable: "couldn’t reach the scanner",
   scanner_timeout: "the scanner took too long",
-  scanner_protocol: "the scanner’s answer couldn’t be read",
+  scanner_protocol: "garbled scanner answer",
   scanner_failed: "the scanner failed",
-  stage_purge_failed: "the upload’s staging copy couldn’t be removed",
-  scan_recovery_expired: "the scan couldn’t be recovered in time",
-  staging_object_invalid: "the uploaded file couldn’t be read",
-  unknown: "failed for a reason Orbit doesn’t name",
+  stage_purge_failed: "staging copy not removed",
+  scan_recovery_expired: "scan not recovered in time",
+  staging_object_invalid: "upload couldn’t be read",
+  unknown: "reason not named",
 });
 
 /** A job's state as its pill says it, and the order the card reads them in. */
