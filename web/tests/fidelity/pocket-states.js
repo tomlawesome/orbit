@@ -210,13 +210,15 @@ export const SIGNED_IN = [
     await page.getByRole("button", { name: "full", exact: true }).click();
     await sheetUp(page);
   } },
-  { route: "/kit", state: "wake", defect: { "*": "review round step c: the wake lies over the add button (the north star) while it is up" }, reach: async (page) => {
+  { route: "/kit", state: "wake", reach: async (page) => {
     await go(page, "/kit");
     await page.getByRole("button", { name: "wake", exact: true }).click();
     await page.locator(".p-wake").first().waitFor();
   } },
 
-  /* /home: the dial, the manifest, and every sheet it raises */
+  /* /home: the dial, the manifest's drawers, and every sheet home raises.
+     The item and suggestion sheets are the dial's alone while the owner's
+     question 6 (review-round.md §4) is open. */
   { route: "/home", state: "rest", reach: (page) => go(page, "/home") },
   { route: "/home", state: "hatch", reach: async (page) => { await go(page, "/home"); await hatch(page); } },
   { route: "/home", state: "search", reach: async (page) => {
@@ -243,18 +245,34 @@ export const SIGNED_IN = [
   } },
   { route: "/home", state: "item-sheet-documents", reach: async (page) => {
     await go(page, "/home");
-    await row(page, ".pk-below", "Car MOT").locator("[data-row-face]").click();
+    await page.locator(".pk-body[data-sheet-title='Car full service']").click();
     await sheetUp(page);
     await settle(page);
     await sheet(page).getByRole("button", { name: "documents" }).click();
     await sheet(page).locator(".pk-list.flat [data-row]").first().waitFor();
   } },
-  { route: "/home", state: "suggestion-sheet", defect: { "*": "review round step c: the suggestion callout cuts Add to orbit and Dismiss at its foot and hides review & amend below its fold" }, reach: async (page) => {
+  { route: "/home", state: "row-open", reach: async (page) => {
+    await go(page, "/home");
+    const mot = row(page, ".pk-below", "Car MOT");
+    await openRow(page, mot);
+    await mot.locator(".paper").first().waitFor();
+  } },
+  { route: "/home", state: "suggestion-row-open", reach: async (page) => {
+    await go(page, "/home");
+    await openRow(page, row(page, ".pk-sugg", "Home insurance"));
+  } },
+  { route: "/home", state: "suggestion-row-armed", reach: async (page) => {
+    await go(page, "/home");
+    const catch_ = row(page, ".pk-sugg", "Home insurance");
+    await openRow(page, catch_);
+    await catch_.getByRole("button", { name: /^Add .* to your orbit$/ }).click();
+  } },
+  { route: "/home", state: "suggestion-sheet", reach: async (page) => {
     await go(page, "/home");
     await page.locator(".pk-body[data-sheet-sugg]").first().click();
     await sheetUp(page);
   } },
-  { route: "/home", state: "suggestion-armed", defect: { 390: "review round step c: review & amend stays below the suggestion callout's fold" }, reach: async (page) => {
+  { route: "/home", state: "suggestion-armed", reach: async (page) => {
     await go(page, "/home");
     await page.locator(".pk-body[data-sheet-sugg]").first().click();
     await sheetUp(page);

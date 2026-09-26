@@ -1,6 +1,7 @@
 <script>
   import "./pocket.css";
-  import { goto, onNavigate } from "$app/navigation";
+  import { tick } from "svelte";
+  import { beforeNavigate, goto, onNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { applyCommand, readItemDocuments } from "$lib/data/workspace.js";
@@ -13,11 +14,14 @@
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import TopChrome from "$lib/pocket/TopChrome.svelte";
-  import { POCKET_QUERY } from "$lib/pocket/media.js";
-  import { wake } from "$lib/pocket/wake.js";
+  import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
+  import { rowOf } from "$lib/pocket/row.js";
+  import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
   import { searchPocket } from "./pocket-search.js";
+  import ItemDrawer from "./ItemDrawer.svelte";
+  import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
   /**
    * HOME ON A PHONE: the pocket sky (CON-10, #430; lifted to the kit in #1120,
@@ -29,12 +33,19 @@
    * controls are Svelte's: the kit's sheets and rows bind their own
    * listeners, and nothing here reaches the desk's markup.
    *
-   * One sheet, several faces. The item sheet (#1119), its documents, the
-   * suggestion sheet (#466) and the search sheet (#1057) are one kit Sheet
-   * whose contents change, because a search result raises the item's sheet
-   * and the item's `documents` grows it (§1.4: a sheet that needs another
-   * grows rather than stacking). One history entry, so Back always closes
-   * whatever is up. The hatch is its own sheet, opened from the orb.
+   * THE ROW IS THE ITEM (review round §2.1, the desk's own grammar, #424):
+   * a manifest row opens in place into a drawer holding the item's detail,
+   * `open →` onward to its belt, `complete`, and `copy link`; the relay's
+   * catch opens the same way with its readings and its two decisions. A
+   * search result closes the search and opens its row.
+   *
+   * One sheet, several faces: the search sheet (#1057), and, for the dial
+   * only, the item sheet (#1119) with its documents and the suggestion
+   * sheet (#466). What a planet on the dial does is the owner's open
+   * question 6 on #1120 (review-round.md §4), so the dial keeps raising
+   * those sheets until it is answered; nothing else raises them. One
+   * history entry, so Back always closes whatever is up. The hatch is its
+   * own sheet, opened from the orb.
    * @typedef {{
    *   view?: import('$lib/data/workspace.js').HomeView | null,
    *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
@@ -267,16 +278,25 @@
 
   // ---- the suggestion sheet (#466) ----------------------------------------
 
-  /** @param {"approve" | "dismiss"} act */
-  async function decide(act) {
-    const target = suggestion;
+  /**
+   * The relay's catch, decided: from the dial's suggestion sheet, or from
+   * its row in the signals (where a refusal stays under the row's readings).
+   * @param {"approve" | "dismiss"} act
+   * @param {import('$lib/data/workspace.js').ReceiptSuggestion | null} [target]
+   */
+  async function decide(act, target = suggestion) {
     const handler = act === "approve" ? onapprove : ondismiss;
     if (!target || !handler || busy) return;
     busy = true;
     problem = null;
+    delete rowProblem[target.id];
     try {
       const failed = await handler(target);
-      if (failed) { problem = failed; return; }
+      if (failed) {
+        if (sheetOpen) problem = failed;
+        else rowProblem[target.id] = failed;
+        return;
+      }
       sheetOpen = false;
       wake(act === "approve" ? `${target.title} added to your orbit` : `${target.title} dismissed`);
     } finally {
@@ -296,6 +316,7 @@
   let query = $state("");
   /** @type {import('./pocket-search.js').SearchDocument[]} */
   let searchDocuments = $state([]);
+  let papersReady = $state(false);
   /** @type {object | null} */
   let searchDocumentsFor = null;
 
@@ -315,7 +336,10 @@
         return [];
       }
     }));
-    if (searchDocumentsFor === household) searchDocuments = found.flat();
+    if (searchDocumentsFor === household) {
+      searchDocuments = found.flat();
+      papersReady = true;
+    }
   }
 
   const results = $derived(
@@ -343,6 +367,149 @@
       busy = false;
     }
   }
+
+  // ---- the drawers (review round §2.1) ---------------------------------------
+
+  /** What went wrong acting from a row, by the row's id. @type {Record<string, string>} */
+  const rowProblem = $state({});
+
+  /** The manifest's row for an item, if the manifest draws one. @param {string} id */
+  const manifestRow = (id) => document.querySelector(`.pocket .pk-below [data-row-key="${CSS.escape(id)}"]`);
+
+  /**
+   * Opens an item's row where it sits in the manifest and brings it to the
+   * middle of the screen, as the desk's `#id` does. False when the manifest
+   * draws no row for it.
+   * @param {string} id
+   * @param {{ focus?: boolean }} [options]
+   */
+  async function openRow(id, { focus = false } = {}) {
+    await tick();
+    const el = manifestRow(id);
+    const control = rowOf(el);
+    if (!el || !control) return false;
+    control.open();
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+    if (focus) /** @type {HTMLElement | null} */ (el.querySelector("[data-row-face]"))?.focus({ preventScroll: true });
+    return true;
+  }
+
+  /**
+   * A search result closes the search and opens its row (§2.1). An item the
+   * manifest does not draw (it lists what needs attention) has no row to
+   * open, so it still raises its sheet.
+   * @param {string} id
+   */
+  async function openResult(id) {
+    if (!manifestRow(id)) { openItem(id); return; }
+    sheetOpen = false;
+    await tick();
+    await openRow(id, { focus: true });
+  }
+
+  /* Arriving on an item's address (`copy link`, the desk's own): its row
+     opens, once, as soon as the manifest has drawn it. */
+  let addressed = false;
+  $effect(() => {
+    const id = page.url.searchParams.get("item");
+    if (addressed || !id || !rows.length || !isPocket()) return;
+    openRow(id).then((opened) => { addressed ||= opened; });
+  });
+
+  /* The papers in a drawer ride on the search's own read of them, made the
+     first time any row opens rather than on every arrival. */
+  /** @param {boolean} open */
+  const onRowToggle = (open) => { if (open) loadSearchDocuments(); };
+  const papersOf = (/** @type {string} */ id) => searchDocuments.filter((doc) => doc.itemId === id);
+
+  /* `complete` from a drawer, as the belt does it (item/[[id]]/+page.svelte,
+     tapComplete): an item with a cost to confirm goes to its belt with the
+     record sheet up; one with nothing to record completes on the tap, held
+     for the wake's four seconds so `undo` is a real undo, and sent at once
+     if the page is left first. */
+  /** @typedef {{ send: () => Promise<void>, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
+  /** @type {HeldCompletion | null} */
+  let held = null;
+  /** @param {{ id: string, title: string }} one */
+  function completeRow(one) {
+    const raw = rawItems.get(one.id);
+    const householdId = view?.primary;
+    if (!raw || !householdId || !view) return;
+    if (raw.costMinor !== null && raw.costMinor !== undefined) {
+      morphing = true;
+      goto(resolve("/item/[[id]]", { id: encodeURIComponent(one.id) }), { state: { pocketAct: "complete" } });
+      return;
+    }
+    sendHeld();
+    const completedDate = view.today;
+    const nextDate = nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined;
+    /** @type {HeldCompletion} */
+    const job = {
+      done: false,
+      timer: undefined,
+      send: async () => {
+        await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId }), { completedDate, nextDate }));
+        await onchanged?.();
+      },
+    };
+    job.timer = setTimeout(() => fireHeld(job), WAKE_HOLD_MS);
+    held = job;
+    wake(`Completed${nextDate ? ` · next due ${short(nextDate)}` : ""} · ${one.title}`, {
+      undo: () => { clearTimeout(job.timer); job.done = true; if (held === job) held = null; },
+    });
+  }
+  /** @param {HeldCompletion} job */
+  async function fireHeld(job) {
+    if (job.done) return;
+    job.done = true;
+    if (held === job) held = null;
+    try {
+      await job.send();
+    } catch (error) {
+      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
+    }
+  }
+  function sendHeld() {
+    const job = held;
+    if (!job || job.done) return;
+    clearTimeout(job.timer);
+    job.done = true;
+    held = null;
+    job.send().catch(() => {});
+  }
+  beforeNavigate(() => { sendHeld(); });
+  $effect(() => {
+    addEventListener("pagehide", sendHeld);
+    return () => { removeEventListener("pagehide", sendHeld); };
+  });
+
+  /* `copy link`: the item's address, the desk's (+page.svelte addressOf),
+     the one place the pocket offers it. */
+  /** @type {string | null} */
+  let copied = $state(null);
+  /** @param {string} id */
+  async function copyLink(id) {
+    try {
+      await navigator.clipboard.writeText(new URL(`/home?item=${encodeURIComponent(id)}`, location.origin).href);
+      copied = id;
+    } catch {
+      /* A refused clipboard is no error worth a word: the address still works. */
+      copied = null;
+    }
+  }
+
+  /** The acts in a manifest item's drawer. @param {{ id: string, title: string }} one @returns {import('$lib/pocket/row.js').RowAct[]} */
+  const itemActs = (one) => [
+    { label: "open →", name: `Open ${one.title}`, tone: "accent", onact: () => { morphing = true; },
+      href: resolve("/item/[[id]]", { id: encodeURIComponent(one.id) }) },
+    { label: "complete", name: `Complete ${one.title}`, tone: "ok", onact: () => completeRow(one) },
+  ];
+  /** The relay's catch, decided from its row. @param {import('$lib/data/workspace.js').ReceiptSuggestion} s @returns {import('$lib/pocket/row.js').RowAct[]} */
+  const suggestionActs = (s) => [
+    { label: "Add to orbit", name: `Add ${s.title} to your orbit`, tone: "filled", arms: true, onact: () => decide("approve", s) },
+    { label: "Dismiss", name: `Dismiss ${s.title}`, danger: true, onact: () => decide("dismiss", s) },
+  ];
 
   // Keyboard (§2.4): ↓ from the field walks into the results, ↑ and ↓ move
   // through them, ↑ from the first goes back to the field, Enter in the field
@@ -560,37 +727,58 @@
   <div class="pk-below">
   {#if groups?.attention.length}
     <h2 class="p-caps">Needs attention</h2>
-    <div class="pk-list">
+    <div class="pk-list" data-row-group>
       {#each groups.attention as one (one.id)}
-        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
+        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
              trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-             onactivate={() => openItem(one.id)}>
+             acts={itemActs(one)} ontoggle={onRowToggle}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
+          {#snippet detail()}
+            <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
+                        reading={!papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
+          {/snippet}
+          {#snippet after()}
+            <button class="p-quiet pk-copy" onclick={() => copyLink(one.id)}>{copied === one.id ? "link copied" : "copy link"}</button>
+          {/snippet}
         </Row>
       {/each}
     </div>
   {:else if groups?.later.length}
+    {@const next = groups.later[0]}
     <h2 class="p-caps">Needs attention</h2>
-    <div class="pk-list">
-      <Row title="nothing needs you" meta={`next up ${groups.later[0].title}${groups.later[0].days !== null ? `, ${tlabel(groups.later[0])}` : ""}`}
-           onactivate={() => openItem(groups.later[0].id)}>
+    <!-- Nothing needs you: the one row is the next item up, and opens as it. -->
+    <div class="pk-list" data-row-group>
+      <Row title="nothing needs you" meta={`next up ${next.title}${next.days !== null ? `, ${tlabel(next)}` : ""}`} key={next.id}
+           acts={itemActs(next)} ontoggle={onRowToggle}>
         {#snippet mark()}<span class="pk-dot quiet"></span>{/snippet}
+        {#snippet detail()}
+          <ItemDrawer one={next} raw={rawItems.get(next.id)} papers={papersOf(next.id)} problem={rowProblem[next.id] ?? null}
+                      reading={!papersReady && (rawItems.get(next.id)?.documentCount ?? 0) > 0} />
+        {/snippet}
+        {#snippet after()}
+          <button class="p-quiet pk-copy" onclick={() => copyLink(next.id)}>{copied === next.id ? "link copied" : "copy link"}</button>
+        {/snippet}
       </Row>
     </div>
   {/if}
   <!-- #466: the pocket's signals — what the relay caught. A suggestion row
-       raises the suggestion sheet; failures speak the server's words. -->
+       opens in place with its readings and its two decisions (§2.1);
+       failures speak the server's words. -->
   {#if view?.suggestions?.length || view?.mailReading?.length || view?.mailFailures?.length}
     <h2 class="p-caps">Signals — your relay caught</h2>
-    <div class="pk-list">
+    <div class="pk-list" data-row-group>
       {#each view.suggestions as s (s.id)}
         <div class="pk-sugg">
-          <Row title={s.title}
+          <Row title={s.title} key={s.id}
                meta={[`from ${s.sourceDocument}`, burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : null].filter(Boolean).join(" · ")}
                trail={s.costMinor ? money(s.costMinor, s.currency, true) : ""}
                trailSub={s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
-               onactivate={() => openSuggestion(s.id)}>
+               acts={suggestionActs(s)}>
             {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
+            {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null} />{/snippet}
+            {#snippet after()}
+              <a class="p-quiet" href={resolve("/item/[[id]]", { id: encodeURIComponent(s.receiptId ?? s.id) })}>review &amp; amend →</a>
+            {/snippet}
           </Row>
         </div>
       {/each}
@@ -696,7 +884,7 @@
         {#each results.items as one (one.id)}
           <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
                trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-               onactivate={() => openItem(one.id)}>
+               onactivate={() => openResult(one.id)}>
             {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
           </Row>
         {/each}
@@ -712,7 +900,7 @@
         {#each results.items as one (one.id)}
           <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
                trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-               onactivate={() => openItem(one.id)}>
+               onactivate={() => openResult(one.id)}>
             {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
           </Row>
         {/each}
