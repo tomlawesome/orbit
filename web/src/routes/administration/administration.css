@@ -77,6 +77,59 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .system .who{flex:1;min-width:0}
 .mission-page .system .who b{display:block;font-size:13.5px;font-weight:530}
 .mission-page .system .who span{font:10.5px var(--mono);color:var(--ink-quiet)}
+
+/* HOUSEHOLD RECOVERY ON THE CLOCK (#1001, design/v19/household-recovery/
+ * round-1/b-the-row-on-the-clock.html): the danger grammar, household-manage's
+ * own — a red-outlined button that fills red once armed, and restore as the
+ * card family's ordinary button in the accent. --on-danger is the danger
+ * button's own text colour once armed, per pack, from household.css. */
+[data-theme=starchart] .mission-page{--on-danger:#060b1c}
+[data-theme=afterdark] .mission-page{--on-danger:#05070d}
+[data-theme=clouds] .mission-page{--on-danger:#f6f1e4}
+[data-theme=dawn] .mission-page{--on-danger:#ffffff}
+[data-theme=retrograde] .mission-page{--on-danger:#0a0410}
+
+.mission-page .system.doomed{flex-wrap:wrap;position:relative;border-bottom-color:var(--overdue)}
+.mission-page .system.doomed svg .ring{stroke:var(--overdue);stroke-dasharray:3 3}
+.mission-page .system.doomed svg .sun{fill:var(--overdue)}
+.mission-page .system.doomed .who span{color:var(--overdue-text)}
+.mission-page .system.doomed .acts{display:flex;gap:8px;align-items:center;flex-basis:100%;
+    padding-left:48px;margin-top:2px}
+.mission-page .system.doomed .confirm{flex-basis:100%;padding:12px 0 6px 48px}
+.mission-page .system.doomed .adminproblem.said,.mission-page .system.settled .adminproblem.said{
+    flex-basis:100%;padding-left:48px;margin-top:0}
+.mission-page .system.settled{flex-wrap:wrap}
+.mission-page .system.settled .adminproblem.gone{padding-left:0}
+
+.mission-page .dangerbtn{font:600 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--overdue-text);background:none;border:1.5px solid var(--overdue);border-radius:9px;
+    padding:7px 12px;font-size:10.5px;cursor:pointer;white-space:nowrap;
+    transition:background .15s,color .15s,border-color .15s}
+.mission-page .dangerbtn:hover{background:color-mix(in srgb,var(--overdue) 15%,transparent)}
+.mission-page .dangerbtn.armed{background:var(--overdue);color:var(--on-danger);border-color:var(--overdue)}
+.mission-page .dangerbtn:disabled{opacity:.42;cursor:not-allowed;background:none}
+.mission-page .rebtn{font:11px var(--mono);color:var(--accent-text);background:none;
+    border:1px solid var(--accent);border-radius:9px;padding:8px 14px;cursor:pointer;white-space:nowrap}
+.mission-page .rebtn:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+
+.mission-page .confirm .field{margin-top:10px}
+.mission-page .confirm label{display:block;font:10.5px var(--mono);color:var(--ink-faint);
+    letter-spacing:.04em;margin-bottom:6px}
+.mission-page .confirm input{font:13px var(--mono);color:var(--ink);background:var(--panel-raised);
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;max-width:320px;
+    box-sizing:border-box}
+.mission-page .confirm input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.mission-page .confirm .stake{font-size:13px;color:var(--ink-mid);line-height:1.62;margin:0}
+.mission-page .adminproblem.gone{color:var(--overdue-text)}
+
+@media (prefers-reduced-motion:reduce){.mission-page .dangerbtn{transition:none}}
+@media (max-width:560px){
+  .mission-page .dangerbtn{white-space:normal}
+  .mission-page .system.doomed .acts{flex-wrap:wrap}
+  .mission-page .system.doomed .acts,.mission-page .system.doomed .confirm,
+  .mission-page .system.doomed .adminproblem.said,.mission-page .system.settled .adminproblem.said{padding-left:0}
+}
+
 /* §15-2g removed the joinbadge and the dashed join-request row from this
    panel. Nothing replaces them and no spacing is patched in: the roster closes
    on its last system (which loses its rule to :last-child), so the card ends on
