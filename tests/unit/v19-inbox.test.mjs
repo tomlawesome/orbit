@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "../../web/src/lib/data/inbox.js";
+import { firstClause, reasonWords } from "../../web/src/lib/pocket/words.js";
 
 // #434: mail-in receipts become the manifest's suggestions and the relay's
 // visible failures. The mapping is pure and pinned here.
@@ -13,7 +14,7 @@ const READY = {
   fieldEvidence: { title: { source: "document", confidence: "high" } },
 };
 const WAITING = { ...READY, id: "r-2", status: "processing", classification: "waiting", canApprove: false, message: "Orbit is still preparing this private review." };
-const DEAD = { ...READY, id: "r-3", status: "failed", classification: "unavailable", canApprove: false, canDiscard: false, proposal: {}, fieldEvidence: {}, message: "This incoming document is no longer available for review." };
+const DEAD = { ...READY, id: "r-3", status: "failed", classification: "unavailable", canApprove: false, canDiscard: false, proposal: {}, fieldEvidence: {}, message: "This incoming document is no longer available for review.", reason: "unknown" };
 
 describe("receiptSuggestionsOf", () => {
   it("maps only approvable receipts, carrying what approval needs", () => {
@@ -50,6 +51,28 @@ describe("receiptFailuresOf", () => {
   it("keeps still-processing mail visible as waiting, not failed", () => {
     const failures = receiptFailuresOf([WAITING]);
     expect(failures).toEqual([]);
+  });
+  it("carries the server's reason code across, unchanged (#1143)", () => {
+    const failures = receiptFailuresOf([{ ...DEAD, reason: "too_large" }]);
+    expect(failures[0].reason).toBe("too_large");
+  });
+});
+
+// #1143: the pocket row's meta at rest reads the short fixed reason, not a
+// clause cut from the free-text message — the two must not collapse to the
+// same words for a real failure message.
+describe("a failed row's meta is the reason label, not a message clause", () => {
+  it("differs from firstClause(message) for the too_large story", () => {
+    const message = "Its attachment was larger than Orbit can store. You can add the item yourself and attach the file from Documents.";
+    expect(reasonWords("too_large")).toBe("too large");
+    expect(firstClause(message)).toBe("Its attachment was larger than Orbit can store");
+    expect(reasonWords("too_large")).not.toBe(firstClause(message));
+  });
+
+  it("the desk row prints label · message", () => {
+    const failure = { reason: "no_document", message: "It carried no document Orbit can read (PDFs work best). Nothing was kept." };
+    const deskRow = `${reasonWords(failure.reason)} · ${failure.message}`;
+    expect(deskRow).toBe("no readable document · It carried no document Orbit can read (PDFs work best). Nothing was kept.");
   });
 });
 
