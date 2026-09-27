@@ -1,4 +1,3 @@
-import { SLOP } from "./gesture.js";
 /**
  * One management act on a row. `name` is the full accessible name, object
  * included ("Remove Emma Lawson"); `label` is what the pill says ("remove").
@@ -21,10 +20,12 @@ const openIn = new WeakMap();
  * THE ROW OPENS ON A TAP (#1120, review round §1.1; the desk's own grammar,
  * home.css "THE ROW IS THE ITEM", #424). Tapping the face grows the row in
  * place into a panel under it holding the row's detail and its acts; tapping
- * the face again closes it. A tap outside the row closes it, Escape closes it
- * and hands focus back to the face, and opening another row in the same
- * group (`data-row-group` on the list) closes the first. Scrolling does not
- * close it and there is no timer.
+ * the face again closes it, Escape closes it and hands focus back to the
+ * face, and opening another row in the same group (`data-row-group` on the
+ * list) closes the first. Nothing else closes it: not a tap elsewhere, not a
+ * scroll, not a timer. That is the desk's own rule (home's one `expanded`
+ * row), and the owner's on the phone (2026-09-27, #1159): "The drawer should
+ * just stay open once tapped like it does on desktop".
  *
  *   keyboard       the face is a button: Enter or Space toggles; the
  *                  panel's pills are in the Tab order only while open (the
@@ -55,39 +56,6 @@ export function mountRow(row, { closeMs, onchange } = {}) {
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let hiding;
 
-  /* A tap outside closes the row, and only a tap: a touch that lands
-     outside and then scrolls is how a reader brings the open row into view,
-     so closing on the touch's landing shut every row the moment it was
-     scrolled (owner, on the phone, 2026-09-27). The browser cancels a
-     pointer it takes over for scrolling, and a lift further than SLOP
-     from where it landed was a drag. */
-  /** @type {{ id: number, x: number, y: number } | null} */
-  let landed = null;
-  /** @param {Event} event */
-  const outside = (event) => !(event.target instanceof Node && row.contains(event.target));
-  /** @param {PointerEvent} event */
-  const onOutsideDown = (event) => {
-    landed = outside(event) ? { id: event.pointerId, x: event.clientX, y: event.clientY } : null;
-  };
-  /** @param {PointerEvent} event */
-  const onOutsideUp = (event) => {
-    const start = landed;
-    landed = null;
-    if (!start || start.id !== event.pointerId || !outside(event)) return;
-    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) <= SLOP) close();
-  };
-  const onOutsideCancel = () => { landed = null; };
-  const listenOutside = () => {
-    win.addEventListener("pointerdown", onOutsideDown, true);
-    win.addEventListener("pointerup", onOutsideUp, true);
-    win.addEventListener("pointercancel", onOutsideCancel, true);
-  };
-  const stopOutside = () => {
-    landed = null;
-    win.removeEventListener("pointerdown", onOutsideDown, true);
-    win.removeEventListener("pointerup", onOutsideUp, true);
-    win.removeEventListener("pointercancel", onOutsideCancel, true);
-  };
 
   function open() {
     if (!panel || isOpen) return;
@@ -101,7 +69,6 @@ export function mountRow(row, { closeMs, onchange } = {}) {
     void panel.offsetHeight;
     row.dataset.open = "";
     face.setAttribute("aria-expanded", "true");
-    listenOutside();
     onchange?.(true);
   }
 
@@ -113,7 +80,6 @@ export function mountRow(row, { closeMs, onchange } = {}) {
     if (openIn.get(group()) === control) openIn.delete(group());
     delete row.dataset.open;
     face.setAttribute("aria-expanded", "false");
-    stopOutside();
     const ms = closeMs ?? (still() ? 0 : CLOSE_MS);
     clearTimeout(hiding);
     if (ms > 0) hiding = setTimeout(() => { if (!isOpen) panel.hidden = true; }, ms);
@@ -146,7 +112,6 @@ export function mountRow(row, { closeMs, onchange } = {}) {
     destroy() {
       clearTimeout(hiding);
       if (openIn.get(group()) === control) openIn.delete(group());
-      stopOutside();
       face.removeEventListener("click", onClick);
       row.removeEventListener("keydown", onKey);
       mounted.delete(row);
