@@ -14,8 +14,9 @@ test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true
 /**
  * Answers the three calls approveReceipt makes and records the approval.
  * @param {import("@playwright/test").Page} page
+ * @param {string} [itemId]  what the approval answers as the new item's id
  */
-async function answerApproval(page) {
+async function answerApproval(page, itemId = "i-new") {
   /** @type {{ approvals: any[], discards: string[] }} */
   const seen = { approvals: [], discards: [] };
   await page.route("**/api/imap-inbox/r-*", async (route) => {
@@ -36,7 +37,7 @@ async function answerApproval(page) {
   });
   await page.route("**/api/reviewed-intake/approve", async (route) => {
     seen.approvals.push(route.request().postDataJSON());
-    await route.fulfill({ json: { outcome: "approved", itemId: "i-new" } });
+    await route.fulfill({ json: { outcome: "approved", itemId } });
   });
   return seen;
 }
@@ -109,34 +110,40 @@ test("a failed arrival the server lets go opens on a tap to remove; one it keeps
   await expect.poll(() => seen.discards).toEqual(["r-gone"]);
 });
 
-/* THE RECEIPT PAGE ON A PHONE (round 3 §4, #1140): `/item/<receiptId>`
-   under the top chrome, the inbox's review card, and the way home as the
-   card's last line; an act leaves for home. */
-test("the receipt page wears the top chrome and ends its card with the way home", async ({ page }) => {
+/* THE SUGGESTION IN THE BELT ON A PHONE (#1145; round 3 §4's receipt page
+   merged into the belt): `/item/<receiptId>` is the belt under the top
+   chrome, the suggestion seated at the apex as its card, with the two
+   decisions and `review & amend →`. The desk half is belt-suggestion.spec.js. */
+test("the receipt address is the belt, wearing the top chrome, with the suggestion's card at the apex", async ({ page }) => {
   await page.goto(`${APP}/item/r-insurance`, { waitUntil: "networkidle" });
   const chrome = page.locator(".p-chrome:visible");
   await expect(chrome.locator(".back")).toHaveAttribute("href", "/home");
   await expect(chrome.locator(".porb")).toBeVisible();
-  const card = page.locator(".p-review");
-  await expect(card.getByRole("heading", { level: 1 })).toHaveText("Home insurance renewal");
-  await expect(card.locator(".rv-when")).toContainText("caught 11 Aug");
-  await expect(card.locator(".rv-paper")).toHaveText(/policy-schedule\.pdf\s*·?\s*scanned clean/);
-  const home = card.locator("a.p-quiet");
-  await expect(home).toHaveText("← your sky");
-  await expect(home).toHaveAttribute("href", "/home");
-  expect(await card.evaluate((el) => el.lastElementChild?.matches("a.p-quiet"))).toBe(true);
+  const card = page.locator(".item-card.sug-card");
+  await expect(card.getByRole("heading", { level: 2 })).toHaveText("Home insurance renewal");
+  await expect(card.locator(".sub")).toContainText("1 forwarded document · burns up in 43d");
+  await expect(card.getByRole("button", { name: "Add Home insurance renewal to your orbit" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Dismiss Home insurance renewal" })).toBeVisible();
+  await expect(card.locator(".ip-docs")).toContainText("1 forwarded document");
+  /* The old page's own lines are gone with it (round 3 §4, owner's 10b). */
   await expect(page.getByText("back to your orbit")).toHaveCount(0);
   await expect(page.getByText("nothing is created without your acceptance")).toHaveCount(0);
+  /* The belt is real: the seat list holds the household and the visitor. */
+  await expect(page.locator(".ip-count")).toHaveText("6 items · 1 suggested · sooner to later");
 });
 
-test("the receipt page adds to orbit and goes home", async ({ page }) => {
-  const seen = await answerApproval(page);
+test("the suggestion adds to orbit from the belt and becomes the new item's seat", async ({ page }) => {
+  const seen = await answerApproval(page, "i-chimney");
   await page.goto(`${APP}/item/r-insurance`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Add Home insurance renewal to your orbit" }).click();
   await page.getByRole("button", { name: "tap again to add Home insurance renewal to your orbit" }).click();
   await expect.poll(() => seen.approvals.length).toBe(1);
   expect(seen.approvals[0]).toMatchObject({ source: { kind: "mailbox_draft", receiptId: "r-insurance" } });
-  await expect(page).toHaveURL(/\/home$/);
+  /* Accepted, it is an item with a seat of its own: the belt re-reads with
+     that item at the apex (the fixture stands in with a real item's id). */
+  await expect(page).toHaveURL(/\/item\/i-chimney$/);
+  await expect(page.locator(".item-card h2")).toHaveText("Chimney sweep");
+  await expect(page.locator(".item-card.sug-card")).toHaveCount(0);
 });
 
 test("the receipt page raises the same review sheet", async ({ page }) => {

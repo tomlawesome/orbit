@@ -1204,3 +1204,42 @@ middle** ("Centred in the screen"), on the desk, whatever height the band
 is at on that side. This overturns #1010's placement (held above the band's
 upper edge) for the desk only. The pocket keeps #1035's rule, because its
 band is a plate at the top of a page that scrolls, not the whole screen.
+
+## 27. A suggestion opens as a drawer, and rides the belt (owner, 2026-09-27)
+
+**"Let the suggested items open as a drawer like the manifest items, and
+then I think we should merge the suggested item screen into the item belt"**
+— then: **"the same familiar item belt just with a similar card to the
+suggested item screen, but on the belt instead."** And, on being offered a
+design first: **"Don't build a mock up - just build it."** #1145.
+
+- **On the desk home** a suggestion row opens in place, exactly as a filed
+  row does (#424): the row at rest keeps the hollow mark, the title and the
+  `Found in … · renews … · ~£…` line, and loses its inline `Add to orbit` /
+  `Dismiss`; the drawer holds the relay's readings with how sure it was,
+  when it burns up, the paper it came in (`attached on acceptance`), the two
+  decisions (two taps, as before), `copy link` and `review in the belt →`
+  (`manage this item →`'s twin). The phone's drawer (round 3) is unchanged.
+- **`/item/<receiptId>` is the belt.** The suggestion is seated at the date
+  the relay read, among its neighbours in time, as a hollow rock in the
+  accent (CON-3's hollow body, in stone); its forwarded paper rides beside
+  it, staged, and pressing it opens the reading card's fifth honest state,
+  `Not yet in orbit.` (§18's grammar). The card is the amend-then-accept
+  card in the belt's card position: on the desk the fields are editable in
+  the card with `accept into orbit` / `dismiss`; on a phone the readings and
+  the two decisions, with `review & amend →` raising the shared review
+  sheet. Accepted, it becomes the new item's seat in place; dismissed, the
+  apex moves to the neighbour it sat beside. Only the arrival seats it: a
+  filed item's belt carries no suggestions, because the belt is the manifest
+  and a suggestion is not in it until accepted.
+- **The promise line is cut on the desk too**, extending 10b: the sub line
+  says when the suggestion burns up, and `accept into orbit` is the promise.
+  `← back to your orbit` goes with the page; the chrome carries the way back.
+- The separate suggestion page (`Suggestion.svelte`, `item.css`) and the
+  phone's receipt page (`ReceiptPocket.svelte`, round 3 §4) retire.
+
+Calls made by the build without a fresh ruling, for the owner to overturn:
+the dismissal's landing (the later neighbour, else the sooner, else home);
+the desk drawer's foot wording (`review in the belt →`); the hollow rock's
+draw (outline in the accent, 12% wash, no pip); the fifth honest state's
+words; the find note's `· 1 suggested`.
