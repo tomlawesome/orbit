@@ -17,10 +17,10 @@
   import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
-  import { mountPocket, mountPocketAccount } from "./pocket.behaviour.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "./bands.js";
   import CorridorRow from "./CorridorRow.svelte";
+  import NorthStarMark from "$lib/NorthStarMark.svelte";
   import "./home.css";
 
   /**
@@ -467,6 +467,35 @@
     }
   }
 
+  /**
+   * The pocket's review sheet, raised in place from a suggestion's row or
+   * its hollow body on the dial (round 3 §4): approves what the reader
+   * amended into the section they chose, on the same idempotent protocol
+   * and operation id as the two-tap decision. Answers the problem, if any.
+   * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
+   * @param {import('$lib/data/workspace.js').ItemProposal} item
+   * @param {string | null} sectionId
+   * @returns {Promise<string | null>}
+   */
+  async function amendReceipt(suggestion, item, sectionId) {
+    if (!suggestion.receiptId) return "not added — try again";
+    busyReceipt = suggestion.id;
+    try {
+      if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
+      const result = await approveReceipt(suggestion, asView(view).primary, operationIds.get(suggestion.receiptId), item, sectionId);
+      if (result.outcome === "partial_success") {
+        return "The item is recorded, but its documents need another try — add it again to finish.";
+      }
+      operationIds.delete(suggestion.receiptId);
+      view = await readHome();
+      return null;
+    } catch (error) {
+      return /** @type {any} */ (error)?.message ?? String(error);
+    } finally {
+      busyReceipt = null;
+    }
+  }
+
   /* Everything below the chrome is the view-model (#451): the same transform
      the unit tests pin renders the dial, the manifest and the palette. */
   /** @type {any[]} */
@@ -504,6 +533,9 @@
      rather than the whole view, so the row component's type is the slice it
      actually reads. */
   const suggestions = $derived(view ? asView(view).suggestions : undefined);
+  /* #1145: the suggestion drawer counts the days to burn-up from the
+     workspace's own today (pinned under fixtures), as the phone's does. */
+  const today = $derived(view ? asView(view).today : new Date().toISOString().slice(0, 10));
   /* #763: how many are overdue right now — the OS badge and the tab title
      both read this, never the server, so both hold whatever this browser's
      own chart just worked out. */
@@ -514,7 +546,7 @@
   const initials = $derived(
     (view ? (asView(view).user?.displayName ?? "") : "")
       .split(/\s+/)
-      .map((/** @type {string} */ word) => word[0] ?? "")
+      .map((word) => word[0] ?? "")
       .join("")
       .slice(0, 2)
       .toUpperCase(),
@@ -632,8 +664,9 @@
        * It binds here, above the branches, so no branch can forget it: this
        * is the one line every path through the mount shares.
        */
-      const pocketAccount = query.matches ? null : mountPocketAccount();
-      const stopAccount = pocketAccount ? pocketAccount.teardown : mountAccount();
+      /* #1120: on a phone the account menu is the kit's hatch, which
+         pocket.svelte owns and binds itself, so only the desk's needs a mount. */
+      const stopAccount = query.matches ? mountAccount() : () => {};
       /** @param {() => void} stopDialect */
       const withAccount = (stopDialect) => () => { stopDialect(); stopAccount(); };
       /* §11 (#453): no household means the labelled sky in either dialect —
@@ -671,21 +704,10 @@
            photograph the same sky twice. */
         ? mountHome({ galaxy: asView(view).galaxy, primary: asView(view).primary,
                       fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "" })
-        : mountPocket({
-            /* #466: the sheet's two-tap lands on the same idempotent approve
-               protocol the desk rows use — one operation id per receipt. */
-            approve: (/** @type {string} */ id) => {
-              const suggestion = view?.suggestions.find((one) => one.receiptId === id);
-              if (suggestion) { armed = { id: suggestion.id, act: "approve" }; tapReceipt(suggestion, "approve"); }
-            },
-            dismiss: (/** @type {string} */ id) => {
-              const suggestion = view?.suggestions.find((one) => one.receiptId === id);
-              if (suggestion) { armed = { id: suggestion.id, act: "dismiss" }; tapReceipt(suggestion, "dismiss"); }
-            },
-            /* #1074: the menu is mounted above; this hands the dialect the
-               half of the one-overlay rule that is the sheet's. */
-            account: pocketAccount ?? undefined,
-          }));
+        /* #1120: the pocket binds its own controls (pocket.svelte, the kit's
+           sheets and rows); its approve, dismiss and refresh are handed to it
+           as props below. */
+        : () => {});
     };
     const sync = () => {
       delete document.body.dataset.homeReady;
@@ -742,7 +764,14 @@
      company with §14's drawer rule, deliberately. -->
 <svelte:window onkeydown={onWindowKeydown} onclick={onWindowClick} />
 
-<Pocket {view} />
+<!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
+     approve protocol the desk rows use (one operation id per receipt), and
+     answer with the problem, if any, for the sheet to show. -->
+<Pocket {view} {arrive}
+        onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
+        ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
+        onamend={amendReceipt}
+        onchanged={async () => { view = await readHome(); }} />
 
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
      descent lands on, and the canvas, mark and void-name between them. Each
@@ -969,102 +998,7 @@
        north star walks into the drawer's own controls next (#853); it is
        positioned absolutely, so this changes nothing on screen. -->
   <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit">
-    <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
-      <defs>
-        <linearGradient id="tron-edge" x1="0" y1="-11" x2="0" y2="11" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="var(--upcoming)"/>
-          <stop offset=".55" stop-color="var(--upcoming)"/>
-          <stop offset="1" stop-color="var(--accent)"/>
-        </linearGradient>
-      </defs>
-      <!-- the mark has THREE forms and only one is ever up: the four-point
-           glint every pack has always had, retrograde's neon wireframe beacon
-           (§15/#480), and clouds' sounding balloon (§15, the roster ruling:
-           "clouds needs ... its own custom symbols"). The pack chooses between
-           them in CSS. -->
-      <g class="glint classic" style="transform-origin:0 0">
-        <circle r="9" fill="var(--ink)" opacity=".12"/>
-        <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
-              fill="var(--ink)" opacity=".9"/>
-        <circle r="2" fill="var(--ink)"/>
-      </g>
-      <g class="glint tron" style="transform-origin:0 0">
-        <circle r="9.5" fill="var(--upcoming)" opacity=".06"/>
-        <path d="M 0 -11 L 7.6 0 L 0 11 L -7.6 0 Z" fill="none"
-              stroke="url(#tron-edge)" stroke-width="1.5" stroke-linejoin="miter"/>
-        <path d="M 0 -4.6 L 3.2 0 L 0 4.6 L -3.2 0 Z" fill="none"
-              stroke="var(--accent)" stroke-width="1" opacity=".9"/>
-        <g stroke="url(#tron-edge)" stroke-width="1.3" stroke-linecap="round" opacity=".75">
-          <line x1="-13.4" y1="0" x2="-10" y2="0"/>
-          <line x1="10" y1="0" x2="13.4" y2="0"/>
-        </g>
-      </g>
-      <!-- CLOUDS' OWN MARK — THE SOUNDING BALLOON (§15: every theme earns its
-           own symbols; only star-chart and after dark share theirs).
-
-           WHY IT CANNOT BE A STAR. This pack's sky is DAYLIGHT above a cloud
-           deck. There is no north star up there to steer by, and drawing one
-           anyway is the exact failure §12 forbids — a mark on the screen that
-           is not true of what the screen is showing. So the question the mark
-           has to answer is the honest one: at altitude, in daylight, what do
-           you send UP to put something new into the sky? A sounding. A pilot
-           balloon carrying an instrument, released to add one real reading to
-           the record — which is what this handle does when it opens the create
-           drawer, said in the vocabulary the pack already speaks.
-
-           WHAT IT KEEPS FROM THE GLINT, and why. Retrograde's beacon held the
-           old mark's silhouette on purpose ("still reads as a beacon at a
-           glance"), and the reasoning travels: this is the same 30px box, the
-           same vertical axis, and the two reticle ticks sit at exactly the same
-           ±13.4 the glint's horizontal arms did, so the mark's footprint in the
-           chrome is unchanged and the eye finds it in the same place. What
-           moves is only what it is made of.
-
-           WHAT IT IS MADE OF, and why that is not decoration. Light packs do
-           not glow — that law is older than this pack (#426: weight instead of
-           luminosity, flat ink instead of gloss) — so the balloon is drawn,
-           not lit: the envelope a thin engraved outline with a single pale
-           highlight where the low sun catches its shoulder, the rigging two
-           hairlines, and the instrument a small SOLID box in the accent at the
-           bottom of the axis. The solid box is the one loud element and it is
-           load-bearing twice over: it is the only filled shape, so it is what
-           the eye lands on, and it sits at the low end of the axis, pointing
-           at the drawer the handle pulls — the same job the tron diamond's
-           downward vertex does in retrograde. Nothing here is added for
-           prettiness; take any one part away and the mark stops reading as an
-           instrument going up. -->
-      <g class="glint sonde" style="transform-origin:0 0">
-        <!-- the envelope: a real pilot balloon is a slightly pear-shaped
-             sphere, wider than it is tall at the shoulder and drawn in by the
-             neck, which is what stops this reading as a lollipop -->
-        <path d="M 0 -12.6 C 5.2 -12.6 7.4 -8.6 7.4 -5.4
-                 C 7.4 -2.1 4.4 .1 1.5 1.6 L -1.5 1.6
-                 C -4.4 .1 -7.4 -2.1 -7.4 -5.4
-                 C -7.4 -8.6 -5.2 -12.6 0 -12.6 Z"
-              fill="none" stroke="var(--ink)" stroke-width="1.3"
-              stroke-linejoin="round" opacity=".9"/>
-        <!-- the shoulder the low sun catches. One stroke, on the sunward side
-             only, because there is one light source in this sky and it is the
-             reason the pack exists -->
-        <path d="M -4.6 -9.4 C -3.2 -11.2 -1.6 -11.8 -.2 -11.9"
-              fill="none" stroke="var(--sun)" stroke-width="1.1"
-              stroke-linecap="round" opacity=".85"/>
-        <!-- the rigging: two hairlines from the neck to the instrument -->
-        <g stroke="var(--ink)" stroke-width=".9" opacity=".78">
-          <line x1="-1.5" y1="1.9" x2="-1.1" y2="7.2"/>
-          <line x1="1.5" y1="1.9" x2="1.1" y2="7.2"/>
-        </g>
-        <!-- the instrument: the one solid shape, in the create colour, at the
-             low end of the axis, pointing at the drawer -->
-        <rect x="-3.1" y="7.2" width="6.2" height="5" rx="1.1"
-              fill="var(--accent-text)"/>
-        <!-- and the reticle ticks, at the glint's own ±13.4 -->
-        <g stroke="var(--ink)" stroke-width="1.2" stroke-linecap="round" opacity=".78">
-          <line x1="-13.4" y1="0" x2="-10" y2="0"/>
-          <line x1="10" y1="0" x2="13.4" y2="0"/>
-        </g>
-      </g>
-    </svg>
+    <NorthStarMark />
     <span>create</span>
   </button>
   <div class="inner">
@@ -1292,7 +1226,7 @@
         {#if corridor.overdue.length}
           <div class="redzone">
             {#each corridor.overdue as row (row.id)}
-              <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+              <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
                 onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
                 onCopyAddress={copyAddress} />
             {/each}
@@ -1300,20 +1234,20 @@
         {/if}
         <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · {todayLine}</span><div class="rule"></div></div>
         {#each corridor.current as row (row.id)}
-          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
             onCopyAddress={copyAddress} />
         {/each}
         {#each corridor.months as month (month.key)}
           <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
           {#each month.rows as row (row.id)}
-            <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+            <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
               onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
               onCopyAddress={copyAddress} />
           {/each}
         {/each}
         {#each corridor.undated as row (row.id)}
-          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
             onCopyAddress={copyAddress} />
         {/each}

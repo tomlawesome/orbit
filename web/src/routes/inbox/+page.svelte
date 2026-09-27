@@ -8,6 +8,7 @@
   import Chrome from "$lib/Chrome.svelte";
   import { resolve } from "$app/paths";
   import { SvelteMap } from "svelte/reactivity";
+  import Pocket from "./pocket.svelte";
   import "./inbox.css";
 
   /**
@@ -150,6 +151,9 @@
 
 <Chrome user={view?.user} current="inbox"
         role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
+
+<!-- #1120, proposal §2.6: the pocket's own inbox, chosen by CSS. -->
+<Pocket bind:view />
 
 <div class="page" role="main">
   <header class="screen">

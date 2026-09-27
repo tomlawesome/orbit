@@ -342,7 +342,11 @@
       settle();
       const stale = () => cancelled || mine !== generation;
       if (!world || !srcLensarcs || !srcLensedArch || !srcPhoton || !srcSmearNear || !srcSmearTidal) return;
-      const rect = world.getBoundingClientRect();
+      /* The svg's box, not the page's: on a phone the well is drawn smaller
+         than the screen, a 16:10 box inside it (#1120, notfound.css), and
+         the rasters are sampled at the scale it is drawn at. On a desk the
+         two are the same box. */
+      const rect = (world.querySelector("svg") ?? world).getBoundingClientRect();
       if (!rect.width || !rect.height) return;
       /* Unlike Grain/Dawn/Dusk, this raster's body is set text (the two
          "4"s), so its shape depends on Space Grotesk having actually
@@ -491,7 +495,7 @@
      Without script nothing would ever land, so the noscript rule shows the
      live sources as they were. -->
 <noscript><style>.world .arrive{visibility:visible;opacity:1}</style></noscript>
-<div class="world" class:lit style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
+<div class="world" class:lit style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
   <defs>
     <!-- doppler: the approaching side of the disc burns white, the receding side dims -->
     <linearGradient id="doppler" x1="0" y1="0" x2="1" y2="0">
@@ -672,6 +676,10 @@
   </g>
 </svg></div>
 
+<!-- The page's one heading. The desk well is told by its art and its two
+     lines, so there it is read, not seen; on a phone it stands over them at
+     28px (proposal §2.19; notfound.css). -->
+<h1 class="offchart">off the chart</h1>
 <div class="line-a">This page fell into a gravity well.</div>
 <div class="line-b"><a href={resolve("/")}>plot a course home &rarr;</a></div>
 
@@ -681,7 +689,14 @@
 {:else}
   <div class="stage">
     <div class="lockup">
-      <div class="name mono">{page.status}</div>
+      <!-- On a phone this is the door's station (proposal §2.19): the ring
+           holds the status and one sentence says what happened. The desk
+           keeps the bare fact; notfound.css draws the ring on phones only. -->
+      <div class="station">
+        <div class="errring" aria-hidden="true"><i></i></div>
+        <div class="name mono">{page.status}</div>
+      </div>
+      <p class="said">Orbit couldn’t answer that · {page.status}</p>
       <p><a href={resolve("/")}>return home</a></p>
     </div>
   </div>

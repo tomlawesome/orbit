@@ -6,7 +6,7 @@
  * Used to live entirely inside home.behaviour.js's `mountHome` closure. #852
  * needed the same wiring for the pocket dialect's sheet, and copying it would
  * have left two copies to keep in sync by hand, so it moved here instead —
- * both home.behaviour.js and pocket.behaviour.js import it now.
+ * home.behaviour.js imports it; the pocket hatch uses $lib/theme-swatches.js.
  */
 
 /* title -> pack name: "star-chart" is starchart, "after dark" is afterdark. */
