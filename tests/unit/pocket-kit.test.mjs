@@ -9,7 +9,7 @@ import {
 import { mountRow, rowOf } from "$lib/pocket/row.js";
 import { holdSheet } from "$lib/pocket/sheet.js";
 import { dismissWake, subscribeWake, undoWake, wake } from "$lib/pocket/wake.js";
-import { firstClause } from "$lib/pocket/words.js";
+import { firstClause, reasonWords } from "$lib/pocket/words.js";
 
 /*
  * The pocket kit's behaviour without a browser (#1120): the row that opens
@@ -64,6 +64,23 @@ describe("a failure's first clause (round 3 §1, R6)", () => {
     expect(firstClause("The scanner is away — try later")).toBe("The scanner is away");
     expect(firstClause("Version 1.2 is too old")).toBe("Version 1.2 is too old");
     expect(firstClause("")).toBe("");
+  });
+});
+
+describe("a failed receipt's reason, in plain words (#1143)", () => {
+  it("looks up every listed code and falls back to unknown", () => {
+    expect(reasonWords("no_document")).toBe("no readable document");
+    expect(reasonWords("too_large")).toBe("too large");
+    expect(reasonWords("malware")).toBe("scanner refused it");
+    expect(reasonWords("scanner_off")).toBe("scanner unavailable");
+    expect(reasonWords("not_kept")).toBe("couldn’t be kept");
+    expect(reasonWords("wrong_recipient")).toBe("not addressed to you");
+    expect(reasonWords("account_disabled")).toBe("account disabled");
+    expect(reasonWords("older_review")).toBe("needs cleanup");
+    expect(reasonWords("unknown")).toBe("reason not named");
+    expect(reasonWords("some_unlisted_code")).toBe("reason not named");
+    expect(reasonWords(null)).toBe("reason not named");
+    expect(reasonWords(undefined)).toBe("reason not named");
   });
 });
 
