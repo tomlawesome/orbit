@@ -15,6 +15,10 @@ fixing the cause deletes the heading in the same commit.
 
 - 2026-09-24 · 8f05e163 (#1107, no change near this script) · local `./node_modules/.bin/vitest run` (full suite) · timed out at the 5s default; green on an immediate rerun of the file alone. Same file and run as the sighting above; first sighting for this test.
 
+## check-base-image-current.test.mjs "keeps the re-pin advice when dev has not re-pinned either"
+
+- 2026-09-27 · 6420d955 (+ #1142's uncommitted pocket CSS and design notes, none of it near this script) · local `scripts/test-backend.sh`, with seven other agents building on the host · timed out at the 5s default, as did two more tests in the same file whose names scrolled past the captured tail; the file alone was green on an immediate rerun (8 of 8, 9.8s). Same wall-clock-under-load shape as the two headings above; first sighting for this test.
+
 ## document-lifecycle.test.ts:1335 "emits a bounded rejected lifecycle record when reconciliation finds an available document's ciphertext missing"
 
 - 2026-09-09 · 11a68e8 (+ #911's uncommitted setup-mail work, none of it near documents) · local `pnpm test:integration` · the bounded reason came back `crypto_metadata_missing` where the test expects `storage_object_missing`. The same file passed on the run immediately before, on the same code, and the run's other 39 files were green both times — so reconciliation appears to reach the two missing-piece checks in a different order under load.

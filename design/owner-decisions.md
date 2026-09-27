@@ -1262,3 +1262,35 @@ user standing on the dial had no way to close what they had just opened.
   listener would race it).
 - A reader whose focus is inside the row still closes it with Escape and
   lands on the row's face, as before.
+
+## 29. An opened signal has no plate of its own in the pen (Fable's call, 2026-09-27)
+
+Not the owner's ruling: a call made by Fable for #1142, for the owner to
+overturn. On the live phone build the owner opened the Home insurance
+signal in home's signals pen and saw **"a card inside the drawer"**: the
+kit's opened row (review round §1.1) draws its own raised plate — a fill,
+the accent rail and 12px corners — and the pen (round 3 §2) is a dashed
+card with rows full-bleed inside it, so the plate ran edge to edge and
+its corners met the dashed border. On the manifest, where rows sit on the
+sky, and on the household's solid card, whose own edge is a quiet
+hairline, the same plate reads as a lit row; against the pen's dashed
+accent border it reads as a second card.
+
+- **In the pen, an opened row draws no plate.** Its face and panel stay
+  on the pen's glass — no fill, no corners of their own — and what says
+  the row is open is the accent rail down its leading edge (round 3 §2:
+  "the open row keeps its accent rail"), the unfold, and the hairlines
+  either side. The pen is the one card. Nothing else changes: the row's
+  panel, `Add to orbit`, `Dismiss` and `review & amend →` (which raises
+  the shared review sheet) are as round 3 §2 has them, and the pen at
+  rest, which the owner said looks right, is untouched.
+- **The plate stays everywhere else.** The manifest's rows and every
+  opened row on a solid card keep review round §1.1's plate; this is the
+  pen's rule, written on home's pen (`pocket.css`) since it is the only
+  dashed card whose rows open. If a second one appears the rule moves to
+  the kit as `.p-card.proposed`'s own.
+- **Not chosen:** raising the review sheet from the row's face instead of
+  opening in place (it would overturn round 3 §2 and §27's "the phone's
+  drawer is unchanged", and put a decision behind a second tap); and
+  insetting the pen's rows so the plate sits clear of the border (a card
+  inside a card, drawn tidily — still what the owner objected to).
