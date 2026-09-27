@@ -190,6 +190,7 @@
  *   `metadata_integrity_failed` for a draft that would not decrypt,
  *   `metadata_locked` while the instance holds no usable encryption key.
  * @property {{ displayName?: string, sizeBytes?: number, scannedClean?: boolean }[]} [attachments]
+ * @property {string} reason
  */
 
 /**
@@ -721,6 +722,7 @@ function todayOf(workspace) {
  * @property {string} message
  * @property {boolean} canDiscard
  * @property {?{proposal?: string, fieldEvidence?: string}} [metadataStatus]
+ * @property {string} reason
  */
 
 /**

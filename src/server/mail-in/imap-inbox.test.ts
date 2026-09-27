@@ -59,6 +59,7 @@ describe("private mailbox review mapping", () => {
       classification: "unavailable",
       canApprove: false,
       canDiscard: false,
+      reason: "unknown",
     });
   });
 

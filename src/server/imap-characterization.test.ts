@@ -47,7 +47,7 @@ import {
   matchesImapRecipientAlias,
 } from "@/server/imap-ingestion";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
-import { findReviewedIntakeCandidateReason, reviewInboxState } from "@/server/imap-inbox";
+import { failureReasonOf, findReviewedIntakeCandidateReason, reviewInboxState } from "@/server/imap-inbox";
 import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 
 // --- self-contained fixtures (no repo-relative test-support imports, so
@@ -452,6 +452,26 @@ describe("reviewInboxState — status/failure to UI classification mapping", () 
     // An unrecognized failure code on an otherwise-eligible row does not
     // qualify for the richer "retry with re-approve" classification either.
     expect(reviewInboxState("recoverable", "some_other_code", fullContext)).toMatchObject({ canApprove: false, classification: "retry" });
+  });
+
+  it("folds every stored failure_code into one of the nine reasons (#1143), one per table row plus null → unknown", () => {
+    expect(failureReasonOf("no_supported_pdf")).toBe("no_document");
+    expect(failureReasonOf("message_too_large")).toBe("too_large");
+    expect(failureReasonOf("malware_detected")).toBe("malware");
+    expect(failureReasonOf("scanner_disabled")).toBe("scanner_off");
+    expect(failureReasonOf("attachment_download_failed")).toBe("not_kept");
+    expect(failureReasonOf("recipient_mismatch")).toBe("wrong_recipient");
+    expect(failureReasonOf("account_disabled")).toBe("account_disabled");
+    expect(failureReasonOf("legacy_review_item")).toBe("older_review");
+    expect(failureReasonOf(null)).toBe("unknown");
+    expect(failureReasonOf(undefined)).toBe("unknown");
+    expect(failureReasonOf("some_unmapped_code")).toBe("unknown");
+  });
+
+  it("carries the derived reason on reviewInboxState's return alongside message", () => {
+    expect(reviewInboxState("failed", "message_too_large")).toMatchObject({ classification: "unavailable", reason: "too_large" });
+    expect(reviewInboxState("failed", "legacy_review_item")).toMatchObject({ classification: "cleanup", reason: "older_review" });
+    expect(reviewInboxState("failed", null)).toMatchObject({ classification: "unavailable", reason: "unknown" });
   });
 });
 

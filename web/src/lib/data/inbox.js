@@ -71,6 +71,7 @@ export function receiptFailuresOf(receipts = []) {
       message: /** @type {string} */ (receipt.message),
       canDiscard: Boolean(receipt.canDiscard),
       metadataStatus: receipt.metadataStatus ?? null,
+      reason: /** @type {string} */ (receipt.reason),
     }));
 }
 
