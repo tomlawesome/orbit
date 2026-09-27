@@ -856,13 +856,15 @@
       </Row>
     </div>
   {/if}
-  <!-- #466; round 3 §2 (#1142): the signals are a pen, the dashed card of
-       what Orbit proposes, 32px of clear sky below the manifest. A
-       suggestion row opens in place with its readings and its two
-       decisions. Reading and failed mail are the inbox's matter: at most
-       one summary row, last in the pen, goes there (owner's answer 12a). -->
+  <!-- #466; round 3 §2 and owner-decisions §29 (#1142): 32px of clear sky
+       below the manifest, a caps head, then each signal as its own row-card
+       as the desk seats a suggestion (#1145): dashed at rest, the thin solid
+       accent outline open, no rail. A suggestion row opens in place with
+       its readings and its two decisions. Reading and failed mail are the
+       inbox's matter: at most one summary row, last, goes there (owner's
+       answer 12a). -->
   {#if view && (view.suggestions.length || mailSummary)}
-    <section class="p-card proposed pk-signals" aria-labelledby="pk-signals-h">
+    <section class="pk-signals" aria-labelledby="pk-signals-h">
       <h2 class="p-caps" id="pk-signals-h">Signals{#if view.suggestions.length}<span class="p-count">{view.suggestions.length}</span>{/if}</h2>
       <div class="pk-pen" data-row-group>
         {#each view.suggestions as s (s.id)}

@@ -247,11 +247,15 @@
     left:calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap));border-top:1px solid var(--line-soft)}
   :global(:is(.p-row, .p-row-below)) + .p-row > .face:has(.mark:empty)::before{left:var(--p-gutter)}
 
-  /* OPEN (review round §1.1): the raised plane, with the accent rail down
-     its leading edge, the face's bottom corners handed to the panel. The
-     trail and meta stay. The attribute is :global because row.js sets it. */
-  .p-row:global([data-open]) > .face{background:var(--panel-raised);box-shadow:inset 2px 0 0 var(--accent);
-    border-radius:12px 12px 0 0}
+  /* OPEN (review round §1.1; owner-decisions §29): the raised plane, the
+     face's bottom corners handed to the panel, and no accent rail -- the
+     desk draws none, and on a phone it read as a card edge. A row that
+     wears an outline of its own (home's manifest and signals) turns it the
+     desk's thin solid accent line; a row on a card's glass has no outline
+     and this sets nothing. The trail and meta stay. The attribute is
+     :global because row.js sets it. */
+  .p-row:global([data-open]){border-color:var(--accent)}
+  .p-row:global([data-open]) > .face{background:var(--panel-raised);border-radius:12px 12px 0 0}
 
   /* The unfold: the desk's ivopen (home.css), verbatim. The panel's rows
      grow 0fr → 1fr over 200ms; its content arrives from 6px up over 300ms.
