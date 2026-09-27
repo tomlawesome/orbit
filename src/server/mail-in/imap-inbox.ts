@@ -12,10 +12,12 @@ import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, re
 import { validUuid } from "@/server/workspace-access";
 import {
   reviewInboxState,
+  failureReasonOf,
   findReviewedIntakeCandidateReason,
   reviewAttachmentDisplayName,
   reviewAttachmentMediaType,
   reviewAttachmentScanState,
+  type FailureReason,
   type ReviewAttachmentMediaType,
   type ReviewInboxClassification,
   type ReviewInboxStateContext,
@@ -24,8 +26,8 @@ import {
 // Re-exported so `@/server/imap-inbox` (now a deprecated stub pointing here)
 // keeps every existing import path working churn-free. See
 // src/server/mail-in/core/review-state.ts for the implementations.
-export { reviewInboxState, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
-export type { ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
+export { reviewInboxState, failureReasonOf, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
+export type { FailureReason, ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
 
 /**
  * Decrypts one receipt's Tier 1 draft (ADR-0024). A value that will not

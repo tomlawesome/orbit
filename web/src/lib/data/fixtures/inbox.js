@@ -76,7 +76,8 @@ export const INBOX_FIXTURE = {
       canDiscard: true,
       cleanupOnly: true,
       message:
-        "Its attachment is a picture-only scan, and Orbit couldn’t read any text from it. You can add the item yourself and attach the file from Documents.",
+        "Its attachment was larger than Orbit can store. You can add the item yourself and attach the file from Documents.",
+      reason: "too_large",
       proposal: {},
       fieldEvidence: {},
     },
@@ -93,6 +94,7 @@ export const INBOX_FIXTURE = {
       canDiscard: true,
       cleanupOnly: true,
       message: "It carried no document Orbit can read (PDFs work best). Nothing was kept.",
+      reason: "no_document",
       proposal: {},
       fieldEvidence: {},
     },

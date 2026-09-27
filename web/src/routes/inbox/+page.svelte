@@ -3,6 +3,7 @@
   import { readInboxScreen, approveReceipt, dismissReceipt } from "$lib/data/workspace.js";
   import { money, ago, agoLong } from "$lib/format.js";
   import { LOCKED, evidenceReadable, fieldState, receiptWords } from "$lib/data/metadata-status.js";
+  import { reasonWords } from "$lib/pocket/words.js";
   import { daysUntil } from "$lib/data/chart.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
@@ -258,7 +259,7 @@
             <i aria-hidden="true"></i>
             <div class="body">
               <b>A message from {short(failure.receivedAt)}</b>
-              <span>{unreadable(failure) ?? failure.message}</span>
+              <span>{unreadable(failure) ?? `${reasonWords(failure.reason)} · ${failure.message}`}</span>
             </div>
             {#if failure.canDiscard}
               <button disabled={busy === failure.id} onclick={() => tap(failure, "dismiss")}>
