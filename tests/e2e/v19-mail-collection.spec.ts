@@ -342,9 +342,13 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   };
   const before = new Set((await itemsOf()).map((item) => item.id));
 
-  // Two taps approve it for real: item created, document transferred.
-  await row.getByRole("button", { name: "Add to orbit" }).click();
-  await row.getByRole("button", { name: "tap again to approve" }).click();
+  // Two taps approve it for real: item created, document transferred. The
+  // decisions live in the drawer the row opens into (#1145).
+  await row.click();
+  const drawer = page.locator(".itemview.suggestview");
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("button", { name: "Add to orbit" }).click();
+  await drawer.getByRole("button", { name: "tap again to approve" }).click();
   await expect(page.locator(".item.suggest")).toHaveCount(0, { timeout: 30_000 });
 
   // The item is real workspace truth now, with its document attached.
