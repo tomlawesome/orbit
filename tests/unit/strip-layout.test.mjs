@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { assignTiers, monthTicks, UNSCHEDULED_X, xOfDays } from "../../web/src/routes/home/strip-layout.js";
+import { assignTiers, monthTicks, stripActsOf, UNSCHEDULED_X, xOfDays } from "../../web/src/routes/home/strip-layout.js";
 
 /* #1161, C · unrolled (design/v19/search/round-1/BUILD.md §3/§4): the desk
    search strip's pure geometry, tested the way pocket-dial.js's spacing law
@@ -73,5 +73,38 @@ describe("the unscheduled anchor", () => {
   it("sits at the axis's own right edge, x=790", () => {
     expect(UNSCHEDULED_X).toBe(790);
     expect(xOfDays(356)).toBeCloseTo(UNSCHEDULED_X, 5);
+  });
+});
+
+/* #1162: the note-line acts BUILD.md §1 left inert, wired up. */
+describe("stripActsOf", () => {
+  const closest = { id: "i-boiler", title: "boiler service" };
+
+  it("at rest, offers complete-the-closest then add, unarmed", () => {
+    const acts = stripActsOf({ searchQuery: "", nothing: false, query: "", closest, completeArmed: false });
+    expect(acts).toEqual([
+      { kind: "complete", itemId: "__complete__", title: 'complete "boiler service"', target: closest },
+      { kind: "add", itemId: "__add__", title: "add an item", name: "" },
+    ]);
+  });
+
+  it("at rest with nothing due, offers only add", () => {
+    const acts = stripActsOf({ searchQuery: "", nothing: false, query: "", closest: null, completeArmed: false });
+    expect(acts).toEqual([{ kind: "add", itemId: "__add__", title: "add an item", name: "" }]);
+  });
+
+  it("armed, the complete act's title asks for the second tap", () => {
+    const acts = stripActsOf({ searchQuery: "", nothing: false, query: "", closest, completeArmed: true });
+    expect(acts[0]).toMatchObject({ title: 'tap again to complete "boiler service"' });
+  });
+
+  it("a query with real matches offers no act", () => {
+    const acts = stripActsOf({ searchQuery: "mo", nothing: false, query: "mo", closest, completeArmed: false });
+    expect(acts).toEqual([]);
+  });
+
+  it("a query matching nothing offers add-as-an-item, carrying the typed name", () => {
+    const acts = stripActsOf({ searchQuery: "zzz", nothing: true, query: "zzz", closest, completeArmed: false });
+    expect(acts).toEqual([{ kind: "add", itemId: "__add__", title: 'add "zzz" as an item', name: "zzz" }]);
   });
 });

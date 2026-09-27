@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from "svelte";
   import { browser } from "$app/environment";
-  import { afterNavigate, pushState, replaceState } from "$app/navigation";
+  import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
@@ -12,7 +12,9 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, requestToJoin, signOut } from "$lib/data/workspace.js";
+  import { applyCommand, approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, requestToJoin, signOut } from "$lib/data/workspace.js";
+  import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
+  import { createArm } from "$lib/pocket/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
@@ -20,7 +22,7 @@
   import { searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "./bands.js";
-  import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, monthTicks, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
+  import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import CorridorRow from "./CorridorRow.svelte";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import "./home.css";
@@ -595,12 +597,66 @@
     searchPocket(searchQuery, { items: searchRows, attention: groups?.attention ?? [], documents: searchDocuments }),
   );
 
+  /* The raw item behind a manifest/search row, for the one command the strip
+     fires directly (#1162): completing the closest thing due. Same shape and
+     source as the pocket's own `rawItems` (home's pocket.svelte). */
+  const rawItems = $derived(new Map((view?.household?.items ?? []).map((item) => [item.id, item])));
+
+  /* #1162: the two note-line acts BUILD.md left inert. "complete" fires the
+     same completeCommand the item page and the pocket's own quick-complete
+     use, arm-then-fire (`$lib/pocket/arm.js`, the shared helper arm.js's own
+     header says the desk should reach for rather than a sixth inline copy).
+     "add" carries the typed name to /create exactly as the pocket's search
+     already does (#1120). Both show together at rest; a typed query with
+     real matches shows neither (BUILD.md §1). */
+  let completeArmed = $state(false);
+  const completeArm = createArm({ onchange: (next) => { completeArmed = next; } });
+  let stripProblem = $state(null);
+
+  const stripActs = $derived(stripActsOf({
+    searchQuery, nothing: searchResults.nothing, query: searchResults.query,
+    closest: groups?.closest ?? null, completeArmed,
+  }));
+
+  /** @param {{ id: string, title: string }} target */
+  async function fireCompleteAct(target) {
+    stripProblem = null;
+    if (!completeArm.tap()) return; // first tap only arms it
+    const raw = rawItems.get(target.id);
+    if (!raw || !view?.primary) return;
+    try {
+      const completedDate = asView(view).today;
+      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), {
+        completedDate,
+        nextDate: nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined,
+      }));
+      stripOpen = false;
+      view = await readHome();
+    } catch (error) {
+      stripProblem = /** @type {any} */ (error)?.message ?? "couldn't complete it — try again";
+    }
+  }
+
+  /** @param {string} name */
+  function goToCreate(name) {
+    stripOpen = false;
+    const query = name ? `?${new URLSearchParams({ name })}` : "";
+    goto(resolve(/** @type {any} */ (`/create${query}`)));
+  }
+
+  /** @param {{ kind: "complete" | "add", target?: any, name?: string }} a */
+  function fireAct(a) {
+    if (a.kind === "complete") fireCompleteAct(a.target);
+    else goToCreate(a.name ?? "");
+  }
+
   function onExploreFocus() {
     stripOpen = true;
+    stripProblem = null;
     loadSearchDocuments();
   }
   function onExploreBlur() {
-    setTimeout(() => { stripOpen = false; }, 150);
+    setTimeout(() => { stripOpen = false; completeArm.disarm(); }, 150);
   }
 
   /* At rest (empty query) the strip shows the same two rows the palette
@@ -611,11 +667,14 @@
   const stripDocuments = $derived(searchQuery ? searchResults.documents : []);
 
   /* The one selectable list, in the order §1 names: items (manifest order,
-     soonest first), then documents. Actions and the no-match sentence are
-     never in it — never selectable. */
+     soonest first), then documents, then the note line's own act(s) (#1162)
+     — trailing, since a query with real matches never shows one at all
+     (BUILD.md §1). The no-match sentence itself carries no act and is never
+     in this list. */
   const selectable = $derived([
     ...stripItems.map((/** @type {SearchItem} */ item) => ({ kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days })),
     ...stripDocuments.map((/** @type {SearchDoc} */ doc) => ({ kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle })),
+    ...stripActs,
   ]);
   let selectedIndex = $state(0);
   const selectedPos = $derived(selectable.length ? Math.min(selectedIndex, selectable.length - 1) : null);
@@ -637,10 +696,16 @@
     selectMark(mark);
     openSearchResult(mark.itemId);
   }
+  /** @param {{ kind: "complete" | "add" }} a */
+  function selectAct(a) {
+    const idx = selectable.indexOf(a);
+    if (idx >= 0) selectedIndex = idx;
+  }
 
   /** @param {KeyboardEvent} event */
   function onExploreKeydown(event) {
     if (event.key === "Escape") {
+      completeArm.disarm();
       /** @type {HTMLElement} */ (event.currentTarget).blur();
       return;
     }
@@ -648,7 +713,9 @@
     if (event.key === "ArrowLeft" || event.key === "ArrowUp") { event.preventDefault(); stepSelection(-1); return; }
     if (event.key !== "Enter") return;
     event.preventDefault();
-    if (selectedEntry) openSearchResult(selectedEntry.itemId);
+    if (!selectedEntry) return;
+    if (selectedEntry.kind === "complete" || selectedEntry.kind === "add") { fireAct(selectedEntry); return; }
+    openSearchResult(selectedEntry.itemId);
   }
 
   /* ---- the strip's own layout: the dial's bodies, never recomputed, plus
@@ -1453,12 +1520,21 @@
           </svg>
           <div class="strip-note" id="strip-note">
             {#if !searchQuery}
-              {#if groups?.closest}<span class="act">→ complete "{groups.closest.title}"</span><span class="sep">·</span>{/if}
-              <span class="act">→ add an item</span>
+              {#each stripActs as a, i (a.itemId)}
+                {#if i > 0}<span class="sep">·</span>{/if}
+                <span class="act" role="presentation"
+                      onmousedown={(event) => { event.preventDefault(); selectAct(a); fireAct(a); }}
+                      >{a.kind === "complete" && completeArmed ? a.title : `→ ${a.title}`}</span>
+              {/each}
+              {#if stripProblem}<span class="sep">·</span><span style="color:var(--overdue)">{stripProblem}</span>{/if}
             {:else if searchResults.nothing}
               <span>nothing in your orbit is called "{searchResults.query}"</span>
               <span class="sep">·</span>
-              <span class="act">→ add "{searchResults.query}" as an item</span>
+              {#each stripActs as a (a.itemId)}
+                <span class="act" role="presentation"
+                      onmousedown={(event) => { event.preventDefault(); selectAct(a); fireAct(a); }}
+                      >→ {a.title}</span>
+              {/each}
             {:else}
               <span>{searchResults.items.length} in your orbit{#if searchResults.documents.length}<span class="sep">·</span>{searchResults.documents.length} document{searchResults.documents.length === 1 ? "" : "s"}{/if}</span>
               <span class="sep">·</span>
@@ -1471,13 +1547,15 @@
                aria-controls="explore-results" aria-autocomplete="list"
                aria-activedescendant={selectedPos === null ? undefined : `sr-opt-${selectedPos}`}
                onfocus={onExploreFocus} onblur={onExploreBlur}
-               oninput={() => { selectedIndex = 0; }}
+               oninput={() => { selectedIndex = 0; stripProblem = null; }}
                onkeydown={onExploreKeydown}>
         {#if stripOpen}
           <ul class="sr-only" id="explore-results" role="listbox" aria-label="Results">
             {#each selectable as entry, i (i)}
               <li id="sr-opt-{i}" role="option" aria-selected={i === selectedPos}>
-                {entry.kind === "item" ? `${entry.title} · ${tlabel({ days: entry.days })}` : `document ${entry.title} · ${entry.itemTitle}`}
+                {entry.kind === "item" ? `${entry.title} · ${tlabel({ days: entry.days })}`
+                  : entry.kind === "doc" ? `document ${entry.title} · ${entry.itemTitle}`
+                  : entry.title}
               </li>
             {/each}
           </ul>

@@ -105,6 +105,55 @@ async function seedHouseholdWithTwoItems(page: Page): Promise<{
   return seeded;
 }
 
+/**
+ * One item due soon enough (`days >= 0`) to be `groups.closest` — the note
+ * line's "complete" act names it (#1162). `recurrenceMonths: 12` matches
+ * v19-item-actions.spec.ts's own completion proof, so the same "about a year
+ * later" regex applies here too.
+ */
+async function seedHouseholdWithSoonItem(page: Page): Promise<{ householdId: string; itemId: string; title: string }> {
+  const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
+  const seeded = await page.evaluate(async (householdName) => {
+    const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+    const session = (await sessionResponse.json()) as { csrfToken: string };
+    const command = async (payload: unknown) => {
+      const response = await fetch("/api/workspace/commands", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`command failed: ${response.status} ${await response.text()}`);
+    };
+    const householdId = crypto.randomUUID();
+    const sectionId = crypto.randomUUID();
+    await command({
+      type: "household.create",
+      household: {
+        id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
+        memberCount: 1, canManage: true, onboardingComplete: true,
+        sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
+        items: [],
+      },
+    });
+    const itemId = crypto.randomUUID();
+    const title = "Nearest due proving";
+    const dueDate = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+    await command({
+      type: "item.upsert",
+      householdId,
+      item: {
+        id: itemId, sectionId, title, currency: "GBP", scheduleKind: "service",
+        dueDate, recurrenceMonths: 12, status: "active",
+      },
+      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+    });
+    return { householdId, itemId, title };
+  }, name);
+  households.track({ id: seeded.householdId, name });
+  return seeded;
+}
+
 function skipOnMobile() {
   test.skip(test.info().project.name.startsWith("mobile"), "#explore's strip is the desk half; the phone has its own sheet");
 }
@@ -250,6 +299,80 @@ test("hovering a mark selects it", async ({ page }) => {
        middle is the SVG's, not the mark's. */
     await marks.nth(1).locator(":scope > :last-child").hover({ timeout: 10_000 });
     await expect(page.locator("#explore-results li").nth(1)).toHaveAttribute("aria-selected", "true");
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
+ * #1162: the note line's own two acts, BUILD.md left inert by #1161 and
+ * wired up here — "complete" the closest thing due and "add" an item, by
+ * mouse and by keyboard, through the same completeCommand/applyCommand and
+ * /create the rest of the app already uses (item page, pocket-search).
+ */
+
+test("clicking the note line's add act, at rest, opens /create", async ({ page }) => {
+  skipOnMobile();
+
+  await signInAsAdmin(page);
+  await seedHouseholdWithTwoItems(page);
+
+  try {
+    await page.goto("/home");
+    await page.locator("#explore").focus();
+    const addAct = page.locator("#strip-note .act", { hasText: "add an item" });
+    await expect(addAct).toBeVisible();
+    await addAct.click();
+
+    await expect(page).toHaveURL(/\/create$/);
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+test("Enter on the no-match add act carries the typed name to /create", async ({ page }) => {
+  skipOnMobile();
+
+  await signInAsAdmin(page);
+  await seedHouseholdWithTwoItems(page);
+
+  try {
+    await page.goto("/home");
+    const explore = page.locator("#explore");
+    await explore.fill("no such orbit thing zzz");
+    await expect(page.locator("#strip-note")).toContainText('add "no such orbit thing zzz" as an item');
+    /* The no-match branch's only entry is the add act, so the default
+       selection (index 0) is already it — the same "Enter opens the
+       selected entry" wiring the matched-item cases above prove. */
+    await explore.press("Enter");
+
+    await expect(page).toHaveURL(/\/create\?name=/);
+    await expect(page.locator("#f-name")).toHaveValue("no such orbit thing zzz");
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+test("clicking the note line's complete act arms then fires, completing the closest item", async ({ page }) => {
+  skipOnMobile();
+
+  await signInAsAdmin(page);
+  const { itemId, title } = await seedHouseholdWithSoonItem(page);
+
+  try {
+    await page.goto("/home");
+    await page.locator("#explore").focus();
+    /* Order matches stripActsOf: "complete" before "add" (BUILD.md §1). */
+    const completeAct = page.locator("#strip-note .act").first();
+    await expect(completeAct).toHaveText(`→ complete "${title}"`);
+
+    await completeAct.click();
+    await expect(completeAct).toHaveText(`tap again to complete "${title}"`);
+
+    await completeAct.click();
+    // The strip closes on fire and the view re-reads with the new orbit.
+    await expect(page.locator("#strip")).toBeHidden();
+    await expect(page.locator(`[id="${itemId}"]`)).toContainText(/T−36[456]d/);
   } finally {
     await households.sweep(page);
   }

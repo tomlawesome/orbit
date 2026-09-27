@@ -98,3 +98,39 @@ export function assignTiers(marks) {
     return { ...m, tier, flip, labelled };
   });
 }
+
+/**
+ * The note line's own act(s) (#1162, wiring the two rows BUILD.md §1 left
+ * inert): "complete" the closest thing due, offered only at rest; "add" the
+ * typed name (or nothing typed), offered at rest and again when a query
+ * matches nothing. BUILD.md §1 never shows both a query's own matches and an
+ * act at once, so a live query with real matches offers none. Kept pure, the
+ * same reason the geometry above is: +page.svelte supplies the live state —
+ * `searchQuery` and `nothing`/`query` from `searchPocket()`, `closest` from
+ * `manifestGroupsOf()`, and whether the complete act is armed — and fires
+ * whatever this returns (completeCommand/applyCommand for "complete", the
+ * create screen for "add"); this only decides what is on offer and how it
+ * reads.
+ * @param {{ searchQuery: string, nothing: boolean, query: string,
+ *   closest: { id: string, title: string } | null, completeArmed: boolean }} args
+ * @returns {({ kind: "complete", itemId: string, title: string, target: { id: string, title: string } }
+ *   | { kind: "add", itemId: string, title: string, name: string })[]}
+ */
+export function stripActsOf({ searchQuery, nothing, query, closest, completeArmed }) {
+  if (searchQuery) {
+    if (!nothing) return [];
+    return [{ kind: "add", itemId: "__add__", title: `add "${query}" as an item`, name: query }];
+  }
+  /** @type {ReturnType<typeof stripActsOf>} */
+  const out = [];
+  if (closest) {
+    out.push({
+      kind: "complete",
+      itemId: "__complete__",
+      title: completeArmed ? `tap again to complete "${closest.title}"` : `complete "${closest.title}"`,
+      target: closest,
+    });
+  }
+  out.push({ kind: "add", itemId: "__add__", title: "add an item", name: "" });
+  return out;
+}
