@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { householdRegister } from "./support/households";
+import { sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { workerAccount } from "./support/worker-identity";
@@ -21,7 +21,26 @@ resetDatabaseBetweenSpecFiles();
  * suite).
  */
 
-const households = householdRegister();
+/**
+ * Schedules the household for deletion so its deliveries stop answering
+ * "sent to you lately" (src/server/notification-history.ts filters to
+ * sent/retry/failed, and requestHouseholdDeletion cancels every delivery a
+ * household holds) -- household.create makes the seeding reader its OWNER,
+ * never an instance administrator, and household-lifecycle.ts's
+ * requireHardDeleteAuthority refuses hard_delete to anyone but one (403).
+ * support/households.ts's own sweep() always attempts hard_delete next, so
+ * it cannot be reused by an ordinary member's own household; this is that
+ * file's schedule-only half, which requireScheduleAuthority does allow an
+ * owner to do.
+ */
+async function scheduleHouseholdDeletion(page: Page, householdId: string, name: string) {
+  const response = await page.request.post(`/api/households/${householdId}/lifecycle`, {
+    headers: await sessionHeaders(page),
+    data: { action: "delete", confirmation: name },
+  });
+  if (response.status() === 404 || response.status() === 409) return;
+  if (!response.ok()) throw new Error(`#1003: could not schedule cleanup of "${name}" (${response.status()})`);
+}
 
 /** The stack's own database container, reached the way support/database.ts does. */
 function databaseContainer(): string {
@@ -52,10 +71,20 @@ async function signInAs(page: Page, account: string) {
   await settleArrival(page);
 }
 
-/** The helm, loaded — every card is gated on the screen's own fetch. */
+/**
+ * The settings screen, loaded — every card is gated on the screen's own
+ * fetch. `.helm-page .cards` is the desk dialect's own loaded signal; below
+ * the CSS switch (pocket.svelte's `.st-pocket` media query) `.page` itself
+ * is `display:none`, so a mobile project waiting on `.cards` times out on a
+ * container that is hidden by design rather than one that never loaded.
+ * `.st-id` is the pocket dialect's own `{#if view}`-gated element, the same
+ * signal one step earlier in the same fetch.
+ */
 async function openSettings(page: Page) {
   await page.goto("/settings");
-  await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+  const isMobile = test.info().project.name.startsWith("mobile");
+  const loaded = isMobile ? page.locator(".st-id") : page.locator(".cards");
+  await expect(loaded).toBeVisible({ timeout: 30_000 });
 }
 
 /**
@@ -98,7 +127,6 @@ async function seedHouseholdAndItem(page: Page, name: string) {
     });
     return { userId: session.user.id };
   }, { householdId, sectionId, itemId, householdName: name });
-  households.track({ id: householdId, name });
   return { householdId, itemId, userId };
 }
 
@@ -151,4 +179,11 @@ test("a member sees their own last sent reminders, plainly, on both dialects", a
   /* The row leads to the item on the belt. */
   await rows.nth(1).click();
   await expect(page).toHaveURL(new RegExp(`/item/${itemId}`));
+
+  /* #730: left out here, this household's deliveries outlived the test and
+     the desk-dialect run's own "Boiler service" rows bled into the
+     pocket-dialect run right after it in the same file (both read one
+     member's reminders across every household they hold, not just the one
+     each run made), so the mobile project saw 4 rows where it seeded 2. */
+  await scheduleHouseholdDeletion(page, householdId, name);
 });
