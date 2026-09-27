@@ -1262,3 +1262,12 @@ user standing on the dial had no way to close what they had just opened.
   listener would race it).
 - A reader whose focus is inside the row still closes it with Escape and
   lands on the row's face, as before.
+
+## 30. The desk search field's focus ring has rounded ends (owner, 2026-09-27)
+
+On the live build of #1057 the owner asked: *"I would like the search box to
+have rounded ends please."* The box they saw is the focus ring #847 gave the
+field. It is now a pill: the outline takes a full radius, and the hairline
+under the text is hidden while the ring shows, since a bottom border under a
+full radius bends into a curve. At rest the field is unchanged: a hairline
+under centred type, no box.
