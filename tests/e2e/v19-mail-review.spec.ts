@@ -189,14 +189,42 @@ test("amend then accept from the item view", async ({ page }) => {
     await interceptMail(page, householdId, approvals, { approvedItemId: itemId } as { firstPartial?: boolean });
 
     await page.goto(`/item/${receiptId}`);
-    const title = page.locator(".name-title");
-    await expect(title).toHaveValue("Reviewed intake 1786823446152");
-    // Extraction-read fields carry the from-document mark.
-    await expect(title).toHaveClass(/sugg/);
+    if (test.info().project.name.startsWith("mobile")) {
+      /* #1145, round 3 §4: on a phone the suggestion's card holds the relay's
+         readings and the two decisions; the fields are in the review sheet
+         `review & amend →` raises (ReviewSheet.svelte: EntryForm in review
+         mode), so the amendment happens there. */
+      await page.getByRole("button", { name: "review & amend →" }).click();
+      const form = page.getByRole("form", { name: "Review Reviewed intake 1786823446152" });
+      const name = form.locator('input[id$="-name"]');
+      await expect(name).toHaveValue("Reviewed intake 1786823446152");
+      /* No field wears a from-document mark on the phone: round 3 §4 draws
+         the readings as their own card, `what the relay read`, each with how
+         sure the relay was, and readingsOf (lib/pocket/review.js) lists
+         provider, reference, due date and cost only -- never the title. So
+         the mark asserted here is that card's: the provider was read plain,
+         the cost at low confidence. */
+      const reading = (label: string) =>
+        form.locator(".pc-read", { has: page.locator(".pc-read-label", { hasText: new RegExp(`^${label}$`) }) });
+      await expect(reading("provider").locator(".pc-read-sure")).toHaveText("sure");
+      await expect(reading("cost").locator(".pc-read-sure")).toHaveText("unsure");
 
-    await title.fill("Home insurance, corrected");
-    await page.locator("#s-cost").fill("199.99");
-    await page.getByRole("button", { name: "accept into orbit" }).click();
+      await name.fill("Home insurance, corrected");
+      await form.locator('input[id$="-cost"]').fill("199.99");
+      /* The sheet's form is create's, and create refuses to save without a
+         section (entry.js refusalOf); the relay proposes none. */
+      await form.getByRole("button", { name: "Home", exact: true }).click();
+      await page.getByRole("button", { name: "add to orbit", exact: true }).click();
+    } else {
+      const title = page.locator(".name-title");
+      await expect(title).toHaveValue("Reviewed intake 1786823446152");
+      // Extraction-read fields carry the from-document mark.
+      await expect(title).toHaveClass(/sugg/);
+
+      await title.fill("Home insurance, corrected");
+      await page.locator("#s-cost").fill("199.99");
+      await page.getByRole("button", { name: "accept into orbit" }).click();
+    }
 
     await expect.poll(() => approvals.length).toBe(1);
     expect(approvals[0]).toMatchObject({
