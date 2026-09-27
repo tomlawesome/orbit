@@ -99,6 +99,21 @@ test("the receipt address is the belt, with the suggestion seated hollow at the 
 
   /* The belt around it is the household's, the suggestion counted apart. */
   await expect(page.locator("#findnote")).toHaveText("6 items · 1 suggested · in date order, sooner to later");
+  /* #1147: the longer line stays one line under the find field. */
+  expect(await page.locator("#findnote").evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+  })).toBe(1);
+  /* ...and centred under the field, spilling evenly rather than to one side. */
+  const [text, field] = await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(/** @type {Element} */ (document.getElementById("findnote")));
+    const t = range.getBoundingClientRect();
+    const f = /** @type {Element} */ (document.getElementById("find")).getBoundingClientRect();
+    return [t.left + t.width / 2, f.left + f.width / 2];
+  });
+  expect(Math.abs(text - field)).toBeLessThan(2);
   /* Its own seat is hollow stone in the accent, and says what it is. */
   const seat = page.locator('#seats .hit.sug[aria-label^="Home insurance renewal"]');
   await expect(seat).toHaveCount(1);
