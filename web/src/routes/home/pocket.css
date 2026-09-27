@@ -158,6 +158,14 @@
 .pocket .pk-signals > .p-caps:first-child{margin:0 var(--p-gutter) 12px}
 .pocket .pk-pen{display:flex;flex-direction:column}
 .pocket .pk-pen [data-row-key=mail] .meta{color:var(--accent-text)}
+/* An opened row IN THE PEN draws no plate of its own (owner-decisions §29,
+   #1142): the pen is the card, so the face and the panel stay on its glass
+   with no fill and no corners of their own, and the accent rail down the
+   leading edge and the panel's unfold say which row is open. Row.svelte's
+   plate stays on the manifest's rows, which sit on the sky. Written on the
+   pen's own classes so it outweighs the kit's open-row rule. */
+.pocket .pk-signals.proposed .p-row[data-open] > .face,
+.pocket .pk-signals.proposed .p-row[data-open] .p-row-open{background:transparent;border-radius:0}
 /* An opened row (review round §2.1, the desk's .item.open): its own glass
    takes the accent's edge, its bottom corners handed to the panel. The
    drawer's `copy link` is the desk's quiet .ivcopy. */
