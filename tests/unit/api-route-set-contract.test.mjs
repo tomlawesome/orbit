@@ -142,6 +142,7 @@ const EXPECTED_ROUTES = [
   "/api/settings/mail-relay/senders",
   "/api/settings/mail-relay/verify",
   "/api/settings/reminders",
+  "/api/settings/sent",
   "/api/settings/tour",
   // The system-status drawer's own data (#863): any signed-in reader, not
   // only an administrator (#869's ruling put per-subsystem truth "behind
@@ -187,7 +188,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 75 route families -- no fewer, no more", () => {
+  it("has exactly the expected 76 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
