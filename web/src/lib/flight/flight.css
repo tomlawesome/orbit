@@ -194,8 +194,13 @@ body.lit .localopen{opacity:1}
    attribute's presence, not merely its value, so a page that never sets
    `data-state` at all (SignIn.svelte is `#dawn`'s only consumer, but this
    is what keeps the rule inert if that ever changes) never hides the button
-   by accident. */
-body[data-state]:not([data-state="door"]) #dawn .gate-wrap{display:none}
+   by accident. `incomplete` is also excluded here, not only re-shown below:
+   `:not([data-state="door"])` alone out-specifies the `incomplete` override
+   two rules down (two attribute selectors plus the id and class beat that
+   override's one attribute selector plus id and class), so the pill stayed
+   display:none whatever the override said until this second exclusion was
+   added (#1056 shipped that way; caught in the m14 batch's own e2e run). */
+body[data-state]:not([data-state="door"]):not([data-state="incomplete"]) #dawn .gate-wrap{display:none}
 
 #dawn .state{grid-area:1/1;width:100%;height:100%;position:relative;pointer-events:none}
 #dawn .state-primary{position:absolute;left:50%;top:calc(50% + 64px);transform:translateX(-50%);
@@ -252,10 +257,13 @@ body.lit[data-state="starting"] #dawn .sunpt{opacity:.6}
    first-light transition finishing what it started. */
 
 /* `incomplete` ALONE keeps the pill on a held sky (round-1's own honest
-   caution: "a held dawn with a handle") — the generic rule above hides
-   `.gate-wrap` for every state but `door`, and this puts it back for this
-   one. Pressing it plays the door's own sunrise, so the retry IS the
-   recovery, exactly as round-1 ratifies. */
+   caution: "a held dawn with a handle") — the generic rule above now
+   excludes `incomplete` from being hidden, so `.gate-wrap` is already at
+   its default `display:block` by the time this rule runs. Kept anyway,
+   explicit rather than relying on the browser default, since that default
+   is exactly what let the specificity bug above ship unnoticed. Pressing
+   the pill plays the door's own sunrise, so the retry IS the recovery,
+   exactly as round-1 ratifies. */
 body[data-state="incomplete"] #dawn .gate-wrap{display:block}
 /* the pill's own entrance (opacity/transform on `.lit`, the delayed
    1.6s-ease-3.6s transition) is the shared `.gate` rule above, unscoped by
