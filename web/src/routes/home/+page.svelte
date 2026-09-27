@@ -12,11 +12,12 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin, signOut } from "$lib/data/workspace.js";
+  import { approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, requestToJoin, signOut } from "$lib/data/workspace.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
+  import { searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "./bands.js";
   import CorridorRow from "./CorridorRow.svelte";
@@ -394,6 +395,25 @@
     }
   }
 
+  /**
+   * A search result opens the same way a clicked row does (#424), plus a
+   * reveal: the row is very likely off-screen, unlike a row the reader was
+   * already looking at, so it rides the same `revealTarget` scroll the
+   * address bar's own arrival uses.
+   * @param {string} id
+   */
+  function openSearchResult(id) {
+    paletteOpen = false;
+    if (expanded === id) return;
+    revealTarget = id;
+    if (expanded === null) {
+      pushedEntry = true;
+      pushState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
+    } else {
+      replaceState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
+    }
+  }
+
   async function copyAddress() {
     try {
       await navigator.clipboard.writeText(new URL(addressOf(expanded), location.origin).href);
@@ -520,6 +540,59 @@
         : null;
     })(),
   );
+  // ---- the desk's own search palette (#1057, POL-9; §2.4's search shared
+  // with the phone via pocket-search.js rather than a second implementation)
+
+  let paletteOpen = $state(false);
+  let searchQuery = $state("");
+  /** @type {import('./pocket-search.js').SearchDocument[]} */
+  let searchDocuments = $state([]);
+  /** @type {object | null} */
+  let searchDocumentsFor = null;
+
+  async function loadSearchDocuments() {
+    const household = view?.household;
+    const householdId = view?.primary;
+    if (!household || !householdId || searchDocumentsFor === household) return;
+    searchDocumentsFor = household;
+    const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
+    // Additive: an item whose papers cannot be read loses its papers from the
+    // results, not the search.
+    const found = await Promise.all(carrying.map(async (item) => {
+      try {
+        const papers = await readItemDocuments(householdId, item.id);
+        return papers.map((doc) => ({ ...doc, itemTitle: item.title }));
+      } catch {
+        return [];
+      }
+    }));
+    if (searchDocumentsFor === household) searchDocuments = found.flat();
+  }
+
+  const searchRows = $derived(groups ? [...groups.attention, ...groups.later] : []);
+  const searchResults = $derived(
+    searchPocket(searchQuery, { items: searchRows, attention: groups?.attention ?? [], documents: searchDocuments }),
+  );
+
+  function onExploreFocus() {
+    paletteOpen = true;
+    loadSearchDocuments();
+  }
+  function onExploreBlur() {
+    setTimeout(() => { paletteOpen = false; }, 150);
+  }
+  /** @param {KeyboardEvent} event */
+  function onExploreKeydown(event) {
+    if (event.key === "Escape") {
+      /** @type {HTMLElement} */ (event.currentTarget).blur();
+      return;
+    }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const top = searchResults.items[0];
+    if (top) openSearchResult(top.id);
+  }
+
   const todayLine = $derived(
     view
       ? new Date(asView(view).today + "T00:00:00Z")
@@ -1204,13 +1277,27 @@
     </div>
     <div class="hero-foot">
       <div class="splash-search" style="position:relative">
-        <input id="explore" placeholder="explore your world" aria-label="Search items and documents">
-        <div class="palette" data-polish="POL-9" id="palette">
-          {#each (groups?.attention ?? []).filter((/** @type {any} */ r) => r.days >= 0).slice(0, 2) as row (row.id)}
-            <div><b>{row.title}</b> <small>· {tlabel(row)}</small></div>
-          {/each}
-          {#if groups?.closest}<div class="act">→ complete "{groups.closest.title}"</div>{/if}
-          <div class="act">→ add an item</div>
+        <input id="explore" placeholder="explore your world" aria-label="Search items and documents"
+               autocomplete="off" bind:value={searchQuery} onfocus={onExploreFocus} onblur={onExploreBlur}
+               onkeydown={onExploreKeydown}>
+        <div class="palette" data-polish="POL-9" id="palette" class:open={paletteOpen}>
+          {#if !searchResults.query}
+            {#each (groups?.attention ?? []).filter((/** @type {any} */ r) => r.days >= 0).slice(0, 2) as row (row.id)}
+              <div><b>{row.title}</b> <small>· {tlabel(row)}</small></div>
+            {/each}
+            {#if groups?.closest}<div class="act">→ complete "{groups.closest.title}"</div>{/if}
+            <div class="act">→ add an item</div>
+          {:else if searchResults.nothing}
+            <div>nothing in your orbit is called "{searchResults.query}"</div>
+            <div class="act">→ add "{searchResults.query}" as an item</div>
+          {:else}
+            {#each searchResults.items as row (row.id)}
+              <div><b>{row.title}</b> <small>· {tlabel(row)}</small></div>
+            {/each}
+            {#each searchResults.documents as doc (doc.id)}
+              <div>◆ <b>{doc.name}</b> <small>· {doc.itemTitle}</small></div>
+            {/each}
+          {/if}
         </div>
       </div>
     </div>
