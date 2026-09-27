@@ -302,4 +302,18 @@ describe("what a refused card says", () => {
       "That email address and password do not match an Orbit account.",
     );
   });
+
+  it("cannot carry the contact address into a disabled account's refusal (#1070): the function has nowhere to put one", () => {
+    /* Owner, 2026-09-19: the public contact address stays on the door's own
+       "couldn't open safely" screen (failedMessage, which does take one) but
+       must never reach a disabled or banned account's sign-in refusal.
+       cardMessageFor is what renders that refusal, and it is a static switch
+       on the error code alone — proven structurally, by arity, so a later
+       change that threaded an address parameter through would fail this
+       assertion before a single message string needed to change. */
+    expect(cardMessageFor.length).toBe(1);
+    for (const code of ["credentials_invalid", "too_many_attempts", "invalid_request"]) {
+      expect(cardMessageFor(code)).not.toContain("@");
+    }
+  });
 });
