@@ -1243,3 +1243,22 @@ the dismissal's landing (the later neighbour, else the sooner, else home);
 the desk drawer's foot wording (`review in the belt →`); the hollow rock's
 draw (outline in the accent, 12% wash, no pip); the fifth honest state's
 words; the find note's `· 1 suggested`.
+
+## 28. Escape on the dial puts the open row away (build's call, 2026-09-27)
+
+Not the owner's ruling: a call made by the build for #1149, for the owner
+to overturn. A planet pressed with Enter opens its manifest row in place
+and, by answer 6a, leaves focus on the planet so a second Enter goes to
+the item. The row's own Escape (row.js) listens on the row, so a keyboard
+user standing on the dial had no way to close what they had just opened.
+
+- **Escape on a dial body closes the lit row, and focus stays on the body.**
+  The rule is the kit's own: a sheet hears Escape wherever focus is and
+  hands focus back to its opener (sheet.js); here the opener never lost
+  focus, so it keeps it. The planet's ring goes out with the row.
+- The second-Enter rule stands unchanged. Focus is not moved into the row
+  on Enter (that would spend the second Enter on the row's face), and
+  Escape is not made page-wide (a sheet's Escape is its own; a page-wide
+  listener would race it).
+- A reader whose focus is inside the row still closes it with Escape and
+  lands on the row's face, as before.

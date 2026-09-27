@@ -193,8 +193,19 @@
   }
 
   // The dial's bodies are SVG, so Enter and Space have to be taught (#851).
+  // Escape too (#1149, owner-decisions §28): a row opened from a body leaves
+  // focus on the body, so the body is where Escape is heard. It puts the lit
+  // row away and focus stays where it is, as a sheet's Escape leaves focus on
+  // its opener (sheet.js). The row's own Escape (row.js) still serves a
+  // reader whose focus is inside the row.
   /** @type {(event: KeyboardEvent, then: () => void) => void} */
   const onKeyActivate = (event, then) => {
+    if (event.key === "Escape") {
+      if (lit === null) return;
+      event.preventDefault();
+      rowOf(manifestRow(lit))?.close();
+      return;
+    }
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     then();
@@ -423,7 +434,8 @@
    * A planet on the dial (owner's answer 6a, the desk's `.body-link`): the
    * first tap scrolls the manifest to its row and opens it, the body
    * lighting while the row is open; a tap on the lit body goes to the item,
-   * the open drawer lifting into it. A body the manifest draws no row for
+   * the open drawer lifting into it, and Escape on the dial puts the row
+   * away (onKeyActivate). A body the manifest draws no row for
    * goes straight to the item, as a search result does (§6.e). The relay's
    * catch does what its row's `review & amend →` does: raises the review
    * sheet in place (round 3 §4).

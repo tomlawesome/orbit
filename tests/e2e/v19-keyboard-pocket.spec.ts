@@ -50,8 +50,8 @@ resetDatabaseBetweenSpecFiles();
  *   - /home in its pocket form: the sky strip (`.skies`, #845's own
  *     `tabindex="0"` scrollable region, whose chips link to each household
  *     since #1118), the search line (`.msearch`, a button raising the search
- *     sheet), and the pocket's sheets (#1120, the kit's `.p-sheet-layer`) —
- *     the item sheet a dial body or a row raises, and the hatch. v19-axe-sweep.spec.ts's
+ *     sheet), the manifest rows a dial body opens in place (264acd44,
+ *     #1149), and the hatch (#1120, the kit's `.p-sheet-layer`). v19-axe-sweep.spec.ts's
  *     own comment on this route confirms the pocket dialect "has no drawers
  *     of its own at all" beyond that: the account panel and the three home
  *     drawers this file's desktop twin light-dismiss-tests are `.desk`-only
@@ -179,15 +179,19 @@ async function seedHousehold(page: Page, options: { withItem?: boolean; secondSe
 /*
  * #1120: pocket home's overlays are the kit's sheets (web/src/lib/pocket),
  * portalled to the end of <body>, each a `.p-sheet-layer` that wears `open`
- * while it is up. The hatch is the one holding the "Go to" nav; the item
- * sheet is the one holding the item's card.
+ * while it is up. The hatch is the one holding the "Go to" nav. The item
+ * sheet is gone (264acd44): a planet opens its manifest row in place.
  */
 const HATCH = '.p-sheet-layer:has(nav[aria-label="Go to"])';
 /* The pocket top chrome's way back. Chrome.svelte also renders the desk
    `a.back`, display:none below the CON-10 switch, so a bare `a.back` matches
    two elements (one hidden) and trips strict mode. */
 const TOP_BACK = "header.p-chrome a.back";
-const ITEM_SHEET = ".p-sheet-layer:has(.pk-item)";
+/* The dial's planets (pocket.svelte): an item body carries `data-body` alone;
+   the relay's catch adds `data-body-sugg`. An open manifest row wears
+   `data-open` (row.js), and the planet whose row is open wears `lit`. */
+const DIAL_PLANET = ".pocket .mdial .pk-body[data-body]:not([data-body-sugg])";
+const OPEN_ROW = ".pocket .pk-below [data-row][data-open]";
 
 /** #730: every household this file makes is removed, even when the test fails. */
 async function cleanup(page: Page, household: { id: string; name: string }) {
@@ -276,18 +280,27 @@ async function fillPocketCreateForm(page: Page, name: string) {
 
 /**
  * The dial's bodies are SVG `<g role="button" tabindex="0">` (#851), and
- * pocket.svelte teaches them Enter and Space. Tab to the first, Enter raises
- * the item sheet (#1119, the kit's Sheet), Escape puts it away (#1120).
+ * pocket.svelte teaches them Enter, Space and Escape. Tab to the first
+ * planet, Enter opens its manifest row in place (owner's answer 6a; the item
+ * sheet retired in 264acd44) and leaves focus on the planet so a second Enter
+ * would go to the item; Escape on the planet puts the row away and focus
+ * stays where it was (#1149, owner-decisions §28).
  */
-test("home (pocket): the item sheet opens and light-dismisses by keyboard", async ({ page }) => {
+test("home (pocket): a planet's row opens and closes by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
   const household = await arriveAtHomePocket(page, { withItem: true });
   try {
-    await tabTo(page, { selector: "[data-sheet-title]" }, { screen: "home (pocket) dial" });
+    await tabTo(page, { selector: DIAL_PLANET }, { screen: "home (pocket) dial" });
     await page.keyboard.press("Enter");
-    await expect(page.locator(ITEM_SHEET)).toHaveClass(/open/);
+    await expect(page.locator(OPEN_ROW)).toHaveCount(1);
+    await expect(page.locator(`${DIAL_PLANET}.lit`)).toHaveCount(1);
+    /* Focus did not move into the row: the second Enter is the item's. */
+    const onPlanet = () => page.evaluate((sel) => document.activeElement?.matches(sel) ?? false, DIAL_PLANET);
+    expect(await onPlanet()).toBe(true);
     await page.keyboard.press("Escape");
-    await expect(page.locator(ITEM_SHEET)).not.toHaveClass(/open/);
+    await expect(page.locator(OPEN_ROW)).toHaveCount(0);
+    await expect(page.locator(`${DIAL_PLANET}.lit`)).toHaveCount(0);
+    expect(await onPlanet()).toBe(true);
   } finally {
     await cleanup(page, household);
   }
