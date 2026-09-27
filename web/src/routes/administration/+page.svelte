@@ -6,11 +6,14 @@
     commandMailbox,
     createLocalUser,
     createSystem,
+    hardDeleteHousehold,
     readAdminScreen,
     readSignInMethods,
+    restoreHousehold,
     sendSetupLink,
     startStepUp,
   } from "$lib/data/workspace.js";
+  import { deletionNameMatches } from "$lib/data/household.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf, galaxyOf } from "$lib/data/chart.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
@@ -61,6 +64,10 @@
   let backdropRoot = null;
   /* #1123: on a phone the pocket's column holds the page's one main landmark. */
   const pocket = isPocket();
+  /** @param {unknown} error */
+  const said = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+  /** @param {number} n @param {string} one @param {string} [many] */
+  const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
   /* §11 (#453): direct placement — it lands on the real route and refreshes
      the screen with the server's answer. Deciding join requests is NOT an
@@ -149,6 +156,86 @@
       systemProblem = setupWords(error);
     } finally {
       systemBusy = false;
+    }
+  }
+
+  /* HOUSEHOLD RECOVERY ON THE CLOCK (#1001, design/v19/household-recovery/
+     round-1/b-the-row-on-the-clock.html, owner-decisions §19). A household
+     whose deletion is requested and still inside its 30-day window carries
+     its own state and both acts on its Systems row; nothing is drawn once
+     nothing is scheduled. Restore is the safe act, one tap. Delete now
+     follows the household page's own danger protocol exactly (§15, "57 admin
+     only": restore is drawn on administration only, never on the household
+     page, whatever the server allows). */
+  const recoverable = $derived.by(() => view?.recoverable ?? []);
+  /** @param {string} iso */
+  const daysLeft = (iso) => Math.max(0, Math.ceil(
+    (Date.parse(iso) - Date.parse(view?.now ?? new Date().toISOString())) / 86_400_000,
+  ));
+  /** @param {string} iso */
+  const goneOn = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
+  /** @param {{ deleteAfter: string }} row */
+  const expired = (row) => Date.parse(row.deleteAfter) <= Date.parse(view?.now ?? new Date().toISOString());
+
+  /** What was said on a row after restoring it, keyed by household id. @type {Record<string, { ok: boolean, text: string }>} */
+  let clockSaid = $state({});
+  /** @param {{ id: string, name: string }} row */
+  async function restoreRow(row) {
+    try {
+      await restoreHousehold(row.id);
+      clockSaid[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
+      view = await readAdminScreen();
+    } catch (error) {
+      clockSaid[row.id] = { ok: false, text: `not restored — ${said(error)}` };
+    }
+  }
+
+  /** Which row's "delete now" confirm is open, and what has been typed into each. @type {Record<string, boolean>} */
+  let doomConfirming = $state({});
+  /** @type {Record<string, string>} */
+  let doomTypedName = $state({});
+  /** @type {Record<string, string | null>} */
+  let doomProblem = $state({});
+  /** Rows replaced by their said-line after a hard delete. @type {{ id: string, text: string }[]} */
+  let doomGone = $state([]);
+  /** @param {{ id: string, name: string }} row */
+  const openDoomConfirm = (row) => {
+    doomConfirming[row.id] = true;
+    doomTypedName[row.id] = "";
+    doomProblem[row.id] = null;
+  };
+  /** @param {{ id: string, name: string }} row */
+  const doomNameOk = (row) => deletionNameMatches(doomTypedName[row.id] ?? "", row.name);
+
+  /* The two-tap protocol (household page's own danger line): the first tap
+     arms the button and does nothing else; the second fires. An unfired arm
+     relaxes on its own after 4 seconds, exactly as the mockup's own script
+     does. */
+  /** @type {string | null} */
+  let doomArmed = $state(null);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let doomArmTimer = null;
+  /** @param {{ id: string, name: string }} row */
+  function twoTapDoom(row) {
+    if (doomArmed === row.id) {
+      clearTimeout(doomArmTimer ?? undefined);
+      doomArmed = null;
+      fireDoom(row);
+      return;
+    }
+    clearTimeout(doomArmTimer ?? undefined);
+    doomArmed = row.id;
+    doomArmTimer = setTimeout(() => (doomArmed = null), 4_000);
+  }
+  /** @param {{ id: string, name: string }} row */
+  async function fireDoom(row) {
+    try {
+      await hardDeleteHousehold(row.id, doomTypedName[row.id] ?? "");
+      doomConfirming[row.id] = false;
+      doomGone = [...doomGone, { id: row.id, text: `deleted · ${row.name} is gone for good · its members keep their accounts` }];
+      view = await readAdminScreen();
+    } catch (error) {
+      doomProblem[row.id] = said(error);
     }
   }
 
@@ -803,23 +890,77 @@
         {#if systemProblem}<div class="adminproblem">{systemProblem}</div>{/if}
 
         {#each view.households as household (household.id)}
-          <div class="system">
-            <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
-              <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
-              <circle cx="17" cy="17" r="2.6" style="fill:var({household.id === view.primary ? "--sun" : "--ink-mid"})"/>
-              {#each ringDots(household) as dot (dot.cx + "-" + dot.cy)}
-                <circle cx={dot.cx} cy={dot.cy} r={dot.r} style="fill:var({dot.tone})" opacity=".8"/>
-              {/each}
-            </svg>
-            <div class="who">
-              <b>{household.name}</b>
-              <span>{[
-                `${household.memberCount} member${household.memberCount === 1 ? "" : "s"}`,
-                view.owners[household.id] ? `owner ${view.owners[household.id]}` : null,
-                `${(household.items ?? []).length} item${(household.items ?? []).length === 1 ? "" : "s"}`,
-              ].filter(Boolean).join(" · ")}</span>
+          {@const doom = recoverable.find((row) => row.id === household.id)}
+          {#if doom}
+            {@const rowExpired = expired(doom)}
+            <div class="system" class:doomed={!rowExpired}>
+              <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+                {#if rowExpired}
+                  <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+                  <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+                {:else}
+                  <circle cx="17" cy="17" r="13" class="ring" fill="none"/>
+                  <circle cx="17" cy="17" r="2.6" class="sun"/>
+                {/if}
+                {#each ringDots(household) as dot (dot.cx + "-" + dot.cy)}
+                  <circle cx={dot.cx} cy={dot.cy} r={dot.r} style="fill:var({dot.tone})" opacity=".8"/>
+                {/each}
+              </svg>
+              <div class="who">
+                <b>{household.name}</b>
+                <span>{rowExpired ? "past its window · removing"
+                  : `on the clock · ${count(daysLeft(doom.deleteAfter), "day")} left · gone for good ${goneOn(doom.deleteAfter)}`}</span>
+              </div>
+              {#if !rowExpired}
+                <div class="acts">
+                  <button class="rebtn" onclick={() => restoreRow(doom)}>restore</button>
+                  {#if !doomConfirming[doom.id]}
+                    <button class="dangerbtn" onclick={() => openDoomConfirm(doom)}>delete now →</button>
+                  {:else}
+                    <button class="dangerbtn" class:armed={doomArmed === doom.id} disabled={!doomNameOk(doom)}
+                            onclick={() => twoTapDoom(doom)}>
+                      {doomArmed === doom.id ? "tap again to delete for good" : "delete now"}</button>
+                  {/if}
+                </div>
+                {#if doomConfirming[doom.id]}
+                  <div class="confirm">
+                    <p class="stake">Deleting now skips the {count(daysLeft(doom.deleteAfter), "day")}. Nothing comes
+                      back after this — not for you, not for anyone.</p>
+                    <div class="field">
+                      <label for="doomname-{doom.id}">type the system’s name exactly to wake the button</label>
+                      <input id="doomname-{doom.id}" placeholder={doom.name} autocomplete="off"
+                             bind:value={doomTypedName[doom.id]} />
+                    </div>
+                    {#if doomProblem[doom.id]}<div class="adminproblem">{doomProblem[doom.id]}</div>{/if}
+                  </div>
+                {/if}
+              {/if}
+              {#if clockSaid[doom.id]}
+                <div class="adminproblem said" class:ok={clockSaid[doom.id].ok}>{clockSaid[doom.id].text}</div>
+              {/if}
             </div>
-          </div>
+          {:else}
+            <div class="system">
+              <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+                <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+                <circle cx="17" cy="17" r="2.6" style="fill:var({household.id === view.primary ? "--sun" : "--ink-mid"})"/>
+                {#each ringDots(household) as dot (dot.cx + "-" + dot.cy)}
+                  <circle cx={dot.cx} cy={dot.cy} r={dot.r} style="fill:var({dot.tone})" opacity=".8"/>
+                {/each}
+              </svg>
+              <div class="who">
+                <b>{household.name}</b>
+                <span>{[
+                  `${household.memberCount} member${household.memberCount === 1 ? "" : "s"}`,
+                  view.owners[household.id] ? `owner ${view.owners[household.id]}` : null,
+                  `${(household.items ?? []).length} item${(household.items ?? []).length === 1 ? "" : "s"}`,
+                ].filter(Boolean).join(" · ")}</span>
+              </div>
+            </div>
+          {/if}
+        {/each}
+        {#each doomGone as line (line.id)}
+          <div class="system settled"><div class="adminproblem gone">{line.text}</div></div>
         {/each}
       </div>
 
