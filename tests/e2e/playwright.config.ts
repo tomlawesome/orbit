@@ -40,6 +40,18 @@ import { defineConfig, devices } from "@playwright/test";
 // otherwise for a measurement.
 const PARALLEL_WORKERS = Number(process.env.ORBIT_E2E_WORKERS ?? 2);
 
+// #1150: scripts/test-e2e-local.sh sets this when running against a stack
+// named by --reuse (#947). Such a stack is by definition already claimed,
+// so the "unclaimed" project below -- whose one spec,
+// bootstrap-protection.spec.ts, asserts the instance is NOT yet claimed --
+// would fail loudly on a precondition that no longer holds, and "setup"
+// depends on it, so nothing else would run either. tests/e2e/claim.setup.ts
+// is already idempotent against an already-claimed stack (its own header
+// comment), so only the "unclaimed" project and "setup"'s dependency on it
+// are dropped here; a fresh run (this unset) keeps exactly the graph it has
+// today.
+const reuseKeptStack = process.env.ORBIT_E2E_REUSE === "true";
+
 export default defineConfig({
   testDir: ".",
   // #1080: the spec FILE is the parallel unit, not the test. Specs assume
@@ -114,13 +126,17 @@ export default defineConfig({
     // run. Two projects with no dependency edge between them have no such
     // guarantee and may be scheduled concurrently -- that laxer arrangement
     // (just leaving the spec out of "setup"'s dependents) is what raced here.
-    { name: "unclaimed", testMatch: /bootstrap-protection\.spec\.ts/, use: { ...devices["Desktop Chrome"] } },
+    ...(reuseKeptStack
+      ? []
+      : [{ name: "unclaimed", testMatch: /bootstrap-protection\.spec\.ts/, use: { ...devices["Desktop Chrome"] } }]),
     // #1039: claims the stack once "unclaimed" above has finished, so any
     // other spec means what it says run alone with --spec against a fresh
     // stack instead of relying on an earlier spec in the same run having
     // claimed it first. See tests/e2e/claim.setup.ts for what it does and
-    // does not cover (OIDC only) and why.
-    { name: "setup", testMatch: /.*\.setup\.ts/, dependencies: ["unclaimed"] },
+    // does not cover (OIDC only) and why. #1150: on the --reuse path
+    // "unclaimed" is dropped above, so this dependency would point at a
+    // project that no longer exists -- drop it too, in the same condition.
+    { name: "setup", testMatch: /.*\.setup\.ts/, dependencies: reuseKeptStack ? [] : ["unclaimed"] },
     {
       name: "desktop-chromium",
       testIgnore: [/bootstrap-protection\.spec\.ts/, /maintenance\.spec\.ts/],
