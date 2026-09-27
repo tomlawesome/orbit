@@ -81,7 +81,7 @@ export default {
     const gran = ctl({ sel: SELECTORS.others, round: true, optional: true });
     await goto(gran, { willPress: false });
     await callout(
-      "The rest of the sky holds systems you don't belong to — tap one to ask to join.",
+      "The rest of the sky holds systems you don't belong to — tap one to fly there.",
       gran,
       "left",
       { mark: "arrive-gran" },

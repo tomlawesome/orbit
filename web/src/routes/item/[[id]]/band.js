@@ -95,6 +95,8 @@ import { seededRng } from "$lib/sky.js";
  * @property {?string} mediaType  the raw stored kind, e.g. "application/pdf"
  * @property {boolean} ready      whether the content can be read at all yet
  * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
+ * @property {boolean} [staged]   a suggestion's paper (#1145): staged with the mail,
+ *                                attached on acceptance; no page and no download yet
  */
 
 /**
@@ -125,6 +127,8 @@ import { seededRng } from "$lib/sky.js";
  * @property {number[]}   remind
  * @property {BeltDoc[]}  docs
  * @property {ItemRecord} item         the raw record the commands write against
+ * @property {?object}    [suggestion] set on a mail-in suggestion's seat (#1145): the
+ *                                     receipt's own view, which the card's form reads
  */
 
 /**
@@ -181,6 +185,7 @@ import { seededRng } from "$lib/sky.js";
  * @property {number} DIP_L      how far the band falls 300px either side
  * @property {number} DIP_R
  * @property {number} GAP_SCALE  the squeeze a narrow sky takes
+ * @property {boolean} [pocket]  the phone's belt (#1072): see THE POCKET'S BELT
  * @property {(phi: number, rho: number, hh: number) => Projected} project
  */
 
@@ -347,9 +352,11 @@ export function phiAtX(geom, targetX, dir) {
  *
  * @param   {number} width
  * @param   {number} height
+ * @param   {{ pocket?: boolean }} [options]  the phone's belt instead (#1072)
  * @returns {Geometry}
  */
-export function geometryOf(width, height) {
+export function geometryOf(width, height, { pocket = false } = {}) {
+  if (pocket) return pocketGeometryOf(width, height);
   const W = width, H = height;
   const A = Math.max(A_MIN, W * A_FRAC);
   const APEX_Y = Math.round(H * APEX_FRAC);
@@ -387,6 +394,116 @@ export function geometryOf(width, height) {
   geom.DIP_R = geom.project(phiAtX(geom, W / 2 + 300, -1), A, 0).y - APEX_Y;
   return geom;
 }
+
+/* ==================================================================== *
+ * THE POCKET'S BELT (#1072, design/v19/phone-vision/proposal.md §2.3, drawn
+ * in design/v19/item-phone/round-1 and accepted "stands with changes").
+ *
+ * On a phone the desk's ring cannot be shown whole: its radius floors at
+ * A_MIN, so a 390px sky sees a hugely magnified band with the neighbours and
+ * papers far off the screen. The pocket brings the viewer CLOSER instead —
+ * the same band, the same rocks and papers, the same order — as a low arc
+ * across the top of the page with the card hanging beneath it:
+ *
+ *   · the arc falls POCKET_FALL px from the crest to the screen's edges;
+ *   · seats are placed by RANK, as fractions of the width, so 360 and 390
+ *     are one drawing: the centred item's papers at ±0.20, the neighbours
+ *     at ±0.39, the next-but-ones at ±0.58 (half off the edge, decorative);
+ *   · at most POCKET_RIDE papers ride; the rest pack into one "+N" clump at
+ *     the crest, which the painter draws and the screen lists in a sheet.
+ *
+ * The date law's spacing is the desk's: on a phone the belt shows three
+ * items at a time and the gap between them is the step, not the calendar.
+ * The ORDER is untouched, and so is everything the order drives — stepping,
+ * the search, the end-caps.
+ *
+ * It is the same ring arithmetic underneath: a seat is still a ring angle
+ * with a radius and a height, so the painter, the ambient bed and its drift
+ * run unchanged; only the projection from ring to screen is the pocket's.
+ * ==================================================================== */
+export const POCKET_CREST = 165;            /* the apex's y on the band plate    */
+export const POCKET_FALL = 95;              /* the arc's fall, crest to edge     */
+export const POCKET_A = 320;                /* thickness scale: ~120px of rubble */
+export const POCKET_PLATE = 360;            /* the band plate's height           */
+export const POCKET_NEAR = 0.39;            /* the neighbours, × the width       */
+export const POCKET_FAR = 0.19;             /* each step past them, × the width  */
+export const POCKET_PAPER = 0.20;           /* the centred item's papers         */
+export const POCKET_RIDE = 2;               /* papers that ride; the rest clump  */
+export const POCKET_R_ITEM = 17, POCKET_R_DOC = 12;
+export const POCKET_SWEEP = 44, POCKET_SWEEP_DOC = 34;
+/* The jumble, softened: three bodies share a 390px arc, so a full throw would
+   put a neighbour's label into its end-cap. */
+export const POCKET_JUMBLE = 0.35;
+/* The ambient bed's density on the pocket's plate (the desk's 2100 is for a
+   1600px sky and a band four times as thick). */
+export const POCKET_RUBBLE = 900;
+/* The pocket's drift (owner, 2026-09-26: "way too fast" on a phone). The
+   desk's DRIFT is an angle, and on the pocket one MIN_GAP of angle spans
+   0.39 of the width, so the same rate crossed a phone about 2.4 times faster,
+   as a share of the screen, than the desk. A quarter of it. */
+export const POCKET_DRIFT = DRIFT / 4;
+
+/**
+ * Where a seat `u` steps from the apex lands across the width: linear out to
+ * the neighbours, then POCKET_FAR per step, so the next-but-ones sit half off
+ * the edge rather than a whole screen away.
+ *
+ * @param   {number} u  steps from the apex; negative is sooner (left)
+ * @param   {number} W  the width
+ * @returns {number}    the screen x
+ */
+export function pocketXOf(u, W) {
+  const a = Math.abs(u);
+  const f = a <= 1 ? POCKET_NEAR * a : POCKET_NEAR + POCKET_FAR * (a - 1);
+  return W / 2 + Math.sign(u) * f * W;
+}
+/** The step a paper sits at, so it lands at ±POCKET_PAPER of the width. */
+export const POCKET_PAPER_STEP = POCKET_PAPER / POCKET_NEAR;
+
+/**
+ * The pocket's geometry: a ring angle maps to a screen x by rank (one item
+ * step is MIN_GAP of ring), the arc through the crest falls as a parabola to
+ * the edges, and a body's radius and height lift it off the arc along the
+ * arc's own normal, so the band keeps its thickness as it bends.
+ *
+ * @param   {number} W
+ * @param   {number} H
+ * @returns {Geometry}
+ */
+function pocketGeometryOf(W, H) {
+  const A = POCKET_A, APEX_Y = POCKET_CREST, half = W / 2;
+  let PHI_APEX = Math.atan2(COS_I * COS_N, SIN_N);
+  if (PHI_APEX < 0) PHI_APEX += Math.PI * 2;
+  /** @type {(phi: number, rho: number, hh: number) => Projected} */
+  const project = (phi, rho, hh) => {
+    const x0 = pocketXOf((PHI_APEX - phi) / MIN_GAP, W);
+    const t = (x0 - half) / half;
+    const slope = (2 * POCKET_FALL * t) / half;       /* dy/dx along the arc */
+    const n = Math.hypot(1, slope);
+    const r = rho - A;
+    const v = r * COS_I + hh * SIN_I;                 /* off the arc, outward */
+    /* depth: as on the desk, the arc's ends lean toward you */
+    const d = -r * SIN_I + hh * COS_I + A * 0.25 * (Math.min(Math.abs(t), 1.4) - 0.5);
+    return { x: x0 + (v * slope) / n, y: APEX_Y + POCKET_FALL * t * t - v / n, d };
+  };
+  /** @type {Geometry} */
+  const geom = {
+    W, H, A, APEX_Y, CX: half, CY: APEX_Y, PHI_APEX,
+    PHI_L: 0, PHI_R: 0, DIP_L: 0, DIP_R: 0, GAP_SCALE: 1, pocket: true, project,
+  };
+  geom.PHI_R = phiAtX(geom, W + 200, -1);
+  geom.PHI_L = phiAtX(geom, -200, +1);
+  return geom;
+}
+
+/**
+ * The papers that ride beside an item on the pocket, and how many clump.
+ *
+ * @param   {number} n  how many papers the item carries
+ * @returns {{ ride: number, clump: number }}
+ */
+export const pocketPapersOf = (n) =>
+  ({ ride: Math.min(n, POCKET_RIDE), clump: n > POCKET_RIDE ? n - POCKET_RIDE : 0 });
 
 /**
  * The card's own width: it is a body in the belt, so it has to fit BETWEEN
@@ -494,30 +611,41 @@ const BAND_VAR = {
  *
  * @param   {BeltRow[]} manifest
  * @param   {number}    gapScale
+ * @param   {{ pocket?: boolean }} [options]  seat for the phone (#1072)
  * @returns {Body[]}    the flat seat list, sorted by `off`
  */
-export function bodiesOf(manifest, gapScale) {
+export function bodiesOf(manifest, gapScale, { pocket = false } = {}) {
   /** @type {Body[]} */
   const bodies = [];
-  const itemOff = itemOffsetsOf(manifest, gapScale);
+  /* #1072: the pocket seats by rank, one MIN_GAP a step, and only the papers
+     that ride take a seat — the rest are the clump, which is not a body. */
+  const itemOff = pocket ? manifest.map((_, i) => i * MIN_GAP) : itemOffsetsOf(manifest, gapScale);
 
   manifest.forEach((row, i) => {
     const docs = row.docs ?? [];
     bodies.push({
       kind: "item", id: row.id, item: row, itemIdx: i, off: itemOff[i],
       label: row.title, sub: `${row.t} · ${row.when}`,
-      tone: BAND_VAR[row.urg] ?? BAND_VAR.ok, urg: row.urg, days: row.days,
-      r: R_ITEM, sweep: SWEEP, seed: ROCK_SEED + i * ROCK_STEP,
+      /* #1145: a suggestion's seat wears the accent, the tone of "not yet
+         accepted" on the dial and the manifest (CON-3's hollow body), never
+         an urgency -- nothing is owed on a thing that is not in orbit. */
+      tone: row.suggestion ? "var(--accent)" : (BAND_VAR[row.urg] ?? BAND_VAR.ok), urg: row.urg, days: row.days,
+      r: pocket ? POCKET_R_ITEM : R_ITEM, sweep: pocket ? POCKET_SWEEP : SWEEP,
+      seed: ROCK_SEED + i * ROCK_STEP,
       t: row.t, when: row.when, longWhen: row.longWhen,
       docs,
       jp: 0, jr: 0, jh: 0,
     });
-    docSpread(docs.length, gapScale).forEach((d, j) => {
+    const spread = pocket
+      ? [-1, 1].slice(0, pocketPapersOf(docs.length).ride).map((side) => side * POCKET_PAPER_STEP * MIN_GAP)
+      : docSpread(docs.length, gapScale);
+    spread.forEach((d, j) => {
       bodies.push({
         kind: "doc", id: docs[j].id, doc: docs[j], item: row, itemIdx: i,
         off: itemOff[i] + d,
-        label: shortName(docs[j].name), sub: docs[j].size,
-        tone: "var(--paper)", r: R_DOC, sweep: SWEEP_DOC,
+        label: pocket ? docs[j].name : shortName(docs[j].name), sub: docs[j].size,
+        tone: "var(--paper)", r: pocket ? POCKET_R_DOC : R_DOC,
+        sweep: pocket ? POCKET_SWEEP_DOC : SWEEP_DOC,
         seed: DOC_SEED + i * DOC_ITEM_STEP + j * DOC_STEP,
         docs: [],
         jp: 0, jr: 0, jh: 0,
@@ -555,9 +683,14 @@ export function bodiesOf(manifest, gapScale) {
 export function seatOf(bodies, i, { roll, berth, geom }) {
   const b = bodies[i];
   const u = b.off - roll;
-  const phi0 = geom.PHI_APEX - warpOf(berth)(u);
+  /* #1072: the pocket seats by rank, so there is no berth to widen. */
+  const phi0 = geom.PHI_APEX - (geom.pocket ? u : warpOf(berth)(u));
   const f = clamp01(Math.abs(phi0 - geom.PHI_APEX) / (MIN_GAP * geom.GAP_SCALE * J_FADE));
   const s = f * f * (3 - 2 * f);               /* smoothstep; 0 at the apex */
+  if (geom.pocket) {
+    const k = s * POCKET_JUMBLE;
+    return { phi: phi0 + b.jp * MIN_GAP * k, rho: geom.A * (1 + b.jr * k), h: geom.A * b.jh * k };
+  }
   return {
     phi: phi0 + b.jp * MIN_GAP * geom.GAP_SCALE * s,
     rho: geom.A * (1 + b.jr * s),
@@ -701,7 +834,8 @@ export function spawnInto(rk, u, { rng, geom, base, reach, drift }) {
  */
 export function bedOf({ rng, geom, bodies, base, reach, drift = 0 }) {
   const win = geom.PHI_L - geom.PHI_R + BAND_MARGIN * 2;
-  const n = Math.round(((bodies.length ? 2100 : 880) / win) * (win + reach));
+  const full = geom.pocket ? POCKET_RUBBLE : 2100;
+  const n = Math.round(((bodies.length ? full : full * 880 / 2100) / win) * (win + reach));
   const bed = [];
   for (let i = 0; i < n; i++) bed.push(spawnInto({}, rng(), { rng, geom, base, reach, drift }));
   return bed;

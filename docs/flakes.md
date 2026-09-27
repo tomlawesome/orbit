@@ -5,10 +5,11 @@ per flake, one line per sighting: `date · commit · pipeline/job · symptom`.
 The third sighting under a heading gets an issue, linked from the heading;
 fixing the cause deletes the heading in the same commit.
 
-## check-base-image-current.test.mjs "tells the reader to merge dev when dev already pins the tag's current digest"
+## check-base-image-current.test.mjs "tells the reader to merge dev when dev already pins the tag's current digest" (#1134)
 
 - 2026-09-19 · 3e855e2 (+ #1052's uncommitted administration work, none of it near this script) · local `scripts/test-backend.sh` · timed out at the 5s default. The whole file passed on a rerun immediately after on the same code, taking 1.9s for this test and 7.5s for the file — so it is the wall-clock budget under a loaded host, not the script. Every test here spawns real `git` subprocesses against temporary repositories.
 - 2026-09-24 · 8f05e163 (#1107, no change near this script) · local `./node_modules/.bin/vitest run` (full suite) · timed out at the 5s default alongside "falls back to fetching dev when it is not already present locally" below, both in the same file, both green on an immediate rerun of the file alone. Same wall-clock-under-load shape as the first sighting.
+- 2026-09-26 · a7dcd3d1 (#1125's phone settings, no change near this script) · local `scripts/test-backend.sh` · timed out at the 5s default; green on an immediate rerun of the file alone. Third sighting: #1134.
 
 ## check-base-image-current.test.mjs "falls back to fetching dev when it is not already present locally"
 
@@ -206,7 +207,15 @@ first thing to check on the next sighting is whether the press landed before
 that screen bound its own chrome. The next sighting should also record the
 page's URL at failure, which this one has to infer.
 
+## v19-keyboard-pocket.spec.ts:570 "inbox (pocket): fully reachable by keyboard" — mobile-chromium
+
+- 2026-09-27 · 7b812e69 (+ #1149's uncommitted home-dial Escape work, none of it near the inbox) · local `scripts/test-e2e-local.sh`, both projects, keyboard-pocket and mail-review specs together · `auditTabOrder` reported `Tab reached a control the screen does not show as visible: a "open the relay →"` — the empty queue's relay card (`.pki-quiet`, inbox/pocket.svelte) was on screen (the test's own `toBeVisible` wait had passed) but its pill was left out of the visible-controls snapshot, so the audit took it for an invisible stop. The same spec on the same code was green in the run before (one project, 18 of 19 passing) and in the run after (23 passed, 14 skipped). First sighting; the next one should record the pill's computed opacity at snapshot time, since the audit's `isReallyVisible` reads it.
+
 ## `sidecar_images` job: the dependency proxy answers 404 for a pinned manifest
 
 - 2026-09-23 · `chore/base-image-repin` c6538042 (!981, a policy-file re-pin, nothing near the sidecar list) · pipeline 1564 / job 21507, 22:07–22:11 UTC · Trivy's worker for `node:24-alpine@sha256:333f6b3e…` got `404 Not Found` (GitLab's HTML error page) from `gitlab.tomlawson.io:443/v2/ai/dependency_proxy/containers/library/node/manifests/sha256:333f6b3e…`; the other three images in the same run resolved. The same digest had scanned on pipeline 1560 forty minutes earlier, and the retry on the same commit (21543) passed in 204 s. First sighting; no issue yet. The host's disk had been cleared by hand about two hours before, so a proxy cache entry gone missing is one guess — the next sighting should check whether the proxy had the manifest cached (`dependency_proxy/manifests` under the group's storage) or had to go upstream.
 - 2026-09-23 · `chore/base-image-repin` 07ad6f6a (!981 after the schedule re-pinned it) · pipeline 1568, 22:59 UTC · five jobs at once — `sidecar_images` (clamav), `smoke` and `smoke_local_only` (postgres), `supply_chain_image` (trivy), `repair_journeys` — each got `not found` from the proxy for a different pinned digest, so the proxy as a whole was refusing rather than one entry missing. `pipelines/1568/retry` about 15 minutes later: all five passed. Second sighting. Both today, both within three hours of the host's disk being cleared by hand; Docker Hub's anonymous pull limit is the other candidate, given the day's pull volume — the next sighting should read the proxy's own log on the GitLab host (`dependency_proxy` entries in `gitlab-rails/production_json.log`) to tell the two apart.
+
+## Runner host out of disk: `no space left on device`, and browsers crashing in the same pipeline
+
+- 2026-09-27 · 0eb5ac03 (!995, phone batch) · pipeline 1721 · four jobs lost, none to an assertion: `sidecar_images` (runner 1, `cp: write error: No space left on device` copying the Trivy cache), `smoke_local_only` (runner 8, `no space left on device` writing to `/builds/.orbit-docker-data/containerd`), `fidelity` (runner 7, `Page crashed` in `pocket-kit.spec.js:142`, 169 of 170 appearance tests and all 508 measurements passed), `smoke` (runner 8, `Target crashed` opening a page in `second-factor.spec.ts:223`, 170 passed). Both runners are on the host `gitlab-runners`; the nightly tidy runs at 03:15. First sighting.

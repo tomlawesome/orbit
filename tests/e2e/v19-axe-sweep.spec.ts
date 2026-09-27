@@ -5,6 +5,7 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { homeIsLive } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { entrancesSettled } from "./support/motion";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -221,7 +222,7 @@ test.describe("the signed-in v19 sweep", () => {
 
   // `button.orb`, `#nstar`, `#edge-health` and `#keydrawer` are the DESKTOP
   // chrome (home.css scopes them under `.desk`); the pocket dialect draws its
-  // own account trigger (`.morb`, pocket.svelte) and has no drawers of its
+  // own account trigger (`#morb`, pocket.svelte) and has no drawers of its
   // own at all. Confirmed by running these against mobile-chromium first:
   // every one of the four times out with "element is not visible" rather
   // than finding a pocket equivalent, so there is nothing there for axe to
@@ -239,11 +240,11 @@ test.describe("the signed-in v19 sweep", () => {
   });
 
   // #852: the pocket dialect's own account menu — the mobile mirror of the
-  // desk `button.orb`/`#account` state above. `#morb`/`#maccount` are the
-  // pocket dialect's own trigger and panel (pocket.svelte), so this is
+  // desk `button.orb`/`#account` state above. `#morb` and the kit's hatch
+  // (#1120) are the pocket dialect's own trigger and panel, so this is
   // skipped on desktop the same way the state above skips mobile.
   test("/home pocket account menu open has no automated WCAG A/AA violations", async ({ page, isMobile }) => {
-    test.skip(!isMobile, "#morb/#maccount are pocket-only chrome; the desk dialect's own state is covered above");
+    test.skip(!isMobile, "#morb and the hatch are pocket-only chrome; the desk dialect's own state is covered above");
     const household = await arriveWithHousehold(page);
     try {
       await page.locator("#morb").click();
@@ -337,9 +338,30 @@ test.describe("the signed-in v19 sweep", () => {
 
   const PLAIN_ROUTES: Array<{ path: string; ready: (page: Page) => Promise<unknown> }> = [
     { path: "/inbox", ready: (page) => expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible() },
-    { path: "/create", ready: (page) => expect(page.locator("#f-name")).toBeVisible() },
-    { path: "/settings", ready: (page) => expect(page.getByRole("heading", { name: "Settings" })).toBeVisible() },
-    { path: "/settings/mail", ready: (page) => expect(page.locator(".relay-card")).toBeVisible() },
+    /* #1120: the form's one exposed name field -- the desk card's `#f-name`,
+       or on a phone the pocket's own form (proposal §2.5), whose fields only
+       draw once the households have loaded; the other dialect's is hidden. */
+    { path: "/create", ready: (page) => expect(page.getByRole("textbox", { name: "name", exact: true })).toBeVisible() },
+    /* #1120: on a phone, settings and its relay draw their own pocket
+       screens, whose cards rise in (st-rise, rl-rise); measure them drawn,
+       not through the entrance's fading opacity. On the desk those roots
+       are display:none and hold no animations. */
+    {
+      path: "/settings",
+      ready: async (page) => {
+        await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+        await entrancesSettled(page.locator(".st-pocket"));
+      },
+    },
+    /* The desk's `.relay-card` never shows on a phone; the relay's h1 is
+       drawn by whichever dialect is showing (the other is hidden). */
+    {
+      path: "/settings/mail",
+      ready: async (page) => {
+        await expect(page.getByRole("heading", { name: "Your relay", level: 1 })).toBeVisible();
+        await entrancesSettled(page.locator(".rl-pocket"));
+      },
+    },
     {
       path: "/administration",
       ready: (page) => expect(page.getByRole("heading", { name: "Administration" })).toBeVisible(),
@@ -361,6 +383,9 @@ test.describe("the signed-in v19 sweep", () => {
     try {
       await page.goto(`/household/${household.id}`);
       await expect(page.getByRole("heading", { name: household.name })).toBeVisible();
+      /* #1122: on a phone the household's cards rise in; measure them drawn,
+         not through the entrance's fading opacity. */
+      await entrancesSettled(page.locator(".hh-pocket"));
       await axeCheck(page);
     } finally {
       await cleanup(page, household);

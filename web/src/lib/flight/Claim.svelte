@@ -1,4 +1,9 @@
 <script>
+  import { onDestroy } from "svelte";
+  import { ringFocusIn, ringFocusOut, ringOpens } from "./ring-closes.js";
+
+  onDestroy(ringOpens);
+
   /**
    * THE CLAIM CARD (#914, plan §2.7; ADR-0022 §1–§2).
    *
@@ -49,13 +54,14 @@
 
 <div id="formlayer">
   <form class="card" aria-label="Claim this Orbit"
+        onfocusin={ringFocusIn} onfocusout={ringFocusOut}
         onsubmit={(event) => { event.preventDefault(); onsubmit(); }}>
     <div class="field">
       <label for="claimcode">claim code</label>
       <!-- autocomplete off and no name: this value is a one-use secret and
            has no business in a browser's saved-form store. -->
       <input id="claimcode" type="text" autocomplete="off" spellcheck="false"
-             autocapitalize="characters" autocorrect="off"
+             autocapitalize="characters" autocorrect="off" enterkeyhint="go"
              placeholder="ABCD-EFGH-…" aria-label="Claim code"
              bind:value={claim} />
       <p class="err" class:shown={Boolean(message)} role="alert">{message}</p>

@@ -485,6 +485,14 @@ out rather than reusing `orbit_full_gate`, whose first arm matches every push
 to `dev` — the merge frequency this job exists to escape — and whose second
 targets `main`, which is the later gate.
 
+The phone floor measurement (`pocket-measure.spec.js`, #1120) is a third
+project, `pocket-measure`, and rides the `fidelity` job as a second Playwright
+run after the first (#1148). It compares no pixels, so it runs on four
+workers; run beside the one-at-a-time appearance project it shared four CPUs
+with it and failed that project's timing-sensitive tests, so the two never
+overlap. Together they measured 16.7 minutes on a quiet host, and the job's
+limit is 30.
+
 Quiet, as far as the lanes allow: the project's own `orbit-build` runner,
 which no other project's jobs reach, in the last stage with no `needs:`, so
 nothing else of Orbit's is running beside it, and a `resource_group` so two

@@ -7,11 +7,12 @@ import {
   auditTabOrder,
   currentFocus,
   dismissTourIfShown,
-  fillCreateForm,
+  gotoCreate,
   homeIsLive,
   installKeyboardAudit,
   tabTo,
 } from "./support/keyboard";
+import { entrancesSettled } from "./support/motion";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
@@ -47,32 +48,30 @@ resetDatabaseBetweenSpecFiles();
  * find these, rather than guessed:
  *
  *   - /home in its pocket form: the sky strip (`.skies`, #845's own
- *     `tabindex="0"` scrollable region), the pocket search (`.msearch
- *     input`), and the one overlay the pocket dialect has — the bottom sheet
- *     (`#sheet`) a dial body or a signal row raises. v19-axe-sweep.spec.ts's
+ *     `tabindex="0"` scrollable region, whose chips link to each household
+ *     since #1118), the search line (`.msearch`, a button raising the search
+ *     sheet), the manifest rows a dial body opens in place (264acd44,
+ *     #1149), and the hatch (#1120, the kit's `.p-sheet-layer`). v19-axe-sweep.spec.ts's
  *     own comment on this route confirms the pocket dialect "has no drawers
  *     of its own at all" beyond that: the account panel and the three home
  *     drawers this file's desktop twin light-dismiss-tests are `.desk`-only
  *     chrome (home.css) that pocket.css hides outright below 901px/600px.
- *   - /inbox, /create, /item/<id>, /household/<id> and /settings:
- *     none of these routes draw a second dialect (no `.pocket`/`.desk` switch
- *     in their own CSS — checked each file; every @media rule found only
- *     reflows columns) so the same controls the desktop file walks are
- *     walked again here, at the phone viewport, to prove the phone's own
- *     rendering of them is still fully keyboard-reachable.
+ *   - /inbox, /create, /item/<id> and /household/<id> each draw their own
+ *     pocket beside the desk's markup since #1120/#1122 (inbox/pocket.svelte,
+ *     create/pocket.svelte, the item page's pocket card and sheets,
+ *     household/[id]/pocket.svelte), chosen by CSS, so the tests below walk
+ *     the pocket's own controls and wait on the pocket's own loaded state.
+ *     /settings draws no second dialect of its own; only its shared chrome
+ *     (Chrome.svelte) turns into the kit's top chrome and hatch, so the same
+ *     controls the desktop file walks are walked again here, at the phone
+ *     viewport, to prove they are still fully keyboard-reachable.
  *
- * A KNOWN GAP, NOW PARTLY CLOSED (#852): mtop's avatar (`.morb`) used to bind
- * no keyboard handler of any kind — it is a real `<button>` now
- * (pocket.svelte), reached by Tab and activated natively by Enter/Space, and
- * it opens the account menu (`#maccount`) with keyboard access to Inbox,
- * Settings and Administration — see the two tests below. `/household` still
- * has no route from pocket home's own chrome (the desk account panel #852
- * mirrors has none either), and the dial's own item/suggestion bodies are
- * unchanged by this issue. The sub-screen tests below still reach their
- * screens by direct navigation as well, because that is the only way this
- * file can audit a real, rendered screen on its own. The bottom-sheet test
- * below (raising `#sheet` from a dial body) is unrelated to #852 and
- * unchanged — see its own comment.
+ * #852 made the avatar a real `<button>`, reached by Tab and activated by
+ * Enter/Space; since #1120 it keeps its id (`#morb`) and opens the kit's
+ * hatch, with keyboard access to Inbox, Settings and Administration — see the
+ * two tests below. The sub-screen tests still reach their screens by direct
+ * navigation, because that is the only way this file can audit a real,
+ * rendered screen on its own.
  */
 
 /* #1080: this worker's own administrator, resolved lazily (worker env only). */
@@ -113,11 +112,20 @@ async function signIn(page: Page, returnTo: string) {
  * files' own name prefixes must stay distinct on the shared acceptance
  * instance (#730).
  */
-async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
+async function seedHousehold(page: Page, options: { withItem?: boolean; secondSection?: boolean } = {}) {
   const name = `keyboard-pocket-${randomUUID()}`;
   const householdId = randomUUID();
   const sectionId = randomUUID();
   const headers = { ...(await sessionHeaders(page)), "content-type": "application/json" };
+  /* #1122 follow-up: a lone section has nowhere to move to, so
+     sectionActs (household/[id]/pocket.svelte) omits both "move up" and
+     "move down" for it -- the boundary rule 733b2f27 gave the pocket
+     household page. The household-page keyboard test needs a second
+     section so its first row's "move down" act actually renders. */
+  const sections = [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }];
+  if (options.secondSection) {
+    sections.push({ id: randomUUID(), name: "Garage", icon: "vehicle", accent: "blue", visible: true });
+  }
 
   const created = await page.request.post("/api/workspace/commands", {
     headers,
@@ -131,7 +139,7 @@ async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
         memberCount: 1,
         canManage: true,
         onboardingComplete: true,
-        sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
+        sections,
         items: [],
       },
     },
@@ -168,6 +176,23 @@ async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
   return { id: householdId, name, itemId };
 }
 
+/*
+ * #1120: pocket home's overlays are the kit's sheets (web/src/lib/pocket),
+ * portalled to the end of <body>, each a `.p-sheet-layer` that wears `open`
+ * while it is up. The hatch is the one holding the "Go to" nav. The item
+ * sheet is gone (264acd44): a planet opens its manifest row in place.
+ */
+const HATCH = '.p-sheet-layer:has(nav[aria-label="Go to"])';
+/* The pocket top chrome's way back. Chrome.svelte also renders the desk
+   `a.back`, display:none below the CON-10 switch, so a bare `a.back` matches
+   two elements (one hidden) and trips strict mode. */
+const TOP_BACK = "header.p-chrome a.back";
+/* The dial's planets (pocket.svelte): an item body carries `data-body` alone;
+   the relay's catch adds `data-body-sugg`. An open manifest row wears
+   `data-open` (row.js), and the planet whose row is open wears `lit`. */
+const DIAL_PLANET = ".pocket .mdial .pk-body[data-body]:not([data-body-sugg])";
+const OPEN_ROW = ".pocket .pk-below [data-row][data-open]";
+
 /** #730: every household this file makes is removed, even when the test fails. */
 async function cleanup(page: Page, household: { id: string; name: string }) {
   await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
@@ -187,7 +212,7 @@ async function cleanup(page: Page, household: { id: string; name: string }) {
 async function settledPocket(p: Page) {
   await dismissTourIfShown(p);
   await p.waitForFunction(() => !document.body.classList.contains("launching"), null, { timeout: 60_000 });
-  await expect(p.locator(".morb")).not.toHaveText("", { timeout: 60_000 });
+  await expect(p.locator("#morb")).not.toHaveText("", { timeout: 60_000 });
   /* ...and the avatar carries its initials from the server's own render
      (#842), so that says the markup arrived, not that anything is listening
      to it. `homeIsLive` is the wait that means the sheet will open when the
@@ -209,6 +234,44 @@ async function arriveAtHomePocket(page: Page, options: { withItem?: boolean } = 
   return household;
 }
 
+/**
+ * #1120, proposal §2.5: on a phone /create is the pocket's own form
+ * (create/pocket.svelte over EntryForm.svelte), not the desk card
+ * `fillCreateForm` walks, so this is its keyboard-only fill. Its order is
+ * the form's own: the type chips, then name, the section (a required
+ * choice, #1058), provider, reference, the due date, how often it comes
+ * round, cost, reminders, notes. Every control is reached by Tab and
+ * activated by Enter; the date goes through `fill()` for the locale reason
+ * `fillCreateForm` gives.
+ */
+const POCKET_FORM = "#pocket-entry";
+async function fillPocketCreateForm(page: Page, name: string) {
+  const screen = "create form (pocket)";
+  await gotoCreate(page);
+  const form = page.getByRole("form", { name: "New entry" });
+  await expect(form).toBeVisible({ timeout: 30_000 });
+
+  await tabTo(page, { selector: `${POCKET_FORM} .pc-kinds button`, textIncludes: "service" }, { screen });
+  await page.keyboard.press("Enter");
+  await expect(form.getByRole("button", { name: "service" })).toHaveAttribute("aria-pressed", "true");
+
+  await tabTo(page, { selector: `${POCKET_FORM} input[id$="-name"]` }, { screen });
+  await page.keyboard.type(name);
+
+  await tabTo(page, { selector: `${POCKET_FORM} .pc-sec`, textIncludes: "Home" }, { screen });
+  await page.keyboard.press("Enter");
+  await expect(form.getByRole("button", { name: "Home" })).toHaveAttribute("aria-pressed", "true");
+
+  await tabTo(page, { selector: `${POCKET_FORM} input[type="date"]` }, { screen });
+  const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const due = form.locator('input[type="date"]');
+  await due.fill(dueDate);
+  await expect(due).toHaveValue(dueDate);
+
+  await tabTo(page, { selector: `${POCKET_FORM} textarea[id$="-notes"]` }, { screen });
+  await page.keyboard.type("added by the keyboard-only pass");
+}
+
 /* ────────────────────────────────────────────────────────────────────────
  * The journeys. One `test(...)` per pocket screen state; each signs in and
  * seeds its own household (where one is needed), and cleans it up in
@@ -216,71 +279,28 @@ async function arriveAtHomePocket(page: Page, options: { withItem?: boolean } = 
  * ──────────────────────────────────────────────────────────────────────── */
 
 /**
- * KNOWN PRODUCT BUG, kept failing on purpose: the closed `#sheet`'s seven
- * controls (`#sh-acts-item`'s "open"/"documents"/"close", `#sh-acts-sugg`'s
- * "Add to orbit"/"Dismiss"/"close", and the "review & amend →" link) are all
- * real Tab stops even while the sheet sits off-screen. pocket.css moves the
- * closed sheet out of view with `transform:translateY(105%)` alone — no
- * `visibility:hidden` — and its own `.sheet .acts{display:flex}` rule
- * (an ordinary author rule, which always outranks the user-agent stylesheet
- * regardless of specificity) overrides the `hidden` attribute `#sh-acts-sugg`
- * and `#sh-amend` are marked with in the markup, so even those stay
- * `display:flex`/`display:block` rather than `display:none`. A transform
- * alone does not remove an element from the Tab order in a real browser —
- * only `display:none`, `visibility:hidden`, `inert`, `tabindex="-1"` or
- * `disabled` do — which is exactly the lesson `web/src/lib/Chrome.svelte`'s
- * own `.account` panel already carries a comment about (its #847 fix): "opacity
- * and pointer-events alone still let Tab land on the links... visibility is
- * delayed to match the close animation". That same delayed-`visibility`
- * treatment was never applied to pocket's `#sheet`. Not fixed here — see the
- * rules in this file's own brief.
+ * The dial's bodies are SVG `<g role="button" tabindex="0">` (#851), and
+ * pocket.svelte teaches them Enter, Space and Escape. Tab to the first
+ * planet, Enter opens its manifest row in place (owner's answer 6a; the item
+ * sheet retired in 264acd44) and leaves focus on the planet so a second Enter
+ * would go to the item; Escape on the planet puts the row away and focus
+ * stays where it was (#1149, owner-decisions §28).
  */
-test("home (pocket): every control is reachable, focus is visible, and Tab is not trapped", async ({ page }) => {
+test("home (pocket): a planet's row opens and closes by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
   const household = await arriveAtHomePocket(page, { withItem: true });
   try {
-    await auditTabOrder(page, "home (pocket)");
-  } finally {
-    await cleanup(page, household);
-  }
-});
-
-test("home (pocket): the sky strip is reachable and keeps focus visible", async ({ page }) => {
-  test.setTimeout(60_000);
-  const household = await arriveAtHomePocket(page);
-  try {
-    /* #845: the strip of other systems scrolls sideways under a thumb, and
-       is reachable to scroll by keyboard via its own tabindex — proved
-       directly (not just as part of the whole-page walk above) since it is
-       the one piece of #845's own work this file exists to cover. */
-    await tabTo(page, { selector: ".skies" }, { screen: "home (pocket)" });
-    const skies = await currentFocus(page);
-    expect(skies?.focusVisible, "home (pocket): the sky strip has no visible focus indicator").toBe(true);
-  } finally {
-    await cleanup(page, household);
-  }
-});
-
-/**
- * KNOWN PRODUCT BUG, kept failing on purpose (see the file header): the
- * dial's item bodies (`[data-sheet-title]`) and its suggestion markers
- * (`[data-sheet-sugg]`) are plain SVG `<circle>`/`<g>` elements.
- * pocket.behaviour.js binds only `click` listeners to them — no `tabindex`,
- * no `role`, no `keydown` handler anywhere — so Tab can never land on one and
- * the bottom sheet (`#sheet`) has no keyboard path to open at all. This test
- * drives that real path (Tab to the first dial body, Enter) rather than
- * inventing a keyboard-only substitute, so it fails with a precise, honest
- * message instead of silently passing on a path nobody can actually take.
- */
-test("home (pocket): the item sheet opens and light-dismisses by keyboard", async ({ page }) => {
-  test.setTimeout(60_000);
-  const household = await arriveAtHomePocket(page, { withItem: true });
-  try {
-    await tabTo(page, { selector: "[data-sheet-title]" }, { screen: "home (pocket) dial" });
+    await tabTo(page, { selector: DIAL_PLANET }, { screen: "home (pocket) dial" });
     await page.keyboard.press("Enter");
-    await expect(page.locator("#sheet")).toHaveClass(/open/);
+    await expect(page.locator(OPEN_ROW)).toHaveCount(1);
+    await expect(page.locator(`${DIAL_PLANET}.lit`)).toHaveCount(1);
+    /* Focus did not move into the row: the second Enter is the item's. */
+    const onPlanet = () => page.evaluate((sel) => document.activeElement?.matches(sel) ?? false, DIAL_PLANET);
+    expect(await onPlanet()).toBe(true);
     await page.keyboard.press("Escape");
-    await expect(page.locator("#sheet")).not.toHaveClass(/open/);
+    await expect(page.locator(OPEN_ROW)).toHaveCount(0);
+    await expect(page.locator(`${DIAL_PLANET}.lit`)).toHaveCount(0);
+    expect(await onPlanet()).toBe(true);
   } finally {
     await cleanup(page, household);
   }
@@ -296,7 +316,7 @@ test("home (pocket): the account menu is light-dismiss by keyboard", async ({ pa
   test.setTimeout(60_000);
   const household = await arriveAtHomePocket(page);
   try {
-    await auditLightDismiss(page, "home (pocket)", "#morb", "#maccount");
+    await auditLightDismiss(page, "home (pocket)", "#morb", HATCH);
   } finally {
     await cleanup(page, household);
   }
@@ -312,8 +332,8 @@ test("home (pocket): the account menu's Inbox link is reachable by Tab and navig
   try {
     await tabTo(page, { selector: "#morb" }, { screen: "home (pocket)" });
     await page.keyboard.press("Enter");
-    await expect(page.locator("#maccount")).toHaveClass(/open/);
-    await tabTo(page, { selector: "#maccount nav a", textIncludes: "Inbox" }, { screen: "home (pocket) account menu" });
+    await expect(page.locator(HATCH)).toHaveClass(/open/);
+    await tabTo(page, { selector: `${HATCH} nav a`, textIncludes: "Inbox" }, { screen: "home (pocket) account menu" });
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/inbox/);
   } finally {
@@ -325,7 +345,13 @@ test("create (pocket): the whole form is reachable in order", async ({ page }) =
   test.setTimeout(60_000);
   const household = await arriveAtHomePocket(page);
   try {
-    await fillCreateForm(page, "Keyboard-only proving ground (pocket audit)");
+    await fillPocketCreateForm(page, "Keyboard-only proving ground (pocket audit)");
+    /* The kit's top chrome retracts once the page scrolls and comes back
+       when it takes focus (TopChrome.svelte's focusin); the audit reads what
+       is shown once, up front, so it starts from the top of the form, where
+       the chrome is down, as a reader arriving on it finds it. */
+    await page.evaluate(() => scrollTo(0, 0));
+    await expect(page.locator(TOP_BACK)).toBeInViewport();
     await auditTabOrder(page, "create form (pocket)");
   } finally {
     await cleanup(page, household);
@@ -337,18 +363,21 @@ test("create (pocket): fillable and submittable by keyboard alone", async ({ pag
   const household = await arriveAtHomePocket(page);
   try {
     const name = "Keyboard-only proving ground (pocket)";
-    await fillCreateForm(page, name);
+    await fillPocketCreateForm(page, name);
 
-    await tabTo(page, { selector: ".btn-primary" }, { screen: "create form (pocket)" });
+    /* The save sits in the pocket's bar at the foot, after the form. */
+    await tabTo(page, { selector: ".pk-save" }, { screen: "create form (pocket)" });
     const submit = await currentFocus(page);
     expect(submit?.focusVisible, "create (pocket): the submit button has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
 
-    await expect(page).toHaveURL(/\/home$/, { timeout: 10_000 });
-    /* The pocket dialect draws a created item as a `.mitem` row (its manifest
-       is a list, not the desk's dial + corridor pair) — not the desk's
+    /* Saved (§2.5): the new item is approached on its belt. */
+    await expect(page).toHaveURL(/\/item\/[0-9a-f-]{36}$/, { timeout: 10_000 });
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    /* And home's pocket lists it as a kit row (#1120), not the desk's
        `.item`, which pocket.svelte never renders. */
-    await expect(page.locator(".mitem", { hasText: name })).toBeVisible({ timeout: 30_000 });
+    await page.goto("/home");
+    await expect(page.locator(".pocket .pk-list .p-row", { hasText: name })).toBeVisible({ timeout: 30_000 });
   } finally {
     await cleanup(page, household);
   }
@@ -367,7 +396,7 @@ test("item page (pocket): fully reachable by keyboard", async ({ page }) => {
   const household = await seedHousehold(page, { withItem: true });
   try {
     await page.goto(`/item/${household.itemId}`);
-    await expect(page.locator("a.back")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(TOP_BACK)).toBeVisible({ timeout: 30_000 });
     await auditTabOrder(page, "item page (pocket)");
   } finally {
     await cleanup(page, household);
@@ -381,22 +410,26 @@ test("item page (pocket): actions and the back link work by keyboard", async ({ 
   const household = await seedHousehold(page, { withItem: true });
   try {
     await page.goto(`/item/${household.itemId}`);
-    await expect(page.locator("a.back")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(TOP_BACK)).toBeVisible({ timeout: 30_000 });
 
     await tabTo(page, { tag: "BUTTON", textIncludes: "reschedule" }, { screen: "item page (pocket) actions" });
     await page.keyboard.press("Enter");
-    await expect(page.locator(".panel")).toBeVisible();
-    await tabTo(page, { selector: "#a-due" }, { screen: "item page (pocket) reschedule panel" });
+    /* On a phone reschedule is the kit Sheet's "Reschedule" face (#1072),
+       not the desk inline `.panel`; by role and name, since the closed hatch
+       is a `.panel` too. */
+    const reschedule = page.getByRole("dialog", { name: "Reschedule" });
+    await expect(reschedule).toBeVisible();
+    await tabTo(page, { selector: "#p-due" }, { screen: "item page (pocket) reschedule sheet" });
     const dueField = await currentFocus(page);
     expect(dueField?.focusVisible, "item page (pocket): the reschedule date field has no visible focus indicator").toBe(true);
     const newDue = new Date(Date.now() + 40 * 86400000).toISOString().slice(0, 10);
-    await page.locator("#a-due").fill(newDue);
-    await tabTo(page, { selector: ".panel .btn-primary" }, { screen: "item page (pocket) reschedule panel" });
+    await page.locator("#p-due").fill(newDue);
+    await tabTo(page, { selector: ".bp-go" }, { screen: "item page (pocket) reschedule sheet" });
     await page.keyboard.press("Enter");
-    await expect(page.locator(".panel")).toBeHidden();
+    await expect(reschedule).toBeHidden();
     await expect(page.locator(".problem")).toBeHidden();
 
-    await tabTo(page, { selector: "a.back" }, { screen: "item page (pocket)" });
+    await tabTo(page, { selector: TOP_BACK }, { screen: "item page (pocket)" });
     const back = await currentFocus(page);
     expect(back?.focusVisible, "item page (pocket): the back link has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
@@ -407,22 +440,57 @@ test("item page (pocket): actions and the back link work by keyboard", async ({ 
 });
 
 /**
- * household/[id]/+page.svelte is likewise dialect-blind, and pocket home has
- * no sun/dial door onto it (that is desk-only chrome) — direct navigation.
+ * #1122: the household draws its own pocket (household/[id]/pocket.svelte,
+ * proposal §2.10) beside the desk's cards, which are display:none on a
+ * phone, so these wait for the pocket's own heading, not the desk's
+ * `.cards`. Pocket home has no sun/dial door onto it (that is desk-only
+ * chrome) — direct navigation.
  */
 test("household page (pocket): fully reachable by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
   await installKeyboardAudit(page);
   await signIn(page, "/home");
-  const household = await seedHousehold(page);
+  /* sectionActs (household/[id]/pocket.svelte) omits "move down" for a
+     section with nothing after it, so a second section is needed for the
+     first row's move act to exist at all (#1122 follow-up). */
+  const household = await seedHousehold(page, { secondSection: true });
   try {
     await page.goto(`/household/${household.id}`);
-    await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { level: 1, name: household.name })).toBeVisible({ timeout: 30_000 });
+    /* The pocket's cards rise in over their first ~800ms; audit them drawn. */
+    await entrancesSettled(page.locator(".hh-pocket"));
     /* Scoped away from `.cand`, same reason as the desktop file: "Add
        someone" lists every account on this shared acceptance instance not
        yet in the household, genuinely unbounded and not part of what this
        test proves. */
-    await auditTabOrder(page, "household page (pocket)", { exclude: ".cand" });
+    /* #1122: the archive's unselected tab is out of the Tab order by
+       design and reached another way, proved below rather than by Tab
+       (§22's tabs, the WAI-ARIA tabs pattern: the tablist is one Tab stop
+       and ← → move between its tabs). A row's acts are in its panel, which
+       is `hidden` until the row is opened (review round §1.1), so a shut
+       row offers only its face to Tab. */
+    await auditTabOrder(page, "household page (pocket)", {
+      exclude: '.cand, [role="tab"][aria-selected="false"]',
+    });
+    const archive = page.getByRole("tablist", { name: "The archive" });
+    await tabTo(page, { selector: '[role="tab"][aria-selected="true"]' }, { screen: "household page (pocket) archive" });
+    await page.keyboard.press("ArrowRight");
+    await expect(archive.getByRole("tab", { name: "bring one in" })).toBeFocused();
+    await expect(archive.getByRole("tab", { name: "bring one in" })).toHaveAttribute("aria-selected", "true");
+    /* A section row's face is the button that opens it; Alt-↑/↓ on it
+       moves the section, and its opened panel holds `move up` / `move
+       down` (review round §1.1). */
+    const section = page.locator(".hh-sections .p-row [data-row-face]").first();
+    await expect(section).toHaveJSProperty("tagName", "BUTTON");
+    await expect(section).toHaveAttribute("aria-expanded", "false");
+    await expect(section).toHaveAttribute("aria-keyshortcuts", /Alt\+ArrowUp Alt\+ArrowDown/);
+    await section.focus();
+    await page.keyboard.press("Enter");
+    await expect(section).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".hh-sections [data-row-panel]:not([hidden])").getByRole("button", { name: /^Move .* down$/ }))
+      .toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(section).toHaveAttribute("aria-expanded", "false");
   } finally {
     await cleanup(page, household);
   }
@@ -435,8 +503,9 @@ test("household page (pocket): the back link works by keyboard", async ({ page }
   const household = await seedHousehold(page);
   try {
     await page.goto(`/household/${household.id}`);
-    await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
-    await tabTo(page, { selector: "a.back" }, { screen: "household page (pocket)" });
+    await expect(page.getByRole("heading", { level: 1, name: household.name })).toBeVisible({ timeout: 30_000 });
+    /* On a phone Chrome.svelte's way back is the kit's top chrome. */
+    await tabTo(page, { selector: TOP_BACK }, { screen: "household page (pocket)" });
     const back = await currentFocus(page);
     expect(back?.focusVisible, "household page (pocket): the back link has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
@@ -452,9 +521,9 @@ test("household page (pocket): the back link works by keyboard", async ({ page }
 });
 
 /**
- * settings/+page.svelte gates its cards behind `{#if view}`
- * (v19-keyboard.spec.ts's `openSettingsFromHome` documents the exact race);
- * waiting for `.cards` here closes the same race on a direct navigation.
+ * settings/pocket.svelte draws unlit rows until the screen has loaded
+ * (v19-keyboard.spec.ts's `openSettingsFromHome` documents the desk's race);
+ * waiting for the methods' rows here closes the same race on a phone.
  */
 test("settings (pocket): fully reachable by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
@@ -463,12 +532,19 @@ test("settings (pocket): fully reachable by keyboard", async ({ page }) => {
   const household = await seedHousehold(page);
   try {
     await page.goto("/settings");
-    await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
-    /* The sign-in methods block (#915) is read after the helm itself, so an
-       audit that starts on `.cards` alone collects its expected set before the
-       block's buttons exist and then meets them by Tab. Wait for the rows. */
-    await expect(page.locator(".method").first()).toBeVisible({ timeout: 30_000 });
-    await auditTabOrder(page, "settings (pocket)");
+    /* #1125: on a phone settings is its own layout (settings/pocket.svelte);
+       the desk's `.cards` and `.method` are display:none here. The sign-in
+       methods (#915) are read after the screen itself, so an audit that
+       starts before their rows exist would meet them by Tab: wait for the
+       email approval row, which is drawn once the methods have answered. */
+    await expect(page.locator(".st-pocket .p-card").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".st-pocket .p-row", { hasText: "email approval" })).toBeVisible({ timeout: 30_000 });
+    /* The cards arrive in turn (a rise of under a second); the audit's
+       snapshot of what is visible must wait for the last one to land. */
+    await expect(page.locator(".st-pocket .st-sessions")).toHaveCSS("opacity", "1");
+    /* The Reminders card's tabs (owner-decisions §22): one tab in the Tab
+       order, ← → between them, so the unchosen tab is never met by Tab. */
+    await auditTabOrder(page, "settings (pocket)", { exclude: "[role=tab][aria-selected=false]" });
   } finally {
     await cleanup(page, household);
   }
@@ -481,12 +557,12 @@ test("settings (pocket): the account panel is light-dismiss by keyboard", async 
   const household = await seedHousehold(page);
   try {
     await page.goto("/settings");
-    await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
-    /* Chrome.svelte's account panel is the same component instance
-       v19-keyboard.spec.ts's desk settings test exercises; walked again here
-       to prove it still light-dismisses at the phone viewport, since it is
-       not itself dialect-switched. */
-    await auditLightDismiss(page, "settings (pocket)", "button.orb", "#account");
+    await expect(page.locator(".st-pocket .p-card").first()).toBeVisible({ timeout: 30_000 });
+    /* Below the CON-10 switch Chrome.svelte's account menu is the hatch
+       sheet (#1120), opened from the top chrome's orb; the desk dropdown
+       (`button.orb`, `#account`) is display:none here. Keyboard-openable,
+       Escape closes it, focus returns to the orb. */
+    await auditLightDismiss(page, "settings (pocket)", "button.porb", HATCH);
   } finally {
     await cleanup(page, household);
   }
@@ -499,10 +575,12 @@ test("inbox (pocket): fully reachable by keyboard", async ({ page }) => {
   const household = await seedHousehold(page);
   try {
     await page.goto("/inbox");
-    /* The inbox draws its queue or its empty-state relay bar only once the
-       view has loaded (inbox/+page.svelte: `{#if view}`) — audit the loaded
-       screen, not the shell, same as the desktop file. */
-    await expect(page.locator(".inbox-page .lanes, .inbox-page .quietnote").first()).toBeVisible({ timeout: 30_000 });
+    /* The inbox draws its queue or its empty-state relay card only once the
+       view has loaded — audit the loaded screen, not the shell, same as the
+       desktop file. On a phone that is the pocket's own inbox
+       (inbox/pocket.svelte, proposal §2.6): its lanes or its quiet card,
+       where the desk's `.lanes`/`.quietnote` are display:none. */
+    await expect(page.locator(".pk-inbox :is(.pki-lane, .pki-quiet)").first()).toBeVisible({ timeout: 30_000 });
     await auditTabOrder(page, "inbox (pocket)");
   } finally {
     await cleanup(page, household);

@@ -147,20 +147,23 @@ test("home (pocket, empty sky): the account menu opens and its controls answer",
   await settleEmptySky(page);
 
   const morb = page.locator("#morb");
-  const menu = page.locator("#maccount");
+  /* #1120: the pocket's account menu is the kit's hatch, a sheet portalled
+     to the end of <body>; its layer wears `open` while it is up. */
+  const menu = page.locator('.p-sheet-layer:has(nav[aria-label="Go to"])');
   await expect(morb).toBeVisible();
   await morb.click();
   await expect(menu).toHaveClass(/open/);
   await expect(morb).toHaveAttribute("aria-expanded", "true");
   await menu.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
 
-  await menu.locator(".mswatches button[title='after dark']").click();
+  await menu.locator("button.swatch[title='after dark']").click();
   await expect.poll(() => liveTheme(page)).toBe("afterdark");
 
-  const signout = menu.locator("#msignout");
+  /* Sign-out arms on its first tap and does nothing else (§1.8). */
+  const signout = menu.getByRole("button", { name: /sign out/ });
   await expect(signout).toBeVisible();
   await signout.click();
-  await expect(signout).toHaveText(/tap again to sign out/);
+  await expect(signout).toHaveClass(/armed/);
 
   await menu.getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings/);

@@ -154,3 +154,17 @@ body{background:#060a18}
   .maintenance-page .glints .glint{animation:none;opacity:.45}
   .maintenance-page .earlier summary,.maintenance-page .earlier summary svg{transition:none}
 }
+
+/* ══ ON A PHONE (#1120 step 9, proposal §2.20) ═════════════════════════════
+   The two fixes. The earlier updates' arrow is a 44px row, and the updates
+   inside it are 15px and are never clipped: on a phone the whole notice
+   scrolls, rather than the drawer scrolling inside the few pixels left
+   under the ring. */
+@media (max-width: 900px), (max-height: 600px){
+  .maintenance-page .notice{overflow-y:auto;overscroll-behavior:contain}
+  .maintenance-page .earlier{flex:none;overflow:visible}
+  .maintenance-page .earlier[open]{mask-image:none}
+  .maintenance-page .earlier summary{position:static;min-height:44px;min-width:44px;
+        align-items:center;justify-content:center;padding:0 14px}
+  .maintenance-page .log .body{font-size:15px;line-height:1.5}
+}

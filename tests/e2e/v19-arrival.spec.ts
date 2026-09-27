@@ -316,15 +316,20 @@ test("naming your own system: the sealed refusal, then the create, then the laun
   await expect(page.locator("#gobtn")).toHaveText("Create");
   await expect(page.locator("#gobtn")).toBeEnabled();
   await page.locator("#gobtn").click();
-  await expect(page.getByRole("alert")).toContainText("already exists here");
-  await expect(page.getByRole("alert").getByRole("link", { name: "ask to join it" })).toBeVisible();
+  /* #1120: the root layout mounts the wake's assertive live region on every
+     screen, present and empty at rest so that a later failure is announced.
+     An empty region says nothing, so the alerts that count are the ones with
+     words in them; that holds across the whole page, not just the card. */
+  const spoken = page.getByRole("alert").filter({ hasText: /\S/ });
+  await expect(spoken).toContainText("already exists here");
+  await expect(spoken.getByRole("link", { name: "ask to join it" })).toBeVisible();
   /* nothing was created and nothing flew */
   await expect(page).toHaveURL(/\/$/);
   expect((await workspaceOf(page)).households).toEqual([]);
 
   /* Typing disarms the rejection, because the rejection was about the NAME. */
   await page.fill("#hhname", OWN_SYSTEM);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(spoken).toHaveCount(0);
 
   /* AND THE CREATE: the server makes the system, the lockup is reclaimed, and
      the ratified climb plays over the populated home. The two answers the card

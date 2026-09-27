@@ -24,9 +24,16 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * photographs at the same 390-wide sheet.
  */
 
+/*
+ * #1120 (proposal §2.1, owner trial 8a) gave the pocket home its own north
+ * star, fixed at the bottom right, and made the account menu the kit's hatch
+ * (a dialog sheet) rather than `#maccount`. Both roads are walked below.
+ */
+
 const PHONE = { width: 390, height: 844 };
 
-test("a pocket reader can reach the create form from home", async ({ page }) => {
+/** @param {import("@playwright/test").Page} page */
+async function atHome(page) {
   await page.setViewportSize(PHONE);
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   /* The gate's own settle for the pocket: the dial is static chrome, so the
@@ -34,25 +41,33 @@ test("a pocket reader can reach the create form from home", async ({ page }) => 
   await page.waitForFunction(
     () => Boolean(document.querySelector(".mdial svg")) && document.querySelectorAll(".msys").length > 0,
   );
+}
 
-  /* What a thumb can actually see and press, before anything is opened. */
-  const atRest = await page.evaluate(() =>
-    [...document.querySelectorAll(".pocket a, .pocket button, .pocket input")]
-      .filter((el) => {
-        const r = el.getBoundingClientRect();
-        return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden";
-      })
-      .map((el) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}`));
-  expect(atRest, "the account orb is the pocket's only way into the chrome").toContain("button#morb");
-
-  await page.locator("#morb").click();
-  await expect(page.locator("#maccount")).toHaveClass(/open/);
-
-  const create = page.locator("#maccount a[href$='/create']");
-  await expect(create, "the pocket's account sheet offers no way to add an item (#1036)").toHaveCount(1);
-  await create.click();
+/** @param {import("@playwright/test").Page} page */
+async function landedOnCreate(page) {
   await page.waitForURL("**/create");
-  /* Landed on the form itself, not merely at the address: the create card is
-     what the reader came for. */
-  await expect(page.locator("#card")).toBeVisible();
+  /* Landed on the form itself, not merely at the address: the create form is
+     what the reader came for. At this width that is the pocket's own form
+     (#1120, proposal §2.5); the desk's #card is hidden by the dialect switch. */
+  await expect(page.locator("#pocket-entry")).toBeVisible();
+}
+
+test("a pocket reader can reach the create form from home by the north star", async ({ page }) => {
+  await atHome(page);
+  const star = page.locator(".pocket a.p-northstar");
+  await expect(star, "the pocket home shows no north star at rest (#1120)").toBeVisible();
+  await expect(star).toHaveAttribute("href", /\/create$/);
+  await star.click();
+  await landedOnCreate(page);
+});
+
+test("a pocket reader can reach the create form from home through the hatch", async ({ page }) => {
+  await atHome(page);
+  await page.locator("#morb").click();
+  const hatch = page.getByRole("dialog");
+  await expect(hatch).toBeVisible();
+  const create = hatch.locator("a[href$='/create']");
+  await expect(create, "the hatch offers no way to add an item (#1036)").toHaveCount(1);
+  await create.click();
+  await landedOnCreate(page);
 });

@@ -175,7 +175,7 @@ describe("the beats, in the mockup's order", () => {
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
       ["The rest of the sky holds households you don't belong to.", ".minisys .msring"],
-      ["Tap one to ask to join — Gran's flat, the narrowboat.", ".minisys .msring"],
+      ["Tap one to fly there — Gran's flat, the narrowboat.", ".minisys .msring"],
     ]);
   });
 
@@ -229,7 +229,7 @@ describe("the chapter played for real", () => {
 
     expect(said).toEqual([
       "The rest of the sky holds households you don't belong to.",
-      "Tap one to ask to join — Gran's flat, the narrowboat.",
+      "Tap one to fly there — Gran's flat, the narrowboat.",
     ]);
     ctx.destroy();
   });

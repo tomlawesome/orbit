@@ -54,12 +54,10 @@ export function findTraps(source) {
   let jsdocStartLine = 0;
   // Whether a JSDoc comment has already closed while sitting at the top
   // level -- outside every bracket, as a plain doc comment above a
-  // declaration rather than annotating one parameter inside a list. Two
-  // more #782-family shapes (#1130) turn on this alone, not on which
-  // parameter list (if any) the comment attaches to: `$props.id()` and a
-  // `{#snippet}` declared in the markup are each hoisted by the Svelte
-  // compiler, and hoisting either one above an earlier top-level JSDoc
-  // comment is what the production build's parser cannot handle.
+  // declaration rather than annotating one parameter inside a list. The
+  // `$props.id()` shape (#1130) turns on this: Svelte hoists the compiled
+  // `$props.id()` declaration above an earlier comment. (The `{#snippet}`
+  // hoist shape is narrower and has its own pass, rootSnippetTraps below.)
   let sawTopLevelJsdoc = false;
   const PROPS_ID_CALL_RE = /^\$props\.id\s*\(\s*\)/;
 
@@ -182,13 +180,6 @@ export function findTraps(source) {
     }
     if (ch === "(" || ch === "[" || ch === "{") {
       const isSnippetParams = ch === "(" && snippetParamStarts.has(i);
-      if (isSnippetParams && sawTopLevelJsdoc) {
-        findings.push({
-          line,
-          reason:
-            "{#snippet} declared in the markup after a JSDoc comment (rolldown hoists the {#snippet} above the script's doc comments and fails to parse, #1130)",
-        });
-      }
       stack.push({
         bracket: ch,
         line,
@@ -228,6 +219,159 @@ export function findTraps(source) {
     i++;
   }
 
+  findings.push(...rootSnippetTraps(source));
+  findings.sort((a, b) => a.line - b.line);
+  return findings;
+}
+
+/**
+ * The comment test Svelte's printer (esrap, `flush_comments_until`) uses to
+ * guess that a block comment is a JSDoc `@type` cast: a line of the
+ * comment's body that starts with `* @type {`. When such a comment is still
+ * waiting to be printed as esrap reaches an identifier the compiler has
+ * moved above it, esrap writes it in front of that identifier as a cast,
+ * `const /** @type {X} *\/ (face) = ...` -- a parenthesised binding name,
+ * which is not valid JavaScript. rolldown's parser rejects it; vite dev and
+ * svelte-check never parse the compiled client output that way, so only the
+ * production build sees it.
+ */
+const TYPE_CAST_COMMENT_RE = /(?:^|\n)\s*\*\s*@type\s*\{/;
+const VOID_ELEMENTS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr",
+]);
+
+/**
+ * Skips one JavaScript span starting at `i` -- a `{...}` expression when
+ * `until` is null (returns the index just past its closing `}`), or the
+ * body of a `<script>` up to the index `until`. Reports each block
+ * comment's body to `onComment`. Strings and template literals are
+ * skipped whole; that is enough to keep brace counting and comment
+ * detection honest for this codebase.
+ * @param {string} source
+ * @param {number} i
+ * @param {number | null} until
+ * @param {(body: string) => void} onComment
+ */
+function skipJs(source, i, until, onComment) {
+  const end = until ?? source.length;
+  let depth = 0;
+  while (i < end) {
+    const ch = source[i];
+    if (source.startsWith("/*", i)) {
+      const close = source.indexOf("*/", i + 2);
+      const stop = close === -1 ? end : close;
+      onComment(source.slice(i + 2, stop));
+      i = stop + 2;
+      continue;
+    }
+    if (source.startsWith("//", i)) {
+      const nl = source.indexOf("\n", i);
+      i = nl === -1 ? end : nl + 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") {
+      i++;
+      while (i < end && source[i] !== ch) i += source[i] === "\\" ? 2 : 1;
+      i++;
+      continue;
+    }
+    if (until === null) {
+      if (ch === "{") depth++;
+      if (ch === "}" && --depth === 0) return i + 1;
+    }
+    i++;
+  }
+  return end;
+}
+
+/**
+ * The narrowed `{#snippet}` hoist shape (#1130). Svelte's client compiler
+ * lifts a `{#snippet}` that sits at the component's ROOT -- not inside any
+ * element, component or `{#...}` block -- to the top of the component
+ * function, above every statement of the instance script. Any `@type`-style
+ * block comment (TYPE_CAST_COMMENT_RE) that comes earlier in the source,
+ * anywhere in the instance script or in a markup expression, is then
+ * printed in front of the snippet's name as a bogus cast and the production
+ * build fails to parse it. Flags exactly that pair. A snippet nested inside
+ * an element, component or block is not lifted and is not flagged, nor is
+ * a comment in `<script module>` (printed at module level, ahead of the
+ * component). Over-flags one case on purpose: a root snippet that uses
+ * nothing from the instance script is lifted out to module level instead
+ * and builds; telling the two apart needs the compiler's scope analysis.
+ * @param {string} source
+ * @returns {{ line: number, reason: string }[]}
+ */
+export function rootSnippetTraps(source) {
+  const findings = [];
+  const n = source.length;
+  let depth = 0;
+  let sawTypeComment = false;
+  const noteComment = (/** @type {string} */ body) => {
+    if (TYPE_CAST_COMMENT_RE.test(body)) sawTypeComment = true;
+  };
+  const lineAt = (/** @type {number} */ index) => source.slice(0, index).split("\n").length;
+  let i = 0;
+  while (i < n) {
+    if (source.startsWith("<!--", i)) {
+      const close = source.indexOf("-->", i + 4);
+      i = close === -1 ? n : close + 3;
+      continue;
+    }
+    const raw = /^<(script|style)\b([^>]*)>/i.exec(source.slice(i, i + 200));
+    if (raw) {
+      const bodyStart = i + raw[0].length;
+      const close = source.indexOf(`</${raw[1]}`, bodyStart);
+      const bodyEnd = close === -1 ? n : close;
+      const isModule = /\bmodule\b|context\s*=\s*["']module["']/.test(raw[2]);
+      if (raw[1].toLowerCase() === "script" && !isModule) skipJs(source, bodyStart, bodyEnd, noteComment);
+      const tagEnd = source.indexOf(">", bodyEnd);
+      i = tagEnd === -1 ? n : tagEnd + 1;
+      continue;
+    }
+    if (source.startsWith("</", i)) {
+      depth = Math.max(0, depth - 1);
+      const tagEnd = source.indexOf(">", i);
+      i = tagEnd === -1 ? n : tagEnd + 1;
+      continue;
+    }
+    const open = /^<([A-Za-z][\w:.-]*)/.exec(source.slice(i, i + 100));
+    if (open) {
+      let j = i + open[0].length;
+      let selfClosing = false;
+      while (j < n) {
+        const ch = source[j];
+        if (ch === "{") j = skipJs(source, j, null, noteComment);
+        else if (ch === '"' || ch === "'") {
+          const close = source.indexOf(ch, j + 1);
+          j = close === -1 ? n : close + 1;
+        } else if (source.startsWith("/>", j)) {
+          selfClosing = true;
+          j += 2;
+          break;
+        } else if (ch === ">") {
+          j++;
+          break;
+        } else j++;
+      }
+      if (!selfClosing && !VOID_ELEMENTS.has(open[1].toLowerCase())) depth++;
+      i = j;
+      continue;
+    }
+    if (source[i] === "{") {
+      if (source.startsWith("{#snippet", i) && depth === 0 && sawTypeComment) {
+        findings.push({
+          line: lineAt(i),
+          reason:
+            "{#snippet} at the component root after an earlier `@type` comment (Svelte lifts the snippet above the script and prints the comment as a cast on its name, which rolldown cannot parse, #1130)",
+        });
+      }
+      if (source.startsWith("{#", i)) depth++;
+      else if (source.startsWith("{/", i)) depth = Math.max(0, depth - 1);
+      i = skipJs(source, i, null, noteComment);
+      continue;
+    }
+    i++;
+  }
   return findings;
 }
 

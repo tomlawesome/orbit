@@ -1195,3 +1195,70 @@ decide them. First case: #1122 (swipe-only row actions; departs from WCAG
 That first case is withdrawn (owner, 2026-09-25, after using it on a real
 phone): row actions open on a tap, on every phone row that has them, so it
 no longer departs from 2.5.1. The principle above stands.
+
+## 26. The belt's end-caps stand at the screen's middle (owner, 2026-09-26)
+
+Asked whether "sooner" and "later" should be centred on the band where it
+leaves the frame or on the screen, the owner chose **the screen's vertical
+middle** ("Centred in the screen"), on the desk, whatever height the band
+is at on that side. This overturns #1010's placement (held above the band's
+upper edge) for the desk only. The pocket keeps #1035's rule, because its
+band is a plate at the top of a page that scrolls, not the whole screen.
+
+## 27. A suggestion opens as a drawer, and rides the belt (owner, 2026-09-27)
+
+**"Let the suggested items open as a drawer like the manifest items, and
+then I think we should merge the suggested item screen into the item belt"**
+— then: **"the same familiar item belt just with a similar card to the
+suggested item screen, but on the belt instead."** And, on being offered a
+design first: **"Don't build a mock up - just build it."** #1145.
+
+- **On the desk home** a suggestion row opens in place, exactly as a filed
+  row does (#424): the row at rest keeps the hollow mark, the title and the
+  `Found in … · renews … · ~£…` line, and loses its inline `Add to orbit` /
+  `Dismiss`; the drawer holds the relay's readings with how sure it was,
+  when it burns up, the paper it came in (`attached on acceptance`), the two
+  decisions (two taps, as before), `copy link` and `review in the belt →`
+  (`manage this item →`'s twin). The phone's drawer (round 3) is unchanged.
+- **`/item/<receiptId>` is the belt.** The suggestion is seated at the date
+  the relay read, among its neighbours in time, as a hollow rock in the
+  accent (CON-3's hollow body, in stone); its forwarded paper rides beside
+  it, staged, and pressing it opens the reading card's fifth honest state,
+  `Not yet in orbit.` (§18's grammar). The card is the amend-then-accept
+  card in the belt's card position: on the desk the fields are editable in
+  the card with `accept into orbit` / `dismiss`; on a phone the readings and
+  the two decisions, with `review & amend →` raising the shared review
+  sheet. Accepted, it becomes the new item's seat in place; dismissed, the
+  apex moves to the neighbour it sat beside. Only the arrival seats it: a
+  filed item's belt carries no suggestions, because the belt is the manifest
+  and a suggestion is not in it until accepted.
+- **The promise line is cut on the desk too**, extending 10b: the sub line
+  says when the suggestion burns up, and `accept into orbit` is the promise.
+  `← back to your orbit` goes with the page; the chrome carries the way back.
+- The separate suggestion page (`Suggestion.svelte`, `item.css`) and the
+  phone's receipt page (`ReceiptPocket.svelte`, round 3 §4) retire.
+
+Calls made by the build without a fresh ruling, for the owner to overturn:
+the dismissal's landing (the later neighbour, else the sooner, else home);
+the desk drawer's foot wording (`review in the belt →`); the hollow rock's
+draw (outline in the accent, 12% wash, no pip); the fifth honest state's
+words; the find note's `· 1 suggested`.
+
+## 28. Escape on the dial puts the open row away (build's call, 2026-09-27)
+
+Not the owner's ruling: a call made by the build for #1149, for the owner
+to overturn. A planet pressed with Enter opens its manifest row in place
+and, by answer 6a, leaves focus on the planet so a second Enter goes to
+the item. The row's own Escape (row.js) listens on the row, so a keyboard
+user standing on the dial had no way to close what they had just opened.
+
+- **Escape on a dial body closes the lit row, and focus stays on the body.**
+  The rule is the kit's own: a sheet hears Escape wherever focus is and
+  hands focus back to its opener (sheet.js); here the opener never lost
+  focus, so it keeps it. The planet's ring goes out with the row.
+- The second-Enter rule stands unchanged. Focus is not moved into the row
+  on Enter (that would spend the second Enter on the row's face), and
+  Escape is not made page-wide (a sheet's Escape is its own; a page-wide
+  listener would race it).
+- A reader whose focus is inside the row still closes it with Escape and
+  lands on the row's face, as before.

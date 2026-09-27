@@ -131,6 +131,23 @@ test("pressing a paper opens the preview, and Esc closes it", async ({ page }) =
     await expect(paper).toBeVisible();
     await paper.click();
 
+    if (test.info().project.name.startsWith("mobile")) {
+      /* #1120, proposal §2.3/§18: on a phone the paper raises the preview
+         sheet, named for the document, with the page nearly edge to edge. */
+      const sheet = page.getByRole("dialog", { name: "preview-proving.pdf" });
+      await expect(sheet).toBeVisible();
+      // The real page, rendered by the real endpoint — not a placeholder.
+      await expect(sheet.locator(".bp-page")).toHaveClass(/shown/, { timeout: 20_000 });
+      await expect(sheet.getByRole("img", { name: "Page one of preview-proving.pdf" })).toBeVisible();
+      // #1088: no page counter and no arrows — Orbit records no page count.
+      await expect(sheet.getByRole("button", { name: /next|previous|page \d/i })).toHaveCount(0);
+      await expect(sheet.getByText(/\b\d+\s*(of|\/)\s*\d+\b/)).toHaveCount(0);
+
+      await page.keyboard.press("Escape");
+      await expect(sheet).toBeHidden({ timeout: 2_000 });
+      return;
+    }
+
     const readcard = page.locator("#readcard");
     await expect(readcard).toBeVisible();
     // The real page, rendered by the real endpoint — not a placeholder.
@@ -165,6 +182,19 @@ test("a removed document shows its own line, honestly, and no page", async ({ pa
     const paper = page.getByRole("button", { name: /removed-proving\.pdf/ });
     await expect(paper).toBeVisible();
     await paper.click();
+
+    if (test.info().project.name.startsWith("mobile")) {
+      /* #1120, §18 on a phone: the preview sheet holds the plate still and
+         says so, with `restore` as its one word. */
+      const sheet = page.getByRole("dialog", { name: "removed-proving.pdf" });
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator(".bp-line")).toHaveText("Removed");
+      // Never a fabricated page: no page and no image of one.
+      await expect(sheet.locator(".bp-page")).toHaveCount(0);
+      await expect(sheet.getByRole("img")).toHaveCount(0);
+      await expect(sheet.getByRole("button", { name: "restore" })).toBeVisible();
+      return;
+    }
 
     const readcard = page.locator("#readcard");
     await expect(readcard).toBeVisible();
