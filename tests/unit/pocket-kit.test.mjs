@@ -258,6 +258,28 @@ describe("the row opens on a tap (review round §1.1)", () => {
     vi.advanceTimersByTime(60_000);
     expect(emma.control.isOpen).toBe(true);
     elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    elsewhere.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    expect(emma.control.isOpen).toBe(false);
+  });
+  it("stays open when a scroll starts outside it: only a finished tap closes it", () => {
+    const { emma } = rowFixture();
+    const elsewhere = /** @type {HTMLElement} */ (document.getElementById("elsewhere"));
+    emma.control.open();
+    /* A finger lands outside the open row and pans: the browser takes the
+       gesture over for scrolling and cancels the pointer. The owner, on the
+       phone (2026-09-27): opened drawers closed as soon as they scrolled, so
+       an opened card could never be brought into view. */
+    elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 400 }));
+    expect(emma.control.isOpen).toBe(true);
+    elsewhere.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true }));
+    expect(emma.control.isOpen).toBe(true);
+    /* A drag that moves more than a tap's slop and lifts is not a tap either. */
+    elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 400 }));
+    elsewhere.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 100, clientY: 250 }));
+    expect(emma.control.isOpen).toBe(true);
+    /* A tap outside still closes it. */
+    elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 400 }));
+    elsewhere.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 102, clientY: 403 }));
     expect(emma.control.isOpen).toBe(false);
   });
   it("keeps one open per group: opening another row in the list closes the first", () => {
