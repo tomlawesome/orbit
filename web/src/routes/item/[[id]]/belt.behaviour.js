@@ -135,8 +135,12 @@ const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matc
  * @param {number}     r     its radius
  * @param {string}     tone  the rim's colour
  * @param {boolean}    pip   whether it wears the urgency dot
+ * @param {boolean}    [hollow]  a suggestion's rock (#1145): the same
+ *   silhouette drawn as an outline -- CON-3's "○ hollow suggestion", said in
+ *   stone -- with the faint accent wash the dial's hollow body has and no
+ *   shading, craters or pip, because there is no body there yet
  */
-function drawRock(g, seed, r, tone, pip) {
+function drawRock(g, seed, r, tone, pip, hollow = false) {
   const rng = lehmer(seed);
   const facets = 11, pts = [];
   for (let i = 0; i < facets; i++) {
@@ -145,6 +149,12 @@ function drawRock(g, seed, r, tone, pip) {
     pts.push(`${(Math.cos(a) * rr).toFixed(2)},${(Math.sin(a) * rr * 0.92).toFixed(2)}`);
   }
   const points = pts.join(" ");
+  if (hollow) {
+    g.appendChild(el("polygon", { class: "hollow", points,
+      fill: "color-mix(in srgb, var(--accent) 12%, transparent)",
+      stroke: "var(--accent)", "stroke-width": "1.8", "stroke-linejoin": "round" }));
+    return;
+  }
   g.appendChild(el("polygon", { points,
     fill: "color-mix(in srgb, var(--accent) 34%, var(--bg))",
     stroke: tone, "stroke-opacity": ".85", "stroke-width": "1.35",
@@ -357,10 +367,19 @@ export function mountBelt(root, options) {
     bodies.forEach((b, i) => {
       const seat = el("g", { class: "seat" });
       const hit = el("g", { class: "hit", role: "button", tabindex: "0" });
+      /* #1145: a suggestion's seat, and its staged papers, say so. */
+      const suggested = Boolean(b.item.suggestion);
+      if (suggested) hit.classList.add("sug");
       hit.setAttribute("aria-label", b.kind === "item"
-        ? `${b.label} — ${b.item.section ?? "no section"}, due ${b.longWhen}, ${b.t}` +
-          (b.docs.length ? `, ${b.docs.length} documents attached` : "")
-        : `${b.doc.name}, ${b.sub}, a document attached to ${b.item.title}`);
+        ? (suggested
+          ? `${b.label} — suggested from your documents, not yet in orbit, ` +
+            `${b.item.kind === "expiry" ? "ends" : "renews"} ${b.longWhen}, ${b.t}` +
+            (b.docs.length ? `, ${b.docs.length} forwarded document${b.docs.length === 1 ? "" : "s"}` : "")
+          : `${b.label} — ${b.item.section ?? "no section"}, due ${b.longWhen}, ${b.t}` +
+            (b.docs.length ? `, ${b.docs.length} documents attached` : ""))
+        : (suggested
+          ? `${b.doc.name}, ${b.sub}, a forwarded document staged with ${b.item.title}`
+          : `${b.doc.name}, ${b.sub}, a document attached to ${b.item.title}`));
       /* #1072: on a phone every seat's target is the pocket's 44px, and no
          wider — the neighbours sit 40px in from the screen's edge. */
       hit.appendChild(el("circle", { r: geom.pocket ? 22 : b.r * 1.8, fill: "transparent" }));
@@ -374,7 +393,7 @@ export function mountBelt(root, options) {
         hit.appendChild(el("ellipse", { rx: (b.r * 1.93).toFixed(1),
           ry: (b.r * 0.66).toFixed(1), transform: "rotate(-24)", fill: "none",
           stroke: "var(--paper)", "stroke-width": "1.3", opacity: ".75" }));
-      drawRock(hit, b.seed, b.r, b.tone, b.kind === "item");
+      drawRock(hit, b.seed, b.r, b.tone, b.kind === "item", suggested && b.kind === "item");
       hit.appendChild(el("circle", { class: "rim", r: b.r + 10, fill: "none",
         stroke: "var(--accent)", "stroke-width": "1", opacity: "0" }));
       /* #1088: a rock rolls to the apex; a paper opens the reading card in
