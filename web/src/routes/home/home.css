@@ -658,7 +658,7 @@
   }
   .desk .strip-note{font:11px var(--mono);letter-spacing:.08em;color:var(--ink-mid);white-space:nowrap;
               display:flex;gap:14px;align-items:baseline;min-height:16px}
-  .desk .strip-note .act{color:var(--accent-text)}
+  .desk .strip-note .act{color:var(--accent-text);cursor:pointer}
   .desk .strip-note .sep,.desk .strip-note .hint{color:var(--ink-faint)}
   /* the ring dissolves as the line unrolls (POL-8's own move); the sun stays
      — #dial-name and .sun-link are not in this selector. .belt's own opacity
