@@ -10,6 +10,7 @@ dist
 .orbit-cosign/
 .orbit-crane/
 .agents/handoffs/
+.agents/reviews/
 .agents/orchestration-state.json
 .agents/worktrees/
 .claude/
