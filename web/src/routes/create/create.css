@@ -176,12 +176,18 @@ body.doc .dz-held{display:block}
 .create-page .field.sugg .tag{display:flex}
 .create-page .field .tag button{font:10px var(--mono);color:var(--bg);background:var(--accent);border:0;
                    border-radius:6px;padding:2px 9px;cursor:pointer}
+/* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
+   measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
+:is([data-theme=dawn],[data-theme=clouds]) .create-page .field .tag button{color:#fff}
 .create-page .field .tag button:hover{filter:brightness(1.12)}
 
 .create-page .save-row{display:flex;flex-direction:column;gap:10px;margin-top:20px}
 .create-page .save-buttons{display:flex;align-items:center;gap:18px}
 .create-page .btn-primary{flex:0 0 auto;padding:12px 26px;border-radius:11px;border:0;cursor:pointer;
              font:600 14px var(--display);color:var(--bg);background:var(--accent)}
+/* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
+   measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
+:is([data-theme=dawn],[data-theme=clouds]) .create-page .btn-primary{color:#fff}
 .create-page .btn-primary:hover{filter:brightness(1.05)}
 .create-page .btn-primary:disabled{opacity:.5;cursor:default}
 .create-page .cancel-link{font:12px var(--mono);color:var(--ink-quiet);text-decoration:none}
