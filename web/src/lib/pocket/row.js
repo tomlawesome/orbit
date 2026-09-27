@@ -1,3 +1,4 @@
+import { SLOP } from "./gesture.js";
 /**
  * One management act on a row. `name` is the full accessible name, object
  * included ("Remove Emma Lawson"); `label` is what the pill says ("remove").
@@ -54,10 +55,38 @@ export function mountRow(row, { closeMs, onchange } = {}) {
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let hiding;
 
+  /* A tap outside closes the row, and only a tap: a touch that lands
+     outside and then scrolls is how a reader brings the open row into view,
+     so closing on the touch's landing shut every row the moment it was
+     scrolled (owner, on the phone, 2026-09-27). The browser cancels a
+     pointer it takes over for scrolling, and a lift further than SLOP
+     from where it landed was a drag. */
+  /** @type {{ id: number, x: number, y: number } | null} */
+  let landed = null;
   /** @param {Event} event */
-  const onOutside = (event) => {
-    if (event.target instanceof Node && row.contains(event.target)) return;
-    close();
+  const outside = (event) => !(event.target instanceof Node && row.contains(event.target));
+  /** @param {PointerEvent} event */
+  const onOutsideDown = (event) => {
+    landed = outside(event) ? { id: event.pointerId, x: event.clientX, y: event.clientY } : null;
+  };
+  /** @param {PointerEvent} event */
+  const onOutsideUp = (event) => {
+    const start = landed;
+    landed = null;
+    if (!start || start.id !== event.pointerId || !outside(event)) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) <= SLOP) close();
+  };
+  const onOutsideCancel = () => { landed = null; };
+  const listenOutside = () => {
+    win.addEventListener("pointerdown", onOutsideDown, true);
+    win.addEventListener("pointerup", onOutsideUp, true);
+    win.addEventListener("pointercancel", onOutsideCancel, true);
+  };
+  const stopOutside = () => {
+    landed = null;
+    win.removeEventListener("pointerdown", onOutsideDown, true);
+    win.removeEventListener("pointerup", onOutsideUp, true);
+    win.removeEventListener("pointercancel", onOutsideCancel, true);
   };
 
   function open() {
@@ -72,7 +101,7 @@ export function mountRow(row, { closeMs, onchange } = {}) {
     void panel.offsetHeight;
     row.dataset.open = "";
     face.setAttribute("aria-expanded", "true");
-    win.addEventListener("pointerdown", onOutside, true);
+    listenOutside();
     onchange?.(true);
   }
 
@@ -84,7 +113,7 @@ export function mountRow(row, { closeMs, onchange } = {}) {
     if (openIn.get(group()) === control) openIn.delete(group());
     delete row.dataset.open;
     face.setAttribute("aria-expanded", "false");
-    win.removeEventListener("pointerdown", onOutside, true);
+    stopOutside();
     const ms = closeMs ?? (still() ? 0 : CLOSE_MS);
     clearTimeout(hiding);
     if (ms > 0) hiding = setTimeout(() => { if (!isOpen) panel.hidden = true; }, ms);
@@ -117,7 +146,7 @@ export function mountRow(row, { closeMs, onchange } = {}) {
     destroy() {
       clearTimeout(hiding);
       if (openIn.get(group()) === control) openIn.delete(group());
-      win.removeEventListener("pointerdown", onOutside, true);
+      stopOutside();
       face.removeEventListener("click", onClick);
       row.removeEventListener("keydown", onKey);
       mounted.delete(row);
