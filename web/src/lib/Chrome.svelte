@@ -119,9 +119,23 @@
     location.href = "/logout";
   }
 
+  /*
+   * No `part` annotation here (#1133): a bare JSDoc comment directly before
+   * an arrow function's own parameter -- anywhere outside the
+   * `/** @type {T} *\/ (expr)` cast idiom used above for `error` -- makes the
+   * Svelte compiler re-emit the parameter wrapped in an extra, invalid pair
+   * of parens (`((part))`). `vite build` bundles through rolldown, which
+   * tolerates it and prints clean code, but `vite dev`'s SSR module runner
+   * hands the raw text straight to V8, which doesn't: every load of a page
+   * that reaches this component 500'd under `pnpm --filter orbit-web dev`
+   * with "SyntaxError: Invalid destructuring assignment target", never in
+   * the production build. The type goes on the name instead, in that cast
+   * idiom: `user` carries no declared type, so without it `part` is an
+   * implicit `any` and the type check (#624) fails.
+   */
   const initials = $derived(
-    (user?.displayName ?? "")
-      .split(/\s+/).map((/** @type {string} */ part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
+    /** @type {string} */ (user?.displayName ?? "")
+      .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
   );
 </script>
 

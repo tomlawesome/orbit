@@ -14,6 +14,11 @@ const bodySchema = z.object({
 /**
  * Decrypts a portable archive just far enough to show the caller what an
  * import would do, without writing anything (#735 port).
+ *
+ * Deliberately not re-challenged (#1132). It answers from the uploaded file;
+ * the only thing it says about the household is which of the file's entries
+ * are already there, and a member can read those entries anyway. The import
+ * that follows is what asks the person to prove it is them.
  */
 export const POST = write(async (event, session) => {
   const body = bodySchema.parse(await event.request.json());
