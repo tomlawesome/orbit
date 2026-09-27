@@ -93,6 +93,23 @@ export function recurrenceWords(/** @type {number} */ months) {
 }
 
 /**
+ * The desk's own recurrence control (#1058d, #1069): a select of one-off,
+ * monthly and yearly, plus a fourth, custom choice that takes a count of
+ * months. Not the phone's vocabulary (its stepper already works in months) —
+ * the desk's, translated to the one range (`RECURRENCE_MAX`) every dialect
+ * shares.
+ * @param {"once" | "monthly" | "yearly" | "custom" | string} choice
+ * @param {string | number} custom  the "every … months" input, read only when choice is "custom"
+ */
+export function recurrenceOfChoice(choice, custom) {
+  if (choice === "once") return 0;
+  if (choice === "monthly") return 1;
+  if (choice === "yearly") return 12;
+  const months = Math.round(Number(custom) || 0);
+  return Math.min(RECURRENCE_MAX, Math.max(1, months));
+}
+
+/**
  * Reminders, toggled one day at a time, kept furthest-first and within the
  * model's ceiling.
  * @param {number[]} days
