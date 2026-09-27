@@ -148,6 +148,11 @@
      find the field, so it earns the same ring every other focusable control
      on this screen gives (.body-link:focus-visible above). */
   .splash-search input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* The ring has rounded ends (owner, 2026-09-27, on the live build: "I would
+     like the search box to have rounded ends please"). The outline follows
+     the radius; the hairline is dropped while the ring shows, since a
+     bottom border under a full radius bends into a curve. */
+  .splash-search input:focus-visible{border-radius:999px;border-bottom-color:transparent}
 
   /* CON-7: the word IS the handle — attached to the drawer edge, riding the
      slide. v17: key is quiet ink, degraded is unmistakably orange, and the
