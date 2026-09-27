@@ -112,7 +112,7 @@ describe("rolldown JSDoc trap check", () => {
     expect(findTraps(source)).toEqual([]);
   });
 
-  it("flags a {#snippet} declared after an earlier top-level JSDoc comment (#1130)", () => {
+  it("flags a root-level {#snippet} after an earlier @type comment (#1130)", () => {
     const source = [
       "<script>",
       "  /** @type {{ title: string }} */",
@@ -126,9 +126,28 @@ describe("rolldown JSDoc trap check", () => {
     expect(findTraps(source)).toEqual([
       {
         line: 6,
-        reason: "{#snippet} declared in the markup after a JSDoc comment (rolldown hoists the {#snippet} above the script's doc comments and fails to parse, #1130)",
+        reason:
+          "{#snippet} at the component root after an earlier `@type` comment (Svelte lifts the snippet above the script and prints the comment as a cast on its name, which rolldown cannot parse, #1130)",
       },
     ]);
+  });
+
+  it("does not flag a {#snippet} nested in an element, component or block, which is not lifted (#1130)", () => {
+    const script = ["<script>", "  /** @type {{ title: string }} */", "  let { title = '' } = $props();", "</script>", ""];
+    for (const markup of [
+      ['<div class="row">', "  {#snippet face()}<span>{title}</span>{/snippet}", "  {@render face()}", "</div>"],
+      ["<Row {title}>", "  {#snippet mark()}<span>{title}</span>{/snippet}", "</Row>"],
+      ["{#if title}", "  {#snippet face()}<span>{title}</span>{/snippet}", "  {@render face()}", "{/if}"],
+    ]) {
+      expect(findTraps([...script, ...markup].join("\n"))).toEqual([]);
+    }
+  });
+
+  it("does not flag a root-level {#snippet} after JSDoc that is not an @type comment (#1130)", () => {
+    for (const comment of ["/** The row's props. */", "/** @typedef {{ title: string }} Props */"]) {
+      const source = ["<script>", `  ${comment}`, "  let { title } = $props();", "</script>", "{#snippet face()}{title}{/snippet}"].join("\n");
+      expect(findTraps(source)).toEqual([]);
+    }
   });
 
   it("does not flag a {#snippet} when the script carries no JSDoc comment", () => {
