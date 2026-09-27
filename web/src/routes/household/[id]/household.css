@@ -189,6 +189,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .savebar{display:flex;align-items:center;gap:14px;margin-top:17px}
 .household-page .btn{font:600 13px var(--display);color:var(--bg);background:var(--accent);border:0;
      border-radius:10px;padding:9px 19px;cursor:pointer}
+/* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
+   measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
+:is([data-theme=dawn],[data-theme=clouds]) .household-page .btn{color:#fff}
 .household-page .btn:hover{filter:brightness(1.06)}
 .household-page .btn:disabled{opacity:.36;cursor:not-allowed;filter:none}
 .household-page .ghost{font:11px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
