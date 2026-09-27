@@ -545,6 +545,25 @@
   // shared with the phone via pocket-search.js rather than a second
   // implementation — design/v19/search/round-1/BUILD.md)
 
+  /**
+   * @typedef {import('./pocket-search.js').SearchItem} SearchItem
+   * @typedef {import('./pocket-search.js').SearchDocument} SearchDoc
+   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean }} BodyPaint
+   * @typedef {BodyPaint & { days: number | null, size: number, costMinor: number | null,
+   *   currency: string, costIsEstimate: boolean }} DialBody
+   * @typedef {{ itemId: string, title: string, days: number | null, body: DialBody | null,
+   *   hitDocs: string[] }} StripMatch
+   */
+
+  /* `bodyMark`'s own neutral stand-in for an unscheduled match, which draws no
+     planet (BUILD.md §1) — and, doubling as the snippet parameter's default
+     value below, the only way to give `b` a real inferred shape rather than
+     `any`: a JSDoc annotation directly in a `{#snippet}` parameter list reads
+     fine to svelte-check but crashes the production rolldown build (see
+     scripts/check-rolldown-jsdoc-trap.mjs and CorridorRow.svelte's header). */
+  /** @type {BodyPaint} */
+  const EMPTY_BODY = { kind: "", paint: "", suggestion: false, documentCount: 0 };
+
   let stripOpen = $state(false);
   let searchQuery = $state("");
   /** @type {import('./pocket-search.js').SearchDocument[]} */
@@ -587,7 +606,7 @@
   /* At rest (empty query) the strip shows the same two rows the palette
      showed (BUILD.md §1): the attention group's own due-or-later two, not
      searchPocket's unfiltered empty branch. */
-  const emptyStripRows = $derived((groups?.attention ?? []).filter((/** @type {any} */ row) => row.days >= 0).slice(0, 2));
+  const emptyStripRows = $derived((groups?.attention ?? []).filter((/** @type {SearchItem} */ row) => row.days !== null && row.days >= 0).slice(0, 2));
   const stripItems = $derived(searchQuery ? searchResults.items : emptyStripRows);
   const stripDocuments = $derived(searchQuery ? searchResults.documents : []);
 
@@ -595,8 +614,8 @@
      soonest first), then documents. Actions and the no-match sentence are
      never in it — never selectable. */
   const selectable = $derived([
-    ...stripItems.map((/** @type {any} */ item) => ({ kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days })),
-    ...stripDocuments.map((/** @type {any} */ doc) => ({ kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle })),
+    ...stripItems.map((/** @type {SearchItem} */ item) => ({ kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days })),
+    ...stripDocuments.map((/** @type {SearchDoc} */ doc) => ({ kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle })),
   ]);
   let selectedIndex = $state(0);
   const selectedPos = $derived(selectable.length ? Math.min(selectedIndex, selectable.length - 1) : null);
@@ -645,8 +664,8 @@
 
   const stripMarks = $derived.by(() => {
     if (!stripOpen) return [];
-    /** @type {Map<string, any>} */
-    const byItem = new Map();
+    /** @type {Map<string, StripMatch>} */
+    const byItem = new SvelteMap();
     for (const row of stripItems) {
       const b = bodiesById.get(row.id) ?? null;
       byItem.set(row.id, { itemId: row.id, title: row.title, days: b ? b.days : row.days, body: b, hitDocs: [] });
@@ -662,11 +681,15 @@
       m.hitDocs.push(doc.name);
     }
     const raw = [...byItem.values()].map((m) => {
-      const unscheduled = m.days === null;
-      const x = unscheduled ? UNSCHEDULED_X : xOfDays(m.days);
-      const meta = unscheduled
+      /* `days` rather than `m.days` from here on: a ternary keyed on a
+         separately-computed `unscheduled` boolean does not narrow `m.days`
+         itself, only one keyed on `days === null` directly does. */
+      const days = m.days;
+      const unscheduled = days === null;
+      const x = days === null ? UNSCHEDULED_X : xOfDays(days);
+      const meta = days === null
         ? `no date · ${m.body ? money(m.body.costMinor, m.body.currency, m.body.costIsEstimate) : ""}`
-        : `${tlabel({ days: m.days })} · ${stripDateOf(m.days)} · ${money(m.body?.costMinor ?? null, m.body?.currency ?? "GBP", m.body?.costIsEstimate ?? false)}`;
+        : `${tlabel({ days })} · ${stripDateOf(days)} · ${money(m.body?.costMinor ?? null, m.body?.currency ?? "GBP", m.body?.costIsEstimate ?? false)}`;
       const lines = [
         { cls: "title", text: m.title, size: 12.5 },
         { cls: "meta", text: meta, size: 11 },
@@ -1212,7 +1235,7 @@
          from the same tokens — never a second painting of the same body.
          (b, cx, cy, r) rather than reading b.placement/b.size directly: the
          strip's r is 1.1× the dial's own size, not the dial's own centre. -->
-    {#snippet bodyMark(b, cx, cy, r)}
+    {#snippet bodyMark(b = EMPTY_BODY, cx = 0, cy = 0, r = 0)}
       {#if b.suggestion}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" stroke-width="1.6"/>
       {:else if b.kind === "expiry"}
@@ -1422,7 +1445,7 @@
                     {/each}
                   {/if}
                   {#if !m.unscheduled}
-                    {@render bodyMark(m.body ?? { kind: "", paint: "", suggestion: false, documentCount: 0 }, m.x, AXIS_Y, m.r)}
+                    {@render bodyMark(m.body ?? EMPTY_BODY, m.x, AXIS_Y, m.r)}
                   {/if}
                 </g>
               {/each}
