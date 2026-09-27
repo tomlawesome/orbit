@@ -518,10 +518,13 @@ const SCREENS = [
      * sides, and both are photographed in it.
      */
     reducedMotion: "reduce",
-    /* Settled once the card is up and the households have been sown. */
+    /* Settled once the card is up, the households have been sown, and the
+       section row (#1058b/#1069, drawn once the household loads) has its
+       buttons — none pressed, as the mockup's own row never is. */
     settle: () =>
       Boolean(document.getElementById("card"))
-      && document.querySelectorAll(".chartback .csys").length > 0,
+      && document.querySelectorAll(".chartback .csys").length > 0
+      && document.querySelectorAll("#sections button").length > 0,
     /* The sheet's own scaffolding: the demos rail (re-roll, state switcher)
        and the footer naming the proposal. The account chrome the sheet
        draws was scaffolding too until #1010 -- the route renders it now, so
