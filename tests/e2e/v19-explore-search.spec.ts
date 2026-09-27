@@ -132,7 +132,11 @@ test("typing in #explore filters the results by title, section and provider", as
 
     // Provider, and a query nothing answers.
     await explore.fill("kwik-fit");
-    await expect(results.getByRole("option").filter({ hasText: matchTitle })).toBeVisible();
+    /* #explore-results is the screen reader's copy (visually hidden); what
+       the eye sees is the strip's one mark. */
+    await expect(results.getByRole("option").filter({ hasText: matchTitle })).toHaveCount(1);
+    await expect(page.locator("#strip .match")).toHaveCount(1);
+    await expect(page.locator("#strip")).toBeVisible();
     await explore.fill("no such orbit thing zzz");
     await expect(page.locator("#strip-note")).toContainText(`nothing in your orbit is called "no such orbit thing zzz"`);
   } finally {
@@ -241,7 +245,10 @@ test("hovering a mark selects it", async ({ page }) => {
     const marks = page.locator("#strip .match");
     await expect(marks).toHaveCount(2);
 
-    await marks.nth(1).hover();
+    /* Hover the mark's own body (drawn last in its group), as a reader does:
+       the group's box also spans the gap up to its label, and that empty
+       middle is the SVG's, not the mark's. */
+    await marks.nth(1).locator(":scope > :last-child").hover({ timeout: 10_000 });
     await expect(page.locator("#explore-results li").nth(1)).toHaveAttribute("aria-selected", "true");
   } finally {
     await households.sweep(page);
