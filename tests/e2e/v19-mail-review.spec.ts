@@ -251,9 +251,14 @@ test("a dismissal takes two taps and mail that failed is visible on the relay", 
     await page.goto("/home");
     const row = page.locator(".item.suggest", { hasText: "Reviewed intake 1786823446152" }).first();
     await expect(row).toBeVisible();
-    await row.getByRole("button", { name: "Dismiss" }).click();
-    await expect(row.getByRole("button", { name: "tap again to dismiss" })).toBeVisible();
-    await row.getByRole("button", { name: "tap again to dismiss" }).click();
+    /* #1145: the dismissal lives in the drawer the row opens into, as the
+       approve test above; the row at rest carries no buttons. */
+    await row.click();
+    const drawer = page.locator(`[id="${receiptId}-view"]`);
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("button", { name: "Dismiss" }).click();
+    await expect(drawer.getByRole("button", { name: "tap again to dismiss" })).toBeVisible();
+    await drawer.getByRole("button", { name: "tap again to dismiss" }).click();
     await expect(page.locator(".item.suggest", { hasText: "Reviewed intake" })).toHaveCount(0);
 
     // The failed message is on the relay, dated, in the server's own words.
