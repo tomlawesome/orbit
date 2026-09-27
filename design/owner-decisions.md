@@ -1182,3 +1182,16 @@ in the meantime. Asked as three options; answered **"3c"**.
 The cut is the desk dialect's own, `(min-width: 901px)` — the same one home
 uses to choose between its two dialects (CON-10) — so "desk" means exactly
 what it already means everywhere else in v19.
+
+## 25. Accessibility means real access, not conformance wording (owner, 2026-09-25)
+
+WCAG is the default check. A departure from a criterion is fine if keyboard,
+screen-reader, voice and switch users can all still reach everything, tested
+on a real iPhone, a real Android phone and the desk, and recorded on the
+issue. Departures are the owner's decision. Agents raise gaps; they don't
+decide them. First case: #1122 (swipe-only row actions; departs from WCAG
+2.5.1).
+
+That first case is withdrawn (owner, 2026-09-25, after using it on a real
+phone): row actions open on a tap, on every phone row that has them, so it
+no longer departs from 2.5.1. The principle above stands.

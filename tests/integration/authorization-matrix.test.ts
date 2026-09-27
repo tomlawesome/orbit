@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import { documents, households, portableArchives, sessions, users } from "@/db/schema";
 import { getAuthConfig } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
+import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import {
   cleanupIntegrationEnvironment,
@@ -342,10 +343,16 @@ describe("portable archive and administrator authorization", () => {
     const householdId = fixture.household.id;
     const context = householdContext(householdId);
 
+    /* Export and import re-challenge the owner (#1132); the fixture's owner
+       has no password, so each act carries a step-up proof for itself. */
+    const config = getAuthConfig();
+    const withProof = async (intent: "archive_export" | "archive_import") =>
+      `${owner.headers.cookie}; ${stepUpProofCookieName(config)}=${await sealStepUpProof(owner.sessionId, intent, config)}`;
+
     const created = await callRouteForSession(createArchive, owner, {
       url: "http://127.0.0.1:3000/api/archives",
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", cookie: await withProof("archive_export") },
       body: JSON.stringify({ passphrase: "integration-passphrase", includeDocuments: false }),
       params: context,
     });
@@ -393,7 +400,7 @@ describe("portable archive and administrator authorization", () => {
     const imported = await callRouteForSession(importArchive, owner, {
       url: "http://127.0.0.1:3000/api/archives/import",
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", cookie: await withProof("archive_import") },
       body: JSON.stringify({ householdId, archive: encrypted, passphrase: "integration-passphrase", conflictItemIds: [] }),
     });
     expect(imported.status).toBe(200);

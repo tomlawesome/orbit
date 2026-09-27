@@ -107,6 +107,29 @@
   const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {(b: DialBody) => number} */
   const bodyR = (b) => (b.overdue ? 8 : b.closest ? 7 : 7.5);
+  /*
+   * #1129: fixture bodies can sit as close as ~35px apart, well under the
+   * 44px accessibility tap-target minimum, so a naive fix that just grew
+   * every body to a 44px (r22) circle would make neighbouring circles
+   * overlap — a tap between two close bodies could then raise the wrong
+   * one's sheet. Each body's hit radius is instead capped at half its
+   * distance to its NEAREST neighbour (minus a small margin), so no two
+   * bodies' hit circles ever overlap: a tap always resolves to the body it
+   * is nearer. This governs only the invisible tap target, never the drawn
+   * circle — the dial's geometry is ratified and unchanged. */
+  const HIT_TARGET_R = 22; // half of the 44px WCAG 2.5.5/2.5.8 minimum
+  const HIT_MARGIN = 1;
+  /** @type {(b: DialBody, all: DialBody[]) => number} */
+  const hitR = (b, all) => {
+    let nearest = Infinity;
+    for (const other of all) {
+      if (other.id === b.id) continue;
+      const d = Math.hypot(other.placement.x - b.placement.x, other.placement.y - b.placement.y);
+      if (d < nearest) nearest = d;
+    }
+    const cap = Number.isFinite(nearest) ? nearest / 2 - HIT_MARGIN : HIT_TARGET_R;
+    return Math.max(bodyR(b), Math.min(HIT_TARGET_R, cap));
+  };
   /** @type {(b: DialBody) => string} */
   const sheetMeta = (b) =>
     [
@@ -282,21 +305,29 @@
       {#each pocketBodies as b (b.id)}
         {#if b.suggestion}
           <!-- #466: the relay's catch is ON the dial at its law position —
-               the same hollow accent body the desk shows (§12). -->
+               the same hollow accent body the desk shows (§12). #1129: the
+               drawn circles below are unchanged; a third, invisible circle
+               carries the (possibly larger) tap target, sized so it never
+               overlaps a neighbour's — see hitR() above. -->
           <g data-sheet-sugg={b.id} style="cursor:pointer" tabindex="0" role="button"
              aria-label={`caught receipt: ${b.title}`}>
             <circle cx={b.placement.x} cy={b.placement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
             <circle cx={b.placement.x} cy={b.placement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
+            <circle cx={b.placement.x} cy={b.placement.y} r={hitR(b, pocketBodies)} fill="transparent" style="pointer-events:all"/>
           </g>
         {:else}
-          <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}"
-                  data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}
-                  tabindex="0" role="button" aria-label={b.title}/>
-          {#if b.documentCount > 0 && b.paint === "jade"}
-            <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
-                     transform="rotate(-24 {b.placement.x} {b.placement.y})"
-                     fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
-          {/if}
+          <!-- #1129: same split — the drawn circle keeps its own size and
+               colour, a sibling invisible circle owns the tap target. -->
+          <g data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}
+             tabindex="0" role="button" aria-label={b.title}>
+            <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}" aria-hidden="true"/>
+            {#if b.documentCount > 0 && b.paint === "jade"}
+              <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
+                       transform="rotate(-24 {b.placement.x} {b.placement.y})"
+                       fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
+            {/if}
+            <circle cx={b.placement.x} cy={b.placement.y} r={hitR(b, pocketBodies)} fill="transparent" style="pointer-events:all"/>
+          </g>
         {/if}
       {/each}
     </svg>
