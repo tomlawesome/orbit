@@ -91,11 +91,11 @@ async function openSettings(page: Page) {
  * A household, one item, and the signed-in member's own database id — the
  * three things the seeded deliveries below are foreign-keyed to.
  */
-async function seedHouseholdAndItem(page: Page, name: string) {
+async function seedHouseholdAndItem(page: Page, name: string, itemTitle: string) {
   const householdId = randomUUID();
   const sectionId = randomUUID();
   const itemId = randomUUID();
-  const { userId } = await page.evaluate(async ({ householdId, sectionId, itemId, householdName }) => {
+  const { userId } = await page.evaluate(async ({ householdId, sectionId, itemId, householdName, itemTitle }) => {
     const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { user: { id: string }, csrfToken: string };
     const command = async (body: Record<string, unknown>) => {
       const response = await fetch("/api/workspace/commands", {
@@ -119,14 +119,14 @@ async function seedHouseholdAndItem(page: Page, name: string) {
       type: "item.upsert",
       householdId,
       item: {
-        id: itemId, sectionId, title: "Boiler service", currency: "GBP",
+        id: itemId, sectionId, title: itemTitle, currency: "GBP",
         scheduleKind: "service", dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
         status: "active",
       },
       activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
     });
     return { userId: session.user.id };
-  }, { householdId, sectionId, itemId, householdName: name });
+  }, { householdId, sectionId, itemId, householdName: name, itemTitle });
   return { householdId, itemId, userId };
 }
 
@@ -138,52 +138,67 @@ test("a member sees their own last sent reminders, plainly, on both dialects", a
   await claimInstanceAsAdministrator(browser);
   await signInAs(page, workerAccount("member"));
   const name = `Sent lately ${Date.now()}`;
-  const { householdId, itemId, userId } = await seedHouseholdAndItem(page, name);
+  /* Named for this run alone, so the rows counted below can only be the
+     ones this run seeded, whatever an earlier run on a reused stack left. */
+  const itemTitle = `Boiler service ${Date.now().toString(36)}`;
+  const { householdId, itemId, userId } = await seedHouseholdAndItem(page, name, itemTitle);
 
-  const dueEventId = runSql(`select id from due_events where item_id = '${itemId}' order by due_date desc limit 1;`).trim();
-  expect(dueEventId, "the item.upsert above should have raised its own due event").not.toBe("");
+  /* #730: the panel shows a member's newest five attempted sends across
+     every household, and scheduling a household for deletion leaves its
+     sent and failed rows in place, so rows a run leaves behind push the
+     next run's own rows out of that five. The rows this run inserts by SQL
+     are removed by SQL, and in `finally`, so a failed run cleans up too. */
+  try {
+    const dueEventId = runSql(`select id from due_events where item_id = '${itemId}' order by due_date desc limit 1;`).trim();
+    expect(dueEventId, "the item.upsert above should have raised its own due event").not.toBe("");
 
-  const sentId = randomUUID();
-  const failedId = randomUUID();
-  const now = new Date();
-  const scheduledFor = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86_400_000).toISOString();
+    const sentId = randomUUID();
+    const failedId = randomUUID();
+    const now = new Date();
+    const scheduledFor = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86_400_000).toISOString();
 
-  /* A clean send by email, and a failed one by push whose stored `lastError`
-     is the worker's own category code (#1003: the row must never show that
-     code, or any raw provider text, only the plain sentence it maps to). */
-  runSql(`
-    insert into notification_deliveries (id, household_id, event_id, user_id, channel, scheduled_for, status, attempts, sent_at, created_at, updated_at)
-    values ('${sentId}', '${householdId}', '${dueEventId}', '${userId}', 'email', '${scheduledFor(2)}', 'sent', 1, '${scheduledFor(2)}', now(), now());
-    insert into notification_deliveries (id, household_id, event_id, user_id, channel, scheduled_for, status, attempts, last_error, created_at, updated_at)
-    values ('${failedId}', '${householdId}', '${dueEventId}', '${userId}', 'web_push', '${scheduledFor(1)}', 'failed', 5, 'smtp_unconfigured', now(), now());
-  `);
+    /* A clean send by email, and a failed one by push whose stored `lastError`
+       is the worker's own category code (#1003: the row must never show that
+       code, or any raw provider text, only the plain sentence it maps to). */
+    runSql(`
+      insert into notification_deliveries (id, household_id, event_id, user_id, channel, scheduled_for, status, attempts, sent_at, created_at, updated_at)
+      values ('${sentId}', '${householdId}', '${dueEventId}', '${userId}', 'email', '${scheduledFor(2)}', 'sent', 1, '${scheduledFor(2)}', now(), now());
+      insert into notification_deliveries (id, household_id, event_id, user_id, channel, scheduled_for, status, attempts, last_error, created_at, updated_at)
+      values ('${failedId}', '${householdId}', '${dueEventId}', '${userId}', 'web_push', '${scheduledFor(1)}', 'failed', 5, 'smtp_unconfigured', now(), now());
+    `);
 
-  await openSettings(page);
-  const isMobile = test.info().project.name.startsWith("mobile");
-  const scope = isMobile ? page.locator(".st-pocket") : page.locator(".helm-page");
-  const sentTab = scope.getByRole("tab", { name: "sent to you lately" });
-  await sentTab.click();
-  const panel = scope.getByRole("tabpanel", { name: "sent to you lately" });
-  await expect(panel).toBeVisible();
+    await openSettings(page);
+    const isMobile = test.info().project.name.startsWith("mobile");
+    const scope = isMobile ? page.locator(".st-pocket") : page.locator(".helm-page");
+    const sentTab = scope.getByRole("tab", { name: "sent to you lately" });
+    await sentTab.click();
+    const panel = scope.getByRole("tabpanel", { name: "sent to you lately" });
+    await expect(panel).toBeVisible();
 
-  /* Newest first: the failed push send (1 day ago) leads the clean email
-     send (2 days ago). */
-  const rows = panel.locator("a", { hasText: "Boiler service" });
-  await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toContainText("couldn’t send");
-  /* The plain sentence, never the raw category the row was stored with. */
-  await expect(rows.nth(0)).toContainText("mail not set up");
-  await expect(rows.nth(0)).not.toContainText("smtp_unconfigured");
-  await expect(rows.nth(1)).not.toContainText("couldn’t send");
+    /* Newest first: the failed push send (1 day ago) leads the clean email
+       send (2 days ago). */
+    const rows = panel.locator("a", { hasText: itemTitle });
+    await expect(rows).toHaveCount(2);
+    /* Where a row says how its send went: inside the row's link on the desk;
+       on the pocket dialect, in the line the kit draws under the row
+       (Row.svelte's `below`), which is the next sibling of the row, not part
+       of its link. */
+    const outcome = (index: number) => isMobile
+      ? panel.locator(".p-row", { hasText: itemTitle }).nth(index)
+        .locator("xpath=following-sibling::*[1][contains(concat(' ', normalize-space(@class), ' '), ' p-row-below ')]")
+      : rows.nth(index);
+    await expect(outcome(0)).toContainText("couldn’t send");
+    /* The plain sentence, never the raw category the row was stored with. */
+    await expect(outcome(0)).toContainText("mail not set up");
+    await expect(outcome(0)).not.toContainText("smtp_unconfigured");
+    await expect(rows.nth(0)).not.toContainText("smtp_unconfigured");
+    await expect(outcome(1)).not.toContainText("couldn’t send");
 
-  /* The row leads to the item on the belt. */
-  await rows.nth(1).click();
-  await expect(page).toHaveURL(new RegExp(`/item/${itemId}`));
-
-  /* #730: left out here, this household's deliveries outlived the test and
-     the desk-dialect run's own "Boiler service" rows bled into the
-     pocket-dialect run right after it in the same file (both read one
-     member's reminders across every household they hold, not just the one
-     each run made), so the mobile project saw 4 rows where it seeded 2. */
-  await scheduleHouseholdDeletion(page, householdId, name);
+    /* The row leads to the item on the belt. */
+    await rows.nth(1).click();
+    await expect(page).toHaveURL(new RegExp(`/item/${itemId}`));
+  } finally {
+    runSql(`delete from notification_deliveries where household_id = '${householdId}';`);
+    await scheduleHouseholdDeletion(page, householdId, name);
+  }
 });
