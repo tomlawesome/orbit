@@ -650,7 +650,11 @@ test("settings: the sign-in-methods challenge arms by keyboard and is reachable"
     /* The whole screen again, with the challenge standing open: its two
        fields and its two buttons have to be in the tab order like anything
        else the screen is now showing. */
-    await auditTabOrder(page, "settings with the sign-in challenge open");
+    /* The Reminders tabs' unchosen tab is off the Tab order by design; the
+       reachable-settings test above proves it by arrow key. */
+    await auditTabOrder(page, "settings with the sign-in challenge open", {
+      exclude: '[role="tab"][aria-selected="false"]',
+    });
   } finally {
     await cleanup(page, household);
   }
