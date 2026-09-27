@@ -11,6 +11,7 @@
   import { consumeDoor } from "./door.js";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
+  import DeskArchive from "./DeskArchive.svelte";
   import {
     addMember,
     decideJoinRequest,
@@ -1089,6 +1090,16 @@
         {/if}
       {/if}
     </div>
+
+    <!-- ── the archive (#1002): portable export, import and preview,
+         OWNER-ONLY like sections and the danger line. The phone's own build
+         is #1122's PocketArchive.svelte; DeskArchive.svelte reuses its
+         server calls under the desk's own card grammar. Between the
+         ordinary cards and the danger line, spanning both columns
+         (household.css's .card.c-archive). -->
+    {#if v.canManage}
+      <DeskArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} />
+    {/if}
 
     <!-- ── THE DANGER ZONE ─────────────────────────────────────────────────
          Red rule, red wash, hazard ticks, red heading, and the button UP on
