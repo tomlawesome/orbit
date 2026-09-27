@@ -798,7 +798,7 @@
 [data-theme=retrograde] :is(.dial,.minisys) [style*="--accent"],
 [data-theme=retrograde] .celestial polyline,
 [data-theme=retrograde] .now-month{filter:drop-shadow(0 0 2.5px var(--bloom))}
-[data-theme=retrograde] :is(.inbox-orb.waiting,.suggest button.yes){
+[data-theme=retrograde] :is(.inbox-orb.waiting,.suggestview .actions button.yes){
   box-shadow:0 0 12px -2px var(--bloom)}
 [data-theme=retrograde] .inbox-orb.waiting .count{box-shadow:0 0 9px var(--bloom)}
 [data-theme=retrograde] .manifest .corridor .today .rule{box-shadow:0 0 8px var(--bloom)}
