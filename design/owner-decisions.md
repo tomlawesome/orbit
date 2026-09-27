@@ -1271,3 +1271,22 @@ field. It is now a pill: the outline takes a full radius, and the hairline
 under the text is hidden while the ring shows, since a bottom border under a
 full radius bends into a curve. At rest the field is unchanged: a hairline
 under centred type, no box.
+
+## 31. Searching unrolls the year (owner, 2026-09-27)
+
+Round 1 of #1161 drew three desk searches (`design/v19/search/round-1/`):
+A lifts the built palette above the field as bare rows; B lights the
+matching planets on the dial and hangs the chart's callout on the top
+match; C dissolves the ring on focus and draws the year as a line above
+the field, with the matches standing on it as their own planets at their
+due dates. The owner chose C: *"Great job Fable! Three really cool
+options, but I think the one that's going to give us the most going
+forward, has to be C - unrolled!"*
+
+What is fixed by that choice: the field stays where §3 put it, with no box
+and no icon; results never go below it; the ring gives way to the line on
+focus and comes back on blur (POL-8's own dissolve); a match is drawn by
+the same code and tokens as its planet on the dial; matching stays
+`pocket-search.js`'s, shared with the phone. Round 1's B survives as a
+feature idea (search that lights the dial); A is the fallback that was not
+needed. The build brief is `design/v19/search/round-1/BUILD.md`.
