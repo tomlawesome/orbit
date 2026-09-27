@@ -17,6 +17,7 @@
   import Mark from "$lib/Mark.svelte";
   import { BAND_VAR, T_CLASS, tlabel } from "./bands.js";
   import ItemView from "./ItemView.svelte";
+  import SuggestionView from "./SuggestionView.svelte";
 
   /**
    * @typedef {import('$lib/data/chart.js').CorridorRow} CorridorRowData
@@ -29,6 +30,7 @@
    *   busyReceipt: string | null,
    *   armed: { id: string | null, act: "approve" | "dismiss" | null },
    *   mailProblem: string | null,
+   *   today: string,
    *   expanded: string | null,
    *   onReceiptTap: (suggestion: ReceiptSuggestion, act: "approve" | "dismiss") => void,
    *   onRowClick: (event: MouseEvent, id: string) => void,
@@ -39,7 +41,7 @@
    *   onCopyAddress: () => void,
    * }} */
   let {
-    row, suggestions, busyReceipt, armed, mailProblem, expanded,
+    row, suggestions, busyReceipt, armed, mailProblem, today, expanded,
     onReceiptTap, onRowClick, detail, detailBusy, detailProblem, copied, onCopyAddress,
   } = $props();
 
@@ -90,27 +92,24 @@
 </script>
 
 {#if row.suggestion}
-  <div class="item suggest" id={row.id}>
+  <!-- #1145 (owner, 2026-09-27): a suggestion opens as a drawer like the
+       manifest items. The row at rest is what it was -- the hollow mark, the
+       title, `Found in … · renews … · ~£…` -- and it opens in place exactly
+       as a filed row does (#424's shallow address, Back, Escape, click-off),
+       into SuggestionView: the relay's readings and how sure it was, the
+       paper it came in, when it burns up, and the two decisions, which used
+       to sit on the row. `review in the belt →` is `manage this item →`'s
+       twin: the belt is where the fields are amended. -->
+  <a class="item suggest" class:open={expanded === row.id} id={row.id}
+     href={resolve(`/home?item=${encodeURIComponent(row.id)}`)} aria-expanded={expanded === row.id}
+     aria-controls="{row.id}-view" onclick={(event) => onRowClick(event, row.id)}>
     <span class="planet sug" aria-hidden="true"><i></i></span>
     <div class="body"><b>{row.title}</b><span>{suggestionMeta.join(" · ")}</span></div>
-    <!-- #434: approval is the boundary between untrusted mail and
-         the household, so it takes two deliberate taps — the first
-         arms, the second fires. One operation id per receipt makes
-         the write idempotent under any retry. -->
-    <div class="actions">
-      <button class="yes" disabled={busyReceipt === row.id}
-        onclick={() => onReceiptTap(asSuggestion(suggestionMatch), "approve")}>
-        {armed.id === row.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
-      </button>
-      <button disabled={busyReceipt === row.id}
-        onclick={() => onReceiptTap(asSuggestion(suggestionMatch), "dismiss")}>
-        {armed.id === row.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
-      </button>
-    </div>
-    {#if mailProblem && armed.id === row.id}
-      <div class="mail-problem">{mailProblem}</div>
-    {/if}
-  </div>
+  </a>
+  {#if expanded === row.id}
+    <SuggestionView {row} suggestion={asSuggestion(suggestionMatch)} {busyReceipt} {armed} {mailProblem}
+                    {today} {onReceiptTap} {copied} {onCopyAddress} />
+  {/if}
 {:else}
   <!-- #424: the row is the item. The href is the row's real address —
        kept so a modified click can still open it in its own tab — and

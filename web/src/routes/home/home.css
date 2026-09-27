@@ -298,14 +298,26 @@
   .t.up{color:var(--upcoming)} .t.ok{color:var(--ok-text)}
   .suggest{border-style:dashed}
   .suggest .body span{color:var(--accent-text)}
-  .suggest .actions{display:flex;gap:8px}
+  /* #1145: the two decisions moved off the row at rest into the drawer it
+     opens into (SuggestionView.svelte); the pills are the ones the row wore. */
+  .suggestview .actions{display:flex;gap:8px;margin-top:16px}
   /* #434: a refused approval speaks in the server's own words, in the
      urgency ink the design already uses (the item view's .problem twin). */
   .desk .mail-problem{flex-basis:100%;font:10.5px var(--mono);color:var(--overdue-text);
     margin-top:8px;line-height:1.6}
-  .suggest button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:default;
-                  border:1px solid var(--line);background:none;color:var(--ink-mid)}
-  .suggest button.yes{border-color:var(--accent);color:var(--accent-text)}
+  .suggestview .actions button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:pointer;
+                  border:1px solid var(--line);background:none;color:var(--ink-mid);font-family:var(--ui)}
+  .suggestview .actions button.yes{border-color:var(--accent);color:var(--accent-text)}
+  .suggestview .actions button:disabled{opacity:.5;cursor:default}
+  /* The open suggestion row keeps its dashed pen, and hands it to the drawer. */
+  .desk .item.suggest.open,.suggestview{border-style:dashed}
+  /* How sure the relay was: 10.5px caps after the value, ok for sure, warm
+     for unsure -- the pocket's ReviewCard grammar at the desk's size. */
+  .suggestview .kv b i.sure{font:normal 10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ok-text);margin-left:8px}
+  .suggestview .kv b i.sure.unsure{color:var(--warm-text)}
+  .suggestview .kv b.soon{color:var(--warm-text)}
+  .suggestview p.unread{color:var(--ink-mid)}
 
   /*
    * THE ROW IS THE ITEM (#424, owner ruling 2026-08-16). The row expands IN

@@ -533,6 +533,9 @@
      rather than the whole view, so the row component's type is the slice it
      actually reads. */
   const suggestions = $derived(view ? asView(view).suggestions : undefined);
+  /* #1145: the suggestion drawer counts the days to burn-up from the
+     workspace's own today (pinned under fixtures), as the phone's does. */
+  const today = $derived(view ? asView(view).today : new Date().toISOString().slice(0, 10));
   /* #763: how many are overdue right now — the OS badge and the tab title
      both read this, never the server, so both hold whatever this browser's
      own chart just worked out. */
@@ -1223,7 +1226,7 @@
         {#if corridor.overdue.length}
           <div class="redzone">
             {#each corridor.overdue as row (row.id)}
-              <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+              <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
                 onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
                 onCopyAddress={copyAddress} />
             {/each}
@@ -1231,20 +1234,20 @@
         {/if}
         <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · {todayLine}</span><div class="rule"></div></div>
         {#each corridor.current as row (row.id)}
-          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
             onCopyAddress={copyAddress} />
         {/each}
         {#each corridor.months as month (month.key)}
           <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
           {#each month.rows as row (row.id)}
-            <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+            <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
               onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
               onCopyAddress={copyAddress} />
           {/each}
         {/each}
         {#each corridor.undated as row (row.id)}
-          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
             onCopyAddress={copyAddress} />
         {/each}
