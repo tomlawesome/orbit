@@ -24,6 +24,7 @@ vi.mock("@/server/imap-ingestion", () => ({
   verifyImapIngestionProviders: mocks.verify,
 }));
 
+import { MailInCredentialLockedError } from "@/server/imap-ingestion";
 import { safeAdministratorAuditLabel, setImapProviderVerificationDependenciesForTests, verifyImapIngestionProvider } from "./admin-operations";
 
 describe("administrator mailbox provider verification bounds", () => {
@@ -58,6 +59,11 @@ describe("administrator mailbox provider verification bounds", () => {
     mocks.verify.mockResolvedValueOnce("available");
     await expect(verifyImapIngestionProvider("admin-user")).resolves.toEqual({ result: "available" });
     expect(mocks.verify).toHaveBeenCalledTimes(3);
+  });
+
+  it("surfaces a locked mail-in credential as credential_locked, not unsafe_input (#1067)", async () => {
+    mocks.verify.mockRejectedValueOnce(new MailInCredentialLockedError("test-key-id"));
+    await expect(verifyImapIngestionProvider("admin-user")).resolves.toEqual({ result: "credential_locked" });
   });
 });
 

@@ -65,6 +65,11 @@ export const stepUpIntents = [
   /* Creating a system for somebody else (#1052): an administrator act that
      hands a household to a named owner, so it is challenged like the rest. */
   "system_create",
+  /* The portable archive (#1132). Writing one out hands the whole household,
+     decrypted, to whoever holds the file; bringing one in writes into the
+     household. Two intents, so a proof taken for one cannot pay for the other. */
+  "archive_export",
+  "archive_import",
 ] as const;
 export type StepUpIntent = typeof stepUpIntents[number];
 
