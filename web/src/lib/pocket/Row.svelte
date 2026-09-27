@@ -246,6 +246,14 @@
   :global(:is(.p-row, .p-row-below)) + .p-row > .face::before{content:"";position:absolute;top:0;right:0;
     left:calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap));border-top:1px solid var(--line-soft)}
   :global(:is(.p-row, .p-row-below)) + .p-row > .face:has(.mark:empty)::before{left:var(--p-gutter)}
+  /* CARDS OF THEIR OWN (#1157): a group that wraps `[data-row-cards]` around
+     rows already outlined individually (home's manifest and signals) draws
+     its own top edge, so the hairline above would double it there. Turn it
+     off; a group with no such wrapper keeps it, drawing one joined list.
+     Wholly :global: the compiler cannot see past `[data-row-cards]` on an
+     ancestor outside this component to prove the rest still matches, and
+     drops the rule as unused if only the ancestor is escaped. */
+  :global([data-row-cards] :is(.p-row, .p-row-below) + .p-row > .face::before){content:none}
 
   /* OPEN (review round §1.1; owner-decisions §29): the raised plane, the
      face's bottom corners handed to the panel, and no accent rail -- the

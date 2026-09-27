@@ -822,7 +822,7 @@
   <div class="pk-below">
   {#if groups?.attention.length}
     <h2 class="p-caps">Needs attention</h2>
-    <div class="pk-list" data-row-group>
+    <div class="pk-list" data-row-group data-row-cards>
       {#each groups.attention as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
              trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
@@ -842,7 +842,7 @@
     {@const next = groups.later[0]}
     <h2 class="p-caps">Needs attention</h2>
     <!-- Nothing needs you: the one row is the next item up, and opens as it. -->
-    <div class="pk-list" data-row-group>
+    <div class="pk-list" data-row-group data-row-cards>
       <Row title="nothing needs you" meta={`next up ${next.title}${next.days !== null ? `, ${tlabel(next)}` : ""}`} key={next.id}
            acts={itemActs(next)} ontoggle={onRowToggle(next.id)}>
         {#snippet mark()}<span class="pk-dot quiet"></span>{/snippet}
@@ -866,7 +866,7 @@
   {#if view && (view.suggestions.length || mailSummary)}
     <section class="pk-signals" aria-labelledby="pk-signals-h">
       <h2 class="p-caps" id="pk-signals-h">Signals{#if view.suggestions.length}<span class="p-count">{view.suggestions.length}</span>{/if}</h2>
-      <div class="pk-pen" data-row-group>
+      <div class="pk-pen" data-row-group data-row-cards>
         {#each view.suggestions as s (s.id)}
           <Row title={s.title} key={s.id}
                meta={burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : ""}
