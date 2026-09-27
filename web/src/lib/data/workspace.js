@@ -1156,11 +1156,22 @@ export async function readAdminScreen() {
  */
 
 /**
+ * One mail test's stored last result (#1071): the server keeps it so the
+ * pill survives a reload. `result` is the same bounded word the live test
+ * answers with (`testVerdict` in ./words.js turns it into a pill).
+ *
+ * @typedef {object} MailProbeResult
+ * @property {string} result
+ * @property {string} at
+ */
+
+/**
  * The part of the operations snapshot the administration screen reads.
  *
  * @typedef {object} AdminOperations
  * @property {AdminDocumentJob[]} documentJobs      the 25 most recently touched
  * @property {Record<string, number>} documentJobCounts
+ * @property {{ mailbox: MailProbeResult | null, relay: MailProbeResult | null }} mailProbes
  */
 
 /**

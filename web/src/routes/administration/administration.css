@@ -130,6 +130,43 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
   .mission-page .system.doomed .adminproblem.said,.mission-page .system.settled .adminproblem.said{padding-left:0}
 }
 
+/* DOCUMENT JOBS AND THE TWO MAIL TESTS (#1071, design/v19/administration-ops/
+ * round-2/f-the-screens-grammar.html). Job and test rows reuse the People
+ * card's own `.person`/`.who`/`.place` furniture (already styled above);
+ * this is only the state pill's colour family and the two cards' own
+ * furniture (the head count, the foot line, the page-head tells). */
+.mission-page .role.bad{color:var(--overdue-text);border-color:var(--overdue)}
+.mission-page .role.warn{color:var(--warm-text);border-color:var(--warm)}
+.mission-page .role.run{color:var(--upcoming-text);border-color:var(--upcoming)}
+.mission-page .role.ok{color:var(--ok-text);border-color:var(--ok)}
+.mission-page .role.quiet{color:var(--ink-quiet);animation:mission-breathe 1.6s ease-in-out infinite}
+@keyframes mission-breathe{50%{opacity:.45}}
+
+.mission-page .tells{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.mission-page .tells .role{text-decoration:none}
+.mission-page .tells .role:hover{border-color:var(--accent);color:var(--accent-text)}
+
+.mission-page .card .count{margin-left:auto;font:10.5px var(--mono);color:var(--ink-quiet)}
+.mission-page .jobfoot{font:10.5px var(--mono);color:var(--ink-faint);padding:12px 2px 0}
+/* the reason is the point of the subtext: it wraps rather than being cut */
+.mission-page #jobs-card .who span,.mission-page .machinery .who span{white-space:normal}
+.mission-page #jobs-card .place{flex-basis:100%;text-align:right}
+
+.mission-page .card .cardhead button+button{margin-left:6px}
+.mission-page .card .cardhead button[disabled]{cursor:default;color:var(--ink-quiet);border-color:var(--line-soft)}
+.mission-page .card .cardhead button.busy{animation:mission-breathe 1.6s ease-in-out infinite}
+
+@media (prefers-reduced-motion:reduce){
+  .mission-page .role.quiet,.mission-page .card .cardhead button.busy{animation:none}
+}
+@media (max-width:560px){
+  .mission-page .machinery .cardhead{flex-wrap:wrap;row-gap:8px}
+  .mission-page .machinery .cardhead h2{flex-basis:100%}
+  .mission-page .machinery .cardhead button{margin-left:0;min-height:44px}
+  .mission-page #jobs-card .cardhead{flex-wrap:wrap}
+  .mission-page #jobs-card .count{margin-left:0;flex-basis:100%}
+}
+
 /* §15-2g removed the joinbadge and the dashed join-request row from this
    panel. Nothing replaces them and no spacing is patched in: the roster closes
    on its last system (which loses its rule to :last-child), so the card ends on
