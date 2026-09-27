@@ -144,20 +144,25 @@ test("the manifest row approves in two taps, idempotently under partial success"
     await page.goto("/home");
     const row = page.locator(".item.suggest", { hasText: "Reviewed intake 1786823446152" });
     await expect(row.first()).toBeVisible();
-    const approve = row.first().getByRole("button", { name: "Add to orbit" });
+    /* #1145: the two decisions live in the drawer the row opens into, like
+       a filed item's detail -- the row at rest carries none. */
+    await row.first().click();
+    const drawer = page.locator(`[id="${receiptId}-view"]`);
+    await expect(drawer).toBeVisible();
+    const approve = drawer.getByRole("button", { name: "Add to orbit" });
 
     // One stray click does nothing but arm.
     await approve.click();
-    await expect(row.first().getByRole("button", { name: "tap again to approve" })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "tap again to approve" })).toBeVisible();
     expect(approvals.length).toBe(0);
 
-    // The second tap fires; the first answer is partial, so the row says so.
-    await row.first().getByRole("button", { name: "tap again to approve" }).click();
+    // The second tap fires; the first answer is partial, so the drawer says so.
+    await drawer.getByRole("button", { name: "tap again to approve" }).click();
     await expect.poll(() => approvals.length).toBe(1);
-    await expect(row.first().locator(".mail-problem")).toContainText("another try");
+    await expect(drawer.locator(".mail-problem")).toContainText("another try");
 
     // The retry carries the SAME operation id and the SAME body: one item, ever.
-    await row.first().getByRole("button", { name: "tap again to approve" }).click();
+    await drawer.getByRole("button", { name: "tap again to approve" }).click();
     await expect.poll(() => approvals.length).toBe(2);
     expect(approvals[1]).toEqual(approvals[0]);
     expect(approvals[0]).toMatchObject({

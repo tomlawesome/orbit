@@ -800,3 +800,43 @@
 .bp-why{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--ink-quiet);margin:0}
 .bp-restore{border-color:color-mix(in srgb, var(--accent) 45%, transparent);color:var(--accent-text)}
 @media (prefers-reduced-motion:reduce){ .bp-plate.scanning::after{animation:none} .bp-page img{transition:none} }
+
+/* ==========================================================================
+   THE SUGGESTION IN THE BELT (#1145). The amend-then-accept card as it stood
+   on its own page (the retired item.css, which composed it from create.html's
+   ratified field grammar), now the belt's own card: everything the belt
+   already declares (.panel, .field, .row2, .save-row, .btn-primary,
+   .btn-quiet, .problem, .note) is reused, and only what the suggestion card
+   alone needs is here -- the heading that IS the name, and the from-document
+   mark on a field the relay read. A suggestion's seat is CON-3's hollow
+   body drawn as stone (belt.behaviour.js drawRock's hollow branch); its
+   card wears the same dashed pen the manifest's suggestion row wears, so
+   "not yet in orbit" reads the same on every screen.
+   ======================================================================== */
+.belt-page .item-card.sug-card{border-style:dashed;border-color:color-mix(in srgb, var(--accent) 55%, var(--line))}
+/* #434: the heading IS the name (create.css .name-title, mirrored here because
+   this screen does not load that sheet). */
+.belt-page .name-title{display:block;width:100%;background:none;border:0;padding:0;
+  font:600 21px var(--display);line-height:1.25;color:var(--ink)}
+.belt-page .name-title:focus{outline:none;border-bottom:1px solid var(--accent)}
+.belt-page .name-title:disabled{color:var(--ink-mid)}
+.belt-page .name-title.sugg{border-left:3px solid var(--accent);padding-left:10px}
+.belt-page .panel .field.sugg input{border-left:3px solid var(--accent)}
+.belt-page .sug-card .save-row{margin-top:10px}
+/* How sure the relay was, on a phone's reading (the pocket's ReviewCard
+   grammar): 12px caps after the value, ok for sure, warm for unsure. */
+.belt-page .kv b i.sure{font:normal var(--p-type-caps, 11px)/1 var(--mono);letter-spacing:var(--p-type-caps-track, .1em);
+  text-transform:uppercase;color:var(--ok-text);margin-left:8px}
+.belt-page .kv b i.sure.unsure{color:var(--warm-text)}
+/* The seat: a hollow rock breathes no glow of its own; the mark the papers
+   wear is unchanged. Its caption's second line already reads the accent. */
+.belt-page .hit.sug .hollow{transition:fill .25s ease}
+.belt-page .hit.sug:hover .hollow{fill:color-mix(in srgb, var(--accent) 22%, transparent)}
+@media (max-width: 900px){
+  /* review & amend → on the phone's card: the pocket's quiet line, 44px. */
+  .belt-page .ip-amend{display:flex;align-items:center;justify-content:center;width:100%;min-height:var(--p-hit);
+    margin-top:4px;appearance:none;border:0;background:none;padding:0;cursor:pointer;
+    font:var(--p-type-meta)/1.2 var(--mono);color:var(--accent-text);letter-spacing:.02em}
+  .belt-page .ip-amend:disabled{opacity:.5}
+  .belt-page .ip-amend:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
+}

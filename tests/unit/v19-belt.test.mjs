@@ -98,6 +98,81 @@ describe("the belt's manifest", () => {
 });
 
 /*
+ * #1145: the suggestion in the belt. A mail-in receipt arrived at by its own
+ * address is seated at the date the relay read, among its neighbours in
+ * time, hollow (band.js gives it the accent, not an urgency), with the paper
+ * it came in staged beside it -- and only that arrival seats it.
+ */
+describe("the suggestion's seat", () => {
+  /* The inbox fixture's r-insurance as readItem hands it to the belt
+     (fixtures/inbox.js through receiptSuggestionsOf, plus the receipt's own
+     proposal and count): spelled out here so the seat is pinned to values,
+     not to whatever the fixture says this week. */
+  const PROPOSAL = {
+    title: "Home insurance renewal", provider: "Harbour Mutual", costMinor: 40000, currency: "GBP",
+    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12,
+  };
+  const SUGGESTION = {
+    id: "r-insurance", receiptId: "r-insurance", householdId: null, draftVersion: 1,
+    title: "Home insurance renewal", renewsOn: "2026-10-03", scheduleKind: "renewal",
+    provider: "Harbour Mutual", expiresAt: "2026-09-25T12:00:00.000Z", receivedAt: "2026-08-11T09:24:00.000Z",
+    costMinor: 40000, currency: "GBP", sourceDocument: "1 forwarded document",
+    attachments: [{ displayName: "policy-schedule.pdf", sizeBytes: 831488, scannedClean: true }],
+    suggestion: true, proposal: PROPOSAL, attachmentCount: 1, today: TODAY,
+  };
+  const RECEIPT = { proposal: PROPOSAL };
+
+  it("takes its seat at the relay's date, in order, and nowhere else", () => {
+    const rows = manifestOf({ suggestion: SUGGESTION });
+    expect(rows.map((row) => row.id)).toEqual([
+      "i-gutter", "i-mot", "i-boiler", "r-insurance", "i-chimney", "i-smoke", "i-svc",
+    ]);
+    const seat = rows.find((row) => row.id === "r-insurance");
+    expect(seat.suggestion).toBe(SUGGESTION);
+    expect(seat.title).toBe("Home insurance renewal");
+    expect(seat.days).toBe(51);
+    expect(`${seat.t} · ${seat.when}`).toBe("T−51d · 03 Oct");
+    expect(seat.longWhen).toBe("3 October 2026");
+    expect(seat.status).toBe("suggested");
+    expect(seat.section).toBeNull();
+    expect(seat.cost).toBe(40000);
+    expect(seat.costIsEstimate).toBe(true);
+    // No arrival, no visitor: a filed item's belt carries no suggestions.
+    expect(manifestOf().map((row) => row.id)).not.toContain("r-insurance");
+  });
+
+  it("wears the accent in the band, never an urgency, and says so to a reader", () => {
+    const bodies = bodiesOf(manifestOf({ suggestion: SUGGESTION }), DESK.GAP_SCALE);
+    const body = bodies.find((one) => one.kind === "item" && one.id === "r-insurance");
+    expect(body.tone).toBe("var(--accent)");
+    expect(body.item.suggestion).toBeTruthy();
+    // Its neighbours keep their own tones: nothing else on the belt changed.
+    expect(bodies.find((one) => one.id === "i-boiler").tone).toBe("var(--warm)");
+  });
+
+  it("stages the forwarded paper beside it: named, dated by the mail, with no page and no download", () => {
+    const seat = manifestOf({ suggestion: SUGGESTION }).find((row) => row.id === "r-insurance");
+    expect(seat.docs).toHaveLength(1);
+    expect(seat.docs[0]).toMatchObject({
+      id: "r-insurance-paper-1", name: "policy-schedule.pdf", size: "812 KB", added: "11 August 2026",
+      plate: "PDF", clean: true, href: "", previewHref: "", ready: false, staged: true,
+    });
+    expect(documentPreviewStateOf(seat.docs[0])).toBe("staged");
+    // Live data names no files yet (#467): the count stands in.
+    const counted = manifestOf({ suggestion: { ...SUGGESTION, attachments: null, attachmentCount: 2 } })
+      .find((row) => row.id === "r-insurance");
+    expect(counted.docs.map((doc) => doc.name)).toEqual(["forwarded document 1", "forwarded document 2"]);
+  });
+
+  it("falls to the later end when the relay read no date", () => {
+    const undated = { ...SUGGESTION, renewsOn: null, proposal: { ...RECEIPT.proposal, dueDate: undefined } };
+    const rows = manifestOf({ suggestion: undated });
+    expect(rows.at(-1).id).toBe("r-insurance");
+    expect(rows.at(-1).when).toBe("undated");
+  });
+});
+
+/*
  * #1088: the reading card's own honest state (owner-decisions.md §18) — a
  * pure read of the document's own lifecycle, never a guess and never
  * anything the endpoint would have to be asked first. `ready` alone answers
