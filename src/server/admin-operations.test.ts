@@ -25,7 +25,11 @@ vi.mock("@/server/imap-ingestion", () => ({
 }));
 
 import { MailInCredentialLockedError } from "@/server/imap-ingestion";
-import { safeAdministratorAuditLabel, setImapProviderVerificationDependenciesForTests, verifyImapIngestionProvider } from "./admin-operations";
+import { verifySmtpProviderConnection } from "@/server/notification-worker";
+import {
+  safeAdministratorAuditLabel, setImapProviderVerificationDependenciesForTests, verifyImapIngestionProvider,
+  verifySmtpProvider,
+} from "./admin-operations";
 
 describe("administrator mailbox provider verification bounds", () => {
   beforeEach(() => {
@@ -64,6 +68,27 @@ describe("administrator mailbox provider verification bounds", () => {
   it("surfaces a locked mail-in credential as credential_locked, not unsafe_input (#1067)", async () => {
     mocks.verify.mockRejectedValueOnce(new MailInCredentialLockedError("test-key-id"));
     await expect(verifyImapIngestionProvider("admin-user")).resolves.toEqual({ result: "credential_locked" });
+  });
+
+  /* #1071: the server now remembers each test's last answer, via a small
+     `recordMailProbeResult` write this suite never mocks `@/db` for — so it
+     always throws here (no DATABASE_URL in this process) and is swallowed.
+     The point of this test is exactly that swallow: the live answer the
+     caller paid for must still come back whole. */
+  it("still answers with the live result when the mail-probe store write fails", async () => {
+    mocks.verify.mockResolvedValueOnce("available");
+    await expect(verifyImapIngestionProvider("admin-user")).resolves.toEqual({ result: "available" });
+  });
+});
+
+describe("administrator SMTP relay verification", () => {
+  /* One test only: `verifySmtpProvider` throttles a second call within 1s of
+     the first (its own dedup, unrelated to #1071) on real wall-clock time
+     with no injectable clock, so a second case here would collide with the
+     first rather than proving anything new. */
+  it("reports unsafe_input when the SMTP connection check throws, and still stores the answer (#1071, swallowed since this suite has no DATABASE_URL)", async () => {
+    vi.mocked(verifySmtpProviderConnection).mockRejectedValueOnce(new Error("connection refused"));
+    await expect(verifySmtpProvider("admin-user")).resolves.toEqual({ result: "unsafe_input" });
   });
 });
 
