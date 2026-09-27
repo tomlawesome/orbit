@@ -485,7 +485,18 @@ test("household page: reached from home's sun by keyboard, and is fully reachabl
        the stack's lifetime as unrelated specs create accounts — genuinely
        unbounded and not part of what this test is proving. Everything else on
        the screen is still audited in full. */
-    await auditTabOrder(page, "household page", { exclude: ".cand" });
+    /* #1002: the archive's unselected tab is out of the Tab order by
+       design (the WAI-ARIA tabs pattern: the tablist is one Tab stop and
+       ← → move between its tabs), so it is proved by arrow key below rather
+       than by Tab — the same split the pocket file makes (#1122). */
+    await auditTabOrder(page, "household page", {
+      exclude: '.cand, [role="tab"][aria-selected="false"]',
+    });
+    const archive = page.getByRole("tablist", { name: "The archive" });
+    await tabTo(page, { selector: '[role="tab"][aria-selected="true"]' }, { screen: "household page archive" });
+    await page.keyboard.press("ArrowRight");
+    await expect(archive.getByRole("tab", { name: "bring one in" })).toBeFocused();
+    await expect(archive.getByRole("tab", { name: "bring one in" })).toHaveAttribute("aria-selected", "true");
   } finally {
     await cleanup(page, household);
   }
@@ -511,7 +522,15 @@ test("settings: reached via the account panel, and fully reachable", async ({ pa
   const household = await arriveAtHome(page);
   try {
     await openSettingsFromHome(page);
-    await auditTabOrder(page, "settings");
+    /* #1003: the Reminders card's tabs (owner-decisions §22) are one Tab
+       stop with ← → between them, so the unchosen tab is proved by arrow
+       key below, not by Tab — as the pocket file does. */
+    await auditTabOrder(page, "settings", { exclude: '[role="tab"][aria-selected="false"]' });
+    const reminders = page.getByRole("tablist", { name: "Reminders" });
+    await tabTo(page, { selector: '#rem-tab-reminders' }, { screen: "settings reminders" });
+    await page.keyboard.press("ArrowRight");
+    await expect(reminders.getByRole("tab", { name: "sent to you lately" })).toBeFocused();
+    await expect(reminders.getByRole("tab", { name: "sent to you lately" })).toHaveAttribute("aria-selected", "true");
   } finally {
     await cleanup(page, household);
   }

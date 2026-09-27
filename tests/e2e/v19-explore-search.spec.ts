@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
-import { workerAccount } from "./support/worker-identity";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -27,6 +27,8 @@ async function signInAsAdmin(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: workerAccount("administrator") }).click();
   await settleArrival(page);
+  /* #1080: the sweep's hard delete is an instance-admin power. */
+  await ensureWorkerAdministrator(page);
 }
 
 /**
