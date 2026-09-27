@@ -70,6 +70,10 @@ export async function load({ params }) {
       household: household
         ? { ...household, items: (household.items ?? []).map((item) => ({ ...item, householdId: household.id })) }
         : null,
+      /* #1145: the same shape readBelt answers -- nothing suggested here. */
+      suggestion: null,
+      households: [],
+      primary: null,
       documentsByItem: {},
     };
   }

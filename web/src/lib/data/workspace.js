@@ -2284,44 +2284,46 @@ export async function withdrawInvitation(householdId, invitationId) {
  * item alone because every item's rock wears CON-1's belt ellipse when it has
  * papers, and because centring a neighbour must not go back to the server.
  *
- * #434 rides along: an id that is a mail-in receipt rather than an item is
- * still the amend-then-accept view, which has no seat in the band — a
- * suggestion is not in the manifest until it is accepted into it.
+ * #434, and since #1145 the owner's merge of the suggestion screen into the
+ * belt: an id that is a mail-in receipt rather than an item is the SAME
+ * belt -- the household the receipt files into (its own, else the primary),
+ * with the suggestion handed alongside so beltManifestOf seats it, hollow, at
+ * the date the relay read. It is a visitor: a suggestion is not in the
+ * manifest until it is accepted into it, so no other arrival ever seats one.
+ * `households` and `primary` ride along for the phone's review sheet, whose
+ * form offers the sections of the household the item files into.
  *
  * @param {string} id  the centred item, or (#434) a mail-in receipt
  */
 export async function readBelt(id) {
   const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
   const today = todayOf(workspace);
-  const household = workspace.households.find((one) =>
+  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  let household = workspace.households.find((one) =>
     (one.items ?? []).some((item) => item.id === id),
   );
+  /** @type {?ItemView} */
+  let suggestion = null;
   if (!household) {
-    const suggestion = await readItem(id);
-    /* The pocket's receipt page (round 3 §4) mounts the chrome, whose orb
-       wants the reader, and the review sheet, whose form offers the
-       sections of the household the item files into. */
-    return suggestion?.suggestion
-      ? {
-          kind: "suggestion",
-          item: suggestion,
-          user: session?.user ?? null,
-          households: workspace.households,
-          primary: workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null,
-        }
-      : null;
+    const found = await readItem(id);
+    if (!found?.suggestion) return null;
+    suggestion = found;
+    household = workspace.households.find((one) => one.id === (found.householdId ?? primary))
+      ?? workspace.households[0];
   }
 
   /** @type {Record<string, DocumentSummary[]>} */
   const documentsByItem = {};
+  const items = household?.items ?? [];
+  const householdId = household?.id ?? "";
   await Promise.all(
-    (household.items ?? [])
+    items
       .filter((item) => (item.documentCount ?? 0) > 0)
       .map(async (item) => {
         try {
           /** @type {{ documents?: DocumentSummary[] }} */
           const body = await json(
-            await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
+            await fetch(`/api/households/${householdId}/items/${item.id}/documents`, {
               credentials: "same-origin",
             }),
           );
@@ -2337,12 +2339,17 @@ export async function readBelt(id) {
     selectedId: id,
     today,
     user: session?.user ?? null,
-    household: {
-      ...household,
-      /* The command builders write against the raw item plus the household it
-         proved membership of (#455, commands.js base()). */
-      items: (household.items ?? []).map((item) => ({ ...item, householdId: household.id })),
-    },
+    household: household
+      ? {
+          ...household,
+          /* The command builders write against the raw item plus the household it
+             proved membership of (#455, commands.js base()). */
+          items: items.map((item) => ({ ...item, householdId })),
+        }
+      : null,
+    suggestion,
+    households: workspace.households,
+    primary,
     documentsByItem,
   };
 }
