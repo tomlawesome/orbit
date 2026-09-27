@@ -27,8 +27,11 @@
 import {
   AMBIENT_SEED, BAND_MARGIN, BERTH_NARROW, COS_I, DRIFT, GLIDE, HFRAC, RAD, RADIAL,
   SIN_I, SWEEP, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, clamp01, ease,
-  geometryOf, lehmer, phiAtX, rollRangeOf, seatOf, spawnInto, stepFrom,
+  geometryOf, lehmer, phiAtX, pocketPapersOf, rollRangeOf, seatOf, spawnInto, stepFrom,
+  POCKET_CREST, POCKET_DRIFT, POCKET_PLATE,
 } from "./band.js";
+import { isPocket } from "$lib/pocket/media.js";
+import { dragAxis } from "$lib/pocket/gesture.js";
 
 /**
  * band.js's vocabulary, said once here so the painter speaks the same
@@ -91,6 +94,8 @@ import {
  *   A document is never the centred body (owner-decisions.md §18), so this is
  *   never routed through onSwap/onSelect — the item at the apex is untouched.
  * @property {(band: BeltApi) => void} [onClosePreview]  the reading card closes
+ * @property {(band: BeltApi) => void} [onOpenList]  the pocket's "+N" clump was
+ *   pressed: the screen lists every paper of the centred item (#1072)
  */
 
 const NS = "http://www.w3.org/2000/svg";
@@ -130,8 +135,12 @@ const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matc
  * @param {number}     r     its radius
  * @param {string}     tone  the rim's colour
  * @param {boolean}    pip   whether it wears the urgency dot
+ * @param {boolean}    [hollow]  a suggestion's rock (#1145): the same
+ *   silhouette drawn as an outline -- CON-3's "○ hollow suggestion", said in
+ *   stone -- with the faint accent wash the dial's hollow body has and no
+ *   shading, craters or pip, because there is no body there yet
  */
-function drawRock(g, seed, r, tone, pip) {
+function drawRock(g, seed, r, tone, pip, hollow = false) {
   const rng = lehmer(seed);
   const facets = 11, pts = [];
   for (let i = 0; i < facets; i++) {
@@ -140,6 +149,12 @@ function drawRock(g, seed, r, tone, pip) {
     pts.push(`${(Math.cos(a) * rr).toFixed(2)},${(Math.sin(a) * rr * 0.92).toFixed(2)}`);
   }
   const points = pts.join(" ");
+  if (hollow) {
+    g.appendChild(el("polygon", { class: "hollow", points,
+      fill: "color-mix(in srgb, var(--accent) 12%, transparent)",
+      stroke: "var(--accent)", "stroke-width": "1.8", "stroke-linejoin": "round" }));
+    return;
+  }
   g.appendChild(el("polygon", { points,
     fill: "color-mix(in srgb, var(--accent) 34%, var(--bg))",
     stroke: tone, "stroke-opacity": ".85", "stroke-width": "1.35",
@@ -259,6 +274,7 @@ export function mountBelt(root, options) {
     onStep,
     onOpenPreview = () => {},
     onClosePreview = () => {},
+    onOpenList = () => {},
   } = options;
 
   const bandC = /** @type {HTMLCanvasElement} */ (root.querySelector("#band"));
@@ -267,6 +283,8 @@ export function mountBelt(root, options) {
   const seatsG = /** @type {SVGGElement} */ (root.querySelector("#seats"));
   const capsG = /** @type {SVGGElement} */ (root.querySelector("#caps"));
   const endsG = /** @type {SVGGElement} */ (root.querySelector("#ends"));
+  /* #1072: the pocket's "+N" clump, drawn only on a phone. */
+  const clumpG = /** @type {SVGGElement} */ (root.querySelector("#clump"));
   const wrap = /** @type {HTMLElement} */ (root.querySelector("#cardwrap"));
   /* #1088: the grid the reading card grows beside — create-v3's lanes,
      ported (design/v19/create-v3.html's own mechanism, carried into
@@ -280,7 +298,13 @@ export function mountBelt(root, options) {
   const hazeCanvas = document.createElement("canvas");
   const hctx = /** @type {CanvasRenderingContext2D} */ (hazeCanvas.getContext("2d"));
 
-  let geom = geometryOf(window.innerWidth, window.innerHeight);
+  /* #1072: on a phone the belt is a plate across the top of a page that
+     scrolls, not the whole viewport: its width is the page's and its height
+     the plate's own. */
+  const measureSky = () => isPocket()
+    ? geometryOf(root.clientWidth || window.innerWidth, POCKET_PLATE, { pocket: true })
+    : geometryOf(window.innerWidth, window.innerHeight);
+  let geom = measureSky();
   /** @type {Body[]} */
   let bodies = [];
   /** @type {Rubble[]} */
@@ -328,7 +352,7 @@ export function mountBelt(root, options) {
   /* ---- the seats ---------------------------------------------------- */
 
   function buildBodies() {
-    bodies = bodiesOf(manifest, geom.GAP_SCALE);
+    bodies = bodiesOf(manifest, geom.GAP_SCALE, { pocket: Boolean(geom.pocket) });
     const at = bodies.findIndex((b) => b.id === selectedId);
     selected = prevSel = Math.max(0, at);
     roll = rollFrom = rollTo = bodies[selected]?.off ?? 0;
@@ -343,13 +367,25 @@ export function mountBelt(root, options) {
     bodies.forEach((b, i) => {
       const seat = el("g", { class: "seat" });
       const hit = el("g", { class: "hit", role: "button", tabindex: "0" });
+      /* #1145: a suggestion's seat, and its staged papers, say so. */
+      const suggested = Boolean(b.item.suggestion);
+      if (suggested) hit.classList.add("sug");
       hit.setAttribute("aria-label", b.kind === "item"
-        ? `${b.label} — ${b.item.section ?? "no section"}, due ${b.longWhen}, ${b.t}` +
-          (b.docs.length ? `, ${b.docs.length} documents attached` : "")
-        : `${b.doc.name}, ${b.sub}, a document attached to ${b.item.title}`);
-      hit.appendChild(el("circle", { r: b.r * 1.8, fill: "transparent" }));
-      hit.appendChild(el("circle", { class: "fring", r: b.r + 13, fill: "none",
-        stroke: "var(--accent)", "stroke-width": "1.4", "stroke-dasharray": "3 3" }));
+        ? (suggested
+          ? `${b.label} — suggested from your documents, not yet in orbit, ` +
+            `${b.item.kind === "expiry" ? "ends" : "renews"} ${b.longWhen}, ${b.t}` +
+            (b.docs.length ? `, ${b.docs.length} forwarded document${b.docs.length === 1 ? "" : "s"}` : "")
+          : `${b.label} — ${b.item.section ?? "no section"}, due ${b.longWhen}, ${b.t}` +
+            (b.docs.length ? `, ${b.docs.length} documents attached` : ""))
+        : (suggested
+          ? `${b.doc.name}, ${b.sub}, a forwarded document staged with ${b.item.title}`
+          : `${b.doc.name}, ${b.sub}, a document attached to ${b.item.title}`));
+      /* #1072: on a phone every seat's target is the pocket's 44px, and no
+         wider — the neighbours sit 40px in from the screen's edge. */
+      hit.appendChild(el("circle", { r: geom.pocket ? 22 : b.r * 1.8, fill: "transparent" }));
+      /* #1065: no .fring child here any more -- belt.css puts the focus ring
+         on `hit` itself as an outline, the same fix #1062 gave the end-caps
+         and for the same reason (belt.css has it). */
       b.mark = drawMark(hit, b.r);
       /* CON-1's belt ellipse: this item has documents attached. On this screen
          it is also a promise — centre it and they come out into the band. */
@@ -357,7 +393,7 @@ export function mountBelt(root, options) {
         hit.appendChild(el("ellipse", { rx: (b.r * 1.93).toFixed(1),
           ry: (b.r * 0.66).toFixed(1), transform: "rotate(-24)", fill: "none",
           stroke: "var(--paper)", "stroke-width": "1.3", opacity: ".75" }));
-      drawRock(hit, b.seed, b.r, b.tone, b.kind === "item");
+      drawRock(hit, b.seed, b.r, b.tone, b.kind === "item", suggested && b.kind === "item");
       hit.appendChild(el("circle", { class: "rim", r: b.r + 10, fill: "none",
         stroke: "var(--accent)", "stroke-width": "1", opacity: "0" }));
       /* #1088: a rock rolls to the apex; a paper opens the reading card in
@@ -373,6 +409,11 @@ export function mountBelt(root, options) {
       /* The label rides upright beneath the body — the band's tangent turns the
          rock, never the words. */
       const cap = el("g", { class: "capseat" });
+      if (geom.pocket) {
+        cap.append(...pocketCaption(b));
+        capsG.appendChild(cap);
+        return;
+      }
       const name = el("text", { class: "cap-name", y: (b.r + 21).toFixed(0) });
       if (b.kind === "doc") name.setAttribute("class", "cap-name doclabel");
       name.textContent = b.label;
@@ -380,6 +421,149 @@ export function mountBelt(root, options) {
       sub.textContent = b.sub;
       cap.append(name, sub); capsG.appendChild(cap);
     });
+  }
+
+  /* ---- THE POCKET'S CAPTIONS (#1072, §2.3) ----------------------------
+     A neighbour's name (16 characters, then an ellipsis) and its T-label,
+     13px, hung beneath the rock and held inside the screen's gutter: the
+     neighbours sit 40px in from the edge, so a centred label would be cut.
+     A paper's name takes two lines of up to 17 characters. */
+  /** @param {string} text @param {number} n */
+  const clip = (text, n) => (text.length <= n ? text : text.slice(0, n - 1).trimEnd() + "…");
+  /** @param {string} name @returns {string[]} at most two lines */
+  function paperLines(name) {
+    if (name.length <= 17) return [name];
+    const cut = name.lastIndexOf(" ", 17);
+    const at = cut > 6 ? cut : 17;
+    return [name.slice(0, at).trimEnd(), clip(name.slice(at).trimStart(), 17)];
+  }
+  /** @param {Body} b @returns {SVGElement[]} */
+  function pocketCaption(b) {
+    if (b.kind === "doc") {
+      return paperLines(b.label).map((line, k) => {
+        const t = el("text", { class: "cap-name doclabel", y: (b.r + 26 + k * 16).toFixed(0) });
+        t.textContent = line;
+        return t;
+      });
+    }
+    const name = el("text", { class: "cap-name", y: (b.r + 18).toFixed(0) });
+    name.textContent = clip(b.label, 16);
+    const sub = el("text", { class: "cap-t", y: (b.r + 34).toFixed(0), fill: b.tone });
+    sub.textContent = b.sub;
+    return [name, sub];
+  }
+  /** The page's gutter, from the kit's tokens (16px, 12px under 390). */
+  const gutter = () => Number.parseFloat(getComputedStyle(root).getPropertyValue("--p-gutter")) || 16;
+  /** @type {number[]} */
+  let capWidth = [];
+  /**
+   * Holds a caption inside the gutter: centred under its body while it fits,
+   * pinned to the edge (and anchored there) once it would not.
+   *
+   * @param {Element} cap  the caption's group
+   * @param {number}  i    its seat
+   * @param {number}  x    where its body is now
+   */
+  function holdCaption(cap, i, x) {
+    if (!capWidth[i]) {
+      let w = 0;
+      for (const t of /** @type {HTMLCollectionOf<SVGTextContentElement>} */ (cap.children))
+        w = Math.max(w, t.getComputedTextLength?.() ?? 0);
+      capWidth[i] = w;
+    }
+    const w = capWidth[i], g = gutter();
+    let anchor = "middle", dx = 0;
+    if (x - w / 2 < g) { anchor = "start"; dx = g - x; }
+    else if (x + w / 2 > geom.W - g) { anchor = "end"; dx = geom.W - g - x; }
+    /* A style, not the attribute: belt.css centres every caption. */
+    for (const t of /** @type {HTMLCollectionOf<SVGTextElement>} */ (cap.children)) {
+      t.style.textAnchor = anchor;
+      t.setAttribute("x", dx.toFixed(1));
+    }
+  }
+
+  /* ---- THE CLUMP (#1072, §2.3; round 1's "many") -----------------------
+     More than two papers would crowd the shoulders off the screen, so two
+     ride and the rest pack into one ringed cluster at the crest — three
+     small rocks inside a paper ring, "+N more" beneath — which opens the
+     list of every paper. Drawn once, shown for whichever item is centred. */
+  function buildClump() {
+    clumpG.textContent = "";
+    if (!geom.pocket) return;
+    const hit = el("g", { class: "hit clump", role: "button", tabindex: "0" });
+    hit.appendChild(el("circle", { r: 22, fill: "transparent" }));
+    hit.appendChild(el("circle", { class: "fring", r: 26, fill: "none",
+      stroke: "var(--accent)", "stroke-width": "1.4", "stroke-dasharray": "3 3" }));
+    const mark = drawMark(hit, 12);
+    mark.setAttribute("opacity", "1");
+    for (const [dx, dy, seed] of [[-5, -3, 311], [5, -4, 523], [0, 5, 877]]) {
+      const g = el("g", { transform: `translate(${dx},${dy})` });
+      drawRock(g, seed, 6, "var(--paper)", false);
+      hit.appendChild(g);
+    }
+    const label = el("text", { class: "cap-name doclabel", y: "38" });
+    hit.appendChild(label);
+    const press = () => onOpenList(api);
+    hit.addEventListener("click", press);
+    hit.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); press(); }
+    });
+    clumpG.appendChild(hit);
+    clumpG.setAttribute("transform", `translate(${(geom.W / 2).toFixed(1)},${POCKET_CREST + 2})`);
+    paintClump(0);   /* hidden until an item with more than two papers is centred */
+  }
+  /** @param {number} open how far the centred item's papers are out */
+  function paintClump(open) {
+    const hit = /** @type {SVGGElement | null} */ (clumpG.firstChild);
+    if (!hit) return;
+    const b = bodies[selected];
+    const extra = b?.kind === "item" ? pocketPapersOf(b.docs.length).clump : 0;
+    const o = extra ? open : 0;
+    clumpG.setAttribute("opacity", o.toFixed(3));
+    const shown = o >= 0.5;
+    clumpG.style.pointerEvents = shown ? "" : "none";
+    clumpG.style.display = o < 0.004 ? "none" : "";
+    hit.setAttribute("tabindex", shown ? "0" : "-1");
+    hit.setAttribute("aria-hidden", shown ? "false" : "true");
+    if (extra && b?.kind === "item") {
+      hit.setAttribute("aria-label", `${extra} more ${extra === 1 ? "document" : "documents"} of ${b.label} — list them all`);
+      const label = /** @type {SVGTextElement} */ (hit.lastChild);
+      label.textContent = `+${extra} more`;
+    }
+  }
+
+  /* ---- THE POCKET'S END-CAPS (#1072, §2.3) ------------------------------
+     "The end-caps live at the shoulders, never in the top row": on a phone
+     the top row is the chrome's, which sits over it and took their taps.
+     So they are 44px ghost pills where the arc leaves the screen, below the
+     neighbours' labels and above the card, in the pocket's button type. The
+     same control as the desk's in every other respect (#1062). */
+  const POCKET_ENDS_Y = POCKET_CREST + 146;   /* the pills' middle */
+  function buildPocketEnds() {
+    const g = gutter();
+    for (const [step, anchor, text, name] of
+         /** @type {[number, string, string, string][]} */
+         ([[-1, "start", "← sooner", "Move one item sooner along the belt, towards what is due first"],
+           [+1, "end", "later →", "Move one item later along the belt, towards what is due last"]])) {
+      const cap = el("g", { class: "endcap-hit pocket", role: "button", tabindex: "0",
+        "aria-label": name, "data-step": step });
+      const pill = el("rect", { class: "endtarget endpill", rx: "22", ry: "22",
+        height: "44", y: String(POCKET_ENDS_Y - 22) });
+      const t = /** @type {SVGTextContentElement} */ (
+        el("text", { class: "endcap", y: String(POCKET_ENDS_Y + 5), "text-anchor": "middle" }));
+      t.textContent = text;
+      cap.append(pill, t);
+      endsG.appendChild(cap);
+      const w = Math.max(44, Math.ceil(t.getComputedTextLength() + 32));
+      const x = anchor === "start" ? g : geom.W - g - w;
+      pill.setAttribute("x", String(x));
+      pill.setAttribute("width", String(w));
+      t.setAttribute("x", (x + w / 2).toFixed(1));
+      cap.addEventListener("click", () => pressEnd(cap, step));
+      cap.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pressEnd(cap, step); }
+      });
+    }
   }
 
   /* The two end-caps: which way time runs. Quiet, riding the band where it
@@ -411,6 +595,7 @@ export function mountBelt(root, options) {
   function buildEnds() {
     endsG.textContent = "";
     if (!bodies.length) return;
+    if (geom.pocket) { buildPocketEnds(); markEnds(); return; }
     const half = (geom.A * RADIAL * COS_I * 2 + geom.A * HFRAC * SIN_I * 2) / 2;
     const clear = half + 25 + 6 + 14;   /* rock r ≤ 25, its ring, breathing room */
     /* #1035: on a narrow sky the shared chrome shares this strip, and the
@@ -451,7 +636,12 @@ export function mountBelt(root, options) {
          lower than eight above the topmost ink a body at this x can reach,
          which is the clearance this whole placement exists to keep. */
       const bodyTop = line - half - 25 - 6;
-      let y = Math.min(bodyTop - 8, Math.max(20, line - clear));
+      /* On a desk they stand at the screen's own middle, whatever height the
+         band leaves at (owner, 2026-09-26, overturning #1010's "held above
+         its upper edge"): 3.5 is half the capitals' height, so the ink, not
+         the baseline, is what is centred. The pocket's band is a plate at
+         the top of a page that scrolls, so it keeps #1035's rule. */
+      let y = geom.pocket ? Math.min(bodyTop - 8, Math.max(20, line - clear)) : geom.H / 2 + 3.5;
       /* Drawn before it is placed, because only the laid-out text knows how
          wide it is, and how wide it is decides whether it shares a column
          with the search field. */
@@ -566,7 +756,10 @@ export function mountBelt(root, options) {
       const s = seatOf(bodies, i, { roll, berth: berthNow, geom });
       const a = geom.project(s.phi, s.rho, s.h);
       const q = geom.project(s.phi + 0.03, s.rho, s.h);
-      const ang = Math.atan2(a.y - q.y, a.x - q.x) / RAD;
+      /* #1072: the pocket's seats ride upright. Its arc is steep at the
+         shoulders, and a turned seat's box is its turned square — 40% wider
+         than its 44px target, which pushed a neighbour's past the edge. */
+      const ang = geom.pocket ? 0 : Math.atan2(a.y - q.y, a.x - q.x) / RAD;
       /* Rolled round the back of the ring: not on this sky at all. */
       const away = s.phi > geom.PHI_L + 0.2 || s.phi < geom.PHI_R - 0.2;
       /* The search dims, it does not hide: the belt keeps its shape so you can
@@ -583,11 +776,18 @@ export function mountBelt(root, options) {
          tabbable while it is being the card, or the keyboard would land on
          something nobody can see. Nor is a body that has rolled off the sky,
          nor a paper that is still folded inside its item. */
-      const gone = o < 0.5;
+      /* #1072: on a phone a body whose target would leave the screen is
+         scenery — the next-but-ones ride half off the edge so the belt is
+         seen to go on — and has no tap, no name and no caption. */
+      const offSky = Boolean(geom.pocket) && (a.x < 22 || a.x > geom.W - 22);
+      const gone = o < 0.5 || offSky;
       seats[i].style.pointerEvents = gone ? "none" : "";
       const hit = /** @type {SVGGElement} */ (seats[i].firstChild);
       hit.setAttribute("tabindex", gone ? "-1" : "0");
       hit.setAttribute("aria-hidden", gone ? "true" : "false");
+      if (geom.pocket) {
+        if (gone) hit.removeAttribute("role"); else hit.setAttribute("role", "button");
+      }
       /* A lit hit wears its rim while the search is open, so matches read as
          matches even before you reach for them. */
       const rim = /** @type {SVGElement} */ (hit.querySelector(".rim"));
@@ -605,8 +805,10 @@ export function mountBelt(root, options) {
       mark.setAttribute("opacity", marked.toFixed(3));
       mark.style.display = marked < 0.004 ? "none" : "";
       caps[i].setAttribute("transform", `translate(${a.x.toFixed(1)},${a.y.toFixed(1)})`);
-      caps[i].setAttribute("opacity", o.toFixed(3));
+      caps[i].setAttribute("opacity", (offSky ? 0 : o).toFixed(3));
+      if (geom.pocket && !offSky && o > 0.004) holdCaption(caps[i], i, a.x);
     });
+    if (geom.pocket && selBody) paintClump(selBody.kind === "item" ? (bloom[selBody.itemIdx] ?? 0) : 0);
   }
 
   /* ---- the band ------------------------------------------------------ */
@@ -652,9 +854,12 @@ export function mountBelt(root, options) {
     ctx.lineCap = "round"; ctx.lineJoin = "round";
     const thick = geom.A * RADIAL * COS_I * 2 + geom.A * HFRAC * SIN_I * 2;
     const passes = 18;
+    /* #1072: the pocket's band is a quarter the thickness, so its glow is laid
+       down heavier to read as a band at all (round 1: .07 → .11). */
+    const alpha = geom.pocket ? 0.024 : 0.0135;
     for (let k = 0; k < passes; k++) {
       const t = k / (passes - 1);
-      ctx.globalAlpha = 0.0135;
+      ctx.globalAlpha = alpha;
       ctx.lineWidth = thick * (0.78 - 0.7 * t * t);
       ctx.beginPath();
       hazePts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
@@ -732,7 +937,8 @@ export function mountBelt(root, options) {
          brings a body forward. Near bodies are bigger, brighter, quicker. */
       const dn = clamp01(0.5 + (p.d / (geom.A * 0.62)) * 0.9);
       let a = rk.alpha * (0.55 + dn * 0.75) * GAIN;
-      const s = rk.size * (0.78 + dn * 0.5);
+      /* #1072: seen closer, the rubble is the same stone at a finer grain. */
+      const s = rk.size * (0.78 + dn * 0.5) * (geom.pocket ? 0.5 : 1);
 
       a *= Math.min(1, p.x / fadeIn) * Math.min(1, (geom.W - p.x) / fadeIn);
       for (const [c, sw] of clears) {
@@ -772,7 +978,10 @@ export function mountBelt(root, options) {
 
   function measureCard() {
     const r = wrap.getBoundingClientRect();
-    cardRect = { l: r.left, r: r.right, t: r.top, b: r.bottom };
+    /* In the band's own coordinates: the desk's band is the viewport, the
+       pocket's a plate at the top of a page that scrolls (#1072). */
+    const at = bandC.getBoundingClientRect();
+    cardRect = { l: r.left - at.left, r: r.right - at.left, t: r.top - at.top, b: r.bottom - at.top };
     levelReadcard();
   }
 
@@ -893,18 +1102,21 @@ export function mountBelt(root, options) {
       onSettle(selected, api);
       return;
     }
-    /* The card leaves the apex the way the belt leaves it: along the band. */
-    const outDx = dir > 0 ? -300 : 300, outDy = dir > 0 ? geom.DIP_L : geom.DIP_R;
+    /* The card leaves the apex the way the belt leaves it: along the band.
+       On a phone the card hangs beneath the band, so it slides straight out
+       and the next slides in (#1072, §2.3). */
+    const far = geom.pocket ? Math.round(geom.W * 0.7) : 300;
+    const outDx = dir > 0 ? -far : far, outDy = dir > 0 ? geom.DIP_L : geom.DIP_R;
     wrap.classList.remove("rollin", "rollpre");
     wrap.classList.add("rollout");
     wrap.style.setProperty("--cdx", outDx + "px");
     wrap.style.setProperty("--cdy", outDy.toFixed(1) + "px");
-    wrap.style.setProperty("--csc", "0.5");
+    wrap.style.setProperty("--csc", geom.pocket ? "0.96" : "0.5");
     swapTimer = setTimeout(() => {
       onSwap(selected, api);
       wrap.classList.remove("rollout");
       wrap.classList.add("rollpre");
-      wrap.style.setProperty("--cdx", (dir > 0 ? 300 : -300) + "px");
+      wrap.style.setProperty("--cdx", (dir > 0 ? far : -far) + "px");
       wrap.style.setProperty("--cdy", (dir > 0 ? geom.DIP_R : geom.DIP_L).toFixed(1) + "px");
       void wrap.offsetWidth;                       /* commit the pre-state */
       wrap.classList.remove("rollpre");
@@ -963,7 +1175,7 @@ export function mountBelt(root, options) {
       paintMembers(p);
       if (p >= 1) { rollT0 = -1; bloomFrom = bloom.slice(); }
     }
-    drift += DRIFT * dt;
+    drift += (geom.pocket ? POCKET_DRIFT : DRIFT) * dt;
     /* The roll gets every frame it can have. The idle drift is fifteen pixels
        a second and does not: repainting a full-width plate under the card's
        backdrop blur sixty times a second to move it a quarter of a pixel is
@@ -979,7 +1191,8 @@ export function mountBelt(root, options) {
        the wrong paper. Rare in practice (rotating a phone mid-preview). */
     closeDoc();
     const wasSel = bodies[selected]?.id ?? selectedId;
-    geom = geometryOf(window.innerWidth, window.innerHeight);
+    geom = measureSky();
+    capWidth = [];
     buildBodies();                    /* GAP_SCALE may have moved with W */
     const i = bodies.findIndex((b) => b.id === wasSel);
     if (i >= 0) {
@@ -993,9 +1206,11 @@ export function mountBelt(root, options) {
     if (rollT0 < 0) roll = rollFrom = rollTo = bodies[selected]?.off ?? 0;
     membersSvg.setAttribute("viewBox", `0 0 ${geom.W} ${geom.H}`);
     buildEnds();
-    wrap.style.top = geom.APEX_Y + "px";
+    buildClump();
+    /* #1072: the pocket's card is in the page's flow, at the page's width. */
+    wrap.style.top = geom.pocket ? "" : geom.APEX_Y + "px";
     const cardw = cardWidthOf(geom);
-    wrap.style.width = cardw + "px";
+    wrap.style.width = geom.pocket ? "" : cardw + "px";
     /* #1088: the reading lane's own width is a CSS calc off this — the
        mockup's --readw, unchanged — so only the card's own width has to be
        handed over. */
@@ -1006,8 +1221,57 @@ export function mountBelt(root, options) {
     onSettle(selected, api);
   }
 
-  const onResize = () => layout();
+  /* A phone resizes whenever its address bar shows or hides, which is every
+     scroll. The pocket's plate does not depend on the height, so only a new
+     width (or a change of dialect) lays it out again — otherwise an open
+     paper would close under the reader's thumb. */
+  const onResize = () => {
+    if (geom.pocket && isPocket() && (root.clientWidth || window.innerWidth) === geom.W) return;
+    layout();
+  };
   window.addEventListener("resize", onResize);
+
+  /* ---- THE SWIPE (#1072, §2.3) -------------------------------------------
+     On a phone a horizontal swipe across the band or the card steps the belt
+     — the end-caps' own step, so it lands where they land. The card follows
+     the finger a little while it is down; vertical movement is the page's
+     (touch-action: pan-y in belt.css), so a scroll never steps. A swipe that
+     ends on a button does not also press it. */
+  const SWIPE_STEP = 48;
+  /** @type {{ id: number, x: number, y: number, axis: "x" | "y" | null, dx: number } | null} */
+  let swipe = null;
+  /** @param {PointerEvent} e */
+  const swipeDown = (e) => {
+    if (!geom.pocket || e.button > 0 || !(e.target instanceof Element)) return;
+    if (!e.target.closest("#members, #cardwrap") || e.target.closest("input, textarea, select")) return;
+    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, axis: null, dx: 0 };
+  };
+  /** @param {PointerEvent} e */
+  const swipeMove = (e) => {
+    if (!swipe || e.pointerId !== swipe.id) return;
+    const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+    swipe.axis ??= dragAxis(dx, dy);
+    if (swipe.axis !== "x") return;
+    swipe.dx = dx;
+    wrap.style.setProperty("--sdx", (dx * 0.35).toFixed(1) + "px");
+  };
+  /** @param {PointerEvent} e */
+  const swipeUp = (e) => {
+    if (!swipe || e.pointerId !== swipe.id) return;
+    const { axis, dx } = swipe;
+    swipe = null;
+    wrap.style.removeProperty("--sdx");
+    if (axis !== "x" || Math.abs(dx) < SWIPE_STEP || e.type === "pointercancel") return;
+    /* the click this pointer is about to make is the swipe's, not a press */
+    const eat = (/** @type {Event} */ c) => { c.stopPropagation(); c.preventDefault(); };
+    root.addEventListener("click", eat, { capture: true, once: true });
+    setTimeout(() => root.removeEventListener("click", eat, { capture: true }), 400);
+    onStep?.(dx < 0 ? 1 : -1);
+  };
+  root.addEventListener("pointerdown", swipeDown);
+  root.addEventListener("pointermove", swipeMove);
+  root.addEventListener("pointerup", swipeUp);
+  root.addEventListener("pointercancel", swipeUp);
 
   layout();
   if (!reduced()) raf = requestAnimationFrame(frame);
@@ -1048,6 +1312,10 @@ export function mountBelt(root, options) {
       cancelAnimationFrame(raf);
       clearTimeout(swapTimer);
       window.removeEventListener("resize", onResize);
+      root.removeEventListener("pointerdown", swipeDown);
+      root.removeEventListener("pointermove", swipeMove);
+      root.removeEventListener("pointerup", swipeUp);
+      root.removeEventListener("pointercancel", swipeUp);
     },
   });
 }

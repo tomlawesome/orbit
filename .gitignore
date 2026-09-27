@@ -63,5 +63,8 @@ uk-specimens/
 # files there were unaffected, since ignoring never untracks; a NEW file there
 # was silently unaddable until this line (caught on !929, 2026-09-15).
 !src/server/documents/
+# The web app's route folders are source too (#1144): /documents and
+# /api/documents and /api/admin/documents are SvelteKit routes.
+!web/src/**/documents/
 scripts/extract-bundle/docs/
 scripts/extract-bundle/out/

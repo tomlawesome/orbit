@@ -160,9 +160,14 @@ function documentRowOf(doc) {
  * of the three kinds the renderer understands.
  *
  * @param   {BeltDocumentRow} doc
- * @returns {"available" | "scanning" | "removed" | "refused" | "undrawable"}
+ * @returns {"available" | "scanning" | "removed" | "refused" | "undrawable" | "staged"}
  */
 export function documentPreviewStateOf(doc) {
+  /* #1145: a suggestion's paper is staged with the mail, not stored -- there
+     is no page to draw until the suggestion is accepted, and nothing to
+     download, restore or refuse. Read first: a staged paper has no lifecycle
+     word of its own, so every test below would otherwise call it scanning. */
+  if (doc.staged) return "staged";
   if (doc.lifecycle === "pending_deletion") return "removed";
   if (doc.lifecycle === "rejected") return "refused";
   if (!doc.ready) return "scanning";
@@ -188,6 +193,8 @@ export function documentPreviewStateOf(doc) {
  * @property {?string} mediaType
  * @property {boolean} ready
  * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
+ * @property {boolean} [staged]  a suggestion's paper (#1145): it rides with the
+ *   mail and is attached only on acceptance -- no page, no download
  */
 
 /**
@@ -218,6 +225,9 @@ export function documentPreviewStateOf(doc) {
  * @property {number[]} remind
  * @property {BeltDocumentRow[]} docs
  * @property {import('./commands.js').CommandItem} item
+ * @property {?import('./workspace.js').ItemView} [suggestion]  set on the one
+ *   seat that is a mail-in suggestion (#1145): the receipt's own view, for
+ *   the card's form and its two decisions; every other row leaves it unset
  */
 
 /**
@@ -233,10 +243,16 @@ export function documentPreviewStateOf(doc) {
  * the parameter as `null`, and every caller passing a real id is then a type
  * error. That was invisible while the workspace seam handed callers `any`.
  *
- * @param {{ household?: import('./workspace.js').Household | null, documentsByItem?: Record<string, import('./workspace.js').DocumentSummary[]>, today: string, keepId?: string | null }} input
+ * `suggestion` (#1145) is the visitor: a mail-in receipt arrived at by its
+ * own address takes a seat at the date the relay read, hollow, so it can be
+ * looked at among its neighbours in time before it is accepted. Only that
+ * arrival seats it: the belt IS the manifest, and a suggestion is not in the
+ * manifest until it is accepted into it, so a filed item's belt carries none.
+ *
+ * @param {{ household?: import('./workspace.js').Household | null, documentsByItem?: Record<string, import('./workspace.js').DocumentSummary[]>, today: string, keepId?: string | null, suggestion?: import('./workspace.js').ItemView | null }} input
  * @returns {BeltRow[]}
  */
-export function beltManifestOf({ household, documentsByItem = {}, today, keepId = null }) {
+export function beltManifestOf({ household, documentsByItem = {}, today, keepId = null, suggestion = null }) {
   const sections = new Map((household?.sections ?? []).map((s) => [s.id, s.name]));
   const rows = (household?.items ?? [])
     .filter((item) => item.status === "active" || item.id === keepId)
@@ -281,11 +297,113 @@ export function beltManifestOf({ household, documentsByItem = {}, today, keepId 
         item: /** @type {import('./commands.js').CommandItem} */ (item),
       };
     });
+  if (suggestion) rows.push(suggestionRowOf(suggestion, today));
   /* Sorted by date ascending — the belt IS this list. Undated rows fall to
      the later end (days is MAX_SAFE_INTEGER above); ties break on id so two
      items due the same day cannot swap places between loads. */
   rows.sort((a, b) => a.days - b.days || a.id.localeCompare(b.id));
   return rows;
+}
+
+/**
+ * "PDF" from a paper's own name, for a staged paper the list gives no media
+ * type for: the plate the reading card holds still.
+ * @param {string} name
+ * @returns {string}
+ */
+const plateOfName = (name) => {
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1) : "";
+  return ext && ext.length <= 5 ? ext.toUpperCase() : "FILE";
+};
+
+/**
+ * A suggestion's papers as they ride beside it (#1145): staged with the
+ * mail, named where the list names them (#467; the fixture does, live data
+ * gives the count), attached only on acceptance. No page, no download.
+ *
+ * @param {import('./workspace.js').ItemView} suggestion
+ * @returns {BeltDocumentRow[]}
+ */
+function stagedDocsOf(suggestion) {
+  const arrived = suggestion.receivedAt ? arrivedOn(suggestion.receivedAt) : "unknown";
+  const named = suggestion.attachments?.map((a) => ({
+    name: a.displayName ?? "forwarded document",
+    size: sizeLabel(a.sizeBytes),
+    clean: Boolean(/** @type {{ scannedClean?: boolean }} */ (a).scannedClean),
+  }));
+  const count = suggestion.attachmentCount ?? 0;
+  const papers = named ?? Array.from({ length: count }, (_, j) => ({
+    name: count === 1 ? "forwarded document" : `forwarded document ${j + 1}`, size: "unknown size", clean: false,
+  }));
+  return papers.map((paper, j) => ({
+    id: `${suggestion.id}-paper-${j + 1}`,
+    name: paper.name,
+    size: paper.size,
+    added: arrived,
+    type: plateOfName(paper.name),
+    plate: plateOfName(paper.name),
+    clean: paper.clean,
+    scan: paper.clean ? "clean" : null,
+    href: "",
+    previewHref: "",
+    lifecycle: null,
+    mediaType: null,
+    ready: false,
+    deleteAfter: null,
+    staged: true,
+  }));
+}
+
+/**
+ * The suggestion's own seat (#1145): the receipt in the row shape, at the
+ * date the relay read (undated falls to the later end, like any undated
+ * row), its papers staged beside it. The card draws the amend-then-accept
+ * form from `suggestion`; nothing in `item` is ever written against, because
+ * a suggestion has no commands -- it has two decisions.
+ *
+ * @param {import('./workspace.js').ItemView} suggestion
+ * @param {string} today
+ * @returns {BeltRow}
+ */
+export function suggestionRowOf(suggestion, today) {
+  const proposal = suggestion.proposal ?? {};
+  const due = proposal.dueDate ?? suggestion.renewsOn ?? null;
+  const days = daysUntil(due, today);
+  const scheduleKind = proposal.scheduleKind ?? suggestion.scheduleKind ?? null;
+  const kind = scheduleKind === "expiry" ? "expiry" : "suggestion";
+  const title = proposal.title ?? suggestion.title ?? "Forwarded email";
+  const currency = proposal.currency ?? suggestion.currency ?? "GBP";
+  return {
+    id: suggestion.id,
+    title,
+    section: null,
+    kind,
+    provider: proposal.provider ?? suggestion.provider ?? null,
+    reference: proposal.reference ?? null,
+    notes: null,
+    metadataStatus: null,
+    status: "suggested",
+    snoozedUntil: null,
+    due,
+    days: days ?? Number.MAX_SAFE_INTEGER,
+    /* The rock is hollow and wears the accent, not an urgency (band.js); the
+       T-label's own tone still comes from the bands everything else uses. */
+    urg: BELT_BAND[bandOfKind(kind === "expiry" ? "expiry" : "renewal", days)],
+    t: due ? tminus(due, today) : "—",
+    when: due ? whenOf(kind, days, shortDate(due)) : "undated",
+    longWhen: due ? longDate(due) : "undated",
+    cost: proposal.costMinor ?? suggestion.costMinor ?? null,
+    costIsEstimate: true,
+    currency,
+    months: proposal.recurrenceMonths ?? null,
+    remind: [],
+    docs: stagedDocsOf(suggestion),
+    item: /** @type {import('./commands.js').CommandItem} */ (/** @type {unknown} */ ({
+      id: suggestion.id, householdId: suggestion.householdId ?? "", title, status: "suggested", currency,
+    })),
+    suggestion,
+  };
 }
 
 /**

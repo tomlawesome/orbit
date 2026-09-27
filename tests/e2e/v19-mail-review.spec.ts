@@ -144,20 +144,25 @@ test("the manifest row approves in two taps, idempotently under partial success"
     await page.goto("/home");
     const row = page.locator(".item.suggest", { hasText: "Reviewed intake 1786823446152" });
     await expect(row.first()).toBeVisible();
-    const approve = row.first().getByRole("button", { name: "Add to orbit" });
+    /* #1145: the two decisions live in the drawer the row opens into, like
+       a filed item's detail -- the row at rest carries none. */
+    await row.first().click();
+    const drawer = page.locator(`[id="${receiptId}-view"]`);
+    await expect(drawer).toBeVisible();
+    const approve = drawer.getByRole("button", { name: "Add to orbit" });
 
     // One stray click does nothing but arm.
     await approve.click();
-    await expect(row.first().getByRole("button", { name: "tap again to approve" })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "tap again to approve" })).toBeVisible();
     expect(approvals.length).toBe(0);
 
-    // The second tap fires; the first answer is partial, so the row says so.
-    await row.first().getByRole("button", { name: "tap again to approve" }).click();
+    // The second tap fires; the first answer is partial, so the drawer says so.
+    await drawer.getByRole("button", { name: "tap again to approve" }).click();
     await expect.poll(() => approvals.length).toBe(1);
-    await expect(row.first().locator(".mail-problem")).toContainText("another try");
+    await expect(drawer.locator(".mail-problem")).toContainText("another try");
 
     // The retry carries the SAME operation id and the SAME body: one item, ever.
-    await row.first().getByRole("button", { name: "tap again to approve" }).click();
+    await drawer.getByRole("button", { name: "tap again to approve" }).click();
     await expect.poll(() => approvals.length).toBe(2);
     expect(approvals[1]).toEqual(approvals[0]);
     expect(approvals[0]).toMatchObject({
@@ -184,14 +189,42 @@ test("amend then accept from the item view", async ({ page }) => {
     await interceptMail(page, householdId, approvals, { approvedItemId: itemId } as { firstPartial?: boolean });
 
     await page.goto(`/item/${receiptId}`);
-    const title = page.locator(".name-title");
-    await expect(title).toHaveValue("Reviewed intake 1786823446152");
-    // Extraction-read fields carry the from-document mark.
-    await expect(title).toHaveClass(/sugg/);
+    if (test.info().project.name.startsWith("mobile")) {
+      /* #1145, round 3 §4: on a phone the suggestion's card holds the relay's
+         readings and the two decisions; the fields are in the review sheet
+         `review & amend →` raises (ReviewSheet.svelte: EntryForm in review
+         mode), so the amendment happens there. */
+      await page.getByRole("button", { name: "review & amend →" }).click();
+      const form = page.getByRole("form", { name: "Review Reviewed intake 1786823446152" });
+      const name = form.locator('input[id$="-name"]');
+      await expect(name).toHaveValue("Reviewed intake 1786823446152");
+      /* No field wears a from-document mark on the phone: round 3 §4 draws
+         the readings as their own card, `what the relay read`, each with how
+         sure the relay was, and readingsOf (lib/pocket/review.js) lists
+         provider, reference, due date and cost only -- never the title. So
+         the mark asserted here is that card's: the provider was read plain,
+         the cost at low confidence. */
+      const reading = (label: string) =>
+        form.locator(".pc-read", { has: page.locator(".pc-read-label", { hasText: new RegExp(`^${label}$`) }) });
+      await expect(reading("provider").locator(".pc-read-sure")).toHaveText("sure");
+      await expect(reading("cost").locator(".pc-read-sure")).toHaveText("unsure");
 
-    await title.fill("Home insurance, corrected");
-    await page.locator("#s-cost").fill("199.99");
-    await page.getByRole("button", { name: "accept into orbit" }).click();
+      await name.fill("Home insurance, corrected");
+      await form.locator('input[id$="-cost"]').fill("199.99");
+      /* The sheet's form is create's, and create refuses to save without a
+         section (entry.js refusalOf); the relay proposes none. */
+      await form.getByRole("button", { name: "Home", exact: true }).click();
+      await page.getByRole("button", { name: "add to orbit", exact: true }).click();
+    } else {
+      const title = page.locator(".name-title");
+      await expect(title).toHaveValue("Reviewed intake 1786823446152");
+      // Extraction-read fields carry the from-document mark.
+      await expect(title).toHaveClass(/sugg/);
+
+      await title.fill("Home insurance, corrected");
+      await page.locator("#s-cost").fill("199.99");
+      await page.getByRole("button", { name: "accept into orbit" }).click();
+    }
 
     await expect.poll(() => approvals.length).toBe(1);
     expect(approvals[0]).toMatchObject({
@@ -246,9 +279,14 @@ test("a dismissal takes two taps and mail that failed is visible on the relay", 
     await page.goto("/home");
     const row = page.locator(".item.suggest", { hasText: "Reviewed intake 1786823446152" }).first();
     await expect(row).toBeVisible();
-    await row.getByRole("button", { name: "Dismiss" }).click();
-    await expect(row.getByRole("button", { name: "tap again to dismiss" })).toBeVisible();
-    await row.getByRole("button", { name: "tap again to dismiss" }).click();
+    /* #1145: the dismissal lives in the drawer the row opens into, as the
+       approve test above; the row at rest carries no buttons. */
+    await row.click();
+    const drawer = page.locator(`[id="${receiptId}-view"]`);
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("button", { name: "Dismiss" }).click();
+    await expect(drawer.getByRole("button", { name: "tap again to dismiss" })).toBeVisible();
+    await drawer.getByRole("button", { name: "tap again to dismiss" }).click();
     await expect(page.locator(".item.suggest", { hasText: "Reviewed intake" })).toHaveCount(0);
 
     // The failed message is on the relay, dated, in the server's own words.

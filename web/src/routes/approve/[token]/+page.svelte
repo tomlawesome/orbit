@@ -5,6 +5,7 @@
   import "$lib/ringcard.css";
   import "$lib/flight/flight.css";
   import "./approve.css";
+  import "$lib/flight/door-phone.css";
 
   /**
    * APPROVING A SIGN-IN (#1033, ADR-0027 §4).
@@ -70,6 +71,12 @@
   };
   const heading = $derived(headings[/** @type {keyof typeof headings} */ (phase)] ?? headings.unknown);
 
+  /* The note says only the clock (design/v19/phone-vision/round-3.md §3.10):
+     the date goes and "nobody gets in until you approve" is the Approve
+     button itself, so only the time survives, read off the tail of the
+     shared mail-and-page formatter's " at " join. */
+  const lapsesTime = $derived(data.request?.expiresAt.split(" at ").pop() ?? "");
+
   /**
    * Records the one press. Same-origin with no CSRF token, because there is no
    * session to derive one from -- the token in the body is the whole
@@ -121,12 +128,16 @@
 
   <div class="bigring" aria-hidden="true">
     <div class="ringglass"></div>
+    <!-- this ring has never drawn its line on the desk; on a phone, where
+         the ring is the door's mark rather than the card's window, it does
+         (door-phone.css) -->
+    <div class="pocketstroke"></div>
     <div class="ringorbit"><i></i></div>
   </div>
 
   <div id="formlayer">
     <div class="card approve" aria-label={heading}>
-      <p class="approve-head">{heading}</p>
+      <p class="approve-head ask">{heading}</p>
 
       {#if phase === "open" && data.request}
         <!-- THE BULLETS, IN THE MAIL'S OWN ORDER (ADR-0027 §4-§5): instance,
@@ -145,7 +156,7 @@
         <button class="approve-no" id="approveno" type="button" disabled={busy}
                 onclick={() => decide("denied")}>This wasn’t me</button>
 
-        <p class="note">Lapses {data.request.expiresAt}. Nobody gets in until you approve.</p>
+        <p class="note">lapses {lapsesTime}</p>
       {:else if phase === "approved"}
         <p class="note">The browser that asked is being let in. You can close this page —
           approving here does not sign this one in.</p>

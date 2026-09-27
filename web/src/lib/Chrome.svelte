@@ -1,7 +1,11 @@
 <script>
   import { resolve } from "$app/paths";
+  import { page } from "$app/state";
   import { signOut } from "$lib/data/workspace.js";
-  import { DEFAULT_THEME, THEME_PACKS } from "$lib/theme.js";
+  import { DEFAULT_THEME } from "$lib/theme.js";
+  import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
+  import Hatch from "$lib/pocket/Hatch.svelte";
+  import TopChrome from "$lib/pocket/TopChrome.svelte";
 
   /**
    * The sub-screens' shared chrome (#461): the "← YOUR SKY" way back, the
@@ -33,28 +37,8 @@
     ["settings", "Settings", "/settings"],
     ["administration", "Administration", "/administration"],
   ];
-  /*
-   * THE v1.3.0 ROSTER, FINAL (§15, owner: "the release theme list is star
-   * chart, after dark, CLOUDS, dawn terminator, and retrograde"). Five packs,
-   * five swatches, in the order and membership theme.js names (#865) — atlas,
-   * hanami, porcelain, miami and solarium are on the records shelf, offered
-   * nowhere a reader can choose, and this row is one of those places (atlas
-   * left at #480/f9261c6 and its code followed at #865).
-   *
-   * The dot is the pack's most telling colour rather than strictly its --bg:
-   * clouds shows the cool white of a cloud crest, which is the lighter end of
-   * the range it was admitted to carry, and dawn shows the temperature story's
-   * own ground now that the terminator has moved it off #c3ccdb.
-   */
-  /** @type {Record<string, [string, string, string]>} */
-  const SWATCH = {
-    starchart: ["star-chart", "#060b1c", ""],
-    afterdark: ["after dark", "#05070d", ""],
-    clouds: ["clouds", "#eef2f9", ""],
-    dawn: ["dawn", "#d2d3d4", ""],
-    retrograde: ["retrograde", "#080a14", "inset 0 0 0 1px #ff4fd8"],
-  };
-  const PACKS = THEME_PACKS.map((id) => [id, ...SWATCH[id]]);
+  /* The five swatches and the act of choosing one: $lib/theme-swatches.js,
+     shared with the pocket hatch (#1120). */
 
   let open = $state(false);
   let active = $state(DEFAULT_THEME);
@@ -83,10 +67,16 @@
   /** @param {string} name */
   function setSwatch(name) {
     active = name;
-    document.documentElement.dataset.theme = name;
-    /* Survive a refresh — the same pre-paint cache home writes. */
-    try { localStorage.setItem("orbit-theme", name); } catch {}
+    applyTheme(name);
   }
+
+  /* THE POCKET (#1120): below the CON-10 switch the way back and the orb
+     sit in the retracting top chrome, and the orb opens the hatch, a list
+     sheet, instead of the desk card. Both are in the page and CSS picks,
+     like home's two dialects. Administration in the hatch is for instance
+     admins only (the root layout's load says who is one). */
+  let hatchOpen = $state(false);
+  const isAdmin = $derived(Boolean(page.data?.isAdmin));
 
   /*
    * Signing out from a sub-screen (#410, §15).
@@ -158,14 +148,24 @@
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
     <span>THEME</span>
-    {#each PACKS as [name, title, swatch, shadow] (name)}
-      <button style="background:{swatch}{shadow ? `;box-shadow:${shadow}` : ""}" {title}
-              aria-pressed={active === name} onclick={() => setSwatch(name)}></button>
+    {#each SWATCHES as { id, title, colour, shadow } (id)}
+      <button style="background:{colour}{shadow ? `;box-shadow:${shadow}` : ""}" {title}
+              aria-pressed={active === id} onclick={() => setSwatch(id)}></button>
     {/each}
   </div>
   <button class="signout" onclick={tapSignOut}>{armedOut ? "tap again to sign out" : "sign out →"}</button>
   {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
 </div>
+
+<div class="pocket-chrome">
+  <TopChrome back={back === "/settings" ? resolve("/settings") : resolve("/home")} {backLabel}>
+    {#snippet end()}
+      <button class="porb" aria-haspopup="dialog" aria-expanded={hatchOpen} aria-label="Account and menu"
+              onclick={() => (hatchOpen = true)}><span>{initials}</span></button>
+    {/snippet}
+  </TopChrome>
+</div>
+<Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={role} {current} {isAdmin} />
 
 <style>
   /*
@@ -232,4 +232,25 @@
   .signout{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue-text)}
   .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
+
+  /* The dialect switch (CON-10), the same query as home's pocket.css and
+     $lib/pocket/media.js. Above it nothing here changes the desk. */
+  .pocket-chrome{display:none}
+  @media (max-width:900px), (max-height:600px){
+    .back,.orb,.account{display:none}
+    .pocket-chrome{display:contents}
+  }
+  /* The orb: drawn 36px, hit 44px (§1.3). */
+  .porb{appearance:none;width:var(--p-hit);height:var(--p-hit);padding:0;border:0;background:none;
+        display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  /* No blur: --panel over the sky is enough at 36px, and a blur on a fixed
+     layer repaints on every scroll (§5.3). */
+  .porb span{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
+        background:var(--panel);display:grid;place-items:center;
+        font:var(--p-type-meta) var(--mono);color:var(--ink-mid)}
+  /* §25: the ring sits on the focused button itself, not its drawn disc --
+     a ring on the child left the button with no indicator of its own. The
+     44px circle inset by 2px draws the same ring the disc's outline did. */
+  .porb{border-radius:50%}
+  .porb:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 </style>

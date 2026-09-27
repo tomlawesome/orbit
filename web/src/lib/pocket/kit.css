@@ -1,0 +1,198 @@
+/*
+ * The pocket kit's shared surfaces (#1120, proposal §1.5-§1.8, §1.13, and
+ * §5 "carrying the desk's character"): pills, cards, caps labels, marks,
+ * key/value lines and the empty, loading and error states. Global, all
+ * prefixed `p-`, so they reach nothing that does not ask for them; loaded
+ * with tokens.css from the root layout. Components with their own markup
+ * (Sheet, Row, TopChrome) keep their rules scoped to themselves.
+ *
+ * Light packs are dawn and clouds; the rest are dark. Retrograde's bloom
+ * follows the desk's law (home.css §3): accent things only, small radius,
+ * low alpha, no animation, always var(--bloom).
+ */
+
+/* PILLS (§1.7, §1.8, §5.2): 44 tall, 16px sides, never shrinking. A ghost
+   pill carries its act's colour the desk way (item.css): the act on the
+   border at 40%, its -text companion on the word, glass behind. Unset, it
+   is the grey of a navigational pill. The word always takes the -text
+   companion, so it passes 4.5:1 on every pack (§5.3). */
+.p-pill{appearance:none;display:inline-flex;align-items:center;justify-content:center;
+  min-height:var(--p-hit);min-width:var(--p-hit);padding:0 var(--p-pill-pad);flex:none;
+  border-radius:calc(var(--p-hit) / 2);
+  border:1px solid color-mix(in srgb, var(--act, var(--line)) 40%, transparent);
+  background:var(--panel);color:var(--act-text, var(--ink-mid));
+  font:var(--p-type-button)/1.2 var(--mono);cursor:pointer;
+  text-decoration:none;-webkit-tap-highlight-color:transparent;
+  transition:background-color 120ms,border-color 120ms}
+.p-pill:not([class*=act-],.danger,[style*="--act"]){border-color:var(--line)}
+.p-pill.act-ok{--act:var(--ok);--act-text:var(--ok-text)}
+.p-pill.act-up{--act:var(--upcoming);--act-text:var(--upcoming-text)}
+.p-pill.act-warm{--act:var(--warm);--act-text:var(--warm-text)}
+.p-pill.act-accent{--act:var(--accent);--act-text:var(--accent-text)}
+.p-pill.danger{--act:var(--overdue);--act-text:var(--overdue-text)}
+@media (hover:hover){ .p-pill:hover{border-color:var(--act, var(--accent));color:var(--act-text, var(--ink))} }
+/* A phone has no hover: the press is the desk's aria-pressed look. */
+.p-pill:active{border-color:var(--act, var(--accent));
+  background:color-mix(in srgb, var(--act, var(--accent)) 14%, transparent)}
+
+/* The filled primary: the desk's .btn, display 600, text on --bg. Its glow
+   on the dark packs comes from --p-pill-glow (tokens.css). */
+.p-pill.filled{background:var(--accent);border-color:var(--accent);color:var(--bg);
+  font:600 var(--p-type-button)/1.2 var(--display);letter-spacing:.01em;box-shadow:var(--p-pill-glow)}
+.p-pill.filled:active{filter:brightness(.92)}
+/* The floor wins over "text on --bg" (§5.3): on dawn and clouds --bg on
+   --accent is 3.03:1; white is 4.57:1. */
+:is([data-theme=dawn],[data-theme=clouds]) .p-pill.filled{color:#fff}
+[data-theme=retrograde] .p-pill.filled{box-shadow:0 0 12px -2px var(--bloom), var(--p-pill-glow)}
+
+.p-pill.wide{display:flex;width:100%}
+.p-pill:focus-visible,.p-focus:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.p-pills{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap)}
+
+/* CARDS (§1.7, §5.2): glass on the sky, with the desk's edge light, and on
+   the dark packs the belt's lift off the sky, cut down for a stack of cards
+   (review round §1.5). They land as the belt's card does (belt.css
+   belt-landed, verbatim, review round §1.4): a screen sets --i 0-4 on its
+   first five cards in DOM order and the rest land at once. Keyed blocks
+   keep their nodes, so a re-render never lands a card twice. */
+.p-card{position:relative;background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+  border-radius:var(--p-card-radius);padding:var(--p-card-pad);margin-bottom:var(--p-card-gap);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 10px 30px -18px rgba(0,0,0,.6);
+  animation:p-landed 600ms cubic-bezier(.3,.7,.2,1) backwards;animation-delay:calc(var(--i, 0) * 60ms)}
+@keyframes p-landed{from{opacity:0;transform:translateY(8px) scale(.985)}}
+:is([data-theme=dawn],[data-theme=clouds]) .p-card{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.72), 0 8px 20px rgba(48,66,98,.07)}
+
+/* THE SAME LANDING, for anything that isn't a card (round 2 §6.k): a
+   page's header, a caps head, or any other non-card block that rises with
+   the rest. Unifies what used to be a screen's own hh-rise/st-rise/rl-rise
+   and the inbox receipts' entrance — one keyframe, one delay formula. */
+.p-land{animation:p-landed 600ms cubic-bezier(.3,.7,.2,1) backwards;animation-delay:calc(var(--i, 0) * 60ms)}
+.p-card-title{font:500 var(--p-type-card)/1.2 var(--display);color:var(--ink);margin:0 0 8px}
+.p-card > .p-caps:first-child{margin:0 0 12px}
+
+/* Something Orbit proposes, or a card with nothing in it yet: the desk's
+   dashed pen (the pocket home's .pk-sugg, the empty seat, the joiner). */
+.p-card.proposed{border-style:dashed;border-color:color-mix(in srgb, var(--accent) 45%, var(--line-soft))}
+
+/* A card whose primary act cannot be undone: the household's deletion
+   card, verbatim. The hazard rule along the top, a red wash under it. */
+.p-card.danger{border:1.5px solid var(--overdue);overflow:hidden}
+.p-card.danger::after{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;
+  background:color-mix(in srgb, var(--overdue) 8.5%, transparent)}
+:is([data-theme=dawn],[data-theme=clouds]) .p-card.danger::after{
+  background:color-mix(in srgb, var(--overdue) 12%, transparent)}
+.p-card.danger::before{content:"";position:absolute;top:0;left:0;right:0;height:6px;pointer-events:none;
+  background:repeating-linear-gradient(115deg, var(--overdue) 0 2px, transparent 2px 6px)}
+
+/* Caps labels: the floor, 12px, tracked .18em like the desk's card heads. */
+.p-caps{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+  text-transform:uppercase;color:var(--ink-quiet);margin:var(--p-group-above) 0 var(--p-group-below)}
+
+/* The count on a caps head (review round §1.6): one bead style everywhere,
+   the inbox lane's ring bead (FOR YOUR REVIEW · 1), trailing the head. */
+.p-count{margin-left:auto;min-width:22px;height:22px;padding:0 7px;box-sizing:border-box;border-radius:11px;
+  display:grid;place-items:center;border:1px solid var(--line);color:var(--ink-mid);letter-spacing:0}
+.p-caps:has(> .p-count){display:flex;align-items:center;gap:10px}
+
+/* Page title (§1.6): one per page. */
+.p-title{font:600 var(--p-type-title)/var(--p-type-title-lh) var(--display);color:var(--ink);margin:0}
+
+/* MARKS (§5.2): the desk's layered bodies, lifted from home.css's corridor
+   and the pocket home. A mark is never a plain filled circle: every body
+   stands in its halo ring. Colour comes from a tone class or, for anything
+   else, `color` on the element. */
+.p-body{display:block;box-sizing:border-box;width:10px;height:10px;border-radius:50%;flex:none;
+  color:var(--ok);background:currentColor;box-shadow:0 0 0 2.5px var(--bg)}
+.p-body.over{color:var(--overdue)}
+.p-body.soon{color:var(--warm)}
+.p-body.up{color:var(--upcoming)}
+.p-body.ok{color:var(--ok)}
+.p-body.ended{color:var(--ink-quiet)}
+.p-body.accent{color:var(--accent)}
+.p-body.failed{color:var(--degraded)}
+.p-body.ter{background:linear-gradient(90deg, currentColor 50%, rgba(0,0,0,.5) 50%)}
+.p-body.con{background:radial-gradient(circle, currentColor 24%, var(--panel-raised) 34%, currentColor 52%)}
+.p-body.exp{background:none;border:1.6px dashed currentColor}
+.p-body.sug{background:none;border:1.6px solid var(--accent)}
+.p-body.unlit{background:none;border:1px solid var(--line)}
+.p-body.breathing{animation:p-breathe 2.4s ease-in-out infinite}
+@keyframes p-breathe{0%,100%{opacity:1}50%{opacity:.55}}
+[data-theme=retrograde] .p-body.sug{box-shadow:0 0 0 2.5px var(--bg), 0 0 8px -1px var(--bloom)}
+
+/* A person: the desk's avatar ring with mono initials; the owner's ring is
+   the accent. 24px in a row, .lg 36px at the head of the hatch. */
+.p-avatar{box-sizing:border-box;width:24px;height:24px;border-radius:50%;flex:none;
+  border:1px solid var(--line);background:var(--panel);display:grid;place-items:center;
+  font:600 .75rem/1 var(--mono);color:var(--ink-mid)}
+.p-avatar.owner{border-color:var(--accent)}
+.p-avatar.lg{width:36px;height:36px;font-size:var(--p-type-meta)}
+/* A document, and a section. */
+.p-paper{color:var(--paper, var(--accent-text));font-size:var(--p-type-meta);line-height:1}
+.p-aster{color:var(--accent);line-height:1}
+
+/* KEY/VALUE LINES (§5.2): the belt's .kv at the floor size, for a sheet
+   that has grown to full. */
+.p-kv{display:flex;justify-content:space-between;gap:12px;font:var(--p-type-meta)/1.4 var(--mono);
+  color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+.p-kv b{font-weight:500;color:var(--ink)}
+.p-kv .over{color:var(--overdue-text)}
+.p-kv .soon{color:var(--warm-text)}
+.p-kv .up{color:var(--upcoming-text)}
+.p-kv :is(.ok,.clean){color:var(--ok-text)}
+.p-kv .ended{color:var(--ink-quiet)}
+
+/* THE OPENED ROW'S PANEL (review round §1.1; Row.svelte unfolds it): the
+   raised plane under the face, the same accent rail, the bottom corners.
+   Its text edge is the row's text edge. Inside, in order: the screen's
+   detail (.p-kv lines), the acts as pills (two share a line when each gets
+   150px, else they stack), then a quiet link line. */
+.p-row-open{background:var(--panel-raised);box-shadow:inset 2px 0 0 var(--accent);border-radius:0 0 12px 12px}
+.p-row-in{padding:4px var(--p-gutter) 12px calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap))}
+.p-row-in > .p-pills:not(:first-child){margin-top:12px}
+.p-row-in > .p-pills > *{flex:1 1 150px}
+/* The quiet link line (review round §1.2, §2.1): 44px to hit, 13px mono. */
+.p-quiet{display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;
+  font:var(--p-type-meta)/1.2 var(--mono);color:var(--accent-text);text-decoration:none;
+  background:none;border:0;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.p-quiet:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+
+/* Loading (§1.13, §5.2): three unlit rows at row height instead of a
+   spinner, their mark a hollow body where the lit row's sits. */
+.p-unlit{height:var(--p-row-min);display:flex;align-items:center;gap:var(--p-row-gap)}
+.p-unlit::before{content:"";flex:none;box-sizing:border-box;width:10px;height:10px;
+  margin:0 calc((var(--p-row-mark) - 10px) / 2);border-radius:50%;border:1px solid var(--line)}
+.p-unlit::after{content:"";flex:1;height:1px;background:var(--line-soft)}
+
+/* MONO IS FOR DATA (#1120): labels, dates, amounts, counts, codes, the
+   trailing value. A sentence or descriptive prose takes the body face at
+   the 13px meta size, untracked, with room between its lines. Say so per
+   use: `.p-prose` on a line of text, `metaFace="ui"` on a Row. Decide by
+   what the words are, not how long they happen to be. */
+.p-prose{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
+
+/* ONE LINE UNDER A TITLE, ONE UNDER A LIST, ONE AT THE FOOT (round 3 §1,
+   R3, R8): a page's subtitle (.p-sub), a hint under a list (.p-hint, at
+   the rows' text edge) and a footnote (.p-foot, a screen has at most one).
+   13px mono, quiet, one line of at most 40 characters that never wraps.
+   The guard is CSS and the fix is the words: a line that ellipsises in the
+   fixtures is a defect in its words (pocket-measure.spec.js fails it). */
+.p-sub,.p-hint,.p-foot{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.p-sub{margin:4px 0 0}
+.p-hint{margin:8px 0 0 calc(var(--p-row-mark) + var(--p-row-gap))}
+.p-foot{margin:16px 8px 0;text-align:center}
+
+/* Empty (§1.13): one quiet mono line, short by design. */
+.p-empty{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:0 0 12px}
+
+/* Error inside a card (§1.13): a red line under the control that failed.
+   It arrives rather than appears (the desk's errin). It carries the
+   server's own sentence, so it speaks prose, not mono. */
+.p-error{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--overdue-text);margin:8px 0 0;
+  animation:p-errin 200ms var(--p-ease) both}
+@keyframes p-errin{from{opacity:0;transform:translateY(-4px)}}
+
+@media (prefers-reduced-motion:reduce){
+  .p-body.breathing,.p-error,.p-card,.p-land{animation:none}
+}

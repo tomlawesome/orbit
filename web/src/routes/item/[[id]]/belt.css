@@ -198,6 +198,12 @@
   .belt-page .hit .fring{opacity:0}
   .belt-page .hit:focus-visible{outline:none}
   .belt-page .hit:focus-visible .fring{opacity:1}
+  /* #1065: a seat's ring is an OUTLINE on the seat's own <g>, the same fix
+     #1062 gave the end-caps and for the same reason -- see the comment on
+     .endcap-hit below. `.seat .hit` rather than `.hit` alone, so this leaves
+     the pocket's document clump (buildClump, not wrapped in `.seat`) painting
+     its ring on a child exactly as before: #1065 is scoped to seats. */
+  .belt-page .seat .hit:focus-visible{outline:2px dashed var(--accent);outline-offset:3px}
   .belt-page .hit:hover .rim{opacity:.9}
   .belt-page .rim{transition:opacity .25s ease}
   .belt-page .cap-name{font:11.5px var(--mono);fill:var(--ink-mid);text-anchor:middle}
@@ -218,18 +224,18 @@
      and be told it is spent.
 
      The ring is an OUTLINE on the control itself, not a dashed shape drawn
-     inside it. The seats above do it the other way -- a .fring circle that
-     opens at :focus-visible while the seat itself is outline:none -- and that
-     is not the screen's proven answer, only its untested one: paintMembers
-     drops a seat nobody can see to tabindex="-1", the keyboard audit's
-     household holds one item, and that item is the card, so no seat has ever
-     been focused by tests/e2e/support/keyboard.ts. The audit reads the
-     computed style of THE ELEMENT THAT HAS FOCUS, so a ring painted by a
-     child leaves the focused <g> carrying nothing -- which is what pipeline
-     1281 caught, and it was right to. Chromium paints outline on an SVG
-     element around its bounding box, so this is one ring, on the thing the
-     focus is actually on. 2px and offset, not a hairline: it has to read
-     against the band on a phone as well as on a desk. */
+     inside it, because Chromium paints outline on an SVG element around its
+     bounding box, so this is one ring, on the thing the focus is actually
+     on -- a keyboard audit reading the focused element's own computed style
+     finds it, where a ring painted by a child leaves that element carrying
+     nothing (pipeline 1281). The seats above now do it the same way (#1065);
+     paintMembers still drops a seat nobody can see to tabindex="-1", and the
+     e2e keyboard audit's household still holds one item -- the card -- so it
+     still never focuses a seat itself, which is why that fix is proved by a
+     fidelity check on the fixture household instead. Only the pocket's
+     document clump below still paints its ring on a child, because #1065 was
+     scoped to seats. 2px and offset, not a hairline: it has to read against
+     the band on a phone as well as on a desk. */
   .belt-page .endcap-hit{pointer-events:auto;cursor:pointer}
   .belt-page .endcap-hit:focus-visible{outline:2px dashed var(--accent);outline-offset:3px}
   .belt-page .endcap-hit:hover .endcap{fill:var(--ink-mid)}
@@ -393,8 +399,14 @@
   .belt-page .find input::placeholder{color:var(--ink-quiet)}
   .belt-page .find input:focus{border-color:var(--accent)}
   .belt-page .find input::-webkit-search-cancel-button{display:none}
+  /* One line always (#1147): with a suggestion counted, the line runs a
+     little past the field's 360px, so it spills evenly both sides rather
+     than wrapping its last word. Flex centres an overflowing line; plain
+     text-align would push it all off to the right. The desk only: a narrow
+     sky hides .find for the pocket's own search. */
   .belt-page .findnote{font:9.5px var(--mono);letter-spacing:.14em;color:var(--ink-quiet);
-            margin-top:7px;text-transform:uppercase}
+            margin-top:7px;text-transform:uppercase;
+            white-space:nowrap;display:flex;justify-content:center}
   /* The hit list drops BESIDE the field, not beneath it: beneath it is where
      the card is, and the search must never cover the thing you are looking
      at. It hangs in the empty quarter of the sky to the field's right, and
@@ -523,7 +535,7 @@
           opacity:0;transform:translateX(-16px);pointer-events:none;
           transition:opacity .55s ease .18s,transform .65s cubic-bezier(.4,.5,.15,1) .18s;
           grid-row:1;grid-column:2;justify-self:start;align-self:start;
-          margin-top:var(--rc-top);max-height:calc(100% - var(--rc-top) - var(--rc-bottom));
+          margin-top:var(--rc-y,var(--rc-top));max-height:calc(100% - var(--rc-top) - var(--rc-bottom));
           display:grid;grid-template-rows:minmax(0,1fr) auto;grid-template-columns:minmax(0,1fr);gap:6px}
 .belt-page .lanes.left .readcard{grid-column:1;justify-self:end;transform:translateX(16px)}
 .belt-page .readcard.open,.belt-page .lanes.left .readcard.open{opacity:1;transform:none;pointer-events:auto}
@@ -616,4 +628,221 @@
   .belt-page .readcard::before{content:"";display:block;width:36px;height:4px;border-radius:2px;
                     background:var(--line);margin:0 auto 8px}
   .belt-page .sheet img{max-height:60vh}
+}
+
+/* ==========================================================================
+ * THE POCKET (#1072, design/v19/phone-vision/proposal.md §2.3; drawn in
+ * design/v19/item-phone/round-1, "stands with changes"). Below the CON-10
+ * switch — the same query $lib/pocket/media.js holds — the belt is a low arc
+ * across the top of a page that scrolls, with the card hanging beneath it
+ * at the §1.6 scale (16/13): the band plate is 360px tall from the top safe
+ * area, the find line and the count line sit over its crest, the end-caps
+ * are pills at its shoulders, and the card starts at 340px. Band geometry
+ * is band.js's THE POCKET'S BELT; the painter's pocket parts are in
+ * belt.behaviour.js. Everything the desk unfolds in or beside the card is
+ * a kit Sheet on a phone, styled by the .bp-* rules after this block.
+ * ========================================================================== */
+.belt-page .ip-find,.belt-page .ip-count{display:none}
+@media (max-width:900px), (max-height:600px){
+  /* A page that scrolls, not a stage: the chrome retracts over it (§1.3). */
+  html:has(.belt-page) body{overflow:visible}
+  .belt-page{--ip-card-top:340px;position:relative;min-height:100dvh;overflow-x:clip;
+    padding:calc(var(--ip-card-top) + env(safe-area-inset-top)) 0 calc(48px + env(safe-area-inset-bottom))}
+  .belt-page .find{display:none}
+
+  .belt-page .ip-find{appearance:none;display:block;position:absolute;z-index:6;
+    top:calc(env(safe-area-inset-top) + 60px);left:50%;transform:translateX(-50%);
+    width:min(88%, var(--p-column));min-height:var(--p-hit);padding:0 8px;
+    background:none;border:0;border-bottom:1px solid var(--line);border-radius:0;
+    font:var(--p-type-body)/1 var(--mono);letter-spacing:.04em;color:var(--ink-quiet);text-align:center;
+    cursor:text;-webkit-tap-highlight-color:transparent}
+  .belt-page .ip-find:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  .belt-page .ip-count{display:block;position:absolute;z-index:6;left:0;right:0;margin:0;
+    top:calc(env(safe-area-inset-top) + 114px);padding:0 var(--p-gutter);text-align:center;
+    font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
+    color:var(--ink-quiet);text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg);pointer-events:none}
+
+  /* the band plate: the two canvases and the members, riding the page */
+  .belt-page #band,.belt-page #fore,.belt-page #members{position:absolute;inset:auto;
+    top:env(safe-area-inset-top);left:0;width:100%;height:360px}
+  .belt-page #members{overflow:hidden;touch-action:pan-y}
+  /* captions at the pocket's scale, haloed so the band never eats them */
+  .belt-page .cap-name{font:var(--p-type-meta) var(--ui);fill:var(--ink);
+    paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+  .belt-page .cap-t{font:var(--p-type-meta) var(--mono);letter-spacing:.02em;
+    paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+  .belt-page .doclabel{font:var(--p-type-meta) var(--ui);fill:var(--paper)}
+  /* the end-caps: ghost pills at the shoulders (§2.3), the button type */
+  .belt-page .endcap-hit.pocket .endcap{font:var(--p-type-button) var(--mono);letter-spacing:.02em;
+    text-transform:none;fill:var(--ink-mid)}
+  .belt-page .endpill{fill:color-mix(in srgb, var(--panel) 85%, transparent);stroke:var(--line);stroke-width:1}
+  .belt-page .endcap-hit.pocket:active .endpill{stroke:var(--accent);
+    fill:color-mix(in srgb, var(--accent) 14%, var(--panel))}
+  .belt-page .endcap-hit.pocket:focus-visible{outline-offset:1px}
+  .belt-page .endcap-hit.pocket.off .endpill{opacity:.4}
+  .belt-page .clump .fring{opacity:0}
+  .belt-page .clump:focus-visible .fring{opacity:1}
+
+  /* the card, in the page's flow beneath the band */
+  .belt-page .lanes,.belt-page .lanes.left,.belt-page .lanes.left.open,.belt-page .lanes.right.open{
+    position:relative;inset:auto;display:block;z-index:4;pointer-events:auto;
+    padding:0 var(--p-gutter);transition:none}
+  .belt-page .lanes .cardwrap,.belt-page .lanes.left .cardwrap{position:relative;left:auto;top:auto;
+    width:auto;max-width:var(--p-column);margin:0 auto;max-height:none;overflow:visible;touch-action:pan-y;
+    transform:translate(calc(var(--cdx) + var(--sdx, 0px)),var(--cdy)) scale(var(--csc));transform-origin:50% 0}
+
+  .belt-page .item-card.ip{padding:20px var(--p-card-pad) 12px;border-radius:var(--p-card-radius);
+    background:var(--panel-raised);border-color:var(--line);
+    box-shadow:0 18px 44px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);
+    /* the approach from home morphs the item sheet into this card (§2.1) */
+    view-transition-name:pocket-item}
+  .belt-page .item-card.ip h2{font:600 var(--p-type-card)/1.2 var(--display);overflow-wrap:anywhere}
+  .belt-page .item-card.ip .sub{font:var(--p-type-meta)/1.4 var(--mono);letter-spacing:.02em;margin:6px 0 10px}
+  .belt-page .item-card.ip .kv{align-items:baseline;gap:16px;min-height:var(--p-hit);padding:11px 0;
+    font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  .belt-page .item-card.ip .kv span{flex:none}
+  .belt-page .item-card.ip .kv b{font:500 var(--p-type-button)/1.35 var(--mono);min-width:0;overflow-wrap:anywhere}
+  .belt-page .item-card.ip h3{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:.18em;margin:20px 0 10px}
+  .belt-page .item-card.ip p{font:var(--p-type-body)/1.5 var(--ui);color:var(--ink-mid)}
+  .belt-page .item-card.ip .problem{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
+  .belt-page .ip-acts{display:flex;flex-direction:column;gap:var(--p-pill-gap)}
+  .belt-page .ip-pair{display:grid;grid-template-columns:1fr 1fr;gap:var(--p-pill-gap)}
+  .belt-page .ip-pair>*{width:100%}
+  /* act colour on the pills, the desk's item.css way (§5.2) */
+  .belt-page .ip-acts .p-pill{background:var(--panel);
+    border-color:color-mix(in srgb, var(--act, var(--line)) 45%, transparent);color:var(--act-text, var(--ink-mid))}
+  .belt-page .ip-acts .p-pill:active{border-color:var(--act, var(--accent));
+    background:color-mix(in srgb, var(--act, var(--accent)) 14%, var(--panel))}
+  .belt-page .ip-acts .arm{--act:var(--overdue);--act-text:var(--overdue-text)}
+  .belt-page .ip-acts .arm.armed{border-color:var(--overdue);background:color-mix(in srgb, var(--overdue) 12%, var(--panel))}
+  .belt-page .ip-acts .ip-lead{--act:var(--accent);--act-text:var(--accent-text)}
+  .belt-page .ip-acts .ip-complete{--act:var(--ok);--act-text:var(--ok-text);
+    background:color-mix(in srgb, var(--ok) 16%, var(--panel));border-color:color-mix(in srgb, var(--ok) 60%, transparent);
+    font:600 var(--p-type-button)/1.2 var(--display);letter-spacing:.01em}
+  .belt-page .ip-acts .p-pill:disabled{opacity:.5}
+  .belt-page .ip-docs{appearance:none;display:flex;align-items:center;gap:12px;width:100%;min-height:56px;
+    margin:16px 0 0;padding:0;border:0;border-top:1px solid var(--line-soft);background:none;text-align:left;
+    font:var(--p-type-body)/1.35 var(--ui);color:var(--ink);cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .belt-page .ip-docs:active{background:var(--panel-raised)}
+  .belt-page .ip-docs:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  .belt-page .ip-paper{flex:none;width:24px;text-align:center;color:var(--paper)}
+  .belt-page .ip-docs-title{min-width:0}
+  .belt-page .ip-chev{flex:none;margin-left:auto;padding-right:4px;font:var(--p-type-meta)/1.3 var(--mono);color:var(--accent-text)}
+  .belt-page .item-card.ip .ip-sentence{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--ink-quiet);margin:16px 0 4px}
+  .belt-page .ip-emptycard .ip-acts{margin-top:16px}
+}
+@media (max-width:389px){
+  .belt-page .ip-find{width:calc(100% - 2 * var(--p-gutter))}
+  /* one line at 360: the count's tracking tightens, the size holds the floor */
+  .belt-page .ip-count{letter-spacing:.08em}
+}
+
+/* ---- the pocket's sheets (#1072): portalled to <body>, so not under
+   .belt-page. The kit's field and pill grammar at 44px, 16px inputs. ---- */
+.bp-sheet{padding-bottom:4px}
+.bp-spacer{flex:1}
+.bp-lede{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-mid);margin:0 0 14px}
+/* A lede that is a sentence, not the item's name and date (#1120). */
+.bp-lede.prose{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
+.bp-field{margin:0 0 12px;min-width:0}
+.bp-field label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+  text-transform:uppercase;color:var(--ink-quiet);margin:0 0 6px}
+.bp-field input,.bp-field textarea{box-sizing:border-box;display:block;width:100%;min-height:var(--p-hit);
+  padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);
+  font:var(--p-type-body)/1.4 var(--ui)}
+.bp-field .mono{font-family:var(--mono)}
+.bp-field textarea{resize:vertical}
+.bp-field input:focus-visible,.bp-field textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.bp-field input:disabled,.bp-field textarea:disabled{opacity:.55}
+/* 170px, not the pill rule's 150 (review round §6.c): a pair of fields sits
+   side by side at 390 and stacks at 360. */
+.bp-row2{display:grid;grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));gap:12px}
+.bp-quick{margin:0 0 14px}
+.bp-quick .p-pill[aria-pressed=true]{border-color:var(--accent);color:var(--accent-text);
+  background:color-mix(in srgb, var(--accent) 14%, transparent)}
+.bp-note{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--ink-quiet);margin:0 0 12px}
+.bp-go.filled{background:var(--act, var(--accent));border-color:var(--act, var(--accent));
+  font:600 var(--p-type-button)/1.2 var(--display)}
+.bp-go:disabled{opacity:.5}
+.bp-danger{border-color:var(--overdue);color:var(--overdue-text);
+  background:color-mix(in srgb, var(--overdue) 14%, transparent);font-weight:600}
+.bp-paper{color:var(--paper, var(--accent-text));font-size:1rem}
+.bp-dot{display:block;width:10px;height:10px;border-radius:50%;box-shadow:0 0 0 2.5px var(--bg)}
+.bp-plus{color:var(--accent-text);font:var(--p-type-body) var(--mono)}
+.bp-field-find{flex:1;min-width:0;box-sizing:border-box;min-height:var(--p-hit);padding:0 4px;margin:0;
+  border:0;border-bottom:1px solid var(--line);border-radius:0;background:none;color:var(--ink);outline:0;
+  font:var(--p-type-body)/1 var(--mono);-webkit-appearance:none;appearance:none}
+.bp-field-find::placeholder{color:var(--ink-quiet)}
+.bp-field-find:focus{border-bottom-color:var(--accent)}
+.bp-field-find::-webkit-search-cancel-button{display:none}
+/* the preview: page one on the cream sheet with the tilted sheet under it
+   (§18, create-v3's topsheet), nearly edge to edge; the page is a button */
+.bp-page{appearance:none;position:relative;display:flex;justify-content:center;width:100%;margin:0;
+  padding:10px 10px 18px;border:0;background:none;cursor:zoom-in;-webkit-tap-highlight-color:transparent}
+.bp-page:disabled{cursor:default}
+/* The page must show whole inside the list sheet's scrolling body, which is
+   about 60% of the screen less 110px: the button adds 28px of padding round
+   the image and the sheet 4px below it, so the image stops 148px short.
+   At 120px it overran the body by 22px at every phone height, and the
+   page's top edge always slid under the sheet's head. */
+.bp-page img{position:relative;display:block;max-width:100%;height:auto;max-height:calc(var(--p-vvh, 100dvh) * .6 - 148px);
+  padding:8px;background:#f6f4ee;border-radius:5px;box-sizing:border-box;
+  box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset;
+  opacity:0;transition:opacity .35s ease}
+.bp-page.shown img{opacity:1}
+.bp-under{position:absolute;inset:14px 18px 20px;background:#e7e3d8;border-radius:5px;
+  transform:rotate(-1.6deg) translate(-4px,4px);opacity:.9}
+.bp-page:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:10px}
+.bp-honest{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:8px 0 4px}
+.bp-plate{position:relative;box-sizing:border-box;width:132px;height:170px;border:1px solid var(--paper, var(--accent));
+  border-radius:8px;background:var(--panel);display:grid;place-items:end center;padding-bottom:10px;overflow:hidden;
+  font:var(--p-type-caps)/1.3 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--paper, var(--accent-text))}
+.bp-plate.scanning::after{content:"";position:absolute;left:0;right:0;top:8px;height:2px;
+  background:var(--paper, var(--accent));box-shadow:0 0 12px var(--paper, var(--accent));
+  animation:bp-sweep 2.4s ease-in-out infinite alternate}
+@keyframes bp-sweep{to{top:calc(100% - 10px)}}
+.bp-line{font:600 var(--p-type-body)/1.35 var(--display);color:var(--ink);margin:4px 0 0}
+.bp-line.quiet{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--ink-quiet);text-align:center;margin:0}
+.bp-why{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--ink-quiet);margin:0}
+.bp-restore{border-color:color-mix(in srgb, var(--accent) 45%, transparent);color:var(--accent-text)}
+@media (prefers-reduced-motion:reduce){ .bp-plate.scanning::after{animation:none} .bp-page img{transition:none} }
+
+/* ==========================================================================
+   THE SUGGESTION IN THE BELT (#1145). The amend-then-accept card as it stood
+   on its own page (the retired item.css, which composed it from create.html's
+   ratified field grammar), now the belt's own card: everything the belt
+   already declares (.panel, .field, .row2, .save-row, .btn-primary,
+   .btn-quiet, .problem, .note) is reused, and only what the suggestion card
+   alone needs is here -- the heading that IS the name, and the from-document
+   mark on a field the relay read. A suggestion's seat is CON-3's hollow
+   body drawn as stone (belt.behaviour.js drawRock's hollow branch); its
+   card wears the same dashed pen the manifest's suggestion row wears, so
+   "not yet in orbit" reads the same on every screen.
+   ======================================================================== */
+.belt-page .item-card.sug-card{border-style:dashed;border-color:color-mix(in srgb, var(--accent) 55%, var(--line))}
+/* #434: the heading IS the name (create.css .name-title, mirrored here because
+   this screen does not load that sheet). */
+.belt-page .name-title{display:block;width:100%;background:none;border:0;padding:0;
+  font:600 21px var(--display);line-height:1.25;color:var(--ink)}
+.belt-page .name-title:focus{outline:none;border-bottom:1px solid var(--accent)}
+.belt-page .name-title:disabled{color:var(--ink-mid)}
+.belt-page .name-title.sugg{border-left:3px solid var(--accent);padding-left:10px}
+.belt-page .panel .field.sugg input{border-left:3px solid var(--accent)}
+.belt-page .sug-card .save-row{margin-top:10px}
+/* How sure the relay was, on a phone's reading (the pocket's ReviewCard
+   grammar): 12px caps after the value, ok for sure, warm for unsure. */
+.belt-page .kv b i.sure{font:normal var(--p-type-caps, 11px)/1 var(--mono);letter-spacing:var(--p-type-caps-track, .1em);
+  text-transform:uppercase;color:var(--ok-text);margin-left:8px}
+.belt-page .kv b i.sure.unsure{color:var(--warm-text)}
+/* The seat: a hollow rock breathes no glow of its own; the mark the papers
+   wear is unchanged. Its caption's second line already reads the accent. */
+.belt-page .hit.sug .hollow{transition:fill .25s ease}
+.belt-page .hit.sug:hover .hollow{fill:color-mix(in srgb, var(--accent) 22%, transparent)}
+@media (max-width: 900px){
+  /* review & amend → on the phone's card: the pocket's quiet line, 44px. */
+  .belt-page .ip-amend{display:flex;align-items:center;justify-content:center;width:100%;min-height:var(--p-hit);
+    margin-top:4px;appearance:none;border:0;background:none;padding:0;cursor:pointer;
+    font:var(--p-type-meta)/1.2 var(--mono);color:var(--accent-text);letter-spacing:.02em}
+  .belt-page .ip-amend:disabled{opacity:.5}
+  .belt-page .ip-amend:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
 }

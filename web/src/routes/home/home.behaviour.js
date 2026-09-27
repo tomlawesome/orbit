@@ -563,7 +563,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
   /* The orb and the THEME row are mountAccount()'s (#1074), bound by
      +page.svelte on every branch of its mount rather than here. */
   on(star, "click", (/** @type {MouseEvent} */ event) => toggleCreate(/** @type {HTMLElement} */ (event.currentTarget)));
-  on(document.querySelector(".scrim"), "click", () => toggleCreate(star));
+  on(document.querySelector(".desk .scrim"), "click", () => toggleCreate(star));
 
   const explore = /** @type {HTMLElement} */ (document.getElementById("explore"));
   on(explore, "focus", () => openPalette(true));
