@@ -43,6 +43,7 @@
     /* #491: the text-grade companions — ink that carries WORDS. Carried from
        web/src/lib/packs.css, where the measurements are. */
     --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
+    --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a; --sec-plum:#b79ae0; --sec-coral:#f0907a;
   }
   [data-theme=afterdark]{
     --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -55,6 +56,7 @@
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
     --chart-alpha:1;
     --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
+    --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83; --sec-plum:#a99ae0; --sec-coral:#ef9b86;
   }
   [data-theme=atlas]{
     --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
@@ -68,6 +70,7 @@
     /* dark ink on pale paper already carries; the lift lands softer here */
     --chart-alpha:.82;
     --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
+    --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00; --sec-plum:#71499a; --sec-coral:#bd4f36;
   }
   [data-theme=dawn]{
     --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
@@ -80,6 +83,7 @@
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
     --chart-alpha:.82;
     --ink-quiet:var(--ink-faint); --accent-text:#14507b; --ok-text:#0f5735;
+    --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00; --sec-plum:#71499a; --sec-coral:#bd4f36;
   }
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
@@ -92,6 +96,7 @@
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
     --chart-alpha:1;
     --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
+    --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f; --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
   }
 
   *{box-sizing:border-box;margin:0}
@@ -202,6 +207,18 @@
   .types button:hover{color:var(--ink)}
   .types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
 
+  /* #1058b/#1069: the section row — none pre-selected, and the entry cannot
+     be saved until one is chosen (the save-row note beside the button says
+     so, in the refusal vocabulary). Same chip as the type row; the dot
+     echoes the section's own accent, as household-manage.html's mark does. */
+  .sections{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+  .sections button{display:inline-flex;align-items:center;gap:7px;font:11px var(--mono);
+                color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
+                border-radius:99px;padding:7px 14px 7px 11px;cursor:pointer;letter-spacing:.02em}
+  .sections button:hover{color:var(--ink)}
+  .sections button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
+  .sec-dot{width:7px;height:7px;border-radius:50%;flex:none}
+
   .dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:19px;text-align:center;
             cursor:pointer;transition:border-color .2s,background .2s}
   .dropzone:hover,.dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04);outline:none}
@@ -227,6 +244,9 @@
   .daterow{display:flex;gap:14px}
   .daterow .f-date{flex:1.4}
   .daterow .f-recur{flex:1}
+  /* #1058d: the custom recurrence count, shown once "every … months" is
+     picked — 1 to 120, recurrenceMonths' own range. */
+  .recur-months{margin-top:8px}
 
   .prefix-wrap{position:relative}
   .prefix-wrap .prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);
@@ -241,12 +261,20 @@
                      border-radius:6px;padding:2px 9px;cursor:pointer}
   .field .tag button:hover{filter:brightness(1.12)}
 
-  .save-row{display:flex;align-items:center;gap:18px;margin-top:20px}
+  .save-row{display:flex;flex-direction:column;gap:10px;margin-top:20px}
+  .save-buttons{display:flex;align-items:center;gap:18px}
   .btn-primary{flex:0 0 auto;padding:12px 26px;border-radius:11px;border:0;cursor:pointer;
                font:600 14px var(--display);color:var(--bg);background:var(--accent)}
   .btn-primary:hover{filter:brightness(1.05)}
+  .btn-primary:disabled{opacity:.5;cursor:default}
   .cancel-link{font:12px var(--mono);color:var(--ink-faint);text-decoration:none}
   .cancel-link:hover{color:var(--ink-mid)}
+  /* #1058e/#1069: the save note's two registers — quiet while the entry
+     merely cannot be saved yet (the section not chosen, foremost), loud
+     once a save has actually been refused. Never a toast. */
+  .save-note{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;line-height:1.5}
+  .save-note:empty{display:none}
+  .save-note.fail{font:600 12px var(--ui);color:var(--overdue);letter-spacing:0}
 
   /* ---- the right lane: reading, then the top sheet ---- */
   .readcard{width:100%;min-width:0;overflow:hidden;padding:26px 26px 22px;
@@ -421,6 +449,21 @@
         </div>
       </div>
 
+      <!-- #1058b/#1069: a section must be picked, with no default; the save
+           button stays disabled until one is chosen, and the reason sits
+           beside it (save-row). Five sections, the same demo household as
+           household-manage.html. -->
+      <div class="field">
+        <label id="sections-label">section</label>
+        <div class="sections" id="sections" role="group" aria-labelledby="sections-label">
+          <button type="button" data-section="home" aria-pressed="false"><span class="sec-dot" style="background:var(--sec-sage)"></span>Home</button>
+          <button type="button" data-section="vehicles" aria-pressed="false"><span class="sec-dot" style="background:var(--sec-blue)"></span>Vehicles</button>
+          <button type="button" data-section="devices" aria-pressed="false"><span class="sec-dot" style="background:var(--sec-sand)"></span>Devices</button>
+          <button type="button" data-section="services" aria-pressed="false"><span class="sec-dot" style="background:var(--sec-plum)"></span>Services</button>
+          <button type="button" data-section="renewals" aria-pressed="false"><span class="sec-dot" style="background:var(--sec-coral)"></span>Dates &amp; renewals</button>
+        </div>
+      </div>
+
       <div class="dropzone" id="dropzone" role="button" tabindex="0"
            aria-label="drop a document to begin, or press enter to simulate">
         <div class="dz-main">drop a document &mdash; we&rsquo;ll read what we can</div>
@@ -454,11 +497,14 @@
             </div>
             <div class="field f-recur">
               <label>recurrence</label>
-              <select id="f-recur">
+              <select id="f-recur" onchange="toggleCustomRecur(this)">
                 <option value="once">one-off</option>
                 <option value="monthly">monthly</option>
                 <option value="yearly" selected>yearly</option>
+                <option value="custom">every &hellip; months</option>
               </select>
+              <input id="f-recur-months" class="recur-months" type="number" min="1" max="120"
+                     inputmode="numeric" placeholder="months" aria-label="months" hidden>
             </div>
           </div>
 
@@ -480,23 +526,20 @@
           </div>
 
           <div class="field">
-            <label>assign to</label>
-            <select id="f-assign">
-              <option value="">household &middot; shared</option>
-              <option>Tom</option>
-              <option>Sarah</option>
-              <option>Isla</option>
-            </select>
-          </div>
-
-          <div class="field">
             <label>notes</label>
             <textarea id="f-notes" rows="2" placeholder="anything else worth keeping"></textarea>
           </div>
 
+          <!-- #1058e/#1069: a failure is loud, not small print — the reason
+               sits here, the button goes back to "Add to orbit", nothing
+               typed is lost. No toast. Quiet by default: the refusal reason
+               while the entry cannot yet be saved (no section chosen, here). -->
           <div class="save-row">
-            <button type="submit" class="btn-primary">Add to orbit</button>
-            <a href="home.html" class="cancel-link">cancel</a>
+            <div class="save-note" id="save-note">not yet &mdash; choose a section</div>
+            <div class="save-buttons">
+              <button type="submit" class="btn-primary" id="save-btn" disabled>Add to orbit</button>
+              <a href="home.html" class="cancel-link">cancel</a>
+            </div>
           </div>
 
         </div></div>
@@ -978,6 +1021,30 @@ typeButtons.forEach(btn => btn.addEventListener("click", () => {
   disclose.classList.add("open");
   document.body.classList.add("grow");
 }));
+
+/* #1058b/#1069: a section must be picked, with no default; the save button
+   stays disabled until one is, and the reason sits beside it. */
+const sectionButtons = document.querySelectorAll("#sections button");
+const saveNote = document.getElementById("save-note");
+const saveBtn = document.getElementById("save-btn");
+sectionButtons.forEach(btn => btn.addEventListener("click", () => {
+  sectionButtons.forEach(b => b.setAttribute("aria-pressed", "false"));
+  btn.setAttribute("aria-pressed", "true");
+  saveNote.textContent = "";
+  saveNote.classList.remove("fail");
+  saveBtn.disabled = false;
+  disclose.classList.add("open");
+  document.body.classList.add("grow");
+}));
+
+/* #1058d: the custom recurrence count, shown only while "every … months"
+   is picked — 1 to 120, recurrenceMonths' own range. */
+function toggleCustomRecur(select){
+  const months = document.getElementById("f-recur-months");
+  months.hidden = select.value !== "custom";
+  if (!months.hidden) months.focus();
+}
+
 nameInput.addEventListener("input", () => {
   if (nameInput.value.trim().length >= 3){ disclose.classList.add("open");
                                            document.body.classList.add("grow"); }
