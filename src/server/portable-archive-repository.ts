@@ -31,15 +31,34 @@ function storage(): PortableArchiveStorage {
   return new PortableArchiveStorage(`${getDocumentConfig().storageRoot}/portable-archives`);
 }
 
-async function requireHouseholdAccess(userId: string, householdId: string) {
-  const [access] = await getDb().select({ id: households.id, administrator: users.isInstanceAdmin, membershipUserId: memberships.userId })
+async function requireHouseholdAccess(userId: string, householdId: string, ownerOnly = false) {
+  const [access] = await getDb().select({ id: households.id, administrator: users.isInstanceAdmin, membershipUserId: memberships.userId, role: memberships.role })
     .from(households).innerJoin(users, eq(users.id, userId))
     .leftJoin(memberships, and(eq(memberships.userId, users.id), eq(memberships.householdId, households.id)))
     .where(and(eq(households.id, householdId), isNull(households.deletionRequestedAt))).limit(1);
   if (!access || (!access.administrator && !access.membershipUserId)) {
     throw new AppError("household_not_found", "That household is not available", 404);
   }
+  if (ownerOnly && !access.administrator && access.role !== "owner") {
+    throw new AppError("owner_required", "Only a household owner can make this change", 403);
+  }
   return access;
+}
+
+/**
+ * Whether this person may write the household out or bring an archive in,
+ * answered before anyone is asked to prove it is them (#1132): a person who
+ * may not do the act at all is told that, rather than being challenged and
+ * then refused. Export is the owner's act (#1049); import is open to any
+ * member. `createPortableArchive` and `importPortableArchive` check again, so
+ * nothing relies on a route having called this.
+ */
+export async function requirePortableArchiveAccess(
+  userId: string,
+  householdId: string,
+  act: "export" | "import",
+): Promise<void> {
+  await requireHouseholdAccess(userId, householdId, act === "export");
 }
 
 function jsonBuffer(value: unknown): Buffer {
@@ -68,7 +87,7 @@ export async function createPortableArchive(input: {
   passphrase: string;
   includeDocuments: boolean;
 }): Promise<{ id: string; expiresAt: string; includesDocuments: boolean }> {
-  await requireHouseholdAccess(input.userId, input.householdId);
+  await requireHouseholdAccess(input.userId, input.householdId, true);
   const db = getDb();
   const [[household], householdSections, householdItems, events, reminders, documentRows] = await Promise.all([
     db.select().from(households).where(eq(households.id, input.householdId)).limit(1),
@@ -82,7 +101,7 @@ export async function createPortableArchive(input: {
       emailEnabled: reminderRules.emailEnabled,
       pushEnabled: reminderRules.pushEnabled,
     }).from(reminderRules).innerJoin(items, eq(reminderRules.itemId, items.id)).where(eq(items.householdId, input.householdId)),
-    db.select().from(documents).where(and(eq(documents.householdId, input.householdId), inArray(documents.lifecycle, ["available", "pending_deletion"]))),
+    db.select().from(documents).where(and(eq(documents.householdId, input.householdId), eq(documents.lifecycle, "available"))),
   ]);
   if (!household) throw new AppError("household_not_found", "That household is not available", 404);
   // The portable archive is the deliberate plaintext escape hatch (ADR-0024

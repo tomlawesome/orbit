@@ -29,6 +29,27 @@
  * not purely local to that shape's own syntax, so there is no fourth
  * fixture here for it.
  *
+ * #1130 bisected two more members of the same family, found on
+ * `feature/phone-layouts` (#1120) and fixed there in commit fe454eea: a
+ * `$props.id()` call, and a `{#snippet}` declared in the markup, EACH
+ * crash whenever an earlier top-level JSDoc comment has already closed
+ * somewhere in the same `<script>` -- not because of anything about that
+ * comment's own content or position, but because Svelte hoists the
+ * compiled `$props.id()` declaration, or the `{#snippet}`, and drags the
+ * earlier comment into a spot rolldown cannot parse. `props-id-fails.svelte`
+ * and `snippet-hoist-fails.svelte` reproduce each in isolation; moving the
+ * comment (or, for `$props.id()`, moving the call to be first, per the
+ * real fix on Sheet.svelte/Hatch.svelte) avoids it.
+ *
+ * #1130's THIRD named shape -- a multi-line `@type` JSDoc comment directly
+ * above `$props()`, independent of `$props.id()` -- was tried repeatedly
+ * (the exact pre-fix content of web/src/lib/pocket/NorthStar.svelte and
+ * TopChrome.svelte, standalone, plus several trimmed variants) and never
+ * reproduced: every attempt built cleanly. The real files that shape was
+ * bisected from also called `$props.id()`, which is enough on its own (see
+ * above); the multi-line comment itself does not appear to be a fourth
+ * distinct trap, so there is no fixture for it here.
+ *
  * This drives the real `vite build` against a scratch SvelteKit route,
  * which is slow (a whole-app build, three times) and mutates
  * .svelte-kit/output as a side effect -- not wired into the fast suite on
@@ -56,6 +77,8 @@ const cases = [
   { file: "passes.svelte", expect: "builds" },
   { file: "fails.svelte", expect: "fails" },
   { file: "const-fails.svelte", expect: "fails" },
+  { file: "props-id-fails.svelte", expect: "fails" },
+  { file: "snippet-hoist-fails.svelte", expect: "fails" },
 ];
 
 function build() {
