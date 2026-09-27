@@ -1499,13 +1499,21 @@ gitleaks:
 # web/tests/fidelity/, so launch-timing.spec.js -- a measurement, not a
 # guard -- no longer rides along on every front-end merge request. It is the
 # `launch_timing` job at the end of this file, at promotion frequency.
+# Since #1148 the same script also runs the `pocket-measure` project (the
+# phone floors, #1120) as a second run after the first; the timeout below
+# says why they run in sequence.
 fidelity:
   stage: acceptance
   tags: [light]
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  timeout: 20m
+  # 30m since #1148: the job runs two Playwright runs one after the other --
+  # the one-at-a-time appearance gate (~6m) and the phone floor measurement on
+  # four workers (~11m) -- which measured 16.7m on a quiet host, about what
+  # `smoke` already takes. Run side by side they shared four CPUs and failed
+  # each other's timing; see web/playwright.config.js.
+  timeout: 30m
   rules:
     - *not_scheduled
     - when: on_success

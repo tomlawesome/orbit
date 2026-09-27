@@ -10,7 +10,9 @@ const MOCKUP_PORT = process.env.FIDELITY_MOCKUP_PORT ?? "5174";
 export default defineConfig({
   testDir: "./tests/fidelity",
   fullyParallel: false,
-  workers: 1,
+  /* The ceiling for a run. Each project below sets its own limit under it:
+     `fidelity` stays at one, `pocket-measure` takes all four. */
+  workers: 4,
   reporter: [["list"]],
   /*
    * Two projects, because this directory holds two different kinds of test
@@ -33,8 +35,31 @@ export default defineConfig({
    * files by accident when a new spec lands in this directory.
    */
   projects: [
-    { name: "fidelity", testIgnore: "**/launch-timing.spec.js" },
-    { name: "launch-timing", testMatch: "**/launch-timing.spec.js" },
+    { name: "fidelity", workers: 1,
+      testIgnore: ["**/launch-timing.spec.js", "**/pocket-measure.spec.js"] },
+    { name: "launch-timing", workers: 1, testMatch: "**/launch-timing.spec.js" },
+    /* `pocket-measure` guards the phone floors (#1120): 508 read-only layout
+       measurements, each on its own page against the fixture app with its
+       API answered per page, so no test can see another's state. It compares
+       no pixels, so it does not need the one-at-a-time run `fidelity` keeps,
+       and on one worker it outran the CI job's 20 minutes by itself (#1148).
+       Four workers match the `light` runner's four CPUs. Its per-test limit
+       is 60s, not the default 30s: with a sheet open on /administration,
+       every control behind the sheet is scrolled into view and re-checked
+       after the 450ms it may take a scroll's consequences to land, and that
+       state measured ~29s on a quiet host. The 450ms is the check's own
+       and stays: a shorter, event-based wait was tried and missed a blocker
+       that appears a few frames after a scroll, which the fixed wait catches.
+
+       `pnpm --filter orbit-web fidelity` runs it AFTER `fidelity`, as a
+       second Playwright run, never beside it: sharing four CPUs with four
+       measurement workers, `fidelity`'s timing-sensitive tests failed (an
+       arrival animation, two administration waits) and the item screen's
+       pixel diff read 0.1056% against a 0.1% budget, where alone it reads
+       0.0417% and all 170 pass (#1148). Both runs always happen, and the
+       command fails if either does. */
+    { name: "pocket-measure", workers: 4, fullyParallel: true, timeout: 60_000,
+      testMatch: "**/pocket-measure.spec.js" },
   ],
   use: {
     /*
