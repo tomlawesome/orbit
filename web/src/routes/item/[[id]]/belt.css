@@ -399,8 +399,14 @@
   .belt-page .find input::placeholder{color:var(--ink-quiet)}
   .belt-page .find input:focus{border-color:var(--accent)}
   .belt-page .find input::-webkit-search-cancel-button{display:none}
+  /* One line always (#1147): with a suggestion counted, the line runs a
+     little past the field's 360px, so it spills evenly both sides rather
+     than wrapping its last word. Flex centres an overflowing line; plain
+     text-align would push it all off to the right. The desk only: a narrow
+     sky hides .find for the pocket's own search. */
   .belt-page .findnote{font:9.5px var(--mono);letter-spacing:.14em;color:var(--ink-quiet);
-            margin-top:7px;text-transform:uppercase}
+            margin-top:7px;text-transform:uppercase;
+            white-space:nowrap;display:flex;justify-content:center}
   /* The hit list drops BESIDE the field, not beneath it: beneath it is where
      the card is, and the search must never cover the thing you are looking
      at. It hangs in the empty quarter of the sky to the field's right, and
